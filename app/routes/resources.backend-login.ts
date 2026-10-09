@@ -15,7 +15,7 @@ import {
 
 /**
  * GET /resources/backend-login?backend=claude|codex — the CALLER's own hosted
- * sign-in session, plus their current backend health (ruling 127).
+ * sign-in session, plus their current backend health (ruling 137).
  *
  * Profile → Agent accounts polls this every 2 s while a sign-in is running: the
  * vendor's process is driven server-side, so the browser has no other way to
@@ -72,7 +72,7 @@ export interface BackendLoginRefusal {
 export type BackendLoginPollAnswer = BackendLoginPollData | BackendLoginRefusal;
 
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // Ruling 11 (test audit L14-29): a 401, never `requireUser`'s login
   // redirect, which named THIS route as the returnTo. The card polls it
   // through a fetcher, and a fetcher follows a redirect as a navigation: a
   // stale tab went to /login and, once signed in, to a page of raw JSON. The
@@ -126,7 +126,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 457: a failed poll is the card's, never the page's. React Router
+ * Ruling 11: a failed poll is the card's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, so a restart, a 5xx or a dead network during a sign-in replaced the
  * Profile page with its error page. Any failure answers null, which names no

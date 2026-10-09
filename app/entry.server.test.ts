@@ -12,7 +12,7 @@ import { setupAppTest, type AppTestContext } from "../test-support/test-app";
 import reactRouterConfig from "../react-router.config";
 
 /**
- * Ruling 458(d): every response carries its request's id as `X-Request-Id`, the
+ * Ruling 43: every response carries its request's id as `X-Request-Id`, the
  * id the request's log records carry, and the document error page shows it.
  *
  * React Router's own request handler, over the REAL entry module, the REAL
@@ -180,7 +180,7 @@ function get(path: string, init: RequestInit = {}): Promise<Response> {
   return handle(new Request(new URL(path, PAGE_URL), init));
 }
 
-describe("X-Request-Id on every response (ruling 458(d))", () => {
+describe("X-Request-Id on every response (ruling 43)", () => {
   it("a document, its `.data`, a resource route and a redirect carry one", async () => {
     const answers = await Promise.all([
       get("/page"),
@@ -240,7 +240,7 @@ describe("X-Request-Id on every response (ruling 458(d))", () => {
   });
 });
 
-describe("React Router's action-origin check is off (ruling 687)", () => {
+describe("React Router's action-origin check is off (ruling 28)", () => {
   // CANARY: drop allowedActionOrigins from react-router.config.ts and, behind
   // the TLS proxy, every https:// form post answers 400 before the app's own
   // origin check (assertTrustedOrigin) can accept it.
@@ -254,7 +254,7 @@ describe("React Router's action-origin check is off (ruling 687)", () => {
   });
 });
 
-describe("the document error page shows the request id (ruling 458(d))", () => {
+describe("the document error page shows the request id (ruling 43)", () => {
   it("a loader failure's page names the id its header and its log record carry", async () => {
     const { result: response, records } = await capturingLog(() => get("/boom"));
     const html = await response.text();

@@ -21,7 +21,7 @@ import remarkGfm from "remark-gfm";
 import { z } from "zod";
 
 /**
- * Ruling 691: the renderer behind every page picture.
+ * Ruling 194: the renderer behind every page picture.
  *
  * A delivered page (HTML or markdown) is judged from its source, and the
  * source does not show a broken table, a missing picture or a layout that
@@ -30,7 +30,7 @@ import { z } from "zod";
  * own on purpose: the browser runs a page's scripts with no sandbox
  * (`specialist-browser-mcp.server.ts` says why the image's Chromium cannot
  * start one), so it must run as the task owner's agent user and never as the
- * server. `page-capture.server.ts` starts it through the ruling 460 launcher,
+ * server. `page-capture.server.ts` starts it through the ruling 139 launcher,
  * hands it one job, and reads back PNG files it checks by their own header.
  *
  * What it does, per page:
@@ -54,7 +54,7 @@ import { z } from "zod";
  *    view's cap. A picture too large to hand to an agent is retaken shorter,
  *    and a width at which the page ends before `from` is reported as ended
  *    while the other width is still pictured.
- *  - **Or pictures it as one box of an exact size** (ruling 698, a view with
+ *  - **Or pictures it as one box of an exact size** (ruling 194, a view with
  *    `box`): laid out in a viewport of that size and cut to it from the top
  *    left, as a PNG of exactly the box times its scale. That one is never
  *    retaken shorter: a picture of another size is not the one asked for.
@@ -252,7 +252,7 @@ function articlePage(file: string, source: string): string {
 const DRAWING_CSS = ["html, body { margin: 0; height: 100%; }", "body > svg { display: block; }"].join("\n");
 
 /**
- * Ruling 698: an SVG source as a whole page, the drawing itself, inline, at
+ * Ruling 194: an SVG source as a whole page, the drawing itself, inline, at
  * the page's top left. Inline and not as an `<img>` on purpose: a drawing shown as an
  * image loads nothing, and this one asks the page server for the files saved
  * beside it (a picture, a font) by name, as an HTML page does. Its markup is
@@ -274,7 +274,7 @@ interface OpenFile {
 }
 
 /** Open `name` in `root` as a regular file, never through a link (ruling
- *  552's rule, in the process that needs it); null when it is anything else. */
+ *  19's rule, in the process that needs it); null when it is anything else. */
 function openRegular(root: string, name: string): OpenFile | null {
   let fd: number;
   try {
@@ -302,7 +302,7 @@ function servable(name: string): boolean {
 }
 
 /**
- * Ruling 675's rule, restated here because this script imports nothing from
+ * Ruling 76's rule, restated here because this script imports nothing from
  * the app: among a folder's `entries`, a written name means the entry spelled
  * exactly so, else the single entry that composes to the same name. A Linux
  * directory holds names byte for byte, a file uploaded from a Mac may be
@@ -794,7 +794,7 @@ async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: numb
 }
 
 /**
- * Ruling 698: picture the page as one box of an exact size, `view.width` by
+ * Ruling 194: picture the page as one box of an exact size, `view.width` by
  * `view.height` CSS px from its top left, laid out in a viewport of that size,
  * as a PNG of that box times `scale`. Taken once: content past the box is
  * reported and left out, and a picture too large to keep is said, never

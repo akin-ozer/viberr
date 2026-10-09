@@ -16,8 +16,8 @@ describe("fileFamily", () => {
   });
 });
 
-/* Ruling 363: what the card can show, decided from the name and then the bytes. */
-describe("attachmentKind (ruling 363)", () => {
+/* Ruling 317: what the card can show, decided from the name and then the bytes. */
+describe("attachmentKind (ruling 317)", () => {
   it("names decide images and the known binary kinds; everything else tries the reader", () => {
     expect(attachmentKind("shot.PNG")).toBe("image");
     expect(attachmentKind("bundle.zip")).toBe("binary");

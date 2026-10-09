@@ -10,7 +10,7 @@ import { mountDock as mount } from "../../../test-support/controller-dock-stub";
 import { DockPanelBody } from "./controller-dock-panel";
 
 /**
- * Ruling 121 — the controller dock, driven through a routed stub: the trigger
+ * Ruling 256 — the controller dock, driven through a routed stub: the trigger
  * names the scope, the panel opens on the current place, focus lands in the
  * composer and returns to the trigger, threads and sends go through the
  * resource route, and the two controller pages carry no dock at all.
@@ -139,7 +139,7 @@ describe("the dock tells a person a reply is waiting (O39-d)", () => {
   });
 
   /**
-   * Ruling 448, and ruling 457 (CTL-3): only the OPEN dock reads the transcript
+   * Ruling 257, and ruling 11 (CTL-3): only the OPEN dock reads the transcript
    * it shows. The view was a root-owned fetcher, so once the dock had been
    * opened, every page revalidation reloaded its last URL, `seen=1` and all:
    * the reply's own `controller.updated` revalidated the page, which marked the
@@ -208,7 +208,7 @@ describe("the dock tells a person a reply is waiting (O39-d)", () => {
   });
 });
 
-describe("the controller dock (ruling 121)", () => {
+describe("the controller dock (ruling 256)", () => {
   it("names the scope on the trigger, opens on the current place, and focuses the composer", async () => {
     const { loads } = mount({
       path: "/projects/viberr/tasks/VIB-1",
@@ -240,12 +240,12 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Ruling 314. The empty dock said what the controller KNOWS and nothing about
+   * Ruling 319. The empty dock said what the controller KNOWS and nothing about
    * what it can DO, so a person who had never used it faced a text box and a
    * claim. The owner chose examples over a capability list: a list tells and
    * goes stale, an example teaches by being clicked.
    */
-  it("ruling 314: the empty state offers scoped examples, and clicking one SENDS it", async () => {
+  it("ruling 319: the empty state offers scoped examples, and clicking one SENDS it", async () => {
     const { sends } = mount({
       path: "/projects/viberr/tasks/VIB-1",
       view: () => taskView(),
@@ -255,7 +255,7 @@ describe("the controller dock (ruling 121)", () => {
     await screen.findByText(/Ask about VIB-1 or say what to do with it/);
 
     // Scoped to the task, and naming it — a generic example would not show that
-    // the controller already knows where it is standing. Ruling 516: the row's
+    // the controller already knows where it is standing. Ruling 291: the row's
     // glyph and arrow are drawn, never read, so its name is the sentence alone
     // (CANARY: give the glyph a text alternative and this finds nothing).
     const first = await screen.findByRole("button", { name: "What's blocking VIB-1?" });
@@ -279,7 +279,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(sends[0]!.get("task")).toBe("VIB-1");
   });
 
-  it("ruling 314: the examples follow the scope", async () => {
+  it("ruling 319: the examples follow the scope", async () => {
     // A board dock must not offer a task's questions. CANARY: collapse
     // `emptyExamples` to one list and this finds a task example on a board.
     mount({
@@ -354,7 +354,7 @@ describe("the controller dock (ruling 121)", () => {
     const composer = await screen.findByLabelText("Message to the controller");
     await waitFor(() => expect(composer.hasAttribute("disabled")).toBe(true));
     await waitFor(() => expect(document.activeElement).toBe(panel));
-    // Ruling 127: the dock's refusal is the person's own, and names the one
+    // Ruling 137: the dock's refusal is the person's own, and names the one
     // place they fix it — the same sentence the page's composer and the
     // refused turn's transcript line carry.
     // U39-10: as a visible note with the place linked, not a placeholder cut
@@ -367,7 +367,7 @@ describe("the controller dock (ruling 121)", () => {
     );
     const note = panel.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    // Ruling 625: the note is the one statement; the box and the empty state
+    // Ruling 319: the note is the one statement; the box and the empty state
     // do not add a placeholder or examples nobody here could send.
     // CANARY: restore the not-connected placeholder, or the examples.
     expect(composer.hasAttribute("placeholder")).toBe(false);
@@ -398,7 +398,7 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Interface review 2026-09-24 (acce-14): no focus trap (ruling 121), so Tab
+   * Interface review 2026-09-24 (acce-14): no focus trap (ruling 318), so Tab
    * reaches page controls the panel covers. Escape there uncovers the control
    * without moving focus. jsdom has no layout, so the hit test is stubbed: it
    * answers the panel for a covered control and the control itself otherwise.
@@ -507,7 +507,7 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Ruling 457, test audit L14-29: a signed-out tab's dock loads used to
+   * Ruling 11, test audit L14-29: a signed-out tab's dock loads used to
    * navigate it to /login. They now answer 401 with an empty status and the
    * signed-out view (returned, not thrown, so the view reaches the panel
    * rather than the `clientLoader`'s failure answer), and the panel says what
@@ -575,7 +575,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("ruling 454: at sheet width a pull down the header dismisses the dock, and focus comes back", async () => {
+  it("ruling 285: at sheet width a pull down the header dismisses the dock, and focus comes back", async () => {
     // The 720px block's flag is what makes the panel a sheet; jsdom lays
     // nothing out, so the sheet's height is stubbed (halfway at 300px).
     Object.defineProperty(window, "matchMedia", {
@@ -652,7 +652,7 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Finding 32, and ruling 457 (CTL-2): while a turn works the dock polls every
+   * Finding 32, and ruling 11 (CTL-2): while a turn works the dock polls every
    * 5 s, open or closed. It polls the small status (unseen replies, turns
    * working), not the transcript: the step line moves from the status, and
    * the transcript reloads once, when the status says the turn settled.
@@ -700,7 +700,7 @@ describe("the controller dock (ruling 121)", () => {
       expect(screen.getByText("Reading the task file")).toBeTruthy();
       const views = loads.length;
       const polls = unseenLoads.length;
-      // Ruling 250: the step moves between polls. CANARY: poll the view again
+      // Ruling 257: the step moves between polls. CANARY: poll the view again
       // (or render the view's step instead of the status's) and this either
       // reloads the transcript or never moves.
       step = "Editing task.md";
@@ -765,7 +765,7 @@ describe("the controller dock (ruling 121)", () => {
     // History never wears the marker…
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
     // …but the reply that lands while the panel is up does. It arrives the way
-    // replies arrive (ruling 457): the page's stream hands the dock the
+    // replies arrive (ruling 11): the page's stream hands the dock the
     // `controller.updated` its conversation published.
     messages = [first, second];
     act(() => {
@@ -865,7 +865,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(form.get("_csrf")).toBe("tok");
     expect(form.get("conversationId")).toBe("");
     await waitFor(() => expect(loads.at(-1)?.searchParams.get("c")).toBe("cnv_new"));
-    // Ruling 259: cleared once the server TOOK it, not when it went out.
+    // Ruling 319: cleared once the server TOOK it, not when it went out.
     expect(composer.value).toBe("");
   });
 
@@ -883,7 +883,7 @@ describe("the controller dock (ruling 121)", () => {
     await screen.findByText("That request expired.");
     expect(screen.getByText("task page")).toBeTruthy();
     /**
-     * Ruling 259 (pass 37, F37-90): the composer keeps the words until the
+     * Ruling 319 (pass 37, F37-90): the composer keeps the words until the
      * server takes them. `setText("")` ran synchronously after
      * `fetcher.submit`, so this refusal — which happens BEFORE the controller
      * engine is reached, leaving the text in no transcript anywhere — used to
@@ -899,7 +899,7 @@ describe("the controller dock (ruling 121)", () => {
   });
 
   /**
-   * Ruling 457: a request the server never answers (a restart, a 5xx, a dead
+   * Ruling 11: a request the server never answers (a restart, a 5xx, a dead
    * network) is the dock's, never the page's. React Router sends a fetcher's
    * failure to the error boundary of the route that owns the fetcher, and
    * root owns all three of the dock's, so a failed send, reload or working
@@ -963,14 +963,14 @@ describe("the controller dock (ruling 121)", () => {
           threads: [{ id: "cnv_a", title: "First", lastMessageAt: "2026-09-01T10:00:00.000Z", unread: false }],
           viewerOwnsActive: true,
         }),
-      // Ruling 457: the button's announcer reads the dock's status.
+      // Ruling 11: the button's announcer reads the dock's status.
       working: () => [{ id: "cnv_a", projectSlug: "viberr", taskKey: "VIB-1", phase: null, step: null }],
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
     fireEvent.click(trigger);
     await screen.findByText("What is this?");
     expect(screen.getByText("task", { selector: "strong" })).toBeTruthy();
-    // Two status regions by design (ruling 476(d)): the visually-hidden
+    // Two status regions by design (ruling 320): the visually-hidden
     // announcer beside the trigger, which survives a close and says a turn is
     // working, and the open panel's, which says the thread on screen replied.
     // The working row itself is visual only.
@@ -979,17 +979,17 @@ describe("the controller dock (ruling 121)", () => {
     ).toContain("Controller is working");
     // History never wears the entry animation marker.
     expect(document.querySelector(".ctl-msg[data-fresh]")).toBeNull();
-    // Ruling 626: the transcript is a tab stop, so the keyboard scrolls it
+    // Ruling 320: the transcript is a tab stop, so the keyboard scrolls it
     // (axe's scrollable-region-focusable). CANARY: drop its `tabIndex`.
     expect(screen.getByRole("region", { name: "Conversation transcript" }).getAttribute("tabindex")).toBe("0");
   });
 
   /**
-   * Ruling 465 (F40-8): the dock reads a transcript the way the page does —
+   * Ruling 320 (F40-8): the dock reads a transcript the way the page does —
    * each reply under the message it answers, "answering now" and the working
    * row on the answered message, "queued · N ahead" on the ones behind it.
    */
-  it("ruling 465: renders reply order and the queue from the server's view", async () => {
+  it("ruling 320: renders reply order and the queue from the server's view", async () => {
     const at = "2026-09-24T20:00:00.000Z";
     const msg = messagesAt(at);
     mount({
@@ -1041,7 +1041,7 @@ describe("the controller dock (ruling 121)", () => {
     expect(states).toEqual([null, null, "answering now", "queued · 1 ahead"]);
   });
 
-  it("ruling 527: steering sits in its turn, Retract fills the composer, and Queue waits behind the turn", async () => {
+  it("ruling 251: steering sits in its turn, Retract fills the composer, and Queue waits behind the turn", async () => {
     const at = "2026-09-27T16:00:00.000Z";
     const msg = messagesAt(at);
     const { sends } = mount({
@@ -1115,12 +1115,12 @@ describe("the controller dock (ruling 121)", () => {
 });
 
 /**
- * Ruling 259's clear, for a message that ends in whitespace, in the dock (the
+ * Ruling 319's clear, for a message that ends in whitespace, in the dock (the
  * page composer's twin). The dock sends the TRIMMED text, and its success
  * handler compared that against the raw box, so "hello " or a message ending
  * in a newline stayed in the box after the controller had taken it.
  */
-describe("ruling 259: the dock compares the box with what went out, trimmed", () => {
+describe("ruling 319: the dock compares the box with what went out, trimmed", () => {
   const typed = "hello \n";
 
   /** Opens the dock on VIB-1 and types `typed` into the composer. */
@@ -1165,11 +1165,11 @@ describe("ruling 259: the dock compares the box with what went out, trimmed", ()
 });
 
 /**
- * Ruling 573: the dock's composer takes files. Picked ones show in its tray,
+ * Ruling 258: the dock's composer takes files. Picked ones show in its tray,
  * go out as a multipart form (files alone are a message), and leave the tray
  * only once the server took them.
  */
-describe("ruling 573: files from the dock", () => {
+describe("ruling 258: files from the dock", () => {
   /** A file the request body can carry, as a browser's can. jsdom's `File`
    *  is not one Node's `Request` encodes or parses back, and jsdom's
    *  `FormData` turns Node's `File` into a string, so these tests run on
@@ -1225,13 +1225,13 @@ describe("ruling 573: files from the dock", () => {
 });
 
 /**
- * Ruling 368: the dock's Send named its work ("Sending…") but sat at the .45
+ * Ruling 286: the dock's Send named its work ("Sending…") but sat at the .45
  * refused step with no busy mark while the controller took the message. It is
  * `aria-busy` now, the loader spinning.
  * Canary: drop `aria-busy={busy || undefined}` in controller-dock-panel-regions.tsx
  * (`DockComposerFoot`).
  */
-describe("ruling 368: the dock's send in flight", () => {
+describe("ruling 286: the dock's send in flight", () => {
   it("Send reads Sending…, busy, the loader spinning", () => {
     render(
       <MemoryRouter>
@@ -1263,18 +1263,18 @@ describe("ruling 368: the dock's send in flight", () => {
 });
 
 /**
- * Ruling 459's deferred dock half (owner, 2026-09-24: "do the two dock fixes
- * now"), built on ruling 454's sheet. F20: the open and close can be turned
+ * Ruling 285's deferred dock half (owner, 2026-09-24: "do the two dock fixes
+ * now"), built on ruling 285's sheet. F20: the open and close can be turned
  * around mid-flight. F24: a panel the per-tab restore reopens appears in
  * place (`data-restored`). The motion itself is CSS, pinned in app.css.test.ts
- * "ruling 459: the dock's deferred half"; these are the component's halves.
+ * "ruling 285: the dock's deferred half"; these are the component's halves.
  *
  * jsdom loads no stylesheet, so its transition duration reads 0 and a close
  * finishes at once. A test that needs the close in flight gives the panel the
  * desktop exit's duration inline, and the dock then waits for `transitionend`
  * (or its fallback timer) as it does in a browser.
  */
-describe("ruling 459: the dock's deferred half", () => {
+describe("ruling 285: the dock's deferred half", () => {
   const DIALOG = { name: "Controller dock" } as const;
   function leaveSlowly(panel: HTMLElement) {
     panel.style.setProperty("transition-duration", "0.12s");
@@ -1320,7 +1320,7 @@ describe("ruling 459: the dock's deferred half", () => {
   });
 
   it("(F20) a close writes nothing on the panel: the exit starts from where it is, nothing pinned", async () => {
-    // Ruling 453(b) amended: the dock no longer pins its live pose. Its
+    // Ruling 285 amended: the dock no longer pins its live pose. Its
     // entrance is a transition, which `data-closing` retargets from wherever
     // it has got to; a pin's inline pose would only fight the reversal.
     // CANARY: put `pinLivePose(panelRef.current)` back in closeDock.
@@ -1454,7 +1454,7 @@ describe("ruling 459: the dock's deferred half", () => {
   });
 
   describe("at sheet width, a close that interrupts a pull's settle", () => {
-    // Ruling 454's gesture under ruling 459's take-back. The 720px block's
+    // Ruling 285's gesture under ruling 285's take-back. The 720px block's
     // flag makes the panel a sheet; jsdom lays nothing out, so the sheet's
     // height is stubbed (halfway at 300px).
     let height: { mockRestore(): void } | null = null;
@@ -1537,12 +1537,12 @@ describe("ruling 459: the dock's deferred half", () => {
 });
 
 /**
- * Ruling 476(c) and (d) in the dock: the page's rules, in the panel a person
+ * Ruling 320 and (d) in the dock: the page's rules, in the panel a person
  * carries onto every page. Live, the dock's transcript was 400px wide at every
  * desktop width, so a reply opened at its tail there even on a desktop, and the
  * announcer beside its button cleared to "" when the reply on screen landed.
  */
-describe("ruling 476: the dock meets a reply at its first line, and says it arrived", () => {
+describe("ruling 320: the dock meets a reply at its first line, and says it arrived", () => {
   const at = "2026-09-24T23:40:00.000Z";
   const msg = messagesAt(at);
   const idle = { working: false, runId: null, phase: null, step: null, answering: null, queued: [], steering: [] };
@@ -1611,7 +1611,7 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
     }
   });
 
-  it("(ruling 572) offers a reader scrolled up in the dock the page's way back", async () => {
+  it("(ruling 320) offers a reader scrolled up in the dock the page's way back", async () => {
     // CANARY: drop the dock's <TranscriptJumpButton>, and the wheel is the
     // only way back down the panel.
     const restore = stubDockTranscript();
@@ -1642,14 +1642,14 @@ describe("ruling 476: the dock meets a reply at its first line, and says it arri
 });
 
 /**
- * Ruling 528 (owner, 2026-09-27: "this view shows old run(I made a new one),
+ * Ruling 256 (owner, 2026-09-27: "this view shows old run(I made a new one),
  * also shows like there is a pending message that I didn't read yet ... I want
  * this for real but for only new messages else I don't want it"). The owner's
  * instance dock showed the thread it had shown before while the conversation
  * they had since started on the full page worked, and the button's pulsing
  * working dot read as a reply waiting.
  */
-describe("ruling 528: the dock opens on the newest thread, and its one dot is a reply not yet read", () => {
+describe("ruling 256: the dock opens on the newest thread, and its one dot is a reply not yet read", () => {
   /** VIB-1's threads as the view lists them, newest first. */
   const threads = [
     { id: "cnv_new", title: "Started on the full page", lastMessageAt: "2026-09-27T16:18:00.000Z", unread: false },
@@ -1704,7 +1704,7 @@ describe("ruling 528: the dock opens on the newest thread, and its one dot is a 
       unseen: () => (replied ? [BOARD_REPLY] : []),
     });
     const trigger = await screen.findByRole("button", { name: "Controller · VIB-1 · viberr" });
-    // The status has landed: the announcer says the turn works (ruling 476(d)).
+    // The status has landed: the announcer says the turn works (ruling 320).
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Controller is working"));
     // CANARY: put the `.live-dot` back on the trigger.
     expect(trigger.querySelector(".live-dot, .unseen-dot")).toBeNull();

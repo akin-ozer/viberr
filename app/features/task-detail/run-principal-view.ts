@@ -1,5 +1,5 @@
 /**
- * Ruling 127: whose accounts a run on THIS task would bill, and the one
+ * Ruling 137: whose accounts a run on THIS task would bill, and the one
  * sentence a control renders when the answer is "nobody's".
  *
  * Every agent run on a task bills its OWNER's connected backends, so the
@@ -51,14 +51,14 @@ export interface TaskRunPrincipalView {
 }
 
 /** The task page's copy of `BACKEND_LABEL` (shared/text/backend-label.ts),
- *  which its run controls read through `backendLabelOf`: ruling 457 keeps the
+ *  which its run controls read through `backendLabelOf`: ruling 11 keeps the
  *  shared one's chunk off the task page (why: that file). */
 const BACKEND_LABEL = {
   claude: "Claude",
   codex: "Codex",
 } satisfies Record<ViewBackend, string>;
 
-/** Ruling 92: the label is "Claude", never "Claude Code". */
+/** Ruling 298: the label is "Claude", never "Claude Code". */
 export function backendLabelOf(backend: ViewBackend): string {
   return BACKEND_LABEL[backend];
 }

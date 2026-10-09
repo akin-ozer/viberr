@@ -15,7 +15,7 @@ import {
 } from "./decision-packet-derive";
 
 /**
- * The decision packet card's regions (ruling 700(e), the split of
+ * The decision packet card's regions (ruling 13(b), the split of
  * `decision-packet.tsx` along the task-page recipe): the body, the options
  * (live, and locked once an `edit_goal` decision is made), the two answer
  * boxes, the refusals and notes under them, and the action row. Each takes
@@ -26,14 +26,14 @@ import {
  */
 
 /** Ties the Confirm button to its visible refusal reason (E4). On the
- *  repository question that reason is the card's one note (ruling 673),
+ *  repository question that reason is the card's one note (ruling 312(d)),
  *  which describes each answer a person cannot give as well. */
 const BLOCK_REASON_ID = "pkt-block-reason";
-/** Ruling 147: where a refused Confirm says the directive is still empty. */
+/** Ruling 288: where a refused Confirm says the directive is still empty. */
 const CUSTOM_ERR_ID = "pkt-custom-err";
-/** Ruling 478(e): where a refused Confirm says no answer is chosen yet. */
+/** Ruling 68: where a refused Confirm says no answer is chosen yet. */
 const CHOICE_ERR_ID = "pkt-choice-err";
-/** Ruling 478(e): where a refused Confirm says the chosen answer needs text. */
+/** Ruling 68: where a refused Confirm says the chosen answer needs text. */
 const REPLY_ERR_ID = "pkt-reply-err";
 
 /** Render a string with `inline code` spans; everything else stays plain text. */
@@ -52,14 +52,14 @@ function renderInlineCode(text: string): ReactNode[] {
   return out;
 }
 /**
- * Ruling 472: the body is the asking agent's own text, and agents write it as
+ * Ruling 62: the body is the asking agent's own text, and agents write it as
  * markdown — numbered dashboard steps, bold field names, a heading per part.
  * Rendered through the inline-code pass alone, a 3,500-character Connect guide
  * read as one paragraph with literal `**` and `##` (WEB-3, 2026-09-24). It goes
  * through the same GFM renderer as the timeline's comments; a <div>, because a
  * list cannot sit inside a <p>.
  *
- * Ruling 478(f) (F40-35): the body's headings are parts of the question, so
+ * Ruling 313 (F40-35): the body's headings are parts of the question, so
  * they nest under the packet's own h2 title rather than standing beside it.
  */
 export function PacketBody({ text }: { text: string }): ReactNode {
@@ -70,7 +70,7 @@ export function PacketBody({ text }: { text: string }): ReactNode {
   );
 }
 
-/** Ruling 500: an option's key, the digit that selects it (the radiogroup's
+/** Ruling 312: an option's key, the digit that selects it (the radiogroup's
  *  shortcut), where the radio circle stood; filled once chosen. Past nine an
  *  option has no digit, and the key stays for the column. */
 function OptionKey({ index }: { index: number }) {
@@ -87,7 +87,7 @@ function OptionKey({ index }: { index: number }) {
  * path). The title says so, because a click that only scrolls to an
  * already-focused composer looked like a no-op. Open to everyone, resolver or
  * not (commenting is app-wide). One button for the open and the decided packet
- * (ruling 657).
+ * (ruling 12).
  */
 function AskOperatorButton({ onAsk }: { onAsk: () => void }) {
   return (
@@ -104,7 +104,7 @@ function AskOperatorButton({ onAsk }: { onAsk: () => void }) {
 }
 
 /**
- * Ruling 138: a decided `edit_goal` packet reads as decided after a reload —
+ * Ruling 63: a decided `edit_goal` packet reads as decided after a reload —
  * the chosen option locked, no Confirm, and one control that opens the goal
  * editor exactly as the confirm did. The decided card's `.packet-body`.
  */
@@ -255,7 +255,7 @@ export function PacketOptions({
               optionRefs.current[i] = el;
             }}
             aria-checked={sel === i}
-            // Ruling 459: `aria-disabled` alone dims a blocked option and
+            // Ruling 283: `aria-disabled` alone dims a blocked option and
             // stills its hover and press (`.opt[aria-disabled="true"]`
             // in app.css); the inline .55 it wore is gone.
             aria-disabled={blocked || undefined}
@@ -284,7 +284,7 @@ export function PacketOptions({
                 {renderInlineCode(o.d)}
                 {refusal?.note ?? ""}
               </div>
-              {/* Ruling 269: a create_task option writes a NEW task, and
+              {/* Ruling 67: a create_task option writes a NEW task, and
                 until it is confirmed that task exists only inside the
                 option's payload. Show what is about to be created — the
                 title and the goal it will be worked to — so the person is
@@ -303,7 +303,7 @@ export function PacketOptions({
                       waits on {o.newTask.blockedBy.join(", ")}
                     </span>
                   )}
-                  {/* Ruling 287: confirming this option also edits tasks
+                  {/* Ruling 67: confirming this option also edits tasks
                       that are NOT on this page — it adds the new key to
                       each of these tasks' own waits. That is the one part
                       of a create_task decision a person cannot see the
@@ -360,7 +360,7 @@ export function PacketOptions({
         >
           <OptionKey index={customIndex} />
           <span>
-            {/* Ruling 478(e) (F40-31): on an agent's question the words go
+            {/* Ruling 68 (F40-31): on an agent's question the words go
                 back to that agent (`resolvePacket`), not to the operator.
                 The title stays: the controller's briefing names this
                 choice by it. */}
@@ -378,7 +378,7 @@ export function PacketOptions({
 }
 
 /**
- * Ruling 478(e) under ruling 147: a Confirm with nothing chosen is refused
+ * Ruling 68 under ruling 288: a Confirm with nothing chosen is refused
  * here, a fresh alert per press, focus on the first choice the viewer can
  * make (the group's tab stop).
  */
@@ -423,8 +423,8 @@ export function DirectiveField({
         onChange={(e) => choice.setCustomText(e.target.value)}
         aria-invalid={customInvalid || undefined}
         aria-describedby={customInvalid ? CUSTOM_ERR_ID : undefined}
-        // Ruling 646 (643's rule, on the box it missed): a required
-        // answer has no example. Ruling 291's merge-and-rebase directive
+        // Ruling 312(c) (643's rule, on the box it missed): a required
+        // answer has no example. Ruling 230's merge-and-rebase directive
         // sat under every agent's question on every board, a Free Tier
         // stance on the AWS estimates board included.
         rows={2}
@@ -468,13 +468,13 @@ export function PacketNoteField({
         {copy.label}
         {needsReply && <span className="req">*</span>}
         <span className="fhint">
-          {/* Ruling 315: the length is stated BEFORE it matters. The route
+          {/* Ruling 63: the length is stated BEFORE it matters. The route
               used to cut this to 2,000 characters with nothing on the box
               saying so, and the server now refuses instead — a refusal a
               person could not see coming is a worse trade than the cut it
               replaced unless the box says the number. */}
           {connectsRepository ? (
-            // Ruling 672: what the box is, and that nothing changes
+            // Ruling 224: what the box is, and that nothing changes
             // until GitHub answers for the repository.
             "required · owner/name · checked on GitHub before anything changes"
           ) : (
@@ -523,7 +523,7 @@ export function PacketNoteField({
 }
 
 /**
- * Ruling 324: the echoes of the SELECTED option, under the choice they are
+ * Ruling 67: the echoes of the SELECTED option, under the choice they are
  * about. Silent when the selection creates nothing, and silent when nothing on
  * the board resembles it — a disclosure a person learns to skip is worse than
  * no disclosure.
@@ -557,7 +557,7 @@ export function CreateTaskEchoes({
 }
 
 /** The selected option's refusal beside Confirm (E4), unless the card says
- *  who answers once (ruling 673, `blockReasonShown`). */
+ *  who answers once (ruling 312(d), `blockReasonShown`). */
 export function BlockReasonNote({ blockReason }: { blockReason: string }) {
   return (
     <p className="deny-note spaced" id={BLOCK_REASON_ID}>
@@ -576,7 +576,7 @@ export function ResolveRefusalNote({ standing }: { standing: PacketStanding }) {
     <p className="deny-note spaced" id={standing.saidOnce ? BLOCK_REASON_ID : undefined}>
       <Icon name="lock" />
       {standing.boardDecision ? (
-        // Ruling 672: neither a maintainer nor the task's owner can
+        // Ruling 65: neither a maintainer nor the task's owner can
         // answer the repository question, so the note names who does.
         <>
           You can&rsquo;t answer this decision: both answers decide the
@@ -678,10 +678,10 @@ export function PacketActions({
         <button
           type="button"
           className="btn primary"
-          // Ruling 147: only a request in flight is a real `disabled` here.
+          // Ruling 288: only a request in flight is a real `disabled` here.
           // An empty directive is REFUSED below instead, in a sentence; a
           // ROLE refusal stays focusable so its reason is reachable. The
-          // sheet dims it (`.btn[aria-disabled="true"]`, ruling 459) and
+          // sheet dims it (`.btn[aria-disabled="true"]`, ruling 283) and
           // keeps it from hovering or pressing like a live button.
           disabled={busy}
           aria-disabled={blockReason !== null || undefined}

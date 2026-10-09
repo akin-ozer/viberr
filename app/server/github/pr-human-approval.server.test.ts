@@ -322,7 +322,7 @@ describe("R19-B — the acceptance verdict gate accepts a member's GitHub approv
     expect(affordance.blockedReason).toContain(
       "no Viberr account carries that GitHub handle",
     );
-    // Ruling 154: the way out is a door that exists on every deployment. The
+    // Ruling 29: the way out is a door that exists on every deployment. The
     // old sentence sent people to a profile card that, without GitHub OAuth,
     // said there was nothing to connect.
     expect(affordance.blockedReason).toContain("Instance settings, Users & access");

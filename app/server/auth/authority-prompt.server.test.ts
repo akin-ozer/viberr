@@ -12,7 +12,7 @@ import {
 } from "./authority-prompt.server";
 
 /**
- * Ruling 309. These tests exist because the block they cover is a SECOND
+ * Ruling 254. These tests exist because the block they cover is a SECOND
  * description of the authorization the server enforces, and a second
  * description is worth having only while it is provably the same description.
  */
@@ -74,12 +74,12 @@ describe("projectAuthorityPrompt", () => {
   });
 
   it("carries what a grant NAME cannot, for the two actions that gate more than they say", () => {
-    // Ruling 309(a), found by the controller reading the generated list and
+    // Ruling 26(b), found by the controller reading the generated list and
     // asking what was not in it. `edit-task-meta` also gates what a task waits
     // on — clearing it RELEASES a held task — and `edit-policy` also gates
     // archiving and restoring the project, so "who can unarchive this?" had no
     // answer anywhere. The names stay short because eight sentences across two
-    // pages read them inline as "the X grant". Ruling 503 added the epic a
+    // pages read them inline as "the X grant". Ruling 26 added the epic a
     // task is in to the first, and gave `manage-epics` its own scope line.
     expect(text).toContain("Edit task priority, labels & due date (the epic a task is in, and what it waits on");
     expect(text).toContain("Create & edit epics (their status, lead and dates)");
@@ -116,7 +116,7 @@ describe("projectAuthorityPrompt", () => {
    * Each is a predict-and-be-wrong case, not a style note.
    */
   it("carries the four gates a tier list would get wrong", () => {
-    // A task run bills the TASK OWNER's accounts (ruling 127), so "Run agents"
+    // A task run bills the TASK OWNER's accounts (ruling 137), so "Run agents"
     // can be held and refused anyway. Its words: "the list would tell me yes;
     // the server would say no. This is the one I'd most expect to hit."
     expect(text).toContain("bills the TASK OWNER's accounts");

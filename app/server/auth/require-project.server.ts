@@ -9,7 +9,7 @@ import { requireAuth, type AuthContext } from "./require-user.server";
  * chokepoint: the six config views (activity, review, policy, agents, settings,
  * github) and the two run-artifact resource routes.
  *
- * R15-4 (ruling 25) makes projects MEMBERS-ONLY, so this guard has exactly ONE
+ * R15-4 (ruling 27) makes projects MEMBERS-ONLY, so this guard has exactly ONE
  * refusal: the 404 an unknown slug produces. A signed-in non-member and a slug
  * that does not exist must be indistinguishable — same status, same bytes.
  *

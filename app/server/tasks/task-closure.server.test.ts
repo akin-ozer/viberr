@@ -10,11 +10,11 @@ const STAGES = [
 ];
 
 /**
- * Ruling 177 (pass 36): ONE predicate for "this task is closed", read by every
+ * Ruling 52 (pass 36): ONE predicate for "this task is closed", read by every
  * coordination door. Canary for each case: flip the matching branch in
  * `taskClosure`.
  */
-describe("ruling 177: taskClosure is the one spelling of a closed task", () => {
+describe("ruling 52: taskClosure is the one spelling of a closed task", () => {
   it("an open task at a working stage is not closed", () => {
     expect(taskClosure({ stage: "impl", archived: false }, STAGES)).toEqual({ closed: false });
     expect(taskClosure({ stage: "review" }, STAGES)).toEqual({ closed: false });

@@ -25,7 +25,7 @@ import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server"
  * environment landed the live key verbatim in a member-visible console, in the
  * `{ } raw` toggle, and in the persisted `.jsonl`.
  *
- * Ruling 127 moved that one credential out of this process's environment: it is
+ * Ruling 137 moved that one credential out of this process's environment: it is
  * the run PRINCIPAL's own, sealed in `user_backend_credentials` and opened per
  * run, so the env sweep alone can no longer see it. `createRunSink(db, spec,
  * { secrets })` is how the value reaches the redactor, and it is now the
@@ -46,7 +46,7 @@ const SAVED = {
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
 const CODEX_TOKEN = "codex-access-token-0123456789abcdef";
 /**
- * The ruling-127 shape: a credential that exists ONLY in a sealed row and in
+ * The ruling-137 shape: a credential that exists ONLY in a sealed row and in
  * the one run's spawn env, never in this process's environment. Deliberately a
  * ChatGPT-workspace ACCESS TOKEN rather than an `sk-…` key: the token patterns
  * would have caught an `sk-` prefix on sight, and then this file would be
@@ -115,7 +115,7 @@ function sinkFor(runId: string, threadId = "primary") {
 }
 
 /** The same row + sink, but carrying the per-run secrets `runCredentialFor`
- *  resolved for the run's principal (ruling 127). */
+ *  resolved for the run's principal (ruling 137). */
 function sinkWithSecrets(runId: string, secrets: string[], threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
@@ -264,7 +264,7 @@ describe("createLineRedactor", () => {
   });
 
   /**
-   * Ruling 127: the run's own secret. A personal API key is sealed in
+   * Ruling 137: the run's own secret. A personal API key is sealed in
    * `user_backend_credentials` and decrypted for exactly one run, so it is
    * never in `process.env` — the env sweep above cannot know it, and without
    * this seam the first `env` a model ran would print one person's key into a
@@ -329,7 +329,7 @@ describe("the sink redacts before it persists", () => {
   });
 
   it("scrubs the PRINCIPAL's own credential, which lives only in the sealed row", () => {
-    // Ruling 127's leak path: the run bills one person, its child env carries
+    // Ruling 137's leak path: the run bills one person, its child env carries
     // that person's credential, and the console is visible to every project
     // member.
     const sink = sinkWithSecrets("run_personal", [PERSONAL_TOKEN]);
@@ -894,13 +894,13 @@ describe("quota exhaustion from a refused run (D5)", () => {
 });
 
 /**
- * Ruling 130(d) (pass 34): the quota store records the STRUCTURED refusal
+ * Ruling 160(a) (pass 34): the quota store records the STRUCTURED refusal
  * (a rejected window on the terminal line's `failure` record) and whose
  * account it was. Canaries: delete the `failure` clause from the exhaustion
  * gate; gate on `window` instead of `windowRejected`; remove the clock arm;
  * stop reading the run's `credential_user_id`.
  */
-describe("ruling 604: a Codex line's usage reading", () => {
+describe("ruling 161(b): a Codex line's usage reading", () => {
   it("is stored as the codex backend's reading, naming the account that ran it", () => {
     const runId = `run_codex_rl_${randomBytes(6).toString("hex")}`;
     upsertRun(store.db, {
@@ -925,7 +925,7 @@ describe("ruling 604: a Codex line's usage reading", () => {
       sink.line({ ...emitted({ t: "13:00:00", ev: "tool", tag: "codex·tool", text: "npm test" }, "{}", "2026-09-30T13:00:00.000Z"), facts: { rateLimit: reading } });
       // CANARY: record the reading for Claude runs only and Profile's Codex
       // card has nothing to show before a refusal.
-      // CANARY (ruling 608): drop `windows` from the stored schema and the
+      // CANARY (ruling 161(b)): drop `windows` from the stored schema and the
       // five-hour figure never reaches instance_health.
       const row = latestBackendRateLimits(store.db, "2026-09-30T13:01:00.000Z").find((q) => q.backend === "codex")!;
       expect(row.reading).toMatchObject({ ...reading, observedAt: "2026-09-30T13:00:00.000Z", credentialUserId: store.users.arda.id });
@@ -935,7 +935,7 @@ describe("ruling 604: a Codex line's usage reading", () => {
   });
 });
 
-describe("ruling 130(d): structured refusals and the principal", () => {
+describe("ruling 160(a): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
     kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,
   });
@@ -1038,12 +1038,12 @@ describe("ruling 130(d): structured refusals and the principal", () => {
 });
 
 /**
- * Ruling 369: the sink folds every cache fact onto the row — the run's writes,
+ * Ruling 172: the sink folds every cache fact onto the row — the run's writes,
  * the FIRST call (with its temperature and the provider's miss reason), the
  * peak and last prompt (per-call figures only), the TTL bucket and the
  * compactions — and a compaction is a governed fact with an audit row.
  */
-describe("ruling 369: the sink folds the prompt-cache record", () => {
+describe("ruling 172: the sink folds the prompt-cache record", () => {
   const cacheLine = (
     cache: NonNullable<EmittedLine["facts"]["cache"]>,
     tag = "assistant",
@@ -1199,7 +1199,7 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     ).toHaveLength(1);
   });
 
-  it("ruling 376: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
+  it("ruling 174: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
     const sink = sinkFor("run_completion_compact", "completion-compact");
     sink.line(cacheLine(call(2_000, 118_000, { promptTokens: 120_000 })));
     sink.line({

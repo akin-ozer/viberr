@@ -16,7 +16,7 @@ import { boardHref, workspaceViewFromPathname, workspaceViewLabel } from "./nav"
  * at 320-375px, pushed the bell and the account menu past the edge (clipped by
  * `.main`'s overflow in the workspace, a sideways page scroll on Home). No
  * role of its own: each header keeps an always-mounted `.vh` announcer as the
- * live region (ruling 149). The Retry exists only when there is something to
+ * live region (ruling 278). The Retry exists only when there is something to
  * reconnect.
  */
 export function LivePausedStrip({
@@ -81,7 +81,7 @@ export function Topbar({
   openTask: { key: string; title: string } | null;
   user: MenuUser;
   theme: ThemePreference;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 300). */
   unread: number;
   orphanUnread: number;
   /** UI-03: the SSE stream is down — everything on screen is a stale snapshot.

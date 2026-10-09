@@ -73,7 +73,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     expect(sub).not.toContain("closed");
   });
 
-  it("ruling 135: an unpushed delivered revision outranks the conflict subline and names the push", () => {
+  it("ruling 243: an unpushed delivered revision outranks the conflict subline and names the push", () => {
     // Canary: move the `unpushedRevision` branch below the `mergeable` one.
     const behind = reviewRowSub({
       ...base,
@@ -90,7 +90,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
     expect(diverged).toContain("Resolve the history");
   });
 
-  it("ruling 132: a base refresh prints the canonical sentence verbatim, never 'unreviewed'", () => {
+  it("ruling 239: a base refresh prints the canonical sentence verbatim, never 'unreviewed'", () => {
     // Canary: restore the summed-count arm (`aheadBy`-style) over the record.
     const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
     const sub = reviewRowSub({ ...base, pr: { number: 130, state: "review", revisionDrift: record } });
@@ -112,7 +112,7 @@ describe("reviewRowSub live PR state (P14-LV-05)", () => {
       ...base,
       pr: { number: 130, state: "review", revisionDrift: { headSha: "a".repeat(40), authored: 2, baseRefresh: null } },
     });
-    // Ruling 132: the canonical sentence, verbatim.
+    // Ruling 239: the canonical sentence, verbatim.
     expect(sub).toContain("2 authored commits since review merge unreviewed");
   });
 
@@ -218,7 +218,7 @@ describe("reviewRowSub terminal GitHub facts (R16-3)", () => {
   });
 });
 
-describe("ruling 138: reviewRowSub on a decided edit_goal packet", () => {
+describe("ruling 63: reviewRowSub on a decided edit_goal packet", () => {
   it("says a goal edit is owed instead of re-offering the packet", () => {
     // Canary: drop the `goalEditPending` branch.
     const decided: ReviewRowView = {
@@ -284,8 +284,8 @@ describe("U35-5: reviewRowSub for review work before the boundary", () => {
   });
 
   it("a live PR fact outranks the in-progress sentence, and the stage still says where", () => {
-    // Ruling 135 names the review row subline as a consumer of the unpushed
-    // revision; ruling 132 the drift sentence; P14-LV-07 the conflict. These
+    // Ruling 243 names the review row subline as a consumer of the unpushed
+    // revision; ruling 239 the drift sentence; P14-LV-07 the conflict. These
     // rows are exactly where they fire (rule (b) admits any non-terminal task
     // with an open PR), and nothing else on the row renders them.
     // CANARY: rank `actionablePrSub` below the "Review in progress" sentence

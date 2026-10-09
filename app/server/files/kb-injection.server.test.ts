@@ -36,7 +36,7 @@ function kbIndex(name: string, dataRoot: string, opts: { hasKnowledgeTool?: bool
   return { body: set.parts[0]?.body ?? "", unresolved: set.unresolved[0] };
 }
 
-describe("one knowledge base's index — what a run receives (ruling 283)", () => {
+describe("one knowledge base's index — what a run receives (ruling 205)", () => {
   it("names a top-level doc with its size and its sections", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(
@@ -82,12 +82,12 @@ describe("one knowledge base's index — what a run receives (ruling 283)", () =
   });
 
   /**
-   * Ruling 678: a knowledge base's folder also holds what a board's work must
+   * Ruling 205: a knowledge base's folder also holds what a board's work must
    * follow (a report template, a sample, a logo). The index said nothing of a
    * file that is not a document, so a run learned of one only from a rule that
    * spelled out its path.
    */
-  it("ruling 678: names the folder's other files apart from its documents, with where a run opens them", () => {
+  it("ruling 205: names the folder's other files apart from its documents, with where a run opens them", () => {
     // CANARY: drop `otherFilesNote` from the body and a template copied into
     // the rulings knowledge base reaches no run's prompt.
     const { dataRoot, kbDir } = freshKb("rulings");
@@ -114,7 +114,7 @@ describe("one knowledge base's index — what a run receives (ruling 283)", () =
     expect(capped).toContain("- … 7 more files in this folder, not listed here.");
   });
 
-  it("ruling 678: a folder that holds only such files is still given, as the list of them", () => {
+  it("ruling 205: a folder that holds only such files is still given, as the list of them", () => {
     // CANARY: answer "holds no documents" for it and a knowledge base made
     // for a board's templates reaches no run, while the copy that filled it
     // said every run given it would see the files.
@@ -134,12 +134,12 @@ describe("one knowledge base's index — what a run receives (ruling 283)", () =
       body: "",
       unresolved: {
         name: "templates",
-        reason: "its store folder holds no documents, and it is private (ruling 578), so no run can open the files it does hold",
+        reason: "its store folder holds no documents, and it is private, so no run can open the files it does hold",
       },
     });
   });
 
-  it("ruling 678: says nothing about other files when the folder holds only documents", () => {
+  it("ruling 205: says nothing about other files when the folder holds only documents", () => {
     // CANARY: print the note for an empty list and every index on the
     // instance gains a line, which moves every cached prompt.
     const { dataRoot, kbDir } = freshKb();
@@ -262,14 +262,14 @@ describe("one knowledge base's index — what a run receives (ruling 283)", () =
 });
 
 /**
- * Ruling 506: the index sits in the static prefix of every run its knowledge
- * base is attached to (ruling 370), and ruling 498 writes agents' corrections
+ * Ruling 204: the index sits in the static prefix of every run its knowledge
+ * base is attached to (ruling 169), and ruling 210 writes agents' corrections
  * straight into the documents, so an edit is routine. The exact byte count the
  * index printed moved on every edit, and each one cost every run on the
  * project its cached prefix. A size class moves only when a document crosses
  * a step.
  */
-describe("the index survives an edit inside a document (ruling 506)", () => {
+describe("the index survives an edit inside a document (ruling 204)", () => {
   it("prints each size as a 1-2-5 class, exact at every step", () => {
     const cases: [number, string][] = [
       [0, "under 1k chars"],
@@ -295,7 +295,7 @@ describe("the index survives an edit inside a document (ruling 506)", () => {
   it("a correction to a document's body leaves the index byte-identical", () => {
     const { dataRoot, kbDir } = freshKb("rulings");
     const doc = path.join(kbDir, "conventions.md");
-    // The live size ruling 283 was written about, and a one-line correction
+    // The live size ruling 205 was written about, and a one-line correction
     // of the kind `correct_knowledge_doc` appends.
     const text = `# Conventions\n\n${"x".repeat(20_600)}\n\n## Boundaries\n\ntail`;
     writeFileSync(doc, text, "utf8");
@@ -317,7 +317,7 @@ describe("the index survives an edit inside a document (ruling 506)", () => {
     // `localeCompare` put `api.md` before `README.md` under an English locale
     // and may not under another; two servers that order one index differently
     // do not share a prefix. Code-point order is the one every other list in a
-    // cached prefix already uses (ruling 370's `sortedNames`).
+    // cached prefix already uses (ruling 169's `sortedNames`).
     const { dataRoot, kbDir } = freshKb();
     for (const name of ["beta.md", "README.md", "api.md", "Zeta.md"]) {
       writeFileSync(path.join(kbDir, name), `# ${name}`, "utf8");
@@ -331,7 +331,7 @@ describe("the index survives an edit inside a document (ruling 506)", () => {
   });
 });
 
-describe("readKbIndexes — every declared KB, no shared budget (ruling 283)", () => {
+describe("readKbIndexes — every declared KB, no shared budget (ruling 205)", () => {
   it("indexes every KB and collects only the real misses", () => {
     const { dataRoot, kbDir } = freshKb("first");
     writeFileSync(path.join(kbDir, "a.md"), `# First\n\n${"x".repeat(30_000)}`, "utf8");
@@ -348,13 +348,13 @@ describe("readKbIndexes — every declared KB, no shared budget (ruling 283)", (
 });
 
 /**
- * Ruling 578: every agent of a person runs as that person's uid and can read
- * `kb/` (ruling 460(d)), so a grant decided what a run is given and nothing
+ * Ruling 209: every agent of a person runs as that person's uid and can read
+ * `kb/` (ruling 15(c)), so a grant decided what a run is given and nothing
  * kept a benchmark's answer key from the shells of the agents it scores. A
  * private folder (0700, the server's alone) is closed to every shell; the runs
  * it is granted to read it through their knowledge tool.
  */
-describe("a private knowledge base (ruling 578)", () => {
+describe("a private knowledge base (ruling 209)", () => {
   it("is the folder's own mode: 0700 is private, anything the group or others may read is not", () => {
     const { kbDir } = freshKb("keys");
     expect(isPrivateKbFolder(kbDir)).toBe(false);
@@ -373,7 +373,7 @@ describe("a private knowledge base (ruling 578)", () => {
     writeFileSync(path.join(kbDir, "sample-01.md"), "# Sample 01\n\nEXPECTED-TOTAL", "utf8");
     chmodSync(kbDir, 0o700);
     const tooled = kbIndex("keys", dataRoot, { hasKnowledgeTool: true });
-    expect(tooled.body).toContain("is private (ruling 578): no shell on this run can open it, so read each document with `read_knowledge_doc`.");
+    expect(tooled.body).toContain("is private: no shell on this run can open it, so read each document with `read_knowledge_doc`.");
     expect(tooled.body).toContain("`sample-01.md`");
     expect(tooled.body).not.toContain("EXPECTED-TOTAL");
     const bare = readKbIndexes(["keys"], dataRoot, { hasKnowledgeTool: false });
@@ -382,10 +382,10 @@ describe("a private knowledge base (ruling 578)", () => {
       {
         name: "keys",
         reason:
-          "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
+          "it is private: its folder is closed to every shell, and this run has no knowledge tool to read it",
       },
     ]);
-    // Ruling 678: a file that is not a document is closed to every run there,
+    // Ruling 205: a file that is not a document is closed to every run there,
     // and the index says so instead of sending one to its shell.
     // CANARY: print the open folder's sentence for a private one and a run is
     // told to open a file its shell is refused.
@@ -400,7 +400,7 @@ describe("a private knowledge base (ruling 578)", () => {
   });
 });
 
-describe("readKbDocForRun — the pull half of ruling 283", () => {
+describe("readKbDocForRun — the pull half of ruling 205", () => {
   it("returns the document whole", () => {
     const { dataRoot, kbDir } = freshKb();
     writeFileSync(path.join(kbDir, "conventions.md"), "# C\n\nMARKER-BODY", "utf8");
@@ -479,10 +479,10 @@ describe("readKbDocForRun — the pull half of ruling 283", () => {
     expect(out).toContain("not the whole document");
   });
 
-  it("ruling 580: a long document is read in pages, each saying where it stands and where to read on", () => {
+  it("ruling 215: a long document is read in pages, each saying where it stands and where to read on", () => {
     // Live on the AWS calculator board the controller could not take in a
     // 94 KB document whole, and agents read past 48,000 characters from disk,
-    // which a private knowledge base (ruling 578) closes. CANARY: ignore
+    // which a private knowledge base (ruling 209) closes. CANARY: ignore
     // `offset` and every page is the opening again.
     const { dataRoot, kbDir } = freshKb();
     const size = READ_PAGE_BYTES * 2 + 1_000;

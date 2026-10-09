@@ -167,7 +167,7 @@ interface ServiceState {
    * reserves) bypassed the cap entirely: `handles.size` alone saw nothing during
    * the multi-minute clone window, so N delivering/reviewer runs all launched at
    * once regardless of the configured cap. Keyed to the lane the slot counts
-   * in (ruling 152(b)), like `handles`.
+   * in (ruling 150), like `handles`.
    */
   reserved: Map<string, RunLane>;
   adapters: AdapterSet;
@@ -186,10 +186,10 @@ interface ServiceState {
   completions: Map<string, RunCompletionCallback>;
   /**
    * U39-30: one-shot callbacks for a controller turn whose answer is complete
-   * while a completion compaction (ruling 376) still holds its settle back.
+   * while a completion compaction (ruling 175) still holds its settle back.
    * Fired just before that compaction, only for a turn that finished, and
    * dropped at settle whether or not it fired. A specialist's run needs none:
-   * its completion itself fires before the compaction (ruling 701).
+   * its completion itself fires before the compaction (ruling 175).
    * In-process only, like `completions`.
    */
   answered: Map<string, RunAnsweredCallback>;
@@ -199,7 +199,7 @@ interface ServiceState {
    * whose row is still `queued` when a live slot frees. In-process only — a
    * restart's orphan recovery finalizes any surviving `queued` row.
    *
-   * Ruling 152(b): two FIFOs, one per lane. `coordination` holds operator and
+   * Ruling 150: two FIFOs, one per lane. `coordination` holds operator and
    * controller turns, admitted up to `cap + coordinationLane(cap)` and promoted
    * first; `delivery` holds every other kind under the cap itself.
    */
@@ -209,7 +209,7 @@ interface ServiceState {
    *  the freed slot, so the nested call returns immediately. */
   draining?: boolean;
   /**
-   * Ruling 701: the sessions a completion compaction (ruling 376) is still
+   * Ruling 175: the sessions a completion compaction (ruling 175) is still
    * summarizing after their run has ended: session id → the run that left it.
    * That run's record is closed and its completion has fired; what is left is
    * the session's own housekeeping. A run that resumes one of these sessions
@@ -225,7 +225,7 @@ interface ServiceState {
 interface LiveSlot {
   handle: RunHandle;
   lane: RunLane;
-  /** Ruling 598: stop the run as failed, with this sentence as its cause. */
+  /** Ruling 158(b): stop the run as failed, with this sentence as its cause. */
   fail: (sentence: string) => void;
 }
 
@@ -234,18 +234,18 @@ interface PendingRun {
   runId: string;
   launch: () => void;
   /** The data root `startRun` was given, for the note the promotion writes on
-   *  the task (ruling 311): the drain runs from another run's onExit or the
+   *  the task (ruling 166): the drain runs from another run's onExit or the
    *  org-settings action, neither of which knows it. */
   dataRoot?: string;
-  /** Ruling 701: the provider session this run resumes. While that session is
+  /** Ruling 175: the provider session this run resumes. While that session is
    *  being compacted the drain passes the run over, whatever the cap says. */
   sessionId?: string;
-  /** Ruling 701: it was parked for that session and not for a slot, so the
+  /** Ruling 175: it was parked for that session and not for a slot, so the
    *  note its promotion writes says so. */
   heldForSession?: boolean;
 }
 
-/** The two admission lanes of ruling 152(b). */
+/** The two admission lanes of ruling 150. */
 type RunLane = "coordination" | "delivery";
 
 interface PendingQueues {
@@ -264,7 +264,7 @@ function laneOf(kind: RunKind): RunLane {
 }
 
 /**
- * Ruling 152(b): may a run in `lane` take a slot right now? Cap 0 is the gate
+ * Ruling 150: may a run in `lane` take a slot right now? Cap 0 is the gate
  * off. Otherwise the instance holds at most `cap + coordinationLane(cap)` runs
  * in total, and at most `cap` of them are delivery runs: the copy's "up to N
  * agent runs at once" is the delivery count, so an operator turn that is live
@@ -288,12 +288,12 @@ function canAdmit(state: ServiceState, cap: number, lane: RunLane): boolean {
   if (lane === "coordination" && coordinationLiveCount(state) < laneSize) return true;
   if (liveCount(state) >= cap + laneSize) return false;
   if (lane === "delivery") return deliveryLiveCount(state) < cap;
-  // Ruling 701: a run parked for its session's summary is not a build waiting
+  // Ruling 175: a run parked for its session's summary is not a build waiting
   // for a slot, so it is not what a coordination turn would be borrowing from.
   return !state.pending.delivery.some((run) => !heldForSettlingSession(state, run));
 }
 
-/** Ruling 701: a parked run that could not start whatever the cap says,
+/** Ruling 175: a parked run that could not start whatever the cap says,
  *  because the session it resumes is still being compacted. */
 function heldForSettlingSession(state: ServiceState, run: PendingRun): boolean {
   return run.sessionId !== undefined && state.settling.has(run.sessionId);
@@ -405,7 +405,7 @@ export function chainRunCompletion(
 /**
  * Test-only: reset live handles and install explicitly supplied adapters.
  *
- * It no longer forces availability: since ruling 127 "available" is a fact
+ * It no longer forces availability: since ruling 137 "available" is a fact
  * about a PERSON, so a test that wants a run to reach its adapter seeds a
  * credential row for that run's principal (`connectFakeBackend` in
  * `test-support/`). Installing the fakes here still fails the runtime closed —
@@ -436,7 +436,7 @@ export interface StartRunInput {
   kind: RunKind;
   backend: RealBackend;
   /**
-   * Ruling 127: whose accounts this run bills — the task owner for a task run,
+   * Ruling 137: whose accounts this run bills — the task owner for a task run,
    * the asker for a controller turn. Required, and `null` ONLY for a run being
    * recorded as REFUSED (no principal could be resolved). A null principal
    * never spawns a process: `startRun` writes the honest error run instead.
@@ -447,11 +447,11 @@ export interface StartRunInput {
    *  packet body and the disabled control all render, so a person cannot be
    *  told three different stories about one refusal. */
   principalRefusal?: RunPrincipalRefusal;
-  /** Ruling 316: this dispatch withheld the run's VERDICT channel, so a reply
+  /** Ruling 66: this dispatch withheld the run's VERDICT channel, so a reply
    *  with no envelope verdict is an answer rather than a silence the prose
    *  fallback should repair. Stored on the run row. */
   verdictWithheld?: boolean;
-  /** Ruling 544: the task's review subject (`reviewSubjectId`) when this run
+  /** Ruling 153: the task's review subject (`reviewSubjectId`) when this run
    *  was dispatched, null when nothing had been delivered. The run's verdict
    *  binds only if the task still has it at completion. Absent on a run that
    *  judges nothing (operator, controller). */
@@ -459,7 +459,7 @@ export interface StartRunInput {
   model: string;
   /** Reasoning/effort level (claude options.effort · codex
    *  modelReasoningEffort). Optional: when absent, Claude takes the SDK
-   *  default and Codex the catalog default (ruling 687). */
+   *  default and Codex the catalog default (ruling 149). */
   effort?: string;
   /** The deployed agent's display name persisted on the run (Agent-logs
    *  picker label). Null → the projection falls back to the backend name. */
@@ -481,20 +481,20 @@ export interface StartRunInput {
   /** Who caused the run (audit). Defaults to the operator system actor. */
   actor?: AuditActor;
   /** Custom instructions: Claude systemPrompt / Codex developer_instructions —
-   *  a static/dynamic split (ruling 370) or a plain string. */
+   *  a static/dynamic split (ruling 169) or a plain string. */
   systemPrompt?: RunPrompt;
-  /** Ruling 371/373: the anchor the run is handed back after a compaction
+  /** Ruling 170: the anchor the run is handed back after a compaction
    *  (see `RunSpec.compactAnchor`). */
   compactAnchor?: string;
   /** U39-30: told a controller turn's answer is written, before the
    *  completion compaction that holds its settle back. The completion
    *  callback still fires afterwards; this never fires for a turn that is not
    *  compacted at completion, or that did not finish, nor for any other kind
-   *  of run (ruling 701: a specialist's completion fires before its
+   *  of run (ruling 175: a specialist's completion fires before its
    *  compaction, and an operator's session is not compacted). Registered
    *  before the run launches, so a run cannot finish ahead of it. */
   onAnswered?: RunAnsweredCallback;
-  /** Ruling 527: see `RunSpec.steering`. */
+  /** Ruling 251: see `RunSpec.steering`. */
   steering?: RunSteering;
   /** Portable HTTP/stdio MCPs, or Claude-only in-process SDK governance tools. */
   mcpServers?: RunMcpServers;
@@ -503,15 +503,15 @@ export interface StartRunInput {
   /** Tool denylist confining a specialist run to its granted capabilities.
    *  Claude only (Codex has no denylist channel — see codex-runtime). */
   disallowedTools?: string[];
-  /** Ruling 176: the org servers' marked write tools this run withholds (see
+  /** Ruling 188: the org servers' marked write tools this run withholds (see
    *  `RunSpec.mcpToolDenials`), as the MCP resolver returned them. */
   mcpToolDenials?: McpToolDenial[];
-  /** Ruling 658: see `RunSpec.mcpOptional`. */
+  /** Ruling 190: see `RunSpec.mcpOptional`. */
   mcpOptional?: string[];
   /** Granted skills mounted for the run (`mountGrantedSkills`). Claude only —
    *  the SDK's native skills filter. See RunSpec.skills. */
   skills?: string[];
-  /** Ruling 180: the plugin directory carrying `skills`; removed when the run
+  /** Ruling 185: the plugin directory carrying `skills`; removed when the run
    *  settles. See RunSpec.skillPlugin. */
   skillPlugin?: SkillPlugin;
   /** JSON schema constraining the run's final output. Codex only — used by the
@@ -525,7 +525,7 @@ export interface StartRunInput {
    *  a live "Preparing workspace" strip while it cloned. `startRun` then adopts
    *  that row (id, thread, started_at) instead of minting a second one. */
   reservation?: RunReservation;
-  /** Ruling 372: set by `resumeRun` on the fresh turn it starts instead of a
+  /** Ruling 173: set by `resumeRun` on the fresh turn it starts instead of a
    *  replay, so the run's start audit records why the session was not resumed. */
   continuityReset?: ContinuityLossReason;
 }
@@ -563,7 +563,7 @@ export interface ReserveRunInput {
   role: string;
   kind: RunKind;
   backend: RealBackend;
-  /** Ruling 127: the principal `startRun` will bill when it adopts this row —
+  /** Ruling 137: the principal `startRun` will bill when it adopts this row —
    *  persisted here too so a reservation that is abandoned mid-preparation
    *  still records whose account the run was going to use. */
   credentialUserId: string | null;
@@ -668,7 +668,7 @@ export function reserveRun(
   // non-reserved path, where `startRun` parks it as `queued` behind the cap. The
   // only cost is no live "Preparing" strip during that run's clone — the rare
   // cap-full case — instead of the cap being silently exceeded on every dispatch.
-  // Ruling 152(b): an operator's reservation is measured against its lane's
+  // Ruling 150: an operator's reservation is measured against its lane's
   // bound (cap + lane), so a full delivery cap does not demote its clone to the
   // stripless queued path either.
   const cap = getMaxConcurrentRuns(db);
@@ -776,7 +776,7 @@ const DEFAULT_THREAD = {
   operator: "op",
   primary: "primary",
   reviewer: "r0",
-  // Ruling 99: controller conversation turns (task_key = the conversation id).
+  // Ruling 247: controller conversation turns (task_key = the conversation id).
   controller: "controller",
 } satisfies Record<RunKind, string>;
 
@@ -798,10 +798,10 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
  * means the spec records the withholding for exactly the profiles the matrix
  * already shows as withheld, with no second source of truth to drift. It no
- * longer drives a sandbox: ruling 101 bound it through Codex's read-only mode,
- * and ruling 185 removed the OS sandbox, so on Codex the withholding is
+ * longer drives a sandbox: ruling 183 bound it through Codex's read-only mode,
+ * and ruling 183 removed the OS sandbox, so on Codex the withholding is
  * advisory. What it still decides is the admin-marked MCP write tools a run
- * loses (ruling 176) and the `repoWriteWithheld` the spec records.
+ * loses (ruling 188) and the `repoWriteWithheld` the spec records.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -873,12 +873,12 @@ type RunStartedAudit = {
   role: string;
   kind: RunKind;
   resumed: boolean;
-  /** Ruling 127: whose account this run bills. Null on a refused run — the
+  /** Ruling 137: whose account this run bills. Null on a refused run — the
    *  audit row then says, permanently, that nobody was billed. */
   credentialUserId: string | null;
   /** R7-2 fail-fast marker: the run never spawned a backend process. */
   failedUnavailable?: true;
-  /** Ruling 372: this is the fresh turn `resumeRun` started INSTEAD of a
+  /** Ruling 173: this is the fresh turn `resumeRun` started INSTEAD of a
    *  replay, and why (`stale_large_session`, `transcript_gone`,
    *  `transcript_damaged`, `owner_changed`). */
   continuityReset?: ContinuityLossReason;
@@ -894,7 +894,7 @@ type RunStartedAudit = {
 const sqliteErrorSchema = z.object({ errcode: z.number(), message: z.string() });
 
 /**
- * Ruling 263 (pass 37, F37-93): what a start DID, for the doors that report it.
+ * Ruling 152 (pass 37, F37-93): what a start DID, for the doors that report it.
  *
  * `startRun` has three endings and used to return the same `{ runId }` for all
  * three, so every caller that wanted to tell a person what happened had to
@@ -915,7 +915,7 @@ export interface RunStartResult {
  *  A durable classified tag (no column, no migration), like `run·line_lost`. */
 const MODEL_SUBSTITUTED_TAG = "run·model_substituted";
 
-/** Ruling 636: the console line of a run that starts without a temporary
+/** Ruling 141(c): the console line of a run that starts without a temporary
  *  directory of its own. */
 const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
 
@@ -929,7 +929,7 @@ const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
  * `error`. That routes the failure through the EXISTING error-run path
  * (completion callbacks fire immediately, `applyAgentCompletionEffects`
  * posts the typed blocked event and escalation packet via runFailureReason).
- * Returns the run id and, since ruling 263, what actually happened to it.
+ * Returns the run id and, since ruling 152, what actually happened to it.
  */
 export async function startRun(
   db: DatabaseSync,
@@ -981,7 +981,7 @@ export async function startRun(
     });
   }
 
-  // Ruling 127: the credential comes BEFORE the adapter. A run with no
+  // Ruling 137: the credential comes BEFORE the adapter. A run with no
   // principal — or one whose principal has not connected this backend — is
   // refused here, and the refusal is the run's whole outcome: an honest error
   // row and no process. Resolved before the row is written so a caller bug
@@ -1004,17 +1004,17 @@ export async function startRun(
     agentName: input.agentName ?? null,
     agentProfileId: input.agentProfileId,
     credentialUserId: input.credentialUserId,
-    // Ruling 369: the kind of credential the run bills, which decides the
-    // cache TTL the resume policy assumes for its session (ruling 372).
+    // Ruling 172: the kind of credential the run bills, which decides the
+    // cache TTL the resume policy assumes for its session (ruling 173).
     credentialKind: credential.ok ? credential.credential.kind : null,
-    // Ruling 507: WHICH of the principal's accounts it bills — the one active
+    // Ruling 138: WHICH of the principal's accounts it bills — the one active
     // when the credential was resolved. Boot recovery hands an orphaned Codex
     // run's refreshed sign-in back to this account and to no other.
     credentialAccountId: credential.ok ? credential.credential.accountId : null,
-    // Ruling 316: kept on the row so the completion path can tell an answer
+    // Ruling 66: kept on the row so the completion path can tell an answer
     // from a silence long after the dispatch is gone.
     verdictWithheld: input.verdictWithheld === true,
-    // Ruling 544: what this run is judging, for the completion to compare.
+    // Ruling 153: what this run is judging, for the completion to compare.
     reviewSubject:
       input.reviewSubject === undefined ? null : (input.reviewSubject ?? NO_REVIEW_SUBJECT),
     // A reserved row is ALREADY running (that is the point) — re-stamping it
@@ -1056,14 +1056,14 @@ export async function startRun(
     resumeSessionId: input.resumeSessionId ?? null,
     autonomous: input.autonomous ?? true,
   };
-  // Ruling 559: what the resumed Claude session last reported, from its run
+  // Ruling 165(c): what the resumed Claude session last reported, from its run
   // log, so the run's share survives a restart that emptied the adapter's
   // memory of the session.
   if (input.backend === "claude" && input.resumeSessionId) {
     const raw = lastSessionResultRaw(db, input.resumeSessionId, runId);
     const reported = raw ? claudeReportedTotals(JSON.parse(raw)) : null;
     if (reported) spec.resumedSessionReported = reported;
-    // Ruling 553: and whether the CLI will restore its cost state at all,
+    // Ruling 159: and whether the CLI will restore its cost state at all,
     // which decides whether the spending cap has to make room for it.
     spec.costStateRestored =
       lastClaudeSessionWorkingThere(db, {
@@ -1075,7 +1075,7 @@ export async function startRun(
         accountId: credential.ok ? credential.credential.accountId : null,
       }) === input.resumeSessionId;
   }
-  // Ruling 507: the home of the account this run bills. Claude already has it
+  // Ruling 138: the home of the account this run bills. Claude already has it
   // as `CLAUDE_CONFIG_DIR` on the credential env; the Codex adapter's private
   // home copies the account's sign-in from here and hands it back here.
   if (credential.ok) spec.accountHome = credential.credential.accountHome;
@@ -1085,7 +1085,7 @@ export async function startRun(
   // came from the other backend's scale ("minimal" from Codex, "max" from
   // Claude) shipped a tier the target SDK does not accept. An unset effort
   // stays unset on Claude, where the SDK default applies. On Codex it is the
-  // catalog default, `medium` (ruling 687): the CLI's own default is set per
+  // catalog default, `medium` (ruling 149): the CLI's own default is set per
   // model, and in 0.160.1 it is `low` on gpt-6.1-sol, the model every
   // model-less operator and undeployed fallback runs, while the picker and the
   // catalog say `medium`.
@@ -1099,13 +1099,13 @@ export async function startRun(
     spec.attachmentsWritableDir = input.attachmentsWritableDir;
   }
   if (input.mcpServers) spec.mcpServers = input.mcpServers;
-  // Ruling 658: only servers this run mounts can be optional.
+  // Ruling 190: only servers this run mounts can be optional.
   const mcpOptional = (input.mcpOptional ?? []).filter((name) =>
     Object.hasOwn(input.mcpServers ?? {}, name),
   );
   if (mcpOptional.length) spec.mcpOptional = mcpOptional;
   if (allowedTools) spec.allowedTools = allowedTools;
-  // Ruling 176: a marked write tool is denied by name AFTER the auto-approval
+  // Ruling 188: a marked write tool is denied by name AFTER the auto-approval
   // above, which keeps its `mcp__<server>` allow entry (D4) — a deny rule wins
   // over it, even under bypassPermissions. Only servers this run mounts: a
   // denial for a server that never started names nothing.
@@ -1123,20 +1123,20 @@ export async function startRun(
   if (input.skills && input.skills.length) spec.skills = input.skills;
   if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
-  // it; on Codex it is advisory (ruling 185 removed the OS sandbox) and the
+  // it; on Codex it is advisory (ruling 183 removed the OS sandbox) and the
   // delivery gate is the boundary.
   if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
   // Same for web egress: withheld ⇒ Codex runs with its web search disabled,
   // the channel the operator already uses (P14-RT-06).
   if (webSearchWithheldFromDenylist(input.disallowedTools)) spec.webSearchWithheld = true;
   if (input.outputSchema) spec.outputSchema = input.outputSchema;
-  // Ruling 175: the instance's spending cap rides every run from here, the one
+  // Ruling 159: the instance's spending cap rides every run from here, the one
   // funnel every builder goes through (specialist, operator, controller,
   // resume, scheduled, recovery), so no path can start a run without it.
   // Codex ignores it: its SDK has no budget option.
   const spendCap = getMaxRunSpendUsd(db);
   if (spendCap !== null) spec.maxSpendUsd = spendCap;
-  // Ruling 127: the credential's env (the principal's home, plus their pasted
+  // Ruling 137: the credential's env (the principal's home, plus their pasted
   // key when they have one) is the BASE; the caller's per-run overlay (the
   // specialist's GIT_* workspace confinement) goes on top. `resolveRunCredential`
   // has already refused a caller overlay that names a credential key, so the
@@ -1148,12 +1148,12 @@ export async function startRun(
     ? { ...credential.credential.env }
     : {};
   Object.assign(runEnv, input.env);
-  // Ruling 371/373: the context window for this kind, from the one home for
+  // Ruling 174: the context window for this kind, from the one home for
   // the number (`context-policy.server.ts`), set here — the one funnel every
   // run goes through — so no path can start a specialist or controller run
   // without it, and after the caller's overlay so nothing renames it.
   Object.assign(runEnv, contextWindowEnv(input.backend, input.kind));
-  // Ruling 460: the run executes as its principal's own OS user. Decided here,
+  // Ruling 139: the run executes as its principal's own OS user. Decided here,
   // the one funnel every run goes through, so no path can start a process as
   // the server's user while this server launches agents; and it never falls
   // back to it — a launch that cannot be prepared refuses the run below.
@@ -1165,7 +1165,7 @@ export async function startRun(
         input.credentialUserId,
         credential.credential.homeDir,
         input.dataRoot,
-        // Ruling 507: the account's own home and what it links to, which the
+        // Ruling 138: the account's own home and what it links to, which the
         // server may have created since the backend home was handed over.
         credential.credential.ownDirs,
       );
@@ -1179,10 +1179,10 @@ export async function startRun(
       launchRefusal =
         error instanceof AppError
           ? error.userMessage
-          : `The agent could not be started as its person's own user (ruling 460): ${errorMessage(error)}. Nothing ran.`;
+          : `The agent could not be started as its person's own user (ruling 139): ${errorMessage(error)}. Nothing ran.`;
     }
   }
-  // Ruling 174: every process the run starts carries its id, so the settle
+  // Ruling 142: every process the run starts carries its id, so the settle
   // sweep can find what it left behind (`run-processes.server.ts`). Set last:
   // no caller overlay may rename a run's processes. A refused run spawns
   // nothing and carries none.
@@ -1190,9 +1190,9 @@ export async function startRun(
   if (Object.keys(runEnv).length) spec.env = runEnv;
 
   // The reasons no process may start, decided on the finished spec: the
-  // credential (ruling 127) and the launch as the principal's own user
-  // (ruling 460) — each an honest `run·unavailable` error row. Ruling 182's
-  // sandbox refusal is gone with the sandbox itself (ruling 185): a Codex run
+  // credential (ruling 137) and the launch as the principal's own user
+  // (ruling 139) — each an honest `run·unavailable` error row. Ruling 144's
+  // sandbox refusal is gone with the sandbox itself (ruling 144): a Codex run
   // is never OS-confined by the CLI, so there is no such host condition.
   const refusal: string | null = credential.ok ? launchRefusal : credential.message;
 
@@ -1229,14 +1229,14 @@ export async function startRun(
       drainRunQueue(db);
     }
     failRunUnavailable(db, spec, message, reservation?.startedAt);
-    // Ruling 180: a refused run never spawns, so its plugin has no reader.
+    // Ruling 185: a refused run never spawns, so its plugin has no reader.
     removeSkillPlugin(spec.skillPlugin);
     return { runId, outcome: "refused", refusal: message };
   };
   if (!credential.ok) return refuse(credential.message);
   if (refusal !== null) return refuse(refusal);
 
-  // Ruling 461: a server with a stored credential is mounted through Viberr's
+  // Ruling 191: a server with a stored credential is mounted through Viberr's
   // MCP gateway; the run's own token goes on its config here, the one funnel
   // every run takes, and is revoked on every path that ends it (the settle,
   // an interrupt with or without a live handle, a queued run that is dropped,
@@ -1253,7 +1253,7 @@ export async function startRun(
       isLive: () => {
         const row = getRun(db, runId);
         if (row?.state === "running" || row?.state === "queued") return true;
-        // Ruling 701: a specialist's run is over while its session is still
+        // Ruling 175: a specialist's run is over while its session is still
         // being compacted, and that request lists the run's servers.
         for (const settlingRunId of state.settling.values()) {
           if (settlingRunId === runId) return true;
@@ -1285,7 +1285,7 @@ export async function startRun(
     launchThunk();
     return { runId, outcome: "started", refusal: null };
   }
-  // Ruling 701: a run that resumes a session still being compacted is parked
+  // Ruling 175: a run that resumes a session still being compacted is parked
   // by the same admission, whatever the cap says. (A reserved run above is
   // always a fresh session: `resumeRun` carries no reservation.)
   const admitted = admitRun(
@@ -1300,7 +1300,7 @@ export async function startRun(
 }
 
 /**
- * Ruling 461: who a call to an admin-marked MCP write tool through the gateway
+ * Ruling 191: who a call to an admin-marked MCP write tool through the gateway
  * is audited as — the agent itself on a specialist run (the ref its toolkit
  * writes carry), the operator on an operator run, and on a controller turn the
  * person whose turn it is, as the controller's instrument (the actor the turn
@@ -1327,7 +1327,7 @@ type ResolvedRunCredential =
   | { ok: false; message: string };
 
 /**
- * Ruling 127: the credential of the ONE person this run bills, or the sentence
+ * Ruling 137: the credential of the ONE person this run bills, or the sentence
  * explaining why there is none.
  *
  * Three ways a run has no credential, and all three end in an honest error run
@@ -1453,7 +1453,7 @@ function failRunUnavailable(
  * the error run's `run·unavailable` line, the blocked packet's body and the
  * disabled dispatch control all read.
  *
- * Ruling 127 replaced the deployment-wide answer this used to give (which named
+ * Ruling 137 replaced the deployment-wide answer this used to give (which named
  * `ANTHROPIC_API_KEY`, `CODEX_HOME` and a pair of CLI-auth opt-ins that no
  * longer exist) with a PERSON: a run bills a person, so the only honest
  * refusal names that person and where THEY connect the backend. The two shapes
@@ -1488,29 +1488,29 @@ function backendUnavailableMessage(
  */
 const SESSION_MISSING_TAG = "run·session_missing";
 
-/** Ruling 207(j): WHY a resume did not reach its session. The causes look
+/** Ruling 162: WHY a resume did not reach its session. The causes look
  *  identical downstream and read completely differently to a human: one is a
  *  storage fault worth investigating, the others are decisions viberr made.
- *  Ruling 372 added `stale_large_session`: the transcript exists and Viberr
+ *  Ruling 173 added `stale_large_session`: the transcript exists and Viberr
  *  chose not to replay it — idle past its cache TTL and above the replay
  *  threshold, so a resume would re-write the whole history as one cache
  *  write. */
 export type ContinuityLossReason =
   | "transcript_gone"
-  /** Ruling 434: the transcript is there and the CLI refuses it (a Codex
+  /** Ruling 162: the transcript is there and the CLI refuses it (a Codex
    *  rollout whose head is torn). A fault, like `transcript_gone`, and marked
    *  the same way so the dead session is never selected again. */
   | "transcript_damaged"
   | "owner_changed"
   | "stale_large_session";
 
-/** Ruling 372: the tag of the meta line a set-aside session's last run gets.
+/** Ruling 173: the tag of the meta line a set-aside session's last run gets.
  *  Not `·session_missing` on purpose: `runIdsWithMissingSession` must not skip
  *  the row (the session is intact and a later small resume may use it), and
  *  no failure classifier may read a decision as a fault. */
 const SESSION_STALE_TAG = "run·session_stale";
 
-/** Ruling 372: the size and age the verdict was taken on, for the sentences. */
+/** Ruling 173: the size and age the verdict was taken on, for the sentences. */
 export interface StaleSessionFacts {
   contextTokens: number;
   idleMs: number;
@@ -1535,7 +1535,7 @@ function sessionMissingMessage(
 ): string {
   const label = BACKEND_LABEL[backend];
   if (reason === "owner_changed") {
-    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 127). Nothing is wrong with the credential, and the transcript is not gone; it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
+    return `The ${label} session ${sessionId} belongs to the account that owned this task before the seat changed hands, so it could not be resumed under the current owner's credential (ruling 137). Nothing is wrong with the credential, and the transcript is not gone; it is simply not this principal's to read. The agent re-anchored on task.md and continued with a fresh session.`;
   }
   if (reason === "transcript_damaged") {
     return `The ${label} session ${sessionId} could not be resumed: its provider transcript is damaged. The rollout does not start with the session's metadata, and the CLI refuses to resume it without that. Nothing is wrong with the credential. The agent re-anchored on task.md and continued with a fresh session.`;
@@ -1558,7 +1558,7 @@ function recordSessionMissing(
 ): void {
   const now = new Date().toISOString();
   const label = BACKEND_LABEL[run.backend];
-  // Ruling 372: a set-aside session is a DECISION, recorded as a meta line
+  // Ruling 173: a set-aside session is a DECISION, recorded as a meta line
   // under its own tag — the session is intact, nothing failed.
   const text =
     reason === "stale_large_session" && stale
@@ -1602,11 +1602,11 @@ function recordSessionMissing(
 function continuityResetPreamble(
   backend: RealBackend,
   kind?: string,
-  /** Ruling 372: a set-aside session says so, and carries the last report. */
+  /** Ruling 173: a set-aside session says so, and carries the last report. */
   stale?: { facts: StaleSessionFacts; lastReport: string | null },
 ): string {
   const label = BACKEND_LABEL[backend];
-  // Ruling 99: a controller turn has no task.md — its anchors are the recent
+  // Ruling 247: a controller turn has no task.md — its anchors are the recent
   // conversation digest its turn prompt carries and the live tool reads.
   if (kind === "controller") {
     return stale
@@ -1636,11 +1636,11 @@ function continuityResetPreamble(
   ].join(" ");
 }
 
-/** Ruling 372: how much of the prior run's last report the fresh turn carries. */
+/** Ruling 173: how much of the prior run's last report the fresh turn carries. */
 const LAST_REPORT_CHARS = 6_000;
 
 /**
- * Ruling 372: the prior run's last reply — the newest agent-text line of its
+ * Ruling 173: the prior run's last reply — the newest agent-text line of its
  * console — clipped, so a fresh session set aside on purpose still knows what
  * the agent last said it did. Null when the run wrote no reply.
  */
@@ -1706,7 +1706,7 @@ async function noteContinuityReset(
   dataRoot?: string,
   stale?: StaleSessionFacts,
 ): Promise<void> {
-  // Ruling 99: a controller conversation has no task file to note on — its
+  // Ruling 247: a controller conversation has no task file to note on — its
   // per-turn digest is the recovery, and the run row's session_missing stamp
   // remains the durable record.
   if (run.kind === "controller") return;
@@ -1715,7 +1715,7 @@ async function noteContinuityReset(
     type: "continuity",
     actor: { kind: "system", systemId: "runtime-continuity" },
     title: null,
-    // Ruling 207(j): the owner-change branch decides continuity BEFORE any
+    // Ruling 162: the owner-change branch decides continuity BEFORE any
     // filesystem is consulted (see resumeRun), so the transcript is intact
     // in the previous owner's home. Reporting that as "no provider
     // transcript … retention sweep or a wiped runtime volume" sent an admin
@@ -1723,12 +1723,12 @@ async function noteContinuityReset(
     // that explains it.
     text:
       reason === "stale_large_session" && stale
-        ? // Ruling 372: a decision, said as one — the session is intact.
+        ? // Ruling 173: a decision, said as one — the session is intact.
           `Started a fresh session: the previous ${label} session behind ${run.agent_name ?? run.role}'s thread was ${wholeThousands(stale.contextTokens)} tokens and ${humanDuration(stale.idleMs)} old, past the ${humanDuration(stale.ttlMs)} its prompt cache is assumed to live, so replaying it would have re-written the whole history as one cache write. The agent re-anchored on \`task.md\` and its last report and continued in a fresh session; the earlier transcript is intact and the run log it produced is unchanged.`
         : reason === "owner_changed"
-        ? `Runtime continuity was reset: this task's runs bill its owner (ruling 127), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands, so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
+        ? `Runtime continuity was reset: this task's runs bill its owner (ruling 137), and the ${label} session behind ${run.agent_name ?? run.role}'s thread belongs to the account that held the seat before it changed hands, so it could not be resumed from here. The transcript is not missing; it is not this principal's to read. The agent re-anchored on \`task.md\` and continued in a fresh session; the run log it already produced is unchanged.`
         : reason === "transcript_damaged"
-        ? // Ruling 434: there, and refused. Not a sweep, and not the credential.
+        ? // Ruling 162: there, and refused. Not a sweep, and not the credential.
           `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread has a damaged provider transcript. Its rollout does not start with the session's metadata, which the CLI needs to resume it. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`
         : `Runtime continuity was lost: the ${label} session behind ${run.agent_name ?? run.role}'s thread no longer has a provider transcript, so it could not be resumed. The agent re-anchored on \`task.md\` and continued in a fresh session. Its earlier conversation context is gone; the run log it already produced is unchanged.`,
   });
@@ -1750,7 +1750,7 @@ export async function noteCompletionEffectsLost(
   run: AgentRunRow,
   dataRoot?: string,
 ): Promise<void> {
-  // Ruling 207(a): the marker that makes the sentence below TRUE. The same
+  // Ruling 163(d): the marker that makes the sentence below TRUE. The same
   // write flips `waiting` to "human" — honest, nothing is running — and boot
   // recovery selects on `t.waiting = 'agent'`, so the note promised a replay
   // its own write had just made unreachable. Recovery now also matches a run
@@ -1807,7 +1807,7 @@ export interface ResumeRunInput {
   runId: string;
   prompt: string;
   /**
-   * Ruling 127: whose accounts the RESUMED turn bills — the task owner as of
+   * Ruling 137: whose accounts the RESUMED turn bills — the task owner as of
    * NOW, not whoever the original run billed. `resumeRun` re-resolves nothing
    * itself; the caller passes the principal it resolved.
    *
@@ -1832,7 +1832,7 @@ export interface ResumeRunInput {
   model?: string;
   /** Reasoning effort for the resumed turns. Absent, a Claude run is left on
    *  the SDK default and a Codex run gets the catalog's `medium` (startRun,
-   *  ruling 687). */
+   *  ruling 149). */
   effort?: string;
   /** Carry/override the agent identity onto the resumed run so it groups
    *  with the prior run in the Agent-logs picker. Defaults to the prior
@@ -1846,20 +1846,20 @@ export interface ResumeRunInput {
    *  this a resumed (e.g. @mention) specialist runs UNCONFINED — the exact
    *  confinement the fresh-run path establishes is silently dropped (XS-1). */
   disallowedTools?: string[];
-  /** Ruling 176: re-apply the org servers' withheld write tools on resume, or
+  /** Ruling 188: re-apply the org servers' withheld write tools on resume, or
    *  a resumed read-only agent would get back the tools its fresh run lacked. */
   mcpToolDenials?: McpToolDenial[];
-  /** Ruling 658: see `RunSpec.mcpOptional`, re-derived for the resume. */
+  /** Ruling 190: see `RunSpec.mcpOptional`, re-derived for the resume. */
   mcpOptional?: string[];
   /** Re-apply the granted skills mounted for the resumed run. A resume
-   *  re-mounts (ruling 180: one plugin per run), but the SDK options do not
+   *  re-mounts (ruling 185: one plugin per run), but the SDK options do not
    *  carry over: without this a resumed @mention run would enable NO skill
    *  while its persona — built by the same `resolveResumeConfinement` —
    *  already left the bodies out for native delivery, so the agent would
    *  silently lose its granted craft mid-thread (the XS-1 fresh-vs-resume
    *  parity class). */
   skills?: string[];
-  /** Ruling 180: the resumed run's own plugin directory (see `skills`). */
+  /** Ruling 185: the resumed run's own plugin directory (see `skills`). */
   skillPlugin?: SkillPlugin;
   /** Re-apply the run's tool APPROVAL list on resume. D4: the type used to
    *  omit this while accepting every other half of the run's tool policy, so
@@ -1874,17 +1874,17 @@ export interface ResumeRunInput {
   mcpServers?: RunMcpServers;
   /** Re-apply the persona/system prompt on resume (Claude). */
   systemPrompt?: RunPrompt;
-  /** Ruling 371: re-apply the compaction anchor on resume, or a resumed run
+  /** Ruling 170: re-apply the compaction anchor on resume, or a resumed run
    *  would lose it mid-thread (the XS-1 fresh-vs-resume parity class). */
   compactAnchor?: string;
-  /** Ruling 544: see `StartRunInput.reviewSubject` — the subject when THIS
+  /** Ruling 153: see `StartRunInput.reviewSubject` — the subject when THIS
    *  turn was dispatched, not the original run's. */
   reviewSubject?: string | null;
   /** U39-30: see `StartRunInput.onAnswered`. */
   onAnswered?: RunAnsweredCallback;
-  /** Ruling 527: see `RunSpec.steering`. */
+  /** Ruling 251: see `RunSpec.steering`. */
   steering?: RunSteering;
-  /** Ruling 372: the instant the resume is decided at. Tests pin it; the
+  /** Ruling 173: the instant the resume is decided at. Tests pin it; the
    *  product passes nothing and the service reads its clock ONCE here. */
   nowIso?: string;
   /** Re-apply the outcome-envelope schema on resume so a resumed (e.g.
@@ -1895,7 +1895,7 @@ export interface ResumeRunInput {
   outputSchema?: unknown;
   /** C02-R3 (pass 32): re-apply the task's attachments drop on resume, so a
    *  resumed run's persona and its writable set still agree. It no longer
-   *  widens any sandbox (ruling 185 removed Codex's; Claude never had one) —
+   *  widens any sandbox (ruling 144 removed Codex's; Claude never had one) —
    *  it is the path the persona names, and the prompt must not promise a drop
    *  the run was not told about. Same fresh-vs-resume parity class as
    *  XS-1/F7. */
@@ -1972,7 +1972,7 @@ export async function resumeRun(
   const resumeThreadId =
     prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
 
-  // Ruling 127: an OWNER CHANGE decides continuity on its own, before any
+  // Ruling 137: an OWNER CHANGE decides continuity on its own, before any
   // filesystem is consulted. The probe below reads the principal's own runtime
   // home, and a home whose transcript store does not exist yet — the new owner
   // connected the backend but has never had a run on this server, so
@@ -1989,7 +1989,7 @@ export async function resumeRun(
     prev.credential_user_id !== input.credentialUserId;
   // P13-D-2: probe before handing the id to the SDK. `unknown` (no transcript
   // store to look in) resumes exactly as before — absence proves nothing there.
-  // Ruling 127: the transcript lives in the PRINCIPAL's own runtime home, so
+  // Ruling 137: the transcript lives in the PRINCIPAL's own runtime home, so
   // the probe has to be told whose. A resume with no principal (the task lost
   // its owner) has no home to look in and no run to start either — it falls
   // through to `startRun`, which records the refusal.
@@ -2001,7 +2001,7 @@ export async function resumeRun(
         prev.session_id,
         input.dataRoot,
       );
-  // Ruling 372: a session that is BOTH idle past its cache TTL AND larger than
+  // Ruling 173: a session that is BOTH idle past its cache TTL AND larger than
   // the replay threshold is never replayed — the whole history would be one
   // cache write (298k, 911k and 929k on this instance). The size is what a
   // resume would replay: the last call's prompt, from the row when the sink
@@ -2010,7 +2010,7 @@ export async function resumeRun(
   // credential kind the prior run billed. A controller turn takes the same
   // rule; its per-turn digest carries the last stored turns.
   const nowIso = input.nowIso ?? new Date().toISOString();
-  // Ruling 701: a session still being compacted is neither idle nor, for
+  // Ruling 175: a session still being compacted is neither idle nor, for
   // long, large: the run below waits for the summary and replays that. Its
   // row's finish and last prompt are the run's own, from before the summary.
   const settling = prev.session_id !== null && getState().settling.has(prev.session_id);
@@ -2086,7 +2086,7 @@ export async function resumeRun(
       prompt: `${preamble}\n\n${input.prompt}`,
       // The whole point: no resumeSessionId. A fresh provider session.
       resumeSessionId: null,
-      // Ruling 372: the fresh row says WHY it is fresh, in its start audit.
+      // Ruling 173: the fresh row says WHY it is fresh, in its start audit.
       continuityReset: lossReason,
     });
     return { runId: fresh.runId, continuityReset: true, continuityLossReason: lossReason };
@@ -2107,7 +2107,7 @@ function liveCount(state: ServiceState): number {
   return state.handles.size + state.reserved.size;
 }
 
-/** How many of the held slots are delivery runs (ruling 152(b)): the count the
+/** How many of the held slots are delivery runs (ruling 150): the count the
  *  cap itself bounds. */
 function deliveryLiveCount(state: ServiceState): number {
   let n = 0;
@@ -2116,7 +2116,7 @@ function deliveryLiveCount(state: ServiceState): number {
   return n;
 }
 
-/** How many of the held slots are coordination turns (ruling 152(b)): the count
+/** How many of the held slots are coordination turns (ruling 150): the count
  *  the lane bounds. Anything past `coordinationLane(cap)` is a borrowed cap
  *  slot, which the next parked build takes back ({@link canAdmit}). */
 function coordinationLiveCount(state: ServiceState): number {
@@ -2132,13 +2132,13 @@ function coordinationLiveCount(state: ServiceState): number {
  * every run launches immediately (the historical behavior, so an untouched
  * deployment is unchanged). Otherwise a run that would exceed its lane's bound
  * ({@link canAdmit}: at most `cap` delivery runs and `cap + lane` runs in all,
- * the lane for operator and controller turns, ruling 152(b)) is PARKED: its DB
+ * the lane for operator and controller turns, ruling 150) is PARKED: its DB
  * row stays `queued` (that is the state startRun already inserts for a
  * non-reserved run) and its launch thunk waits in the lane's queue, promoted by
  * `drainRunQueue` when a live slot frees.
  */
 /** True when the run launched now; false when it was parked behind the cap
- *  (ruling 263: the caller reports which, instead of saying "started" for
+ *  (ruling 152: the caller reports which, instead of saying "started" for
  *  both). */
 function admitRun(
   db: DatabaseSync,
@@ -2146,14 +2146,14 @@ function admitRun(
   launchThunk: () => void,
   kind: RunKind,
   dataRoot?: string,
-  /** Ruling 701: the session the run resumes, when it resumes one. */
+  /** Ruling 175: the session the run resumes, when it resumes one. */
   resumeSessionId?: string | null,
 ): boolean {
   const state = getState();
   const cap = getMaxConcurrentRuns(db);
   const lane = laneOf(kind);
-  // Ruling 701: the session is still being compacted after the run that left
-  // it. Two processes on one transcript is what ruling 376 made the whole
+  // Ruling 175: the session is still being compacted after the run that left
+  // it. Two processes on one transcript is what ruling 175 made the whole
   // settle wait to prevent; now only this run waits, parked like a run behind
   // the cap, with the reason as its row's step.
   const held = Boolean(resumeSessionId && state.settling.has(resumeSessionId));
@@ -2162,7 +2162,7 @@ function admitRun(
     return true;
   }
   const queue = state.pending[lane];
-  // Ruling 458(d): a parked run is launched later by whichever run frees the
+  // Ruling 43: a parked run is launched later by whichever run frees the
   // slot, inside that run's correlation. It carries the correlation of the
   // request that started it instead, so its records name that request and user.
   const parked: PendingRun = { runId, launch: carryCorrelation(launchThunk), dataRoot };
@@ -2202,7 +2202,7 @@ function admitRun(
  * it mid-drain is honored; `handles.size` grows as each promoted run launches,
  * so the loop is self-limiting.
  *
- * Ruling 152(b): the coordination queue is drained first; a delivery run is
+ * Ruling 150: the coordination queue is drained first; a delivery run is
  * promoted only when no coordination run can go and the cap itself has room.
  * So a freed slot goes to the operator turn that was parked behind the builds
  * before the next build — until coordination holds its whole lane, when the
@@ -2227,7 +2227,7 @@ export function drainRunQueue(db: DatabaseSync): void {
         continue;
       }
       next.launch();
-      // Ruling 311, the other half: the timeline said "Queued … Nothing is
+      // Ruling 166, the other half: the timeline said "Queued … Nothing is
       // streaming yet", and this is the one place that stops being true.
       void noteRunStarted(db, row, next.dataRoot, next.heldForSession === true);
     }
@@ -2244,7 +2244,7 @@ function nextPromotable(state: ServiceState, cap: number): PendingRun | null {
     const queue = state.pending[lane];
     if (queue.length === 0) continue;
     if (!canAdmit(state, cap, lane)) continue;
-    // Ruling 701: a run whose session is still being compacted keeps its
+    // Ruling 175: a run whose session is still being compacted keeps its
     // place and is passed over; the oldest run that can go, goes.
     const index = queue.findIndex((run) => !heldForSettlingSession(state, run));
     if (index === -1) continue;
@@ -2258,7 +2258,7 @@ function nextPromotable(state: ServiceState, cap: number): PendingRun | null {
 export interface RunConcurrencySnapshot {
   /** Configured cap (0 = unlimited). */
   cap: number;
-  /** Ruling 152(b): the extra slots operator and controller turns may take
+  /** Ruling 150: the extra slots operator and controller turns may take
    *  beyond the cap (one per four of it, minimum one; 0 when the cap is 0). */
   lane: number;
   /** Runs holding a slot right now — live adapters plus reserved-but-not-yet-
@@ -2266,7 +2266,7 @@ export interface RunConcurrencySnapshot {
    *  against, so it is what the admin card must show. */
   live: number;
   /** Runs parked right now, both lanes together: behind the cap, or (ruling
-   *  701) for the summary of their session's last run. */
+   *  175) for the summary of their session's last run. */
   queued: number;
 }
 
@@ -2288,7 +2288,7 @@ function launch(
   db: DatabaseSync,
   spec: RunSpec,
   adapter: RuntimeAdapter,
-  /** Ruling 127: the plaintext credentials THIS run's child env carries. The
+  /** Ruling 137: the plaintext credentials THIS run's child env carries. The
    *  sink redacts them from every persisted line — they belong to one person
    *  and the run console is visible to every project member. */
   secrets: readonly string[],
@@ -2299,7 +2299,7 @@ function launch(
     /** F21-13: a disclosure line to open the run log with. */
     notice?: string;
     /** The data root the run's task lives under: where the finalize reads a
-     *  Codex run's rollout (ruling 369(c)). Absent means the instance's own
+     *  Codex run's rollout (ruling 172). Absent means the instance's own
      *  root. */
     dataRoot?: string;
   } = {},
@@ -2310,7 +2310,7 @@ function launch(
   // Set when onExit fires DURING adapter.start() (synchronous exit / spawn
   // crash) so we skip tracking a handle for an already-terminal run.
   let exited = false;
-  // Ruling 598: why the gateway stopped this run, once it has.
+  // Ruling 158(b): why the gateway stopped this run, once it has.
   let stoppedFor: string | null = null;
 
   // Mark running immediately (queued → running). A run that was RESERVED before
@@ -2341,7 +2341,7 @@ function launch(
     });
   }
 
-  // Ruling 636: the run's own temporary directory, made now that it launches
+  // Ruling 141(c): the run's own temporary directory, made now that it launches
   // (a queued run never had one) and set over every overlay, so no caller
   // renames it. A run whose directory cannot be made starts without one, and
   // its console says so first: the shell inventory's "keep temporary files in
@@ -2353,7 +2353,7 @@ function launch(
     } catch (error) {
       const now = new Date().toISOString();
       const message =
-        `This run has no temporary directory of its own (ruling 636): ${errorMessage(error)}. ` +
+        `This run has no temporary directory of its own (ruling 141(c)): ${errorMessage(error)}. ` +
         "Its tools use the shared /tmp.";
       logger.warn("a run's temporary directory could not be made", {
         runId: spec.runId,
@@ -2375,7 +2375,7 @@ function launch(
   let lastPhase: string | null = null;
   let lastPhaseWriteMs = 0;
   const PHASE_MIN_INTERVAL_MS = 1_000;
-  // Ruling 348: a step the window suppresses is written when the window closes,
+  // Ruling 166: a step the window suppresses is written when the window closes,
   // not dropped. The update that matters most arrives inside the window — a
   // tool that answers within a second of being invoked — and a Codex run then
   // emits nothing until its reasoning item completes, so a dropped write would
@@ -2435,7 +2435,7 @@ function launch(
       }
     },
     onExit: (adapterExit) => {
-      // Ruling 598: a run the gateway stopped ends failed, and its cause is
+      // Ruling 158(b): a run the gateway stopped ends failed, and its cause is
       // the last error line, written after anything the abort emitted. A run
       // that finished before the stop landed keeps its outcome.
       let exit = adapterExit;
@@ -2449,18 +2449,18 @@ function launch(
       deferredTimer = null;
       deferred = null;
       // The handle is tracked only for a run still in flight, so the flag is
-      // set here, synchronously, exactly as before ruling 376 made the rest
+      // set here, synchronously, exactly as before ruling 174 made the rest
       // of the exit asynchronous.
       exited = true;
-      // Ruling 376: the exit may compact the session, a provider round trip,
-      // so the settle is asynchronous. Ruling 701: for a specialist's run the
+      // Ruling 174: the exit may compact the session, a provider round trip,
+      // so the settle is asynchronous. Ruling 175: for a specialist's run the
       // finalize, the slot and the completion come first and only a resume of
       // that session waits for the compaction; a controller turn's settle
       // still waits for it whole.
       void settleRun(exit);
     },
   };
-  // Ruling 458(d): the run's own work (its adapter stream, the sink, the settle
+  // Ruling 43: the run's own work (its adapter stream, the sink, the settle
   // and the completion callbacks) logs under its runId and taskKey, plus the
   // request and user behind it. It gets its OWN copy of the correlation: every
   // continuation of a request shares one object, and a run's completion can
@@ -2477,10 +2477,10 @@ function launch(
       return adapter.start(spec, callbacks);
     });
   } catch (error) {
-    // Ruling 461: an adapter that throws before it runs anything leaves no
+    // Ruling 191: an adapter that throws before it runs anything leaves no
     // process to settle, so the run's gateway token is revoked here.
     revokeRunMcpGateway(spec.runId);
-    // Ruling 636: nor anything that wrote its temporary directory.
+    // Ruling 141(c): nor anything that wrote its temporary directory.
     if (spec.tmpDir) void removeRunTmp(spec.tmpDir, spec.agent ?? null, spec.runId);
     throw error;
   }
@@ -2502,19 +2502,19 @@ function launch(
   }
 
   async function settleRun(exit: RunExit): Promise<void> {
-      // Ruling 461: the process that held the run's gateway token has exited,
+      // Ruling 191: the process that held the run's gateway token has exited,
       // so the token calls nothing from now on. It is revoked once the
       // completion compaction below is done (or at once when there is none):
       // that request replays the session with the run's own MCP servers, and
       // a server it cannot list is a different prefix that misses the cache
-      // ruling 376 compacts to read (R-gateway-4, 2026-09-25).
+      // ruling 174 compacts to read (R-gateway-4, 2026-09-25).
       closeRunMcpGatewayCalls(spec.runId);
-      // Ruling 701: the compaction a specialist's session is still owed once
+      // Ruling 175: the compaction a specialist's session is still owed once
       // the run's own record is closed. Null when the settle below is the end
       // of it: nothing to compact, or a controller turn, whose settle waits.
       let housekeeping: (() => Promise<void>) | null = null;
       try {
-        // Ruling 369: a Codex run's per-call prompt sizes and compactions are
+        // Ruling 172: a Codex run's per-call prompt sizes and compactions are
         // in the rollout the CLI wrote, never in its SDK stream; read once the
         // CLI has exited, off the principal's own home.
         // A shutdown drain (F21-24): nothing below can be read or written; the
@@ -2532,7 +2532,7 @@ function launch(
             : null;
         let stats = rolloutStats();
         if (stats && stats.calls > 0) sink.foldRolloutStats(stats);
-        // Ruling 376: a session larger than the completion threshold is
+        // Ruling 174: a session larger than the completion threshold is
         // compacted now, while its prefix is still in the provider's cache.
         // Never after an interrupt (the person asked for the spending to
         // stop), never without a session, never on a backend that cannot,
@@ -2542,7 +2542,7 @@ function launch(
           : exit.effectiveBackend === "codex"
             ? (stats?.lastPromptTokens ?? 0)
             : (getRun(db, spec.runId)?.last_prompt_tokens ?? 0);
-        // Ruling 599: nor after a run its provider refused (the usage limit,
+        // Ruling 174: nor after a run its provider refused (the usage limit,
         // the account, no credential, its own overload). The compaction is one
         // more request to that provider on that account and cannot be served
         // either. Live, eight Codex runs the usage limit refused each stayed
@@ -2558,14 +2558,14 @@ function launch(
           sessionId &&
           exit.outcome !== "interrupted" &&
           !refused &&
-          // Ruling 701: nor an operator's session. Every operator turn starts
+          // Ruling 175: nor an operator's session. Every operator turn starts
           // a fresh one (`runOperator` passes no session to resume), so the
           // summary would have no reader: 39 of them on one instance, none
           // ever resumed.
           spec.kind !== "operator" &&
           replaySize > COMPACT_AT_COMPLETION_TOKENS
         ) {
-          // Ruling 701: set at the deadline. What a compaction says after it
+          // Ruling 175: set at the deadline. What a compaction says after it
           // was given up is dropped: the console has said it did not happen,
           // and a run parked for the session may already be on it.
           const givenUp = new AbortController();
@@ -2607,9 +2607,9 @@ function launch(
               const event = stats?.compactionEvents.at(-1) ?? null;
               if (stats && stats.compactionEvents.length > compactionsBefore && event) {
                 const occurredAt = new Date().toISOString();
-                // Ruling 414: the CLI writes this compaction's own size line
+                // Ruling 172: the CLI writes this compaction's own size line
                 // between its two spellings, so the rollout has measured it.
-                // Ruling 403: when it has not (a marker with nothing after it),
+                // Ruling 172: when it has not (a marker with nothing after it),
                 // the figure is unknown rather than zero. Say so.
                 const post =
                   event.postTokens === null
@@ -2630,7 +2630,7 @@ function launch(
               }
             }
           };
-          // Ruling 701: the compaction, bounded and never thrown. A throw is
+          // Ruling 175: the compaction, bounded and never thrown. A throw is
           // logged; no answer by the deadline stops waiting, says so on the
           // run's console and stops the compaction's process, so nothing that
           // waits on this session waits for good. (Before, a controller turn
@@ -2646,7 +2646,7 @@ function launch(
             const work = compactSession(onPhase).then(
               () => "answered" as const,
               (error) => {
-                // Never a failure of the run (ruling 376).
+                // Never a failure of the run (ruling 174).
                 logger.error("run compaction at completion failed", {
                   runId: spec.runId,
                   err: toError(error),
@@ -2694,7 +2694,7 @@ function launch(
           if (spec.kind === "controller") {
             // U39-30: the answer is written; only the housekeeping is left.
             // Live on ax-clone a controller turn's compaction held its reply off
-            // the page for 27 seconds, and ruling 371 measured one at 131. The
+            // the page for 27 seconds, and ruling 170 measured one at 131. The
             // turn's settle still waits for the compaction: the conversation's
             // next turn resumes this same session, so nothing would start sooner.
             const answered = getState().answered.get(spec.runId);
@@ -2711,7 +2711,7 @@ function launch(
             }
             await compactWithin((phase, step) => writePhase(phase, step));
           } else {
-            // Ruling 701: a specialist's run ends when its answer is written.
+            // Ruling 175: a specialist's run ends when its answer is written.
             // Its report, its files and the operator's next turn do not wait
             // for a summary of a session that only a later comment or answer
             // to this agent would resume (live, 136 s a run on average). The
@@ -2734,15 +2734,15 @@ function launch(
       // U39-30: an answered callback the settle never needed goes with it.
       state.answered.delete(spec.runId);
       const tidy = () => {
-        // Ruling 180: the settled run's skill plugin goes with it — the CLI
+        // Ruling 185: the settled run's skill plugin goes with it — the CLI
         // that read it has exited, and nothing else names the path.
         removeSkillPlugin(spec.skillPlugin);
-        // Ruling 636: and its temporary directory, after the completion
+        // Ruling 141(c): and its temporary directory, after the completion
         // compaction (which wrote it too) and once the settle sweep has
         // had its grace, so no process of the run is still writing it.
         if (spec.tmpDir) scheduleRunTmpRemoval(spec.tmpDir, spec.agent ?? null, spec.runId);
       };
-      // Ruling 701: from here until the compaction is over, a run that resumes
+      // Ruling 175: from here until the compaction is over, a run that resumes
       // this session is parked ({@link admitRun}). Registered before the queue
       // is drained and before the completion fires, because either may start
       // one: a parked run the drain would promote, a comment the completion
@@ -2830,7 +2830,7 @@ function launch(
 }
 
 /**
- * Ruling 701: write or clear, on a terminal run's row, that its session's
+ * Ruling 175: write or clear, on a terminal run's row, that its session's
  * completion compaction is in flight ({@link COMPACTING_AFTER_RUN_STEP}).
  * Best-effort: a database closed for shutdown leaves the mark for boot.
  */
@@ -2864,7 +2864,7 @@ export interface InterruptResult {
 /**
  * The interrupt itself — the live-handle arm and the no-handle arm — shared by
  * the human interrupt (`interruptRun`) and the closure interrupt
- * (`interruptRunOnClosure`, ruling 177). `actorUserId` is stamped into
+ * (`interruptRunOnClosure`, ruling 154). `actorUserId` is stamped into
  * `interrupted_by`; `auditActor`/`auditDetails` shape the audit row.
  */
 function stopRunProcess(
@@ -2882,7 +2882,7 @@ function stopRunProcess(
 ): void {
   const state = getState();
   const slot = state.handles.get(input.runId);
-  // Ruling 461: an interrupted run's gateway token stops working at once,
+  // Ruling 191: an interrupted run's gateway token stops working at once,
   // whether a process is still winding down (the settle revokes it again) or
   // there is none to settle (a queued or reserved run, or one a restart left).
   revokeRunMcpGateway(input.runId);
@@ -2919,7 +2919,7 @@ function stopRunProcess(
     // "working" until a restart replayed recovery. Same precondition as the
     // spawn-crash race: terminal state, no live handle, so fire it now.
     fireIfAlreadyTerminal(db, input.runId);
-    // Ruling 701: a parked run that is stopped leaves the queue now. A run
+    // Ruling 175: a parked run that is stopped leaves the queue now. A run
     // parked behind the cap was dropped by the next drain anyway; one parked
     // for its session's summary would have sat there, counted as queued,
     // until that compaction ended.
@@ -2971,7 +2971,7 @@ export async function interruptRun(
   }
 
   if (run.kind === "controller") {
-    // Ruling 99: a controller turn has no project to be a member of. It is
+    // Ruling 249: a controller turn has no project to be a member of. It is
     // stoppable by the two people who may read it — the conversation's owner,
     // whose turn and whose Claude account it is, and a live org admin — and
     // the refusal is 404-shaped like every other non-owner answer about a
@@ -3029,7 +3029,7 @@ export async function interruptRun(
 }
 
 /**
- * Ruling 598: the gateway stops a run that keeps sending one call and getting
+ * Ruling 158(b): the gateway stops a run that keeps sending one call and getting
  * one answer. The run ends failed with `sentence` as its cause, so its stall
  * packet says which call and what it answered. False when no process of that
  * run is live.
@@ -3042,7 +3042,7 @@ export function stopRunForToolLoop(runId: string, sentence: string): boolean {
   return true;
 }
 
-/** Ruling 598: the error line a stopped run ends on, tagged as its cause. */
+/** Ruling 158(b): the error line a stopped run ends on, tagged as its cause. */
 function toolLoopLine(sentence: string): EmittedLine {
   const occurredAt = new Date().toISOString();
   return {
@@ -3060,7 +3060,7 @@ function toolLoopLine(sentence: string): EmittedLine {
 }
 
 /**
- * Ruling 177 (pass 36, F36-5): a task that closes — accepted, force-accepted or
+ * Ruling 154 (pass 36, F36-5): a task that closes — accepted, force-accepted or
  * archived — ends its live runs. No RBAC: the person's authority was spent on
  * the closure itself (acceptance is owner-or-maintainer, archive is
  * maintainer+), and the interrupt is that act's consequence, audited under the
@@ -3094,12 +3094,12 @@ export function interruptRunOnClosure(
 }
 
 /**
- * Ruling 525: a controller conversation that is deleted ends its live turns
+ * Ruling 250: a controller conversation that is deleted ends its live turns
  * first, so nothing answers into it and nothing it was about to apply is
  * applied. No authority check here: the person's was spent on the deletion
  * (`deleteControllerConversation`), and the stop is that act's consequence,
  * audited under the SYSTEM actor with the person who deleted it in the
- * details, the shape a closing task's stop has (ruling 177). Idempotent like
+ * details, the shape a closing task's stop has (ruling 154). Idempotent like
  * `interruptRun`: a turn someone already stopped is left to finish stopping.
  */
 export function interruptRunOnConversationDeletion(
@@ -3129,7 +3129,7 @@ export function interruptRunOnConversationDeletion(
  * silence, and the next reader could not tell the run was stopped by a person.
  * A note authored by that person, naming the run, is the canonical trace.
  * Best-effort like the continuity note: a task file we cannot write never
- * masks the interrupt itself. Controller runs have no task file (ruling 99).
+ * masks the interrupt itself. Controller runs have no task file (ruling 247).
  */
 async function noteInterrupt(
   db: DatabaseSync,
@@ -3143,7 +3143,7 @@ async function noteInterrupt(
     type: "note",
     actor: { kind: "human", userId: actor.userId, nameHint: actor.label },
     title: null,
-    // Ruling 207(g): "the thread stays resumable" is true only when a
+    // Ruling 154: "the thread stays resumable" is true only when a
     // provider session was ever reported. `reserveRun` writes a `running`
     // row minutes before any provider process exists, and that row is what
     // the Live-run strip's Stop button acts on — the deliberate
@@ -3158,7 +3158,7 @@ async function noteInterrupt(
 }
 
 /**
- * Ruling 311, the other half. `runDispatchLine` now records a run parked
+ * Ruling 166, the other half. `runDispatchLine` now records a run parked
  * behind the concurrent-run cap as "Queued … starts when a slot frees. Nothing
  * is streaming yet" — and a parked run is promoted in exactly one place,
  * `drainRunQueue`, whose `launch()` patches the run row and publishes SSE and
@@ -3170,13 +3170,13 @@ async function noteInterrupt(
  * admitted at once was never "queued" on the timeline, and its dispatch line
  * already said "Started". Best-effort like `noteInterrupt`: a task file we
  * cannot write never blocks the launch. Controller turns have no task file
- * (ruling 99).
+ * (ruling 247).
  */
 async function noteRunStarted(
   db: DatabaseSync,
   run: AgentRunRow,
   dataRoot?: string,
-  /** Ruling 701: it waited for its session's compaction, not for a slot. */
+  /** Ruling 175: it waited for its session's compaction, not for a slot. */
   heldForSession = false,
 ): Promise<void> {
   if (run.kind === "controller") return;
@@ -3195,8 +3195,8 @@ async function noteRunStarted(
 // ---------------------------------------------- reads
 
 /** All runs for a task as RunView[] + their D-11 log windows (task loader).
- *  `console` says how much of each window to carry (ruling 457); `rows` hands
- *  in run rows the caller has already read (ruling 693). */
+ *  `console` says how much of each window to carry (ruling 300); `rows` hands
+ *  in run rows the caller has already read (ruling 83). */
 export function listRunsForTask(
   db: DatabaseSync,
   projectSlug: string,
@@ -3216,7 +3216,7 @@ export interface RunLog {
   oldestSeq: number;
   /** P13-D-11: lines older than `oldestSeq` exist for this run. */
   hasMore: boolean;
-  /** Ruling 457 (LIVE-1): the run row's moving facts as of this read, so the
+  /** Ruling 11 (LIVE-1): the run row's moving facts as of this read, so the
    *  Live run strip follows the console's tail instead of a revalidation. */
   facts: RunLiveFacts;
 }
@@ -3245,7 +3245,7 @@ export interface RunLogQuery {
 /**
  * A page of a run's log lines, for a caller that already read the run row: the
  * run-log route reads it for its membership gate, and the live tail calls that
- * route once per streamed line per viewer (ruling 457, LIVE-9).
+ * route once per streamed line per viewer (ruling 11, LIVE-9).
  *
  * Two modes, because D-11 made the console a paginated view of a bounded
  * loader window rather than the whole history:
@@ -3274,7 +3274,7 @@ export function runLogPage(db: DatabaseSync, run: AgentRunRow, query: RunLogQuer
     // Older lines exist below this page. An EMPTY backward page means we
     // reached the start of this run (the console then steps to the previous
     // run id in the group's `logWindow.runIds`). One index probe, not a count
-    // of the run's lines (ruling 457).
+    // of the run's lines (ruling 11).
     hasMore: lines.length > 0 && hasRunLinesBefore(db, runId, oldestSeq),
     facts: runLiveFacts(run),
   };

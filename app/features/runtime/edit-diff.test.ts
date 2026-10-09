@@ -15,7 +15,7 @@ function show(row: DiffRow): string {
   return `${row.kind} ${row.text}`;
 }
 
-describe("ruling 499: an Edit reads as the lines it removed and added", () => {
+describe("ruling 168: an Edit reads as the lines it removed and added", () => {
   it("keeps the quoted context, removes then adds, and counts both", () => {
     const diff = editDiff(
       tool("Edit", {
@@ -108,7 +108,7 @@ describe("ruling 499: an Edit reads as the lines it removed and added", () => {
   });
 });
 
-describe("ruling 499: a MultiEdit marks each edit; a Write numbers the file it writes", () => {
+describe("ruling 168: a MultiEdit marks each edit; a Write numbers the file it writes", () => {
   it("marks each of a MultiEdit's edits, with its own every-occurrence, and sums the counts", () => {
     const diff = editDiff(
       tool("MultiEdit", {
@@ -146,7 +146,7 @@ describe("ruling 499: a MultiEdit marks each edit; a Write numbers the file it w
   });
 });
 
-describe("ruling 499: a long diff shows its first ten rows and counts the rest", () => {
+describe("ruling 168: a long diff shows its first ten rows and counts the rest", () => {
   const line = (n: number): DiffLine => ({ kind: "add", text: `l${n}`, spans: null, num: null });
 
   it("draws a diff of twelve rows whole", () => {

@@ -99,7 +99,7 @@ export function AgentGlyph({
 }
 
 /**
- * Ruling 365: the agent as a badge in the board card's avatar stack — a 22px
+ * Ruling 306: the agent as a badge in the board card's avatar stack — a 22px
  * circle in the backend's tint with the backend's mark, the same size and
  * shape as the owner's avatar beside it, so the two seats read as one stack.
  * The profile's name is not printed on the card; it is the badge's accessible

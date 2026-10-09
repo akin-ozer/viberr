@@ -32,11 +32,11 @@ import { WORKSPACE_FONT_PRELOADS } from "~/features/shell/font-preloads";
  * Workspace shell layout for /projects/:slug (shell spec): rail with live
  * counts + topbar + child view Outlet. Children read this loader's data via
  * useRouteLoaderData("routes/project"): the viewer, the project's shell slice,
- * its members and the viewer's role. Ruling 457 (BOARD-6): the board's columns
+ * its members and the viewer's role. Ruling 11 (BOARD-6): the board's columns
  * are the board route's own loader (routes/project.board.tsx); both read the
  * project through `readWorkspace`, once per request.
  *
- * Rail counts: board = ALL LIVE tasks incl. Done (ruling 16), review = the
+ * Rail counts: board = ALL LIVE tasks incl. Done (ruling 295), review = the
  * review queue's own `total` (U35-5, pass 35: the queue's membership is no
  * longer one stage id — review work at Validation with an open PR counts too —
  * so the badge reads the queue instead of re-deriving a stage filter that had
@@ -54,7 +54,7 @@ import { WORKSPACE_FONT_PRELOADS } from "~/features/shell/font-preloads";
  * tasks "leave the board's default view and the review queue", and
  * review-queue.server.ts asserts the badge/queue parity as a contract, so the
  * archived predicate belongs here too — ONE predicate (`isArchived`), one count.
- * Done tasks stay counted: that half is ruling 16 and deliberate.
+ * Done tasks stay counted: that half is ruling 295 and deliberate.
  *
  * R15-4 (owner ruling, 2026-07-28): projects are MEMBERS-ONLY. This loader is
  * the single chokepoint for every project surface — board, task detail and the
@@ -71,7 +71,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
   ];
 }
 
-// Ruling 457: the rail, crumbs and board chrome draw at 500 on first paint.
+// Ruling 11: the rail, crumbs and board chrome draw at 500 on first paint.
 export const links: Route.LinksFunction = () => WORKSPACE_FONT_PRELOADS;
 
 export async function loader({ request, params }: Route.LoaderArgs) {
@@ -88,7 +88,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const { project } = board;
   return {
     user,
-    // Ruling 457 (BOARD-6): the shell's slice of the project. The columns are
+    // Ruling 11 (BOARD-6): the shell's slice of the project. The columns are
     // the board route's own loader; every page under this layout used to
     // compute and ship them on every revalidation.
     project: {
@@ -108,7 +108,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // one number by construction, not by two predicates kept in step.
     reviewCount: reviewQueue.total,
     violations: countOpenPolicyViolations(db, params.slug),
-    // Ruling 457 (FL-4 / SRV-6): the bell's counts; the bell loads its own
+    // Ruling 300 (FL-4 / SRV-6): the bell's counts; the bell loads its own
     // list when it is wanted, instead of every revalidation shipping it.
     ...bellCounts(db, user.id),
   };
@@ -160,7 +160,7 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   // toast), and the open task adds its own `task:` scope (task-detail
   // brief) — any matching event revalidates layout + child loaders, except a
   // run's console line: that revalidates nothing, and goes to the open task's
-  // console through this same stream (`onLiveFrame`, ruling 457: the tab's one
+  // console through this same stream (`onLiveFrame`, ruling 11: the tab's one
   // live connection).
   const slug = project.slug;
   // UI-03: `paused` is true once the stream has failed (an expired session 401s
@@ -290,5 +290,5 @@ export default function ProjectLayout({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project");

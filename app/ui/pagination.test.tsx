@@ -13,7 +13,7 @@ function drawn(page: number, pages: number) {
   return [...container.querySelectorAll(".pager-list > li")].map((li) => li.textContent);
 }
 
-describe("Pagination (ruling 618)", () => {
+describe("Pagination (ruling 326)", () => {
   /**
    * shadcn's layout, at seven slots at most so the control keeps its width
    * while the reader pages: the first and last page, the current one and its

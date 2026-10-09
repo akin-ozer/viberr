@@ -5,7 +5,7 @@ import type { RecommendationView } from "./operator-recommendations";
 
 /**
  * F19-3 + F19-26 — does APPLYING this recommendation reach acceptance? The
- * page routes such an Apply through the accept confirm, and ruling 162 has the
+ * page routes such an Apply through the accept confirm, and ruling 95 has the
  * card print the gate's refusal on it.
  *
  * Gate on the recommendation's TARGET, never on its `kind`. A supervised

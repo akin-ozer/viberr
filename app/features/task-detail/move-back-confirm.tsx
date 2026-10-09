@@ -3,7 +3,7 @@ import { Icon } from "~/ui/icon";
 import { useDialog } from "~/ui/use-dialog";
 
 /**
- * Ruling 381 (F39-8): a manual move BACKWARD says why.
+ * Ruling 47 (F39-8): a manual move BACKWARD says why.
  *
  * A stage move is one of the strongest signals a person sends on a board, and
  * it used to be mute: the event read "moved AX-9 from Review to Verify" and
@@ -35,7 +35,7 @@ export function MoveBackConfirm({
   onConfirm: (reason: string) => void;
 }) {
   const [reason, setReason] = useState("");
-  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  // Ruling 287: the confirm leaves the way Cancel does (`commit`).
   const { ref, close, commit } = useDialog(onCancel);
   const ready = reason.trim().length > 0;
   return (
@@ -94,7 +94,7 @@ export function MoveBackConfirm({
             disabled={!ready || busy}
             onClick={() => commit(() => onConfirm(reason.trim()))}
           >
-            {/* Ruling 368: the dialog closes on the click (ruling 459's
+            {/* Ruling 286: the dialog closes on the click (ruling 287's
                 `commit`, the exit Cancel plays), so a busy step here is
                 SOMEONE ELSE's move in flight, or ours while it leaves; the
                 button waits and claims nothing (it read "Moving…"). */}

@@ -151,8 +151,8 @@ describe("uploads", () => {
     expect(listSkills(db, ctx).find((s) => s.id === skill.id)!.body).toBe("## captured body");
   });
 
-  // Ruling 183 (pass 36, F36-2): the upload path is a SKILL.md writer too.
-  it("ruling 183: refuses a root-level SKILL.md that is not a skill before any file in the batch is written", async () => {
+  // Ruling 186 (pass 36, F36-2): the upload path is a SKILL.md writer too.
+  it("ruling 186: refuses a root-level SKILL.md that is not a skill before any file in the batch is written", async () => {
     // Canary: move the check into the write loop — notes.md lands first.
     const db = dbCtx.makeDb();
     const ctx = { dataRoot: dbCtx.makeTempDir() };
@@ -730,7 +730,7 @@ describe("writeStoreDoc", () => {
   });
 
   /**
-   * Ruling 246 (pass 37, F37-75): EXISTENCE is judged before TYPE.
+   * Ruling 260 (pass 37, F37-75): EXISTENCE is judged before TYPE.
    *
    * The other order answers a path this store has never held with a complaint
    * about its file extension. Live, the controller asked for `make/stack.mk` —
@@ -739,7 +739,7 @@ describe("writeStoreDoc", () => {
    * the file "no longer exists", which implies it once did. Two refusals, two
    * causes that were not the reason.
    */
-  it("ruling 246: an ABSENT path reads as absent, whatever its extension", async () => {
+  it("ruling 260: an ABSENT path reads as absent, whatever its extension", async () => {
     const { db, target } = await setupKb();
     writeStoreDoc(db, target, ["notes"], "a.md", "hello", ACTOR);
     // CANARY: put the extension check back in front and this throws "only opens
@@ -775,11 +775,11 @@ describe("writeStoreDoc", () => {
   });
 
   /**
-   * Ruling 466 (F40-9): a store write reports and audits UTF-8 BYTES. It
+   * Ruling 18(b) (F40-9): a store write reports and audits UTF-8 BYTES. It
    * recorded `body.length`, UTF-16 code units: live, an 8,220-byte document
    * was reported and audited as "8,170 bytes".
    */
-  it("ruling 466: a non-ASCII body reports its UTF-8 length in the result and the audit row", async () => {
+  it("ruling 18(b): a non-ASCII body reports its UTF-8 length in the result and the audit row", async () => {
     const { db, ctx, kb, target } = await setupKb();
     const body = "# Kimlik\n\nAkın Özer — İstanbul’da çalışır. ✓\n";
     expect(body.length).not.toBe(Buffer.byteLength(body, "utf8"));
@@ -791,17 +791,17 @@ describe("writeStoreDoc", () => {
     const row = listAuditEvents(db, { action: "org.store.doc_written" })[0];
     expect(row?.details).toMatchObject({ path: "kimlik.md", bytes: onDisk, replaced: false });
 
-    // A replace names how many bytes it destroyed, measured on disk (ruling 257).
+    // A replace names how many bytes it destroyed, measured on disk (ruling 212).
     const replaced = writeStoreDoc(db, target, [], "kimlik.md", "ş", ACTOR, { overwrite: true });
     expect(replaced).toMatchObject({ replaced: true, previousBytes: onDisk, bytes: 2 });
   });
 
   /**
-   * Ruling 466 (F40-13): an append adds EXACTLY the text sent. The controller's
+   * Ruling 18(b) (F40-13): an append adds EXACTLY the text sent. The controller's
    * door trimmed each part and forced a blank line between parts, so a part
    * boundary inside a markdown table split the table in two.
    */
-  it("ruling 466: two appends that split a table concatenate byte for byte", async () => {
+  it("ruling 18(b): two appends that split a table concatenate byte for byte", async () => {
     const { db, ctx, kb, target } = await setupKb();
     const first = "| Rule | Year |\n|---|---|\n| Kör ";
     const second = "nokta | 2026 |\n| Şeffaflık | 2025 |\n";
@@ -831,7 +831,7 @@ describe("writeStoreDoc", () => {
     );
   });
 
-  it("ruling 466: the editor's read cap is in bytes, so `truncated` and the text agree", async () => {
+  it("ruling 18(b): the editor's read cap is in bytes, so `truncated` and the text agree", async () => {
     const { db, target } = await setupKb();
     // 10 two-byte characters = 20 bytes.
     writeStoreDoc(db, target, [], "cap.md", "ç".repeat(10), ACTOR);
@@ -841,7 +841,7 @@ describe("writeStoreDoc", () => {
     expect(readStoreDoc(target, ["cap.md"], 20)).toEqual({ text: "ç".repeat(10), truncated: false });
   });
 
-  it("ruling 183: a SKILL.md written through the document editor is judged like every other SKILL.md write", async () => {
+  it("ruling 186: a SKILL.md written through the document editor is judged like every other SKILL.md write", async () => {
     // Canary: skip the check in writeStoreDoc.
     const db = dbCtx.makeDb();
     const ctx = { dataRoot: dbCtx.makeTempDir() };
@@ -1037,7 +1037,7 @@ describe("in-app writes obey the same dotfile rule as every other store write", 
   });
 });
 
-describe("the resource a store write names (ruling 681)", () => {
+describe("the resource a store write names (ruling 34)", () => {
   // CANARY: record any of these rows without `recordStoreWrite`'s `resource`
   // and it names a row id and a path inside the folder, and no board; ask the
   // boards at read time instead and the first row follows the grant that

@@ -171,7 +171,7 @@ describe("ActivityPage", () => {
     expect(rows[1]!.querySelector(".keybtn")!.textContent).toBe("VIB-142");
   });
 
-  it("ruling 652(c): same-day rows from different YEARS get their own sections, in order", () => {
+  it("ruling 305: same-day rows from different YEARS get their own sections, in order", () => {
     // The day label carries no year, and the stream grouped on the label, so
     // two Mar 30s a year apart merged into one section with the old row inside
     // the recent block. Canary: group the stream by `g.day` again.
@@ -186,7 +186,7 @@ describe("ActivityPage", () => {
     expect(shown[1]!.textContent).toContain("a year older");
   });
 
-  it("ruling 148: a row with no actor names none, rather than a '−'", () => {
+  it("ruling 291: a row with no actor names none, rather than a '−'", () => {
     // The sibling of the notifications case: a "−" in the slot every other row
     // fills with a name claimed a fact in a glyph, and sat where a remove
     // control would.
@@ -237,7 +237,7 @@ describe("ActivityPage", () => {
   // CANARY: render the link from the sentence, or for every row, and a row
   // the loader gave no `docHref` (a member's, or a delete's) offers a page its
   // reader cannot open.
-  it("ruling 681: a row links the document it wrote only when the loader says where it opens", () => {
+  it("ruling 34: a row links the document it wrote only when the loader says where it opens", () => {
     const href = "/org/settings?tab=resources&kb=house-rules&doc=rules.md";
     const wrote = {
       ...AUDIT[1]!,
@@ -858,12 +858,12 @@ describe("C5: the controller instrument and the runtime-session fold", () => {
 });
 
 /**
- * Ruling 477(c) (F40-29, live on akinozer.com): every task key on Activity
+ * Ruling 304 (F40-29, live on akinozer.com): every task key on Activity
  * (WEB-2, WEB-3…) was a `<button class="keybtn">` calling navigate(), so a
  * key could not be opened in a new tab or copied, and a screen reader heard
  * "button" for a page link.
  */
-describe("ruling 477(c): task keys are links to their tasks", () => {
+describe("ruling 304: task keys are links to their tasks", () => {
   it("in the stream, on audit rows, and on rows a compacted run gives back", () => {
     // CANARY: render either key as `<button type="button" onClick={…}>` again
     // and its lookup below finds no link.

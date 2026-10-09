@@ -1,6 +1,6 @@
 /**
  * Paths inside a task's checkout, read the way a person names them: relative
- * to the repository. Server and client share it since ruling 499: an agent's
+ * to the repository. Server and client share it since ruling 168: an agent's
  * reply is rewritten with it when it is extracted (F7-UX1), and the run
  * console prints the file an edit or a read names the same way, so one file
  * reads as `docs/x.md` on the timeline, in the Changes panel and in the log.

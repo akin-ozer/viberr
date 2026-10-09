@@ -10,7 +10,7 @@ import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { convertTemplateReviewEntry } from "./review-entry-conversion.server";
 
 /**
- * Ruling 519: the Standard board's move into Review is `auto`. A board created
+ * Ruling 91: the Standard board's move into Review is `auto`. A board created
  * before the ruling carries the template's old approval edge in its
  * project.md, and boot converts it once; an approval a person chose stays.
  */
@@ -19,7 +19,7 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 /** The template's In Progress → Review edge as project creation wrote it
- *  before ruling 519. */
+ *  before ruling 91. */
 const OLD_REVIEW_ENTRY: WorkflowBoundary = {
   from: "impl",
   to: "review",
@@ -45,7 +45,7 @@ function workflowOf(store: TestStore): WorkflowBoundary[] {
 const boundaryChanges = (store: TestStore) =>
   listAuditEvents(store.db, { action: "project.policy.boundary_changed" });
 
-describe("convertTemplateReviewEntry (ruling 519)", () => {
+describe("convertTemplateReviewEntry (ruling 91)", () => {
   it("gives a board created before the ruling the template's automatic move into Review, once, on the record", async () => {
     // CANARY: skip the write and the board still asks a person to confirm the
     // move; drop the audit row and the Policy page cannot say who changed it.

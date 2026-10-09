@@ -19,7 +19,7 @@ import { isNoRepositoryRulingDoc } from "~/shared/repository-ask";
 import { KB_REFRESH_MODES, type KbRefreshMode } from "./resources.server";
 
 /**
- * Ruling 653: the BOARD FILE — one board's workflow without its work, as a
+ * Ruling 32: the BOARD FILE — one board's workflow without its work, as a
  * zip in which every part is a plain file a person can read, edit and keep in
  * git. Export and import both go through this module, so the layout below is
  * written in one place:
@@ -56,7 +56,7 @@ export interface BoardKnowledgeBase {
   dir: string;
   name: string;
   refresh: KbRefreshMode;
-  /** Ruling 578: its folder is closed to every agent's shell. */
+  /** Ruling 209: its folder is closed to every agent's shell. */
   private: boolean;
 }
 
@@ -74,7 +74,7 @@ export interface BoardMcpServer {
   name: string;
   transport: "HTTP" | "stdio";
   target: string;
-  /** Ruling 176: the tools an admin marked as writes; absent when the
+  /** Ruling 188: the tools an admin marked as writes; absent when the
    *  server's tools were never reviewed. */
   writeTools?: string[];
 }
@@ -90,7 +90,7 @@ export interface BoardDefinition {
   guardrails: Guardrail[];
   requiredReviewers: RequiredReviewerRule[];
   rulingsKb: string | null;
-  /** Ruling 482: absent when the board declares no gates. */
+  /** Ruling 17: absent when the board declares no gates. */
   gates?: ProjectGate[];
   knowledgeBases: BoardKnowledgeBase[];
   skills: BoardSkill[];
@@ -108,7 +108,7 @@ export interface BoardFolderFile {
 }
 
 /**
- * Ruling 672: the documents of a knowledge base that a board file carries:
+ * Ruling 199: the documents of a knowledge base that a board file carries:
  * every one but a project's decision that its board connects no repository
  * (`no-repository-<slug>.md`), which is one person's, on one instance. An
  * export writes these, the reader leaves such a document out of a file that

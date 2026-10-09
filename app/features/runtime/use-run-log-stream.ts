@@ -19,14 +19,14 @@ export type { OlderLogState, RunLogStore, StreamedLine, ThreadView } from "./run
  * revalidating the page's loaders (which would refetch the whole task per
  * log line).
  *
- * Ruling 457 reshaped it (owner decision 2, 2026-09-24):
+ * Ruling 11 reshaped it (owner decision 2, 2026-09-24):
  *
  *   - the lines live in a store outside React state (`run-log-store.ts`); the
  *     page holds the store, the console reads the thread it shows, so a line
  *     re-renders the console and not the page (LIVE-2);
  *   - it opens no connection of its own: the frames come from the tab's one
  *     live stream (`onLiveFrame`, the layout's `useLiveUpdates`), which also
- *     carries ruling 301's hidden-tab close and the reconnect catch-up
+ *     carries ruling 25's hidden-tab close and the reconnect catch-up
  *     (TASK-6 / LIVE-5);
  *   - a thread the page did not carry lines for loads with one request when
  *     the console shows it (TASK-1), and a revalidation keeps whatever a
@@ -36,7 +36,7 @@ export type { OlderLogState, RunLogStore, StreamedLine, ThreadView } from "./run
  *     reads, so the page no longer revalidates on run lines (LIVE-1); a frame
  *     for a thread whose lines are not loaded reads its facts alone (CON-1).
  *
- * Two SOURCES (ruling 99): a task's runs (`run.log-appended`, on the task
+ * Two SOURCES (ruling 247): a task's runs (`run.log-appended`, on the task
  * scope) and a controller conversation's, which have no task scope — their
  * frames reach the conversation owner's `user` stream as
  * `controller.log-appended` (`run-events.server.ts`).
@@ -108,10 +108,10 @@ export function useRunLogStream(input: {
    *  safety revalidation, while the tab's live stream is down, so a
    *  `run.state-changed` finalize event MISSED during an SSE outage (rapid
    *  reaction chains) self-heals instead of leaving a phantom "1 agent
-   *  running" strip until a manual reload (F22; ruling 457, RF-6). */
+   *  running" strip until a manual reload (F22; ruling 11, RF-6). */
   hasActiveRun?: boolean;
   /**
-   * Ruling 457 (CTL-2): instead of the F22 revalidation, read this run's tail
+   * Ruling 11 (CTL-2): instead of the F22 revalidation, read this run's tail
    * every `everyMs` while `runId` is set, and revalidate once when the tail
    * says the run is no longer live. The controller page's fallback for a
    * missed settle, which used to revalidate root, layout and page every 5 s of
@@ -175,7 +175,7 @@ export function useRunLogStream(input: {
   // reconnect gap), bounding a stale "running" strip to one interval. A page
   // with a status poll running (below) has the cheaper net and skips this one.
   //
-  // Ruling 457 (RF-6): only while the tab's live stream is DOWN. A connected
+  // Ruling 11 (RF-6): only while the tab's live stream is DOWN. A connected
   // stream delivers the event, a transient drop replays it (the browser's
   // retry sends `Last-Event-ID`), a reopen or a return from hidden asks the
   // broker for what it missed, and the page's first stream replays from the

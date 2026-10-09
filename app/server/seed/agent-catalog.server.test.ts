@@ -30,7 +30,7 @@ describe("seeded agent catalog copy", () => {
   });
 
   it("the operator states the scope line every surface shows for it", () => {
-    // Ruling 518: "System role · one per active task" gave the operator a
+    // Ruling 176: "System role · one per active task" gave the operator a
     // second role; the line is fixed in the view (`OPERATOR_SCOPE`), and the
     // shipped asset matches this catalog (operator-parity.server.test.ts).
     expect(SCOPE_OF("operator")).toBe(OPERATOR_SCOPE);
@@ -43,7 +43,7 @@ describe("seeded agent catalog copy", () => {
       p.frontmatter.scope,
       p.frontmatter.desc,
       p.frontmatter.name,
-      // The operator has no role (ruling 518).
+      // The operator has no role (ruling 176).
       p.frontmatter.role ?? "",
       p.description,
     ]);

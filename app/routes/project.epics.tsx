@@ -16,10 +16,10 @@ import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 
 /**
- * /projects/:slug/epics — the project's epics (ruling 503): each with its
+ * /projects/:slug/epics — the project's epics (ruling 325): each with its
  * status, progress, lead and target date, and New epic. Actions:
  * create-epic (`createEpic`, `manage-epics` inside) · archive-epic-tasks
- * (`archiveEpicTasks`, ruling 651: a Done epic's tasks, `approve-transition`
+ * (`archiveEpicTasks`, ruling 274: a Done epic's tasks, `approve-transition`
  * inside).
  */
 
@@ -78,5 +78,5 @@ export default function Epics({ loaderData, params }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.epics");

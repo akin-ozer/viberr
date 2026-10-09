@@ -10,7 +10,7 @@ describe("workspace rail order (A00-9, pass 32)", () => {
     // The docs claimed the order lives in nav.ts "with no test pinning it";
     // a reordered rail would silently contradict the codebase map. Pinned
     // here, against the map's own sentence; the rendered rail's order is the
-    // rail's own test (`shell-components.test.tsx`, ruling 667).
+    // rail's own test (`shell-components.test.tsx`, ruling 224).
     const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..", "..", "..");
     const map = readFileSync(path.join(root, "docs", "architecture", "codebase-map.md"), "utf8");
     expect(map).toContain(
@@ -20,14 +20,14 @@ describe("workspace rail order (A00-9, pass 32)", () => {
 });
 
 /**
- * Ruling 145 — which routes carry the app header.
+ * Ruling 294 — which routes carry the app header.
  *
  * The header is mounted once by the `palette-shell` layout and this map is the
  * whole decision, so a route added to that layout gets a header only when it is
  * added here too. Both halves are pinned: the answer per path, and the fact that
  * every route it names is actually under the layout that renders it.
  */
-describe("standalone pages carry the app header (ruling 145)", () => {
+describe("standalone pages carry the app header (ruling 294)", () => {
   it("answers on the path alone — a tab is not a page", () => {
     // The header names the SURFACE; which tab is open is the tab rail's job
     // (`aria-current`), and the search string never reaches this.

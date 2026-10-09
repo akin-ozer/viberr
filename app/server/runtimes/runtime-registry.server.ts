@@ -13,7 +13,7 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  * Runtime registry: constructs the two provider adapters and hands one back
  * for a requested backend.
  *
- * Ruling 127 took the CREDENTIAL out of this module entirely. There used to be
+ * Ruling 137 took the CREDENTIAL out of this module entirely. There used to be
  * an availability probe here (`isBackendAvailable`, `backendCredentialHealth`
  * and their CLI-auth diagnostics) that answered "is this backend configured?"
  * by reading the deployment's own environment. That question no longer has an
@@ -30,7 +30,7 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  *    Both adapters are built on a base env with EVERY credential-shaped
  *    variable stripped, so a child process starts from a blank credential
  *    slate and sees only what the run service explicitly adds for its
- *    principal — and, since ruling 142, with every name the app's own env
+ *    principal — and, since ruling 141(a), with every name the app's own env
  *    schema declares stripped too ({@link APP_CONFIG_ENV}), so the child
  *    never sees this server's configuration either.
  *  - {@link createAdapters} / {@link selectAdapter} — construction and lookup.
@@ -40,7 +40,7 @@ export type RealBackend = "claude" | "codex";
 
 // ---------------------------------------------------------- spawn env
 
-// Ruling 142 / 127: the credential-free base every child is spawned on lives
+// Ruling 141(a) / 137: the credential-free base every child is spawned on lives
 // in `spawn-env.server.ts` (a leaf the git layer imports too).
 export { CREDENTIAL_ENV_RE, filteredSpawnEnv } from "./spawn-env.server";
 
@@ -65,7 +65,7 @@ export interface AdapterDeps {
  * principal's home and, when they pasted one, their key — is merged onto it in
  * `startRun` from `runCredentialFor`, because it differs per run and this
  * factory runs once per process. Building a credential in here is what made
- * one deployment-wide account pay for everybody's runs (ruling 127).
+ * one deployment-wide account pay for everybody's runs (ruling 137).
  */
 export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
   const claudeDeps: NonNullable<Parameters<typeof createClaudeAdapter>[0]> = {
@@ -85,7 +85,7 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
 /**
  * The adapter for a backend.
  *
- * A plain lookup since ruling 127: whether a run may proceed is decided
+ * A plain lookup since ruling 137: whether a run may proceed is decided
  * upstream, by resolving its credential principal — `startRun` calls
  * `runCredentialFor` and takes the refusal path before it ever asks for an
  * adapter. The name stays because every caller reads as "pick the runtime for

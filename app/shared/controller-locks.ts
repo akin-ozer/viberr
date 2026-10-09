@@ -1,5 +1,5 @@
 /**
- * Ruling 108 — the controller's configuration sections are LOCKED by default,
+ * Ruling 270 — the controller's configuration sections are LOCKED by default,
  * org admins included: which skills, knowledge bases and org MCP servers it
  * loads, and its instructions, are a DEPLOYMENT decision, unlocked per section
  * by an environment variable at deploy time. `true` = locked. Model and effort

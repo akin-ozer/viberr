@@ -21,14 +21,14 @@ import { archivableTasks } from "./epic-helpers";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**
- * Ruling 503: the project's epics, the way Linear lists a team's projects and
+ * Ruling 325: the project's epics, the way Linear lists a team's projects and
  * Jira an epics panel. Each row is its epic's page: its colour and name, its
  * status, its progress in the project's own stage colours, who leads it and
  * when it is meant to land. Open epics first (the default view); the closed
  * ones are one click away and never deleted. A Done epic whose tasks are all
- * done offers Archive tasks, to someone who may archive them (ruling 651).
+ * done offers Archive tasks, to someone who may archive them (ruling 274).
  *
- * Ruling 700(e): the empty state and the list are `EpicsEmptyHero` and
+ * Ruling 13(b): the empty state and the list are `EpicsEmptyHero` and
  * `EpicsList` below, which take the page's slot and call no hook.
  */
 
@@ -46,7 +46,7 @@ function isShow(value: string | null): value is Show {
 let openings = 0;
 
 /**
- * Ruling 700(c): New epic's create, held by the page that acts on its answer
+ * Ruling 325: New epic's create, held by the page that acts on its answer
  * rather than by the dialog, so the new epic's id never goes up through an
  * effect. A made epic is toasted and opened, then the dialog plays its close;
  * a refusal stays in the dialog's foot. Each opening has a fetcher of its own,
@@ -59,7 +59,7 @@ function useCreateEpic(projectSlug: string) {
   const dialog = useRef<{ close: () => void }>(null);
   const push = useToast();
   const navigate = useNavigate();
-  // Ruling 503: on idle, not just answered (useFetcherResult waits for idle).
+  // Ruling 325: on idle, not just answered (useFetcherResult waits for idle).
   // The answer lands while the page's loaders are still reloading for it, and
   // a navigation started then can finish with the new epic's URL over the old
   // page (a React Router race, seen live).
@@ -93,7 +93,7 @@ export function EpicsPage({
   /** `manage-epics` (server-checked again on submit; this only hides a dead
    *  button). */
   canManage: boolean;
-  /** `approve-transition`, the grant archiving a task takes (ruling 651). */
+  /** `approve-transition`, the grant archiving a task takes (ruling 274). */
   canArchive: boolean;
 }) {
   const [params, setParams] = useSearchParams();
@@ -114,7 +114,7 @@ export function EpicsPage({
       <div className="board-head">
         <div>
           <h1>Epics</h1>
-          {/* Ruling 625: an empty project's count is the hero's heading below
+          {/* Ruling 325: an empty project's count is the hero's heading below
               ("No epics yet"), so the head says nothing rather than say it
               twice. The status region stays, so a count that arrives is read. */}
           <div className="sub">
@@ -139,7 +139,7 @@ export function EpicsPage({
               ))}
             </div>
           )}
-          {/* Ruling 625: one primary New epic — the empty state's own button
+          {/* Ruling 325: one primary New epic — the empty state's own button
               while there are none (as the board keeps one create on a
               virgin board), this one once there is a list. */}
           {canManage && epics.length > 0 && (
@@ -263,7 +263,7 @@ function EpicsList({
 /**
  * One epic. Its name is the link to its page, and the link's box covers the
  * row, so the whole row still opens it; Archive tasks sits above that box,
- * since a button may not sit inside a link (ruling 651).
+ * since a button may not sit inside a link (ruling 325).
  */
 function EpicRow({
   epic,

@@ -8,7 +8,7 @@ import { formatDayDotTime, formatDayDotTimeUTC } from "~/shared/dates/format";
 import { LocalDayDotTime } from "./local-time";
 
 /**
- * The hydration contract (pass 34, C6) under ruling 457's `useHydrated`: the
+ * The hydration contract (pass 34, C6) under ruling 11's `useHydrated`: the
  * server and the hydration pass render the timezone-free UTC form, so the two
  * agree whatever the viewer's zone; the local form follows once hydration has
  * committed; and a stamp that mounts after that renders local from its first
@@ -45,7 +45,7 @@ function Stamps() {
   );
 }
 
-describe("useHydrated (ruling 457)", () => {
+describe("useHydrated (ruling 11)", () => {
   it("serves the UTC form, hydrates without a mismatch, then shows the local form", async () => {
     expect(formatDayDotTime(ISO)).not.toBe(formatDayDotTimeUTC(ISO));
     const html = renderToString(<Stamps />);

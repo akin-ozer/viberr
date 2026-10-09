@@ -18,7 +18,7 @@ afterEach(ctx.cleanup);
  * properties that make that true: a write survives a read, a read that cannot
  * make sense of the row is SILENT rather than loud (a board loader must not
  * throw because an observation drifted), and a reading speaks only for the
- * repository it was taken of (ruling 517). The fixture project points at
+ * repository it was taken of (ruling 223). The fixture project points at
  * `akin-ozer/viberr`.
  */
 describe("repository health (U33-2)", () => {
@@ -69,7 +69,7 @@ describe("repository health (U33-2)", () => {
     expect(readRepoHealthMany(store.db, [])).toEqual(new Map());
   });
 
-  it("ruling 517: a reading of another repository is no reading, whatever the case of the name", () => {
+  it("ruling 223: a reading of another repository is no reading, whatever the case of the name", () => {
     // Live, a board kept saying "akin-ozer/akin-website · repo not found" (a
     // repository the owner does not have) with nothing left to take it back: a
     // repository change or an edit of project.md moves the project to another

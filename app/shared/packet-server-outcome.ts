@@ -1,5 +1,5 @@
 /**
- * Ruling 136(a) (pass 34, F34-10): what the SERVER did after a human resolved
+ * Ruling 233 (pass 34, F34-10): what the SERVER did after a human resolved
  * a packet option whose ceremony performs work of its own. It rides the
  * `packet-resolved` hand-off in its OWN field, rendered to the operator as
  * Viberr's sentence and never inside the human's quoted note, so the
@@ -41,7 +41,7 @@ export interface CollisionServerOutcome {
 }
 
 /**
- * Ruling 489: what the `deliver_for_review` option's delivery did. `delivered`
+ * Ruling 62: what the `deliver_for_review` option's delivery did. `delivered`
  * pushed the head (or opened the PR for it); `current` found the pull request
  * already carrying it; `failed` is every delivery that did not complete, with
  * the delivery's own sentence as `reason`.

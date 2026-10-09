@@ -27,15 +27,15 @@ import type { ProfileBackend } from "./profile-query.server";
 
 /**
  * Profile and preferences overlay, including appearance and a self-serve
- * password change for accounts with a local password (ruling 148(b): a row
+ * password change for accounts with a local password (ruling 323: a row
  * on the Profile card whose button opens a modal; phase-2 machinery,
  * login-flow copy).
  *
- * Identity is the session user widened by the loader (ruling 6 — id is
+ * Identity is the session user widened by the loader (ruling 26(a) — id is
  * authoritative, names render-only). "Your access" reads the shared
  * RBAC_ROWS table (contracts §3.2, imported from features/policy — never
  * restated) indexed by the REAL membership role. GitHub connection state
- * is derived from users.idp (ruling 13); Connect starts the real OAuth
+ * is derived from users.idp (ruling 30); Connect starts the real OAuth
  * flow, Disconnect is a governed action with a lockout guard.
  */
 
@@ -56,7 +56,7 @@ export interface ProfileData {
   accessRole: ProjectRole | null;
   /** F18-3: whether GitHub OAuth is configured on this deployment. */
   githubConfigured: boolean;
-  /** Ruling 127: the viewer's own Claude and Codex accounts. Type-only import
+  /** Ruling 137: the viewer's own Claude and Codex accounts. Type-only import
    *  of the loader's shape, so the panel and the query cannot drift apart. */
   backends: ProfileBackend[];
   prefs: {
@@ -114,7 +114,7 @@ function ProfileIdentity({
   data: ProfileData;
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
-  /** Ruling 148(b): the "Password · Change password" row, when the account
+  /** Ruling 323: the "Password · Change password" row, when the account
    *  has a local password. Rendered under the sign-in facts it belongs to. */
   passwordRow?: ReactNode;
 }) {
@@ -210,7 +210,7 @@ function ProfileIdentity({
             fact, beside the sign-in fact it belongs with. */}
         <div className="kv-row">
           <span className="k">Email</span>
-          {/* Ruling 625: an address and a sign-in method are not code: the
+          {/* Ruling 280: an address and a sign-in method are not code: the
               body face, at the value's regular weight. */}
           <span className="v light">{user.email}</span>
         </div>
@@ -333,7 +333,7 @@ function desktopRefusal(state: DesktopAlertState | null): string | null {
 }
 
 /**
- * Ruling 481(c) (F40-51): the opt-in for desktop notifications, per browser
+ * Ruling 74 (F40-51): the opt-in for desktop notifications, per browser
  * (`desktop-alerts.ts` says why). The browser's permission is requested here
  * and nowhere else, and only when the person switches it on. Its state is
  * the browser's, so it renders off until hydration reads it, and it is read
@@ -434,7 +434,7 @@ function ProfileAppearance({
   // immediately — and the shared result handler early-returned unless the intent
   // was `set-notif`, so a `set-tl-default` failure was consumed by NOBODY: no
   // error and no rollback of the control.
-  // Ruling 148(c): the "Reduce motion" toggle that sat here is gone; the OS
+  // Ruling 323: the "Reduce motion" toggle that sat here is gone; the OS
   // `prefers-reduced-motion` setting is the one reduced-motion signal.
   const pending = useRef<{
     toast: string;
@@ -562,11 +562,11 @@ function ProfileAccess({
             <div className="kv-row" key={r.action}>
               <span className="k strong">
                 {r.action}
-                {/* Ruling 309(a): see policy-page — the grant name is short on
+                {/* Ruling 26(b): see policy-page — the grant name is short on
                     purpose and two of them gate more than they say. */}
                 {r.covers ? <span className="act-covers">{r.covers}</span> : null}
               </span>
-              {/* Ruling 148: the fact in words. The check is aria-hidden, so a
+              {/* Ruling 291: the fact in words. The check is aria-hidden, so a
                   glyph-only pair left the whole list silent to a reader, and a
                   lone "−" in a value slot reads as a collapse control (the same
                   swap the GitHub card below already made). */}
@@ -622,7 +622,7 @@ const socialSignIn = z
   .catch({});
 
 /** The "GitHub account" fact: the handle and whether it signs in here or an
- *  org admin linked it (ruling 154). */
+ *  org admin linked it (ruling 29). */
 function githubAccountLine(user: ProfileData["user"]): string {
   if (user.githubConnected) {
     return user.githubHandle ? `@${user.githubHandle} · GitHub sign-in` : "linked · GitHub sign-in";
@@ -656,7 +656,7 @@ function ProfileGithub({
   const [connectErr, setConnectErr] = useState<string | null>(null);
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   // The confirm asks about the connection on screen, so it goes when that
-  // connection does. A confirmed Disconnect closes it itself (ruling 459); a
+  // connection does. A confirmed Disconnect closes it itself (ruling 287); a
   // connection that goes away otherwise (disconnected in another tab while
   // "Disconnect GitHub?" is open here) takes the dialog off with the connected
   // box but not this state, and the next load that finds GitHub connected
@@ -715,7 +715,7 @@ function ProfileGithub({
       {!showConnectAffordance ? (
         // Unconfigured + unconnected: a quiet, honest one-liner — no warn chips,
         // no Connect that could only produce "GitHub sign-in couldn't start".
-        // Ruling 154: with an admin-linked handle the line says what that
+        // Ruling 29: with an admin-linked handle the line says what that
         // link does; the person cannot change it here (the verdict path
         // counts approvals by it), so there is no field.
         <div className="pol-note">
@@ -775,9 +775,9 @@ function ProfileGithub({
 type PwField = "current" | "next" | "confirm";
 
 /**
- * Ruling 148(b): the password change is a row on the Profile card whose
+ * Ruling 323: the password change is a row on the Profile card whose
  * button opens a modal, not a three-field form served inline on the page.
- * The modal is the org-settings `MiniModal`, which carries the ruling 147
+ * The modal is the org-settings `MiniModal`, which carries the ruling 288
  * contract (the primary stays enabled; an incomplete submit is refused with
  * the hint re-inserted as an alert and the first empty field focused). The two
  * checks the server would also make, length and match, are refused here with
@@ -792,7 +792,7 @@ function ChangePasswordModal({
 }: {
   fetcher: ProfileFetcher;
   submit: (fields: Record<string, string>) => void;
-  /** The change landed: the modal plays its exit (ruling 459). */
+  /** The change landed: the modal plays its exit (ruling 287). */
   done: boolean;
   onClose: () => void;
 }) {
@@ -929,7 +929,7 @@ function ProfilePassword({
 
   // Close on the server's success result: the toast says what happened, and a
   // modal that stayed open over "Password changed" would read as unfinished.
-  // Ruling 459: through the modal's exit (`done`), then onClose unmounts it.
+  // Ruling 287: through the modal's exit (`done`), then onClose unmounts it.
   useFetcherResult(fetcher, (data) => {
     if (data.ok) setDone(true);
   });
@@ -989,13 +989,13 @@ export function ProfilePage({
     appearance: ProfileFetcher;
     password: ProfileFetcher;
     github: ProfileFetcher;
-    /** Ruling 127: the Agent-accounts intents. */
+    /** Ruling 137: the Agent-accounts intents. */
     backends: ProfileFetcher;
   };
   submitWith: (
     fetcher: ProfileFetcher,
   ) => (fields: Record<string, string>) => void;
-  /** Ruling 532: the URL names the Agent accounts panel (`#agent-accounts`). */
+  /** Ruling 322: the URL names the Agent accounts panel (`#agent-accounts`). */
   accountsTargeted?: boolean;
 }) {
   const navigate = useNavigate();
@@ -1049,7 +1049,7 @@ export function ProfilePage({
               onNav={onNav}
               hasMembership={first !== null}
             />
-            {/* Ruling 127: above GitHub identity. This is the panel that
+            {/* Ruling 137: above GitHub identity. This is the panel that
                 decides whether this person's agents can run at all, so it
                 outranks the attribution card below it. */}
             <AgentAccountsPanel

@@ -1,8 +1,8 @@
 /**
- * Ruling 667: what a board delivers, settled when the project is created.
+ * Ruling 224: what a board delivers, settled when the project is created.
  *
  * A `software` board changes its repository and ships pull requests, so it
- * needs one. A `results` board is the no-code kind (ruling 530): a person
+ * needs one. A `results` board is the no-code kind (ruling 268): a person
  * files a task with an input, the agents work on it, and the result comes back
  * as the files they save on the task. Its repository is optional, and none of
  * its agents is deployed able to write one.

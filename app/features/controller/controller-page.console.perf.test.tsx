@@ -10,13 +10,13 @@ import { FakeEventSource } from "../../../test-support/fake-event-source";
 import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 
 /**
- * Ruling 457, journey `controller` (CTL-2, the page half): what a working turn
+ * Ruling 11, journey `controller` (CTL-2, the page half): what a working turn
  * costs the project controller page while nothing but its step moves. The page
  * used to revalidate every 5 s of a turn (plus the F22 20 s safety tick), and
  * every revalidation re-ran root, the workspace layout and the page loader,
  * whose payload carries the transcript and the console window. It
  * now reads the turn's tail every 5 s, which also moves the working row's
- * step (ruling 250), and revalidates once the tail says the run ended.
+ * step (ruling 257), and revalidates once the tail says the run ended.
  *
  * Fixture: ControllerPage on a routes stub under a root with a loader (both
  * loaders count their runs), a conversation whose controller turn is running
@@ -104,7 +104,7 @@ async function settle(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
-describe("the controller page during a working turn (ruling 457, CTL-2)", () => {
+describe("the controller page during a working turn (ruling 11, CTL-2)", () => {
   it("re-runs no loader while only the turn's step moves", async () => {
     const { container } = mount();
     await act(async () => {
@@ -124,7 +124,7 @@ describe("the controller page during a working turn (ruling 457, CTL-2)", () => 
     expectWithinBudget("console:controller-page.loader-runs-per-30s-turn", loaderRuns);
   });
 
-  it("moves the working row's step from the turn's tail (ruling 250 kept)", async () => {
+  it("moves the working row's step from the turn's tail (ruling 257 kept)", async () => {
     const { container } = mount();
     await act(async () => {
       await settle();

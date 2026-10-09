@@ -109,7 +109,7 @@ describe("curated catalog", () => {
     expect(cat.defaultEffort).toBe("high");
   });
 
-  it("every curated Claude value runs verbatim by the pickers' shared rule (ruling 106 D1)", async () => {
+  it("every curated Claude value runs verbatim by the pickers' shared rule (ruling 270 D1)", async () => {
     // The client pickers ask `claudeModelRunsVerbatim` whether a stored model
     // would run verbatim; a curated value it does not accept would be
     // rewritten to the default by every picker that shows it.
@@ -125,7 +125,7 @@ describe("curated catalog", () => {
 
   it("codex curated: the pinned CLI's bundled models + low…max efforts, per model", async () => {
     const cat = await getModelCatalog("codex");
-    // Ruling 687: GPT-6.1 Sol is listed FIRST, so it is the fallback a
+    // Ruling 149: GPT-6.1 Sol is listed FIRST, so it is the fallback a
     // model-less operator or profile runs on (it replaced F20-33's Terra).
     // The rest follow the 0.160.1 bundled catalog's priority order, its
     // hidden models left out. CANARY: move GPT-6.1 Sol below another entry and
@@ -175,7 +175,7 @@ describe("curated catalog", () => {
 });
 
 /**
- * Ruling 127: the enhanced probe reads the VIEWER's OWN Claude account. There
+ * Ruling 137: the enhanced probe reads the VIEWER's OWN Claude account. There
  * is no instance account left to enumerate against, so "available" is replaced
  * by "the caller handed us a credential" — and a caller that hands none gets
  * the curated list, which is a complete answer for somebody who has not
@@ -333,7 +333,7 @@ describe("the live probe is CONFINED like a real run (A1, F10-02 regression)", (
       expect(env.VIBERR_SECRET_ENCRYPTION_KEY).toBeUndefined();
       // …and it reads/writes the VIEWER's own home, carrying THEIR key and no
       // other — the probe bills nothing, but it does read a personal account,
-      // so it reads the account of the person who asked (ruling 127).
+      // so it reads the account of the person who asked (ruling 137).
       expect(env.CLAUDE_CONFIG_DIR).toBe(VIEWER_CREDENTIAL.homeDir);
       expect(env.ANTHROPIC_API_KEY).toBe(VIEWER_CREDENTIAL.secrets[0]);
       // The host-isolation options a run gets.
@@ -521,7 +521,7 @@ describe("isKnownModel agrees with what the picker offered (P13-RT-07)", () => {
     // Canary: delete the variant branch in modelDisplayName (the cold case
     // echoes the id) or the live lookup (the warm case does).
     resetModelCatalogCache();
-    // Ruling 642: in the live row's words, never the bracketed id.
+    // Ruling 35: in the live row's words, never the bracketed id.
     expect(modelDisplayName("claude", "opus[1m]")).toBe("Claude Opus (1M context)");
     expect(modelDisplayName("claude", "opus-next")).toBe("opus-next");
     await getModelCatalog("claude", {
@@ -678,13 +678,13 @@ describe("foreignModelBackend (F21-13)", () => {
 });
 
 /**
- * Ruling 139 (pass 34, G34-1): the save-time effort/model assertions the
+ * Ruling 261 (pass 34, G34-1): the save-time effort/model assertions the
  * controller's typed write surfaces and the profile editor share.
  *
  * Canary: route `assertEffortForBackend` through `resolveRunEffort` (clamp
  * instead of refuse) and the refusal cases answer nothing.
  */
-describe("assertEffortForBackend / assertModelForBackend (ruling 139)", () => {
+describe("assertEffortForBackend / assertModelForBackend (ruling 261)", () => {
   it("accepts every tier the backend offers and refuses the rest by name, listing the tiers", () => {
     for (const backend of ["claude", "codex"] as const) {
       for (const tier of effortsFor(backend)) {

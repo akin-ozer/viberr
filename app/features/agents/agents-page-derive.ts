@@ -7,7 +7,7 @@ import type {
 import type { BackendConnectionSummary, BackendHealthMap } from "./agents-page";
 
 /**
- * What the Agents page reads off its props before it draws (ruling 700(e), the
+ * What the Agents page reads off its props before it draws (ruling 13(b), the
  * split of `agents-page.tsx` along the task-page recipe): which backend a
  * profile's runs resolve and whether the viewer connected it, the roster's
  * operator, agents and open profile, each profile's live runs, the stats'
@@ -34,7 +34,7 @@ export function primaryBackendHealth(
   return health[backend] ?? null;
 }
 
-/** Ruling 127: the profile editor's advisory note, from the same probe the
+/** Ruling 137: the profile editor's advisory note, from the same probe the
  *  roster reads. Undefined when connections were not probed on this surface,
  *  so the editor claims nothing rather than inventing a second answer. */
 export function viewerConnections(
@@ -52,7 +52,7 @@ export function viewerConnections(
  *  under it, the library's undeployed templates, and the open profile. */
 export interface AgentRoster {
   operator: AgentProfileView | null;
-  /** The backend an operator run starts on (ruling 479(e)). */
+  /** The backend an operator run starts on (ruling 326). */
   operatorBackend: "codex" | "claude";
   specialists: AgentProfileView[];
   libraryProfiles: LibraryProfileView[];
@@ -67,7 +67,7 @@ export function rosterOf(
   sel: string,
 ): AgentRoster {
   const operator = profiles.find((p) => p.kind === "operator") ?? null;
-  // Ruling 479(e): the backend an operator run starts on, by the rule the run
+  // Ruling 326: the backend an operator run starts on, by the rule the run
   // resolves it with (`resolveOperatorAuthority`): the first backend the
   // profile names, Claude when it names none or no operator is deployed.
   const operatorBackend = (operator && primaryBackend(operator)) ?? "claude";
@@ -118,7 +118,7 @@ export function engagementTallies(deployments: AgentDeploymentView[]) {
 }
 
 /** The library template whose deploy the page's fetcher is posting, so its
- *  row names the work while the others wait (ruling 368, ruling 638). */
+ *  row names the work while the others wait (ruling 286, ruling 326). */
 export function deployingProfileId(fetcher: {
   state: "idle" | "loading" | "submitting";
   formData?: FormData | undefined;

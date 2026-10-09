@@ -8,10 +8,10 @@ import type { TaskActionContext } from "./task-action-core.server";
 import { toError } from "~/shared/errors";
 
 /**
- * Ruling 330 — nothing watched for the state itself.
+ * Ruling 122 — nothing watched for the state itself.
  *
  * Every fix before this one closed a CAUSE of a task stopping dead. Rulings
- * 325, 326 and 328 closed three; the owner found a fourth on the same day. The
+ * 122, 156 and 94 closed three; the owner found a fourth on the same day. The
  * causes are not the point. The point is that a task can arrive in a state
  * where NOTHING is going to move it — no packet, no recommendation, no queued
  * question, no schedule, no running or queued agent, and no hold that explains
@@ -30,8 +30,8 @@ import { toError } from "~/shared/errors";
  * That re-invocation is not guaranteed. `operatorShouldReactToReply` requires
  * the run to finish in state `finished` with a readable reply, so a run that
  * FAILS — quota, credential, crash — re-invokes nobody. The fallback is the
- * stuck-loop packet, which ruling 326 found had been refused for four days
- * straight and ruling 325 found said nothing when it was. Live on SHOP-61: a
+ * stuck-loop packet, which ruling 156 found had been refused for four days
+ * straight and ruling 122 found said nothing when it was. Live on SHOP-61: a
  * silent operator turn, then `blocked` (credential rejected), then "the
  * recovery packet could not be opened" — and the operator's last recorded words
  * were that it would be re-invoked when the reviewer reported.
@@ -113,8 +113,8 @@ function findStrandedTasks(
     if ((fm.recommendations ?? []).length > 0) continue;
     // A HOLD is a reason for silence, and the release engine owns it.
     if ((fm.blockedBy ?? []).length > 0) continue;
-    // A queued question is put the moment its wait clears (ruling 241), and a
-    // pending schedule is a dispatch with a date on it (ruling 224). Both are
+    // A queued question is put the moment its wait clears (ruling 66), and a
+    // pending schedule is a dispatch with a date on it (ruling 157). Both are
     // something happening later, which is not nothing.
     if ((fm.queuedQuestions ?? []).length > 0) continue;
     if ((fm.schedules ?? []).some((s) => s.status === "pending")) continue;

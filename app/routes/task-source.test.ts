@@ -3,9 +3,9 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
 import { writeTaskSource } from "~/server/files/task-sources.server";
 
 /**
- * Ruling 690: the route that serves one kept source of a task by its id.
+ * Ruling 317: the route that serves one kept source of a task by its id.
  * What it adds to the store: membership, the id lookup, and a kept page never
- * rendering on the app's origin (ruling 363).
+ * rendering on the app's origin (ruling 317).
  */
 
 let app: AppTestContext;
@@ -69,7 +69,7 @@ async function get(
   }
 }
 
-describe("GET /projects/:slug/tasks/:key/sources/:id (ruling 690)", () => {
+describe("GET /projects/:slug/tasks/:key/sources/:id (ruling 317)", () => {
   it("serves a member a kept page as a download under the sandbox headers, answers 404 for an id the task does not keep, and refuses a non-member", async () => {
     // CANARY: drop requireProjectMember and the signed-in non-member gets
     // the page's bytes. Serve the page under its own content type and a kept

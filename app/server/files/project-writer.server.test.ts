@@ -14,7 +14,7 @@ import {
  * Read-your-own-writes repair for project.md (P11-51) — the same VirtioFS
  * stale-read hazard the task writer guards, extended to member/agent/policy
  * edits and the task-key counter. What counts as provably stale is
- * write-cache's own test (ruling 513); these prove the writer reads through it.
+ * write-cache's own test (ruling 18); these prove the writer reads through it.
  */
 
 const ctx = createTestDbContext();

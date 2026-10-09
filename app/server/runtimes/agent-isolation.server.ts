@@ -27,7 +27,7 @@ import { errorMessage, toError } from "~/shared/errors";
 import { userRuntimeRoot } from "./user-homes.server";
 
 /**
- * Ruling 460: every agent process runs as the OS user of the person it bills.
+ * Ruling 139: every agent process runs as the OS user of the person it bills.
  *
  * The server runs as `node`. Before this ruling it spawned every Claude and
  * Codex CLI as `node` too, so a run's shell could read the server's
@@ -241,7 +241,7 @@ function launchRefusal(what: string, detail: string): AppError {
     code: ERROR_CODES.RUN_UNAVAILABLE,
     status: 409,
     userMessage:
-      `The agent could not be started as its person's own user (ruling 460): ${what}` +
+      `The agent could not be started as its person's own user (ruling 139): ${what}` +
       (detail ? ` (${detail})` : "") +
       ". Nothing ran; nothing falls back to the server's own user.",
   });
@@ -288,7 +288,7 @@ function ownedBy(uid: number, dir: string): boolean {
  * already theirs (a fresh home, or one the server just created) — the common
  * case is three `lstat`s. `alsoOwn` names the directories inside the vendor
  * home the server may have created since it was handed over — an account's own
- * home and the shared directories it links to (ruling 507) — which get the
+ * home and the shared directories it links to (ruling 138) — which get the
  * same treatment; the vendor home stays the one the launcher hands back after
  * the process exits, so that walk covers every account in it. Throws a
  * `run_unavailable` AppError naming what failed; the caller refuses the run
@@ -471,7 +471,7 @@ function makeServersOwnDir(dir: string): void {
 }
 
 /**
- * Ruling 636: make `dir` (created when missing) a directory the agents pass
+ * Ruling 141(c): make `dir` (created when missing) a directory the agents pass
  * THROUGH and never list: the server's own, in the agent group, 0710. An agent
  * reaches an entry under it by the path it is given and cannot read the names
  * beside it. Throws when `dir` is not the server's own directory (a symbolic
@@ -496,7 +496,7 @@ export function passThroughDirForAgents(dir: string, deps: { gid?: number } = {}
  * uid made, throws, so nothing is ever made under one. A group or a mode that
  * did not take is logged instead: the person's own step below it then fails
  * in its own words, which the caller reports. For a folder that only leads to
- * what a person's process writes (ruling 691: a page render's scratch), where
+ * what a person's process writes (ruling 194: a page render's scratch), where
  * the server puts no file of its own.
  */
 export function passThroughDirForAgentsOrWarn(dir: string): void {
@@ -509,7 +509,7 @@ export function passThroughDirForAgentsOrWarn(dir: string): void {
 }
 
 /**
- * Ruling 534: a file the server wrote into a private directory of its own,
+ * Ruling 145: a file the server wrote into a private directory of its own,
  * made READABLE by the agent group: the directory traversable (0710), the file
  * readable (0640), both in the group, through the same no-follow descriptor
  * every share uses. The Codex SDK writes a turn's output schema into a
@@ -588,7 +588,7 @@ function shareEntry(entry: string, gid: number, want: (st: Stats) => number): bo
 }
 
 /**
- * A tree the server created before ruling 460 (every file `node:node`, 0644):
+ * A tree the server created before ruling 15 (every file `node:node`, 0644):
  * hand it to the agent group once — group, setgid on directories, group write
  * on everything — so an agent can edit a checkout it did not clone. Only
  * entries the server owns are touched; symlinks are left alone. Returns how
@@ -649,7 +649,7 @@ export function shareTreeBuiltForAgents(dir: string, deps: { gid?: number } = {}
  * with group write, which reached the mirror's inode too. Every server-owned
  * file under `projects/<slug>/.repo-mirror/` loses group and other write (the
  * server, their owner, never needs them) and is back in the server's own
- * group, which no agent uid is in: ruling 495's removal step
+ * group, which no agent uid is in: ruling 140's removal step
  * (`chmod -R -P g+rwX`, `agent-trees.server.ts`) can reach a checkout's
  * object linked from here, and opens it to the group it is in. Agents read
  * the mirror through its other-read bits. Returns how many entries changed.
@@ -716,18 +716,18 @@ export interface LayoutReport {
   /** Person runtime roots handed to their uid. */
   homes: number;
   /** Mirror files that had group or other write, or were in another group
-   *  than the server's (pass 40 review, R-seams-1; ruling 495). */
+   *  than the server's (pass 40 review, R-seams-1; ruling 140). */
   mirrorWritesRevoked: number;
   /** What could not be set, by path. */
   failures: string[];
 }
 
 /** The per-task directories a run writes: shared with the agent group here,
- *  and removed as the task's person wherever they are removed (ruling 485). */
+ *  and removed as the task's person wherever they are removed (ruling 140). */
 const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as const;
 
 /**
- * Ruling 691: the folder of a task directory that holds the page renderer's
+ * Ruling 194: the folder of a task directory that holds the page renderer's
  * scratch, beside `deliveries/`. It and each run's folder in it are the
  * server's own, passed through and never listed or written by an agent
  * ({@link passThroughDirForAgentsOrWarn}); only one render's own folder, made
@@ -737,7 +737,7 @@ const TASK_SHARED_DIRS = ["workspace", "attachments", ".operator-scratch"] as co
 export const TASK_CAPTURE_SCRATCH_DIR = ".captures";
 
 /**
- * Ruling 691: the folder a kept delivery's files are handed to the page
+ * Ruling 194: the folder a kept delivery's files are handed to the page
  * renderer in, beside `deliveries/` in the task's own directory. The server's
  * own: an agent reads a file of it by name and can neither list nor write it,
  * so the server removes it itself.
@@ -746,11 +746,11 @@ export const TASK_CAPTURE_INPUT_DIR = ".capture-input";
 
 /** Every per-task directory that can hold what a person's process wrote, so
  *  is removed as the task's person and never by the server's own recursive
- *  remove (ruling 485): the shared ones and the page renderer's scratch. */
+ *  remove (ruling 140): the shared ones and the page renderer's scratch. */
 export const TASK_PERSON_REMOVED_DIRS = [...TASK_SHARED_DIRS, TASK_CAPTURE_SCRATCH_DIR] as const;
 
 /**
- * Ruling 460's store layout, asserted at every boot. The server owns the tree,
+ * Ruling 15's store layout, asserted at every boot. The server owns the tree,
  * so chmod and chgrp need no privilege; only the per-person homes need the
  * launcher (`prepareHome`).
  *

@@ -119,7 +119,7 @@ describe("flagScopeViolation notification fan-out (E3)", () => {
  * Live, one minute apart, viberr said both of these about one fact: the task
  * record carried "**Policy violation:** active PAT is missing `checks:read`"
  * under the red shield `event-meta.ts` gives the `policy` type, and the
- * credential card said "All required scopes proven." Ruling 360 had already
+ * credential card said "All required scopes proven." Ruling 237 had already
  * settled which one was right — `credentialAdvisories` says "Not a missing
  * REQUIRED scope — merging never needed it" — but only the card had learned it.
  */

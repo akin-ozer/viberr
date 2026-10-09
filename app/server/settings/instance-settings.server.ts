@@ -92,7 +92,7 @@ export function getMaxConcurrentRuns(db: DatabaseSync): number {
 }
 
 /**
- * Ruling 152(b): the coordination lane a cap carries. Operator and controller
+ * Ruling 150: the coordination lane a cap carries. Operator and controller
  * turns are admitted up to `cap + lane` slots, one extra per four of the cap
  * (minimum one), so a decision never queues behind the delivery runs it is
  * deciding about. Derived from the cap rather than stored beside it: there is
@@ -122,7 +122,7 @@ const MAX_RUN_SPEND_USD_KEY = "maxRunSpendUsd";
 const runSpendSchema = z.number().positive();
 
 /**
- * Ruling 175: the instance's spending cap per Claude run, in USD, or null when
+ * Ruling 159: the instance's spending cap per Claude run, in USD, or null when
  * none is set (the default — a side project does not want a surprise cut-off).
  * `startRun` hands it to every run as `RunSpec.maxSpendUsd`, and the Claude
  * adapter passes it to the SDK as `maxBudgetUsd`; the SDK ends a run that

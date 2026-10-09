@@ -40,7 +40,7 @@ export function HomeTopBar({
   searchRef: RefObject<HTMLInputElement | null>;
   query: string;
   onQuery: (q: string) => void;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 300). */
   unread: number;
   orphanUnread: number;
   user: SessionUser;
@@ -64,7 +64,7 @@ export function HomeTopBar({
           <span className="mark">V</span>
           <b>Viberr</b>
         </button>
-        {/* Ruling 149: `role="status"` replaced the button's own role, so the
+        {/* Ruling 278: `role="status"` replaced the button's own role, so the
             one control that can restart the stream was announced as a status
             sentence and never as something to press — and a status region is
             atomic, so it re-read the whole label. The sentence moves to an
@@ -188,7 +188,7 @@ export function HomeHero({
             project this user belongs to, while a board header counts tasks in
             one project and the Agents page counts engagements — three numbers,
             three questions, near-identical copy. Each names its scope now. */}
-        {/* Ruling 532: with no project, the setup checklist under the hero
+        {/* Ruling 322: with no project, the setup checklist under the hero
             says what comes first, so the hero adds no sentence of its own. */}
         {projectCount > 0 && (
         <p className="sub">
@@ -220,7 +220,7 @@ export function HomeHero({
         )}
       </div>
       {/* Zero projects: the setup checklist below carries the page's single
-          primary CTA (ruling 532); a second identical "New project" up here
+          primary CTA (ruling 322); a second identical "New project" up here
           plus a view toggle over a grid that does not exist read as chrome for
           content that is not there. */}
       {projectCount > 0 && (
@@ -332,7 +332,7 @@ export function ProjectSections({
             Every match for “{query}” is pinned above.
           </div>
         ) : (
-          // Ruling 625: no third "New project" here. The grid ended in a
+          // Ruling 280: no third "New project" here. The grid ended in a
           // 341×221 dashed tile and the list in a dashed button, beside the
           // hero's primary button (and the checklist's step while it is
           // open), so the page drew one action three ways. The hero's button
@@ -386,7 +386,7 @@ function OrgTile({
   /** The action word in the tile foot (default "Manage"; a read-only tile like
    *  Insights passes "View"). */
   verb?: string;
-  /** Ruling 625: the tile's picture (the member faces, the two backends) sits
+  /** Ruling 280: the tile's picture (the member faces, the two backends) sits
    *  at the foot's far end. Beside the numbers it squeezed the text column, so
    *  the four headlines started at four different x and wrapped unevenly. */
   aside?: ReactNode;
@@ -464,7 +464,7 @@ export function SettingsPanel({
           </span>
           <span className="val">
             <span className="nm">{countLabel(org.users.total, "user")}</span>
-            {/* Each count keeps its noun on its line (ruling 625). */}
+            {/* Each count keeps its noun on its line (ruling 280). */}
             <span className="sub">
               <span>{countLabel(org.users.admins, "admin")}</span> ·{" "}
               <span>{countLabel(org.users.members, "member")}</span>
@@ -562,7 +562,7 @@ export function StoreStrip({
           // WAL loss (the incident this guard exists to stop).
           <>
             {" "}
-            {/* Ruling 625: the code face for the two values only; the label
+            {/* Ruling 280: the code face for the two values only; the label
                 and the sentence are prose. */}
             <span className="sub">
               Writer: pid <span className="mono">{lockHolder.pid}</span> on{" "}
@@ -575,11 +575,11 @@ export function StoreStrip({
           GROUP is pushed to the end rather than the first button. What stays
           inline is this row's own layout, not compensation for that. */}
       <span className="inline-row">
-        {/* Ruling 368: each request shows itself on the button that started
+        {/* Ruling 286: each request shows itself on the button that started
             it (busy, the loader spinning, the label naming the work) and
             cannot be pressed again mid-flight: Rebuild used to stay live and
             reopen its confirm while the rebuild it had started was running.
-            Ruling 459: the loader cross-fades in for the resting glyph
+            Ruling 284: the loader cross-fades in for the resting glyph
             (`GlyphSwap`) instead of replacing it in one frame. */}
         <button
           type="button"
@@ -609,9 +609,9 @@ export function StoreStrip({
 }
 
 /** Confirm dialog for the full projection rebuild (admin recovery action).
- *  Hand-written, not the shared `ConfirmDialog` ruling 458(f) moved the other
+ *  Hand-written, not the shared `ConfirmDialog` ruling 297 moved the other
  *  plain confirms onto. Home loads no other confirm, and the shared one's
- *  chunk would add ~0.5 KB gzip to Home's ruling-457 budget (ruling 458's
+ *  chunk would add ~0.5 KB gzip to Home's ruling-11 budget (ruling 297's
  *  2026-09-24 note). */
 export function RebuildConfirm({
   onCancel,
@@ -620,7 +620,7 @@ export function RebuildConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  // Ruling 287: the confirm leaves the way Cancel does (`commit`).
   const { ref, close, commit } = useDialog(onCancel);
   return (
     // Native <dialog>; role="alertdialog" kept for the stronger semantics.

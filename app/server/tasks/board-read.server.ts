@@ -30,7 +30,7 @@ import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-a
 import type { TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 281 (pass 37, F37-114) and ruling 282 (F37-115): the board read an
+ * Ruling 213(a) (pass 37, F37-114) and ruling 117 (F37-115): the board read an
  * agent and an operator share.
  *
  * Neither could see a task other than the one it was working. An agent's whole
@@ -50,12 +50,12 @@ import type { TaskMutationContext } from "./task-mutation.server";
  *  task's whole contract compete with the reader's own prompt. */
 const BOARD_READ_GOAL_CHARS = 2_000;
 
-/** Ruling 579: where the decisions written into a goal begin. `resolvePacket`
- *  appends each after a rule; ruling 571 made its dash a colon, and a goal
+/** Ruling 213(a): where the decisions written into a goal begin. `resolvePacket`
+ *  appends each after a rule; ruling 292 made its dash a colon, and a goal
  *  written before that keeps the dash. */
 const GOAL_DECISIONS_RE = /\n---\n\n\*\*Decision(?: —|:) \d{4}-\d{2}-\d{2}, /;
 
-/** Ruling 569: how much of a task's completion summary, and of each verdict's
+/** Ruling 213(a): how much of a task's completion summary, and of each verdict's
  *  report, a single-task read hands back. The outcome is what a task that
  *  waited on this one needs, so it is read far past the goal's cap. */
 const BOARD_READ_OUTCOME_CHARS = 8_000;
@@ -64,7 +64,7 @@ export interface BoardReadContext {
   db: DatabaseSync;
   ctx: TaskMutationContext;
   projectSlug: string;
-  /** Ruling 648: the knowledge bases the reader is given, "all" for a
+  /** Ruling 211: the knowledge bases the reader is given, "all" for a
    *  person's controller; a correction to one of them reads whole. */
   readerKbs?: readonly string[] | "all";
 }
@@ -75,8 +75,8 @@ export interface BoardReadContext {
  * The cap is deliberate (see {@link BOARD_READ_GOAL_CHARS}) and the silence was
  * not: this returned a bare `.slice`, so a 6,000-character contract came back
  * ending mid-word and read as the whole of it. That is the shape this pass
- * spent the day closing everywhere else — a knowledge base (ruling 283), an
- * agent report (ruling 285), a goal draft (ruling 288) — and it was in the
+ * spent the day closing everywhere else — a knowledge base (ruling 205), an
+ * agent report (ruling 117), a goal draft (ruling 131) — and it was in the
  * reader those rulings' own author wrote the same day.
  *
  * There is no "read the rest" tool to name here on purpose: this is the SHALLOW
@@ -88,8 +88,8 @@ export interface BoardReadContext {
 function goalExcerpt(goal: string | null): string | null {
   if (goal === null) return null;
   if (goal.length <= BOARD_READ_GOAL_CHARS) return goal;
-  // Ruling 579: the cap is for the goal's own text. The decisions people wrote
-  // into it (ruling 189) bind the task and are appended at its end, the part
+  // Ruling 213(a): the cap is for the goal's own text. The decisions people wrote
+  // into it (ruling 64) bind the task and are appended at its end, the part
   // the cap used to cut, so they ride whole after the excerpt.
   const at = goal.search(GOAL_DECISIONS_RE);
   const text = at === -1 ? goal : goal.slice(0, at);
@@ -109,7 +109,7 @@ function goalExcerpt(goal: string | null): string | null {
   );
 }
 
-/** Ruling 569: one side of an outcome, or its opening with a line saying so. */
+/** Ruling 213(a): one side of an outcome, or its opening with a line saying so. */
 function outcomeExcerpt(text: string, what: string): string {
   if (text.length <= BOARD_READ_OUTCOME_CHARS) return text;
   return (
@@ -126,12 +126,12 @@ function flat(text: string): string {
 }
 
 /**
- * Ruling 569, amended: the verdict's whole report. A verdict stores the first
+ * Ruling 213(a), amended: the verdict's whole report. A verdict stores the first
  * 2,000 characters of its justification and a line saying the whole report is
- * on the task's timeline (ruling 292), which a reader on another task cannot
+ * on the task's timeline (ruling 262), which a reader on another task cannot
  * open; live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000
  * of 5,382 and asked Arda to paste the rest. The report is the agent's "Review
- * verdict" comment (ruling 317), the newest at or before the verdict's stamp,
+ * verdict" comment (ruling 88), the newest at or before the verdict's stamp,
  * and it must open with what the verdict stored, so an earlier round's report
  * never stands in for this one. Without it the stored text is all there is.
  */
@@ -150,7 +150,7 @@ function verdictReport(timeline: readonly TaskFileEvent[], v: ReviewVerdict): st
 }
 
 /**
- * Ruling 569: what a task came to, for a reader on another task. Its completion
+ * Ruling 213(a): what a task came to, for a reader on another task. Its completion
  * summary when one describes what it delivered, and the verdicts on that
  * delivery with their reports; null while it has neither.
  *
@@ -219,25 +219,25 @@ export function readBoardTask(
   };
   const outcome = file ? taskOutcome(file.parsed.frontmatter, file.parsed.timeline) : null;
   if (outcome) read.outcome = outcome;
-  // Ruling 594: what `read_task_attachment` can open on this task.
+  // Ruling 214: what `read_task_attachment` can open on this task.
   const files = taskFileNames(deps, row.key);
   if (files.length > 0) read.files = files;
-  // Ruling 597: the files deliveries, as each was delivered.
+  // Ruling 86: the files deliveries, as each was delivered.
   const deliveries = listKeptDeliveries(deps.projectSlug, row.key, deps.ctx.dataRoot);
   if (deliveries.length > 0) read.deliveries = deliveries;
-  // Ruling 690: a count and the way in, not the list: this read has to reach
+  // Ruling 82: a count and the way in, not the list: this read has to reach
   // a Codex run whole, and a task may keep two hundred sources.
   const kept = readTaskSources(deps.projectSlug, row.key, deps.ctx.dataRoot).sources.length;
   if (kept > 0) {
     read.sources = `${kept} kept; \`read_task_source\` with this task's key lists them and what each delivery rested on`;
   }
-  // Ruling 596: what `read_timeline_entry` can open on this task.
+  // Ruling 213: what `read_timeline_entry` can open on this task.
   const timeline = file ? timelineIndex(file.parsed.timeline) : [];
   if (timeline.length > 0) read.timeline = timeline;
   return JSON.stringify(read, null, 1);
 }
 
-/** Ruling 596: how many entries the index lists, newest first. The longest
+/** Ruling 213: how many entries the index lists, newest first. The longest
  *  task on the AWS calculator board ran to 184 entries and a round-4 one to
  *  84; the cap keeps a board-wide research read bounded. */
 const BOARD_READ_TIMELINE_ENTRIES = 200;
@@ -257,7 +257,7 @@ function timelineAuthor(actor: FileActorRef): string {
 }
 
 /**
- * Ruling 596: a task's timeline as an index, one line per entry: its stamp,
+ * Ruling 213: a task's timeline as an index, one line per entry: its stamp,
  * type, author and title. `read_timeline_entry` opens an entry by that stamp,
  * and an agent had no other way to learn it: its prompt carries only the
  * recent entries, and this read carried none. Live in round 4, two Estimate
@@ -287,21 +287,21 @@ interface BoardTaskRead {
   archived: boolean;
   waitsOn: string[];
   goal: string | null;
-  /** Ruling 569: absent until the task has one. */
+  /** Ruling 213(a): absent until the task has one. */
   outcome?: TaskOutcome;
-  /** Ruling 594: the task's files, without the browser's working files;
+  /** Ruling 214: the task's files, without the browser's working files;
    *  absent when it has none. */
   files?: string[];
-  /** Ruling 597: the deliveries kept as delivered, newest first; absent when none. */
+  /** Ruling 86: the deliveries kept as delivered, newest first; absent when none. */
   deliveries?: KeptDelivery[];
-  /** Ruling 690: how many sources the task keeps and the tool that lists
+  /** Ruling 82: how many sources the task keeps and the tool that lists
    *  them; absent when it keeps none. */
   sources?: string;
-  /** Ruling 596: the timeline's index, newest first; absent when it is empty. */
+  /** Ruling 213: the timeline's index, newest first; absent when it is empty. */
   timeline?: string[];
 }
 
-/** Ruling 594: a task's attachment names, less the browser's working files. */
+/** Ruling 214: a task's attachment names, less the browser's working files. */
 function taskFileNames(deps: BoardReadContext, taskKey: string): string[] {
   return listTaskAttachments(deps.projectSlug, taskKey, deps.ctx.dataRoot)
     .map((a) => a.name)
@@ -310,7 +310,7 @@ function taskFileNames(deps: BoardReadContext, taskKey: string): string[] {
 
 /** What a reader answers for a name the task does not hold: the names it
  *  does. One sentence for every tool that takes a file of the task by name
- *  (`read_task_attachment`, and `capture_page`, ruling 691). */
+ *  (`read_task_attachment`, and `capture_page`, ruling 194). */
 export function noSuchAttachment(deps: BoardReadContext, taskKey: string, name: string): string {
   const have = taskFileNames(deps, taskKey);
   return (
@@ -319,14 +319,14 @@ export function noSuchAttachment(deps: BoardReadContext, taskKey: string, name: 
   );
 }
 
-/** Ruling 594: what an agent's attachment reader answers: text, or a line and
+/** Ruling 214: what an agent's attachment reader answers: text, or a line and
  *  the picture. */
 export type AgentAttachmentRead =
   | { text: string }
   | { header: string; image: { data: string; mimeType: string } };
 
 /**
- * Ruling 594: one attachment of a task in this project, for an agent. The
+ * Ruling 214: one attachment of a task in this project, for an agent. The
  * operator's `read_task_attachment` reads its own task's files, and a Claude
  * specialist read nothing but its prompt; live on AWSC-33 the Estimate Judge
  * was told to read two registers on AWSC-24 and AWSC-31 "where they are",
@@ -338,7 +338,7 @@ export function readAgentTaskAttachment(
   taskKey: string,
   name: string,
   offset = 0,
-  /** Ruling 597: a kept delivery's stamp. */
+  /** Ruling 198: a kept delivery's stamp. */
   delivery?: string,
 ): AgentAttachmentRead {
   const key = taskKey.trim();
@@ -367,7 +367,7 @@ interface SourceListRead {
 }
 
 /**
- * Ruling 690: the sources a task in this project keeps, for an agent: the
+ * Ruling 82: the sources a task in this project keeps, for an agent: the
  * list without `id`, one source's content with it. One reader behind every
  * `read_task_source` (a Claude specialist's toolkit, the gateway's board
  * server for a Codex one, the operator and the controller), so a reviewer and
@@ -378,7 +378,7 @@ interface SourceListRead {
  * (`readTaskSource`): what a reviewer checks a claim against is the bytes the
  * run kept, not the page as it reads on the day of the review.
  *
- * Ruling 706: with `find`, the places in one source that hold those words
+ * Ruling 82: with `find`, the places in one source that hold those words
  * instead of a page of it (`taskSourceSearch`).
  */
 export function readAgentTaskSource(
@@ -456,7 +456,7 @@ function noSuchSource(key: string, kept: TaskSourcesRead, wanted: string): strin
 }
 
 /**
- * Ruling 706: one source searched for `words`, as JSON: how many places in it
+ * Ruling 82: one source searched for `words`, as JSON: how many places in it
  * hold them (`found`), and the places from `offset` on (`hits`), each with
  * its line, the offset a read of it starts at and the words where they stand.
  * `nextOffset` is where the next search starts when the list was cut.
@@ -559,7 +559,7 @@ function boardRows(deps: BoardReadContext) {
 }
 
 /**
- * Ruling 285 (pass 37, F37-120): the coordinator can read a report it was
+ * Ruling 117 (pass 37, F37-120): the coordinator can read a report it was
  * handed half of.
  *
  * An agent's report reaches the operator's prompt clipped at 4,000 characters,
@@ -576,13 +576,13 @@ function boardRows(deps: BoardReadContext) {
  *
  * The clip itself stays: a prompt carrying every 20,000-character report in
  * full is the problem the clip exists to prevent. What changes is that there is
- * now somewhere to go, exactly as ruling 283 did for a knowledge base — index
+ * now somewhere to go, exactly as ruling 205 did for a knowledge base — index
  * in the prompt, document on demand.
  */
 const TIMELINE_ENTRY_READ_CHARS = 40_000;
 
 /**
- * Ruling 644: how a shared budget splits between entries. Each gets an equal
+ * Ruling 72: how a shared budget splits between entries. Each gets an equal
  * part of what is left, shortest first, so an entry under its part leaves the
  * rest to the longer ones.
  */
@@ -604,12 +604,12 @@ interface TimelineEntryReading {
   title: string | null;
   truncated: boolean;
   text: string;
-  /** Ruling 645: a `kb_correction` entry's correction, whole from its record. */
+  /** Ruling 211: a `kb_correction` entry's correction, whole from its record. */
   correction?: CorrectionReading;
 }
 
 /** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
- *  prints or `read_board` lists (ruling 596). Ruling 644: every entry the stamp
+ *  prints or `read_board` lists (ruling 213). Ruling 72: every entry the stamp
  *  names. One write often stamps two entries with one instant (a verdict's
  *  report and its quality marker, a failed run's report and its failure, a
  *  task's opening notes), and the read returned the first in the file: on
@@ -617,7 +617,7 @@ interface TimelineEntryReading {
  *  quality marker, so it scored the rework against a split it rebuilt from
  *  memory.
  *
- *  Ruling 645: entries that share a stamp come back in the order they were
+ *  Ruling 72: entries that share a stamp come back in the order they were
  *  written. The file holds them newest first, and "in the timeline's order"
  *  read as first written first: on AWSC-97 the Estimate Judge read an agent's
  *  question as sent before the report that saved its ledger, which was written
@@ -641,7 +641,7 @@ export async function readTimelineEntry(
   // the file's order is the order they were written.
   const entries = file.parsed.timeline.filter((e) => e.occurredAt === wanted).reverse();
   if (entries.length === 0) {
-    // Ruling 246's shape: say what this reader IS and how to address it, rather
+    // Ruling 260's shape: say what this reader IS and how to address it, rather
     // than implying the entry was deleted. The likeliest caller error is a
     // stamp retyped by hand or trimmed of its milliseconds.
     const recent = file.parsed.timeline

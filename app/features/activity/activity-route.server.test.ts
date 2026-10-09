@@ -136,7 +136,7 @@ describe("/projects/:slug/activity", () => {
   // CANARY: hand `docHref` to every viewer and a person who cannot open
   // Instance settings is given its link; send the row as the read model built
   // it and `doc` rides along to everyone.
-  it("ruling 681: a row that wrote a knowledge-base document links it for an org admin, and for nobody else", async () => {
+  it("ruling 34: a row that wrote a knowledge-base document links it for an org admin, and for nobody else", async () => {
     const { updateProjectFile } = await import("~/server/files/project-writer.server");
     const { resolveStoreTarget, saveKnowledgeBase } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");

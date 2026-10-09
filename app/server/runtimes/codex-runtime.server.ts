@@ -88,7 +88,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * error). Each event is persisted as raw_json via `JSON.stringify(event)`
  * and projected through the shared normalizer. Tokens only, no dollar cost. A
  * run is one turn, whose usage the SDK streams only as it ends, so a run's
- * Turns and Tokens come off the rollout after each model call (ruling 541).
+ * Turns and Tokens come off the rollout after each model call (ruling 165(b)).
  *
  * Interrupt: the SDK's `TurnOptions.signal` (AbortSignal) — we pass an
  * AbortController and abort it. Resume: `codex.resumeThread(threadId)`.
@@ -97,7 +97,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * in the SDK contract). The SDK spawns the codex binary internally; startup or
  * runtime failures are surfaced as sanitized failed runs.
  *
- * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 127) — the
+ * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 137) — the
  * `codex login` the vendor binary wrote into that person's `CODEX_HOME`, or a
  * `CODEX_API_KEY` / `CODEX_ACCESS_TOKEN` they pasted. Both arrive on
  * `spec.env`, assembled by `runCredentialFor` in the run service; this adapter
@@ -126,8 +126,8 @@ import { errorMessage, toError } from "~/shared/errors";
  * config key `codexConfigForRun` writes were re-checked against the bundled
  * 0.153.4 binary, as were the `login --device-auth` prompt (byte-identical
  * source) and `login status` markers `backend-login` parses. `--add-dir` still
- * reads "writable alongside the primary workspace", so the ruling-109 carve-out
- * (ruling 185: `danger-full-access`, always) stands.
+ * reads "writable alongside the primary workspace", so the ruling-183 carve-out
+ * (ruling 144: `danger-full-access`, always) stands.
  *
  * 0.156.0 (2026-09-23, from 0.153.4, owner's request for GPT-6 Luna): the
  * SDK's own `dist` is byte-identical, so only the pinned CLI moved. The move
@@ -142,12 +142,12 @@ import { errorMessage, toError } from "~/shared/errors";
  * `--help` after a value flag now exits 2 where 0.153.4 exited 0, which is the
  * CLI's argument parser, not a flag it lost.
  *
- * Ruling 541, measured on the 0.156.0 binary: the rollout carries a top-level
+ * Ruling 165(b), measured on the 0.156.0 binary: the rollout carries a top-level
  * `token_usage_record` per model call (the call's usage, the turn's running
  * total and the thread's), written before the tool the call asked for runs,
  * which the live Turns and Tokens read (`codexUsageTail`); and a resumed
  * thread's `turn.completed.usage` is the THREAD's running total, where ruling
- * 369(g) had measured the turn's on runs stored before this bump. A bump
+ * 172 had measured the turn's on runs stored before this bump. A bump
  * re-checks both.
  *
  * 0.160.1 (2026-10-07, from 0.156.0, the dependency refresh): the SDK's own
@@ -159,7 +159,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * the same `thread.started` / `turn.started` / `error` / `turn.failed` shapes;
  * `login status` still prints "Not logged in"; and the binary still carries
  * `thread/compact/start`, `contextCompaction`, `token_usage_record` and the
- * device-flow "Enter this one-time code". Ruling 541's two facts were measured
+ * device-flow "Enter this one-time code". Ruling 165(b)'s two facts were measured
  * against a scripted local Responses server (a `model_providers` entry, every
  * call answering 1234 input tokens): the rollout carries one
  * `token_usage_record` per call, and `exec resume` of the thread reported
@@ -184,12 +184,12 @@ interface CodexAdapterDeps {
    *  `apiKey` dep: the SDK's own `apiKey` option does nothing but set
    *  `env.CODEX_API_KEY` (verified in @openai/codex-sdk/dist/index.js), which
    *  is exactly what `runCredentialFor` already puts there for the ONE person
-   *  the run bills (ruling 127). */
+   *  the run bills (ruling 137). */
   env?: Record<string, string>;
-  /** Ruling 376: how the completion compaction starts `codex app-server`
+  /** Ruling 174: how the completion compaction starts `codex app-server`
    *  (a test scripts the JSON-RPC exchange over pipes of its own). */
   spawnAppServer?: SpawnAppServer;
-  /** Ruling 174: the sweep that runs once a marked run has settled (default:
+  /** Ruling 142: the sweep that runs once a marked run has settled (default:
    *  the real one). */
   reapProcesses?: ReapRunProcesses;
 }
@@ -210,7 +210,7 @@ const codexMcpServerSchema = z.union([
     .object({
       type: z.literal("http"),
       url: z.string(),
-      /** Ruling 461: a gateway mount's run token. A header map that is not
+      /** Ruling 191: a gateway mount's run token. A header map that is not
        *  all strings is not a declaration of one and reads as absent. */
       headers: z.record(z.string(), z.string()).optional().catch(undefined),
     })
@@ -238,14 +238,14 @@ const codexMcpServerSchema = z.union([
 
 /**
  * What a stdio server is started with beyond the CLI's short default
- * environment: the run marker (ruling 174) and the run's own temporary
- * directory (ruling 636), so a browser it launches writes its profile there and
+ * environment: the run marker (ruling 142) and the run's own temporary
+ * directory (ruling 141(c)), so a browser it launches writes its profile there and
  * the settle removes it. Ids and paths, never secrets, so argv is a fine place.
  */
 const STDIO_SERVER_ENV_KEYS = [RUN_MARKER_ENV, ...RUN_TMP_ENV_KEYS] as const;
 
 /**
- * Ruling 658: how long the CLI may take to start a required MCP server. A
+ * Ruling 146: how long the CLI may take to start a required MCP server. A
  * minute is room for a stdio server that installs on its first start (`uvx`)
  * and for the gateway to reach a remote upstream; a server that has not
  * started by then ends the run before the model is called.
@@ -278,17 +278,17 @@ function stdioServerEnv(runEnv: RunSpec["env"]) {
  * the CLI merges `--config` per dotted leaf key. That is why runs get an
  * a per-person CODEX_HOME (`user-homes.server.ts`) instead of the host's.
  *
- * Ruling 174: a stdio server is started with the CLI's short default
+ * Ruling 142: a stdio server is started with the CLI's short default
  * environment plus its declared `env`, so the run marker is declared there —
  * it is an id, not a secret, and argv is a fine place for it — and whatever
  * the server launches (a browser, a language server) inherits it.
  *
- * Ruling 176: a server's admin-marked write tools, on a run that withholds
+ * Ruling 188: a server's admin-marked write tools, on a run that withholds
  * repo write, become its `disabled_tools` (a per-server key the pinned CLI
  * reads, alongside `enabled_tools`). Tool names, not secrets, so argv is fine
  * here too.
  *
- * Ruling 461: an HTTP server's `headers` become its `http_headers` (the pinned
+ * Ruling 191: an HTTP server's `headers` become its `http_headers` (the pinned
  * CLI's per-server table for a Streamable HTTP server). The only headers a
  * portable config carries are a gateway mount's `Authorization: Bearer <run
  * token>`: never a credential — the credential stays in Viberr's gateway — and
@@ -297,7 +297,7 @@ function stdioServerEnv(runEnv: RunSpec["env"]) {
  * it. That is what ended "a credentialed org MCP connects unauthenticated on
  * Codex" (F40-3): both backends now get the same gateway config.
  *
- * Ruling 658: every server is `required` unless the run names it optional.
+ * Ruling 146: every server is `required` unless the run names it optional.
  * The CLI starts MCP servers in the background and builds a turn's tools from
  * the ones ready when the turn starts; a run is one turn, so a server a second
  * late was missing for the whole run and nothing said so (live: AWSC-106's
@@ -316,13 +316,13 @@ function codexMcpServers(
   const serverEnv = stdioServerEnv(runEnv);
   const translated: CodexConfig = {};
   const optionalNames = new Set(optional);
-  /** Ruling 658: the CLI starts this server before the first turn, or fails. */
+  /** Ruling 146: the CLI starts this server before the first turn, or fails. */
   const startFirst = (server: CodexConfig, name: string) => {
     if (optionalNames.has(name)) return;
     server.required = true;
     server.startup_timeout_sec = MCP_REQUIRED_STARTUP_TIMEOUT_SEC;
   };
-  // Ruling 370: servers in name order and their withheld tools sorted, so two
+  // Ruling 169: servers in name order and their withheld tools sorted, so two
   // runs of one profile hand the CLI the same argv whatever order the grants
   // were stored in.
   for (const [name, value] of Object.entries(sortedRecord(servers ?? {}))) {
@@ -340,7 +340,7 @@ function codexMcpServers(
         url: declaration.data.url,
         default_tools_approval_mode: "approve",
       };
-      // Ruling 461: the gateway mount's run token (see the docstring).
+      // Ruling 191: the gateway mount's run token (see the docstring).
       if (Object.keys(declaration.data.headers).length) {
         http.http_headers = sortedRecord(declaration.data.headers);
       }
@@ -358,7 +358,7 @@ function codexMcpServers(
     if (declaration.data.args.length) stdio.args = declaration.data.args;
     if (Object.keys(serverEnv).length) stdio.env = serverEnv;
     if (disabledTools.length) stdio.disabled_tools = disabledTools;
-    // Ruling 554: the browser's supervisor answers a stuck call at its own
+    // Ruling 146: the browser's supervisor answers a stuck call at its own
     // deadline, saying the browser was restarted, so Codex must still be
     // waiting then; its default gives up first and says only "timed out".
     if (name === BROWSER_MCP_NAME) stdio.tool_timeout_sec = BROWSER_TOOL_TIMEOUT_SEC;
@@ -412,11 +412,11 @@ function resolveCodexReasoningEffort(
  * only mechanism — a weaker guarantee than the docstring claims, and none at
  * all when `setIdentity` failed.
  *
- * Ruling 174: the run marker crosses too, so a command the model backgrounds
+ * Ruling 142: the run marker crosses too, so a command the model backgrounds
  * (`npm run dev &`) carries it and the settle sweep can find it after the CLI
  * is gone.
  *
- * Ruling 636: so does the run's own temporary directory, named rather than
+ * Ruling 141(c): so does the run's own temporary directory, named rather than
  * left to "core", which is the CLI's list to change.
  */
 const SHELL_EXPORTED_ENV_KEYS = [
@@ -453,7 +453,7 @@ function shellExportedEnv(spec: RunSpec) {
  * ISOLATION (P13-LV-13 / LV-14 / RT-04): the CLI merges `--config` overrides
  * into whatever `$CODEX_HOME/config.toml` already declares, so config alone
  * cannot close the host channels — the run's PER-PERSON home
- * (`userBackendHome`, ruling 127) is what does. These keys are the
+ * (`userBackendHome`, ruling 137) is what does. These keys are the
  * second half of the same fence, because the CLI RE-INSTALLS its five bundled
  * `.system` skills into *any* home on startup (verified with
  * `codex debug prompt-input` on a pristine home: `imagegen`, `openai-docs`,
@@ -535,10 +535,10 @@ function codexConfigForRun(spec: RunSpec): CodexConfig {
     shell_environment_policy: shellEnvironmentPolicy,
   };
   // The persona/expertise prompt, only when the run carries one, so the key
-  // never lands empty. Ruling 370: a prompt split is the same text in the
+  // never lands empty. Ruling 169: a prompt split is the same text in the
   // same order, joined — Codex has no boundary to hand it to.
   if (spec.systemPrompt) config.developer_instructions = joinedPrompt(spec.systemPrompt);
-  // Ruling 371: a specialist's context is compacted at the shared window,
+  // Ruling 170: a specialist's context is compacted at the shared window,
   // with the shared summarizer prompt; a kind with no window (the operator)
   // sets none of the three keys and keeps the CLI's own default.
   Object.assign(config, codexCompactionConfig(spec.kind));
@@ -546,7 +546,7 @@ function codexConfigForRun(spec: RunSpec): CodexConfig {
 }
 
 /**
- * Ruling 185 (owner, 2026-09-12, pass 36): **Viberr does not confine a Codex
+ * Ruling 144 (owner, 2026-09-12, pass 36): **Viberr does not confine a Codex
  * run with the CLI's OS sandbox.** Every Codex run is started
  * `danger-full-access`; the boundary is Viberr's own — the prompt contract,
  * the per-engagement workspace isolation (P8), the server-owned delivery gate
@@ -578,7 +578,7 @@ function codexConfigForRun(spec: RunSpec): CodexConfig {
 /** The idle (inactivity) timeout for a codex run in ms — the window a single
  *  turn/tool may produce no event before the run is treated as hung. Overridable
  *  via VIBERR_CODEX_IDLE_TIMEOUT_MS; defaults to 15 minutes (owner ruling A8;
- *  the default and the parse live in the env schema, ruling 458(j)). */
+ *  the default and the parse live in the env schema, ruling 39). */
 function codexIdleTimeoutMs(): number {
   return getEnv().VIBERR_CODEX_IDLE_TIMEOUT_MS;
 }
@@ -592,13 +592,13 @@ function codexIdleTimeoutMs(): number {
  * iterator, so without this the row sits `running` until the next restart's
  * orphan sweep: the Stop-did-nothing defect, on the other backend. The settle
  * that follows sweeps that child and the grandchild by the run marker (ruling
- * 174), so the row and the processes end together.
+ * 142), so the row and the processes end together.
  */
 export const INTERRUPT_SETTLE_GRACE_MS = 20_000;
 
 /** CLI failures can include stderr and command lines. Those may contain
  * credentials, so the raw text is never logged unscrubbed — but R20-3 settled
- * that a REDACTED provider complaint is loggable (ruling 69), so instead of
+ * that a REDACTED provider complaint is loggable (ruling 219), so instead of
  * discarding it we keep the scrubbed sentence. Falls back to the class-only
  * message when the scrub finds nothing usable. */
 function safeCodexError(cause: unknown): Error {
@@ -644,11 +644,11 @@ interface CodexFailure {
   origin: RunFailureFacts["origin"];
 }
 
-/** Ruling 658: what the CLI writes when a required MCP server did not start,
+/** Ruling 146: what the CLI writes when a required MCP server did not start,
  *  followed by `<server>: <reason>` for each, `; ` between them. */
 const REQUIRED_MCP_FAILED_MARK = "required MCP servers failed to initialize: ";
 
-/** Ruling 658: the servers a session failed on, by the names the CLI gives
+/** Ruling 146: the servers a session failed on, by the names the CLI gives
  *  them, or null when no required server failed. Only a name is kept: the
  *  reasons are the CLI's own transport errors. */
 function requiredMcpServersThatFailed(raw: string): string[] | null {
@@ -700,7 +700,7 @@ function classifyCodexFailure(
   // P13-D-2 before the auth branch: a missing rollout is not a credential
   // problem, and telling a human to "review the configured subscription
   // credential" for it sends them to the one place that is definitely fine.
-  // Ruling 221 (F37-41): the store is THERE and unreadable — same class, same
+  // Ruling 162 (F37-41): the store is THERE and unreadable — same class, same
   // remedy, different sentence. Before the auth branch for the same reason the
   // vanished-rollout check is: live, "file is not a database" was reported as
   // "review the configured subscription credential", with "redirect with
@@ -717,7 +717,7 @@ function classifyCodexFailure(
       origin: null,
     };
   }
-  // Ruling 434: the rollout is there and its head is torn. The resume probe
+  // Ruling 162: the rollout is there and its head is torn. The resume probe
   // catches this before a spawn; this is the run that got there first.
   if (SESSION_DAMAGED_RE.test(raw)) {
     return {
@@ -740,7 +740,7 @@ function classifyCodexFailure(
       origin: null,
     };
   }
-  // Ruling 658: a required MCP server did not start. Before the quota, auth
+  // Ruling 146: a required MCP server did not start. Before the quota, auth
   // and network branches: its stderr carries the server's own transport error
   // ("error sending request for url"), which the network branch would read as
   // this deployment failing to reach Codex.
@@ -750,7 +750,7 @@ function classifyCodexFailure(
       kind: "unknown",
       message:
         `Codex could not start this run: ${mountedServersPhrase(failedServers)} did not start, and a run ` +
-        "starts only with every server it mounts (ruling 658). Nothing reached the model. Run the agent " +
+        "starts only with every server it mounts (ruling 146). Nothing reached the model. Run the agent " +
         "again. If it fails the same way, the server is down: retest it in Instance settings → MCP " +
         "servers, or take it off the agent's grants.",
       providerText,
@@ -836,9 +836,9 @@ const fatalEventMessageSchema = z
   .catch({});
 
 /**
- * Ruling 460: what hands a path in the principal's home to their uid (the
+ * Ruling 139: what hands a path in the principal's home to their uid (the
  * launcher's `--prepare-home`) — the run home the server just forked, the
- * sign-in it wrote back — and, ruling 485, what removes the run home as them
+ * sign-in it wrote back — and, ruling 140, what removes the run home as them
  * (their CLI wrote it). None when the run is not launched.
  */
 function agentOwner(agent: AgentLaunch | undefined): RunHomePerson | undefined {
@@ -867,9 +867,9 @@ const codexWithExecSchema = z.object({
 });
 
 /**
- * Ruling 534: the Codex SDK writes a turn's `outputSchema` into a directory of
+ * Ruling 145: the Codex SDK writes a turn's `outputSchema` into a directory of
  * its own (`mkdtemp`, 0700, the server's) and passes the CLI its path, but the
- * CLI runs as the person's agent uid behind the launcher (ruling 460) and so
+ * CLI runs as the person's agent uid behind the launcher (ruling 139) and so
  * could not open it: every Codex run given a schema (the operator's decision
  * plan, a specialist's outcome envelope) failed before its first turn with
  * "Failed to read output schema file ... Permission denied". Live on the AWS
@@ -918,11 +918,11 @@ export function createCodexAdapter(
   return {
     backend: "codex",
     /**
-     * Ruling 376: compact the thread a run just left through the CLI's
+     * Ruling 174: compact the thread a run just left through the CLI's
      * app-server (`thread/compact/start`; neither `exec` nor the SDK has a
      * command for it). The run's forked home is gone by the time a run has
      * exited (`finishCodexRunHome`), so the compaction gets a fork of its own
-     * from the principal's SHARED home (ruling 507: seeded with the sign-in of
+     * from the principal's SHARED home (ruling 138: seeded with the sign-in of
      * the account the run billed, settled like a run's), with the same
      * credential overlay and the shared summarizer prompt; the rollout it
      * extends lives in the shared home through the fork's links. The sizes are
@@ -943,8 +943,8 @@ export function createCodexAdapter(
       const env = baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
       // Its own marker: the run's settle sweep must not reap the app-server.
       if (env?.[RUN_MARKER_ENV]) Object.assign(env, compactionMarkerEnv(spec.runId));
-      // Ruling 507: the compaction bills the account the run billed, so it runs
-      // in a private fork of the shared home like the run did (ruling 181),
+      // Ruling 138: the compaction bills the account the run billed, so it runs
+      // in a private fork of the shared home like the run did (ruling 145),
       // seeded with THAT account's sign-in. The shared home holds no sign-in of
       // an account connected since the ruling, and may hold an earlier
       // account's that is not the one this run billed.
@@ -973,7 +973,7 @@ export function createCodexAdapter(
         if (spec.model) input.model = spec.model;
         if (env) input.env = env;
         if (deps.spawnAppServer) input.spawn = deps.spawnAppServer;
-        // Ruling 460: as the person's own OS user, like the run it compacts.
+        // Ruling 139: as the person's own OS user, like the run it compacts.
         if (spec.agent) input.launch = spec.agent;
         outcome = await compactCodexThread(input);
       } catch (error) {
@@ -999,7 +999,7 @@ export function createCodexAdapter(
       let sawTurnCompleted = false;
       let sawFatalError = false;
       /**
-       * Ruling 394: work the agent started AFTER its last completed turn.
+       * Ruling 155(d): work the agent started AFTER its last completed turn.
        *
        * `turn.completed` clears it; a new turn or a new item sets it. It is the
        * difference between a transport failure that CUT work short and one that
@@ -1018,7 +1018,7 @@ export function createCodexAdapter(
       let settled = false;
       let idleTimedOut = false;
       let emittedAdapterFailure = false;
-      // Ruling 181: the run's private CODEX_HOME, forked from the principal's
+      // Ruling 145: the run's private CODEX_HOME, forked from the principal's
       // home at spawn and removed by `settle` — the one exit every outcome
       // takes. Null until the spawn env is built, and for a spec that carries
       // no home at all (nothing to fork from).
@@ -1039,7 +1039,7 @@ export function createCodexAdapter(
       // R21-4 / G5 (FR28): the live phase/step the run strip renders — the same
       // vocabulary the Claude adapter emits, so the strip reads identically on
       // both backends. `lastStep` sticks through a stretch of reasoning events,
-      // marked answered once the tool it names has completed (ruling 348).
+      // marked answered once the tool it names has completed (ruling 166).
       let lastStep: string | null = null;
       const phase = (name: string, step: string | null = lastStep) => {
         cb.onPhase?.(name, step);
@@ -1055,7 +1055,7 @@ export function createCodexAdapter(
       const idleMs = codexIdleTimeoutMs();
       let idleTimer: ReturnType<typeof setTimeout> | null = null;
       /**
-       * Ruling 595: the stream is not the run's only sign of life. The CLI
+       * Ruling 158(a): the stream is not the run's only sign of life. The CLI
        * streams no event for a reasoning step whose summary is empty, and at
        * a high effort one model call reasons for many minutes in such steps,
        * each one a line in the rollout. Live, two Inventory Analysts on
@@ -1118,7 +1118,7 @@ export function createCodexAdapter(
       };
 
       /**
-       * Ruling 174: a settled run leaves no live process. The Codex SDK spawns
+       * Ruling 142: a settled run leaves no live process. The Codex SDK spawns
        * the CLI itself and signals only it (SIGTERM, never SIGKILL), so the
        * sweep is what reaches a CLI that outlived its abort and everything the
        * model's shell backgrounded — all of it carries this run's marker
@@ -1144,7 +1144,7 @@ export function createCodexAdapter(
           clearTimeout(interruptTimer);
           interruptTimer = null;
         }
-        // Ruling 181: carry the refreshed sign-in back and drop the run home
+        // Ruling 145: carry the refreshed sign-in back and drop the run home
         // BEFORE the completion callback runs inside `onExit` — a follow-up
         // run it starts forks its own home from the shared file, which must
         // already hold this run's refresh. Never throws.
@@ -1191,7 +1191,7 @@ export function createCodexAdapter(
         } satisfies ThreadErrorEvent;
         const occurredAt = new Date().toISOString();
         const { display, facts } = projectEnvelope("codex", event, occurredAt);
-        // Ruling 130(a): the same typed record the Claude adapter attaches;
+        // Ruling 155(a): the same typed record the Claude adapter attaches;
         // Codex streams no structured refusal facts, so every field but the
         // kind (and, U35-11, the origin of an overload) is unknown.
         const failure = emptyRunFailureFacts(kind);
@@ -1207,7 +1207,7 @@ export function createCodexAdapter(
       };
 
       /**
-       * Ruling 394: did the run's work stand finished when this failure landed?
+       * Ruling 155(d): did the run's work stand finished when this failure landed?
        *
        * The old gate was `sawTurnCompleted && !sawFatalError` — a conjunction
        * over the WHOLE stream, blind to order. This asks the question that
@@ -1254,7 +1254,7 @@ export function createCodexAdapter(
             : undefined);
         const mergedEnv =
           baseEnv || spec.env ? { ...baseEnv, ...spec.env } : undefined;
-        // Ruling 181: `spec.env.CODEX_HOME` is the principal's SHARED home
+        // Ruling 145: `spec.env.CODEX_HOME` is the principal's SHARED home
         // (`runCredentialFor`). The CLI gets a private fork of it for this run
         // — its own `tmp/arg0` helper directory, its own copy of the sign-in —
         // while the state db (`CODEX_SQLITE_HOME`) and, by link, the sessions
@@ -1267,7 +1267,7 @@ export function createCodexAdapter(
             sharedHome,
             spec.runId,
             agentOwner(spec.agent),
-            // Ruling 507: the sign-in of the account this run bills.
+            // Ruling 138: the sign-in of the account this run bills.
             spec.accountHome ?? sharedHome,
           );
           mergedEnv.CODEX_HOME = runHome.dir;
@@ -1276,7 +1276,7 @@ export function createCodexAdapter(
         const config = codexConfigForRun(spec);
         const codexOptions: CodexOptions = { config };
         if (mergedEnv) codexOptions.env = mergedEnv;
-        // Ruling 460: the SDK spawns `codexPathOverride` with the argv it
+        // Ruling 139: the SDK spawns `codexPathOverride` with the argv it
         // builds, so the launcher stands in for the CLI and execs the SDK's own
         // vendored binary (`VIBERR_LAUNCH_EXEC`) as the principal's uid. The
         // SDK prepends its helper directories to PATH only when it resolves
@@ -1291,7 +1291,7 @@ export function createCodexAdapter(
           );
         }
         const codex = factory(codexOptions);
-        // Ruling 185: no OS confinement from Viberr. Every Codex run starts
+        // Ruling 144: no OS confinement from Viberr. Every Codex run starts
         // `danger-full-access` — the mode that installs neither bubblewrap nor
         // the network seccomp filter, and so has neither F36-1's "bwrap: No
         // permissions to create a new namespace" nor F36-11's `EPERM` on every
@@ -1314,12 +1314,12 @@ export function createCodexAdapter(
         // Absent when the spec's tier is not one this SDK accepts, so the CLI
         // applies its own default rather than being handed an empty value.
         // startRun always resolves a Codex run's tier to a listed one (ruling
-        // 687), so this guards a spec built outside it.
+        // 149), so this guards a spec built outside it.
         if (reasoningEffort) {
           threadOptions.modelReasoningEffort = reasoningEffort;
         }
         // Web SEARCH still follows the grant on BOTH kinds (pass-24 B-2, owner
-        // ruling): it is the CLI's own tool, not the OS sandbox, so ruling 185
+        // ruling): it is the CLI's own tool, not the OS sandbox, so ruling 144
         // does not touch it. A Codex operator that HOLDS `use-web-search-fetch`
         // gets web search, matching the Claude operator; a withheld grant
         // disables it.
@@ -1334,7 +1334,7 @@ export function createCodexAdapter(
         const thread = spec.resumeSessionId
           ? codex.resumeThread(spec.resumeSessionId, threadOptions)
           : codex.startThread(threadOptions);
-        // Ruling 541: a Viberr run is ONE Codex turn, whose usage the SDK
+        // Ruling 165(b): a Viberr run is ONE Codex turn, whose usage the SDK
         // streams once, at its end, so the strip read Turns 0 and Tokens
         // "pending" for the whole run. The rollout records each model call
         // the moment it completes; it is read on every event below. Opened
@@ -1351,7 +1351,7 @@ export function createCodexAdapter(
           const { events } = await thread.runStreamed(spec.prompt, turnOptions);
           // The model calls the rollout has recorded: a Codex run's Turns.
           let calls = 0;
-          // Ruling 604: the account reading the last line carried.
+          // Ruling 161(b): the account reading the last line carried.
           let sentLimit: string | null = null;
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event
@@ -1388,7 +1388,7 @@ export function createCodexAdapter(
               calls = live.calls;
               facts.turns = calls;
             }
-            // Ruling 604: the account's usage window, from the same rollout
+            // Ruling 161(b): the account's usage window, from the same rollout
             // lines, rides the line when it changes, and the sink records it
             // as Claude's `rate_limit_event` is recorded.
             const limit = usageTail?.rateLimit() ?? null;
@@ -1397,7 +1397,7 @@ export function createCodexAdapter(
               facts.rateLimit = limit;
             }
             if (type === "turn.started" || type === "item.started") {
-              // Ruling 394: something is in flight again.
+              // Ruling 155(d): something is in flight again.
               workAfterLastTurn = true;
             }
             if (type === "turn.completed") {
@@ -1424,7 +1424,7 @@ export function createCodexAdapter(
             // R21-4: the strip's live row. `turn N` is the honest fallback until
             // the run invokes its first tool — a number that climbs is what
             // tells a human the run is alive. The service throttles the writes.
-            // Ruling 348: a tool stays named while it runs; once its result lands the
+            // Ruling 166: a tool stays named while it runs; once its result lands the
             // step says the model is composing again, instead of the finished call.
             const update = stepUpdateForLine(emitted);
             if (update?.kind === "tool") lastStep = update.step;
@@ -1449,7 +1449,7 @@ export function createCodexAdapter(
             return settle("error");
           }
           if (interrupted) return settle("interrupted");
-          // Ruling 394: the turn had completed and nothing was in flight, so
+          // Ruling 155(d): the turn had completed and nothing was in flight, so
           // the iterator threw on teardown, not on the work. Live this was the
           // socket dying under Viberr's OWN end-of-run compaction — its
           // housekeeping turning a finished run into a failed one.
@@ -1481,7 +1481,7 @@ export function createCodexAdapter(
 
         if (interrupted) return settle("interrupted");
         if (sawTurnCompleted && !sawFatalError) return settle("finished");
-        // Ruling 394: a fatal event that landed AFTER the completed turn, with
+        // Ruling 155(d): a fatal event that landed AFTER the completed turn, with
         // nothing started since. Same judgement as the catch above — the work
         // stood finished, so the drop is transport and the run is not failed.
         if (turnStoodComplete()) {

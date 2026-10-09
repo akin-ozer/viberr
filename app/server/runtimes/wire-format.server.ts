@@ -44,20 +44,20 @@ export interface EnvelopeFacts {
   isError?: boolean;
   /** True when this is a terminal result envelope (claude result). */
   isResult?: boolean;
-  /** Ruling 348: the tool this envelope closes has answered, though the envelope
+  /** Ruling 166: the tool this envelope closes has answered, though the envelope
    *  carries no console row (a succeeding Codex MCP call). The adapters mark the
    *  live step answered on it. */
   toolAnswered?: boolean;
-  /** Ruling 130(a): the assistant envelope's `error` code (`oauth_org_not_allowed`,
+  /** Ruling 155(a): the assistant envelope's `error` code (`oauth_org_not_allowed`,
    *  `rate_limit`, …) when the provider streamed its API-error banner. */
   apiError?: string | null;
-  /** Ruling 130(a): the result envelope's `api_error_status` (403, 429, …). */
+  /** Ruling 155(a): the result envelope's `api_error_status` (403, 429, …). */
   apiErrorStatus?: number | null;
-  /** Ruling 130(a): the result envelope's `terminal_reason` (`api_error`, …). */
+  /** Ruling 155(a): the result envelope's `terminal_reason` (`api_error`, …). */
   terminalReason?: string | null;
   /** A live quota reading — Claude's `rate_limit_event` (beside the plan
-   *  windows the run's CLI reported, ruling 611), or the Codex rollout's
-   *  rate-limit snapshot the adapter reads (ruling 604) — folded
+   *  windows the run's CLI reported, ruling 161(a)), or the Codex rollout's
+   *  rate-limit snapshot the adapter reads (ruling 161(b)) — folded
    *  into the instance-wide backend-quota store by the sink, so approaching
    *  exhaustion is visible BEFORE a run fails on it (pass-29 gap 3.2). */
   rateLimit?: {
@@ -66,13 +66,13 @@ export interface EnvelopeFacts {
     utilization: number | null;
     resetsAt: number | null;
     isUsingOverage: boolean;
-    /** Ruling 608: every window the provider reported, shortest first (Codex
+    /** Ruling 161(b): every window the provider reported, shortest first (Codex
      *  names its five-hour and weekly windows at once, and a Claude run's CLI
-     *  its plan windows, ruling 611); the fields above are the binding one.
+     *  its plan windows, ruling 161(a)); the fields above are the binding one.
      *  Absent when only that one is known. */
     windows?: { rateLimitType: string; utilization: number | null; resetsAt: number | null }[];
   } | null;
-  /** Ruling 369: what the prompt cache did for ONE model call (a Claude
+  /** Ruling 172: what the prompt cache did for ONE model call (a Claude
    *  main-loop assistant envelope; the Claude adapter keeps only the first
    *  envelope of each API message) or one Codex turn. `promptTokens` is the
    *  whole prompt; the two cache figures are its written and read slices;
@@ -91,7 +91,7 @@ export interface EnvelopeFacts {
     ttl: { fiveMinute: number; oneHour: number } | null;
     missReason: string | null;
   } | null;
-  /** Ruling 369: the provider compacted the run's context — a Claude
+  /** Ruling 172: the provider compacted the run's context — a Claude
    *  `compact_boundary` (with its token counts) or a Codex context-compaction
    *  item (which carries none). The sink counts it and notes it on the task. */
   compaction?: {
@@ -99,7 +99,7 @@ export interface EnvelopeFacts {
     preTokens: number | null;
     postTokens: number | null;
   } | null;
-  /** Ruling 376: a call made AFTER the run's own result — the completion
+  /** Ruling 174: a call made AFTER the run's own result — the completion
    *  compaction's summary request — adds to the run's totals instead of
    *  replacing them (a result's `costUsd`/`usage` is the run's whole figure;
    *  these are increments the sink folds on top). */
@@ -193,7 +193,7 @@ const wireError = z
 // ------------------------------------------------------ claude envelopes
 
 /**
- * Ruling 367: one block inside a `tool_result`'s `content` ARRAY — the shape
+ * Ruling 168(b): one block inside a `tool_result`'s `content` ARRAY — the shape
  * an MCP server answers with (the SDK's text / image / tool_reference blocks),
  * and every one of the product's own tools among them.
  */
@@ -239,7 +239,7 @@ const wireResultContent = z
 const claudeBlock = z.object({
   type: wireText,
   text: wireText,
-  /** `tool_result` content: a string, or the blocks it holds (ruling 367). */
+  /** `tool_result` content: a string, or the blocks it holds (ruling 168(b)). */
   content: wireResultContent,
   name: wireText,
   input: wireToolInput,
@@ -252,7 +252,7 @@ type ClaudeBlock = z.infer<typeof claudeBlock>;
 const claudeBlocks = z.array(claudeBlock.catch(() => claudeBlock.parse({}))).catch(() => []);
 
 /**
- * Ruling 175: one model's totals in a result's `modelUsage` (sdk.d.ts
+ * Ruling 159: one model's totals in a result's `modelUsage` (sdk.d.ts
  * `ModelUsage`), the fields the fold reads. `inputTokens` is the uncached slice
  * and the two cache figures are disjoint from it, the same split as `usage`.
  */
@@ -274,7 +274,7 @@ const claudeModelUsage = z
   .catch(() => []);
 
 /**
- * Ruling 369: an assistant envelope's `message.usage`. The three prompt figures
+ * Ruling 172: an assistant envelope's `message.usage`. The three prompt figures
  * are disjoint (the uncached slice, the cache write, the cache read);
  * `cache_creation` splits the write by the TTL the provider billed it under.
  * Null when the message carries no usage at all (an SDK synthetic message),
@@ -296,7 +296,7 @@ const claudeMessageUsage = z
   .nullable()
   .catch(null);
 
-/** Ruling 369: the provider's own attribution of a cache miss, when it sent
+/** Ruling 172: the provider's own attribution of a cache miss, when it sent
  *  one (13 of this instance's last 400 runs carried it). */
 const claudeDiagnostics = z
   .object({
@@ -307,7 +307,7 @@ const claudeDiagnostics = z
   })
   .catch(() => ({ cache_miss_reason: null }));
 
-/** Ruling 369: a `compact_boundary`'s metadata — what the CLI compacted. */
+/** Ruling 172: a `compact_boundary`'s metadata — what the CLI compacted. */
 const claudeCompactMetadata = z
   .object({
     trigger: wireTextOrBlank,
@@ -345,7 +345,7 @@ const claudeEnvelopeFields = z.object({
           /** The API message id: one message yields one envelope per content
            *  block, all carrying the same usage under the same id. */
           id: wireTextOrBlank,
-          /** Ruling 369: the call's prompt-cache figures, read here so the
+          /** Ruling 172: the call's prompt-cache figures, read here so the
            *  adapter and the sink never decode the envelope twice. */
           usage: claudeMessageUsage,
           diagnostics: claudeDiagnostics,
@@ -367,7 +367,7 @@ const claudeEnvelopeFields = z.object({
     })),
   /** `system/permission_denied`: the tool the run was refused, and why (the
    *  deciding component's reason and its kind — `rule`, `mode`, `classifier`…).
-   *  `tool_progress` (ruling 366) names its tool through the same key. */
+   *  `tool_progress` (ruling 168) names its tool through the same key. */
   tool_name: wireTextOrBlank,
   /** `tool_progress`: the call a heartbeat reports on. The SDK gives each
    *  heartbeat its own `tool_use_id` (`<call>-heartbeat-N`) and names the call
@@ -395,7 +395,7 @@ const claudeEnvelopeFields = z.object({
       output_tokens: 0,
     })),
   total_cost_usd: wireCount,
-  /** Ruling 175: every call the query made, per model — main loop, subagents,
+  /** Ruling 159: every call the query made, per model — main loop, subagents,
    *  sidechains, compaction. The SDK calls it "the correct field for token/cost
    *  accounting"; `usage` is the main loop only. */
   modelUsage: claudeModelUsage,
@@ -403,7 +403,7 @@ const claudeEnvelopeFields = z.object({
   duration_ms: wireCount,
   duration_api_ms: wireCount,
   is_error: wireFlag,
-  /** Ruling 130(a): the result's HTTP status when the API refused the run, and
+  /** Ruling 155(a): the result's HTTP status when the API refused the run, and
    *  the SDK's terminal reason. Nullable on purpose: absent is "not sent". */
   api_error_status: z.number().nullable().catch(null),
   terminal_reason: wireText,
@@ -454,7 +454,7 @@ const codexItem = z.object({
   tool: wireText,
   arguments: wireMcpArguments,
   error: wireError,
-  /** Ruling 499: a `todo_list` item's steps. */
+  /** Ruling 168: a `todo_list` item's steps. */
   items: z
     .array(
       z
@@ -472,7 +472,7 @@ const codexEnvelopeFields = z.object({
     .object({
       input_tokens: wireCount,
       cached_input_tokens: wireCount,
-      /** Ruling 369: the SDK defaults it to 0 when the CLI sent none; the
+      /** Ruling 172: the SDK defaults it to 0 when the CLI sent none; the
        *  ChatGPT-backed CLI has reported 0 on every stored run so far. */
       cache_write_input_tokens: wireCount,
       output_tokens: wireCount,
@@ -535,19 +535,19 @@ export interface ClaudeResultUsage {
 }
 
 /**
- * Ruling 542: a Claude result's figures are the SESSION's, not the query's.
+ * Ruling 165(c): a Claude result's figures are the SESSION's, not the query's.
  * The CLI restores a session's saved cost state when it resumes it, so the
  * result of a resumed run reports `total_cost_usd` and `modelUsage` for every
  * query the session has made; only `usage` and `num_turns` are this query's.
  * Live on the AWS calculator board a 29-second, 8-turn controller turn read
  * "$2.51 · in 2627.6k · out 35.2k" where its own four calls read 188k tokens
- * in, and ruling 536's compaction was the same fact once. Given the totals the
+ * in, and ruling 165(c)'s compaction was the same fact once. Given the totals the
  * session last reported, the run's share is the difference, model by model,
  * when every figure grew from them; when one did not, the CLI restored
  * nothing (another session ran in the same directory between the two) and
  * the report is the query's own.
  */
-/** Ruling 542: the totals a Claude result REPORTS (the session's), or null
+/** Ruling 165(c): the totals a Claude result REPORTS (the session's), or null
  *  when the message is not a result. What the next share is taken from. */
 export function claudeReportedTotals(
   // eslint-disable-next-line anti-slop/no-unknown-parameters -- the raw SDK message, parsed here
@@ -591,7 +591,7 @@ function sessionShareOf(
 }
 
 /**
- * Ruling 175: a Claude result's tokens and cost, from `modelUsage` when it
+ * Ruling 159: a Claude result's tokens and cost, from `modelUsage` when it
  * carries any figure, else from `usage` and `total_cost_usd`. The row's
  * `input_tokens` is the WHOLE prompt (uncached + cache writes + cache reads)
  * and `cached_input_tokens` its cache-read subset on both paths, so a row
@@ -639,7 +639,7 @@ export function projectEnvelope(
   // eslint-disable-next-line anti-slop/no-unknown-parameters -- see above
   raw: unknown,
   occurredAtIso?: string,
-  /** Ruling 542: the totals the Claude session last reported, so a result's
+  /** Ruling 165(c): the totals the Claude session last reported, so a result's
    *  line and facts state this query's share (see `sessionShareOf`). */
   claudeSession?: ClaudeResultUsage | null,
 ): ProjectedEnvelope {
@@ -680,7 +680,7 @@ function projectClaude(
         info?.utilization != null
           ? `${Math.round(info.utilization * 100)}%`
           : "utilization not reported";
-      // Ruling 130(a): the display names the window, the STATUS and the reset
+      // Ruling 155(a): the display names the window, the STATUS and the reset
       // instant (absolute UTC, never relative). A REJECTED reading is the one
       // a human must see, so it carries its own tag suffix: the console's
       // telemetry collapse keys on the bare `rate_limit_event` tag.
@@ -733,7 +733,7 @@ function projectClaude(
           facts: {},
         };
       }
-      // Ruling 369: the CLI compacted the context. The line names the
+      // Ruling 172: the CLI compacted the context. The line names the
       // trigger and the token counts, and the fact rides to the sink, which
       // counts it on the row and notes it on the task's timeline.
       if (e.subtype === "compact_boundary") {
@@ -767,7 +767,7 @@ function projectClaude(
       };
     }
     case "tool_progress": {
-      // Ruling 366: the provider's heartbeat — "this tool call is still
+      // Ruling 168: the provider's heartbeat — "this tool call is still
       // running, N seconds in". It fell to the unknown-envelope row, so a
       // `run_agent` that waited forty minutes on a specialist printed eighty
       // rows of raw JSON under the call it was waiting on. The row carries the
@@ -797,14 +797,14 @@ function projectClaude(
     }
     case "assistant": {
       const content = e.message.content;
-      // Ruling 369: the call's prompt-cache figures, on every main-loop
+      // Ruling 172: the call's prompt-cache figures, on every main-loop
       // envelope that carries usage (a subagent's envelope is not part of the
       // run's own context and reports none here). One API message yields one
       // envelope per content block, all with the same figures under the same
       // id; the adapter keeps the first and strips the repeats before the
       // sink folds them.
       const cache = e.parent_tool_use_id ? null : claudeCacheFacts(e);
-      // Ruling 130(a): the provider streams its API-error banner ("You are not
+      // Ruling 155(a): the provider streams its API-error banner ("You are not
       // allowed to …") as an assistant message carrying an `error` code. It is
       // an error line, never the agent's reply, so it can never be selected as
       // the reply comment.
@@ -850,13 +850,13 @@ function projectClaude(
       // slice alone, and the strip read a median 60x below the provider's own
       // total on the runs this instance had stored.
       //
-      // Ruling 175: the figures come from `modelUsage`, which covers every call
+      // Ruling 159: the figures come from `modelUsage`, which covers every call
       // the query made, subagents and compaction included; `usage` covers the
       // main loop only and undercounted any run that delegated. Same column
       // semantics either way. `usage` (and `total_cost_usd`) remain the
       // fallback for a result without per-model figures — an older CLI, or a
       // crash result whose `modelUsage` came back empty or zeroed.
-      // Ruling 542: this query's share of the session's totals.
+      // Ruling 165(c): this query's share of the session's totals.
       const fold = sessionShareOf(session, foldClaudeResultUsage(e));
       const { inTok, cached, outTok } = fold;
       const durSec = Math.round(e.duration_ms / 1000);
@@ -907,7 +907,7 @@ function projectClaude(
 }
 
 /**
- * Ruling 369: one Claude call's cache fact, or null when the envelope carries
+ * Ruling 172: one Claude call's cache fact, or null when the envelope carries
  * no usage — or only zeros, which is the SDK's placeholder for a message that
  * never reached the API (an interrupt, a synthetic frame) and would otherwise
  * be counted as a first call that read and wrote nothing.
@@ -962,7 +962,7 @@ const toolInputSummary = z.object({
 
 function summarizeToolInput(name: string, input: LogLine["input"]): string {
   if (!input) return "";
-  // Ruling 366: an MCP call's arguments read as the arguments line on both
+  // Ruling 168: an MCP call's arguments read as the arguments line on both
   // backends; the built-in summaries below are Claude's own tools.
   if (name.startsWith("mcp__")) return summarizeArguments(input);
   const summary = toolInputSummary.parse(input);
@@ -1014,7 +1014,7 @@ function argumentText(value: JsonValue): string {
 }
 
 /**
- * Ruling 366: the console row for an MCP call's arguments, one rule on both
+ * Ruling 168: the console row for an MCP call's arguments, one rule on both
  * backends. A single string argument prints as itself (`services/orders/src/
  * app.ts`, `ping` — the value IS the row, and it is what the Codex rule already
  * did for `query`/`path`/`url`/`name`/`message`); anything else prints every
@@ -1058,11 +1058,11 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
         display: { t, ev: "result", tag: "turn.completed", text, usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok } },
         // One turn; the adapter overrides it with the model calls the
         // rollout recorded, and on a resumed thread, whose CLI figure is the
-        // THREAD's running total, it passes the turn's own usage (ruling 541).
+        // THREAD's running total, it passes the turn's own usage (ruling 165(b)).
         facts: {
           usage: { input_tokens: inTok, cached_input_tokens: cached, output_tokens: outTok, outputEstimated: false },
           turns: 1,
-          // Ruling 369: a TURN's totals over every call it made — a cached
+          // Ruling 172: a TURN's totals over every call it made — a cached
           // ratio and a write figure, never a prompt size (`perCall: false`).
           // The per-call figures come off the rollout at finalize.
           cache:
@@ -1151,7 +1151,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
           return { display: null, facts: {} };
         }
         case "context_compaction":
-          // Ruling 369: the CLI compacted the thread (an item type newer than
+          // Ruling 172: the CLI compacted the thread (an item type newer than
           // the SDK's own union). Counted on the row like Claude's boundary;
           // the rollout read at finalize carries the authoritative count.
           return completed
@@ -1175,7 +1175,7 @@ function projectCodex(e: CodexEnvelope, t: string): ProjectedEnvelope | null {
               }
             : { display: null, facts: {} };
         case "todo_list": {
-          // Ruling 499: the plan's steps ride on the line, so the console draws
+          // Ruling 168: the plan's steps ride on the line, so the console draws
           // the agent's to-do list instead of an empty row. Completed only, as
           // before: the plan as the turn left it. Codex marks a step done or
           // not; it names no step in progress, so none is drawn as one.

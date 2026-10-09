@@ -23,7 +23,7 @@ const PRIVATE_RUNTIME_ENV_RE =
   /^(?:DATABASE_URL|REDIS_URL|SSH_AUTH_SOCK|GPG_AGENT_INFO)$/i;
 
 /**
- * Ruling 127: the two vendor HOME variables, stripped for the same reason the
+ * Ruling 137: the two vendor HOME variables, stripped for the same reason the
  * credentials are.
  *
  * Neither name is credential-shaped, so {@link CREDENTIAL_ENV_RE} lets both
@@ -38,7 +38,7 @@ const PRIVATE_RUNTIME_ENV_RE =
  * spawn sites (the sign-in driver and `runVendorLogout`) delete them by hand
  * in `vendorSpawnEnv`, for the same reason, at the same boundary.
  *
- * Ruling 181 adds `CODEX_SQLITE_HOME`, the CLI's state-db location: the Codex
+ * Ruling 141 adds `CODEX_SQLITE_HOME`, the CLI's state-db location: the Codex
  * adapter sets it per run to the principal's shared home (the run's own
  * `CODEX_HOME` is a private fork), so an ambient one — a host's `~/.codex`
  * state — must not be what a child inherits when the adapter has nothing to
@@ -47,7 +47,7 @@ const PRIVATE_RUNTIME_ENV_RE =
 const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|CODEX_SQLITE_HOME)$/;
 
 /**
- * Ruling 506: the CLI's prompt-cache switches, stripped because ruling 374(a)
+ * Ruling 169: the CLI's prompt-cache switches, stripped because ruling 171
  * made the cache lifetime the CLI's automatic choice and Viberr sets none of
  * them.
  *
@@ -56,7 +56,7 @@ const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|CODEX_SQLITE_HOME)
  * deployment's old `.env`) rode into every Claude child, where
  * `DISABLE_PROMPT_CACHING` would turn caching off for every run the instance
  * makes, `ENABLE_PROMPT_CACHING_1H` would pay the hour's 2x write on every
- * API-key run that 374(a) priced out, and any of them would make ruling 370's
+ * API-key run that 374(a) priced out, and any of them would make ruling 171's
  * `CACHE_TTL_MS`, which the resume verdict and the Insights resume table
  * assume, quietly wrong. The names are the CLI's own (the 2.1.280 bundle),
  * with its per-model and Bedrock variants.
@@ -65,8 +65,8 @@ const PROMPT_CACHE_ENV_RE =
   /^(?:DISABLE_PROMPT_CACHING(?:_[A-Z0-9]+)?|ENABLE_PROMPT_CACHING_1H(?:_[A-Z0-9]+)?|FORCE_PROMPT_CACHING_5M|CLAUDE_CODE_(?:SUBAGENT_)?PROMPT_CACHE_TTL)$/;
 
 /**
- * Ruling 506: the CLI's compaction switches, stripped for the same reason
- * under ruling 376(d): the CLI compacts at its model's own limit, and Viberr
+ * Ruling 169: the CLI's compaction switches, stripped for the same reason
+ * under ruling 171: the CLI compacts at its model's own limit, and Viberr
  * compacts a large session at the end of its run with `/compact`.
  *
  * On the host, the window (`CLAUDE_AUTO_COMPACT_WINDOW_ENV`) and
@@ -75,7 +75,7 @@ const PROMPT_CACHE_ENV_RE =
  * cache), `DISABLE_AUTO_COMPACT` would stop it, and `DISABLE_COMPACT` would
  * refuse the completion compaction itself. A server started from inside a
  * Claude Code session inherits the first two: the container this ruling was
- * written in did, and ruling 376's hermeticity tests failed there.
+ * written in did, and ruling 171's hermeticity tests failed there.
  *
  * Neither list stops Viberr choosing a value on purpose: a run's own overlay
  * (`spec.env`) is spread over this base, as a window from `contextWindowEnv`
@@ -89,7 +89,7 @@ const COMPACTION_ENV: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Ruling 142 (pass 34, U34-7): the app's OWN configuration, stripped for a
+ * Ruling 141(a) (pass 34, U34-7): the app's OWN configuration, stripped for a
  * different reason than the credentials.
  *
  * `ENV_KEYS` is every name the env schema declares — `NODE_ENV`, `PORT`,
@@ -128,12 +128,12 @@ const APP_CONFIG_ENV: ReadonlySet<string> = new Set(ENV_KEYS);
  * is real, not advisory. Ordinary runtime settings (PATH/HOME/locale/proxy)
  * survive so stdio MCP servers (`npx …`) and the CLIs' own machinery keep
  * working; nothing that looks like a secret does, and nothing the app's env
- * schema declares does either (ruling 142, {@link APP_CONFIG_ENV}): the rule is
+ * schema declares does either (ruling 141(a), {@link APP_CONFIG_ENV}): the rule is
  * "every declared name is stripped, an undeclared name passes", so the child
  * never inherits this server's `NODE_ENV`, `PORT` or data root, while a
  * name the schema does not know is by definition not Viberr's configuration.
  *
- * Ruling 127: this base carries NO provider credential and NO home — the
+ * Ruling 137: this base carries NO provider credential and NO home — the
  * credential names go by {@link CREDENTIAL_ENV_RE}, the two home names by
  * {@link RUNTIME_HOME_ENV_RE}. A run adds back
  * exactly one principal's `CLAUDE_CONFIG_DIR`/`CODEX_HOME` (and, for a pasted
@@ -142,10 +142,10 @@ const APP_CONFIG_ENV: ReadonlySet<string> = new Set(ENV_KEYS);
  * `OPENAI_API_KEY` on the host can never quietly pay for a ChatGPT-workspace
  * run.
  *
- * Ruling 506: and NO prompt-cache or compaction switch
+ * Ruling 169: and NO prompt-cache or compaction switch
  * ({@link PROMPT_CACHE_ENV_RE}, {@link COMPACTION_ENV}), so the cache
  * lifetime and the compaction point a run gets are the CLI's own choice, as
- * rulings 374(a) and 376(d) decided.
+ * rulings 171 and 171 decided.
  */
 export function filteredSpawnEnv(): Record<string, string> {
   return Object.fromEntries(

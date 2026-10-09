@@ -8,7 +8,7 @@ import { requireVisibleProject } from "./project-visibility.server";
 
 /**
  * GET /projects/:slug/tasks/:key/dependency-candidates — the Blocked by
- * picker's read (ruling 548): the project's other tasks, each with the refusal
+ * picker's read (ruling 59): the project's other tasks, each with the refusal
  * the writer would give it as a new entry.
  *
  * Membership, the task page's own gate (`requireVisibleProject`: a non-member
@@ -31,7 +31,7 @@ export async function loader({
   params,
 }: Route.LoaderArgs): Promise<DependencyCandidatesView> {
   // A 401, not `requireUser`'s login redirect: a fetcher follows a redirect as
-  // a navigation (the bell's lesson, ruling 457).
+  // a navigation (the bell's lesson, ruling 11).
   const ctx = await authenticate(request);
   if (!ctx || ctx.pwresetRequired) {
     throw data("Sign in to read what this task can wait on.", { status: 401 });

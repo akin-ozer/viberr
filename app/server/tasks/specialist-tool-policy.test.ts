@@ -8,7 +8,7 @@ import {
   resolveUndeployedDisallowedTools,
 } from "./specialist-tool-policy";
 
-describe("codexRepoWriteAdvisory (ruling 185)", () => {
+describe("codexRepoWriteAdvisory (ruling 183)", () => {
   // Viberr no longer OS-confines a Codex run, so a withheld write family has
   // no OS channel there at all: it is advisory for EVERY such profile, not
   // just the old E32-3 carve-out (withheld + evidence granted). What binds is
@@ -34,7 +34,7 @@ describe("codexRepoWriteAdvisory (ruling 185)", () => {
     // The seeded Reviewer shape: no headline grant at all (grant-required ⇒
     // withheld), evidence left at its default.
     expect(codexRepoWriteAdvisory([g("report-validation-verdict", "direct")])).toBe(true);
-    // Evidence withheld TOO — before ruling 185 the sandbox bound this one
+    // Evidence withheld TOO — before ruling 183 the sandbox bound this one
     // read-only, so it was not advisory. Now nothing confines it.
     expect(
       codexRepoWriteAdvisory([
@@ -308,7 +308,7 @@ describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
   // would silently revoke every read-only MCP server an operator granted on
   // purpose. This is the record that says the gap is a decision.
   //
-  // Ruling 176 amends it without touching these assertions: no CAPABILITY rule
+  // Ruling 188 amends it without touching these assertions: no CAPABILITY rule
   // denies the channel still. What a withheld repo-write grant now denies is the
   // tools an admin MARKED on a server, per tool, by name
   // (`resolveSpecialistMcpServersDetailed` → `startRun`); see
@@ -335,7 +335,7 @@ describe("MCP tools are deliberately NOT capability-gated (R16-5)", () => {
   });
 });
 
-/* ------------- the hook's sentence (ruling 101(e), Option D PR 5) ---------- */
+/* ------------- the hook's sentence (ruling 219(a), Option D PR 5) ---------- */
 
 describe("bashDenyReason — named from the run's denylist alone", () => {
   it("names each capability whose whole rule set the denylist carries", () => {

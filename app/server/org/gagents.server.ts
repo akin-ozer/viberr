@@ -82,7 +82,7 @@ export interface GagentView {
   /** The markdown body — the agent's persona / system-prompt material. */
   persona: string;
   stages: string[];
-  /** Ruling 153 (pass 35, G35-2): the template's default model id for its
+  /** Ruling 264 (pass 35, G35-2): the template's default model id for its
    *  backend ("" = the backend default) and effort tier ("" = the backend
    *  default); `deploy_agent` takes both when no override is given. */
   model: string;
@@ -375,8 +375,8 @@ export interface SaveGagentInput {
   mcps?: string[];
   kbs?: string[];
   /**
-   * Ruling 153 (pass 35, G35-2): the template's default model and effort,
-   * checked by name against `backend` (ruling 139). Both are merge fields on
+   * Ruling 264 (pass 35, G35-2): the template's default model and effort,
+   * checked by name against `backend` (ruling 261). Both are merge fields on
    * an edit: omitted keeps the stored value, `""` clears it. A backend switch
    * whose stored model belongs to the other backend clears the model and the
    * toast says so.
@@ -384,7 +384,7 @@ export interface SaveGagentInput {
   model?: string;
   effort?: string;
   /**
-   * Ruling 156 (pass 35, F35-7): also rewrite the grants of every project copy
+   * Ruling 177 (pass 35, F35-7): also rewrite the grants of every project copy
    * that no longer matches this template. Off by default: a project's copy is
    * its own record. Only org admins reach this writer (owner, Q35-8).
    */
@@ -417,18 +417,18 @@ export interface SaveGagentResult {
   profile: GagentView;
   toast: string;
   /**
-   * Ruling 156: the non-archived projects whose copy of the grants still
+   * Ruling 177: the non-archived projects whose copy of the grants still
    * differs from the template AFTER this save (and after any propagation).
    * Empty on a create, which has no copies yet.
    */
   diverged: TemplateCopyDrift[];
   /** The copies this save rewrote (only with `propagate: true`). */
   propagated: PropagatedCopy[];
-  /** Ruling 467: the copies whose PERSONA this save rewrote (only with
+  /** Ruling 177: the copies whose PERSONA this save rewrote (only with
    *  `propagate: true` on a save that changed the template's persona). */
   personaPropagated: PersonaPropagatedCopy[];
   /**
-   * Ruling 277: the non-archived projects whose copy still runs an OLDER
+   * Ruling 177: the non-archived projects whose copy still runs an OLDER
    * persona or summary than the template. A deployment snapshots both
    * (P13-AP-07) and `propagate` rewrites only the grants, so a template edit
    * that corrects a persona reaches no running agent — and every reply built
@@ -439,7 +439,7 @@ export interface SaveGagentResult {
 }
 
 /**
- * The model to store after one save (ruling 153): the caller's, checked by
+ * The model to store after one save (ruling 264): the caller's, checked by
  * name against the backend; omitted keeps the stored one, `""` clears it. A
  * stored model the NEW backend cannot run is cleared (it would be substituted
  * silently at run time, F21-13's class) and the caller is told which backend
@@ -508,7 +508,7 @@ const TEMPLATE_FIELDS: readonly [keyof AgentDeploymentDefinition, (t: ParsedTemp
   ["persona", (t) => t.description],
 ];
 
-/** Ruling 681: the fields one save of a template changed. */
+/** Ruling 34: the fields one save of a template changed. */
 function templateChanges(
   before: ParsedTemplate,
   after: ParsedTemplate,
@@ -540,7 +540,7 @@ export async function saveGlobalAgentProfile(
     if (!existing || existing.frontmatter.kind !== "specialist") {
       throw AppError.notFound("No such agent profile.");
     }
-    // Ruling 139/153: both defaults are judged BEFORE anything is written.
+    // Ruling 261/264: both defaults are judged BEFORE anything is written.
     const model = nextTemplateModel(backend, existing.frontmatter.model, input);
     const effort = nextTemplateEffort(backend, existing.frontmatter.effort, input);
     // P13-AP-01/AP-02: `desc` (what the operator reads) is now rewritten on
@@ -548,7 +548,7 @@ export async function saveGlobalAgentProfile(
     // flattens a profile's system prompt, and a blank persona keeps the one
     // that is already there.
     const persona = input.persona.trim();
-    // Ruling 467: whether THIS save changed the persona, read before the
+    // Ruling 177: whether THIS save changed the persona, read before the
     // write replaces the body it compares against.
     const personaChanged = persona !== "" && persona !== existing.description;
     const merged: ParsedTemplate = {
@@ -572,7 +572,7 @@ export async function saveGlobalAgentProfile(
       agentProfileFilePath(input.id, ctx.dataRoot),
       serializeAgentProfile(merged),
     );
-    // Ruling 156: the copies are read AFTER the template write, so the list
+    // Ruling 177: the copies are read AFTER the template write, so the list
     // names exactly the projects this save did not reach.
     let diverged = listTemplateResourceDrift(db, input.id, ctx);
     let propagated: PropagatedCopy[] = [];
@@ -585,9 +585,9 @@ export async function saveGlobalAgentProfile(
       );
       diverged = listTemplateResourceDrift(db, input.id, ctx);
     }
-    // Ruling 467 (F40-11): `propagate` on a save that CHANGED the persona also
+    // Ruling 177 (F40-11): `propagate` on a save that CHANGED the persona also
     // rewrites the persona of every copy still running older text (ruling
-    // 277's set). A save that left the persona alone rewrites none, so a
+    // 177's set). A save that left the persona alone rewrites none, so a
     // grants propagation never overwrites a project's own persona edit.
     let personaPropagated: PersonaPropagatedCopy[] = [];
     if (input.propagate && personaChanged) {
@@ -616,7 +616,7 @@ export async function saveGlobalAgentProfile(
         diverged: diverged.map((d) => d.projectSlug),
         propagated: propagated.map((p) => p.projectSlug),
         personaPropagated: personaPropagated.map((p) => p.projectSlug),
-        // Ruling 681: the boards whose agent leaves to this template something
+        // Ruling 34: the boards whose agent leaves to this template something
         // the edit changed, which reaches them the moment it is saved.
         resource: auditedTemplate(input.id, templateChanges(existing, merged), ctx.dataRoot),
       },
@@ -636,7 +636,7 @@ export async function saveGlobalAgentProfile(
         `persona rewritten on ${countLabel(personaPropagated.length, "project copy", "project copies")}: ${personaPropagated.map((p) => p.projectSlug).join(", ")}`,
       );
     }
-    // Ruling 277 (F37-110): the PERSONA and the summary are snapshotted onto
+    // Ruling 177 (F37-110): the PERSONA and the summary are snapshotted onto
     // every deployment too (P13-AP-07), and `propagate` rewrites only the
     // grants — so a template edit that corrects a persona reaches no running
     // agent, and nothing said so at the moment it was made. Live, four
@@ -646,7 +646,7 @@ export async function saveGlobalAgentProfile(
     const textBehind = listTemplateTextDrift(db, input.id, ctx);
     if (textBehind.length > 0) {
       const fields = [...new Set(textBehind.flatMap((d) => d.fields))].join(" and ");
-      // Ruling 467: propagate rewrites a persona, but only on a save that
+      // Ruling 177: propagate rewrites a persona, but only on a save that
       // changed it, and never a summary; each copy stays editable by hand.
       const personaBehind = textBehind.some((d) => d.fields.includes("persona"));
       const summaryBehind = textBehind.some((d) => d.fields.includes("summary"));
@@ -720,7 +720,7 @@ export async function saveGlobalAgentProfile(
     },
     description: input.persona.trim() || input.summary.trim(),
   };
-  // Ruling 153: the template's default effort, only when the caller set one.
+  // Ruling 264: the template's default effort, only when the caller set one.
   if (createEffort) created.frontmatter.effort = createEffort;
   writeFileAtomic(
     agentProfileFilePath(id, ctx.dataRoot),

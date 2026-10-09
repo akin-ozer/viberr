@@ -33,7 +33,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Ruling 127: one resolver for the per-person runtime homes. The failure this
+ * Ruling 137: one resolver for the per-person runtime homes. The failure this
  * guards against is the shared-home era's — two resolvers disagreeing, so the
  * credential the run reads and the transcript the exporter looks for live in
  * different directories.
@@ -146,11 +146,11 @@ describe("listUserRuntimeRoots", () => {
 });
 
 /**
- * Ruling 507: every account connected since the ruling keeps its vendor
+ * Ruling 138: every account connected since the ruling keeps its vendor
  * sign-in in a home of its own inside the backend home, so switching accounts
  * moves no file; what must stay one per person is shared by link.
  */
-describe("per-account homes (ruling 507)", () => {
+describe("per-account homes (ruling 138)", () => {
   it("puts an account's home under the backend home, and a legacy account's IN it", () => {
     const root = ctx.makeTempDir();
     const backendHome = userBackendHome("u_arda", "claude", root);
@@ -234,7 +234,7 @@ describe("per-account homes (ruling 507)", () => {
   });
 });
 
-describe("per-run Codex homes (ruling 181)", () => {
+describe("per-run Codex homes (ruling 145)", () => {
   function sharedCodexHome(): string {
     return ensureUserBackendHome("u_arda", "codex", ctx.makeTempDir());
   }
@@ -347,13 +347,13 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(() => codexRunHomeDir(shared, "../escape")).toThrow();
     expect(() => prepareCodexRunHome(shared, "")).toThrow();
     expect(codexRunHomeDir(shared, "run_ok-1")).toBe(path.join(shared, "runs", "run_ok-1"));
-    // Ruling 507: the compaction's own fork has a path-safe id beside the run's.
+    // Ruling 138: the compaction's own fork has a path-safe id beside the run's.
     expect(codexRunHomeDir(shared, codexCompactionHomeId("run_ok-1"))).toBe(
       path.join(shared, "runs", "run_ok-1-compaction"),
     );
   });
 
-  it("takes the sign-in from the billed account's home and hands it back there (ruling 507)", () => {
+  it("takes the sign-in from the billed account's home and hands it back there (ruling 138)", () => {
     const root = ctx.makeTempDir();
     const shared = ensureUserBackendHome("u_arda", "codex", root);
     writeFileSync(path.join(shared, "auth.json"), '{"tokens":"legacy-account"}');
@@ -377,7 +377,7 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"legacy-account"}');
   });
 
-  it("never hands back a copy the CLI did not refresh over one another run refreshed (ruling 507)", () => {
+  it("never hands back a copy the CLI did not refresh over one another run refreshed (ruling 138)", () => {
     // Two runs of one account: A refreshes (the provider rotates the refresh
     // token) and settles first; B's copy is still the seed when it settles.
     // Comparing B's copy with the account's file would call it "changed" and
@@ -395,7 +395,7 @@ describe("per-run Codex homes (ruling 181)", () => {
     expect(existsSync(b.dir)).toBe(false);
   });
 
-  it("hands nothing back to an account removed while the run was live (ruling 507)", () => {
+  it("hands nothing back to an account removed while the run was live (ruling 138)", () => {
     const root = ctx.makeTempDir();
     const shared = ensureUserBackendHome("u_arda", "codex", root);
     const { home: accountHome } = ensureBackendAccountHome(
@@ -416,10 +416,10 @@ describe("per-run Codex homes (ruling 181)", () => {
 });
 
 /**
- * Ruling 199 (F37-20, live): the Codex CLI writes its rollout THROUGH the run
+ * Ruling 145 (F37-20, live): the Codex CLI writes its rollout THROUGH the run
  * home's `sessions` symlink — so the bytes land in the shared home and survive —
  * but it records the path it SAW, `…/runs/<runId>/sessions/…`, in its own thread
- * index. Ruling 181 removes that directory when the run settles, so every later
+ * index. Ruling 145 removes that directory when the run settles, so every later
  * `thread/resume` answers "no rollout found for thread id", and Viberr reported
  * that to a human as "the agent's stored Codex session no longer exists" while
  * the transcript sat one path segment away.
@@ -428,7 +428,7 @@ describe("per-run Codex homes (ruling 181)", () => {
  * under a per-run home, 135 of those paths gone, and 135 of 135 of their files
  * present at the shared path.
  */
-describe("ruling 199: a settled run's rollout paths are re-pointed at the shared home", () => {
+describe("ruling 145: a settled run's rollout paths are re-pointed at the shared home", () => {
   function seedThread(
     sharedHome: string,
     id: string,

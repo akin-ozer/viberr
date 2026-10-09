@@ -35,12 +35,12 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 export interface TemplateProfile {
   kind: "operator" | "specialist";
   name: string;
-  /** Empty on the operator, which has no role (ruling 518). */
+  /** Empty on the operator, which has no role (ruling 176). */
   role: string;
   icon: string;
   backends: ("codex" | "claude")[];
   model: string;
-  /** Ruling 153 (pass 35): the template's default effort tier, undefined when
+  /** Ruling 264 (pass 35): the template's default effort tier, undefined when
    *  the file names none (the backend default applies at deploy). */
   effort: string | undefined;
   scope: string;
@@ -64,7 +64,7 @@ export function readTemplate(
   )?.parsed;
   if (!parsed) return null;
   const fm = parsed.frontmatter;
-  // Ruling 99: the controller is instance machinery, never a deployable
+  // Ruling 247: the controller is instance machinery, never a deployable
   // template — a deployment row naming it resolves as if no template existed,
   // so the two-kind deployment world stays closed.
   if (fm.kind === "controller") return null;
@@ -180,16 +180,16 @@ export interface DeploymentRuntimeIdentity {
   backends: ("codex" | "claude")[];
 }
 
-/** Ruling 518: the operator's one name, on every surface. */
+/** Ruling 106: the operator's one name, on every surface. */
 const OPERATOR_NAME = "Operator";
 
-/** Ruling 518: the line under the operator's name, whatever its template says.
+/** Ruling 176: the line under the operator's name, whatever its template says.
  *  A store copy seeded before the ruling still reads "System role · one per
  *  active task", and `npm run seed` writes a copy boot never refreshes. */
 export const OPERATOR_SCOPE = "Built in · runs on every task";
 
 /**
- * Ruling 518: the operator is one agent, called Operator, with no role, so no
+ * Ruling 176: the operator is one agent, called Operator, with no role, so no
  * deployment may rename it, give it a role or reword the line that says what
  * it is. The override's copy of these fields is dropped when the deployment
  * resolves; a save no longer writes them, and boot removes the copies a save
@@ -225,7 +225,7 @@ export function deploymentRuntimeIdentity(
 /** A deployment's grant lists: the copy it wrote, else its template's, which a
  *  deployment with no copy resolves live. The one writing of that rule: the
  *  roster shows these lists, a run mounts them, and an audit row of a write to
- *  one of them names the boards that hold it (ruling 681). */
+ *  one of them names the boards that hold it (ruling 34). */
 export function deploymentResources(
   identity: Pick<DeploymentRuntimeIdentity, "def" | "template">,
 ): TemplateProfile["resources"] {
@@ -237,7 +237,7 @@ export function deploymentResources(
   };
 }
 
-/** The name a deployment goes by: the operator's one name (ruling 518), else
+/** The name a deployment goes by: the operator's one name (ruling 106), else
  *  the override's, the template's, then the profile id. */
 export function deploymentName(
   deployment: AgentDeployment,

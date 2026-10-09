@@ -237,7 +237,7 @@ describe("acceptanceNoChangeCheck — the accept-time gate", () => {
     expect(check.refusal).toContain("2 commit");
   });
 
-  it("ruling 550: a files delivery that lands during the probe stops the no-change close", () => {
+  it("ruling 102: a files delivery that lands during the probe stops the no-change close", () => {
     // The probe found no branch for a task with nothing delivered; then its
     // deliverer's files were stamped while the acceptance awaited GitHub. The
     // re-check in the lock must see what the check before the probe would

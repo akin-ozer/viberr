@@ -2,13 +2,13 @@ import { prettySize } from "~/shared/text/byte-size";
 import { Icon } from "~/ui/icon";
 
 /**
- * Ruling 533: a task is filed WITH its input. On a board that delivers
+ * Ruling 76: a task is filed WITH its input. On a board that delivers
  * results, the thing a person hands over (an inventory, a spreadsheet, a
  * screenshot of a portal) is the task, and it used to reach the task only
  * after the operator had already triaged a goal that could not show it.
  *
- * The picker offers any kind of file (ruling 574), and the rules that keep or
- * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 573); a
+ * The picker offers any kind of file (ruling 76), and the rules that keep or
+ * refuse a pick are the composers' own (`~/ui/picked-files`, ruling 319); a
  * filing only words its limits for the dialog.
  */
 

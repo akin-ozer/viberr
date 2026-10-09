@@ -24,13 +24,13 @@ export interface OrgActionSuccess {
   toast?: string;
   tempPassword?: string;
   email?: string;
-  /** `mcp-oauth-start` (ruling 469): the authorization URL the admin opens,
+  /** `mcp-oauth-start` (ruling 192): the authorization URL the admin opens,
    *  and the host of the server that asks. */
   authorizeUrl?: string;
   issuer?: string;
-  /** `board-import-preview` (ruling 653): what importing the file would do. */
+  /** `board-import-preview` (ruling 32): what importing the file would do. */
   boardImport?: BoardImportPreview;
-  /** `board-import` (ruling 653): the new project, and what its repository
+  /** `board-import` (ruling 32): the new project, and what its repository
    *  probe found. */
   slug?: string;
   repoWarning?: string;
@@ -38,7 +38,7 @@ export interface OrgActionSuccess {
 }
 
 /** A refusal names the form field it is about when it is about one
- *  (`appErrorResponse`, ruling 514). */
+ *  (`appErrorResponse`, ruling 288). */
 export type OrgActionData = OrgActionSuccess | { ok: false; error: string; field?: string };
 
 const ORG_SETTINGS_ACTION = "/org/settings";

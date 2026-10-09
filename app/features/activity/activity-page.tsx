@@ -29,7 +29,7 @@ import {
  * per-row task-key deep link (kept by the callers) is the stable pointer to the
  * run/task itself.
  */
-// Ruling 625 (h-mobile #13): 160, not 240. The "one-line" preview set three
+// Ruling 280 (h-mobile #13): 160, not 240. The "one-line" preview set three
 // lines at 1440 and eight on a phone; 160 is two at 1440.
 const ACTIVITY_TEXT_PREVIEW_LIMIT = 160;
 function ActivityText({ text }: { text: string }) {
@@ -78,10 +78,10 @@ function ActivityText({ text }: { text: string }) {
  * Project-wide cross-task activity stream and audit log.
  *
  * Read-only. The stream is a flattened projection over task_events
- * (loader), day-grouped here with the shared date formatter (ruling 4);
+ * (loader), day-grouped here with the shared date formatter (ruling 293);
  * the mock's string-time hacks (`evMins`, `"now"`, DAY_ORDER) are gone.
  * Rich text renders through THE shared renderer with mentions off — the
- * mock's `RichA` variant (ruling 14; never fork app/ui/rich-text.tsx).
+ * mock's `RichA` variant (ruling 297; never fork app/ui/rich-text.tsx).
  * The actor filter does NOT touch the audit panel (mock behavior, kept).
  */
 
@@ -138,7 +138,7 @@ function AuditRow({
             </Link>
           </>
         )}
-        {/* Ruling 681: the row names the document and never quotes it; who may
+        {/* Ruling 34: the row names the document and never quotes it; who may
             open it reads it there. */}
         {entry.docHref && (
           <>
@@ -242,7 +242,7 @@ function AuditLogs({
   /** Everyone who ever wrote an audit row, for the actor filter — the stored
    *  label as the value, a display name as the label (E32-8). */
   actorOptions: AuditActorOption[];
-  /** The task page a row's key links to (ruling 477(c)). */
+  /** The task page a row's key links to (ruling 304). */
   taskHref: (key: string) => string;
   onShowOlder: () => void;
 }) {
@@ -470,7 +470,7 @@ function FeedFilters({
       {/* Pass 30: the app's ONE date-entry control (the task pages' custom
           DatePicker) — the feeds were the only surface still shipping native
           date inputs, a second visual idiom for the same act.
-          Ruling 625: the range wraps as one piece; on a phone "To" went to a
+          Ruling 280: the range wraps as one piece; on a phone "To" went to a
           line of its own and left "to" dangling after From. */}
       <span className="ff-range">
         <span className="ff-datepick">
@@ -551,7 +551,7 @@ export function ActivityPage({
   // timezone-AGNOSTIC UTC forms (absolute days, UTC clocks); an effect then
   // swaps in the viewer-local forms (the app/ui/local-time.tsx pattern).
   const local = useHydrated();
-  // Ruling 477(c) (F40-29): every task key on this page is a LINK to the task.
+  // Ruling 304 (F40-29): every task key on this page is a LINK to the task.
   // They were <button>s calling navigate(), so a key could not be opened in a
   // new tab or copied, and assistive tech announced a button for navigation.
   const taskHref = (key: string) => `/projects/${projectSlug}/tasks/${key}`;
@@ -569,7 +569,7 @@ export function ActivityPage({
     );
 
   const filtered = stream.filter((r) => matchesActorFilter(r, f));
-  // Ruling 652(c): sections by the absolute day, so two days a year apart
+  // Ruling 305: sections by the absolute day, so two days a year apart
   // never merge under one yearless "Mar 30".
   const shown = daySections(filtered, (r) => r.occurredAt, local);
   const total = shown.reduce((n, g) => n + g.rows.length, 0);
@@ -653,7 +653,7 @@ export function ActivityPage({
                       <Icon name={actIcon(r.type)} />
                     </span>
                     <span className="pev-main">
-                      {/* Ruling 148: a row with no actor says nothing about
+                      {/* Ruling 291: a row with no actor says nothing about
                           one. The "−" claimed a fact in a glyph, and it sat in
                           the slot every other row fills with a name, so it read
                           as a remove control. Same treatment as the sibling

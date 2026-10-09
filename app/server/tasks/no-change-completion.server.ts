@@ -17,9 +17,9 @@ import {
 import { toError } from "~/shared/errors";
 
 /**
- * R19-8 (ruling 62) — the whole "Completed — no changes" contract:
+ * R19-8 (ruling 101) — the whole "Completed — no changes" contract:
  * the live proof, the accept-time gate, and the ONE completion event every
- * writer to Done uses. Extends ruling 43 (R17-2) to the shape it was named for.
+ * writer to Done uses. Extends ruling 101 (R17-2) to the shape it was named for.
  *
  * F19-21, live: VC-5 was a verification-only task ("confirm the file exists on
  * main; NO changes are expected"). The operator correctly engaged the reviewer
@@ -84,7 +84,7 @@ export function noChangeCandidate(fm: Pick<TaskFrontmatter, "pr">): boolean {
 }
 
 /**
- * Ruling 550: a task the accept-time probe may prove empty: no pull request,
+ * Ruling 102: a task the accept-time probe may prove empty: no pull request,
  * and a delivery that was never a branch. A task delivered as the files saved
  * on it has no PR because its delivery never was a branch, and the probe found
  * no branch and recorded a delivered result as "completed with no changes".
@@ -307,7 +307,7 @@ export async function acceptanceNoChangeCheck(
   }
   const claimed = noChangeApplies(fm); // fm.noChanges === true && !fm.pr
   // The ordinary PR path pays NOTHING — a task WITH a PR fails the candidate
-  // test, and (ruling 550) so does a task delivered as files.
+  // test, and (ruling 102) so does a task delivered as files.
   if (!claimed && !probeCandidate(fm)) {
     return { applies: false, refusal: null, verification: null, branch: null, autoDetected: false };
   }
@@ -373,7 +373,7 @@ export function assertVerifiedNoChangeStillApplies(
 const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
 /**
- * Ruling 576: the knowledge-base corrections made on a task that still stand
+ * Ruling 101: the knowledge-base corrections made on a task that still stand
  * (nobody has undone them), oldest first. They are work the task did, so a
  * task that made them did not complete "with no changes", whatever its branch
  * says. Read from the correction records the Controller page lists.
@@ -389,8 +389,8 @@ export function standingKbCorrections(
 }
 
 /**
- * Ruling 576: what such a task produced, by id and document, with who made
- * it. Never the passage (ruling 568): the ids and the Controller page carry it.
+ * Ruling 245: what such a task produced, by id and document, with who made
+ * it. Never the passage (ruling 211): the ids and the Controller page carry it.
  */
 export function kbCorrectionsOutcome(corrections: readonly KbCorrection[]): string {
   const byDoc = new Map<string, string[]>();
@@ -422,7 +422,7 @@ export function noChangeCompletionEvent(input: {
   /** R20-2 (F20-6): the completion did NOT claim `noChanges` — the server proved
    *  it at acceptance. Disclosed so the record states who established the fact. */
   autoDetected?: boolean;
-  /** Ruling 576: the task's standing knowledge-base corrections
+  /** Ruling 101: the task's standing knowledge-base corrections
    *  ({@link standingKbCorrections}). With any, nothing went to the repository
    *  but the task did change something, and the record names what. */
   kbCorrections?: readonly KbCorrection[];

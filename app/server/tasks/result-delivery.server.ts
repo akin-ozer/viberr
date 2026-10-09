@@ -1,13 +1,13 @@
 /**
- * Ruling 531: how the operator scopes and delivers a task whose deliverable is
+ * Ruling 128: how the operator scopes and delivers a task whose deliverable is
  * a result rather than a change to the repository, the task a board that
- * delivers results is made of (ruling 530).
+ * delivers results is made of (ruling 268).
  *
  * Nothing told the operator about such a task. Its triage gate asks for "what
  * changes, and where" and reads the repository first, and its delivery rule
  * delivers whatever the deliverer committed. Live on aws-cost-calculator, the
  * CALC-4 pilot estimate was committed under `estimates/CALC-4/` and delivered
- * as PR #4 (its goal, written before ruling 530, said "on the task branch"),
+ * as PR #4 (its goal, written before ruling 268, said "on the task branch"),
  * so accepting the estimate would have merged it into the repository.
  *
  * This is the rules' one home. The operator's turn prompt carries both

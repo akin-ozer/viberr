@@ -147,7 +147,7 @@ export function stageEligible(
 }
 
 /**
- * Ruling 133's refusal, in ONE spelling: the server's dispatch gate and the
+ * Ruling 181's refusal, in ONE spelling: the server's dispatch gate and the
  * task page's Run-an-agent control (U36-10, pass 36) both print it, so the
  * words a person meets before the click are the words the server answers with.
  */

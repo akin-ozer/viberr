@@ -2,7 +2,7 @@ import type { IconName } from "~/ui/icon";
 
 /**
  * THE shared notification kind → icon/color mapping + markdown stripper
- * (contracts §4 / ruling 14 — the mock duplicates both ×3; port once).
+ * (contracts §4 / ruling 297 — the mock duplicates both ×3; port once).
  * The `act-*` classes are the timeline event palette in app.css (ported from
  * the mock's viberr.css).
  */
@@ -29,31 +29,31 @@ export function ntfMeta(n: {
     // supervisor scanning the inbox must NOT get. A non-blocked packet is an
     // open question: `hand` is the glyph this app already uses for "waiting on
     // a human" (the board card's status chip, "Waiting on me" filter, review
-    // queue). Ruling 625: on the blue palette, the one colour "a decision
+    // queue). Ruling 277: on the blue palette, the one colour "a decision
     // waits on you" wears everywhere (the board's chip, the review queue);
     // amber stays an agent's question below.
     return n.ptype === "blocked"
       ? { icon: "alert", cls: "act-blocked" }
       : { icon: "hand", cls: "act-transition" };
   }
-  // Ruling 481(a) (F40-48): an agent's question waits on a human exactly like
+  // Ruling 74 (F40-48): an agent's question waits on a human exactly like
   // an operator's open question, so it wears the same hand on the same
   // palette. Filed as an `approval` it wore the stage-transition arrow.
   if (n.kind === "question") return { icon: "hand", cls: "act-policy" };
   if (n.kind === "approval") return { icon: "arrow", cls: "act-transition" };
   if (n.kind === "mention") return { icon: "message", cls: "act-comment" };
   if (n.kind === "quality") return { icon: "flag", cls: "act-quality" };
-  // Ruling 99: goal-chain progress an inbox kept from before ruling 503 — the
+  // Ruling 273: goal-chain progress an inbox kept from before ruling 273 — the
   // comment palette (the controller is conversational), with the cpu glyph
   // naming the sender.
   if (n.kind === "controller") return { icon: "cpu", cls: "act-comment" };
-  // Ruling 503: an epic's membership or status moved — forward motion, on the
+  // Ruling 272: an epic's membership or status moved — forward motion, on the
   // transition palette, with the stacked glyph the Epics rail item wears.
   if (n.kind === "epic") return { icon: "epic", cls: "act-transition" };
-  // Ruling 131: a released wait is forward motion — the transition palette
+  // Ruling 55: a released wait is forward motion — the transition palette
   // with the lock glyph the board's wait chip wears.
   if (n.kind === "dependency") return { icon: "lock", cls: "act-transition" };
-  // Ruling 140: a seat change is about a person — the user glyph on the
+  // Ruling 50: a seat change is about a person — the user glyph on the
   // transition palette (nothing was violated, nothing is blocked).
   if (n.kind === "ownership") return { icon: "user", cls: "act-transition" };
   return { icon: "alert", cls: "act-policy" }; // "policy" + unknown fallback
@@ -86,9 +86,9 @@ export function ntfPill(n: {
   ptype?: "input" | "blocked" | null;
 }): NtfPill {
   if (n.kind === "approval") return { kind: "info", label: "approval" };
-  // Ruling 481(a): the task page names the same packet "Agent question"
+  // Ruling 74: the task page names the same packet "Agent question"
   // (`AGENT_QUESTION_PACKET_KIND`); the pill is its lowercased form, on the
-  // input (amber) tone ruling 625 keeps for an agent's question.
+  // input (amber) tone ruling 312 keeps for an agent's question.
   if (n.kind === "question") return { kind: "input", label: "agent question" };
   // F19-24: this used to end in `return { kind: "input", label: "completion
   // report" }` as the FALL-THROUGH, so every non-blocked packet was pilled a
@@ -102,7 +102,7 @@ export function ntfPill(n: {
   // from the SAME `packetType` that becomes this row's `ptype` further down
   // that function) — see the note on NtfPill about threading the stored string
   // through instead.
-  // Ruling 625: "decision required" is blue (info), as every other decision
+  // Ruling 277: "decision required" is blue (info), as every other decision
   // that waits on you; amber (input) is an agent's question, above.
   if (n.kind === "packet") {
     return n.ptype === "blocked"

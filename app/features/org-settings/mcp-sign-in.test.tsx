@@ -9,7 +9,7 @@ import { ToastProvider } from "~/ui/toast";
 import { ResourcesPanel } from "./resources-panel";
 
 /**
- * Ruling 469: the Settings MCP editor offers "Sign in" for an HTTP server,
+ * Ruling 192: the Settings MCP editor offers "Sign in" for an HTTP server,
  * shows where the sign-in stands (needs sign-in / signed in until when /
  * expired), sends the admin to the authorization URL through a link (no popup
  * to block), and offers "Sign out". The row says the same without a click.
@@ -113,7 +113,7 @@ function row(container: HTMLElement): HTMLElement {
   return found;
 }
 
-describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
+describe("the MCP editor's OAuth sign-in (ruling 192)", () => {
   it("a server that asks for a sign-in reads 'needs sign-in' on its row and in its editor", () => {
     const { container, getByLabelText, getByRole } = renderPanel(BASE);
     const text = row(container).textContent ?? "";
@@ -206,12 +206,12 @@ describe("the MCP editor's OAuth sign-in (ruling 469)", () => {
     });
     fireEvent.click(getByLabelText("Edit cloudflare-api"));
     expect(queryByRole("group", { name: /OAuth sign-in/ })).toBeNull();
-    // Ruling 486(c): a command signs nothing in, so it asks for no scopes.
+    // Ruling 192: a command signs nothing in, so it asks for no scopes.
     expect(queryByRole("textbox", { name: /Requested scopes/ })).toBeNull();
   });
 });
 
-describe("a pasted credential and an OAuth sign-in in one editor (ruling 514)", () => {
+describe("a pasted credential and an OAuth sign-in in one editor (ruling 192)", () => {
   const CONFLICT = "cloudflare-api is signed in with OAuth. Sign it out first to use a pasted credential instead.";
   /** The row after the sign-in: its connection check listed the tools. */
   const LANDED: McpView = {
@@ -291,7 +291,7 @@ describe("a pasted credential and an OAuth sign-in in one editor (ruling 514)", 
   });
 });
 
-describe("what the sign-in was granted, and what it asks for (ruling 486)", () => {
+describe("what the sign-in was granted, and what it asks for (ruling 192)", () => {
   const signedIn: NonNullable<McpView["oauth"]> = {
     status: "signed_in",
     expiresAt: new Date(Date.now() + 52 * 60_000 + 20_000).toISOString(),

@@ -20,19 +20,19 @@ import { runLogWindowFor } from "~/server/runtimes/run-projection.server";
  *                           is fetched on demand (docs/architecture/decisions.md forbids fat SSE
  *                           objects).
  *   ?window=1               the console window of the run's agent group
- *                           (ruling 457): display lines with their keys,
+ *                           (ruling 300): display lines with their keys,
  *                           the window facts and the representative's live
  *                           facts, as a hard refresh ships the shown group.
  *                           No envelopes.
  *   ?raw=0                  (with `since` or `before`) leaves each line's
- *                           stored envelope out (ruling 457).
+ *                           stored envelope out (ruling 300).
  *   ?before=<seq>&limit=<n> backward page (P13-D-11): the newest `n` lines
  *                           OLDER than `seq`. The task loader now ships a
  *                           bounded window of each agent group's console
  *                           (NFR5), and this is how the console walks back
  *                           through the history it did not ship. `hasMore`,
  *                           `headSeq` and `oldestSeq` are PAGE-LOCAL cursors
- *                           for this stateful console (ruling 107 disowned
+ *                           for this stateful console (ruling 269 disowned
  *                           them as facts about the run): `hasMore: false`
  *                           means this page reached the run's oldest line —
  *                           the console then steps to the previous run id in
@@ -54,7 +54,7 @@ import { runLogWindowFor } from "~/server/runtimes/run-projection.server";
  * lines: [{ seq, occurredAt, raw, display }] } }`.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // Ruling 11 (test audit L14-29): a 401, never `requireUser`'s login
   // redirect. The run console reads this in the background with a plain
   // `fetch`, which follows a redirect without a word: every tail read from a
   // signed-out tab rendered /login on the server, failed to parse as the log,
@@ -100,7 +100,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       { status: 404 },
     );
   }
-  // Ruling 99: a controller conversation turn has no project scope — its log
+  // Ruling 249: a controller conversation turn has no project scope — its log
   // is readable by the conversation's OWNER (and org admins), never by
   // project membership.
   if (run.kind === "controller") {
@@ -118,7 +118,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     await requireProjectMember(request, run.project_slug, "view raw run logs");
   }
 
-  // Ruling 457 (owner decision 2): the whole console window of the run's
+  // Ruling 300 (owner decision 2): the whole console window of the run's
   // agent group, exactly as a hard refresh would ship it. Pages carry no
   // console lines on a revalidation or a client navigation, so the console
   // fills the thread it shows with this one request.
@@ -137,9 +137,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     query = { since };
   }
   // The row read above, not a second read: the live tail calls this once per
-  // streamed line per viewer (ruling 457).
+  // streamed line per viewer (ruling 11).
   const page = runLogPage(db, run, query);
-  // Ruling 457: `raw=0` leaves the stored envelopes out; the console asks for
+  // Ruling 300: `raw=0` leaves the stored envelopes out; the console asks for
   // them only while its raw view is open, and they are most of a line's bytes.
   if (url.searchParams.get("raw") === "0") {
     return Response.json({

@@ -57,7 +57,7 @@ test("profile theme switch persists after reload", async ({ page }) => {
 });
 
 /**
- * Ruling 127: Profile → Agent accounts. Every agent run bills ONE person's
+ * Ruling 137: Profile → Agent accounts. Every agent run bills ONE person's
  * provider account, so a fresh instance must show the signed-in admin exactly
  * where to connect Claude and Codex, and must say honestly that neither is
  * connected yet.
@@ -80,7 +80,7 @@ test("profile shows Agent accounts with both backends unconnected", async ({
   await expect(cards.nth(0).locator(".cred-name")).toHaveText("Claude");
   await expect(cards.nth(1).locator(".cred-name")).toHaveText("Codex");
 
-  // Both read "not connected" — the badge says it in words (ruling 148) — and
+  // Both read "not connected" — the badge says it in words (ruling 323) — and
   // each names the vendor whose account a run would bill. Not connected is a
   // fresh account's resting state, so that sentence is the card's quiet note,
   // no longer a "Not connected." warning box (design pass, 2026-09-08).

@@ -15,7 +15,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { stageName } from "~/shared/workflow/stage-roles";
 
 /**
- * Ruling 178 (pass 36, G36-3): the project-level REQUIRED-reviewer rule.
+ * Ruling 89 (pass 36, G36-3): the project-level REQUIRED-reviewer rule.
  *
  * Required-ness used to be emergent: `requiredReviewers(fm)` (task-file schema)
  * is the set of engaged, non-delivering, verdict-capable engagements, so a
@@ -89,7 +89,7 @@ export interface RequiredReviewerTaskState {
   verdicts: ReviewVerdict[];
   pr: PrRef | null;
   /**
-   * Ruling 385 (F39-12(c)) / ruling 388: when a DELIVERER last saved files —
+   * Ruling 81 (F39-12(c)) / ruling 84: when a DELIVERER last saved files —
    * this task's non-commit delivery. It started life as a timeline scan the
    * callers threaded in; it is frontmatter now, because the same fact has to
    * identify what a verdict was given ON, which no reader can reconstruct from
@@ -102,15 +102,15 @@ export interface RequiredReviewerTaskState {
  * Whether ONE rule's reviewer has approved the task's current work revision:
  * an `approve` verdict from that profile bound to the ACTIVE revision id
  * (revision-bound, like `currentVerdicts`; an approval of an older revision
- * is history, ruling 163).
+ * is history, ruling 90).
  */
 function requiredReviewerApproved(
   rule: Pick<RequiredReviewerView, "profileId">,
   fm: Pick<RequiredReviewerTaskState, "workRevision" | "deliveredAt" | "verdicts">,
 ): boolean {
-  // Ruling 388: the subject, not the revision. Keyed on `workRevision` alone
+  // Ruling 84: the subject, not the revision. Keyed on `workRevision` alone
   // this returned false forever on a task whose deliverable is a saved file —
-  // an approval could not be stored, so the gate ruling 385 added could never
+  // an approval could not be stored, so the gate ruling 81 added could never
   // be satisfied and force-accept was the only way out.
   const subject = reviewSubjectId(fm);
   if (!subject) return false;
@@ -126,7 +126,7 @@ function requiredReviewerApproved(
  * The gate: one refusal sentence per rule whose reviewer has no current
  * approval, in rule order.
  *
- * Ruling 385 (owner, 2026-09-22; F39-12(c)): the gate holds on DELIVERED WORK,
+ * Ruling 81 (owner, 2026-09-22; F39-12(c)): the gate holds on DELIVERED WORK,
  * in whatever form the task delivered it — a work revision, a pull request, or
  * files a run saved. It used to hold on git alone, and ax-clone AX-12 walked
  * straight through: a standalone research task whose deliverable was a 27KB
@@ -135,7 +135,7 @@ function requiredReviewerApproved(
  * Review". Any task whose deliverable is not a commit skipped its project's
  * required reviewer, silently.
  *
- * A task that produced NOTHING is still not held — that is ruling 161's case
+ * A task that produced NOTHING is still not held — that is ruling 234's case
  * (planning work, or a discarded revision), and there really is nothing to
  * judge.
  */
@@ -144,12 +144,12 @@ export function requiredReviewerRefusals(
   fm: RequiredReviewerTaskState & {
     engagements: readonly Pick<Engagement, "profileId" | "delivers">[];
   },
-  /** Ruling 556: who made the review subject ({@link reviewSubjectAuthor}),
+  /** Ruling 89: who made the review subject ({@link reviewSubjectAuthor}),
    *  whose own verdict never binds to it. */
   subjectAuthor: string | null,
 ): string[] {
   if (rules.length === 0) return [];
-  // Ruling 556: a rule whose reviewer is this task's deliverer can never be
+  // Ruling 89: a rule whose reviewer is this task's deliverer can never be
   // met, whatever has been delivered, and "run the review" sends the operator
   // into a loop of delivering runs; nor is such a task one that has "nothing
   // to judge", since its deliverer's work is what no review will judge.
@@ -170,9 +170,9 @@ export function requiredReviewerRefusals(
       ? `revision ${fm.pr.headSha.slice(0, 7)}`
       : fm.pr
         ? `pull request #${fm.pr.number}`
-        : // Ruling 385: no git subject at all — name what there IS to review.
+        : // Ruling 81: no git subject at all — name what there IS to review.
           "the work delivered on this task";
-  // Ruling 556: nor one whose reviewer MADE what is delivered: delivery handed
+  // Ruling 89: nor one whose reviewer MADE what is delivered: delivery handed
   // to another agent that has saved nothing yet leaves the reviewer's own work
   // as the subject, and its review of that can never count either.
   const asAuthor = rules
@@ -202,9 +202,9 @@ export function requiredReviewerRefusals(
 const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
 /**
- * Ruling 556: the refusal when an agent the project requires as a reviewer is
+ * Ruling 89: the refusal when an agent the project requires as a reviewer is
  * asked to deliver a task. Its verdict on its own delivery does not count
- * (ruling 555), so the task could never pass the stage the rule holds it at.
+ * (ruling 87), so the task could never pass the stage the rule holds it at.
  * Live on AWSC-3 the operator made the Estimate Judge the benchmark's
  * deliverer on a board whose rule is "Estimate Judge reviews at Review".
  */
@@ -223,7 +223,7 @@ export function requiredReviewerDeliversRefusal(
 }
 
 /**
- * Ruling 384 (F39-12): the acceptance card's opening clause, DERIVED.
+ * Ruling 99 (F39-12): the acceptance card's opening clause, DERIVED.
  *
  * The card used to open with a fixed sentence — "The review is clean and the
  * work meets the goal" — on every acceptance offer the operator filed. Live on
@@ -242,7 +242,7 @@ export function acceptanceOfferBasis(
   rules: readonly RequiredReviewerView[],
 ): string {
   const rev = activeWorkRevision(fm.workRevision);
-  // Ruling 388: the subject, not the revision, the same one the verdict
+  // Ruling 84: the subject, not the revision, the same one the verdict
   // writer and the gate read. Keyed on the revision alone, a task whose
   // deliverable is a saved file was told "No review verdict is recorded" over
   // the approval its reviewer had just given.

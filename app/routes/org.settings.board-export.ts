@@ -6,7 +6,7 @@ import { exportBoard } from "~/server/org/board-export.server";
 /**
  * GET /org/settings/board-export?project=<slug>
  *
- * Ruling 653: one board as a board file (`<slug>.viberr-board.zip`). Org-admin
+ * Ruling 32: one board as a board file (`<slug>.viberr-board.zip`). Org-admin
  * gated, like the Instance settings tab its Export buttons sit on: the file
  * carries the knowledge bases and agent personas of the board, whichever
  * project it is. It changes nothing, so it records nothing, as the audit

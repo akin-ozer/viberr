@@ -49,7 +49,7 @@ export type AgentRunRow = {
   cached_input_tokens: number;
   output_tokens: number;
   /** F35-1: 1 once a PROVIDER usage figure landed on the row (a Claude result,
-   *  a Codex run's first model call: ruling 541), 0 while the token columns
+   *  a Codex run's first model call: ruling 165(b)), 0 while the token columns
    *  hold the Claude adapter's live estimate or nothing at all. The projection
    *  prints an estimated row as `~n`; Insights leaves it out of its token
    *  totals. */
@@ -77,27 +77,27 @@ export type AgentRunRow = {
    *  without the guaranteed operator re-invoke. Null on every other run. */
   dispatched_by_name: string | null;
   dispatched_by_user_id: string | null;
-  /** Ruling 127: the credential principal — the person whose connected backend
+  /** Ruling 137: the credential principal — the person whose connected backend
    *  account this run bills, and whose runtime home holds its transcript. Task
    *  runs carry the task owner, controller turns the asker. Null only on a run
    *  refused before any credential was looked up (an unowned task). */
   credential_user_id: string | null;
-  /** Ruling 316: 1 when this run was dispatched with its verdict channel
+  /** Ruling 66: 1 when this run was dispatched with its verdict channel
    *  withheld. A reply with no envelope verdict is then an ANSWER, not silence,
    *  and the prose fallback must not manufacture one over it. */
   verdict_withheld: number;
-  /** Ruling 544: what the task's review bound to when this run was dispatched
+  /** Ruling 153: what the task's review bound to when this run was dispatched
    *  (`reviewSubjectId`), or {@link NO_REVIEW_SUBJECT} when nothing on it had
    *  been delivered yet. The run's verdict binds only if the task still has
    *  that subject when it completes. NULL on a run that is not a task agent's
    *  and on rows written before the column existed. */
   review_subject: string | null;
-  /** Ruling 248 (pass 37, F37-77): 1 when the workspace checkout could not be
+  /** Ruling 87 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
    *  not read the work judges nothing — the completion pipeline closes the
    *  verdict path (envelope and prose fallback alike) for these rows. */
   no_checkout: number;
-  /** Ruling 369: the prompt-cache record, folded by the sink from the
+  /** Ruling 172: the prompt-cache record, folded by the sink from the
    *  provider's own usage figures. `cache_write_tokens` is the whole run's
    *  cache writes; the `first_call_*` columns describe the FIRST model call
    *  (NULL until one lands; a run that never reached the provider keeps NULL,
@@ -106,7 +106,7 @@ export type AgentRunRow = {
    *  `cache_ttl_bucket` is which TTL the provider billed the writes under
    *  (`5m`, `1h`, `mixed`; NULL on Codex); `peak_prompt_tokens` is the largest
    *  prompt any call carried and `last_prompt_tokens` the last call's — the
-   *  size a resume replays, which ruling 372 reads; `compactions` counts the
+   *  size a resume replays, which ruling 173 reads; `compactions` counts the
    *  provider's context compactions. */
   cache_write_tokens: number;
   first_call_prompt_tokens: number | null;
@@ -118,18 +118,18 @@ export type AgentRunRow = {
   peak_prompt_tokens: number;
   last_prompt_tokens: number;
   compactions: number;
-  /** Ruling 369: the kind of credential the run billed at start, which decides
-   *  the cache TTL the resume policy assumes (ruling 372). NULL on a refused
+  /** Ruling 172: the kind of credential the run billed at start, which decides
+   *  the cache TTL the resume policy assumes (ruling 173). NULL on a refused
    *  run and on rows written before the column existed. */
   credential_kind: CredentialKind | null;
-  /** Ruling 507: which of the principal's accounts on this backend the run
+  /** Ruling 138: which of the principal's accounts on this backend the run
    *  billed (`user_backend_credentials.id`). NULL on a refused run and on rows
    *  written before the column existed. */
   credential_account_id: string | null;
 };
 
 /**
- * Ruling 559: the raw `result` message a Claude session last reported: the
+ * Ruling 165(c): the raw `result` message a Claude session last reported: the
  * newest one on any other run that carried the session. A completion
  * compaction's result is a line of the run it compacted, so it counts; a run
  * that stopped before its result (a restart) is passed over for the one before
@@ -167,7 +167,7 @@ export interface RunPlace {
 }
 
 /**
- * Ruling 553: the session of the newest other Claude run that worked where
+ * Ruling 159: the session of the newest other Claude run that worked where
  * this one will, under the same account. The CLI restores a resumed session's
  * cost state only when that session was the last one it ran in the working
  * directory, per account home, and every controller conversation shares one
@@ -205,13 +205,13 @@ function isResultLine(raw: string): boolean {
   }
 }
 
-/** Ruling 544: `agent_runs.review_subject` for a run dispatched before anything
+/** Ruling 153: `agent_runs.review_subject` for a run dispatched before anything
  *  on its task was delivered. Never a subject id, which is a revision id or
  *  `files:<deliveredAt>`. */
 export const NO_REVIEW_SUBJECT = "none";
 
 /**
- * Ruling 544: the subject a run was dispatched on, read back off its row. Null
+ * Ruling 153: the subject a run was dispatched on, read back off its row. Null
  * when nothing on the task had been delivered yet; undefined when the row does
  * not say (a run that is not a task agent's, or one written before the column).
  */
@@ -223,7 +223,7 @@ export function reviewSubjectAtDispatch(
   return stored === NO_REVIEW_SUBJECT ? null : stored;
 }
 
-/** Ruling 369: which prompt-cache TTL the provider billed a run's writes under. */
+/** Ruling 172: which prompt-cache TTL the provider billed a run's writes under. */
 export type CacheTtlBucket = "5m" | "1h" | "mixed";
 
 export interface InsertRunInput {
@@ -254,22 +254,22 @@ export interface InsertRunInput {
   totalCostUsd?: number | null;
   interruptedBy?: string | null;
   interruptedReason?: RunInterruptedReason | null;
-  /** Ruling 127: the credential principal (see `AgentRunRow.credential_user_id`).
+  /** Ruling 137: the credential principal (see `AgentRunRow.credential_user_id`).
    *  Optional at THIS layer — the store is a plain writer, also driven by
    *  fixtures that build a row directly, and an omitted principal stores NULL.
    *  The rule "a run that spawned a process has a principal" is enforced one
    *  level up, where `StartRunInput`/`ReserveRunInput` require the field. */
   credentialUserId?: string | null;
-  /** Ruling 316: this run was dispatched with its verdict channel withheld, so
+  /** Ruling 66: this run was dispatched with its verdict channel withheld, so
    *  a reply carrying no envelope verdict is an ANSWER, not silence to repair. */
   verdictWithheld?: boolean;
-  /** Ruling 544: see `AgentRunRow.review_subject`. Omitted stores NULL. */
+  /** Ruling 153: see `AgentRunRow.review_subject`. Omitted stores NULL. */
   reviewSubject?: string | null;
-  /** Ruling 369: the kind of credential the run bills (see
+  /** Ruling 172: the kind of credential the run bills (see
    *  `AgentRunRow.credential_kind`). Omitted (a refused run, a fixture) stores
    *  NULL. */
   credentialKind?: CredentialKind | null;
-  /** Ruling 507: the account the run bills (see
+  /** Ruling 138: the account the run bills (see
    *  `AgentRunRow.credential_account_id`). Omitted stores NULL. */
   credentialAccountId?: string | null;
 }
@@ -376,11 +376,11 @@ export interface RunPatch {
   /** See `AgentRunRow.dispatched_by_name` (pass 32, C02-R11). */
   dispatchedByName?: string | null;
   dispatchedByUserId?: string | null;
-  /** Ruling 248: this run executed with no working tree (see
+  /** Ruling 87: this run executed with no working tree (see
    *  `AgentRunRow.no_checkout`). Patched at completion registration, like
    *  `outcomeKey`, so boot recovery re-reads it from the row after a restart. */
   noCheckout?: 0 | 1;
-  /** Ruling 369: the prompt-cache record (see `AgentRunRow`), patched by the
+  /** Ruling 172: the prompt-cache record (see `AgentRunRow`), patched by the
    *  sink as the run streams. */
   cacheWriteTokens?: number;
   firstCallPromptTokens?: number | null;
@@ -392,7 +392,7 @@ export interface RunPatch {
   peakPromptTokens?: number;
   lastPromptTokens?: number;
   compactions?: number;
-  /** Ruling 369: patchable so the start path can stamp it on a reserved row. */
+  /** Ruling 172: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
 }
 
@@ -469,7 +469,7 @@ export function listRunsForTaskRows(
     .all(projectSlug, taskKey) as AgentRunRow[];
 }
 
-/** Ruling 693: the columns what a task took reads off a run row
+/** Ruling 83: the columns what a task took reads off a run row
  *  (`what-it-took.server.ts`), and no others. */
 export type TookRunRow = Pick<
   AgentRunRow,
@@ -490,7 +490,7 @@ export type TookRunRow = Pick<
 export type ProjectTookRunRow = TookRunRow & Pick<AgentRunRow, "task_key">;
 
 /**
- * Ruling 693: every task run of one project, oldest first, as what a task
+ * Ruling 83: every task run of one project, oldest first, as what a task
  * took reads a run: one statement for a whole board, which the caller groups
  * by task. Controller turns are not task work and are left out.
  */
@@ -510,7 +510,7 @@ export function listTookRowsForProject(
 }
 
 /**
- * Ruling 265 (pass 37, F37-95): every run that is LIVE right now, across every
+ * Ruling 269 (pass 37, F37-95): every run that is LIVE right now, across every
  * project, newest first.
  *
  * `read_run_log` takes a run id and its own description could only say "e.g.
@@ -534,7 +534,7 @@ export function listLiveRunRows(db: DatabaseSync): AgentRunRow[] {
 }
 
 /**
- * Ruling 349: the live run state per task of one project — `running` when any
+ * Ruling 44: the live run state per task of one project — `running` when any
  * run of the task streams, else `queued` when one is parked behind the cap.
  * Controller turns are not task work and are left out. Feeds `withLiveRun`.
  */
@@ -717,7 +717,7 @@ export function runLineStats(db: DatabaseSync, runId: string): RunLineStats {
 }
 
 /**
- * Ruling 457 (TASK-1): `runLineStats` for every run of a task in ONE query,
+ * Ruling 11 (TASK-1): `runLineStats` for every run of a task in ONE query,
  * keyed by run id. A run with no lines has no entry. The task loader used to
  * ask once per run, on every load.
  */
@@ -739,7 +739,7 @@ export function runLineStatsForTask(
   return new Map(rows.map((r) => [r.id, { count: r.c, minSeq: r.lo, maxSeq: r.hi }]));
 }
 
-/** What a window needs to know about a line without shipping it (ruling 457). */
+/** What a window needs to know about a line without shipping it (ruling 300). */
 export interface RunLineSize {
   seq: number;
   /** `raw_json` + `display_json` length: what the line costs a payload. */
@@ -765,7 +765,7 @@ const BUDGETED_TAIL = `(
   ) WHERE cum <= ? OR n <= ?
 ) w`;
 
-/** What a window read is bounded by (ruling 457): the lines and bytes left in
+/** What a window read is bounded by (ruling 11): the lines and bytes left in
  *  the window, and how many of the newest lines to keep regardless. */
 export interface TailBudget {
   lines: number;
@@ -774,7 +774,7 @@ export interface TailBudget {
 }
 
 /**
- * Ruling 457 (TASK-1): the newest lines of a run that fit `budget`, as sizes
+ * Ruling 300 (TASK-1): the newest lines of a run that fit `budget`, as sizes
  * and tags only, oldest-first. The loader bounds a console window it does not
  * ship with this, so a revalidation parses no line and carries none.
  */
@@ -804,7 +804,7 @@ export interface RunLineDisplay {
 }
 
 /**
- * Ruling 457 (TASK-1): the newest lines of a run that fit `budget`, display
+ * Ruling 300 (TASK-1): the newest lines of a run that fit `budget`, display
  * only — a console the reader has not asked to see raw needs no stored
  * envelope, and the envelope is most of a line's bytes. `bytes` still counts
  * both, so the window it bounds is the same window.
@@ -834,7 +834,7 @@ export function listRunLineDisplays(db: DatabaseSync, runId: string, budget: Tai
   }));
 }
 
-/** The stored envelope of one line, or null (ruling 457: the continuity
+/** The stored envelope of one line, or null (ruling 300: the continuity
  *  marker's dead session id is read out of it). */
 export function runLineRaw(db: DatabaseSync, runId: string, seq: number): string | null {
   // SAFETY: `raw_json` is NOT NULL TEXT.
@@ -846,10 +846,10 @@ export function runLineRaw(db: DatabaseSync, runId: string, seq: number): string
 
 /**
  * Does the run hold a line older than `seq`? The console page's `hasMore`
- * (ruling 107's page-local cursor) needs exactly this, and it is one index
+ * (ruling 269's page-local cursor) needs exactly this, and it is one index
  * probe — `runLineStats` answers it too, but counts every line of the run to
  * do so, which the live tail paid once per streamed line per viewer (ruling
- * 457, LIVE-9).
+ * 11, LIVE-9).
  */
 export function hasRunLinesBefore(db: DatabaseSync, runId: string, seq: number): boolean {
   // SAFETY: `EXISTS` always yields 0 or 1.
@@ -917,7 +917,7 @@ const missingPath = z.object({ code: z.literal("ENOENT") });
 /**
  * Append one raw envelope line to the run's canonical .jsonl (creates dirs).
  *
- * Ruling 457 (LIVE-10): the directory is created only when the append finds it
+ * Ruling 11 (LIVE-10): the directory is created only when the append finds it
  * missing. It exists for every line after a run's first, and a recursive
  * mkdir on every streamed line was a syscall chain per line on the shared
  * event loop (on the Docker bind mount, a host round trip).
@@ -942,7 +942,7 @@ export function appendRawLine(
 /**
  * Insert one projected log line as the run's next line and return its seq —
  * `nextSeq`'s numbering (max + 1, or 0), taken inside the INSERT itself so a
- * streamed line costs one statement instead of two (ruling 457, LIVE-10).
+ * streamed line costs one statement instead of two (ruling 11, LIVE-10).
  */
 export function appendRunLine(
   db: DatabaseSync,
@@ -990,19 +990,19 @@ export function insertRunLine(
 }
 
 /**
- * Ruling 242 (pass 37, F37-69): the runs `profileId` made on this task since
+ * Ruling 92 (pass 37, F37-69): the runs `profileId` made on this task since
  * `since`, oldest first, with their states.
  *
- * The signal ruling 204's round counter was reaching for. That ruling made a
+ * The signal ruling 92's round counter was reaching for. That ruling made a
  * reviewer's repeat objection on the same revision count as a fresh round,
  * because in a real deadlock the deliverer commits nothing and no new revision
  * is ever minted (SHOP-9, where the count would otherwise have sat at 1 while
  * the loop ran). What it could not distinguish is a repeat objection with NO
- * rework behind it at all, which is what ruling 237's own escalation question
+ * rework behind it at all, which is what ruling 94's own escalation question
  * provokes: the reviewer is asked to answer, answers, and verdicts again on an
  * untouched revision. A DELIVERER RUN is the thing that separates them.
  *
- * Which of these runs count is `deliveredRoundSince`'s call (ruling 416): every
+ * Which of these runs count is `deliveredRoundSince`'s call (ruling 92): every
  * state does, except a run the PROVIDER refused.
  */
 export function profileRunsSince(

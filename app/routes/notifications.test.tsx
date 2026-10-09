@@ -203,7 +203,7 @@ describe("notifications overlay: row destinations come from href", () => {
   });
 
   /**
-   * Ruling 657: PageOverlay's close goes back where the shell opened it from,
+   * Ruling 12: PageOverlay's close goes back where the shell opened it from,
    * once useDialog's exit ends. The exit can end after the overlay is gone,
    * when a row's page replaced it mid-fade.
    */

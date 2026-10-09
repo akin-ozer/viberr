@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ruling 419(d): no component renders a literal ⌘.
+ * Ruling 321: no component renders a literal ⌘.
  *
  * UI-55 settled that a shortcut hint names the modifier the viewer's keyboard
  * has, and wrote `useModifierHint` for it; P13-D-39 applied it to the comment
@@ -38,7 +38,7 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
-describe("ruling 419(d): shortcut hints name the viewer's own modifier", () => {
+describe("ruling 321: shortcut hints name the viewer's own modifier", () => {
   it("finds no literal ⌘ in any component's code or JSX text", () => {
     const offenders: string[] = [];
     const files = components(APP);

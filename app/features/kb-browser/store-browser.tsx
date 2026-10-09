@@ -167,7 +167,7 @@ function BrowserToolbar({
           <Icon name="github" />
           Add from GitHub
         </button>
-        {/* P13-LV-06 (owner ruling 3): a knowledge base used to be fillable
+        {/* P13-LV-06 (P13 owner decision 3): a knowledge base used to be fillable
             only by upload/import, so writing three facts by hand meant leaving
             the product — while skills had a full in-app editor. */}
         <button type="button" className="btn sm" onClick={onNewDoc}>
@@ -525,7 +525,7 @@ function StoreTree({
 }
 
 /** Nested delete confirm on its OWN native <dialog> (the shared `ConfirmDialog`,
- * ruling 458(f)) — showModal stacking makes it the topmost layer, so its
+ * ruling 297) — showModal stacking makes it the topmost layer, so its
  * Escape/backdrop land there (useDialog), not on the browser card underneath. */
 function DeleteConfirm({
   node,
@@ -571,14 +571,14 @@ interface StoreActionReply {
   /** `store-read-doc`: the document body and whether the read was cut short. */
   text?: string;
   truncated?: boolean;
-  /** `store-read-doc` (ruling 663): the version read. */
+  /** `store-read-doc` (ruling 18(c)): the version read. */
   version?: string;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
   error?: string;
 }
 
-/** Where the browser's every read and write posts (ruling 657: no caller ever
+/** Where the browser's every read and write posts (ruling 12: no caller ever
  *  passed another). */
 const STORE_ACTION = "/org/settings";
 
@@ -747,7 +747,7 @@ function useStoreOps(
 
 /** What a document save posts (`store-write-doc`). `overwrite` rides only a
  *  confirmed replace, and `version` only a document that was opened (ruling
- *  663); each is sent or absent, never blank. */
+ *  18(c)); each is sent or absent, never blank. */
 type DocSaveFields = {
   _csrf: string;
   intent: "store-write-doc";
@@ -913,7 +913,7 @@ function useDocEditor(
     // Only a confirmed replace carries the field: the action reads it as
     // `overwrite === "1"`, so it is sent or absent, never blank.
     if (overwrite) fields.overwrite = "1";
-    // Ruling 663: an opened document is saved against the version it read.
+    // Ruling 18(c): an opened document is saved against the version it read.
     if (doc.version) fields.version = doc.version;
     posted.current = { draft: doc, opening: opened.current };
     saveFetcher.submit(fields, { method: "post", action: STORE_ACTION });
@@ -933,7 +933,7 @@ function useDocEditor(
 }
 
 /**
- * The tree's own state (ruling 700(e), split out of `StoreBrowser`, which calls
+ * The tree's own state (ruling 13(b), split out of `StoreBrowser`, which calls
  * it before any other hook, as these states always stood): which folders are
  * open (the top-level ones at first), where the inline new-folder row stands,
  * the folder every toolbar action writes into, and the entry whose delete is
@@ -982,7 +982,7 @@ function useStoreTree(tree: StoreNode[]) {
 }
 
 /**
- * The GitHub import's answer (ruling 700(e), split out of `StoreBrowser`, which
+ * The GitHub import's answer (ruling 13(b), split out of `StoreBrowser`, which
  * calls it where its effect always ran): a success toasts, opens the folder the
  * snapshot landed in and closes the import bar; a failure lands in the bar's
  * error line.
@@ -1016,7 +1016,7 @@ function useGhImportFeedback(
 }
 
 /** Nested "this file already exists" confirm — its own native <dialog> (the
- *  shared `ConfirmDialog`, ruling 458(f)), so it stacks over the browser card
+ *  shared `ConfirmDialog`, ruling 297), so it stacks over the browser card
  *  exactly like the delete confirm (UI-59). */
 function ReplaceConfirm({
   path,
@@ -1047,7 +1047,7 @@ function ReplaceConfirm({
 }
 
 /**
- * Ruling 614: the open document is one card. The head names the file and, for
+ * Ruling 317: the open document is one card. The head names the file and, for
  * markdown, carries the Preview / Raw switch; the body is the rendered document
  * or its raw text; the foot says what state the text is in, beside Close (or
  * Cancel) and Save. It replaces a path line over a "Document contents" label, a
@@ -1078,7 +1078,7 @@ function DocumentCard({
    *  from a draft opened since (`useDocEditor`). */
   saving: boolean;
   nameRef: RefObject<HTMLInputElement | null>;
-  /** Ruling 147: a refused save of a nameless draft marks the name field. */
+  /** Ruling 288: a refused save of a nameless draft marks the name field. */
   nameInvalid: boolean;
   /** The refusal counter the alert is keyed on, and its one shake (451(g)). */
   refusal: { count: number; shake: RefusalShake };
@@ -1086,7 +1086,7 @@ function DocumentCard({
   onCancel: () => void;
   onSave: () => void;
 }) {
-  // Ruling 700(e): what the card reads off the draft is `documentCardState`'s,
+  // Ruling 13(b): what the card reads off the draft is `documentCardState`'s,
   // and its body, notes and foot are regions (`store-browser-regions.tsx`).
   const { unread, changed, fileName, markdown, view, meta } = documentCardState(doc, sizeBytes);
 
@@ -1117,7 +1117,7 @@ function DocumentCard({
         )}
       </div>
       {!doc.existing && (
-        /* Ruling 149: the name is a typing control in the sheet's own field
+        /* Ruling 278: the name is a typing control in the sheet's own field
            chrome, with its visible label, laid out as the card's first row. */
         <div className="field doc-name">
           <label className="flabel" htmlFor="fm-doc-name">
@@ -1155,7 +1155,7 @@ function DocumentCard({
         saving={saving}
         onEdit={onEdit}
       />
-      {/* One box, never two (`DocumentNotes`, ruling 147). A read that failed
+      {/* One box, never two (`DocumentNotes`, ruling 288). A read that failed
           says so in the body instead. */}
       {(nameInvalid || (doc.err && !unread)) && (
         <DocumentNotes nameInvalid={nameInvalid} err={doc.err} refusal={refusal} />
@@ -1184,13 +1184,13 @@ export function StoreBrowser({
 }: {
   title: string;
   subMono: string;
-  /** Ruling 480: a node, so a "when" in it renders hydration-safe
+  /** Ruling 293: a node, so a "when" in it renders hydration-safe
    *  (`RelativeStamp`) rather than as a clock-read string. */
   metaTail?: ReactNode;
   tree: StoreNode[];
   resource: StoreBrowserResource;
   onClose: () => void;
-  /** Ruling 483: a document to open on arrival (a store-relative path), for
+  /** Ruling 267: a document to open on arrival (a store-relative path), for
    *  the link a knowledge-base proposal carries to the document it stands in. */
   initialDoc?: string;
 }) {
@@ -1206,16 +1206,16 @@ export function StoreBrowser({
     push(toast);
     expand(dir);
   });
-  // Ruling 147: Save document stays enabled on a nameless draft and refuses the
+  // Ruling 288: Save document stays enabled on a nameless draft and refuses the
   // click with the sentence `writeStoreDoc` would have thrown. Counted, so a
   // repeated press inserts a fresh alert; cleared wherever a draft opens or
   // closes, so a new document is never accused before it is submitted.
   const [refusedDoc, setRefusedDoc] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const docShake = useRefusalShake(refusedDoc);
   const docNameRef = useRef<HTMLInputElement>(null);
 
-  // Ruling 483: arriving from a proposal's "Open document", the document it
+  // Ruling 267: arriving from a proposal's "Open document", the document it
   // stands in opens once, the way a click on its row would open it. The ref
   // makes it once: a later render must not reopen a document a person closed.
   const openedInitial = useRef(false);
@@ -1272,14 +1272,14 @@ export function StoreBrowser({
       path: JSON.stringify([...path, node.name]),
     });
     // No setConfirm(null): the confirm plays its exit, then its onCancel
-    // clears it (ruling 459).
+    // clears it (ruling 287).
   };
 
   const nFiles = countKbFiles(nodes);
   const nDirs = countKbDirs(nodes);
   const folders = folderPaths(nodes);
   const { doc } = editor;
-  /** Ruling 147: set only after a refused save, and only while the draft is
+  /** Ruling 288: set only after a refused save, and only while the draft is
    *  still nameless, so typing clears the mark. */
   const docNameInvalid =
     refusedDoc > 0 && doc !== null && !doc.existing && !doc.name.trim();

@@ -68,7 +68,7 @@ export interface HomeProjectCard {
   key: string;
   repo: string | null;
   desc: string;
-  /** The project's OWN stages (ruling 15) — StageMeter iterates these. */
+  /** The project's OWN stages (ruling 47) — StageMeter iterates these. */
   stages: { id: string; name: string; color: string }[];
   /** stageId → task count. */
   dist: Record<string, number>;
@@ -93,7 +93,7 @@ export interface HomeProjectCard {
   accent: string;
   /**
    * U33-2: the LAST recorded repository probe for this project, or null when
-   * nothing has looked at the repository it points at now (ruling 517). Read
+   * nothing has looked at the repository it points at now (ruling 223). Read
    * from `project_github_health` in one query for the whole list — the card
    * says a repository is unreachable WITHOUT this page calling GitHub, which is
    * the constraint the table exists for.
@@ -367,12 +367,12 @@ export function getHomeOrgSummary(
 }
 
 /**
- * Ruling 532: one step of Home's setup checklist, with the one fact its row
+ * Ruling 322: one step of Home's setup checklist, with the one fact its row
  * shows. `todo` is open, `done` closed. GitHub is `failed` when every
  * connection's token failed its last check, and the row sends an admin to that
  * connection's Update token. Claude or Codex is `stale` when the viewer's own
  * account stopped working (a wiped runtime volume), and the row asks them to
- * sign in again. Ruling 667: the first project waits on nothing, because a
+ * sign in again. Ruling 322: the first project waits on nothing, because a
  * board that delivers results needs no repository.
  */
 export type HomeSetupStep =
@@ -388,15 +388,15 @@ export type HomeSetupStep =
 const SETUP_BACKENDS: readonly RealBackend[] = ["claude", "codex"];
 
 /**
- * Ruling 532: what `viewer` still has to do before Viberr can work for them,
+ * Ruling 322: what `viewer` still has to do before Viberr can work for them,
  * in the order Home's checklist lists it. An org admin gets the instance's
  * steps (a GitHub connection, an account other than the bootstrap admin), and
  * everyone gets the two that are their own: a Claude or Codex account, which
- * the runs on their tasks and their controller turns bill (ruling 127), and a
+ * the runs on their tasks and their controller turns bill (ruling 137), and a
  * first project among those they can see (`projects`). Null once every step is
  * done, which is when the checklist leaves Home.
  *
- * Ruling 667: GitHub is owed only where it is used. An instance with a project
+ * Ruling 322: GitHub is owed only where it is used. An instance with a project
  * and no connection runs boards that deliver results, so the step is not
  * listed there; a connection whose token failed is still listed, and the New
  * project dialog says what a software board needs.

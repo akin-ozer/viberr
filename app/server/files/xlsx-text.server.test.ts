@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { xlsxToText } from "./xlsx-text.server";
 
 /**
- * Ruling 533: an inventory is a spreadsheet more often than anything else, and
- * viberr stores only what it can read back (ruling 379). The fixture is a real
+ * Ruling 117: an inventory is a spreadsheet more often than anything else, and
+ * viberr stores only what it can read back (ruling 76). The fixture is a real
  * workbook written by openpyxl (shared strings, numbers, a boolean, an empty
  * cell mid-row, a gap before a far cell, a second sheet), shaped like the
  * RVTools export people hand an AWS estimate board.
@@ -110,7 +110,7 @@ function oneSheet(sheetXml: string): Buffer {
 }
 
 /**
- * Ruling 533's reader takes bytes a person or an agent chose, and the
+ * Ruling 117's reader takes bytes a person or an agent chose, and the
  * coordinators read attachments at triage, so a hostile workbook reaches it by
  * being filed. Each case once crashed or stalled the server process.
  */

@@ -23,10 +23,10 @@ import type { TimelineFilterId } from "./timeline";
 import { isEventAnchor, shownBy } from "./timeline-derive";
 
 /**
- * The timeline's post and its tab (ruling 700(e), the split of `timeline.tsx`
+ * The timeline's post and its tab (ruling 13(b), the split of `timeline.tsx`
  * along the task page's recipe): the comment the composer sends, with its
  * fetcher, toast, file tray and the "Ask operator" prefill, and the filter tab
- * with the step a link to an event takes (ruling 497). `Timeline` calls them
+ * with the step a link to an event takes (ruling 302). `Timeline` calls them
  * where its hooks always ran, so the comment fetcher keeps its key, and draws
  * what they return. No component lives here, so the module is not a Fast Refresh
  * boundary, like `task-detail-actions.tsx`.
@@ -90,12 +90,12 @@ export function useCommentPost({
 
   // Comment result: success clears the draft + toasts (server copy);
   // failure keeps the draft and shows the inline error below.
-  // Ruling 573: the files going with the comment, and the first refused.
+  // Ruling 76: the files going with the comment, and the first refused.
   // One state, so an add builds on the picks before it through the updater.
   const [tray, setTray] = useState<PickedFiles>({ files: [], problem: null });
   const { files, problem: fileProblem } = tray;
   // Stable, so the memoised paperclip and tray skip a revalidation's render
-  // (ruling 457).
+  // (ruling 11).
   const addFiles = useCallback((incoming: File[]) => {
     setTray((cur) => addPickedFiles(cur.files, incoming, MESSAGE_BATCH));
   }, []);
@@ -108,7 +108,7 @@ export function useCommentPost({
     const sentFiles = pendingFiles.current;
     pendingFiles.current = [];
     if (data.ok) {
-      // Ruling 573: the files that went out leave the tray; a failure keeps them.
+      // Ruling 76: the files that went out leave the tray; a failure keeps them.
       setTray((cur) => ({
         files: cur.files.filter((file) => !sentFiles.includes(file)),
         problem: null,
@@ -131,7 +131,7 @@ export function useCommentPost({
 
   const send = () => {
     const text = draftRef.current.trim();
-    // Ruling 573: files alone are a comment.
+    // Ruling 76: files alone are a comment.
     if ((!text && files.length === 0) || busy) return;
     const fd = new FormData();
     fd.set("_csrf", csrf);
@@ -141,7 +141,7 @@ export function useCommentPost({
     pendingFiles.current = files;
     fetcher.submit(fd, files.length > 0 ? { method: "post", encType: "multipart/form-data" } : { method: "post" });
   };
-  // Ruling 457 (CS-7): the composer is memoised, so what it is handed holds
+  // Ruling 11 (CS-7): the composer is memoised, so what it is handed holds
   // still while nothing it draws changed: a revalidation or a fetcher state
   // re-renders this timeline, not the editor. ⌘↵ reaches the latest `send`
   // through a ref kept current in an effect.
@@ -175,10 +175,10 @@ export function useCommentPost({
 export interface TimelineTab {
   f: TimelineFilterId;
   setF: Dispatch<SetStateAction<TimelineFilterId>>;
-  /** Ruling 497: the anchor the link that opened the page names, while it
+  /** Ruling 302: the anchor the link that opened the page names, while it
    *  marks its event. */
   targeted: string | null;
-  /** Ruling 523: the event the latest link named, still focusable after the
+  /** Ruling 302(c): the event the latest link named, still focusable after the
    *  person's next press ends its mark. */
   arrived: string | null;
 }
@@ -186,7 +186,7 @@ export interface TimelineTab {
 /**
  * The filter tab the timeline shows, and the event a link lands on.
  *
- * Ruling 497: a notification about an event opens it here. A filter tab that
+ * Ruling 302: a notification about an event opens it here. A filter tab that
  * hides it opens to All, older events load until it is among them, and it
  * comes into view, marked (`useHashTarget`). Each step happens once for the
  * navigation that named the event, so the person can switch tabs after.
@@ -209,7 +209,7 @@ export function useTimelineTab({
   const targetTime = useHydrated() ? timelineEventTime(hashTarget(location.hash)) : null;
   const target = targetTime ? (rows.find((e) => e.occurredAt === targetTime) ?? null) : null;
   const targeted = useHashTarget(isEventAnchor, target !== null && shownBy(f, target));
-  // Ruling 523: the event the latest link named, still focusable after the
+  // Ruling 302(c): the event the latest link named, still focusable after the
   // person's next press ends its mark.
   const [arrived, setArrived] = useState<string | null>(null);
   if (targeted !== null && targeted !== arrived) setArrived(targeted);

@@ -6,17 +6,17 @@ import { z } from "zod";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 
 /**
- * What this host can run (ruling 182, narrowed by ruling 185).
+ * What this host can run (ruling 40, narrowed by ruling 144).
  *
  * G36-2 asked what an agent's shell would actually find here, so the versions
  * of the tools a run reaches for ride `healthSnapshot` — `/resources/health`
  * and the controller's `instance_health` both read them, and a controller can
  * answer "can this deployment build a Go service?" without guessing.
  *
- * The sandbox half is GONE with the sandbox: ruling 185 (owner, 2026-09-12)
+ * The sandbox half is GONE with the sandbox: ruling 144 (owner, 2026-09-12)
  * removed Viberr's use of the Codex CLI's OS sandbox, so there is no longer a
  * confinement to probe, nothing to refuse a run over, and no second question
- * about child processes (ruling 184). What remains is the honest inventory.
+ * about child processes (ruling 144). What remains is the honest inventory.
  *
  * Memoized per process: versions cannot change while the process lives, and
  * each probe spawns a binary. The unit suite never runs them — `setup-env.ts`
@@ -33,7 +33,7 @@ export type Toolchain = {
   git: string | null;
   python3: string | null;
   go: string | null;
-  /** Ruling 191: the four a run reaches for before anything else and cannot
+  /** Ruling 148: the four a run reaches for before anything else and cannot
    *  install when they are missing. `make` and `docker` drive nearly every
    *  "one command to bring it up" contract; `pnpm` and `yarn` decide whether a
    *  workspace's own lockfile can be honoured; `curl` is how a health check
@@ -250,7 +250,7 @@ export function cachedToolchain(): Toolchain {
 /**
  * F39-1 (pass 39): whether ONE named command exists on this host.
  *
- * {@link Toolchain} is a fixed struct, and ruling 191 widened the LIST without
+ * {@link Toolchain} is a fixed struct, and ruling 148 widened the LIST without
  * changing that: it still answers only for the ten names it was compiled with,
  * all of them npm-shaped. A project whose gates are `gofmt`, `go vet`,
  * `golangci-lint` and `go test` can therefore verify three of its four gates
@@ -370,7 +370,7 @@ const SHELL_TOOLS: ReadonlyArray<readonly [keyof Toolchain, string]> = [
 const NPM_REACHABLE: ReadonlySet<keyof Toolchain> = new Set(["pnpm", "yarn"]);
 
 /**
- * Ruling 191: what a run's shell will and will not find, as a paragraph for
+ * Ruling 148: what a run's shell will and will not find, as a paragraph for
  * the agent, the operator and the controller alike.
  *
  * Until this existed the reading was reachable only through the controller's
@@ -388,7 +388,7 @@ const NPM_REACHABLE: ReadonlySet<keyof Toolchain> = new Set(["pnpm", "yarn"]);
  * to provide, so the two cases must not read alike.
  */
 /**
- * Ruling 275 (pass 37, F37-108): the tools a piece of PROSE plans around that
+ * Ruling 204 (pass 37, F37-108): the tools a piece of PROSE plans around that
  * this host does not have.
  *
  * Word-boundary, case-insensitive, over the labels the probe actually measured
@@ -411,7 +411,7 @@ function absentToolsNamedIn(tc: Toolchain, prose: string): string[] {
 export function shellInventoryPrompt(
   tc: Toolchain,
   /**
-   * Ruling 275: the run's OWN role description, when there is one. Ruling 191
+   * Ruling 204: the run's OWN role description, when there is one. Ruling 148
    * put this measurement into every prompt, and it says what the host lacks —
    * it did not say "and the role description above plans around three of
    * them". A contradiction inside one prompt is resolved by the model, and the
@@ -472,7 +472,7 @@ export function shellInventoryPrompt(
   } else {
     lines.push("", "Every tool this probe knows about is installed.");
   }
-  // Ruling 275: named specifically, because "NOT installed: docker, make" a
+  // Ruling 204: named specifically, because "NOT installed: docker, make" a
   // paragraph below a role description that says the stack is yours is a
   // contradiction the reader has to notice on its own.
   const conflicts = absentToolsNamedIn(tc, persona);
@@ -487,7 +487,7 @@ export function shellInventoryPrompt(
         "following the description into a command that exits 127.",
     );
   }
-  // Ruling 636: where a run's scratch goes, said where every prompt describes
+  // Ruling 148: where a run's scratch goes, said where every prompt describes
   // the shell (the operator's and the controller's describe their agents').
   lines.push(
     "",

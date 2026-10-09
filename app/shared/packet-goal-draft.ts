@@ -1,7 +1,7 @@
 /**
  * The goal editor's prefill for a decided `edit_goal` option — the ONE
  * composition, shared by the confirm response (the same page session) and the
- * reload path that rebuilds it from the decided packet (ruling 138, pass 34
+ * reload path that rebuilds it from the decided packet (ruling 63, pass 34
  * F34-13 / U34-10). Client-safe.
  *
  * An option may carry `goalDraft`, the proposed goal text itself, which both

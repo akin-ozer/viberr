@@ -119,13 +119,13 @@ describe("applyCommentGuardrails + commentOutcomeMessage (B-FD8)", () => {
 });
 
 /**
- * Ruling 383 (F39-11) — live on ax-clone AX-12: the deliverer returned a
+ * Ruling 20 (F39-11) — live on ax-clone AX-12: the deliverer returned a
  * 27,597-character upstream fidelity report whose `summary` carried 146 literal
  * `\n` sequences and not one real newline. Viberr stored what it was handed, so
  * canonical `task.md` took 27KB of markdown as a single line with `\n` showing
  * between every heading — and that file is what the next agent re-anchors on.
  */
-describe("repairDoubledNewlines (ruling 383)", () => {
+describe("repairDoubledNewlines (ruling 20)", () => {
   const long = (body: string) => body + "x".repeat(220);
 
   it("repairs a long body whose breaks are all escaped", () => {

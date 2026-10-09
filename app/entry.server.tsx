@@ -43,7 +43,7 @@ export const handleError: HandleErrorFunction = (error, { request }) => {
   // logger merges it automatically; otherwise seed one from the request so the
   // record is never anonymous. `correlationFor` gives one Request one
   // correlation, so the seeded id is the one the response echoes (ruling
-  // 458(d)).
+  // 43).
   const bound = currentCorrelation();
   const log = bound ? logger : logger.child(correlationFor(request));
   log.error("request handler error", {
@@ -52,7 +52,7 @@ export const handleError: HandleErrorFunction = (error, { request }) => {
 };
 
 /**
- * Ruling 458(d): every `.data` response carries its request's id. Route
+ * Ruling 43: every `.data` response carries its request's id. Route
  * middleware already stamped each matched one with the same id, which is kept;
  * this covers the ones React Router answers without running it — an unmatched
  * URL, a 405, a mutation refused as a potential CSRF attack. It runs after the
@@ -76,7 +76,7 @@ export default function handleRequest(
   // middleware already bound one; mints one when it did not, so this entry
   // point is never uncorrelated on its own.
   const correlation = currentCorrelation() ?? correlationFor(request);
-  // Ruling 458(d): the document carries its id. Route middleware stamps every
+  // Ruling 43: the document carries its id. Route middleware stamps every
   // response it produces; this covers the documents React Router renders
   // without running it (an unmatched URL's 404, a 405).
   responseHeaders.set(REQUEST_ID_HEADER, correlation.requestId);

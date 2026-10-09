@@ -3,7 +3,7 @@ import { timelineEventTime } from "~/shared/page-anchors";
 import type { TimelineFilterId } from "./timeline";
 
 /**
- * What the timeline reads off its rows and its tab (ruling 700(e), the split
+ * What the timeline reads off its rows and its tab (ruling 13(b), the split
  * of `timeline.tsx` along the task page's recipe): which events a filter tab
  * shows, whether a hash names an event, and what the list says when it shows
  * none. Pure functions, no React; `Timeline` and its hooks in
@@ -15,7 +15,7 @@ export function shownBy(f: TimelineFilterId, ev: Pick<TimelineEventRender, "type
   return f === "all" ? true : f === "comment" ? ev.type === "comment" : ev.type !== "comment";
 }
 
-/** Ruling 497: a notification about an event links to it (`#event-<time>`). */
+/** Ruling 75: a notification about an event links to it (`#event-<time>`). */
 export function isEventAnchor(id: string): boolean {
   return timelineEventTime(id) !== null;
 }
@@ -31,7 +31,7 @@ export function emptyTimelineText(
     ? runLive
       ? // U33-1: the loop HAS started — the Live-run strip on this
         //  same page is showing its progress. Saying "hasn't started"
-        //  here contradicted it, and contradicted ruling 87(b)'s whole
+        //  here contradicted it, and contradicted ruling 152's whole
         //  point (a healthy pre-run phase must be distinguishable from
         //  a wedged one). An empty timeline under a live run is the
         //  normal first seconds: the run has not reported yet.

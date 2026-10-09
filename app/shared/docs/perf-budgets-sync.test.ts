@@ -5,7 +5,7 @@ import { escapeRegExp } from "~/shared/text/regexp";
 import { PERF_BUDGETS } from "../../../test-support/perf-budgets";
 
 /**
- * Ruling 457: the performance ratchet stays honest. A ceiling no test measures
+ * Ruling 11: the performance ratchet stays honest. A ceiling no test measures
  * would pass forever, so every budget id must be passed to `expectWithinBudget`
  * by some `*.perf.test.ts(x)` under app/, every such file must assert at least
  * one budget, and every bundle budget must name a route the build has.
@@ -17,7 +17,7 @@ const perfTests = readdirSync(path.join(root, "app"), { recursive: true })
   .filter((f) => /\.perf\.test\.tsx?$/.test(f))
   .map((f) => ({ file: f, text: readFileSync(path.join(root, "app", f), "utf8") }));
 
-describe("perf budgets are measured (ruling 457)", () => {
+describe("perf budgets are measured (ruling 11)", () => {
   it("every budget id is asserted by a *.perf.test file", () => {
     // Inside the call's own parentheses (a ternary may pick the id), so an id
     // quoted in a comment or a stray string does not count as measured.

@@ -20,7 +20,7 @@ test("org settings tabs render", async ({ page }) => {
   await page.goto("/org/settings?tab=resources");
   await expect(panel("Agent resources")).toBeVisible();
 
-  // Ruling 653: the board file's door, with the seeded boards listed for export.
+  // Ruling 32: the board file's door, with the seeded boards listed for export.
   await page.goto("/org/settings?tab=boards");
   await expect(panel("Import & export")).toBeVisible();
   await expect(panel("Import & export").getByRole("button", { name: "Export Viberr Core" })).toBeVisible();
@@ -48,13 +48,13 @@ test("settings headings name their own scope (R15-13)", async ({ page }) => {
 });
 
 /**
- * Ruling 145. The instance surfaces behind Home's Settings tiles rendered with
+ * Ruling 294. The instance surfaces behind Home's Settings tiles rendered with
  * no app header at all: no brand, no search, no bell, no account menu, and an
  * in-page back button doing the navigating. Checked live on both of them, since
  * the whole point is that a person walking from a board into settings finds the
  * same header there.
  */
-test("the instance pages sit under the app header (ruling 145)", async ({ page }) => {
+test("the instance pages sit under the app header (ruling 294)", async ({ page }) => {
   for (const [path, crumb] of [
     ["/org/settings", "Instance settings"],
     ["/insights", "Insights"],

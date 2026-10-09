@@ -2,7 +2,7 @@ import { Icon } from "./icon";
 import { Markdown } from "./markdown";
 
 /**
- * Ruling 614: a markdown file opens rendered, and its raw text is one switch
+ * Ruling 317: a markdown file opens rendered, and its raw text is one switch
  * away at the top of the document.
  *
  * The two places a person opens a `.md` file to read it share these pieces:
@@ -57,7 +57,7 @@ export function DocViewToggle({
  * escaped, so a document's bytes never execute) in the document type
  * (`.md-doc`). Both surfaces sit under a level-2 heading (the browser's dialog
  * title, the task page's sections), so the document's top heading renders at
- * level 3 and its deeper ones follow (ruling 478(f)); the type is set by that
+ * level 3 and its deeper ones follow (ruling 313); the type is set by that
  * rendered level.
  */
 export function MarkdownDoc({

@@ -2,7 +2,7 @@
 // (Fast Refresh boundary, as app/ui/initials.ts is for avatar.tsx).
 
 /**
- * Ruling 121: the surface a message was sent from, as a short word — the
+ * Ruling 249: the surface a message was sent from, as a short word — the
  * workspace view's name, a task key, or "Home". The full path stays in the
  * title attribute.
  */

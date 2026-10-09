@@ -1,5 +1,5 @@
 /**
- * What the operator writes for people (ruling 656): its comments on a task,
+ * What the operator writes for people (ruling 13(a)): its comments on a task,
  * its recommendations, and the decision packets it opens and resolves.
  */
 
@@ -140,7 +140,7 @@ export async function writeOperatorComment(
   // own — the comment discloses the non-delivery instead of dropping it in
   // silence. Applied after the guardrails so it rides the text actually written.
   const text2 = withAmbiguityDisclosure(db, guardrail.text ?? text);
-  // Ruling 214 (F37-34): the same principle, one audience over. The operator's
+  // Ruling 133 (F37-34): the same principle, one audience over. The operator's
   // own doctrine used to tell it to put the completeness question to a reviewer
   // "in ONE comment", and live on SHOP-10 it did — "@Code Reviewer, name
   // everything you would still block on" — to an audience that does not exist.
@@ -151,9 +151,9 @@ export async function writeOperatorComment(
   // were waiting behind. The doctrine now names `run_agent`. This is the
   // backstop for when it tags an agent anyway: the record says plainly that
   // nothing was sent, instead of the tag going nowhere in silence.
-  // Ruling 252: the sentence itself now lives beside the resolver, because the
+  // Ruling 70: the sentence itself now lives beside the resolver, because the
   // controller and a mid-run agent needed the same one.
-  // Ruling 262: all of them, in one sentence, from the disclosure resolver.
+  // Ruling 70: all of them, in one sentence, from the disclosure resolver.
   const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
   const note = unreachedAgentNote(
     unreachedAgents(ctx, projectSlug, taskKey, text2),
@@ -201,7 +201,7 @@ export async function writeOperatorComment(
   // B-FD8b: scan the caller's ORIGINAL text, not the stored post-trim form — a
   // handle inside a fenced block that evidence-separation cut away must still
   // notify (the record lost the line; the ping must not be lost with it).
-  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  // Ruling 20: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, projectSlug, taskKey),
@@ -275,11 +275,11 @@ export interface RecommendationInput {
   delivers?: boolean;
   toStageId?: string;
   label: string;
-  /** accept_completion — ruling 137: the work revision the offer binds to. */
+  /** accept_completion — ruling 99: the work revision the offer binds to. */
   forHeadSha?: string;
-  /** run_agent — ruling 421: the run puts the completeness question. */
+  /** run_agent — ruling 93: the run puts the completeness question. */
   completeness?: boolean;
-  /** run_agent — ruling 583: the run records no verdict. */
+  /** run_agent — ruling 124: the run records no verdict. */
   noVerdict?: boolean;
 }
 
@@ -314,7 +314,7 @@ export async function addRecommendation(
   );
   let wasNew = false;
   const reasoningAt = new Date().toISOString();
-  // Ruling 644: built once, so the recipients are stamped on this event.
+  // Ruling 72: built once, so the recipients are stamped on this event.
   const reasoningComment: TaskFileEvent = {
     occurredAt: reasoningAt,
     type: "comment",
@@ -362,7 +362,7 @@ export async function addRecommendation(
       else delete existing.completeness;
       if (recommendation.noVerdict) existing.noVerdict = true;
       else delete existing.noVerdict;
-      // Ruling 137: a re-recommended acceptance re-binds to the revision it
+      // Ruling 99: a re-recommended acceptance re-binds to the revision it
       // was authored against, or the card keeps a stale binding.
       if (recommendation.forHeadSha !== undefined) {
         existing.forHeadSha = recommendation.forHeadSha;
@@ -385,7 +385,7 @@ export async function addRecommendation(
     details: { kind: rec.kind },
   });
   // NEW-4: recommendation reasoning that tags a person pings them too.
-  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  // Ruling 20: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, projectSlug, taskKey),
@@ -412,11 +412,11 @@ export async function addRecommendation(
         taskKey,
         kind: "approval",
         ptype: "input",
-        // Ruling 361: the operator's own recommendation, named as such.
+        // Ruling 74: the operator's own recommendation, named as such.
         from: OPERATOR_NOTIFY_FROM,
         title: `Operator recommends: ${rec.label}`,
         text: reasoning,
-        // Ruling 497: the row opens the card, where it is applied.
+        // Ruling 75: the row opens the card, where it is applied.
         about: "recommendations",
       },
       ctx,
@@ -429,7 +429,7 @@ export async function addRecommendation(
  * starts from the base branch. Live on ax-clone AX-5 the operator recommended
  * a core follow-up for review findings in `pty_linux.go`, a file that existed
  * only on `ax-5`, and made AX-5 wait on it. The new task could not have
- * reached that code, and AX-5 would have been held (ruling 186) until a
+ * reached that code, and AX-5 would have been held (ruling 56) until a
  * person found the cycle. Its guidance said to use the kind for "another
  * owner's package" and never said where a created task starts. Both operator
  * surfaces say it from here, so the two never disagree.
@@ -440,7 +440,7 @@ export const CREATE_TASK_BASE_NOTE =
   "when another owner's package holds them: hand delivery to that owner here instead. Never make " +
   "this task wait on a task that needs this task's code.";
 
-/** Ruling 138: the longest `goalDraft` an option may carry into task.md. */
+/** Ruling 63: the longest `goalDraft` an option may carry into task.md. */
 const GOAL_DRAFT_MAX_CHARS = 4000;
 
 /** One option the operator offers on a decision/blocking packet. */
@@ -448,46 +448,46 @@ export interface OperatorPacketOptionInput {
   kind: PacketOptionKind;
   title: string;
   detail?: string;
-  /** redirect and request_edit only — ruling 650: the person's own words are
-   *  the choice, so the card requires them (ruling 478(e)'s `reply`). */
+  /** redirect and request_edit only — ruling 132: the person's own words are
+   *  the choice, so the card requires them (ruling 68's `reply`). */
   reply?: boolean;
   recommended?: boolean;
   /** Pre-authored timeline text written when a human chooses this option. */
   ev?: string;
   /** retry_other_backend — the backend to re-run the failed agent on. */
   backend?: "codex" | "claude";
-  /** retry_other_backend — a reviewer retry names its profile. Ruling 237:
+  /** retry_other_backend — a reviewer retry names its profile. Ruling 94:
    *  question_reviewer names the reviewer the question is put to. */
   profileId?: string;
   /** archive_task — also delete the task's remote branch (discard the work). */
   deleteBranch?: boolean;
-  /** redirect — ruling 163: the resolution returns the task to the review
+  /** redirect — ruling 90: the resolution returns the task to the review
    *  stage when it stands at or past it (the branch-conflict packet sets it). */
   rework?: boolean;
-  /** move_stage only — ruling 164: the stage id the resolution moves the task
+  /** move_stage only — ruling 131: the stage id the resolution moves the task
    *  to. Required on the kind and refused on every other one. */
   toStage?: string;
-  /** edit_goal only — ruling 138: the proposed goal text itself, what the goal
+  /** edit_goal only — ruling 63: the proposed goal text itself, what the goal
    *  editor opens with when the human confirms. Refused on any other kind. */
   goalDraft?: string;
-  /** wait_for_window only — ruling 224: the provider's own reset instant, ISO.
+  /** wait_for_window only — ruling 157: the provider's own reset instant, ISO.
    *  The resolution schedules the agent's re-dispatch just after it. */
   dueAt?: string;
-  /** block_on_dependencies only — ruling 230: the tasks this one waits on. The resolution writes them through `setTaskDependencies`, so
+  /** block_on_dependencies only — ruling 66: the tasks this one waits on. The resolution writes them through `setTaskDependencies`, so
    *  Viberr releases the task when the last entry finishes. */
   blockedBy?: string[];
-  /** create_task only — ruling 269: the task the resolution creates. Required
+  /** create_task only — ruling 67: the task the resolution creates. Required
    *  on the kind and refused on every other one. */
   newTask?: {
     title: string;
     goal: string;
     /** What the NEW task waits on — not this one. */
     blockedBy?: string[];
-    /** Ruling 287: the EXISTING tasks that must wait on the new one. */
+    /** Ruling 67: the EXISTING tasks that must wait on the new one. */
     blocks?: string[];
     labels?: string[];
   };
-  /** connect_repository only — ruling 672: the repository the task names, as
+  /** connect_repository only — ruling 224: the repository the task names, as
    *  `owner/name`. The card opens its repository box with it. */
   repo?: string;
 }
@@ -501,14 +501,14 @@ export interface OperatorOpenPacketInput {
   body?: string;
   observations?: { k: string; v: string; code?: boolean }[];
   options: OperatorPacketOptionInput[];
-  /** Ruling 315: the account-level cause that raised this, when the cause is
+  /** Ruling 63: the account-level cause that raised this, when the cause is
    *  bigger than the task. Packets sharing it are resolved together. */
   cause?: string;
-  /** Ruling 432: a stall escalation (`openStuckLoopPacket`), the one family a
+  /** Ruling 123: a stall escalation (`openStuckLoopPacket`), the one family a
    *  later successful run may withdraw. Set by the server only; the operator's
    *  own packet tools build their input field by field and never carry it. */
   stalled?: true;
-  /** Ruling 672: the repository question (`operatorAskForRepository`), the
+  /** Ruling 107: the repository question (`operatorAskForRepository`), the
    *  one packet that may offer `connect_repository` and
    *  `keep_without_repository`. Set by the server only, like `stalled`. */
   repositoryAsk?: true;
@@ -517,7 +517,7 @@ export interface OperatorOpenPacketInput {
 const PACKET_KIND_SET = new Set<string>(PACKET_OPTION_KINDS);
 
 /**
- * Ruling 672: the option kinds an operator writes on a packet of its own:
+ * Ruling 107: the option kinds an operator writes on a packet of its own:
  * every kind but the repository question's two, which only
  * `ask_for_repository` writes. Both backends' packet schemas offer these, so
  * neither can express the two, and the schema a project with a repository is
@@ -583,14 +583,14 @@ function retryOtherBackendDefaults(
   };
   // Stamped so the retry re-runs the agent that failed rather than falling
   // back to the delivering one, and so a stall packet's withdrawal
-  // (`withdrawSupersededStuckPacket`, ruling 432) joins it to the right
+  // (`withdrawSupersededStuckPacket`, ruling 123) joins it to the right
   // agent's success.
   if (profileId) defaults.profileId = profileId;
   return defaults;
 }
 
 /**
- * B2 as ruling 437 exposes it: a packet the operator may withdraw is one it
+ * B2 as ruling 131 exposes it: a packet the operator may withdraw is one it
  * raised. `from` is stamped by each writer ("operator" for the operator's own,
  * the agent's actor ref for a question, the policy engine for its escalations),
  * and a question an agent asked through the operator still names the agent in
@@ -607,7 +607,7 @@ function sentence(title: string): string {
 }
 
 /**
- * Ruling 161: the one sentence naming why a `discard_branch` option cannot be
+ * Ruling 234: the one sentence naming why a `discard_branch` option cannot be
  * offered, from the fact that says the revision left the workspace.
  */
 function revisionDepartureSentence(
@@ -663,7 +663,7 @@ export async function operatorOpenPacket(
     }
   }
 
-  // Ruling 672: the two repository options are written one way, by the
+  // Ruling 107: the two repository options are written one way, by the
   // question that owns them. Their resolution attaches a repository or writes
   // a standing ruling for the whole board, so an option an operator composed
   // itself (its own title, no second option to refuse with, a board that has
@@ -685,7 +685,7 @@ export async function operatorOpenPacket(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
-  // Ruling 177 (pass 36, F36-5): no decision packet on a closed task. The
+  // Ruling 52 (pass 36, F36-5): no decision packet on a closed task. The
   // operator that outlives an acceptance (its turn started before the human
   // accepted) reaches this writer with a plan authored for an open task; the
   // packet it wants would ask a person to decide something about a task that
@@ -718,7 +718,7 @@ export async function operatorOpenPacket(
   // delivery it promised to push). Refuse the authoring and name the verb that
   // fits.
   //
-  // Ruling 161 (pass 35, G35-6): the gate keys on `revisionLeftWorkspace`, not
+  // Ruling 234 (pass 35, G35-6): the gate keys on `revisionLeftWorkspace`, not
   // on `workRevision !== null`. The revision registry writes a revision when
   // the agent's completion report lands, before any push, so "has a revision"
   // refused the discard on exactly the branch it exists for (KNC-21: reported
@@ -732,7 +732,7 @@ export async function operatorOpenPacket(
       return {
         outcome: "noop",
         message:
-          `discard_branch only fits a branch whose revision never left the workspace (ruling 161): ` +
+          `discard_branch only fits a branch whose revision never left the workspace (ruling 234): ` +
           `${revisionDepartureSentence(departure, input.taskKey, fm.branch)} ` +
           "For a task-key branch collision (an unrelated remote branch or unowned PR under this task's branch name), offer resolve_remote_collision: the human's confirm closes the unowned PR, deletes the stale remote branch, and re-delivers this task's local work. To abandon pushed or tracked work entirely, offer archive_task with deleteBranch.",
       };
@@ -740,8 +740,8 @@ export async function operatorOpenPacket(
   }
   // Owner ruling (pass 32): an `accept_completion` option is only coherent at
   // the acceptance boundary with a healthy verdict — everywhere else the
-  // acceptance gate refuses the very decision the option offers (ruling 20:
-  // verdict-gated; ruling 62: a no-change completion needs one too), and the
+  // acceptance gate refuses the very decision the option offers (ruling 97:
+  // verdict-gated; ruling 101: a no-change completion needs one too), and the
   // human is left confirming a card that cannot succeed. Live (VIB-3): a triage
   // packet offered "Accept as complete now" on a task at Triage with no
   // verdict. Refuse the authoring, name the verbs that fit; the admin's own
@@ -767,17 +767,17 @@ export async function operatorOpenPacket(
           "Offer archive_task to close a task that needs no work, edit_goal to scope real work, or transition_stage / run_agent to move it toward review. Only a human admin can force-accept from here.",
       };
     }
-    // Ruling 521: a decision that offers acceptance is the operator's offer,
+    // Ruling 130: a decision that offers acceptance is the operator's offer,
     // so it carries the completion packet the page draws inside it.
     const packetRefusal = completionPacketRefusal(fm, input.taskKey);
     if (packetRefusal) return { outcome: "noop", message: packetRefusal };
   }
-  // Ruling 244 (pass 37, F37-73): the same rule the `accept_completion` arm
+  // Ruling 131 (pass 37, F37-73): the same rule the `accept_completion` arm
   // above applies, applied to its sibling. `resolve_remote_collision` clears a
-  // FOREIGN remote — ruling 122's case, an unrelated branch or an unowned PR
+  // FOREIGN remote — ruling 233's case, an unrelated branch or an unowned PR
   // squatting this task's branch name — and V19 put `unownedPr` in the
   // operator's own snapshot precisely so it can tell. With no collision
-  // recorded, the resolution takes ruling 136(b)'s `own_pr_open` arm, answers
+  // recorded, the resolution takes ruling 233's `own_pr_open` arm, answers
   // "No collision to clear: PR #N on `branch` is TASK's own review PR", and
   // leaves the block exactly where it was.
   //
@@ -805,10 +805,10 @@ export async function operatorOpenPacket(
       };
     }
   }
-  // Ruling 489: `deliver_for_review` promises a delivery, so it is offered only
+  // Ruling 62: `deliver_for_review` promises a delivery, so it is offered only
   // over a head that has one owed — committed, and neither pushed by a
   // delivery nor carried by the live pull request. Anywhere else the confirm
-  // would push nothing, which is ruling 244's false premise.
+  // would push nothing, which is ruling 131's false premise.
   if (rawOptions.some((o) => o.kind === "deliver_for_review")) {
     const head = taskHeadState(existing.parsed.frontmatter);
     if (head.kind !== "undelivered") {
@@ -842,7 +842,7 @@ export async function operatorOpenPacket(
     };
   }
 
-  // Ruling 164 (pass 35, F35-14): an option TITLE is a promise the resolution
+  // Ruling 131 (pass 35, F35-14): an option TITLE is a promise the resolution
   // keeps, and the send-back kinds (custom / redirect / request_edit) keep no
   // promise but "the agent side hears about it". KNC-3's custom "Force-accept
   // as admin without a fresh verdict" re-ran the operator into a no-op behind
@@ -861,7 +861,7 @@ export async function operatorOpenPacket(
           kind: o.kind,
           title: o.title,
           detail: o.detail ?? "",
-          // Ruling 163: the branch-conflict packet's rework redirect really
+          // Ruling 90: the branch-conflict packet's rework redirect really
           // does return the task to the review stage, and says so.
           rework: o.rework === true,
         },
@@ -877,10 +877,10 @@ export async function operatorOpenPacket(
     // `move_stage` names the stage it moves to, and only that kind carries the
     // field: the same two refusals `resolvePacket` makes, made here so the
     // option is never written in a shape the confirm would refuse.
-    // Ruling 269: `create_task` carries the task it will create, and only that
+    // Ruling 67: `create_task` carries the task it will create, and only that
     // kind reads it — the same two refusals `move_stage` gets, for the same
     // reason: an option must never be written in a shape the confirm refuses.
-    // Ruling 273 (pass 37, F37-106): a retry onto a backend the instance
+    // Ruling 131 (pass 37, F37-106): a retry onto a backend the instance
     // ALREADY knows is spent. The same rule the `accept_completion` and
     // `resolve_remote_collision` guards apply — "the human is left confirming
     // a card that cannot succeed" — on the kind whose whole job is recovery.
@@ -889,10 +889,10 @@ export async function operatorOpenPacket(
     // recommended "Re-run the Integration Verifier on the Codex backend" at
     // 09:0x, a person confirmed it, and the answer was "The retry could not
     // start: Held: Codex is out of quota until Sep 19… scheduled for then."
-    // Nothing lied and nothing was lost — the hold is ruling 152(c) working —
+    // Nothing lied and nothing was lost — the hold is ruling 151 working —
     // but the decision was spent on a four-day park that was knowable when the
     // option was written. `wait_for_window` is the honest kind for that, and
-    // ruling 224 built it for exactly this fact.
+    // ruling 157 built it for exactly this fact.
     if (rawOptions.some((o) => o.kind === "retry_other_backend")) {
       const ownerId = existing.parsed.frontmatter.ownerUserId;
       const retryTargets = rawOptions
@@ -944,9 +944,9 @@ export async function operatorOpenPacket(
           "Without them the confirm would create nothing.",
       };
     }
-    // Ruling 288 (F37-123): a goal too long to carry is REFUSED, never cut. Both
+    // Ruling 131 (F37-123): a goal too long to carry is REFUSED, never cut. Both
     // of these texts become a task's CONTRACT — the one document every future
-    // run on it re-anchors on (ruling 189) — and both were a bare
+    // run on it re-anchors on (ruling 64) — and both were a bare
     // `.slice(0, GOAL_DRAFT_MAX_CHARS)`, so an over-long draft was committed
     // ending mid-sentence with nothing anywhere saying it had been cut.
     //
@@ -959,7 +959,7 @@ export async function operatorOpenPacket(
     // unrecoverable by then — the slice happened at write time, so what was cut
     // was never stored anywhere.
     //
-    // Refusing is ruling 139's rule applied to prose: check before anything is
+    // Refusing is ruling 261's rule applied to prose: check before anything is
     // written, name what is wrong, and write nothing. The operator can shorten
     // and re-offer inside the same turn; a truncated contract cannot be
     // repaired by anyone who does not already know what it said.
@@ -1012,13 +1012,13 @@ export async function operatorOpenPacket(
             "nothing. Offer the stage the work should be shown at, or a kind that acts on the task.",
         };
       }
-      // Ruling 164 again, on the kind that carries BOTH a title and a target:
+      // Ruling 131 again, on the kind that carries BOTH a title and a target:
       // the card shows the words and the resolution reads the id, so a title
       // naming another stage is the same broken promise the send-back guard
       // above refuses — invisible to the person confirming it.
       const mismatch = moveStagePromiseMismatch(o, target.stage, projectStages, input.taskKey);
       if (mismatch) return { outcome: "noop", message: mismatch };
-      // Ruling 702, by ruling 655's rule (a move nobody confirms is never put
+      // Ruling 112, by ruling 111's rule (a move nobody confirms is never put
       // to a person): a BLOCKED packet whose recommended way out is a move the
       // operator makes itself is not blocked. On BLOG-8 that packet was the
       // whole dead end: "Writer cannot be engaged at Cover: move BLOG-8 back
@@ -1069,9 +1069,9 @@ export async function operatorOpenPacket(
     }
   }
 
-  // Ruling 138: `goalDraft` is the goal editor's prefill, which only an
+  // Ruling 63: `goalDraft` is the goal editor's prefill, which only an
   // `edit_goal` option opens — on any other kind it is a claim nothing reads,
-  // so the authoring is refused by name (the ruling-115 precedent above).
+  // so the authoring is refused by name (the ruling-131 precedent above).
   const strayDraft = rawOptions.find(
     (o) => o.kind !== "edit_goal" && (o.goalDraft ?? "").trim() !== "",
   );
@@ -1084,7 +1084,7 @@ export async function operatorOpenPacket(
     };
   }
 
-  // Ruling 224: a wait_for_window with no instant resolves into a schedule
+  // Ruling 157: a wait_for_window with no instant resolves into a schedule
   // with no due time, so it is refused by name like every other option whose
   // payload its kind requires.
   const strayWait = rawOptions.find(
@@ -1110,7 +1110,7 @@ export async function operatorOpenPacket(
     };
   }
 
-  // Ruling 237 (F37-57): a question_reviewer names the reviewer it questions,
+  // Ruling 94 (F37-57): a question_reviewer names the reviewer it questions,
   // and that reviewer must be one this task actually has. Without the check the
   // resolution would promise "ask X" and then either dispatch nobody or, worse,
   // start the DELIVERER with a prompt telling it not to review — and the person
@@ -1143,7 +1143,7 @@ export async function operatorOpenPacket(
     };
   }
 
-  // Ruling 230: a hold that names nothing to wait on resolves into a hold that
+  // Ruling 66: a hold that names nothing to wait on resolves into a hold that
   // releases on nothing — the task would sit with no dependencies, no run and
   // no owner. Refused by name like every other option whose payload its kind
   // requires.
@@ -1172,7 +1172,7 @@ export async function operatorOpenPacket(
     };
   }
 
-  // Ruling 226: the head-check override is the policy engine's to offer and
+  // Ruling 243: the head-check override is the policy engine's to offer and
   // nobody else's. It is granted against a triple the gate read live at the
   // moment it refused, so an operator authoring it from a stale board would be
   // offering a waiver over facts it never checked — and the thing being waived
@@ -1222,48 +1222,48 @@ export async function operatorOpenPacket(
     // U36-2 (pass 36): a branchless task has no branch to delete — the option
     // must not promise it, and the card's recovery paragraph keys on it.
     if (o.deleteBranch && existing.parsed.frontmatter.branch) option.deleteBranch = true;
-    // Ruling 163: only a redirect returns the task to the review stage.
+    // Ruling 90: only a redirect returns the task to the review stage.
     if (o.rework && o.kind === "redirect") option.rework = true;
-    // Ruling 650: an option that hands the person's words to the next run
+    // Ruling 132: an option that hands the person's words to the next run
     // requires them. Live on AWSC-100 "Ask the Estimate Judge to revise the
     // inputs first: write what to change" sat over a box marked optional, so
     // an empty confirm would have re-run the Judge with nothing to change.
     if (o.reply && (o.kind === "redirect" || o.kind === "request_edit")) option.reply = true;
-    // Ruling 672: the repository to connect is the person's typed answer, so
+    // Ruling 224: the repository to connect is the person's typed answer, so
     // the card requires it; the one the operator could name opens the box.
     if (o.kind === "connect_repository") {
       option.reply = true;
       if (o.repo) option.repo = o.repo;
     }
-    // Ruling 164: the stage a move_stage resolution moves to, validated above.
+    // Ruling 131: the stage a move_stage resolution moves to, validated above.
     if (o.kind === "move_stage" && o.toStage) option.toStage = o.toStage.trim();
-    // Ruling 224: only a wait_for_window carries the reset instant, and it is
+    // Ruling 157: only a wait_for_window carries the reset instant, and it is
     // useless without one — an option promising to resume "when the window
     // reopens" with no instant would resolve into a schedule with no due time.
     if (o.kind === "wait_for_window" && o.dueAt) option.dueAt = o.dueAt;
     if (o.kind === "block_on_dependencies" && o.blockedBy?.length) {
       option.blockedBy = [...o.blockedBy];
     }
-    // Ruling 269: the task the create_task resolution will make, validated
+    // Ruling 67: the task the create_task resolution will make, validated
     // above. Trimmed here, the one chokepoint both operator backends reach.
     if (o.kind === "create_task" && o.newTask) {
       const newTask: NonNullable<PacketOption["newTask"]> = {
         title: o.newTask.title.trim(),
-        // Ruling 288: within the cap by construction — an over-long goal was
+        // Ruling 131: within the cap by construction — an over-long goal was
         // refused above, with nothing written.
         goal: o.newTask.goal.trim(),
       };
       if (o.newTask.blockedBy?.length) newTask.blockedBy = [...o.newTask.blockedBy];
-      // Ruling 287: the reverse edge reaches the stored option, which is the
+      // Ruling 67: the reverse edge reaches the stored option, which is the
       // only place the resolver can read it from.
       if (o.newTask.blocks?.length) newTask.blocks = [...o.newTask.blocks];
       if (o.newTask.labels?.length) newTask.labels = [...o.newTask.labels];
       option.newTask = newTask;
     }
-    // Ruling 138: the draft is model-authored prose bound for task.md — capped
+    // Ruling 63: the draft is model-authored prose bound for task.md — capped
     // here, the one chokepoint both operator backends reach.
     const goalDraft = o.goalDraft?.trim();
-    // Ruling 288: within the cap by construction (refused above). It was a
+    // Ruling 131: within the cap by construction (refused above). It was a
     // silent `.slice` here, which is how a contract came to end mid-sentence.
     if (goalDraft) option.goalDraft = goalDraft;
     return option;
@@ -1284,14 +1284,14 @@ export async function operatorOpenPacket(
     })),
     options,
   };
-  // Ruling 315: an account-level cause travels onto the packet, so a sibling
+  // Ruling 63: an account-level cause travels onto the packet, so a sibling
   // raised by the same failure can be found when this one is answered.
   if (input.cause) packet.cause = input.cause;
-  // Ruling 432: what lets a later successful run withdraw it, and nothing else.
+  // Ruling 123: what lets a later successful run withdraw it, and nothing else.
   if (input.stalled) packet.stalled = true;
 
   let opened = false;
-  // Ruling 137: a packet pauses coordination, so the standing acceptance
+  // Ruling 99: a packet pauses coordination, so the standing acceptance
   // offers (and the terminal transition cards, acceptances too) are withdrawn
   // on the record inside the same locked write.
   const packetCause: OfferWithdrawalCause = { kind: "packet", title };
@@ -1322,10 +1322,10 @@ export async function operatorOpenPacket(
       type: input.packetType === "blocked" ? "blocked" : "comment",
       actor: { kind: "operator" },
       title,
-      // Ruling 586: the entry carries the card, which leaves when answered.
+      // Ruling 68: the entry carries the card, which leaves when answered.
       text: askedEntryText(
         input.packetType === "blocked"
-          ? // Ruling 625: the entry's title already says what blocked it.
+          ? // Ruling 280: the entry's title already says what blocked it.
             "**Blocked.** Opened a decision packet for the owner to resolve."
           : `**Decision packet:** ${sentence(title)} Awaiting a human decision.`,
         packet,
@@ -1366,14 +1366,14 @@ export async function operatorOpenPacket(
       taskKey: input.taskKey,
       kind: "packet",
       ptype: input.packetType,
-      // Ruling 361: the operator's own packet.
+      // Ruling 74: the operator's own packet.
       from: OPERATOR_NOTIFY_FROM,
       title:
         input.packetType === "blocked"
           ? `Blocked, decision needed: ${title}`
           : `Decision needed: ${title}`,
       text: packet.body || title,
-      // Ruling 497: the row opens the packet, where it is decided.
+      // Ruling 75: the row opens the packet, where it is decided.
       about: { decision: packet.id },
     },
     ctx,
@@ -1395,7 +1395,7 @@ export interface OperatorAskForRepositoryInput {
 }
 
 /**
- * Ruling 672: ask a person to connect a repository to a board that has none,
+ * Ruling 107: ask a person to connect a repository to a board that has none,
  * because this task needs one. "Operator creates a packet to remind to user
  * to connect a repo" (owner, 2026-10-06).
  *
@@ -1411,7 +1411,7 @@ export async function operatorAskForRepository(
   input: OperatorAskForRepositoryInput,
   authority: OperatorAuthority,
   /** The packet writer. Both operator backends pass the one that appends
-   *  ruling 84's disclosure of the agents this run consulted. */
+   *  ruling 114's disclosure of the agents this run consulted. */
   open: (packet: OperatorOpenPacketInput) => Promise<OperatorActionResult> = (packet) =>
     operatorOpenPacket(db, ctx, packet, authority),
 ): Promise<OperatorActionResult> {

@@ -186,7 +186,7 @@ describe("a refused sign-in names its field", () => {
     expect(container.querySelector("#lg-email")!.getAttribute("aria-invalid")).toBeNull();
   });
 
-  it("ruling 451(g): a second refused submit without typing is a new alert", async () => {
+  it("ruling 284: a second refused submit without typing is a new alert", async () => {
     // The person clicks Sign in again on the same wrong password. Nothing was
     // typed, so nothing dismissed the first box; the second answer must still
     // arrive as a new one.
@@ -229,12 +229,12 @@ describe("a refused sign-in names its field", () => {
 });
 
 /**
- * Ruling 451(g): a second refusal that reads the same is still a second
+ * Ruling 284: a second refusal that reads the same is still a second
  * refusal. The box stayed mounted across it, so the sentence stood still as if
  * the click had been ignored, and an unchanged `role="alert"` is not announced
  * again. Keyed on the refusal itself, the box remounts and shakes (`.refused`).
  */
-describe("ruling 451(g): every refused sign-in is a new alert", () => {
+describe("ruling 284: every refused sign-in is a new alert", () => {
   it("client-side: a second empty submit replaces the box, and each one shakes", () => {
     // CANARY: drop `key={refusalKey(...)}` from #lg-err and the second submit
     // leaves the first node in place.
@@ -315,13 +315,13 @@ describe("the forced set-new-password step names its field the same way", () => 
 });
 
 /**
- * Ruling 459 (better-ui icons): one icon library per surface, one glyph per
+ * Ruling 282 (better-ui icons): one icon library per surface, one glyph per
  * meaning. Google's button led with a typed ExtraBold "G" beside GitHub's
  * outline glyph (its accessible name read "GContinue with Google"), and both
  * buttons spun the `refresh` arrow while the sign-in was in flight, where the
  * set's busy glyph is `loader`.
  */
-describe("ruling 459: the provider buttons draw the icon set's glyphs", () => {
+describe("ruling 282: the provider buttons draw the icon set's glyphs", () => {
   /** The path markup a glyph renders, to tell two `svg.ico`s apart. */
   const glyph = (name: IconName) => {
     const { container, unmount } = render(<Icon name={name} />);
@@ -339,7 +339,7 @@ describe("ruling 459: the provider buttons draw the icon set's glyphs", () => {
     ] as const) {
       const button = getByRole("button", { name });
       expect(button.textContent).toBe(name);
-      // Ruling 459: the mark leads in its GlyphSwap cell, the loader resting
+      // Ruling 284: the mark leads in its GlyphSwap cell, the loader resting
       // hidden behind it until the sign-in is in flight.
       const cell = button.firstElementChild!;
       expect(cell.matches(".copy-glyph[aria-hidden='true']:not([data-copied])"), name).toBe(true);

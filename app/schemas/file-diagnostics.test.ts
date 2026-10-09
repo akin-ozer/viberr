@@ -7,7 +7,7 @@ import {
 } from "./file-diagnostics";
 
 /**
- * Ruling 458(h): `project.md` and `task.md` read their frontmatter through
+ * Ruling 16(a): `project.md` and `task.md` read their frontmatter through
  * these two helpers, on the task file's wording — a field that falls back
  * names the value it fell back to. The messages are pinned byte for byte:
  * they reach the diagnostics console and `npm run store:check`. A missing or
@@ -15,7 +15,7 @@ import {
  * (project-file.schema.test.ts, "fallback wording" and "repo").
  */
 
-describe("tolerantField (ruling 458(h))", () => {
+describe("tolerantField (ruling 16(a))", () => {
   const readiness = z.enum(["ready", "blocked"]);
 
   it("reports at info severity when the field asks for it, missing or invalid", () => {
@@ -34,7 +34,7 @@ describe("tolerantField (ruling 458(h))", () => {
   });
 });
 
-describe("tolerantListField (F18, ruling 458(h))", () => {
+describe("tolerantListField (F18, ruling 16(a))", () => {
   const member = z.object({ userId: z.string() });
 
   it("keeps the good rows and drops only the bad one, at its index", () => {

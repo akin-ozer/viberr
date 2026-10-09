@@ -20,7 +20,7 @@ import { resolveStageRoles } from "~/shared/workflow/stage-roles";
 import { isRelayComment } from "./task-relay.server";
 
 /**
- * Ruling 693: what a task took.
+ * Ruling 83: what a task took.
  *
  * The agent runs that started and their time, their cost where a backend
  * reported one, how many rounds a person was asked, how many times the work
@@ -608,7 +608,7 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
   for (const entry of file.timeline) {
     const person = byPerson(entry);
     // An agent's entry is the trace a run of this task leaves, except the
-    // comment another task's agent relayed here (ruling 488): that agent ran
+    // comment another task's agent relayed here (ruling 71): that agent ran
     // there, and this task may not have been run at all.
     if (entry.actor.kind === "agent" && !isRelayComment(entry)) agentWrote = true;
     // One packet leaves one decision entry, whoever raised it and however
@@ -696,7 +696,7 @@ export function whatItTook(input: WhatItTookInput): WhatItTook {
  * task (the controller's `list_tasks`): the runs that started, their agent
  * minutes and the dollars they reported. Null for a task no run started on,
  * so a listing spends nothing on it. A board is listed whole in one reply,
- * and that reply has a size a turn can carry (ruling 677): three numbers as
+ * and that reply has a size a turn can carry (ruling 260): three numbers as
  * an object cost a row five lines there, a line costs it one.
  */
 export function runTotalsLine(rows: readonly TookRunRow[]): string | null {

@@ -59,7 +59,7 @@ describe("notifyMentionedUsers", () => {
       from: OPERATOR_FROM,
     });
     // Users-table order, not mention order: the order `stampNotifiedRecipients`
-    // writes into the event (ruling 382).
+    // writes into the event (ruling 20).
     expect(matched).toEqual([store.users.arda.id, store.users.selin.id]);
     const rows = notificationRows(store);
     expect(rows).toHaveLength(2);
@@ -70,7 +70,7 @@ describe("notifyMentionedUsers", () => {
   });
 
   /**
-   * Ruling 497: a mention is about its comment, so the row opens on it (the
+   * Ruling 75: a mention is about its comment, so the row opens on it (the
    * comment writers all pass its time). Canary: drop the `href` line in
    * `notifyMentionedUsers` and the row opens the task's top.
    */
@@ -113,7 +113,7 @@ describe("notifyMentionedUsers", () => {
     expect(matched).toEqual([store.users.arda.id]);
   });
 
-  it("reserved agent handles never notify a person, even one whose handle spells them (ruling 99); no handles → no rows", () => {
+  it("reserved agent handles never notify a person, even one whose handle spells them (ruling 247); no handles → no rows", () => {
     // Unprojected, so resolution runs app-wide and each handle below is the
     // email local-part of exactly one enabled person. CANARY: drop the
     // RESERVED_HANDLES filter from the resolver and all five are notified.
@@ -175,13 +175,13 @@ describe("notifyMentionedUsers", () => {
     expect(String(row!.text).length).toBeLessThan(300);
     expect(row!.text).toContain("mentioned you");
     expect(row!.text).toContain("…");
-    // Ruling 233: the head window stands when the mention is inside it, with no
+    // Ruling 70: the head window stands when the mention is inside it, with no
     // leading ellipsis: the quote opens on the comment.
     expect(String(row!.text)).toContain("mentioned you: “@arda done.");
   });
 
   /**
-   * Ruling 233 — the quote must contain the mention it was sent for.
+   * Ruling 70 — the quote must contain the mention it was sent for.
    *
    * The head clip is the right window only when the handle is near the top. An
    * operator directive opens by naming the AGENT it is dispatching and reaches
@@ -190,7 +190,7 @@ describe("notifyMentionedUsers", () => {
    * handle they were sent for, so the row read "mentioned you" above a sentence
    * addressed to somebody else.
    */
-  it("quotes the window around the mention when the handle sits past the cap (ruling 233)", () => {
+  it("quotes the window around the mention when the handle sits past the cap (ruling 70)", () => {
     const store = setupTestStore(ctx);
     const head = "@Platform Architect, revise the deliverable on the task branch.";
     const directive =
@@ -217,12 +217,12 @@ describe("notifyMentionedUsers", () => {
   });
 
   /**
-   * Ruling 232 (owner, 2026-09-14) — a comment whose DECLARED audience is the
+   * Ruling 70 (owner, 2026-09-14) — a comment whose DECLARED audience is the
    * agent notifies no person. Asserted at the seam, so every writer that
    * declares it inherits the rule; `operatorPromptAgent` proves it end to end
    * in the writer-enumeration block below.
    */
-  it("a declared agent audience notifies nobody (ruling 232)", () => {
+  it("a declared agent audience notifies nobody (ruling 70)", () => {
     const store = setupTestStore(ctx);
     const directive =
       "@dev implement the cart endpoint, and leave the schema question for @arda.";
@@ -352,7 +352,7 @@ describe("mention disambiguation (B-FD2)", () => {
   });
 
   it("the appended disclosure closes an unclosed ``` fence so the note renders as prose", () => {
-    // Ruling-104 review: the operator-brevity truncation was the only code that
+    // Ruling-134 review: the operator-brevity truncation was the only code that
     // balanced fences before a tail was appended; with it gone, the disclosure
     // append is the one tail-adder and owns the balance. An author text ending
     // inside an open fence must not swallow the note into a code block.
@@ -371,7 +371,7 @@ describe("mention disambiguation (B-FD2)", () => {
 });
 
 /**
- * F33-9 — a mention may not cross the members-only boundary (ruling 25).
+ * F33-9 — a mention may not cross the members-only boundary (ruling 27).
  *
  * Live: a project admin commented on `sandbox/SBX-3` tagging a viewer of a
  * DIFFERENT project. Her inbox showed "mentioned you — '@Elif Maintainer can you
@@ -606,11 +606,11 @@ describe("mentions stay inside the project (F33-9)", () => {
  * ADDED that this table does not cover.
  */
 /**
- * Ruling 644: one write often stamps two entries with one instant (an agent's
+ * Ruling 72: one write often stamps two entries with one instant (an agent's
  * reply and its quality marker, a failed run's report and its failure), and the
  * recipients were recorded on whichever came first in the file.
  */
-describe("ruling 644: the recipients land on the event that was written", () => {
+describe("ruling 72: the recipients land on the event that was written", () => {
   it("stamps the comment, not the quality marker in its millisecond", async () => {
     const store = setupTestStore(ctx);
     const at = "2026-10-03T13:02:29.579Z";
@@ -823,7 +823,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       },
     },
     {
-      // Ruling 488: a relay from another task lands on VIB-1 as a comment.
+      // Ruling 71: a relay from another task lands on VIB-1 as a comment.
       name: "relayToTask (another task's relay, the operator's or an agent's)",
       roster: false,
       from: OPERATOR_FROM,
@@ -843,7 +843,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       },
     },
     {
-      // Ruling 557: a take lands on VIB-1 as the operator's claiming comment.
+      // Ruling 135: a take lands on VIB-1 as the operator's claiming comment.
       name: "takeFromTask (files taken from another task, with a line on why)",
       roster: false,
       from: OPERATOR_FROM,
@@ -889,7 +889,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
       // answer. CANARY: send an agent reply's ping `from` the Operator and
       // postAgentReplyComment's row fails.
       expect(JSON.parse(String(mentions[0]!.actor_json))).toMatchObject(writer.from);
-      // Ruling 382 (F39-9): the EVENT records who the fan-out reached, so
+      // Ruling 20 (F39-9): the EVENT records who the fan-out reached, so
       // compaction can never fold a comment somebody was told about. Asserted
       // here, on the same enumerated table, because a writer that notifies but
       // does not stamp leaves the notification pointing at text the canonical
@@ -911,7 +911,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
   }
 
   /**
-   * Ruling 232 (owner, 2026-09-14) — the ONE writer that must NOT fan out to a
+   * Ruling 70 (owner, 2026-09-14) — the ONE writer that must NOT fan out to a
    * person, and the reason it is carved out of the table above rather than
    * missing from it.
    *
@@ -927,7 +927,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * The directive below is P14-GV-06's own shape verbatim, so this test fails
    * the moment the audience stops being declared at that call site.
    */
-  it("operatorPromptAgent notifies nobody: its audience is the agent (ruling 232)", async () => {
+  it("operatorPromptAgent notifies nobody: its audience is the agent (ruling 70)", async () => {
     const store = setupTestStore(ctx);
     seed(store, false);
     const tag = `@${store.users.arda.email.split("@")[0]}`;
@@ -967,12 +967,12 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * `comment` timeline event: a new one fails here until its author both wires
    * the fan-out and adds a row above.
    *
-   * The task actions (split into families by ruling 654) have 4 sites serving
+   * The task actions (split into families by ruling 13(a)) have 4 sites serving
    * 4 writers: `postAgentReplyComment` and `recordAgentCompletion` share
    * `prepareAgentReplyEvent`'s single construction (task-replies) and fan out
    * separately, which is exactly why site count and writer count are pinned
    * apart; `appendComment` and `operatorPromptAgent` write their own; and agent
-   * completion's other site announces ruling 237's deadlock packet (see
+   * completion's other site announces ruling 94's deadlock packet (see
    * `SITES_WITHOUT_MENTIONS`).
    */
   const COMMENT_WRITER_SITES = {
@@ -981,7 +981,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
     "server/tasks/task-replies.server.ts": 1,
     "server/tasks/operator-packets.server.ts": 2,
     "server/tasks/agent-toolkit.server.ts": 1,
-    // Ruling 488: the relay's comment on the target task; ruling 557: the
+    // Ruling 71: the relay's comment on the target task; ruling 135: the
     // take's claiming comment on the task that takes.
     "server/tasks/task-relay.server.ts": 2,
     // The ONE site that must NOT fan out: the compaction marker is synthesized
@@ -997,7 +997,7 @@ describe("every comment writer notifies the human it @tags (NEW-4)", () => {
    * Sites inside a fanning-out file whose event text cannot carry a human
    * @mention, counted out of the writer floor below so it stays a real floor.
    *
-   * Ruling 237's deadlock announcement is the only one: the text is built from
+   * Ruling 94's deadlock announcement is the only one: the text is built from
    * a constant and the packet title, and the packet is announced to people
    * through `notifyTaskWatchers` in the same breath. Per FILE is the wrong
    * granularity for it — `agent-completion.server.ts` fans out on its other

@@ -1,9 +1,9 @@
 /**
- * Resolving a decision packet (ruling 654): `resolvePacket` carries out the
+ * Resolving a decision packet (ruling 13(a)): `resolvePacket` carries out the
  * option a person or the operator chose (an acceptance, a stage move, a
  * delivery, an archive, a new task, an answer to the agent that asked), and
  * fans one decision out to the sibling packets it answers. Also here: the
- * answer to a packet a person already decided (ruling 602), the process-only
+ * answer to a packet a person already decided (ruling 65), the process-only
  * option kinds, and a packet owner's request for a maintainer's decision.
  */
 
@@ -117,16 +117,16 @@ import { transitionStage } from "./task-transitions.server";
 import { answerAskingAgent, answerNamesAnotherActor } from "./task-comments.server";
 
 /**
- * Ruling 322 — does this `create_task` option also make the DECIDING task wait
+ * Ruling 67 — does this `create_task` option also make the DECIDING task wait
  * on what it creates?
  *
- * Ruling 269 built the option and wrote, in the resolver and again in the note
+ * Ruling 67 built the option and wrote, in the resolver and again in the note
  * it leaves, that *"`<KEY>` is unchanged; the new task carries the work"* — with
  * a comment beside it calling the mutation "a deliberate NO-OP… this option
  * says something about work that is NOT this task". Both were true when they
  * were written.
  *
- * Ruling 287 then added `newTask.blocks`, the reverse edge: the EXISTING tasks
+ * Ruling 67 then added `newTask.blocks`, the reverse edge: the EXISTING tasks
  * that must wait on the new one. Nothing excludes the deciding task from that
  * list, and it is the most natural entry on it — a task is usually created
  * because the work in front of you cannot proceed without it. When it is
@@ -145,7 +145,7 @@ function createTaskHoldsDecider(
 }
 
 /**
- * Ruling 329: EXPORTED, because it is the line between a sentence a person
+ * Ruling 64: EXPORTED, because it is the line between a sentence a person
  * reads once on a card and a sentence that becomes permanent contract.
  *
  * `resolvePacket` appends `${option.t}: ${option.d}` to the task's goal for
@@ -156,7 +156,7 @@ function createTaskHoldsDecider(
  * set to know which authored options it must hold to that bar.
  */
 export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
-  // Ruling 672: both decide the BOARD, and the board keeps them (a repository
+  // Ruling 224: both decide the BOARD, and the board keeps them (a repository
   // in project.md, a ruling in its knowledge base). Neither is this task's
   // contract, and their words are card copy ("Type it as owner/name").
   "connect_repository",
@@ -169,33 +169,33 @@ export const PROCESS_ONLY_OPTION_KINDS: ReadonlySet<string> = new Set([
   "discard_branch",
   "resolve_remote_collision",
   "move_stage",
-  // Ruling 200(h): "the label promises an UNBLOCK, so this records one … 'I
+  // Ruling 64: "the label promises an UNBLOCK, so this records one … 'I
   // fixed the credential, carry on' is the recovery the human means". That is
   // what happens NEXT, not what the work IS — the same reason `redirect` and
   // `hold_runtime_debug` are here, and it was missed when the list was first
   // written.
   "block_on_policy",
-  // F37-60: both of these POSTDATE ruling 189, so neither was ever added, and
+  // F37-60: both of these POSTDATE ruling 64, so neither was ever added, and
   // the defect the ruling exists to stop came straight back through them.
-  // Ruling 224's own words are "the decision IS the wait" and ruling 230's are
+  // Ruling 157's own words are "the decision IS the wait" and ruling 66's are
   // "hold this until those land" — pure recovery, deciding what happens NEXT
   // rather than what the work IS. Live on SHOP-18: its goal carried FIVE
   // decision blocks, three of them "pick a recovery path → Wait for the window
   // and pick the task back up automatically", which is the same sentence
-  // ruling 189 quotes from SHOP-7 as the thing that must not be there.
+  // ruling 64 quotes from SHOP-7 as the thing that must not be there.
   "wait_for_window",
   "block_on_dependencies",
-  // Ruling 237: "ask the reviewer what else it would block on" decides who
+  // Ruling 94: "ask the reviewer what else it would block on" decides who
   // runs next, and the answer that comes back is the reviewer's, not the
   // person's. Nothing about the deliverable changed.
   "question_reviewer",
-  // Ruling 269: the decision is about work that is NOT this task — it names
+  // Ruling 67: the decision is about work that is NOT this task — it names
   // a gap and puts it on the board somewhere else. Amending THIS contract
   // with it would bind every future run here to a paragraph about another
-  // task's job, which is exactly the accumulation ruling 189 exists to stop.
+  // task's job, which is exactly the accumulation ruling 64 exists to stop.
   // The two timeline lines name the new key; that is the join.
   "create_task",
-  // Ruling 489: "deliver the committed head" decides what happens next to
+  // Ruling 62: "deliver the committed head" decides what happens next to
   // work that already exists; it changes nothing about what the work is.
   "deliver_for_review",
 ]);
@@ -217,7 +217,7 @@ export function packetIdentity(p: TaskPacket): string {
   })}`;
 }
 
-/** Ruling 189: the sentence that makes a person's decision part of the
+/** Ruling 64: the sentence that makes a person's decision part of the
  *  task's contract. O39-b finds an earlier copy of the same decision by it. */
 const CONTRACT_CLAUSE = "This decision is part of the task's contract from here on.";
 
@@ -240,7 +240,7 @@ const CONTRACT_DECISION_RE = new RegExp(
  */
 function contractHoldsDecision(goal: string, question: string, answer: string): boolean {
   const asked = (title: string) => title.replace(/\d+/g, "#");
-  // Ruling 571: an answer joins the option's title and detail with a colon.
+  // Ruling 292: an answer joins the option's title and detail with a colon.
   // Goals written before it joined them with a dash, so a dash reads as that
   // separator on both sides and a decision stored the old way still counts.
   const said = (text: string) => text.replace(/ — /g, ": ");
@@ -268,7 +268,7 @@ export async function resolvePacket(
      *  un-gated kind operators already author — with this text as the note the
      *  asker and the operator receive. */
     custom?: string;
-    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+    /** Ruling 97 (F21-2): the acceptance disclosure the human acknowledged.
      *  Consulted ONLY by the `accept_completion` arm below — the one option kind
      *  that writes Done and merges a pull request; every other kind resolves a
      *  decision and carries no acceptance to disclose. Three states, documented
@@ -278,7 +278,7 @@ export async function resolvePacket(
      *  NOT a substitute: it proves the decision is the one that was opened, not
      *  that the human saw what merges. */
     ack?: AcceptanceDisclosure | null;
-    /** Ruling 319: INTERNAL. Set when this resolution is itself the fan-out of
+    /** Ruling 65: INTERNAL. Set when this resolution is itself the fan-out of
      *  a decision a person made on another task, naming that task. It stops the
      *  fan-out below recursing — a sibling answers for itself and for nobody
      *  else — and no door sets it; only the loop at the end of this function. */
@@ -295,12 +295,12 @@ export async function resolvePacket(
     throw AppError.conflict("This packet was already resolved.");
   }
   /**
-   * Ruling 315: the note REFUSES like its neighbour instead of being cut.
+   * Ruling 63: the note REFUSES like its neighbour instead of being cut.
    *
    * `project.task.tsx` used to slice it to 2,000 characters in the route,
    * before this function ever saw it — no `maxLength` on the textarea, no
    * counter, no marker on the record and no error, and nothing anywhere holds
-   * the discarded tail. Ruling 292 allowed a cut on a VERDICT because "the full
+   * the discarded tail. Ruling 262 allowed a cut on a VERDICT because "the full
    * text is never lost — the agent's own report is on the same timeline,
    * untruncated". A person's typed note has no second copy, so the same cut is
    * actual loss.
@@ -345,7 +345,7 @@ export async function resolvePacket(
   } else {
     const picked = packet.options[input.optionIndex];
     if (!picked) throw AppError.validation("Unknown packet option.");
-    // Ruling 478(e) (F40-31): a choice the asking agent marked as needing the
+    // Ruling 68 (F40-31): a choice the asking agent marked as needing the
     // person's typed answer is not an answer without it. The card refuses
     // first; this is the same refusal for any other door.
     if (picked.reply && noteText.trim() === "") {
@@ -408,7 +408,7 @@ export async function resolvePacket(
    *  `accept_completion` arm — the shared write below re-reads the stage under
    *  the lock and skips itself when the task is already there. */
   let acceptsInto: string | null = null;
-  /** Ruling 241: THIS resolution queued the reviewer's question instead of
+  /** Ruling 66: THIS resolution queued the reviewer's question instead of
    *  dispatching it, because the task is held. A flag rather than a read of the
    *  written file: "did I queue" and "does a queue entry exist" are different
    *  questions, and the second one answers yes for an entry somebody else left
@@ -419,7 +419,7 @@ export async function resolvePacket(
    *  only after the write lands, so the decision has to outlive that arm's
    *  block scope. Every other arm leaves it `none`. */
   let branchDisposition: EmptyBranchDisposition = { kind: "none" };
-  /** Ruling 672: the connection a person answered `connect_repository` with,
+  /** Ruling 259: the connection a person answered `connect_repository` with,
    *  ON THIS TASK: what hands the answered tasks back to their operators once
    *  the fan-out has run, and (when this answer attached the repository)
    *  starts the controller on the board. Null on every other kind, and on a
@@ -437,7 +437,7 @@ export async function resolvePacket(
         existing.parsed.frontmatter.ownerUserId,
         "accept completion into Done",
       );
-      // Ruling 88 (F21-2): this option is an acceptance — it writes Done and
+      // Ruling 97 (F21-2): this option is an acceptance — it writes Done and
       // merges the pull request — so it is held to the ceremony exactly like the
       // Accept button. Checked AFTER the authority gate (a caller who may not
       // accept hears about their role, not their dialog) and BEFORE the merge,
@@ -560,7 +560,7 @@ export async function resolvePacket(
       const hasPr = !!existing.parsed.frontmatter.pr;
       // R17-1: name any reviewed-revision drift on the completion record.
   /**
-   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * Ruling 96: computed AFTER the merge, because the merge is what moves the
    * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
    * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
    * up to date with the base, pushes that merge commit, re-measures the drift
@@ -582,7 +582,7 @@ export async function resolvePacket(
           existing.parsed.frontmatter,
       );
       /**
-       * Ruling 327: stamped when it is WRITTEN, not when the ceremony began.
+       * Ruling 100: stamped when it is WRITTEN, not when the ceremony began.
        *
        * `now` is captured at the top of `resolvePacket`, 114 lines and one
        * GitHub round-trip above this — and `attemptAcceptanceMerge` can refresh
@@ -593,7 +593,7 @@ export async function resolvePacket(
        * announces is 05:33:43.377Z and the branch deletion 05:33:44.631Z. The
        * timeline is newest-first, so the file puts the completion at the top
        * while its own timestamp is the oldest of the three — whichever a reader
-       * trusts, the other is wrong. And its text is ruling 318's drift note,
+       * trusts, the other is wrong. And its text is ruling 96's drift note,
        * correctly measured after the refresh, describing a state that did not
        * exist at the instant the record claims.
        *
@@ -658,7 +658,7 @@ export async function resolvePacket(
         // pair itself is re-asserted here too.
         assertVerifiedHeadStillApplies(fm, headCheck, input.taskKey);
         assertVerifiedNoChangeStillApplies(fm, noChange, input.taskKey);
-        // Ruling 88: the disclosure is re-compared against the state actually
+        // Ruling 97: the disclosure is re-compared against the state actually
         // being closed, on the same terms `applyAcceptanceWrite` re-compares it
         // for the other Done writers. Scope `in-lock` skips the PR fact, which
         // the merge above may already have moved.
@@ -672,7 +672,7 @@ export async function resolvePacket(
         // R20-2 (F20-6): a server-proved no-change acceptance repairs the flag so
         // the durable record matches the outcome. Set before deriveValidation.
         if (noChange.applies && noChange.autoDetected) fm.noChanges = true;
-        // Ruling 98: EVERY stage write records where the task came from. This
+        // Ruling 124: EVERY stage write records where the task came from. This
         // arm writes the terminal stage itself rather than going through
         // `applyAcceptanceWrite`, which owns the field — without this the Done
         // task's `previousStageId` still names the stage before review, and the
@@ -692,8 +692,8 @@ export async function resolvePacket(
             fm.pr.state === "merged" || reallyMerged ? "merged" : "accepted";
           fm.pr = { ...fm.pr, state: next };
         }
-        // A9 / ruling 226: the record says when the head that merged could
-        // not be verified, in the shared write's own words (ruling 686). After
+        // A9 / ruling 243: the record says when the head that merged could
+        // not be verified, in the shared write's own words (ruling 100). After
         // the PR's state is settled: the note is for a merge that landed.
         event.text += unverifiedHeadNote(fm, headCheck);
       };
@@ -711,7 +711,7 @@ export async function resolvePacket(
         type: "transition",
         actor: human,
         title: null,
-        // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the
+        // Ruling 62 (pass 34, F34-12): without a pre-authored `ev` the
         // record restates the option's OWN words. It used to assert "policy /
         // credential updated" for every option of this kind, and an operator
         // reading that record on JC-6 told the specialist a GitHub-scope block
@@ -736,7 +736,7 @@ export async function resolvePacket(
       // R20-1 (F20-5): still a hold — no run starts — but it now RESOLVES the
       // packet (it used to keep it open and re-accept the same confirm). The
       // task stays blocked and waiting on a human so the board's "Blocked or
-      // waiting" filter still lists it (ruling 36 / R16-2) now that the packet
+      // waiting" filter still lists it (ruling 46 / R16-2) now that the packet
       // no longer holds that position.
       event = {
         occurredAt: now,
@@ -747,7 +747,7 @@ export async function resolvePacket(
           option.ev ??
           `**Decision:** hold for runtime debug. ${key} stays blocked while the provider-native ` +
             `session is inspected. Coordination is paused and no operator run was started. ` +
-            // Ruling 207(i): `run-agents` is admin/maintainer only (shared/rbac),
+            // Ruling 54: `run-agents` is admin/maintainer only (shared/rbac),
             // so a CONTRIBUTOR who owns the task — who may resolve this packet
             // through the owner exception — never sees that control, and the
             // @operator door is gated on the same role. Naming the control
@@ -789,8 +789,8 @@ export async function resolvePacket(
       break;
     }
     case "retry_other_backend": {
-      // Ruling 354 (pass 38, F38-8): ruling 241's rule at this arm too. The
-      // retry is an agent dispatch, which ruling 186 refuses on a held task;
+      // Ruling 66 (pass 38, F38-8): ruling 66's rule at this arm too. The
+      // retry is an agent dispatch, which ruling 56 refuses on a held task;
       // reading the hold only in the start below meant the decision was
       // written, the packet cleared, and THEN "The retry could not start" —
       // the person's choice bought nothing and there was no packet to choose
@@ -828,13 +828,13 @@ export async function resolvePacket(
       break;
     }
     case "question_reviewer": {
-      // Ruling 237 (F37-57): the decision is that the REVIEWER answers before
+      // Ruling 94 (F37-57): the decision is that the REVIEWER answers before
       // anyone reworks anything. The run starts below; `waiting: agent` is
       // honest about who the task is on, and the stage does not move — the
       // reviewer is being asked a question about the revision where it stands,
       // not sent to judge a new one.
       //
-      // Ruling 241 (F37-68): unless a dependency hold refuses it. Ruling 186
+      // Ruling 66 (F37-68): unless a dependency hold refuses it. Ruling 56
       // refuses every agent dispatch on a held task, and live on SHOP-5 this
       // arm wrote the decision, cleared the packet and then discovered the
       // refusal — leaving the contract saying "no rework until the reviewer has
@@ -961,8 +961,8 @@ export async function resolvePacket(
         "approve-transition",
         "resolve this task's branch collision",
       );
-      // Ruling 354 (pass 38, F38-8): the ceremony ends in a re-delivery, which
-      // ruling 240 refuses on a held task — after the PR was closed and the
+      // Ruling 66 (pass 38, F38-8): the ceremony ends in a re-delivery, which
+      // ruling 56 refuses on a held task — after the PR was closed and the
       // remote branch deleted. Read the hold before any of it, so a held task
       // keeps both its packet and its remote branch until the wait clears.
       {
@@ -995,9 +995,9 @@ export async function resolvePacket(
       break;
     }
     case "deliver_for_review": {
-      // Ruling 489 (pass 40, F40-68): the delivery runs AFTER the resolution
+      // Ruling 62 (pass 40, F40-68): the delivery runs AFTER the resolution
       // write, below, through the task page's own delivery door. Its authority
-      // (`run-agents`, or the task's owner) and ruling 240's hold are read
+      // (`run-agents`, or the task's owner) and ruling 56's hold are read
       // here, before the packet is spent, so a refusal leaves the decision
       // open rather than answered with nothing done.
       if (!isOwner) {
@@ -1027,7 +1027,7 @@ export async function resolvePacket(
       break;
     }
     case "force_accept": {
-      // Ruling 164 (pass 35, F35-14): an option's title is a promise the
+      // Ruling 131 (pass 35, F35-14): an option's title is a promise the
       // resolution keeps. KNC-3's "Force-accept as admin without a fresh
       // verdict" was a `custom` option: the resolution recorded the decision,
       // re-ran the operator, whose `accept_completion` returned a no-op behind
@@ -1080,7 +1080,7 @@ export async function resolvePacket(
       break;
     }
     case "move_stage": {
-      // Ruling 164 (pass 35, F35-14): the option names a stage and the
+      // Ruling 131 (pass 35, F35-14): the option names a stage and the
       // resolution moves the task there, through `transitionStage` with
       // `manual: true` — the stage picker's own path, so the same
       // `approve-transition` tier, the same off-graph licence a person's move
@@ -1121,12 +1121,12 @@ export async function resolvePacket(
       break;
     }
     case "create_task": {
-      // Ruling 269 (F37-101): the decision IS the new task. Everything the
+      // Ruling 67 (F37-101): the decision IS the new task. Everything the
       // resolution needs is on the option; the creation itself runs AFTER this
       // write, through `createTask` — the same door the board and both
       // toolkits use, so the key allocation, the goal-header shape, the
       // dependency validation and the auto-invoke are the ones every other
-      // caller gets (ruling 164: an option performs the real action through
+      // caller gets (ruling 131: an option performs the real action through
       // the real door).
       const spec = option.newTask;
       if (!spec || spec.title.trim() === "" || spec.goal.trim() === "") {
@@ -1140,7 +1140,7 @@ export async function resolvePacket(
         type: "note",
         actor: human,
         title: null,
-        // Ruling 322: the second sentence used to say `${key} is unchanged`
+        // Ruling 67: the second sentence used to say `${key} is unchanged`
         // unconditionally, and `newTask.blocks` may name this very task.
         text:
           option.ev ??
@@ -1155,8 +1155,8 @@ export async function resolvePacket(
       // `waiting` stamp, a stage, a disposition — and flipping one would be
       // this write claiming a reach it does not have.
       //
-      // Ruling 322: that is not the same as "this task is unchanged". When
-      // `newTask.blocks` names this task (ruling 287's reverse edge), the
+      // Ruling 67: that is not the same as "this task is unchanged". When
+      // `newTask.blocks` names this task (ruling 67's reverse edge), the
       // resolution below writes the new key into its `blockedBy` through
       // `setTaskDependencies` — the task's own editor — which is where a wait
       // belongs. What this arm must not do is pretend the wait is not coming;
@@ -1166,8 +1166,8 @@ export async function resolvePacket(
       break;
     }
     case "block_on_dependencies": {
-      // Ruling 230 (F37-50): the decision IS the wait. `blockedBy` is ruling
-      // 131's mechanism and it is already good — the board renders it, the
+      // Ruling 66 (F37-50): the decision IS the wait. `blockedBy` is ruling
+      // 55's mechanism and it is already good — the board renders it, the
       // schedule runner refuses on it, and the dependency release re-triggers
       // the operator when the last entry finishes. It simply could not be
       // reached from a packet, so an operator wanting a hold picked
@@ -1177,7 +1177,7 @@ export async function resolvePacket(
       // The list is written AFTER this write, through `setTaskDependencies` —
       // the same door the operator's own tool and the task page use, so the
       // canonicalisation and the "Dependencies updated"
-      // note are the ones every other caller gets (ruling 164: an option
+      // note are the ones every other caller gets (ruling 131: an option
       // performs the real action through the real door).
       const entries = (option.blockedBy ?? []).filter((e) => e.trim() !== "");
       if (entries.length === 0) {
@@ -1209,7 +1209,7 @@ export async function resolvePacket(
       break;
     }
     case "wait_for_window": {
-      // Ruling 224 (F37-44): the decision IS the wait. The packet closes and
+      // Ruling 157 (F37-44): the decision IS the wait. The packet closes and
       // the task settles on a human, because nothing is running and nothing
       // should look like it is; the schedule written after this write is what
       // brings the agent back. Authored only on a quota refusal whose reset
@@ -1235,7 +1235,7 @@ export async function resolvePacket(
       break;
     }
     case "accept_unverified_head": {
-      // Ruling 226 (F37-43): the deliberate way past a head GitHub would not
+      // Ruling 243 (F37-43): the deliberate way past a head GitHub would not
       // compare. It is NOT force-accept and must not borrow its door — that one
       // bypasses the VERDICT gate and cannot touch this one. This waives a
       // single containment check, for a single (PR, delivered revision, live
@@ -1333,13 +1333,13 @@ export async function resolvePacket(
       break;
     }
     case "connect_repository": {
-      // Ruling 672: the decision IS the connection. The repository the person
+      // Ruling 224: the decision IS the connection. The repository the person
       // typed is attached HERE, before the write that clears the packet,
-      // through the Change door (ruling 669): GitHub confirms it or the door
+      // through the Change door (ruling 226): GitHub confirms it or the door
       // refuses in its own words, and a refusal leaves the question open with
       // nothing recorded. Attaching is the board's policy, so it asks for the
       // tier that door asks for. On a task the answer reached from another
-      // one (ruling 319's fan-out) nothing is attached twice.
+      // one (ruling 65's fan-out) nothing is attached twice.
       requireAction(db, project, actor, "edit-policy", "connect a repository to this board");
       const { connectRepositoryFromPacket } = await import("./repository-ask.server");
       const connected = await connectRepositoryFromPacket(
@@ -1372,7 +1372,7 @@ export async function resolvePacket(
       break;
     }
     case "keep_without_repository": {
-      // Ruling 672: the decision is written into the project's rulings
+      // Ruling 224: the decision is written into the project's rulings
       // knowledge base before the packet clears, because that document is
       // what stops the question being asked again: a decision recorded here
       // and not there would be asked on the next task. It is the board's
@@ -1417,7 +1417,7 @@ export async function resolvePacket(
     }
     default: {
       // request_edit | redirect | custom — send back to the agent side.
-      // Ruling 163 (pass 35, F35-13 (b)): a redirect the branch-conflict
+      // Ruling 90 (pass 35, F35-13 (b)): a redirect the branch-conflict
       // packet marked `rework` RETURNS a task standing at or past the review
       // stage to that stage in this same write, so the resolved revision gets
       // its verdict where the reviewers are eligible. KNC-20 sat at Merge
@@ -1438,7 +1438,7 @@ export async function resolvePacket(
         title: null,
         text:
           (option.ev ??
-            // Ruling 562: an agent's question is answered back to that agent
+            // Ruling 68: an agent's question is answered back to that agent
             // when it can run, and to the operator when it cannot; the events
             // that follow say which. Its record names the decision only.
             (packet.kind === AGENT_QUESTION_PACKET_KIND && packet.askedBy?.trim()
@@ -1477,7 +1477,7 @@ export async function resolvePacket(
     }
   }
 
-  // Ruling 189 (pass 37, F37-10): the sentence a person's decision adds to the
+  // Ruling 64 (pass 37, F37-10): the sentence a person's decision adds to the
   // task's goal, or null when this resolution is not an answer that binds
   // future work.
   //
@@ -1496,7 +1496,7 @@ export async function resolvePacket(
   // blocks: the provider decision (contract) and "Work stalled: pick a recovery
   // path → Redirect with sharper guidance" (not).
   //
-  // Ruling 284 (owner's call, 2026-09-15) draws the second line by CHANNEL:
+  // Ruling 64 (owner's call, 2026-09-15) draws the second line by CHANNEL:
   // choosing a structured option is a decision and amends the contract; typing
   // free text is conversation and does not. The old rule was the opposite — a
   // typed directive "always binds, whatever packet it was typed on, because a
@@ -1509,11 +1509,11 @@ export async function resolvePacket(
   // another actor's tools. Nothing is lost by leaving it out: the directive is
   // written verbatim to the timeline, and it reaches the operator in its own
   // `note` field on the re-queue, which is the channel it was actually for.
-  // Ruling 189 / 284: the list is module-scope and exported now (ruling 329).
+  // Ruling 64: the list is module-scope and exported now (ruling 64).
 
-  // Ruling 189 excludes "a resolution that ENDS the task", and `acceptsInto`
+  // Ruling 64 excludes "a resolution that ENDS the task", and `acceptsInto`
   // catches only ONE of the two doors that do: `force_accept` closes the task
-  // through `forceAcceptCompletion` and never assigns it (ruling 200(h)). A
+  // through `forceAcceptCompletion` and never assigns it (ruling 64). A
   // contract amendment on a task being closed in the same breath binds no
   // future run's work, which is the whole test the exclusion applies.
   const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
@@ -1566,7 +1566,7 @@ export async function resolvePacket(
       );
     }
     mutate(parsed.frontmatter, parsed.timeline);
-    // Ruling 189 (pass 37, F37-10): a person's decision joins the task's
+    // Ruling 64 (pass 37, F37-10): a person's decision joins the task's
     // CONTRACT, not just its timeline.
     //
     // Live on SHOP-7: the goal said "the agent must not select a provider …
@@ -1586,7 +1586,7 @@ export async function resolvePacket(
     // is not written again. Live on ax-clone AX-22 a review deadlock asked
     // round after round, and every "Let the rework continue" answer appended
     // the same block: four copies in the text every fresh run re-anchors on.
-    // Each answer is still on the timeline, and ruling 415 carries every one
+    // Each answer is still on the timeline, and ruling 116 carries every one
     // to the operator.
     if (
       goalAmendment &&
@@ -1596,7 +1596,7 @@ export async function resolvePacket(
       parsed.goal = `${parsed.goal.trimEnd()}\n\n${goalAmendment}`;
     }
     if (clearPacket) parsed.packet = null;
-    // Ruling 160 (pass 35, F35-11): a PERSON answering a packet while the
+    // Ruling 63 (pass 35, F35-11): a PERSON answering a packet while the
     // task's pull request stands closed without merging is the answer to that
     // closure, whichever option they chose (rework, archive, a redirect): the
     // next delivery may open a fresh PR for the branch. The operator's own
@@ -1625,7 +1625,7 @@ export async function resolvePacket(
     // clears it when the edited goal lands.
     if (option.kind === "edit_goal" && parsed.packet) {
       parsed.packet.awaiting = "goal_edit";
-      // Ruling 138: the packet records WHICH option was chosen, so a reload
+      // Ruling 63: the packet records WHICH option was chosen, so a reload
       // renders it decided and rebuilds the same goal draft.
       parsed.packet.decided = {
         optionIndex: input.optionIndex,
@@ -1646,7 +1646,7 @@ export async function resolvePacket(
   try {
     await decisionWritten;
   } catch (error) {
-    // Ruling 672: a `connect_repository` answer attaches before this write,
+    // Ruling 224: a `connect_repository` answer attaches before this write,
     // and GitHub is asked in between. When the packet was answered or
     // replaced meanwhile, the write refuses for a change that happened: the
     // connection is settled as one made outside any task, and the refusal
@@ -1664,14 +1664,14 @@ export async function resolvePacket(
     throw error;
   }
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-  // Ruling 686: the `accept_completion` arm writes the last stage itself, so
+  // Ruling 100: the `accept_completion` arm writes the last stage itself, so
   // what follows an acceptance is run here as the shared write runs it: the
   // epic's all-done check, the dependents' release and a waiting controller
   // conversation's next turn. Not when a racing acceptance had already closed
   // the task (U3): those are that write's to run.
   if (acceptsInto !== null && !alreadyAccepted) {
     afterAcceptance(db, ctx, input.projectSlug, input.taskKey);
-    // Ruling 177: a task that closes ends its live runs, as it does when the
+    // Ruling 154: a task that closes ends its live runs, as it does when the
     // person presses Accept. A run left going spends on a task that is Done.
     await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, { cause: "accept" });
   }
@@ -1693,7 +1693,7 @@ export async function resolvePacket(
     });
   }
 
-  // Ruling 164 + ruling 152(c) (pass 35, cluster review): the two options that
+  // Ruling 131 + ruling 151 (pass 35, cluster review): the two options that
   // say the spent window is over — the specialist's "The window has reset …,
   // or the Codex account changed: send @dev back to continue" and the
   // operator's "The usage window has reset …, or I switched the Codex account:
@@ -1724,7 +1724,7 @@ export async function resolvePacket(
   // the approval is read in every case. (Was gated on `!clearPacket`, which now
   // reduces to exactly this set.)
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
-  // Ruling 547: a packet this answer cleared leaves the page, so its rows open
+  // Ruling 75: a packet this answer cleared leaves the page, so its rows open
   // the decision's own entry. An `edit_goal` answer keeps its packet, decided,
   // until the goal lands; a write the racing acceptance owned cleared nothing.
   if (clearPacket && !alreadyAccepted) {
@@ -1742,35 +1742,35 @@ export async function resolvePacket(
     "archive_task", // the task left the board
     "edit_goal", // the packet is still open, awaiting the goal
     "hold_runtime_debug", // the human explicitly asked for no run (§1.2)
-    // Ruling 230: the decision is that nothing runs until the dependencies
+    // Ruling 66: the decision is that nothing runs until the dependencies
     // clear. Re-invoking the operator would only pay a drive to rediscover the
     // wait it was just told about — JC-9's five runs, and the same reason
-    // ruling 131(d) refuses the held triggers at the door.
+    // ruling 115 refuses the held triggers at the door.
     "block_on_dependencies",
     "retry_other_backend", // starts a specialist run above; its completion re-invokes
     "discard_branch", // cleanup only, no coordination change
     "resolve_remote_collision", // the re-delivery's own machinery owns the follow-up
-    "deliver_for_review", // ruling 489: the same, with one hand-off after the delivery
-    // Ruling 164 (pass 35, F35-14): the task is Done (the acceptance below),
+    "deliver_for_review", // ruling 62: the same, with one hand-off after the delivery
+    // Ruling 131 (pass 35, F35-14): the task is Done (the acceptance below),
     // and the move re-invokes the operator at the stage it lands on
     // (`transitionStage`), so a second hand-off here would pay for a duplicate
     // turn on the stage the first one is already reading.
     "force_accept",
     "move_stage",
-    // Ruling 224 (F37-44): the decision IS that nothing runs until the window
+    // Ruling 157 (F37-44): the decision IS that nothing runs until the window
     // reopens, and the schedule written above is what brings the operator
     // back. Re-invoking it here spends a run against the very quota the human
     // just chose to wait out, gets refused, and opens a NEW packet asking the
     // same question — so answering the packet re-created it, in a loop. Live
     // on SHOP-18 at 00:05:50, seven seconds after the decision was recorded.
     "wait_for_window",
-    // Ruling 237 (F37-57): starts the reviewer's run below, exactly like
+    // Ruling 94 (F37-57): starts the reviewer's run below, exactly like
     // `retry_other_backend`; its completion re-invokes the operator with the
     // answer in hand. Re-invoking here would put the operator on the task
     // while the question it is supposed to wait for is still unanswered, which
     // is the behaviour this packet exists to interrupt.
     "question_reviewer",
-    // Ruling 672: the answer alone does not make the board able to deliver.
+    // Ruling 259: the answer alone does not make the board able to deliver.
     // `carryOnAfterConnection` starts each answered task's operator, after
     // the fan-out, at the moment it can do something with the repository.
     "connect_repository",
@@ -1798,7 +1798,7 @@ export async function resolvePacket(
           ? (packet.askedBy?.trim() ?? "")
           : "";
       if (askedBy) {
-        // Ruling 447 (O39-a): an answer that names another actor goes to the
+        // Ruling 68 (O39-a): an answer that names another actor goes to the
         // operator, which routes it; only an answer for the asker goes back.
         const { listDeployedSpecialists } = await import("./specialist-roster.server");
         const { agentMentionHandle } = await import("./agent-reply.server");
@@ -1889,7 +1889,7 @@ export async function resolvePacket(
       const { deleteTaskRemoteBranch } = await import(
         "~/server/github/github-reconciler.server"
       );
-      // Ruling 136(c): this door now pays the live re-confirm of a cached open
+      // Ruling 233: this door now pays the live re-confirm of a cached open
       // PR, so the transport hook is threaded like every other GitHub call.
       const archiveDeleteCtx: GithubActionContext = { dataRoot: ctx.dataRoot };
       if (ctx.fetchImpl) archiveDeleteCtx.fetchImpl = ctx.fetchImpl;
@@ -1922,7 +1922,7 @@ export async function resolvePacket(
       // too and clear `fm.branch`, so the discarded work exists nowhere and the
       // restored task shows no phantom branch row. Skipped only when the remote
       // deletion was REFUSED (an open PR / the default branch — the work is
-      // deliberately KEPT). `discardLocalTaskBranch` keeps ruling 17's own guard:
+      // deliberately KEPT). `discardLocalTaskBranch` keeps ruling 233's own guard:
       // a branch still reachable on the remote is never removed here.
       const localBranch = existing.parsed.frontmatter.branch;
       if (localBranch && outcome.status !== "refused") {
@@ -1937,14 +1937,14 @@ export async function resolvePacket(
           taskKey: input.taskKey,
           branch: localBranch,
           defaultBranch,
-          // The ruling-17 "is it on origin?" check needs the project's PAT, or
+          // The ruling-233 "is it on origin?" check needs the project's PAT, or
           // it cannot answer on a private repo.
           db,
         };
         if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
         const local = await discardLocalTaskBranch(discard);
         if (local.status === "deleted") {
-          // Ruling 161 (pass 35, U35-8): the remote head the delete removed,
+          // Ruling 233 (pass 35, U35-8): the remote head the delete removed,
           // read live by `deleteTaskRemoteBranch` before its DELETE. KNC-21's
           // audit named the LOCAL head (8c463b7) as what was discarded while
           // the ref it deleted held a foreign commit; both heads are recorded.
@@ -2022,7 +2022,7 @@ export async function resolvePacket(
       };
       if (ctx.dataRoot) discard.dataRoot = ctx.dataRoot;
       const outcome = await discardLocalTaskBranch(discard);
-      // Ruling 161 (pass 35, G35-6): the discard RETIRES the revision the
+      // Ruling 234 (pass 35, G35-6): the discard RETIRES the revision the
       // agent reported on that branch. The record stays (`kind: discarded`,
       // verdicts kept as history) so no reviewer can pin a verdict to a head
       // that no longer exists, and `validation` re-derives to `none`. A
@@ -2094,7 +2094,7 @@ export async function resolvePacket(
             ? {
                 branch: outcome.branch,
                 localSha: outcome.sha,
-                // Ruling 161: a local-only discard touched no remote head.
+                // Ruling 234: a local-only discard touched no remote head.
                 remoteSha: null,
                 basis: "local_only",
                 retiredRevisionId: retires?.id ?? null,
@@ -2104,14 +2104,14 @@ export async function resolvePacket(
     }
   }
 
-  // resolve_remote_collision (F31-6, ruling 136): the decision IS the remedy —
+  // resolve_remote_collision (F31-6, ruling 233): the decision IS the remedy —
   // delete the stale remote branch, close the recorded unowned PR, re-deliver
   // this task's local work — and the ceremony ends with EXACTLY ONE hand-off.
   // Each step is best-effort AFTER the resolution write (the decision stands
   // even when GitHub misbehaves) and every non-success lands on the timeline
   // in plain words. The kind stays out of the generic `packet-resolved`
   // re-queue above (that hand-off runs before the ceremony and could not carry
-  // its outcome): the ceremony fires its own at its end, the ruling-48
+  // its outcome): the ceremony fires its own at its end, the ruling-127
   // `delivered` re-queue when the re-delivery fired it, otherwise a
   // `packet-resolved` re-queue whose payload carries the outcome in its OWN
   // field, never inside the human's quoted note.
@@ -2166,7 +2166,7 @@ export async function resolvePacket(
         serverOutcome = outcomeOf("cleared_delivery_failed", { reason: delivery.message });
       }
     } else if (collision.reason === "own_pr_open") {
-      // Ruling 136(b): the packet's premise was false — the PR on the branch is
+      // Ruling 233: the packet's premise was false — the PR on the branch is
       // this task's OWN review PR, so there is no collision to clear, and what
       // the person asked for is the work reaching that PR. For a remote that
       // is merely behind or absent, perform the delivery that pushes it (the
@@ -2182,7 +2182,7 @@ export async function resolvePacket(
         await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
           if (parsed.frontmatter.github) {
             parsed.frontmatter.github.unownedPr = null;
-            // Ruling 161: a self-referencing collision record named no foreign head.
+            // Ruling 234: a self-referencing collision record named no foreign head.
             delete parsed.frontmatter.github.foreignHead;
           }
         });
@@ -2192,7 +2192,7 @@ export async function resolvePacket(
         : null;
       if (record?.relation === "diverged") {
         const head = record.prHeadSha ? `\`${record.prHeadSha.slice(0, 7)}\`` : "its head";
-        // Ruling 321: "a person resolves the branch history" names no act. The
+        // Ruling 230: "a person resolves the branch history" names no act. The
         // one that works is the one the owner had to write into the project's
         // KB by hand after SHOP-11 — merge, never rewrite, once a pull request
         // tracks the branch.
@@ -2278,7 +2278,7 @@ export async function resolvePacket(
       // `performDelivery` records no next step for a human who just clicked
       // Deliver (R18-2/R19-4) — but the person here confirmed a packet
       // ceremony, not a delivery. Under FULL autonomy the delivery re-queues
-      // the operator itself (ruling 134(b)); the SUPERVISED half gets the
+      // the operator itself (ruling 127); the SUPERVISED half gets the
       // server-attributed "Move to <review>" card, where the board lets it
       // apply (`recordDeliveredNextStep` re-checks everything under the lock).
       const { resolveOperatorAuthority } = await import("./operator-authority.server");
@@ -2301,7 +2301,7 @@ export async function resolvePacket(
         await recordDeliveredNextStep(db, ctx, input.projectSlug, input.taskKey, prNumber);
       }
     }
-    // Ruling 136(a): EXACTLY ONE hand-off. The `delivered` re-queue, when the
+    // Ruling 233: EXACTLY ONE hand-off. The `delivered` re-queue, when the
     // re-delivery fired it, already carries the outcome as a moved head;
     // otherwise the operator is handed the decision with Viberr's own record
     // of what the ceremony did, in its own field.
@@ -2320,7 +2320,7 @@ export async function resolvePacket(
     }
   }
 
-  // Ruling 489 (pass 40, F40-68): the decision IS the delivery. It runs the
+  // Ruling 62 (pass 40, F40-68): the decision IS the delivery. It runs the
   // task page's own door (`manualDeliverForReview` → `performDelivery`, the
   // core behind the operator's `deliver_for_review` tool), so the push, the PR,
   // the audit row and every refusal's timeline event are the ones a delivery
@@ -2372,7 +2372,7 @@ export async function resolvePacket(
     }
   }
 
-  // force_accept (ruling 164, pass 35, F35-14): the decision IS the override.
+  // force_accept (ruling 131, pass 35, F35-14): the decision IS the override.
   // It runs AFTER the resolution write, on the same footing as the archive and
   // the discard above: the packet is answered on the record first (so the
   // acceptance withdraws nothing and its "the decision was never answered" note
@@ -2390,7 +2390,7 @@ export async function resolvePacket(
     await forceAcceptCompletion(db, forced, actor, ctx);
   }
 
-  // block_on_dependencies (ruling 230, pass 37, F37-50): write the hold the
+  // block_on_dependencies (ruling 66, pass 37, F37-50): write the hold the
   // decision promised, through the same door every other dependency edit uses.
   // Best-effort like its siblings: a refused write never un-resolves a decision
   // a human already made, and its outcome lands on the timeline in plain words.
@@ -2423,7 +2423,7 @@ export async function resolvePacket(
     }
   }
 
-  // create_task (ruling 269, pass 37, F37-101): make the task the decision
+  // create_task (ruling 67, pass 37, F37-101): make the task the decision
   // promised, through the door every other creator uses, under the RESOLVING
   // person's own authority (`createTask` runs its own `create-task` gate on
   // `actor`). Best-effort like its siblings: a refused create never
@@ -2440,7 +2440,7 @@ export async function resolvePacket(
       };
       if (spec.blockedBy?.length) createInput.blockedBy = [...spec.blockedBy];
       if (spec.labels?.length) createInput.labels = [...spec.labels];
-      // Ruling 503: work split out of a task belongs to the same body of work,
+      // Ruling 272: work split out of a task belongs to the same body of work,
       // so the new task joins the deciding task's epic.
       const deciderEpic = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed
         .frontmatter.epic;
@@ -2450,7 +2450,7 @@ export async function resolvePacket(
       const made = await createTask(db, createInput, actor, ctx);
       await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
         title: "Task created from a decision",
-        // Ruling 322: same correction as the decision event's own sentence.
+        // Ruling 67: same correction as the decision event's own sentence.
         // The wait itself is written by the `blocks` loop below, through the
         // task's own dependency editor; this note is what a person reads.
         text:
@@ -2459,10 +2459,10 @@ export async function resolvePacket(
             ? `${input.taskKey} now waits on it and is released when it is done.`
             : `It carries the work; ${input.taskKey} is unchanged.`),
       });
-      // Ruling 287 (F37-122): connect it in the direction the work runs. A task
+      // Ruling 67 (F37-122): connect it in the direction the work runs. A task
       // is usually created to UNBLOCK something, so the dependency points from
       // the EXISTING work to the new task — and that is the one direction
-      // ruling 269 could not express, because `newTask.blockedBy` only says
+      // ruling 67 could not express, because `newTask.blockedBy` only says
       // what the new task waits on.
       //
       // Live on SHOP-28: the person's decision routed three frozen contract
@@ -2503,7 +2503,7 @@ export async function resolvePacket(
           // appears with no reason on a task nobody was looking at reads as
           // Viberr deciding something on its own.
           //
-          // Ruling 322: except when that task is the one being decided on —
+          // Ruling 67: except when that task is the one being decided on —
           // the note directly above already told this reader, in this task's
           // own voice, that it now waits on what the decision created. A
           // second card saying it again in the third person is noise on the
@@ -2550,7 +2550,7 @@ export async function resolvePacket(
     }
   }
 
-  // wait_for_window (ruling 224, pass 37, F37-44): write the schedule the
+  // wait_for_window (ruling 157, pass 37, F37-44): write the schedule the
   // decision promised. Best-effort like every sibling ceremony — a refused
   // schedule never un-resolves the packet, and its outcome lands on the
   // timeline in plain words instead of as a thrown error over a decision that
@@ -2598,7 +2598,7 @@ export async function resolvePacket(
     }
   }
 
-  // move_stage (ruling 164, pass 35, F35-14): the decision IS the move, made
+  // move_stage (ruling 131, pass 35, F35-14): the decision IS the move, made
   // through `transitionStage` with `manual: true` — the stage picker's path,
   // which re-checks `approve-transition`, writes the transition event and the
   // `task.transition` row, and re-invokes the operator at the stage the task
@@ -2608,7 +2608,7 @@ export async function resolvePacket(
   if (option.kind === "move_stage") {
     const target = moveStageTarget(option, project.stages, input.taskKey);
     if (target.ok) {
-      // Ruling 381: a backward move says why, and a packet resolution is a
+      // Ruling 47: a backward move says why, and a packet resolution is a
       // door onto it like the stage menu. The person's own words when they
       // gave any, else the option they chose, which is what they agreed to.
       // Without it every move_stage option that goes back was refused after
@@ -2643,7 +2643,7 @@ export async function resolvePacket(
     }
   }
 
-  // question_reviewer (ruling 237, F37-57): actually put the question. Same
+  // question_reviewer (ruling 94, F37-57): actually put the question. Same
   // shape as the retry below and for the same reason — the packet is the human
   // decision, the dispatch is coordination machinery — with one difference that
   // matters: the directive is the WHOLE point of the option, so a start failure
@@ -2651,7 +2651,7 @@ export async function resolvePacket(
   if (
     option.kind === "question_reviewer" &&
     option.profileId &&
-    // Ruling 241: a question THIS resolution queued is not dispatched now — the
+    // Ruling 66: a question THIS resolution queued is not dispatched now — the
     // moment the hold goes away puts it instead.
     !queuedTheQuestion
   ) {
@@ -2670,7 +2670,7 @@ export async function resolvePacket(
           profileId: option.profileId,
           directive: REVIEW_DEADLOCK_QUESTION,
           directiveFrom: actor.label,
-          // Ruling 313: the directive above says "do NOT return a verdict"
+          // Ruling 87: the directive above says "do NOT return a verdict"
           // because one here binds to the same revision and counts as another
           // objection — the loop this option exists to end. Withhold the channel
           // so the sentence is enforced rather than requested. The engagement
@@ -2746,16 +2746,16 @@ export async function resolvePacket(
     }
   }
 
-  // ------------------------------------------------- ruling 319: the fan-out
+  // ------------------------------------------------- ruling 65: the fan-out
   //
-  // `packet.cause` (ruling 315) names what actually failed when the failure
+  // `packet.cause` (ruling 63) names what actually failed when the failure
   // belongs to an ACCOUNT rather than to this task: a quota that runs out, a
   // credential that is revoked, a backend that goes away. It takes out every
   // task that account is paying for at the same instant, and each one raised
   // its own identical packet — same reason, same remedy, same options, N times
   // in one person's queue.
   //
-  // Ruling 315 wrote the stamp and stopped there, and the field's own comment
+  // Ruling 63 wrote the stamp and stopped there, and the field's own comment
   // went on promising that "packets that share a cause resolve together". They
   // did not. This is that loop.
   //
@@ -2763,14 +2763,14 @@ export async function resolvePacket(
   // answer is named on this task's timeline with the reason, because the person
   // who just cleared four packets with one click is the one who has to know
   // that the fifth is still open.
-  // Ruling 328: an escalation ruling 237 had to skip — because THIS packet was
+  // Ruling 94: an escalation ruling 94 had to skip — because THIS packet was
   // the one already open — is raised now that it is answered. Before the
   // fan-out, so a sibling resolution meets the same state this one leaves.
   if (clearPacket) {
     await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);
   }
 
-  // Ruling 602: a person's own answer to a quota packet stands for the rest of
+  // Ruling 65: a person's own answer to a quota packet stands for the rest of
   // its window, for the packets later refusals open. A fanned-out or standing
   // answer records nothing: the decision it came from already stands.
   if (input.fanOutOrigin === undefined && packet.cause) {
@@ -2791,11 +2791,11 @@ export async function resolvePacket(
     note: noteText,
   }, actor, ctx);
 
-  // Ruling 672: "If they decide to connect a repo, controller spawns on board
+  // Ruling 259: "If they decide to connect a repo, controller spawns on board
   // level" (owner, 2026-10-06). After the fan-out, so the tasks handed back
   // are every task the answer reached, and once: a task the answer only
   // reached carries no connection of its own. Best-effort: the decision is
-  // written, and ruling 330's sweep starts a task nothing moved.
+  // written, and ruling 122's sweep starts a task nothing moved.
   if (repositoryConnection !== null) {
     try {
       const { carryOnAfterConnection } = await import("./repository-ask.server");
@@ -2824,10 +2824,10 @@ export async function resolvePacket(
 }
 
 /**
- * Ruling 602: a packet raised after a person already decided this account's
+ * Ruling 65: a packet raised after a person already decided this account's
  * window is answered by that decision, through the real `resolvePacket`
  * (authority, events, the schedule a wait writes, notifications), exactly as a
- * ruling 319 sibling is. Best-effort: a miss leaves the packet open, as before.
+ * ruling 65 sibling is. Best-effort: a miss leaves the packet open, as before.
  */
 export async function answerFromStandingDecision(
   db: DatabaseSync,
@@ -2866,7 +2866,7 @@ export async function answerFromStandingDecision(
 }
 
 /**
- * Ruling 319 — apply a resolution to every packet raised by the SAME cause.
+ * Ruling 65 — apply a resolution to every packet raised by the SAME cause.
  *
  * Each sibling goes through the real `resolvePacket`, not a cheaper write: a
  * decision that reaches another task has to pass that task's authority check,
@@ -2972,7 +2972,7 @@ async function fanOutByCause(
     }
   }
 
-  // Ruling 672: the tasks the answer reached, for whoever carries on from it.
+  // Ruling 65: the tasks the answer reached, for whoever carries on from it.
   const applied = outcomes.flatMap((o) => (o.applied ? [o.taskKey] : []));
   const text = fanOutOutcomeText(outcomes, input.cause);
   if (!text) return applied;
@@ -3036,7 +3036,7 @@ export async function requestPacketMaintainerDecision(
   // who can already act (and, for an owner, notify themselves). Refuse with a
   // pointer instead of sending a pointless alert.
   const role = project.memberRoles.get(actor.userId ?? "");
-  // Ruling 672: the repository question's two answers decide the board, so
+  // Ruling 65: the repository question's two answers decide the board, so
   // they are a project admin's. A maintainer cannot give one either, and may
   // send it up exactly as a contributor-owner sends up a maintainer's.
   const boardDecision = isRepositoryAskCause(packet.cause);
@@ -3097,9 +3097,9 @@ export async function requestPacketMaintainerDecision(
       : `Decision needs a maintainer: ${packet.title}`,
     text: noteText,
     occurredAt,
-    // Ruling 497: the row opens the packet the maintainer is asked to decide.
+    // Ruling 75: the row opens the packet the maintainer is asked to decide.
     about: { decision: packet.id },
-    // Ruling 361: the person who asked, or the operator when it did.
+    // Ruling 74: the person who asked, or the operator when it did.
     from: actor.userId
       ? {
           kind: "human",

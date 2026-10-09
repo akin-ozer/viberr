@@ -20,10 +20,10 @@ import { CONNECT_TO_SEND } from "./not-connected";
 import { useOpResultToast, type ActionResult } from "./op-result";
 
 /**
- * Ruling 498: what the board's agents changed in the knowledge every run
+ * Ruling 321: what the board's agents changed in the knowledge every run
  * reads, where the owner looks, with Undo.
  *
- * Rulings 378 and 483 queued every correction here as a proposal, and each
+ * Rulings 210 and 267 queued every correction here as a proposal, and each
  * Promote asked the controller for a turn. The owner, 2026-09-26: "proposal
  * spam is exhausting, it should be easier to get them merged to the kb. No
  * human can approve all of these while inspecting them thoroughly." An agent's
@@ -33,13 +33,13 @@ import { useOpResultToast, type ActionResult } from "./op-result";
  * (direct and audited, never a controller turn: an undo is the recorded edit in
  * reverse, with nothing to compose).
  *
- * The proposals agents filed before ruling 498 still stand in their documents
+ * The proposals agents filed before ruling 210 still stand in their documents
  * until someone closes them, so they are listed under the corrections with
- * ruling 483's Promote and Dismiss, which ask the controller in this
+ * ruling 267's Promote and Dismiss, which ask the controller in this
  * conversation, and a Promote all that asks once for the lot.
  */
 
-/** Ruling 497's reveal, for the places this panel holds: the panel, a
+/** Ruling 302's reveal, for the places this panel holds: the panel, a
  *  correction's entry, the proposals list and a proposal's entry (a proposal's
  *  notification opens `#proposal-kp-…`; a correction's timeline entry and a
  *  reply naming its id open `#correction-kc-…`). */
@@ -74,7 +74,7 @@ function proposalRequest(
     : `Dismiss knowledge-base proposal ${p.id} in ${p.kb}/${p.doc} with resolve_kb_proposal, leaving the settled text as it is. I decided against it on the Controller page.`;
 }
 
-/** Ruling 498: the one request that clears the proposals filed before it. */
+/** Ruling 210: the one request that clears the proposals filed before it. */
 function promoteAllRequest(count: number): string {
   return (
     `Promote all ${count} open knowledge-base proposals on this board (get_project lists them in openProposals). ` +
@@ -94,7 +94,7 @@ export function KnowledgePanel({
   onAsk,
 }: {
   corrections: KbCorrectionsView;
-  /** The proposals filed before ruling 498 that still stand. */
+  /** The proposals filed before ruling 210 that still stand. */
   proposals: KbProposalView[];
   projectSlug: string;
   /** Org admins: an undo, a promote and a dismiss edit an org knowledge base. */
@@ -265,7 +265,7 @@ export function KnowledgePanel({
 }
 
 /**
- * Ruling 483's proposals that documents still hold: each can be promoted or
+ * Ruling 267's proposals that documents still hold: each can be promoted or
  * dismissed through the controller as before, and Promote all asks once.
  */
 function LegacyProposals({

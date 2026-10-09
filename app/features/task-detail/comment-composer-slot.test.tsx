@@ -11,7 +11,7 @@ import type { CommentComposerHandle } from "./comment-composer-slot";
 import { Timeline } from "./timeline";
 
 /**
- * Ruling 457 (owner, 2026-09-24): the Lexical comment editor is lazy. Until
+ * Ruling 300 (owner, 2026-09-24): the Lexical comment editor is lazy. Until
  * it arrives the timeline shows a stand-in with the editor's own markup, and
  * whatever was typed there moves into the editor with the caret at the end.
  */
@@ -91,7 +91,7 @@ function composerMarkup(container: HTMLElement) {
   }));
 }
 
-describe("the comment composer's stand-in (ruling 457)", () => {
+describe("the comment composer's stand-in (ruling 300)", () => {
   it("wears the editor's own markup, so nothing moves when the editor arrives", async () => {
     const { container, standIn } = mount();
     const before = composerMarkup(container);
@@ -158,7 +158,7 @@ describe("the comment composer's stand-in (ruling 457)", () => {
  * their swaps come due in the same moment, so the idle one's arrival is the
  * sign the composing one would have been swapped too.
  */
-describe("a composition is never cut by the editor's arrival (ruling 457)", () => {
+describe("a composition is never cut by the editor's arrival (ruling 300)", () => {
   it("waits for compositionend, then carries the committed text", async () => {
     vi.resetModules();
     const { CommentComposer } = await import("./comment-composer-slot");
@@ -199,7 +199,7 @@ describe("a composition is never cut by the editor's arrival (ruling 457)", () =
  * whichever composer is live. Until the editor arrives that is the stand-in,
  * which nothing else here drives through the ref.
  */
-describe("the stand-in answers the composer's handle until the editor arrives (ruling 457)", () => {
+describe("the stand-in answers the composer's handle until the editor arrives (ruling 300)", () => {
   it("prefills a blank draft only, focuses it, and clears it after a send", async () => {
     vi.resetModules();
     const { CommentComposer } = await import("./comment-composer-slot");
@@ -232,7 +232,7 @@ describe("the stand-in answers the composer's handle until the editor arrives (r
   });
 });
 
-describe("the task route ships without Lexical (ruling 457)", () => {
+describe("the task route ships without Lexical (ruling 300)", () => {
   it("reaches no Lexical package through a static import", () => {
     const packages = [...staticPackagesOf("app/routes/project.task.tsx")];
     expect(packages.filter((p) => p === "lexical" || p.startsWith("@lexical/"))).toEqual([]);

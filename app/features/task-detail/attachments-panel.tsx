@@ -73,7 +73,7 @@ export function AttachmentsPanel({
           <Icon name="file" />
           <h2>Attachments</h2>
         </div>
-        {/* Ruling 625: left-aligned with the panel's title and as tall as its
+        {/* Ruling 281: left-aligned with the panel's title and as tall as its
             sentence, not a centred empty box over a left-aligned button. */}
         <p className="attach-empty">
           {browserExpected
@@ -101,7 +101,7 @@ export function AttachmentsPanel({
         </span>
       </div>
       {canAttach && <AttachFile />}
-      {/* Ruling 510: a long list folds the way a long comment does, clamped
+      {/* Ruling 314: a long list folds the way a long comment does, clamped
           behind Show more / Show less, so fifteen files don't push the
           timeline a screen down. The heading, its count and the attach control
           stay above the fold. */}
@@ -144,7 +144,7 @@ export function AttachmentsPanel({
           </div>
         )}
         {files.map((a) => (
-          // Ruling 105 (+ addendum): a plain click opens the in-app card for
+          // Ruling 78 (+ addendum): a plain click opens the in-app card for
           // EVERY kind — text files render read-only, anything else shows a
           // no-preview note; both carry the Download button.
           <a
@@ -156,7 +156,7 @@ export function AttachmentsPanel({
             onClick={lightbox({ name: a.name, url: href(a.name) })}
           >
             <Icon name="file" />
-            {/* Ruling 478(b) (F40-32): the name takes its own line on a phone
+            {/* Ruling 313 (F40-32): the name takes its own line on a phone
                 (app.css), and the whole name rides on a hover where a long one
                 is still cut. */}
             <span className="attach-name" title={a.name}>{a.name}</span>
@@ -180,7 +180,7 @@ export function AttachmentsPanel({
  * screen reader without any script; the fetcher posts the same `attach-file`
  * intent a `curl` would.
  *
- * Ruling 574: the picker offers any kind of file; the writer refuses only a
+ * Ruling 76: the picker offers any kind of file; the writer refuses only a
  * name it cannot store and a file over the size cap.
  */
 function AttachFile() {
@@ -190,9 +190,9 @@ function AttachFile() {
   const error = fetcher.data && !fetcher.data.ok ? fetcher.data.error : null;
   return (
     <div className="attach-add">
-      {/* Ruling 368: the upload in flight is `aria-busy` (the sheet's .7 busy
+      {/* Ruling 286: the upload in flight is `aria-busy` (the sheet's .7 busy
           step) with the loader spinning, the same shape as every busy button.
-          Ruling 459: the file mark and the loader share one cell (GlyphSwap)
+          Ruling 284: the file mark and the loader share one cell (GlyphSwap)
           and trade in place. */}
       <label className={`btn ghost sm${busy ? " busy" : ""}`} aria-busy={busy || undefined}>
         <GlyphSwap rest="file" alt="loader" on={busy} spinAlt />

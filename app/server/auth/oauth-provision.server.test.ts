@@ -241,7 +241,7 @@ describe("applyOAuthUser", () => {
 });
 
 /**
- * Ruling 154 (pass 35, G35-3): `users.github_handle` gained a SECOND writer, so
+ * Ruling 29 (pass 35, G35-3): `users.github_handle` gained a SECOND writer, so
  * the "unique among enabled accounts" invariant has to hold at every door, not
  * just the admin one. The reader fails closed: two enabled rows with the same
  * handle make `resolveGithubHandle` answer `ambiguous` forever, and that
@@ -250,7 +250,7 @@ describe("applyOAuthUser", () => {
  *
  * Canary for both: write the handle with a bare `updateUserFields` again.
  */
-describe("ruling 154: a GitHub sign-in claims a handle an admin linked elsewhere", () => {
+describe("ruling 29: a GitHub sign-in claims a handle an admin linked elsewhere", () => {
   const linkHandle = (db: DatabaseSync, userId: string, name: string, email: string, handle: string) =>
     updateOrgUser(db, { userId, name, email, role: "member", githubHandle: handle }, ACTOR);
 

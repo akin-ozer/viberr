@@ -32,7 +32,7 @@ import { removeAgentTree } from "./agent-trees.server";
 import { toError } from "~/shared/errors";
 
 /**
- * Personal agent-backend credentials (ruling 127) — the store, and the ONE
+ * Personal agent-backend credentials (ruling 137) — the store, and the ONE
  * per-person availability answer every surface reads.
  *
  * A person connects Claude and Codex on Profile → Agent accounts in one of two
@@ -50,7 +50,7 @@ import { toError } from "~/shared/errors";
  *    sealed (AES-256-GCM, `secret-box`) and the store is registered in
  *    `SEALED_STORES` so a key rotation reaches it.
  *
- * Ruling 507: a row is one ACCOUNT, and a person may keep several per backend
+ * Ruling 138: a row is one ACCOUNT, and a person may keep several per backend
  * — a work and a personal subscription, a key for when both windows are spent.
  * Connecting adds an account instead of replacing the one there was, and
  * exactly one per (person, backend) is ACTIVE: the one runs bill, which is the
@@ -101,7 +101,7 @@ export interface BackendCredentialActor {
   label: string;
 }
 
-/** A stored credential — one account (ruling 507) — as every reader sees it,
+/** A stored credential — one account (ruling 138) — as every reader sees it,
  *  never the box. */
 export interface BackendCredentialRow {
   id: string;
@@ -114,11 +114,11 @@ export interface BackendCredentialRow {
   /** Non-secret facts the vendor reported at connect time. */
   detail: Record<string, string>;
   verifiedAt: string | null;
-  /** Ruling 507: the person's own name for the account, or null. */
+  /** Ruling 138: the person's own name for the account, or null. */
   label: string | null;
-  /** Ruling 507: when this account last became the active one. */
+  /** Ruling 138: when this account last became the active one. */
   selectedAt: string;
-  /** Ruling 507: connected before the ruling, so its sign-in lives in the
+  /** Ruling 138: connected before the ruling, so its sign-in lives in the
    *  backend home itself rather than in a home of its own. */
   legacyHome: boolean;
   createdAt: string;
@@ -131,14 +131,14 @@ const VENDOR_LABEL = { claude: "Anthropic", codex: "OpenAI" } as const;
 const CONNECT_HERE = "Profile → Agent accounts";
 
 /**
- * Ruling 507: how many accounts one person may keep per backend. Each sign-in
+ * Ruling 138: how many accounts one person may keep per backend. Each sign-in
  * is a home on the runtime volume and a vendor session; nobody switches among
  * more than a handful, and a ceiling turns a runaway loop of sign-ins into a
  * sentence instead of a directory per attempt.
  */
 export const MAX_ACCOUNTS_PER_BACKEND = 10;
 
-/** The longest name a person may give an account (ruling 507). */
+/** The longest name a person may give an account (ruling 138). */
 export const MAX_ACCOUNT_LABEL_LEN = 60;
 
 // ------------------------------------------------------------------ reads
@@ -150,7 +150,7 @@ const CREDENTIAL_COLUMNS = `id, user_id, backend, kind, method, secret_suffix,
        detail_json, verified_at, label, selected_at, legacy_home, created_at, updated_at`;
 
 /**
- * Ruling 507: the order that puts a person's ACTIVE account first — the most
+ * Ruling 138: the order that puts a person's ACTIVE account first — the most
  * recently selected, then the newer row, then the id, so the answer is total.
  * The one definition of "active": every reader that wants the account runs
  * bill takes the first row of it. Selection stamps are unique per person and
@@ -241,7 +241,7 @@ function parseRows(rows: unknown[]): BackendCredentialRow[] {
 }
 
 /** The ACTIVE account of (person, backend) — the one every run on that backend
- *  bills (ruling 507) — or null when the person has connected none. */
+ *  bills (ruling 138) — or null when the person has connected none. */
 export function getBackendCredential(
   db: DatabaseSync,
   userId: string,
@@ -251,7 +251,7 @@ export function getBackendCredential(
 }
 
 /** Every account the person holds on one backend, the active one first, then
- *  the rest in the order they were last used (ruling 507). */
+ *  the rest in the order they were last used (ruling 138). */
 export function listBackendAccounts(
   db: DatabaseSync,
   userId: string,
@@ -301,13 +301,13 @@ function listBackendCredentials(
   );
 }
 
-/** Where one account's vendor sign-in lives (ruling 507). */
+/** Where one account's vendor sign-in lives (ruling 138). */
 function accountRef(row: Pick<BackendCredentialRow, "id" | "legacyHome">): BackendAccountRef {
   return { id: row.id, legacyHome: row.legacyHome };
 }
 
 /**
- * How an account is named to the person who holds it (ruling 507): their own
+ * How an account is named to the person who holds it (ruling 138): their own
  * label; else what the vendor reported about a sign-in (the email Claude's
  * `auth status` prints); else what kind of credential it is. The one home of
  * the name, so the Profile list, the toasts and the audit-facing sentences
@@ -402,7 +402,7 @@ const HOME_ENV_KEY = {
  * The env a vendor binary runs on for one ACCOUNT outside a run: the sign-in
  * driver (`startBackendLogin`) and `runVendorLogout`. `filteredSpawnEnv()`
  * (every credential-shaped variable stripped) plus the ONE home variable of
- * this backend, pointed at that account's home (ruling 507), so the child
+ * this backend, pointed at that account's home (ruling 138), so the child
  * cannot reach any credential but the one it is signing in or revoking — not
  * even the person's other accounts on the same backend.
  */
@@ -425,14 +425,14 @@ function vendorSpawnEnv(
 export interface VendorCommand {
   file: string;
   env: Record<string, string>;
-  /** Ruling 460: `file` is the agent launcher, whose hard kill is SIGUSR2. */
+  /** Ruling 139: `file` is the agent launcher, whose hard kill is SIGUSR2. */
   launched: boolean;
-  /** Ruling 507: the account home the binary acts on. */
+  /** Ruling 138: the account home the binary acts on. */
   accountHome: string;
 }
 
 /**
- * Ruling 460: a vendor binary run for one person outside a run — the hosted
+ * Ruling 139: a vendor binary run for one person outside a run — the hosted
  * sign-in, its confirmation, the sign-out — runs as that person's own OS user
  * through the launcher, exactly like their runs, so every file it writes into
  * their home is theirs (and, once the launcher has handed the backend home
@@ -440,7 +440,7 @@ export interface VendorCommand {
  * is the binary on `vendorSpawnEnv`, as before. Throws the launch's
  * `run_unavailable` AppError when the person's home cannot be prepared.
  *
- * Ruling 507: it acts on ONE account's home, created here (with its links)
+ * Ruling 138: it acts on ONE account's home, created here (with its links)
  * when it does not exist yet — a sign-in into a new account starts in an empty
  * home of its own.
  */
@@ -488,7 +488,7 @@ async function runVendorLogout(
   dataRoot?: string,
 ): Promise<void> {
   try {
-    // Ruling 460: as the person's own OS user, like the sign-in that wrote it.
+    // Ruling 139: as the person's own OS user, like the sign-in that wrote it.
     const command = vendorCommand(db, row.userId, row.backend, binary, accountRef(row), dataRoot);
     await execFileAsync(command.file, [...LOGOUT_ARGS[row.backend]], {
       env: command.env,
@@ -505,10 +505,10 @@ async function runVendorLogout(
 
 /**
  * Delete what one account left on disk. An account with a home of its own
- * (ruling 507) loses the whole home — its sign-in and whatever its runs wrote
+ * (ruling 138) loses the whole home — its sign-in and whatever its runs wrote
  * there beside the shared transcripts, which the home only LINKS to (a removal
  * unlinks a link; it never descends into it) — removed as the person, because
- * their agents wrote it (ruling 485). An account connected before the ruling
+ * their agents wrote it (ruling 140). An account connected before the ruling
  * lives in the backend home itself, which also holds the person's transcripts
  * and their other accounts, so it loses its credential file and nothing else.
  * Never throws: a disconnect after a volume wipe is still a disconnect.
@@ -573,7 +573,7 @@ async function retireAccount(
 }
 
 /**
- * Ruling 165, carried into ruling 507: the account that bills the next run on
+ * Ruling 160(b), carried into ruling 160: the account that bills the next run on
  * this backend is about to change — a connect, a switch, the active account's
  * removal — so the refusals and the reading Viberr observed on the one that
  * billed until now go. A spent window or a rejected credential is evidence
@@ -603,7 +603,7 @@ function assertRoomForAnotherAccount(db: DatabaseSync, userId: string, backend: 
 /** The probe each pasted credential is verified against. Authenticated with the
  *  pasted value itself (it rides a request header, which is why the catch below
  *  never echoes a fetch failure's cause), and free of any cost: listing models
- *  bills nothing (ruling 19's spirit — never spend the person's money to find
+ *  bills nothing (ruling 220's spirit — never spend the person's money to find
  *  out whether their key works). */
 const KEY_PROBE = {
   claude: { host: "api.anthropic.com", url: "https://api.anthropic.com/v1/models" },
@@ -615,7 +615,7 @@ const MAX_SECRET_LEN = 512;
 
 /**
  * Which pasted credentials each backend accepts, and the ONE home of that fact
- * (ruling 127).
+ * (ruling 137).
  *
  * `setBackendApiKey` refuses anything outside it, and Profile → Agent accounts
  * builds its paste buttons from the same table
@@ -636,7 +636,7 @@ export interface SetBackendApiKeyDeps {
 /**
  * The paste path: verify a pasted key against the provider, then seal it as
  * a NEW account of this person's on that backend, which becomes the active
- * one. Whatever was connected before stays connected (ruling 507): the person
+ * one. Whatever was connected before stays connected (ruling 138): the person
  * switches back to it on the same card, with no sign-in.
  *
  * A ChatGPT workspace ACCESS TOKEN has no free probe (every endpoint that
@@ -788,7 +788,7 @@ function trimDetail(detail: Record<string, string>): Record<string, string> {
 }
 
 /**
- * Where a hosted sign-in writes (ruling 507): the account it will become, and
+ * Where a hosted sign-in writes (ruling 138): the account it will become, and
  * whether that account already exists. A sign-in for a NEW account runs in an
  * empty home of its own, minted before the vendor process starts; signing an
  * existing `login` account in again (its file went missing, or its vendor
@@ -832,8 +832,8 @@ export function loginTargetFor(
  * Called by the sign-in driver the moment the vendor binary reports success:
  * records the `login` account (no secret — the binary owns the credential in
  * the account's home) as the person's ACTIVE account on this backend, and
- * retires the refusal Viberr observed on the one that was active (ruling 165).
- * Every other account the person holds stays connected (ruling 507).
+ * retires the refusal Viberr observed on the one that was active (ruling 160(b)).
+ * Every other account the person holds stays connected (ruling 138).
  *
  * A new account is inserted with the id its home was minted under; an account
  * signed in again keeps its id and home and has its vendor facts refreshed.
@@ -896,7 +896,7 @@ export function recordBackendLogin(
 }
 
 /**
- * Ruling 507: make one of the person's accounts the one their runs bill.
+ * Ruling 138: make one of the person's accounts the one their runs bill.
  *
  * No vendor process runs and no file moves — the account's sign-in has sat in
  * its own home since it was connected — so switching takes effect for the next
@@ -950,7 +950,7 @@ export function switchBackendAccount(
 }
 
 /**
- * Ruling 507: give an account the person's own name, or clear it (an empty
+ * Ruling 138: give an account the person's own name, or clear it (an empty
  * name) so it is named by its vendor facts again. A name is display only: it
  * decides nothing about which account runs bill.
  */
@@ -997,12 +997,12 @@ export interface DisconnectedAccount {
 }
 
 /**
- * Disconnect ONE of the acting person's accounts (ruling 507): log its vendor
+ * Disconnect ONE of the acting person's accounts (ruling 138): log its vendor
  * sign-in out (login accounts), remove its files, drop the row. Transcripts
  * stay — they are the record of what the agents did, not a credential, and
  * they live in the backend home the account only linked to. Removing the
  * active account hands runs back to the account used before it, and retires
- * the refusals observed on the removed one (ruling 165); removing any other
+ * the refusals observed on the removed one (ruling 160(b)); removing any other
  * changes nothing about which account runs bill.
  *
  * Refuses when the account is not the person's (or is already gone) instead
@@ -1043,7 +1043,7 @@ export interface RetireUserBackendsDeps {
 
 /**
  * Retire EVERY agent account a person holds on this server, for the one case
- * that is not a disconnect: the ACCOUNT itself is being removed (ruling 127).
+ * that is not a disconnect: the ACCOUNT itself is being removed (ruling 137).
  *
  * `DELETE FROM users` cascades the `user_backend_credentials` rows away, but a
  * foreign key cannot reach the filesystem — and a `login` row's credential is a
@@ -1070,7 +1070,7 @@ export async function retireUserBackends(
   userId: string,
   deps: RetireUserBackendsDeps = {},
 ): Promise<RealBackend[]> {
-  // Every account on both backends (ruling 507), not only the active ones: an
+  // Every account on both backends (ruling 138), not only the active ones: an
   // inactive account's sign-in is as live a credential as the active one's.
   const connected = listBackendCredentials(db, userId);
   if (connected.length === 0) return [];
@@ -1090,7 +1090,7 @@ export async function retireUserBackends(
     await retireAccount(db, row, vendorDeps);
   }
   const backends = [...new Set(connected.map((row) => row.backend))];
-  // Ruling 165: the records naming this person go with their accounts.
+  // Ruling 160(b): the records naming this person go with their accounts.
   for (const backend of backends) activeAccountChanged(db, userId, backend);
   logger.info("personal backend credentials retired with the account", {
     userId,
@@ -1121,7 +1121,7 @@ async function vendorBinaryIfPresent(
 // -------------------------------------------------------------- health
 
 /** Per-person backend health — the ONE answer the task page, the packets, the
- *  Agents page, the controller and the run service all read. Since ruling 507
+ *  Agents page, the controller and the run service all read. Since ruling 138
  *  it is the health of the person's ACTIVE account on the backend, the one a
  *  run would bill; {@link backendAccountHealth} answers for any one account. */
 export interface UserBackendHealth {
@@ -1140,7 +1140,7 @@ export interface UserBackendHealth {
   connectedAt: string | null;
   /** Actionable sentence for the person themselves; null when available. */
   detail: string | null;
-  /** Ruling 507: the account this answers for, and how it is named to the
+  /** Ruling 138: the account this answers for, and how it is named to the
    *  person; null when nothing is connected. */
   accountId: string | null;
   accountName: string | null;
@@ -1152,7 +1152,7 @@ export interface UserBackendHealthEnv {
 }
 
 /**
- * Whether ONE account can bill a run right now (ruling 507's per-account half
+ * Whether ONE account can bill a run right now (ruling 138's per-account half
  * of {@link userBackendHealth}). Re-probed on every call, never cached, from
  * the account's own home: a wiped runtime volume must read as "sign in again"
  * the moment it happens, and a fresh sign-in must count without a restart.
@@ -1233,8 +1233,8 @@ export function userBackendHealth(
   }
   const health = backendAccountHealth(row, env);
   if (health.available) return health;
-  // Ruling 507: there is no fallback — a run bills the active account or none
-  // (ruling 127) — but the person may hold one that works, and the sentence
+  // Ruling 138: there is no fallback — a run bills the active account or none
+  // (ruling 137) — but the person may hold one that works, and the sentence
   // every refusal quotes should say so rather than send them to a sign-in.
   const usable = others.some((other) => backendAccountHealth(other, env).available);
   return usable
@@ -1268,7 +1268,7 @@ const connectedRowSchema = z.object({ user_id: z.string() });
 /** Every person whose connection to this backend actually holds — the
  *  instance-level number that replaced "is the backend configured". A person
  *  counts once however many accounts they keep, and by their ACTIVE one
- *  (ruling 507): that is the account a run of theirs would bill. */
+ *  (ruling 138): that is the account a run of theirs would bill. */
 export function connectedUserIds(
   db: DatabaseSync,
   backend: RealBackend,
@@ -1308,15 +1308,15 @@ export interface RunCredential {
   secrets: string[];
   kind: CredentialKind;
   /** The person's backend home: what the launcher prepares and hands back
-   *  after every launched process (ruling 460). Shared by all their accounts. */
+   *  after every launched process (ruling 139). Shared by all their accounts. */
   homeDir: string;
-  /** Ruling 507: the account this run bills — the person's active one when the
+  /** Ruling 138: the account this run bills — the person's active one when the
    *  credential was resolved — and its own vendor home. A Claude run gets the
    *  account home as `CLAUDE_CONFIG_DIR`; a Codex run's private home takes the
-   *  account's `auth.json` from it (the adapter's fork, ruling 181). */
+   *  account's `auth.json` from it (the adapter's fork, ruling 145). */
   accountId: string;
   accountHome: string;
-  /** Ruling 460 + 507: the directories the launch must hand to the person's
+  /** Ruling 139 + 138: the directories the launch must hand to the person's
    *  uid besides the backend home (the account home and what it links to). */
   ownDirs: string[];
 }
@@ -1349,7 +1349,7 @@ export function runCredentialFor(
   // Claude reads its sign-in from its config dir, so the run is pointed at the
   // account's own home (whose `projects/` links to the shared transcripts).
   // Codex keeps the SHARED home here: its adapter forks a private home from
-  // it for every run and copies the sign-in from `accountHome` (ruling 181).
+  // it for every run and copies the sign-in from `accountHome` (ruling 145).
   const env = { [HOME_ENV_KEY[backend]]: backend === "claude" ? account.home : homeDir };
   const secrets: string[] = [];
   if (row.kind !== "login") {

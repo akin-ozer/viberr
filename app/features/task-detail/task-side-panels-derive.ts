@@ -10,7 +10,7 @@ import {
 } from "~/features/github/github-pills";
 
 /**
- * What the GitHub trace reads off the task before it draws (ruling 700(e), the
+ * What the GitHub trace reads off the task before it draws (ruling 13(b), the
  * task-page recipe applied to `task-side-panels.tsx`): whether a live pull
  * request stands, the revision a push would carry and what the server would
  * refuse a delivery with, the admin override's reason, the card's links and
@@ -24,7 +24,7 @@ export function prIsTerminal(task: TaskDetail): boolean {
   return !task.pr || task.pr.state === "closed" || task.pr.state === "merged";
 }
 
-/** Ruling 160 (pass 35, F35-11): the refusal the server gives a delivery over a
+/** Ruling 232 (pass 35, F35-11): the refusal the server gives a delivery over a
  *  pull request a person closed without merging, said on the control rather than
  *  after the click. The server's own sentence is `closedByHumanDeliveryText`;
  *  this is its client half, so the card never offers a door that then 409s. */
@@ -38,7 +38,7 @@ const CLOSED_PR_DELIVERY_REFUSAL = (
   `#${prNumber} on GitHub lifts the block too.`;
 
 /**
- * Ruling 160: `closed` is terminal, so the delivery control is offered — and
+ * Ruling 232: `closed` is terminal, so the delivery control is offered — and
  * the server refuses it while nobody has answered the closure. The whole
  * `PrRef` reaches this page (`pr_json`), so the refusal is derivable here and
  * is said on the control, the way the diverged push is.
@@ -49,7 +49,7 @@ export function closedPrRefusal(task: TaskDetail): string | null {
     : null;
 }
 
-/** Ruling 135: the delivered revision the open pull request does not carry,
+/** Ruling 243: the delivered revision the open pull request does not carry,
  *  short, as the push control and its status row name it. */
 export interface PushOffer {
   prNumber: number;
@@ -59,7 +59,7 @@ export interface PushOffer {
 }
 
 export function prPushOffer(task: TaskDetail, prTerminal: boolean): PushOffer | null {
-  // Ruling 134(c) / 135: the recorded unpushed revision, current only.
+  // Ruling 229 / 243: the recorded unpushed revision, current only.
   const unpushed = unpushedRevisionOf(task.pr, task.workRevisionSha ?? null);
   return task.pr && !prTerminal && unpushed
     ? {
@@ -91,16 +91,16 @@ export function forceAcceptReason(
   // unmerged PR is decided, not wedged — there is nothing to override).
   const isTerminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
-  // Ruling 124: force-accept is an escape hatch, not a standing offer. It stays
-  // visible OFF-BOUNDARY (ruling 59 — a pre-work wedge must be escapable), but a
-  // task with nothing to accept cannot be wedged yet: before ruling 124 every
+  // Ruling 98: force-accept is an escape hatch, not a standing offer. It stays
+  // visible OFF-BOUNDARY (ruling 98 — a pre-work wedge must be escapable), but a
+  // task with nothing to accept cannot be wedged yet: before ruling 98 every
   // non-terminal task showed an admin "skips the remaining stages and the review
   // gate" in its GitHub card, ten seconds after creation, directly above "No
   // branch yet" and directly under "Not acceptable yet … move it through the
   // workflow first". "Escapable" is the test, so a task that IS wedged still
   // offers it with no branch at all: an open BLOCKED packet is a wedge (a
   // crashed run's recovery packet), and so is any work to accept — a branch, a
-  // pull request, a delivered revision, or (ruling 665) delivered files. What
+  // pull request, a delivered revision, or (ruling 228) delivered files. What
   // goes away is the standing offer on a task where nothing has happened yet.
   const wedgedOrDelivering = Boolean(
     task.branch ?? task.pr ?? task.workRevisionSha ?? null,
@@ -121,7 +121,7 @@ export interface PrCardLinks {
 
 /**
  * Real external links (spec §4.9: the prototype toast goes away). Ruling
- * 511: the pull request's title opens it, and the branch opens its tree;
+ * 315: the pull request's title opens it, and the branch opens its tree;
  * they are the card's "Open on GitHub", which stood as a third full-width
  * button under the other two.
  *
@@ -159,11 +159,11 @@ export function prCardSignals(
   // required reviews surfaced only as a late 405.
   const checks = task.prChecks ? checksPill(task.prChecks) : null;
   const review = task.prReview ? reviewPill(task.prReview) : null;
-  // Ruling 162 (pass 35, F35-12 (c)): the conflict the acceptance gate refuses
+  // Ruling 95 (pass 35, F35-12 (c)): the conflict the acceptance gate refuses
   // on, on the task page too. It was rendered on the GitHub page alone, so this
   // card read "PR #16 · in review" while the accept click answered 409. The
   // reconciler drops the fact for a settled PR, so a merged or closed one never
-  // carries it. Ruling 405(b): through `liveMergeable`, not off the raw field.
+  // carries it. Ruling 315(d): through `liveMergeable`, not off the raw field.
   // The GitHub page and the review queue both read the verdict's head pin, and
   // a task page reporting "conflicts" over the commit that resolved it would
   // disagree with them and with the acceptance gate.
@@ -177,7 +177,7 @@ export function prCardSignals(
 /**
  * R15-2 safety net (b): with delivery now an operator decision, a human with
  * authority can always ship the branch by hand — offered when no live PR
- * stands (none yet, or the last one closed/merged) and, since ruling 134(c),
+ * stands (none yet, or the last one closed/merged) and, since ruling 229,
  * whenever the open PR does not carry the delivered revision: the same door
  * pushes the revision to that PR. A DIVERGED remote gets the fact and a
  * disabled control naming the refusal the server would give, never a button

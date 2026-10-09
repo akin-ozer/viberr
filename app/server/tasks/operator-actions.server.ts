@@ -58,7 +58,7 @@ export interface ContextConflict {
 }
 
 /**
- * R19-2 (ruling 56) — a KB-vs-repo disagreement is a `quality` flag on the
+ * R19-2 (ruling 206) — a KB-vs-repo disagreement is a `quality` flag on the
  * timeline. The existing type carries exactly this meaning: nothing was
  * violated (`policy`) and nothing is stuck (`blocked`), but a human must see
  * that two sources of convention disagree about the same repository. It already
@@ -89,7 +89,7 @@ function contextConflictEvent(
 
 /**
  * The knowledge bases a run on this task was given: the operator's own (its
- * grants and the project's rulings) and every engaged agent's. Ruling 483: the
+ * grants and the project's rulings) and every engaged agent's. Ruling 210: the
  * operator relays a correction an agent proved, and on Codex the agent has no
  * tool to make one itself, so the operator may correct any base a run on this
  * task was handed, not only its own.
@@ -116,18 +116,18 @@ function kbsGivenToTaskRuns(
 }
 
 /**
- * F39-1/F39-7 (pass 39, ruling 378), generalized by ruling 483 (F40-53) and
- * made a write by ruling 498: the operator CORRECTS a knowledge base, in the
+ * F39-1/F39-7 (pass 39, ruling 210), generalized by ruling 210 (F40-53) and
+ * made a write by ruling 210: the operator CORRECTS a knowledge base, in the
  * document itself.
  *
- * Ruling 378 gave it a proposal against the project's rulings only; ruling 483
+ * Ruling 210 gave it a proposal against the project's rulings only; ruling 210
  * widened it to every knowledge base a run on the task holds (live in pass 40
  * the stale facts were in the akin-dossier and the deploy runbook, and the
- * operator answered "I'm not changing them myself"). Ruling 498 (owner,
+ * operator answered "I'm not changing them myself"). Ruling 210 (owner,
  * 2026-09-26: "No human can approve all of these while inspecting them
  * thoroughly") writes the correction as it is made: `replaces` is the exact
  * passage, `text` what takes its place, and a person undoes it from the
- * Controller page. `kb` null keeps ruling 378's default, the project's rulings.
+ * Controller page. `kb` null keeps ruling 210's default, the project's rulings.
  * Same gate as the typed event it posts.
  */
 export async function operatorCorrectKnowledgeDoc(
@@ -152,13 +152,13 @@ export async function operatorCorrectKnowledgeDoc(
 }
 
 /**
- * Ruling 584 (owner, 2026-09-29): "operator decides if it's own comments needs
+ * Ruling 133 (owner, 2026-09-29): "operator decides if it's own comments needs
  * deleting or editing. Don't expose this to the end user, fixes the problem
  * silently with mcp and doing it itself, not asking the user."
  *
  * On AWSC-19 the Estimate Judge's report said which golden entries price no
  * load-balancer line, on a task every agent can read, and the operator told
- * Arda "A comment is not something I can remove". Ruling 582 gave a person a
+ * Arda "A comment is not something I can remove". Ruling 80 gave a person a
  * Remove on the comment's row; the owner gave the comment to the operator.
  *
  * Only a comment the operator or an agent wrote: a person's words are theirs.
@@ -238,16 +238,16 @@ export async function operatorEditComment(
   };
 }
 
-/** Ruling 417: the audit action shared with the settings page's lease writer. */
+/** Ruling 61: the audit action shared with the settings page's lease writer. */
 const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
 
 /**
- * Ruling 417 (owner, 2026-09-23): the operator leases files to ITS OWN task.
+ * Ruling 61 (owner, 2026-09-23): the operator leases files to ITS OWN task.
  *
- * Ruling 245 gave the project leases ("this task owns these paths until it
- * merges") and ruling 396 a human surface, but only a person on the settings
+ * Ruling 60 gave the project leases ("this task owns these paths until it
+ * merges") and ruling 61 a human surface, but only a person on the settings
  * page, or the controller when a person asked it, could declare one. The
- * operator is the first to SEE two open PRs sharing a file (ruling 413) and
+ * operator is the first to SEE two open PRs sharing a file (ruling 116) and
  * could do nothing about it: on ax-clone AX-20 and AX-21 collided on
  * `internal/sandbox/local.go` and it cost an agent run, a decision packet and
  * the owner's answer. The owner chose the direct door over a proposal a person
@@ -288,11 +288,11 @@ export async function operatorLeaseFiles(
   if (taskClosure(task.parsed.frontmatter, project.parsed.frontmatter.stages).closed) {
     return {
       outcome: "noop",
-      message: `${input.taskKey} is closed, and a lease held by a finished task binds nobody (ruling 245(b)). Nothing was leased.`,
+      message: `${input.taskKey} is closed, and a lease held by a finished task binds nobody (ruling 60). Nothing was leased.`,
     };
   }
   const leaseCtx = ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {};
-  // Ruling 426: a lease that would park work other tasks wait on is a person's
+  // Ruling 61: a lease that would park work other tasks wait on is a person's
   // call. Live on ax-clone AX-22's operator leased `internal/controller/task.go`
   // at 23:47, which AX-20's open PR #13 already changed; AX-20's operator then
   // made AX-20 wait on AX-22, and AX-21, AX-5 and goal-6 waited on AX-20. The
@@ -318,7 +318,7 @@ export async function operatorLeaseFiles(
           `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ${input.taskKey} ` +
           `itself waits on ${first.key}: leasing it to ${input.taskKey} would make each wait for the ` +
           `other to merge. Keep ${input.taskKey}'s work off those paths, or drop the wait if it is ` +
-          `wrong (ruling 426). Nothing was leased.`,
+          `wrong (ruling 61). Nothing was leased.`,
       };
     }
     return {
@@ -327,7 +327,7 @@ export async function operatorLeaseFiles(
         `\`${first.path}\` is changed by ${first.key}'s open PR #${first.pr}, and ` +
         `${joinDependencyEntries(others)} ${others.length === 1 ? "waits" : "wait"} on ${first.key}: ` +
         `leasing it to ${input.taskKey} would hold all of them behind ${input.taskKey}. ` +
-        `Which of the two lands first is a person's call (ruling 426). Open a decision packet ` +
+        `Which of the two lands first is a person's call (ruling 61). Open a decision packet ` +
         `that names both tasks and what waits on each, keep ${input.taskKey}'s work off those ` +
         `paths, or wait for ${first.key} to merge (set_dependencies). Nothing was leased.`,
     };
@@ -480,7 +480,7 @@ export async function operatorPostComment(
 }
 
 /**
- * Ruling 488 (F40-67): post on ANOTHER task of this project, as the operator.
+ * Ruling 135 (F40-67): post on ANOTHER task of this project, as the operator.
  * Gated like `post_comment` (`append-typed-events`): it is a comment, on the
  * task a goal told this one to write to. The door refuses what a relay may
  * not reach, writes the source task's line and wakes the target's operator
@@ -494,7 +494,7 @@ export async function operatorRelayToTask(
     taskKey: string;
     toTaskKey: string;
     text: string;
-    /** Ruling 538: this task's attachments to put on the other task. */
+    /** Ruling 135: this task's attachments to put on the other task. */
     files?: readonly string[];
   },
   authority: OperatorAuthority,
@@ -520,7 +520,7 @@ export async function operatorRelayToTask(
   });
 }
 
-/** Ruling 557: take named attachments of another task onto this one. The
+/** Ruling 135: take named attachments of another task onto this one. The
  *  relay's grant: it is the relay's claim comment, written on this task. */
 export async function operatorTakeFromTask(
   db: DatabaseSync,
@@ -624,7 +624,7 @@ export async function operatorFlagContextConflict(
       text: event.text,
       occurredAt: event.occurredAt,
       about: { event: event.occurredAt },
-      // Ruling 361: the operator flagged the conflict (the event's own actor).
+      // Ruling 74: the operator flagged the conflict (the event's own actor).
       from: OPERATOR_NOTIFY_FROM,
     },
     ctx,
@@ -636,7 +636,7 @@ export async function operatorFlagContextConflict(
 }
 
 /**
- * Ruling 131(b) (pass 34): the operator records what a task WAITS ON with a
+ * Ruling 55 (pass 34): the operator records what a task WAITS ON with a
  * tool of its own instead of a hold packet (JC-9's "standing token"). Gated
  * like packets (`generate-packets`: the wait is the packet's replacement, so
  * it reuses the packet's own grant rather than minting a catalog id for one
@@ -692,7 +692,7 @@ export async function operatorSetDependencies(
 }
 
 /**
- * Ruling 503: the operator puts ITS OWN task in an epic, moves it to another,
+ * Ruling 116: the operator puts ITS OWN task in an epic, moves it to another,
  * or takes it out, through the one writer of a task's `epic`
  * (`setTasksEpic`), so the task's note, the epic's history line, the audit
  * row and the lead's notice read as they do when a person does it. It rides
@@ -759,7 +759,7 @@ export async function operatorSetGoal(
   if (current === goal) {
     return { outcome: "noop", message: "Goal unchanged." };
   }
-  /** Ruling 547: the awaiting packet the drafted goal fulfils; the note below
+  /** Ruling 75: the awaiting packet the drafted goal fulfils; the note below
    *  is its record. */
   let clearedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {

@@ -1,5 +1,5 @@
 /**
- * Ruling 649: the one line every writer Viberr prompts reads about the people
+ * Ruling 203: the one line every writer Viberr prompts reads about the people
  * it writes about: the operator's turn, a specialist's run on either backend,
  * and the controller.
  *

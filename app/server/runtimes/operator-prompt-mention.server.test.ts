@@ -51,7 +51,7 @@ describe("operator triage gate — disclose a substituted delegated ask (R20-9)"
 });
 
 /**
- * Ruling 285 (pass 37, F37-120). The clip on an agent report was already
+ * Ruling 117 (pass 37, F37-120). The clip on an agent report was already
  * honest — the header said "first 4,000 chars" — and honesty about a dead end
  * is still a dead end. Live on SHOP-42 the operator raised a packet to a human
  * saying "the reviewer's report reached me truncated at '### Item 3 —', so I
@@ -60,7 +60,7 @@ describe("operator triage gate — disclose a substituted delegated ask (R20-9)"
  * somewhere it could not go — and what it could not read named two unowned
  * defects the reviewer had gone looking for.
  */
-describe("a clipped agent report names the way out (ruling 285)", () => {
+describe("a clipped agent report names the way out (ruling 117)", () => {
   const long = `## Findings\n\n${"filler ".repeat(900)}\n\nSENTINEL-PAST-THE-CLIP`;
 
   it("a report past the clip is cut, says so, and names the tool that finishes it", () => {

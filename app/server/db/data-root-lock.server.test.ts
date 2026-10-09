@@ -245,11 +245,11 @@ describe("classifyLock — container self-lockout (F20-8b)", () => {
 });
 
 /**
- * Ruling 158: the reader-side judgement `openDatabaseReadOnly` asks before it
+ * Ruling 23: the reader-side judgement `openDatabaseReadOnly` asks before it
  * opens anything. It must agree with the boot's own verdicts: absent and stale
  * mean "just files", held and an unreadable holder mean "copy first".
  */
-describe("judgeDataRootLock (ruling 158, the reader's question)", () => {
+describe("judgeDataRootLock (ruling 23, the reader's question)", () => {
   function stateDir(): string {
     const dir = path.join(ctx.makeTempDir(), "state");
     mkdirSync(dir, { recursive: true });

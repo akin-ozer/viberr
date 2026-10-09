@@ -10,7 +10,7 @@ import { stageEligible } from "./stage-eligibility";
 import { resolveStageRoles } from "./stage-roles";
 
 /**
- * Ruling 163 (pass 35, F35-13): the stage a task whose revision changed after
+ * Ruling 90 (pass 35, F35-13): the stage a task whose revision changed after
  * a verdict goes BACK to for its re-verdict, or null when no move is needed.
  *
  * "The review stage" is defined by where the task's required reviewers can
@@ -32,7 +32,7 @@ import { resolveStageRoles } from "./stage-roles";
  *    revision is eligible at the task's CURRENT stage, that verdict can be
  *    given here: null.
  *
- *    Ruling 208: it used to ask whether ANY required reviewer was eligible
+ *    Ruling 90: it used to ask whether ANY required reviewer was eligible
  *    here, which is a different question the moment a board declares required
  *    reviewers at two different stages. Live on SHOP-15: `code-reviewer`
  *    (stages build+review) had no approve on the delivered revision, and
@@ -57,7 +57,7 @@ export function verdictStageFor(
   fm: {
     stage: string;
     engagements: Engagement[];
-    /** Ruling 208: which reviewers still owe a verdict is read from these. A
+    /** Ruling 90: which reviewers still owe a verdict is read from these. A
      *  caller that has no verdict history (none of the shipped ones) is treated
      *  as "everybody owes", which is the pre-208 behaviour. */
     verdicts?: ReviewVerdict[];
@@ -73,7 +73,7 @@ export function verdictStageFor(
   const reviewIndex =
     roles.reviewId === null ? -1 : stages.findIndex((s) => s.id === roles.reviewId);
   if (reviewIndex < 0) return null;
-  // Ruling 208: only the reviewers whose approve on the CURRENT revision is
+  // Ruling 90: only the reviewers whose approve on the CURRENT revision is
   // missing. The ones that already approved cannot be the reason a re-verdict
   // is needed, so their eligibility must not answer for the ones that have not.
   const approved = new Set(

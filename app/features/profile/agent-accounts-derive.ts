@@ -9,7 +9,7 @@ import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.serv
 
 /**
  * What Profile → Agent accounts reads off its props and its fetcher before it
- * draws (ruling 700(e), the split of `agent-accounts-panel.tsx` along the task
+ * draws (ruling 13(b), the split of `agent-accounts-panel.tsx` along the task
  * page's recipe): the vendors' own words for their flows, a running sign-in's
  * status line, an account's kind, the usage pill, the badge, and which request
  * in flight is this card's. Pure functions of the loader data and the fetcher,
@@ -36,7 +36,7 @@ export const SIGN_IN_CONNECTED = {
 } as const satisfies Record<LoginMethod, string>;
 
 /** The company whose page the person signs in on. The step titles name the
- *  company; the badge, the buttons and every sentence keep the ruling-92
+ *  company; the badge, the buttons and every sentence keep the ruling-298
  *  product names ("Claude", "Codex"). */
 export const VENDOR = { claude: "Anthropic", codex: "OpenAI" } as const;
 
@@ -78,7 +78,7 @@ export function hostOf(url: string): string | null {
 }
 
 /**
- * Ruling 294: a reading's percentage, clamped.
+ * Ruling 161: a reading's percentage, clamped.
  *
  * The clamp is not defensive noise: a provider on OVERAGE reports a utilization
  * above 1, and rounding that unclamped renders "118% of seven day" on a card
@@ -108,7 +108,7 @@ function usagePct(utilization: number | null): number | null {
  */
 export function usageText(usage: NonNullable<ProfileBackend["usage"]>): string {
   const window = (usage.rateLimitType || "window").replaceAll("_", " ");
-  // Ruling 481(d): the window this figure was read in is over, so the figure
+  // Ruling 161(c): the window this figure was read in is over, so the figure
   // describes nothing current. It used to stay "92% of five hour" for hours.
   if (usage.windowReset) return `${window} window reset`;
   const pct = usagePct(usage.utilization);
@@ -126,7 +126,7 @@ export function usagePillKind(usage: NonNullable<ProfileBackend["usage"]>): "neu
 }
 
 /**
- * Ruling 507: how an account was connected, as the line under its name says
+ * Ruling 138: how an account was connected, as the line under its name says
  * it. The name itself says WHICH account (`backendAccountName`); this says what
  * kind, so a person holding a sign-in and a key can tell them apart at a glance.
  */
@@ -162,7 +162,7 @@ export function cardBadge(running: boolean, connected: boolean): string {
 }
 
 /** The account a running or failed sign-in is FOR, when it is one the person
- *  already has (signing an existing sign-in in again, ruling 507). */
+ *  already has (signing an existing sign-in in again, ruling 138). */
 export function loginAccount(
   login: NonNullable<ProfileBackend["login"]>,
   accounts: ProfileBackendAccount[],
@@ -172,14 +172,14 @@ export function loginAccount(
     : null;
 }
 
-/** Ruling 368: the panel's one request, as ONE card reads it. */
+/** Ruling 286: the panel's one request, as ONE card reads it. */
 export interface CardRequest {
   /** A request is in flight: both cards share the fetcher, so every control
    *  waits. */
   busy: boolean;
   /** The intent THIS card sent, while it is in flight. */
   inFlight: string | null;
-  /** Ruling 507: and the account it names ("" for a sign-in that adds a new
+  /** Ruling 138: and the account it names ("" for a sign-in that adds a new
    *  one), so only that row's button shows the work. */
   inFlightAccount: string | null;
   /** Whether the sign-in starting is `method`, into `account`. */
@@ -189,7 +189,7 @@ export interface CardRequest {
 }
 
 /**
- * Ruling 368: both cards share the fetcher, so the request is THIS card's only
+ * Ruling 286: both cards share the fetcher, so the request is THIS card's only
  * when it names this backend; the button that sent it shows the work and every
  * other control (this card's and the other card's) only waits.
  */

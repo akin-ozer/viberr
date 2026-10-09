@@ -12,7 +12,7 @@ import { initialsOf } from "~/ui/initials";
  * variants (contracts §3.1), resolved from file actor refs.
  *
  * Humans resolve by user id against the users table (identity = id,
- * ruling 6); the resolved name/initials/tone are a denormalized snapshot
+ * ruling 26(a)); the resolved name/initials/tone are a denormalized snapshot
  * stored on projected events so they survive member removal. `guest: true`
  * marks a registered user who is NOT a member of the surrounding project.
  * Operator renders as `{ kind: "agent", name: "Operator" }` — NO backend,
@@ -36,7 +36,7 @@ export type ActorRender =
     }
   | { kind: "agent"; backend: "codex" | "claude"; name: string; role: string }
   | { kind: "agent"; name: "Operator" }
-  // Ruling 99: the instance controller — same backend-less shape as the
+  // Ruling 247: the instance controller — same backend-less shape as the
   // operator (it is machinery, not a deployed profile).
   | { kind: "agent"; name: "Controller" }
   | { kind: "system"; name: string };
@@ -151,7 +151,7 @@ export function createActorResolver(
 /**
  * C5 (pass 34, U34-4): the controller INSTRUMENT on a human's audit label.
  *
- * Ruling 99(b) requires a controller-driven write to disclose the instrument:
+ * Ruling 247 requires a controller-driven write to disclose the instrument:
  * the person is the authority, the controller is the tool they used, so an
  * audit row a person writes THROUGH the controller carries it in its
  * `actor_label`. Both producers (`controller-tool-guards.server.ts`,

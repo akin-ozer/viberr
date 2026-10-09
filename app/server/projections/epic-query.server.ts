@@ -13,7 +13,7 @@ import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { getProject } from "./board-query.server";
 
 /**
- * Epic read models (ruling 503): the Epics pages, the board's epic filter
+ * Epic read models (ruling 272): the Epics pages, the board's epic filter
  * and New task pick, the task page's Epic row, and the controller's and
  * operator's reads all answer from here.
  *
@@ -26,7 +26,7 @@ import { getProject } from "./board-query.server";
 /** How far an epic's tasks have got. A task archived before it was done is
  *  left out of every count, the way Linear leaves a cancelled issue out of a
  *  project's progress: it is abandoned work, neither done nor still to do. A
- *  task archived at the terminal stage still counts as done (ruling 651):
+ *  task archived at the terminal stage still counts as done (ruling 274):
  *  archiving filed finished work away, it did not undo it. */
 export interface EpicProgress {
   /** Tasks in the epic: the live ones and the ones archived when done. */
@@ -37,7 +37,7 @@ export interface EpicProgress {
   started: number;
   /** Still at the entry stage. */
   notStarted: number;
-  /** Waiting on other work (ruling 131); counted in the three above too. */
+  /** Waiting on other work (ruling 55); counted in the three above too. */
   held: number;
   /** Archived tasks that still name this epic, shown apart. */
   archived: number;
@@ -290,7 +290,7 @@ export function epicTaskRows(db: DatabaseSync, slug: string, epicId: string): Ep
     }));
 }
 
-/** An epic as a chip or a menu entry draws it (ruling 503). */
+/** An epic as a chip or a menu entry draws it (ruling 325). */
 export interface EpicChipRow {
   id: string;
   title: string;

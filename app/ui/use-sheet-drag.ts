@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import { createVelocityTracker, project, rubberband, springAt, unrubberband, type Spring } from "./spring";
 
 /**
- * A bottom sheet a finger can pull down to dismiss (ruling 454) — the
+ * A bottom sheet a finger can pull down to dismiss (ruling 285) — the
  * gesture Apple's "Designing Fluid Interfaces" is built around:
  *
  * - **Direct manipulation.** After a 10px slop the sheet tracks the pointer
@@ -34,11 +34,11 @@ import { createVelocityTracker, project, rubberband, springAt, unrubberband, typ
  * `open` false as that exit starts, not once it unmounts (the dock passes
  * `open && !closing`): a settle left running under an exit the person then
  * takes back would snap the sheet onto the spring, or dismiss it anyway
- * (ruling 459).
+ * (ruling 285).
  *
  * The sheet's entrance must be a TRANSITION that the caller's
  * `[data-sheet-drag]` rule switches off (`transition: none`), as the dock's
- * is (ruling 459). That is what holds a sheet caught mid-entrance at the
+ * is (ruling 285). That is what holds a sheet caught mid-entrance at the
  * offset read here. A keyframe entrance would outrank the drag's transform
  * in the cascade and carry on under the finger.
  *
@@ -251,7 +251,7 @@ export function useSheetDrag({
       stop();
       // A sheet still rising is held where the finger caught it by the
       // host's drag rule: its `transition: none` cancels the entrance (a
-      // transition, ruling 459) at the offset written here, and nothing
+      // transition, ruling 285) at the offset written here, and nothing
       // replays after the release. Nothing is written on the sheet itself.
       if (base !== 0) apply(base);
       tracker.reset();

@@ -34,7 +34,7 @@ export function splitNotifications(
 ): NotificationSplit {
   const match = (n: NotificationPageItem) => (f === "unread" ? n.unread : true);
   // The server decides which kinds can wait on you (`listNotifications` sets
-  // `waitingOnYou` only on `DECISION_NOTIFICATION_KINDS`, ruling 481(a)); a
+  // `waitingOnYou` only on `DECISION_NOTIFICATION_KINDS`, ruling 74); a
   // second copy of that set here missed the agent question.
   // R8-3: exactly one "Waiting on you" card per task — a task needs one human
   // action, so a superseded packet's leftover notification (or a stale approval
@@ -85,7 +85,7 @@ export function needsYouTimeUTC(iso: string): string {
   return formatDayBucketUTC(iso).toLowerCase() + " " + formatClockUTC(iso);
 }
 
-/** The "Waiting on you" header's tail after "N decisions" (ruling 700(e), the
+/** The "Waiting on you" header's tail after "N decisions" (ruling 13(b), the
  *  split of `NtfNeedsYou`): what the authoritative count holds that the card
  *  does not list, the rows the filter hides and the decisions with no row
  *  here. Empty when the card lists every one. */
@@ -97,7 +97,7 @@ export function needsYouCountTail(hiddenByFilter: number, onTaskPages: number): 
   return subParts.length > 0 ? ` · ${subParts.join(" · ")}` : "";
 }
 
-/** What the "Waiting on you" card says when it lists nothing (ruling 700(e),
+/** What the "Waiting on you" card says when it lists nothing (ruling 13(b),
  *  the split of `NtfNeedsYou`): nothing waits; or decisions wait that the
  *  filter hides; or decisions wait that have no row here. */
 export function needsYouEmptyText(decisionCount: number, hiddenByFilter: number): string {

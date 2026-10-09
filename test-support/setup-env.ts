@@ -8,7 +8,7 @@ import { primeHermeticToolchain } from "./toolchain";
  * Vitest setup: hermetic env for the test suite. The first `getEnv()` call
  * needs two secrets, and some test paths reach it — e.g.
  * `configureRunServiceForTests` → `createAdapters` → `filteredSpawnEnv`. Left
- * unset, it would generate random ones into the data root (ruling 504): a file
+ * unset, it would generate random ones into the data root (ruling 38): a file
  * write and different values on every run. Locally a developer's `.env` may
  * set them; on CI and fresh clones nothing does.
  *
@@ -25,9 +25,9 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
   Buffer.alloc(32, 7).toString("base64");
 
 /**
- * Fail closed against ambient real-backend credentials (F10-10, ruling 127).
+ * Fail closed against ambient real-backend credentials (F10-10, ruling 137).
  *
- * Since ruling 127 no deployment-wide credential is DECLARED any more — a run's
+ * Since ruling 137 no deployment-wide credential is DECLARED any more — a run's
  * env is built from the credential of the ONE person it bills. But the spawn
  * env still starts from `process.env` (`filteredSpawnEnv`), and a developer's
  * `.env` or a CI host may carry a real provider key under one of these names.
@@ -117,7 +117,7 @@ if (suiteRoot) {
 }
 
 /**
- * Ruling 636: a run that launches makes its own temporary directory under
+ * Ruling 141(c): a run that launches makes its own temporary directory under
  * `VIBERR_RUN_TMP_ROOT` (else `viberr-runs` in the temp folder) and removes it
  * a grace after it settles, which a test file does not wait for. The suite's
  * root is this file's own and goes with it, like the data root above.
@@ -133,7 +133,7 @@ if (runTmpRoot) {
 }
 
 /**
- * Fail closed against PROBING THE HOST (ruling 182).
+ * Fail closed against PROBING THE HOST (ruling 9).
  *
  * `healthSnapshot` — and so the health route, `instance_health` and the boot
  * integrity line — reports the toolchain, which `cachedToolchain()` resolves

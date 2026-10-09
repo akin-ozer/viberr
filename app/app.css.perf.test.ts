@@ -5,7 +5,7 @@ import { expectWithinBudget } from "../test-support/perf-ratchet";
 import { balanced, cssRules, selectorParts, type CssRule } from "../test-support/css-rules";
 
 /**
- * Ruling 457: the stylesheet's share of the main thread and of layout shift,
+ * Ruling 11: the stylesheet's share of the main thread and of layout shift,
  * counted off `app/app.css` itself (the one sheet the app has).
  *
  *   - An endless animation of anything but transform and opacity repaints on
@@ -67,12 +67,12 @@ function declares(selector: string, prop: string, value: RegExp): boolean {
   );
 }
 
-describe("app.css main-thread and layout-shift costs (ruling 457)", () => {
+describe("app.css main-thread and layout-shift costs (ruling 11)", () => {
   it("animates only transform and opacity in an endless loop, but the live shimmers", () => {
     const loops = mainThreadLoops();
-    // Ruling 451(a): the "Controller is working…" band animates its gradient's
+    // Ruling 284: the "Controller is working…" band animates its gradient's
     // position. One element, drawn only while the controller works. Ruling
-    // 499: the console's live "Thinking" label and the to-do step under way
+    // 168: the console's live "Thinking" label and the to-do step under way
     // carry the same band, one element each, only while a run is live.
     expect(loops.sort()).toEqual([
       ".ctl-working-text::before",

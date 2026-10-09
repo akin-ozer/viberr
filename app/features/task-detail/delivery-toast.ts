@@ -1,7 +1,7 @@
 import type { DeliveryOutcome } from "~/server/tasks/task-delivery.server";
 
 /**
- * Ruling 134(a): every human door that performs a delivery says what moved
+ * Ruling 229: every human door that performs a delivery says what moved
  * through ONE toast. The task page's Deliver / Push control and an applied
  * `delivery` recommendation both come through here, so a person is never told
  * "Delivered" for a push that moved nothing, and never left in the dark after

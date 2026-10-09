@@ -27,7 +27,7 @@ import type { RealBackend } from "./runtime-registry.server";
 import { toError } from "~/shared/errors";
 
 /**
- * The hosted sign-in driver (ruling 127).
+ * The hosted sign-in driver (ruling 137).
  *
  * A person signs Claude or Codex in by driving the vendor's OWN unmodified
  * binary from this server: `claude auth login --claudeai|--console` and
@@ -41,7 +41,7 @@ import { toError } from "~/shared/errors";
  * code Anthropic shows), and afterwards asks the SAME binary whether it is
  * signed in. The credential itself is written by the vendor client into the
  * account's own home under `<dataRoot>/runtimes/users/<id>/{claude-home,codex-home}`
- * (`accounts/<accountId>`, ruling 507) and is never read, copied or parsed
+ * (`accounts/<accountId>`, ruling 138) and is never read, copied or parsed
  * here.
  *
  * What this module deliberately never does:
@@ -58,7 +58,7 @@ import { toError } from "~/shared/errors";
  *    variable, with the other vendor's home variable deleted first (an ambient
  *    `CODEX_HOME` must not make a `claude auth login` act on a directory nobody
  *    chose).
- *  - It runs as the person's own OS user (ruling 460, `vendorCommand`): in the
+ *  - It runs as the person's own OS user (ruling 139, `vendorCommand`): in the
  *    image the binary is started through the agent launcher, like their runs,
  *    so the sign-in it writes into their home is theirs.
  *
@@ -67,11 +67,11 @@ import { toError } from "~/shared/errors";
  * Ended sessions stay readable for ten minutes so the Profile poller can show
  * the outcome, then are dropped.
  *
- * Ruling 507: a sign-in is for ONE account. Adding an account signs in inside
+ * Ruling 138: a sign-in is for ONE account. Adding an account signs in inside
  * a new, empty account home minted before the vendor process starts, and the
  * person's other accounts on the backend are never touched: their sign-ins
  * sit in homes of their own. A sign-in that does not end connected takes its
- * half-made home with it (removed as the person, ruling 485, once the vendor
+ * half-made home with it (removed as the person, ruling 140, once the vendor
  * process has exited), so an abandoned attempt leaves no credential behind that
  * no account row accounts for. Signing an existing `login` account in again
  * runs in that account's own home and updates its row.
@@ -95,7 +95,7 @@ export interface LoginSessionView {
   id: string;
   backend: RealBackend;
   method: LoginMethod;
-  /** Ruling 507: the account this sign-in records, and whether it is one the
+  /** Ruling 138: the account this sign-in records, and whether it is one the
    *  person already has (signed in again) rather than a new one. */
   accountId: string;
   existingAccount: boolean;
@@ -128,7 +128,7 @@ function isTerminalLoginState(state: LoginState): boolean {
 
 /**
  * Which sign-in flows each vendor actually offers, and the ONE home of that
- * fact (ruling 127).
+ * fact (ruling 137).
  *
  * `startBackendLogin` validates against it, and Profile → Agent accounts builds
  * its "Sign in with …" buttons from the same table
@@ -385,7 +385,7 @@ function missingBinaryError(
 /**
  * The absolute path to ONE vendor's binary.
  *
- * Per backend on purpose (ruling 127): a host where only Anthropic's optional
+ * Per backend on purpose (ruling 137): a host where only Anthropic's optional
  * package installed must still be able to sign Claude in, and the person doing
  * it must not be told about a Codex package they were not asking for. Nothing
  * here ever falls back to a PATH lookup, which would run whatever a shell
@@ -411,7 +411,7 @@ export function resolveBackendBinary(
  * One vendor's binary when this deployment installed that vendor's optional
  * package, and `undefined` when it did not.
  *
- * The ONE home of that tolerance (ruling 127). A disconnect, a paste that
+ * The ONE home of that tolerance (ruling 137). A disconnect, a paste that
  * replaces a sign-in and an account removal all stay correct without a binary:
  * the local half — the credential file and the row — is what makes the account
  * unusable from this server, and each of those paths says in the log that the
@@ -442,7 +442,7 @@ interface LoginSession {
   userId: string;
   backend: RealBackend;
   method: LoginMethod;
-  /** Ruling 507: the account the sign-in records, and its home. */
+  /** Ruling 138: the account the sign-in records, and its home. */
   target: LoginTarget;
   accountHome: string;
   dataRoot: string | undefined;
@@ -455,7 +455,7 @@ interface LoginSession {
   error: string | null;
   child: ChildProcess | null;
   /** What is spawned: the vendor binary, or the agent launcher standing in
-   *  for it (ruling 460, `launched`). */
+   *  for it (ruling 139, `launched`). */
   binary: string;
   env: Record<string, string>;
   launched: boolean;
@@ -640,7 +640,7 @@ function terminateChild(session: LoginSession): void {
   const child = session.child;
   if (!child || child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
-  // Ruling 460: a launched vendor process is another user's; the launcher's
+  // Ruling 139: a launched vendor process is another user's; the launcher's
   // hard kill (SIGUSR2) reaches it, a SIGKILL of the launcher would not.
   const hardKill = session.launched ? "SIGUSR2" : "SIGKILL";
   const hard = setTimeout(() => {
@@ -686,12 +686,12 @@ function finish(session: LoginSession, state: LoginState, error: string | null):
 }
 
 /**
- * Ruling 507: a sign-in for a NEW account that did not end connected takes its
+ * Ruling 138: a sign-in for a NEW account that did not end connected takes its
  * half-made home with it — a vendor that got as far as writing its sign-in
  * before the flow failed must not leave a credential on this server that no
  * account row accounts for. Called only once the vendor process has exited
  * (its `close`, or a spawn that never produced one), so nothing is writing in
- * the home while it goes; removed as the person (ruling 485), never the
+ * the home while it goes; removed as the person (ruling 140), never the
  * server. An existing account's home is never touched here, and neither is a
  * home whose sign-in succeeded. Fire-and-forget: the person is told about the
  * sign-in, not about housekeeping, and a failure is logged.
@@ -841,7 +841,7 @@ export interface StartBackendLoginDeps {
   /** Overrides the vendor default so a test can drive the timeout path without
    *  waiting a quarter of an hour. */
   timeoutMs?: number;
-  /** Ruling 507: sign THIS existing `login` account in again (its own home,
+  /** Ruling 138: sign THIS existing `login` account in again (its own home,
    *  its own row). Omitted, the sign-in adds a new account. */
   accountId?: string;
 }
@@ -871,7 +871,7 @@ export function startBackendLogin(
   // optional package but not OpenAI's can still connect Claude, and the failure
   // sentence names the vendor the person actually pressed.
   const binary = deps.binaries?.[backend] ?? resolveBackendBinary(backend);
-  // Ruling 507: which account this sign-in becomes, decided before anything
+  // Ruling 138: which account this sign-in becomes, decided before anything
   // is killed or spawned, so a refusal (the account ceiling, an account that
   // is not a sign-in) leaves a running sign-in exactly as it was.
   const target = loginTargetFor(db, actor.userId, backend, deps.accountId);
@@ -888,7 +888,7 @@ export function startBackendLogin(
     store.delete(key);
   }
 
-  // Ruling 460: the vendor binary runs as the person's own OS user, through the
+  // Ruling 139: the vendor binary runs as the person's own OS user, through the
   // launcher when this server launches agents, so the sign-in it writes into
   // their home is theirs. `binary` becomes the launcher then; the status
   // confirmation below reuses the same pair.
@@ -962,7 +962,7 @@ export function startBackendLogin(
   child.on("close", (code) => {
     clearTimers(session);
     // Cancelled, replaced or timed out: the process is gone now, and so is
-    // the reason to keep the new account's half-made home (ruling 507).
+    // the reason to keep the new account's half-made home (ruling 138).
     if (isTerminalLoginState(session.state)) {
       discardPendingAccount(session);
       return;

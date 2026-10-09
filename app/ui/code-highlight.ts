@@ -5,7 +5,7 @@ import type {
 } from "shiki/types";
 
 /**
- * Ruling 363: Shiki, loaded late and small.
+ * Ruling 317: Shiki, loaded late and small.
  *
  * The reader highlights with Shiki — VS Code's TextMate grammars, the same
  * lineage Codex's own renderer (syntect) and every editor the owner reads code
@@ -17,7 +17,7 @@ import type {
  * stylesheet colours from the `--syn-*` palette — no inline colours, both
  * themes served by `app.css` alone. Every family but punctuation has a
  * colour, and `app.css.test.ts` reads the families off the theme itself, so
- * one Shiki adds cannot go uncoloured unnoticed (ruling 508: a diff's lines
+ * one Shiki adds cannot go uncoloured unnoticed (ruling 317: a diff's lines
  * and a log's levels did).
  *
  * Highlighting is decoration. The text is on screen before any of this runs,
@@ -92,7 +92,7 @@ export const LANGUAGE_LOADERS: ReadonlyMap<string, GrammarLoader> = new Map<
   ["r", () => import("@shikijs/langs/r")],
   ["perl", () => import("@shikijs/langs/perl")],
   ["diff", () => import("@shikijs/langs/diff")],
-  // Upstream's grammar with whole numbers and levels by severity (ruling 508).
+  // Upstream's grammar with whole numbers and levels by severity (ruling 317).
   ["log", () => import("./log-grammar")],
   ["csv", () => import("@shikijs/langs/csv")],
   ["tsv", () => import("@shikijs/langs/tsv")],

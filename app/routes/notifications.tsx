@@ -25,7 +25,7 @@ import type { NotificationPageItem } from "~/features/notifications/notification
  * day-grouped stream, All/Unread filter, mark-all-read. Read mutations go
  * through the ONE existing /notifications/read action; row clicks navigate
  * for real, cross-project included (against the store's real projects — the
- * ruling-9 stub projects exist only in the demo seed).
+ * ruling-74 stub projects exist only in the demo seed).
  */
 
 export function meta() {
@@ -131,5 +131,5 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/notifications");

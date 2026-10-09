@@ -19,7 +19,7 @@ import { reachesAcceptance } from "./reaches-acceptance";
  * — `accept_completion`, and any `transition` whose target is the terminal
  * stage — reaches the same merge writer as the Accept button, so the page
  * routes THOSE clicks through the shared acceptance confirm before they run
- * (F19-3 / F19-26 / ruling 20). The panel owns no fetcher and no confirm state:
+ * (F19-3 / F19-26 / ruling 97). The panel owns no fetcher and no confirm state:
  * a section that owned its own submission structurally could not ask first.
  */
 
@@ -44,7 +44,7 @@ export interface RecommendationView {
   toStageId?: string;
   label: string;
   detail: string;
-  /** accept_completion — ruling 137: the work revision the offer was authored
+  /** accept_completion — ruling 99: the work revision the offer was authored
    *  against; the card says "for revision <sha7>" so a reader can tell whether
    *  the offer still describes the branch. */
   forHeadSha?: string;
@@ -64,7 +64,7 @@ const KIND_LABEL = {
   delivery: "Delivery",
 } as const satisfies Record<RecommendationView["kind"], string>;
 
-/** Ruling 368: the one recommendation whose Apply or Dismiss is in flight. */
+/** Ruling 286: the one recommendation whose Apply or Dismiss is in flight. */
 export interface RecommendationInFlight {
   recId: string;
   action: "apply" | "dismiss";
@@ -82,13 +82,13 @@ export function OperatorRecommendations({
   terminalStageId = null,
 }: {
   recommendations: RecommendationView[];
-  /** Ruling 497: a recommendation's notification opened the cards
+  /** Ruling 302: a recommendation's notification opened the cards
    *  (`#recommendations`). */
   targeted?: boolean;
   /** admin|maintainer — gates the Apply button (server re-checks). */
   canApply: boolean;
   busy: boolean;
-  /** Ruling 368: which card's request is in flight, so THAT button shows it —
+  /** Ruling 286: which card's request is in flight, so THAT button shows it —
    *  the loader spinning where its glyph was and a label naming the work —
    *  while every other control just waits. Applying an acceptance merges on
    *  GitHub, which takes seconds; the confirm has closed by then, and a card
@@ -98,10 +98,10 @@ export function OperatorRecommendations({
    *  reaches the acceptance confirm before it submits (F19-3). */
   onApply: (recId: string) => void;
   onDismiss: (recId: string) => void;
-  /** Ruling 162 (pass 35, F35-12 (c)): the acceptance gate's standing refusal
+  /** Ruling 95 (pass 35, F35-12 (c)): the acceptance gate's standing refusal
    *  (`acceptance.blockedReason`), or null. An acceptance card renders it as
    *  a keyed alert and its Apply refuses the click instead of opening a
-   *  confirm the server would answer 409 (ruling 147's shape: the control
+   *  confirm the server would answer 409 (ruling 288's shape: the control
    *  stays, the refusal sentence is the alert). */
   acceptanceRefusal?: string | null;
   /** The terminal stage id, so a `transition` card into it counts as an
@@ -110,7 +110,7 @@ export function OperatorRecommendations({
 }) {
   // A refused Apply re-keys the alert so the sentence is announced again.
   const [refused, setRefused] = useState<{ id: string; n: number } | null>(null);
-  // Ruling 451(g): the note shakes once per refused click. A note that comes
+  // Ruling 284: the note shakes once per refused click. A note that comes
   // back when the gate blocks again, after a refresh, answers no click.
   const refusalShake = useRefusalShake(refused ? `${refused.id}:${refused.n}` : null);
   if (recommendations.length === 0) return null;
@@ -178,7 +178,7 @@ export function OperatorRecommendations({
               {acceptanceRefusal && reachesAcceptance(r, terminalStageId) && (
                 <p
                   key={`refusal-${r.id}-${refused?.id === r.id ? refused.n : 0}`}
-                  // Ruling 451(g): the note stands on its own before any click;
+                  // Ruling 284: the note stands on its own before any click;
                   // it shakes only as the answer to a refused one.
                   className={"deny-note spaced" + (refused?.id === r.id && refusalShake.shake ? " refused" : "")}
                   onAnimationEnd={refused?.id === r.id ? refusalShake.onAnimationEnd : undefined}
@@ -202,7 +202,7 @@ export function OperatorRecommendations({
                   disabled={busy}
                   aria-busy={inFlight?.recId === r.id && inFlight.action === "apply"}
                   onClick={() => {
-                    // Ruling 162: an acceptance the gate refuses is not offered;
+                    // Ruling 95: an acceptance the gate refuses is not offered;
                     // the click re-announces the reason instead of submitting.
                     if (acceptanceRefusal && reachesAcceptance(r, terminalStageId)) {
                       setRefused((cur) => ({ id: r.id, n: cur?.id === r.id ? cur.n + 1 : 1 }));

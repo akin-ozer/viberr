@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { deliveryToast } from "./delivery-toast";
 
 /**
- * Ruling 134(a): one toast for every human delivery door. Canary: swap the
+ * Ruling 229: one toast for every human delivery door. Canary: swap the
  * `created` and `moved` branches and the first two cases fail.
  */
 describe("deliveryToast", () => {

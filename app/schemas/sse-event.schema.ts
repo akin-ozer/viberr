@@ -16,7 +16,7 @@ import { READINESS_VALUES } from "./task-file.schema";
  *   from the right position after a reconnect.
  * - stream.resync: sent when a reconnect's Last-Event-ID predates the
  *   ring buffer window (or an earlier server process: ids are unique across
- *   processes, ruling 457) — the client cannot be caught up by replay and
+ *   processes, ruling 11) — the client cannot be caught up by replay and
  *   should revalidate once.
  */
 
@@ -40,7 +40,7 @@ export const SSE_EVENT_NAMES = [
   // without a loader round-trip. Both scoped to the task.
   "run.log-appended",
   "run.state-changed",
-  // Ruling 99 — controller conversation activity (message appended, turn
+  // Ruling 249 — controller conversation activity (message appended, turn
   // started/settled). Routed to the conversation OWNER's user-scoped
   // connections only; reference-only, the page revalidates its own loader.
   "controller.updated",
@@ -51,7 +51,7 @@ export const SSE_EVENT_NAMES = [
   // (`SSE_STREAM_EVENTS` in event-types.ts keeps it out of the surface-wide
   // revalidation every `user`-scoped page runs on the other names).
   "controller.log-appended",
-  // Ruling 503 — an epic changed (created, edited, a status set). Project-
+  // Ruling 272 — an epic changed (created, edited, a status set). Project-
   // routed like task.updated; the Epics pages revalidate.
   "epic.updated",
   "stream.open",

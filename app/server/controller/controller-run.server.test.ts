@@ -9,7 +9,7 @@ import type { ControllerToolUser } from "./controller-tool-guards.server";
 import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
- * Ruling 107 — what a controller turn MOUNTS, and what it is told about it.
+ * Ruling 269 — what a controller turn MOUNTS, and what it is told about it.
  *
  * The "not removable by anyone" mechanism is not a guard that refuses a
  * removal: it is that no removal exists. `buildControllerMounts` reads no
@@ -63,7 +63,7 @@ async function build(
   });
 }
 
-describe("controller mounts (ruling 107)", () => {
+describe("controller mounts (ruling 269)", () => {
   it("attaches viberr_ops on a turn with NO org MCP grants at all", async () => {
     const { buildControllerMounts } = await import("./controller-run.server");
     // The empty-grants turn is the whole point: nothing was granted, and the
@@ -156,7 +156,7 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 297, and its correction, which the controller found by looking for
+   * Ruling 255, and its correction, which the controller found by looking for
    * the manifest and not seeing it.
    *
    * The list first shipped in the two servers' `instructions`, on a
@@ -173,7 +173,7 @@ describe("controller mounts (ruling 107)", () => {
    * open longest are the ones whose toolkit has changed most. So it rides in
    * the system prompt, which Viberr rebuilds and re-sends every turn.
    */
-  it("ruling 297: the tool manifest rides in the PER-TURN system prompt, not in the servers' frozen instructions", async () => {
+  it("ruling 255: the tool manifest rides in the PER-TURN system prompt, not in the servers' frozen instructions", async () => {
     const { buildControllerMounts } = await import("./controller-run.server");
     const { publishedInstructions } = await import("../../../test-support/mcp-tool-meta");
     const mounts = buildControllerMounts(app.db, {
@@ -195,7 +195,7 @@ describe("controller mounts (ruling 107)", () => {
     // The absence half of the promise, which is what the controller could not
     // answer: a verb it does NOT have is not on the list.
     expect(prompt).not.toContain("- mcp__viberr_controller__accept_completion: ");
-    // Ruling 347: the line is the MOUNTED name, the one ToolSearch answers to.
+    // Ruling 204: the line is the MOUNTED name, the one ToolSearch answers to.
     expect(prompt).not.toMatch(/^- whoami: /m);
     expect(prompt).toContain("you do not have it");
 
@@ -208,17 +208,17 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 309. The preamble said "their LIVE permissions are the ceiling for
+   * Ruling 254. The preamble said "their LIVE permissions are the ceiling for
    * everything you do here" and then named their ORG role, which decides
    * nothing on a board — and viberr's authorization map reached the model
    * nowhere at all: not here, not `whoami` (which returns a tier NAME), not
    * `list_capabilities` (the agent capability catalogue, a different axis).
    * So the tier-to-action mapping came from the model's own prose memory.
    */
-  it("ruling 649: the controller reads the people rule on every turn, a resumed conversation included", async () => {
+  it("ruling 203: the controller reads the people rule on every turn, a resumed conversation included", async () => {
     // Live, it wrote "her comment" about the board's owner into AWSC-98's goal.
     // The system prompt is recorded when a conversation starts and kept until
-    // it compacts (ruling 373), so the rule rides in the turn, where ruling 444
+    // it compacts (ruling 255), so the rule rides in the turn, where ruling 255
     // put the model. CANARY: drop it from `buildTurnPrompt` and no turn of a
     // conversation started before the deploy reads it.
     const { PEOPLE_RULE } = await import("~/server/runtimes/people-rule.server");
@@ -230,7 +230,7 @@ describe("controller mounts (ruling 107)", () => {
     expect(prompt.indexOf(PEOPLE_RULE)).toBeLessThan(prompt.indexOf(`${user.email} says:`));
   });
 
-  it("ruling 309: the authorization map rides in the per-turn prompt, advisory and generated", async () => {
+  it("ruling 254: the authorization map rides in the per-turn prompt, advisory and generated", async () => {
     const { RBAC_DEFINITIONS } = await import("~/shared/rbac");
     const { prompt } = await build({});
     // CANARY: unwire `projectAuthorityPrompt()` and the model is back to
@@ -249,13 +249,13 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 310, third surface. The specialist and operator prompts asserted an
+   * Ruling 190, third surface. The specialist and operator prompts asserted an
    * invented cause for a failed mount; this one asserted none — it named the
    * servers and stopped. That is better and still not enough: the controller is
    * the surface a person asks "why is my server not there?" on, and the reason
    * each server gave was one `.map((u) => u.name)` from reaching it.
    */
-  it("ruling 310: an unmounted grant reaches the controller with the reason it gave", async () => {
+  it("ruling 190: an unmounted grant reaches the controller with the reason it gave", async () => {
     const { prompt } = await build({}, {
       unresolvedMcps: [
         { name: "kb-architecture", reason: "its stored credential could not be opened" },
@@ -267,10 +267,10 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 312. The controller's tool descriptions cite "ruling N" forty-one
+   * Ruling 208(c). The controller's tool descriptions cite "ruling N" forty-one
    * times, meaning VIBERR's own product decisions — which no run can read. A
    * project's rulings knowledge base numbers its rules from 1, and operator
-   * directives on a live board cite those as "ruling 1", "ruling 4". Two
+   * directives on a live board cite those as "ruling 44", "ruling 293". Two
    * namespaces, one word, neither marked; no collision today only because every
    * viberr ruling happens to be ≥107.
    *
@@ -279,10 +279,10 @@ describe("controller mounts (ruling 107)", () => {
    * I cannot read a single one. A citation that looks like it points somewhere
    * consultable, and doesn't, is a soft version of the same class."
    */
-  it("ruling 312: says which ruling namespace a tool description means", async () => {
+  it("ruling 208(c): says which ruling namespace a tool description means", async () => {
     const { prompt } = await build({});
-    // CANARY: drop the paragraph and "ruling 4" in a task directive and
-    // "ruling 246" in a tool description read as the same numbering.
+    // CANARY: drop the paragraph and "ruling 293" in a task directive and
+    // "ruling 260" in a tool description read as the same numbering.
     expect(prompt).toContain("is Viberr's own product decision");
     expect(prompt).toContain("not readable from here");
     expect(prompt).toContain("number from 1");
@@ -291,12 +291,12 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 502. The owner asked for every controller turn to write under the
+   * Ruling 187. The owner asked for every controller turn to write under the
    * Humanizer skill, hidden from the people who use Viberr. So it is no grant:
    * the settings panel and a turn's `run_inputs` read the grants, and neither
    * may learn of it. (The seeded store's half is in `humanizer.server.test.ts`.)
    */
-  it("ruling 502: every turn closes its static block with the writing guide, and its disclosure never names it", async () => {
+  it("ruling 187: every turn closes its static block with the writing guide, and its disclosure never names it", async () => {
     const { resolveControllerConfig } = await import("./controller-profile.server");
     const { HUMANIZER_PROMPT_SECTION } = await import("~/server/runtimes/humanizer.server");
     const config = resolveControllerConfig(app.dataRoot);
@@ -317,12 +317,12 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 679: the guide this repository ships is the controller's doctrine,
-   * and it reaches the turn whole. Ruling 672's section took it past the 24,000
+   * Ruling 186: the guide this repository ships is the controller's doctrine,
+   * and it reaches the turn whole. Ruling 224's section took it past the 24,000
    * characters an agent's skills share, and every turn after that deploy read
    * it without its last sections.
    */
-  it("ruling 679: the shipped guide reaches the controller's turn whole, with room left beside it", async () => {
+  it("ruling 186: the shipped guide reaches the controller's turn whole, with room left beside it", async () => {
     const { seedDefaultAgentAssets } = await import("~/server/seed/default-assets.server");
     const { CONTROLLER_SKILL_BUDGET, readSkillBodies } = await import("~/server/files/skill-body.server");
     const { resolveControllerConfig } = await import("./controller-profile.server");
@@ -351,7 +351,7 @@ describe("controller mounts (ruling 107)", () => {
     // The other skill is the one that gives way, and it says so, by the
     // controller's own figure.
     expect(crowded.prompt).toContain(`_(skill truncated: SKILL.md is 20000 chars and exceeds the ${CONTROLLER_SKILL_BUDGET - guide!.body.length}-char injection budget)_`);
-    // Rendered in name order all the same (ruling 370).
+    // Rendered in name order all the same (ruling 169).
     expect(crowded.prompt.indexOf("vvvvvvvv")).toBeLessThan(crowded.prompt.indexOf("# Viberr controller playbook"));
 
     // CANARY: name the agents' figure in the reason and a skill left out of a
@@ -381,7 +381,7 @@ describe("controller mounts (ruling 107)", () => {
     // believes the categorical negative never calls the tools at all.
     expect(prompt).toContain("No org MCP servers are attached to you.");
     expect(prompt).not.toContain("No MCP servers are attached to you.");
-    // Ruling 297: it no longer NAMES that server's tools. This sentence used
+    // Ruling 255: it no longer NAMES that server's tools. This sentence used
     // to read "instance health, run logs, store documents", and `list_runs`
     // shipped after it and was never added, so the one written description of
     // the server understated it. The list is generated into the server's own
@@ -391,7 +391,7 @@ describe("controller mounts (ruling 107)", () => {
   });
 
   /**
-   * Ruling 191 (F37-13, live): the controller writes the profiles, knowledge
+   * Ruling 148 (F37-13, live): the controller writes the profiles, knowledge
    * bases and architecture that agents WITH a shell are measured against. Pass
    * 37 it chose a pnpm + turbo monorepo, a root `Makefile` and a Docker Compose
    * stack on a host with none of those, and chartered a required reviewer whose
@@ -399,7 +399,7 @@ describe("controller mounts (ruling 107)", () => {
    * sitting in `instance_health` and it never asked — an inventory you must know
    * to ask for is not a fact the planner has.
    */
-  it("ruling 191: carries the agents' shell inventory without being asked", async () => {
+  it("ruling 148: carries the agents' shell inventory without being asked", async () => {
     const { prompt } = await build({});
     // CANARY: remove the section and the planner is back to guessing.
     expect(prompt).toContain("# Shell inventory (measured on this host, not a guess)");
@@ -413,9 +413,9 @@ describe("controller mounts (ruling 107)", () => {
   });
 });
 
-// ------------------------------------------------------------ ruling 121
+// ------------------------------------------------------------ ruling 253
 
-describe("the turn carries the context read (ruling 121)", () => {
+describe("the turn carries the context read (ruling 253)", () => {
   it("names the task binding in the system prompt, and the board one, and the instance one", async () => {
     const task = (await build({ projectSlug: "viberr-core", taskKey: "VIB-142" })).prompt;
     expect(task).toContain(
@@ -460,12 +460,12 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
-   * Ruling 465 (F40-10): a turn reads the conversation only up to the message
+   * Ruling 252 (F40-10): a turn reads the conversation only up to the message
    * it answers. Live, the turn answering dossier part 3 saw the owner's queued
    * correction as a 600-character stub and said it "never reached me … please
    * resend it" while it was simply next in the queue.
    */
-  it("ruling 465: the digest stops at the answered message and counts the queue behind it", async () => {
+  it("ruling 252: the digest stops at the answered message and counts the queue behind it", async () => {
     const { buildTurnPrompt } = await import("./controller-run.server");
     const { createConversation, appendMessage } = await import("./controller-conversations.server");
     const conversation = createConversation(app.db, { userId: user.id, userLabel: user.email });
@@ -509,12 +509,12 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
-   * Ruling 444. The controller's system prompt is recorded when its
-   * conversation starts and replayed until it compacts (ruling 373). It named
+   * Ruling 255. The controller's system prompt is recorded when its
+   * conversation starts and replayed until it compacts (ruling 255). It named
    * the model, so after the switch to Opus 5.5 the controller found "Opus 5
    * ... claude-opus-5[1m]" in its own context and had to reason its way past it.
    */
-  it("ruling 444: the model is named in the turn, never in the recorded system prompt", async () => {
+  it("ruling 255: the model is named in the turn, never in the recorded system prompt", async () => {
     const { buildTurnPrompt } = await import("./controller-run.server");
     const { resolveControllerConfig } = await import("./controller-profile.server");
     const { createConversation } = await import("./controller-conversations.server");
@@ -546,7 +546,7 @@ describe("the turn carries the context read (ruling 121)", () => {
    * adapter's captured RunSpec, so the context read, the task anchor and the
    * surface hint cannot be unwired with the suite still green.
    */
-  it("ruling 444: a started turn names the model the settings chose", async () => {
+  it("ruling 255: a started turn names the model the settings chose", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
     );
@@ -597,7 +597,7 @@ describe("the turn carries the context read (ruling 121)", () => {
     const { lastRunSpec } = await import("../../../test-support/fake-runtime");
     const { runControllerTurn } = await import("./controller-run.server");
     const { createConversation } = await import("./controller-conversations.server");
-    // Ruling 127: a controller turn bills the ASKER's own Claude account, so
+    // Ruling 137: a controller turn bills the ASKER's own Claude account, so
     // the way to make one start is to connect the asker's — there is no
     // instance-level switch left to flip. Disconnected again below so the
     // next case still meets the hermetic "nobody has connected" default.
@@ -646,12 +646,12 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
-   * Ruling 461: the controller's granted org servers resolve the same way a
+   * Ruling 191: the controller's granted org servers resolve the same way a
    * specialist's do, so a credentialed one reaches the turn as a gateway mount
    * carrying the turn's own token, the credential never in the turn's config,
    * and the prompt says who holds it.
    */
-  it("ruling 461: a turn mounts a granted credentialed server through Viberr's gateway", async () => {
+  it("ruling 191: a turn mounts a granted credentialed server through Viberr's gateway", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
     );
@@ -730,7 +730,7 @@ describe("the turn carries the context read (ruling 121)", () => {
   });
 
   /**
-   * Ruling 344 (pass 37, F37-180): the controller turn discloses what it was
+   * Ruling 167 (pass 37, F37-180): the controller turn discloses what it was
    * given. `recordRunInputs` had two callers, both on the specialist paths, so
    * none of this instance's 71 controller turns recorded anything — and the
    * controller had named the gap itself, from the other side, on 2026-09-15:
@@ -740,7 +740,7 @@ describe("the turn carries the context read (ruling 121)", () => {
    * controller resumes on every turn after the first: recording only fresh
    * starts would have disclosed one turn per conversation.
    */
-  it("ruling 344: a controller turn records what it was given, resume included", async () => {
+  it("ruling 167: a controller turn records what it was given, resume included", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
     );
@@ -771,7 +771,7 @@ describe("the turn carries the context read (ruling 121)", () => {
       // CANARY: delete the `recordRunInputs` call after `entry.runId = runId`.
       const inputs = disclosureFor(first);
       expect(inputs, "the controller turn recorded no input disclosure").toBeTruthy();
-      // The controller has no checkout at all — ruling 299 gave it repository
+      // The controller has no checkout at all — ruling 265 gave it repository
       // READS through a tool, not a working tree.
       expect(inputs!.cloned).toBe(false);
       expect(inputs!.repo).toBeNull();
@@ -803,7 +803,7 @@ describe("the turn carries the context read (ruling 121)", () => {
 
       // The SECOND turn resumes, and must disclose too. CANARY: move the
       // `recordRunInputs` call inside the `else` (fresh-start) branch and this
-      // finds nothing — which is the shape ruling 343 fixed on the specialist's
+      // finds nothing — which is the shape ruling 167 fixed on the specialist's
       // own resume door the same day.
       await runControllerTurn(app.db, {
         conversationId: conversation.id,
@@ -824,16 +824,16 @@ describe("the turn carries the context read (ruling 121)", () => {
 });
 
 /**
- * Ruling 293 (pass 37, F37-128): the EVIDENCE, not only the sentence claiming
+ * Ruling 79 (pass 37, F37-128): the EVIDENCE, not only the sentence claiming
  * it. Attachments are where every convention on this instance tells an agent to
  * put its proof — a mutation run with both vitest outputs, before/after
  * captures, a cold-stack log — and the actor a person asks "did it actually
  * prove that?" could read the claim and never the file.
  */
-describe("ruling 293: the coordinators can read the evidence", () => {
+describe("ruling 79: the coordinators can read the evidence", () => {
   it("both mount read_task_attachment, in the same change", async () => {
     // Canary: drop either mount. They are asserted TOGETHER on purpose —
-    // ruling 292 exists because ruling 285 gave one coordinator a reader and
+    // ruling 262 exists because ruling 117 gave one coordinator a reader and
     // not the other, and this is the test that makes doing it twice a choice.
     const { buildControllerMounts } = await import("./controller-run.server");
     const mounts = buildControllerMounts(app.db, {
@@ -881,7 +881,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
     expect(text).toMatchObject({ kind: "text", truncated: false });
     expect(text && "text" in text ? text.text : "").toContain("MUTANT RED");
 
-    // Ruling 533: a person's screenshot is the picture, not a description.
+    // Ruling 117: a person's screenshot is the picture, not a description.
     const image = readTaskAttachment("viberr-core", "VIB-1", "portal.png", app.dataRoot);
     expect(image).toMatchObject({ kind: "image", mimeType: "image/png", data: png.toString("base64") });
 
@@ -899,7 +899,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
     ).toBeNull();
   });
 
-  it("ruling 551: a long attachment reads in pages that join back into the whole file", async () => {
+  it("ruling 117: a long attachment reads in pages that join back into the whole file", async () => {
     // Live, the controller asked to copy the table at the end of a 55 KB
     // result could read 11 of its 25 rows and had no way on. CANARY: ignore
     // `offset` in textPage and the second page repeats the first.
@@ -921,7 +921,7 @@ describe("ruling 293: the coordinators can read the evidence", () => {
       seen.push({ offset: read.offset, truncated: read.truncated, nextOffset: read.nextOffset });
       offset = read.nextOffset;
     }
-    // Ruling 624: a page is 32,000 bytes, which this ASCII file is in characters.
+    // Ruling 215: a page is 32,000 bytes, which this ASCII file is in characters.
     expect(seen).toEqual([
       { offset: undefined, truncated: true, nextOffset: 32_000 },
       { offset: 32_000, truncated: true, nextOffset: 64_000 },
@@ -938,13 +938,13 @@ describe("ruling 293: the coordinators can read the evidence", () => {
 });
 
 /**
- * Ruling 292 (pass 37, F37-127): ruling 285 gave the OPERATOR a way to read a
+ * Ruling 262 (pass 37, F37-127): ruling 117 gave the OPERATOR a way to read a
  * report its prompt had cut. The controller got nothing — and it is the sharper
  * case of the two, because its `get_task` cuts at 700 rather than 1,500 and it
  * is the actor a PERSON asks about an agent's report. A rule applied to one
  * actor and not its sibling, inside this pass's own fix for that shape.
  */
-describe("ruling 292: the controller can read an entry its own read cut", () => {
+describe("ruling 262: the controller can read an entry its own read cut", () => {
   it("mounts read_timeline_entry, unconditionally", async () => {
     const { buildControllerMounts } = await import("./controller-run.server");
     const mounts = buildControllerMounts(app.db, {
@@ -968,12 +968,12 @@ describe("ruling 292: the controller can read an entry its own read cut", () => 
 });
 
 /**
- * Ruling 283 — the controller's prompt INDEXES its knowledge bases and its
+ * Ruling 205 — the controller's prompt INDEXES its knowledge bases and its
  * toolkit reads them, through `read_knowledge_doc`, which a turn mounts
  * exactly when it holds a knowledge base. (The index is pinned in
  * project-rulings.server.test.ts, the read in kb-injection.server.test.ts.)
  */
-describe("ruling 283: read_knowledge_doc is mounted exactly when the turn holds a knowledge base", () => {
+describe("ruling 205: read_knowledge_doc is mounted exactly when the turn holds a knowledge base", () => {
   it("a turn holding a knowledge base mounts read_knowledge_doc", async () => {
     const { buildControllerMounts } = await import("./controller-run.server");
     const mounts = buildControllerMounts(app.db, {
@@ -1006,15 +1006,15 @@ describe("ruling 283: read_knowledge_doc is mounted exactly when the turn holds 
 });
 
 /**
- * Ruling 370/373: the controller's static block is the same bytes for every
+ * Ruling 169/170: the controller's static block is the same bytes for every
  * conversation of one instance; only the conversation block and this turn's
  * mount notices differ. The adapter records the split for the session.
  */
-describe("ruling 370: the controller prefix", () => {
+describe("ruling 169: the controller prefix", () => {
   it("an instance-scoped and a board-scoped conversation share the static block; the conversation block is the tail", async () => {
     const instance = await build({});
     const board = await build({ projectSlug: "viberr-core" });
-    // A project scope indexes the project's rulings (ruling 239), which is a
+    // A project scope indexes the project's rulings (ruling 208(a)), which is a
     // resource difference, so the proof is over the same scope twice and the
     // tail over the two.
     const instanceAgain = await build({});
@@ -1038,14 +1038,14 @@ describe("ruling 370: the controller prefix", () => {
 });
 
 /**
- * Ruling 476(h) (F40-61): a chain records the conversation that planned it.
+ * Ruling 273 (F40-61): a chain records the conversation that planned it.
  * Live, goal-1 was planned in a 16-message instance thread, and the project's
  * Controller page said "No conversations yet" beside it: the goal file named
- * its creator and nothing else, so nothing could link back. Ruling 503 kept
+ * its creator and nothing else, so nothing could link back. Ruling 273 kept
  * the rule for the epic that replaced the chain: its file names the thread,
  * and its page links to it.
  */
-describe("ruling 476(h): an epic a turn creates records the conversation it was planned in", () => {
+describe("ruling 273: an epic a turn creates records the conversation it was planned in", () => {
   it("the turn's own create_epic writes its conversation into the epic's file", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
@@ -1070,7 +1070,7 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     const { connectedClient, inProcess } = await import("../../../test-support/mcp-tool-meta");
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const client = await connectedClient(server, "ruling-476");
+    const client = await connectedClient(server, "ruling-273");
     const reply = JSON.stringify(
       (
         await client.callTool({
@@ -1097,13 +1097,13 @@ describe("ruling 476(h): an epic a turn creates records the conversation it was 
 });
 
 /**
- * Ruling 685(d): a turn that a follow-up started leaves no further step. The
+ * Ruling 259: a turn that a follow-up started leaves no further step. The
  * rule is about the turn, so the tools a turn is handed are told which message
  * it answers. The first writing judged by the conversation's newest message,
  * and a person's own turn, still working when the task was accepted, was
  * refused a step over a message it had not read.
  */
-describe("ruling 685: a turn's tools know which message the turn answers", () => {
+describe("ruling 259: a turn's tools know which message the turn answers", () => {
   it("the turn a follow-up opened is refused a further step by its own continue_when_done", async () => {
     const { connectFakeBackend, disconnectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
@@ -1151,7 +1151,7 @@ describe("ruling 685: a turn's tools know which message the turn answers", () =>
     const server = lastRunSpec()?.mcpServers?.["viberr_controller"];
     const { connectedClient, inProcess } = await import("../../../test-support/mcp-tool-meta");
     if (!inProcess(server)) throw new Error("the turn must mount viberr_controller in process");
-    const client = await connectedClient(server, "ruling-685");
+    const client = await connectedClient(server, "ruling-259");
     const reply = JSON.stringify(
       (
         await client.callTool({

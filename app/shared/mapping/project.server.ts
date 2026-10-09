@@ -50,11 +50,11 @@ export interface ProjectRecord {
   agentPolicy: AgentDeployment[];
   credentialPolicy: CredentialPolicy | null;
   guardrails: Guardrail[];
-  /** Ruling 178: the declared required reviewers, RESOLVED to stage and agent
+  /** Ruling 89: the declared required reviewers, RESOLVED to stage and agent
    *  names at project-rebuild time (the rebuilder's task walk prints them in
    *  `validation_block_reason`, so the queue needs no file read). */
   requiredReviewers: RequiredReviewerView[];
-  /** Ruling 482: the gates Viberr runs on every delivered revision. */
+  /** Ruling 104: the gates Viberr runs on every delivered revision. */
   gates: ProjectGate[];
   /** Store-relative path, e.g. "projects/viberr-core/project.md". */
   sourcePath: string;

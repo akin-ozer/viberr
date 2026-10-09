@@ -13,9 +13,9 @@ import type { OwnerAction, TaskMemberView } from "./execution-profile";
  * + hand-off-instead chips (candidates INCLUDE me here, me-first — clicking
  * my own chip performs a take-over instead of releasing to nobody).
  *
- * Port additions per ruling 16: rendered as a native <dialog> via useDialog,
+ * Port additions per ruling 295: rendered as a native <dialog> via useDialog,
  * which provides Escape + backdrop-click close, focus handling, and scroll
- * lock. Identity comparisons by user id (ruling 6).
+ * lock. Identity comparisons by user id (ruling 26(a)).
  */
 export function ReleaseConfirm({
   task,
@@ -34,7 +34,7 @@ export function ReleaseConfirm({
   onConfirm: () => void;
   onOwner: (action: OwnerAction, member?: TaskMemberView) => void;
 }) {
-  // Ruling 459: a release or a hand-off leaves the way Cancel does
+  // Ruling 287: a release or a hand-off leaves the way Cancel does
   // (`commit`); onCancel unmounts it after the exit.
   const { ref: panelRef, close, commit } = useDialog(onCancel);
   // Defensive: the dialog should only open when owned (mock guard kept).
@@ -171,7 +171,7 @@ export function ReleaseConfirm({
 /**
  * The dialog's "Open now" row: the open packet waiting on the owner, a pending
  * human decision, or agent work with no boundary waiting. A hook-free
- * component of its own (ruling 700(e), the split of `ReleaseConfirm` along the
+ * component of its own (ruling 13(b), the split of `ReleaseConfirm` along the
  * task-page recipe) in the slot the row always held.
  */
 function OpenNowRow({ task }: { task: TaskSummary }) {
@@ -183,7 +183,7 @@ function OpenNowRow({ task }: { task: TaskSummary }) {
         {packet ? (
           <span className="rel-open">
             <Pill
-              // Ruling 625 (B11): a decision waiting on a person is
+              // Ruling 277 (B11): a decision waiting on a person is
               // info blue; amber is an agent's question.
               kind={packet.type === "blocked" ? "blocked" : packet.answerTo ? "input" : "info"}
               sm

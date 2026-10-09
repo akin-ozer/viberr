@@ -1,5 +1,5 @@
 /**
- * The task as the operator reads it (ruling 656): `operatorSnapshot`, the one
+ * The task as the operator reads it (ruling 13(a)): `operatorSnapshot`, the one
  * structured view of a task (its stage and owner, timeline, decisions, runs,
  * gates, dependencies and base drift) that every operator turn is built on.
  */
@@ -92,7 +92,7 @@ export interface OperatorTaskSnapshot {
   priority: string;
   labels: string[];
   dueDate: string | null;
-  /** Ruling 131(d): what the task waits on, each entry with its live state.
+  /** Ruling 115: what the task waits on, each entry with its live state.
    *  Non-empty means the task is HELD: the doctrine replaces the stage rule. */
   blockedBy: DependencyRender[];
   stage: string;
@@ -122,21 +122,21 @@ export interface OperatorTaskSnapshot {
     role: string;
     backend: string;
     verdict: "approve" | "request_changes" | null;
-    /** Ruling 193: successive delivered revisions this reviewer has requested
+    /** Ruling 93: successive delivered revisions this reviewer has requested
      *  changes on, counted back from its newest verdict and stopping at its
      *  first `approve`. `0` when its newest verdict is an approval or it has
      *  not weighed in. Two or more means the same objection survived a rework,
      *  which is when re-prompting the deliverer stops being the move. */
     consecutiveRequestChanges: number;
   }[];
-  /** Ruling 178: the reviewers the PROJECT requires, per review stage,
+  /** Ruling 89: the reviewers the PROJECT requires, per review stage,
    *  resolved to the names the acceptance gate prints. Each must hold an
    *  `approve` verdict on the delivered revision before acceptance, engaged
    *  or not — `reviewers` above lists only who the operator has engaged.
    *  Empty when the project requires none. */
   requiredReviewers: RequiredReviewerView[];
   /**
-   * Ruling 482 (F40-52): the project's gates on the revision under review, as
+   * Ruling 315 (F40-52): the project's gates on the revision under review, as
    * VIBERR ran them (never an agent's report of them): the line the PR card
    * prints, the state, and each gate that did not exit 0 with its log's
    * attachment name. A `failed` state blocks acceptance; dispatch the rework
@@ -160,7 +160,7 @@ export interface OperatorTaskSnapshot {
    *  legal all along. These are the earlier stages the operator MAY move the
    *  task to directly, no human and no recommendation: every earlier stage
    *  while the latest review is `failing` (R7-4), the review stage after a
-   *  revision changed (ruling 163), and (ruling 702) on a task that has no
+   *  revision changed (ruling 90), and (ruling 112) on a task that has no
    *  delivering agent and has delivered nothing, the earlier stages where one
    *  can be engaged, each with `engage` naming the agents. The same answers
    *  `transitionStage` vets. */
@@ -177,11 +177,11 @@ export interface OperatorTaskSnapshot {
   workStageId: string | null;
   deployedSpecialists: (DeployedSpecialistView & {
     /** Whether this profile may RUN the task at its CURRENT stage: its
-     *  declared eligibility, or (ruling 133) it is the task's engaged
+     *  declared eligibility, or (ruling 181) it is the task's engaged
      *  deliverer, which runs at every stage. Declared eligibility alone is
      *  where a profile may be NEWLY engaged. */
     eligibleForCurrentStage: boolean;
-    /** Ruling 133: this profile is the task's delivering engagement. */
+    /** Ruling 181: this profile is the task's delivering engagement. */
     engagedAsDeliverer: boolean;
     /** F21-16: the specialist's OWN capabilities, resolved live from its
      *  deployment grants — the right place to look when a human asks whether an
@@ -199,21 +199,21 @@ export interface OperatorTaskSnapshot {
     title: string;
     body: string;
     options: string[];
-    /** Ruling 138: `goal_edit` once an edit_goal option was confirmed — the
+    /** Ruling 63: `goal_edit` once an edit_goal option was confirmed — the
      *  packet is decided and waits for the edited goal, so do not re-ask. */
     awaiting: "goal_edit" | null;
-    /** Ruling 437: who raised it, as the packet records it ("operator", an
+    /** Ruling 131: who raised it, as the packet records it ("operator", an
      *  agent's ref, "policy-engine"). */
     raisedBy: string;
-    /** Ruling 437: whether `resolve_packet` may withdraw it, read with the
+    /** Ruling 131: whether `resolve_packet` may withdraw it, read with the
      *  refusal's own condition: only a packet the operator raised, never an
      *  agent's question. */
     yours: boolean;
   } | null;
   /**
-   * Ruling 503: the EPIC this task is in, with the rest of its work.
+   * Ruling 116: the EPIC this task is in, with the rest of its work.
    *
-   * Ruling 402 (F39-29) gave the operator the goal chain its task was a link
+   * Ruling 116 (F39-29) gave the operator the goal chain its task was a link
    * of, because a link that had not started had no task and `read_board`
    * could not see it: live on ax-clone AX-4 the operator planned a packet
    * offering to create a follow-on for the missing `/logs` baseline, which
@@ -232,15 +232,15 @@ export interface OperatorTaskSnapshot {
     /** The epic's OTHER tasks, archived ones left out. */
     tasks: { key: string; title: string; stage: string; blockedBy: string[] }[];
   };
-  /** Ruling 503: the project's open epics, for `set_epic`. Absent when it has
+  /** Ruling 116: the project's open epics, for `set_epic`. Absent when it has
    *  none. */
   openEpics?: { id: string; title: string }[];
   recentTimeline: OperatorTimelineRow[];
   /**
-   * Ruling 397 (F39-24): a run Viberr recorded as FAILED that had already
+   * Ruling 116 (F39-24): a run Viberr recorded as FAILED that had already
    * posted its report moments earlier, with nothing dispatched since.
    *
-   * Ruling 394 stops the common cause of this, but a genuinely cut run can
+   * Ruling 155(d) stops the common cause of this, but a genuinely cut run can
    * still leave a partial report, and the failure event's own sentence
    * ("Nothing was delivered to a pull request") is about the PR while a reader
    * takes it to be about the work. Live on ax-clone AX-2 the report said "Done
@@ -259,16 +259,16 @@ export interface OperatorTaskSnapshot {
     failedAt: string;
     /** The report's stamp, which `read_timeline_entry` takes. */
     reportedAt: string;
-    /** Ruling 415: the report itself, for an operator that cannot call
+    /** Ruling 116: the report itself, for an operator that cannot call
      *  `read_timeline_entry` (a Codex plan). Absent for one that can. */
     text?: string;
-    /** Ruling 440: present only when `text` was cut. */
+    /** Ruling 117: present only when `text` was cut. */
     clipped?: string;
   };
   /**
-   * Ruling 408 (F39-35): a refusal this task has not answered yet.
+   * Ruling 116 (F39-35): a refusal this task has not answered yet.
    *
-   * Ruling 400 made the plan-refused retry CARRY its refusals instead of
+   * Ruling 121 made the plan-refused retry CARRY its refusals instead of
    * saying "read them on the timeline" -- but it records them only when the
    * plan was WHOLLY refused (`refused.length === plan.actions.length`), which
    * is the rarer half. Live on ax-clone AX-18 the operator planned
@@ -276,7 +276,7 @@ export interface OperatorTaskSnapshot {
    * was refused, so nothing was recorded -- and fourteen seconds later the
    * next drive planned `transition_stage` again and was refused with a
    * byte-identical message. That second wasted drive is what tripped the
-   * two-in-a-row hold (ruling 406).
+   * two-in-a-row hold (ruling 121).
    *
    * Partial or whole, a refusal the operator has not acted on is the most
    * important thing about the task. Absent once it has moved the task or
@@ -284,17 +284,17 @@ export interface OperatorTaskSnapshot {
    */
   unansweredRefusal?: { at: string; text: string };
   /**
-   * Ruling 413: the OTHER open review PRs whose diff shares a file with this
+   * Ruling 116: the OTHER open review PRs whose diff shares a file with this
    * task's, by shared path.
    *
-   * Viberr has computed this since ruling 236 and rendered it on exactly one
+   * Viberr has computed this since ruling 242 and rendered it on exactly one
    * surface, the human's review queue, described there as "read-only and quiet
    * by design". The operator is the actor that decides what to dispatch, when
    * to deliver and whether to refresh a branch, and it had no cross-task view
    * at all: asked where it was weakest, the ax-clone controller answered that
    * `get_task` is single-task, "so every cross-task correlation on this board
-   * is currently done by you". Ruling 402 gave it the goal chain for the same
-   * reason (ruling 503: its epic now); this is the other fact viberr already
+   * is currently done by you". Ruling 116 gave it the goal chain for the same
+   * reason (ruling 116: its epic now); this is the other fact viberr already
    * holds.
    *
    * Read live on ax-clone: all five open PRs carried one, and AX-20 and AX-21
@@ -304,8 +304,8 @@ export interface OperatorTaskSnapshot {
    */
   collisions?: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
   /**
-   * Ruling 431 (pass 39, F39-53): the project's file leases as they bind NOW
-   * (ruling 245(b): a finished holder's lease is gone), every holder included.
+   * Ruling 116 (pass 39, F39-53): the project's file leases as they bind NOW
+   * (ruling 60: a finished holder's lease is gone), every holder included.
    *
    * The operator only had the timeline's "Files leased by another task" note,
    * which is history. Live on ax-clone AX-21 (01:18) the owner had removed
@@ -317,11 +317,11 @@ export interface OperatorTaskSnapshot {
    */
   fileLeases?: { taskKey: string; paths: string[]; reason: string }[];
   /**
-   * Ruling 415 (F39-41): every decision a PERSON made on this task, newest
+   * Ruling 116 (F39-41): every decision a PERSON made on this task, newest
    * first, read from the WHOLE timeline, with their own words when they gave
    * any.
    *
-   * Ruling 284 keeps typed words out of the goal and said nothing was lost by
+   * Ruling 64 keeps typed words out of the goal and said nothing was lost by
    * it, because the words "reach the operator in their own `note` field on the
    * re-queue". They reach exactly ONE turn. Live on ax-clone AX-19 the owner
    * answered round five in their own words ("I am changing what may block
@@ -346,11 +346,11 @@ export interface OperatorTaskSnapshot {
     /** Present when `words` was cut, saying where the rest is. */
     clipped?: string;
   }[];
-  /** Ruling 302: how many entries this task's timeline HAS, against the
+  /** Ruling 117: how many entries this task's timeline HAS, against the
    *  `recentTimeline.length` shown. Present always, so a coordinator never has
    *  to infer from a full-looking window that it saw everything. */
   timelineTotal: number;
-  /** Ruling 302: present ONLY when entries were left out, naming the count and
+  /** Ruling 117: present ONLY when entries were left out, naming the count and
    *  the way to reach them. */
   timelineOlder?: string;
   /** [1] The coordinator's OWN proposals — what it already asked for, and what a
@@ -399,7 +399,7 @@ export interface OperatorTaskSnapshot {
    *  unreviewed out-of-band commit the reconciler had already seen went
    *  unmentioned. Null when the head equals the reviewed revision.
    *
-   *  Ruling 132 (pass 34, F34-14): the WHOLE record, plus the canonical
+   *  Ruling 239 (pass 34, F34-14): the WHOLE record, plus the canonical
    *  sentence (`describeRevisionDrift`) the accept dialog prints, so the
    *  operator's read and the ceremony can never say two different things. */
   pr:
@@ -410,7 +410,7 @@ export interface OperatorTaskSnapshot {
         revisionDrift: RevisionDrift | null;
         /** `describeRevisionDrift(revisionDrift).sentence`, empty for none. */
         revisionDriftSentence: string;
-        /** Ruling 135 (pass 34, F34-11): the PR head as last read, the CURRENT
+        /** Ruling 243 (pass 34, F34-11): the PR head as last read, the CURRENT
          *  unpushed record (null when the delivered revision is on the PR or
          *  the fact was never measured), and the sentence the acceptance gate
          *  refuses with ("" when none). An unpushed revision reaches its PR
@@ -418,24 +418,24 @@ export interface OperatorTaskSnapshot {
         headSha: string | null;
         unpushedRevision: UnpushedRevision | null;
         unpushedRevisionSentence: string;
-        /** Ruling 162 (pass 35, F35-12): GitHub's mergeability as the
+        /** Ruling 95 (pass 35, F35-12): GitHub's mergeability as the
          *  reconciler last read it (`conflicting` is the fact the acceptance
          *  gate refuses on); null when never read or settled. */
         mergeable: PrMergeable | null;
       }
     | null;
-  /** Ruling 162 (pass 35, F35-12): the acceptance gate's own refusal, computed
+  /** Ruling 95 (pass 35, F35-12): the acceptance gate's own refusal, computed
    *  by the SAME function every acceptance surface reads
    *  (`acceptanceRefusalFor`), or null when the task could be accepted now.
    *  A PR the gate would refuse cannot be recommended for acceptance and the
    *  task cannot be moved into the acceptance stage; route the conflict with
-   *  `update_branch_from_base` (ruling 475) or deliver the unpushed revision
+   *  `update_branch_from_base` (ruling 129) or deliver the unpushed revision
    *  instead. */
   notAcceptableReason: string | null;
-  /** Ruling 521: the completion packet a person reads before accepting, and
+  /** Ruling 103: the completion packet a person reads before accepting, and
    *  what writing it takes (the change's size, the images you may pick). */
   completionPacket: CompletionPacketFact;
-  /** Ruling 693: what the task has taken so far, derived from its run rows and
+  /** Ruling 83: what the task has taken so far, derived from its run rows and
    *  its own timeline at this read: the runs that started and their agent
    *  minutes, the dollars they reported (`cost.usd: null` is unknown, never
    *  zero), the rounds a person was asked, the times the work was sent back,
@@ -454,7 +454,7 @@ export interface OperatorTaskSnapshot {
    *  refusal notes rendered it for humans only, so the model had to guess from
    *  timeline prose. Null when no collision is recorded. */
   unownedPr: number | null;
-  /** Ruling 161 (pass 35, U35-8): origin's copy of the task branch carries
+  /** Ruling 234 (pass 35, U35-8): origin's copy of the task branch carries
    *  commits this task did not author, as the reconciler last recorded it
    *  (`github.foreignHead`): the head sha when GitHub named one and the
    *  unowned PR when one stands. Name it in an `archive_task` option's text
@@ -467,14 +467,14 @@ export interface OperatorTaskSnapshot {
    *  compared this task yet. Informational: a stale or absent reading must
    *  never stop an update, it only stops the step being planned blind. */
   baseBehindBy: number | null;
-  /** Ruling 494 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
+  /** Ruling 238 (pass 40, F40-70): the compare `baseBehindBy` was counted in.
    *  `sha` is the branch head it read and `observedAt` when it ran. `current`
    *  is false when the count was not read on the head Viberr's newest push
    *  published (`pushedSince` names that head, null when git could not name
    *  it): the push came after the compare, or the compare right after the
    *  push read another head because GitHub had not shown the push yet. The
    *  count then describes another head than the pushed one. It is null when
-   *  the compare named no head (a compare recorded before ruling 494), which
+   *  the compare named no head (a compare recorded before ruling 238), which
    *  never reads as current either, and true otherwise. Null while
    *  `baseBehindBy` is null. */
   baseComparedHead: {
@@ -483,10 +483,10 @@ export interface OperatorTaskSnapshot {
     current: boolean | null;
     pushedSince: { sha: string | null; at: string } | null;
   } | null;
-  /** Ruling 494: when `baseBehindBy` does not describe the branch's current
+  /** Ruling 116: when `baseBehindBy` does not describe the branch's current
    *  head, the sentence that says so and what not to write; "" when it does. */
   baseBehindBySentence: string;
-  /** Ruling 424 (pass 39): the sentence `update_branch_from_base` refuses
+  /** Ruling 116 (pass 39): the sentence `update_branch_from_base` refuses
    *  with from where the task stands, or null when a refresh would run. At
    *  the acceptance stage the ceremony refreshes the branch once and merges,
    *  so a positive `baseBehindBy` there is the ceremony's to settle; the
@@ -520,7 +520,7 @@ export interface OperatorTaskSnapshot {
     state: "queued" | "running";
   }[];
   /**
-   * Ruling 487: the runs scheduled on THIS task that have not fired yet, read
+   * Ruling 125: the runs scheduled on THIS task that have not fired yet, read
    * from the task file: its own re-run (`run-operator`) or an agent's
    * (`run-agent`, with the profile and directive). `by` is who scheduled it,
    * and `yours` marks one the operator scheduled itself, the only kind
@@ -713,7 +713,7 @@ const liveRunRowsSchema = z.array(
 );
 
 /**
- * Ruling 302: how many timeline entries `get_task` returns by default, and the
+ * Ruling 117: how many timeline entries `get_task` returns by default, and the
  * most it will return when asked. The controller's own `get_task` has taken an
  * `events` count (1..50, default 12) for as long as it has existed; the
  * operator's took no arguments at all and returned six.
@@ -725,18 +725,18 @@ export const OPERATOR_TIMELINE_MAX = 50;
  *  snapshot builder writes and the operator reads. Named rather than inline so
  *  the builder and the contract cannot drift over what `clipped` means. */
 export interface OperatorTimelineRow {
-  /** Ruling 285: the ADDRESS `read_timeline_entry` takes. */
+  /** Ruling 117: the ADDRESS `read_timeline_entry` takes. */
   occurredAt: string;
   type: string;
   actor: string;
   text: string;
-  /** Ruling 285: present ONLY when the text was cut, naming the tool that
+  /** Ruling 117: present ONLY when the text was cut, naming the tool that
    *  returns it whole. */
   clipped?: string;
 }
 
 /**
- * Ruling 397: find a report a failed run left standing, if one is still the
+ * Ruling 116: find a report a failed run left standing, if one is still the
  * open question on this task.
  *
  * The scan walks the timeline newest-first and stops at the first `agent`
@@ -783,7 +783,7 @@ function findUnfinishedReport(
 }
 
 /**
- * Ruling 408: the newest refusal note with nothing done since.
+ * Ruling 116: the newest refusal note with nothing done since.
  *
  * Same walk as {@link findUnfinishedReport} and the same stop rule: a
  * `transition` or an `agent` event means the operator got somewhere after the
@@ -801,28 +801,28 @@ function findUnansweredRefusal(
   return undefined;
 }
 
-/** Ruling 415: how many of a task's human decisions the snapshot carries. */
+/** Ruling 116: how many of a task's human decisions the snapshot carries. */
 const HUMAN_DECISIONS_MAX = 5;
-/** Ruling 285: the window cuts an entry here for an operator that can read
+/** Ruling 117: the window cuts an entry here for an operator that can read
  *  the rest with `read_timeline_entry`. */
 const TIMELINE_ENTRY_CAP = 1500;
-/** Ruling 415: an OLDER decision's words are cut here, at the timeline
+/** Ruling 116: an OLDER decision's words are cut here, at the timeline
  *  window's own per-entry cap; the newest is whole. */
 const OLDER_DECISION_WORDS_CAP = TIMELINE_ENTRY_CAP;
 /**
- * Ruling 440 (F39-67): the one cut for everything an operator that cannot
+ * Ruling 117 (F39-67): the one cut for everything an operator that cannot
  * call tools (a Codex plan) is handed in place of an address. That covers a
  * window entry, a decision's words, an unfinished report, and the report that
- * woke it (`agentReportBlock`). Ruling 415 raised only the last of those to
+ * woke it (`agentReportBlock`). Ruling 116 raised only the last of those to
  * this. So the same reviewer report read whole on the turn it woke, and cut
  * at 1,500 characters on any other turn, which "cannot fetch the rest".
  */
 export const AGENT_REPORT_CAP_TOOLLESS = 16000;
-/** Ruling 503: the snapshot carries the task's epic's description up to this;
+/** Ruling 116: the snapshot carries the task's epic's description up to this;
  *  the epic's page has the rest. */
 const EPIC_DESCRIPTION_CAP = 2000;
 /**
- * Ruling 415 (F39-41): the decisions a person made on this task, newest
+ * Ruling 116 (F39-41): the decisions a person made on this task, newest
  * first, over the WHOLE timeline rather than the snapshot's window.
  *
  * A decision is the `transition` event `resolvePacket` writes under a human
@@ -854,7 +854,7 @@ function findHumanDecisions(
     };
     if (quoted) {
       // The newest decision governs, so it is carried whole (it is bounded by
-      // the directive field's own limit); older ones are context. Ruling 440:
+      // the directive field's own limit); older ones are context. Ruling 117:
       // context an operator cannot fetch is carried whole too.
       const cap = toolless
         ? AGENT_REPORT_CAP_TOOLLESS
@@ -875,7 +875,7 @@ function findHumanDecisions(
   return found.length > 0 ? found : undefined;
 }
 
-/** Ruling 482: the snapshot's `gates` — the PR card's line plus what failed. */
+/** Ruling 315: the snapshot's `gates` — the PR card's line plus what failed. */
 function operatorGatesOf(
   declared: readonly ProjectGate[] | undefined,
   fm: TaskFrontmatter,
@@ -896,7 +896,7 @@ function operatorGatesOf(
 }
 
 /**
- * Ruling 494 (pass 40, F40-70): does the newest compare's count describe the
+ * Ruling 238 (pass 40, F40-70): does the newest compare's count describe the
  * branch as it stands? Not when it was not read on the head Viberr's newest
  * push published (`pushedSince`, set by `createBaseCompareLookup`): a push
  * recorded after that compare, or one the compare right after it read another
@@ -904,14 +904,14 @@ function operatorGatesOf(
  * named no head either (`null`, unknown). The known head is the one Viberr's
  * own push published: `pr.headSha` lags a push until GitHub shows it on the
  * pull request (F39-64), a task with no live pull request has none, and a base
- * refresh moves the branch past `workRevision` (ruling 439).
+ * refresh moves the branch past `workRevision` (ruling 239).
  */
 function comparedHeadCurrent(reading: BaseCompareReading): boolean | null {
   if (reading.pushedSince) return false;
   return reading.headSha === null ? null : true;
 }
 
-/** Ruling 494: the snapshot's `baseComparedHead` for a compare reading. */
+/** Ruling 238: the snapshot's `baseComparedHead` for a compare reading. */
 function baseComparedHeadOf(
   reading: BaseCompareReading | null,
 ): OperatorTaskSnapshot["baseComparedHead"] {
@@ -927,7 +927,7 @@ function baseComparedHeadOf(
 }
 
 /**
- * Ruling 494: the sentence the operator reads instead of a count it must not
+ * Ruling 116: the sentence the operator reads instead of a count it must not
  * repeat, or "" when the count describes the current head. It names both
  * heads, so "the head you just pushed" is checkable against what was counted.
  */
@@ -978,7 +978,7 @@ export function operatorSnapshot(
   authority: OperatorAuthority,
   events: number = OPERATOR_TIMELINE_DEFAULT,
   /**
-   * Ruling 415: `toolless` is a Codex operator, which returns a plan and "cannot
+   * Ruling 116: `toolless` is a Codex operator, which returns a plan and "cannot
    * call tools". Every note that names a tool (`get_task`, `read_timeline_entry`)
    * sent it somewhere it cannot go, so for it the snapshot carries the content
    * instead of the address, and says plainly when content is out of reach.
@@ -996,12 +996,12 @@ export function operatorSnapshot(
 
   const fm = file.parsed.frontmatter;
   // F37-11: the reconciler's own last compare, read the same way the GitHub
-  // page's sync pill reads it. Ruling 494: with the head it was counted on and
+  // page's sync pill reads it. Ruling 238: with the head it was counted on and
   // any push Viberr made after it.
   const baseCompare = createBaseCompareLookup(db)(
     storeRelativePath(resolveTaskFilePath(taskRef(ctx, projectSlug, taskKey)), ctx.dataRoot),
   );
-  // Ruling 302: the window, clamped the way the controller's own `events` is.
+  // Ruling 117: the window, clamped the way the controller's own `events` is.
   const timelineWindow = Math.min(
     Math.max(Math.trunc(events), 1),
     OPERATOR_TIMELINE_MAX,
@@ -1020,7 +1020,7 @@ export function operatorSnapshot(
   // R7-4: the rework license, listed rather than left to be inferred. Same
   // predicate `isReworkMove` vets on the way in (backward + validation
   // failing), so what this offers is exactly what transition_stage accepts.
-  // Ruling 163 (pass 35, F35-13): a revision that CHANGED after a verdict is
+  // Ruling 90 (pass 35, F35-13): a revision that CHANGED after a verdict is
   // rework by definition, so a task past the review stage with `validation:
   // changed` may go back to the review stage (and only there) for its
   // re-verdict; `failing` keeps the whole backward license.
@@ -1028,7 +1028,7 @@ export function operatorSnapshot(
   const deployed = listDeployedSpecialists(projectSlug, ctx);
   const changedTarget =
     fm.validation === "changed" ? verdictStageFor({ stages, workflow }, fm, deployed) : null;
-  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // Ruling 112: a task that has no delivering agent and has delivered nothing
   // may also go back to a stage where one can be engaged, and the entry says
   // whom the move is for. It never meets the two licenses above: both need
   // something delivered.
@@ -1102,7 +1102,7 @@ export function operatorSnapshot(
         role: r.role,
         backend: r.backend,
         verdict: verdictOf(r.profileId),
-        // Ruling 193: how many successive DELIVERED REVISIONS this reviewer
+        // Ruling 93: how many successive DELIVERED REVISIONS this reviewer
         // has requested changes on. One is ordinary review. A run of them on
         // revisions that keep changing is the shape of an objection the work
         // cannot satisfy, and the operator could not see it: the snapshot
@@ -1111,9 +1111,9 @@ export function operatorSnapshot(
         consecutiveRequestChanges: consecutiveRequestChanges(fm, r.profileId),
       }));
     })(),
-    // Ruling 178: from the project file, resolved the way the gate prints it.
+    // Ruling 89: from the project file, resolved the way the gate prints it.
     requiredReviewers: resolveRequiredReviewers(project.parsed.frontmatter, ctx.dataRoot),
-    // Ruling 482: the server's own gate record, in the PR card's words.
+    // Ruling 315: the server's own gate record, in the PR card's words.
     gates: operatorGatesOf(project.parsed.frontmatter.gates, fm),
     nextStages,
     reworkStages,
@@ -1123,7 +1123,7 @@ export function operatorSnapshot(
     workStageId: roles.workId,
     deployedSpecialists: deployed.map((s) => ({
       ...s,
-      // Ruling 133: may this profile RUN here (declared, or the engaged
+      // Ruling 181: may this profile RUN here (declared, or the engaged
       // deliverer), not only "may it be newly engaged here".
       eligibleForCurrentStage: runEligibilityFor(
         s,
@@ -1159,13 +1159,13 @@ export function operatorSnapshot(
       // Timeline comments store the agent's FULL report (no 1,200-char cap
       // since 2026-07-17) — cap here so six entries can't balloon the prompt.
       //
-      // Ruling 285 (F37-120): the cap stays and the ADDRESS ships with it. The
+      // Ruling 117 (F37-120): the cap stays and the ADDRESS ships with it. The
       // stamp is what `read_timeline_entry` takes, and a clipped entry says it
       // is clipped — an entry that ends mid-sentence with a "…" and no way to
       // ask for the rest is how a coordinator states half a report as the whole
       // of it, which it did, live, on SHOP-42.
       //
-      // Ruling 440 (F39-67): an operator that cannot go to the address is
+      // Ruling 117 (F39-67): an operator that cannot go to the address is
       // handed the content. Live on ax-clone AX-5 a restart re-invoked a Codex
       // operator without the reviewer report that had woken the interrupted
       // turn. It read that report here, cut partway into finding 3 of 4. It
@@ -1190,7 +1190,7 @@ export function operatorSnapshot(
       }
       return row;
     }),
-    // Ruling 503: the epic, when this task is in one, and the open epics it
+    // Ruling 116: the epic, when this task is in one, and the open epics it
     // could be put in.
     ...((): Pick<OperatorTaskSnapshot, "epic" | "openEpics"> => {
       const epics = listEpics(db, projectSlug);
@@ -1219,16 +1219,16 @@ export function operatorSnapshot(
       }
       return out;
     })(),
-    // Ruling 397: scanned over the WHOLE timeline, not the window above — the
+    // Ruling 116: scanned over the WHOLE timeline, not the window above — the
     // pair is adjacent, but the window can end between them.
     ...((): Pick<OperatorTaskSnapshot, "unfinishedReport"> => {
       const found = findUnfinishedReport(file.parsed.timeline);
       if (!found) return {};
-      // Ruling 415: an operator that cannot call read_timeline_entry gets the
-      // report itself. Ruling 440: bounded by the one cut such an operator
+      // Ruling 116: an operator that cannot call read_timeline_entry gets the
+      // report itself. Ruling 117: bounded by the one cut such an operator
       // gets everywhere, and saying so when that cut lands.
       if (toolless) {
-        // Ruling 644: the report is the comment at that stamp; the failure is
+        // Ruling 117: the report is the comment at that stamp; the failure is
         // often written in the same millisecond.
         const report = file.parsed.timeline.find(
           (e) => e.occurredAt === found.reportedAt && e.type === "comment",
@@ -1245,19 +1245,19 @@ export function operatorSnapshot(
       }
       return { unfinishedReport: found };
     })(),
-    // Ruling 415: whole timeline, for ruling 408's reason — a person's decision
+    // Ruling 116: whole timeline, for ruling 116's reason — a person's decision
     // falls out of the window while it is still the one that governs.
     ...((): Pick<OperatorTaskSnapshot, "humanDecisions"> => {
       const found = findHumanDecisions(file.parsed.timeline, toolless);
       return found ? { humanDecisions: found } : {};
     })(),
-    // Ruling 408: whole timeline for the same reason — the refusal can fall
+    // Ruling 116: whole timeline for the same reason — the refusal can fall
     // out of the window while still being the open question.
     ...((): Pick<OperatorTaskSnapshot, "unansweredRefusal"> => {
       const found = findUnansweredRefusal(file.parsed.timeline);
       return found ? { unansweredRefusal: found } : {};
     })(),
-    // Ruling 413: ruling 236's intersection, reused rather than re-derived.
+    // Ruling 116: ruling 242's intersection, reused rather than re-derived.
     ...((): Pick<OperatorTaskSnapshot, "collisions"> => {
       const mine = fm.pr;
       if (!mine || mine.state !== "review" || !mine.paths?.changed.length) return {};
@@ -1312,7 +1312,7 @@ export function operatorSnapshot(
           number: fm.pr.number,
           state: fm.pr.state,
           title: fm.pr.title,
-          // F21-17 / ruling 132: the drift record verbatim from the same field
+          // F21-17 / ruling 239: the drift record verbatim from the same field
           // the acceptance ceremony reads, and the same sentence it prints.
           revisionDrift:
             describeRevisionDrift(fm.pr.revisionDrift).kind !== "none"
@@ -1330,9 +1330,9 @@ export function operatorSnapshot(
               activeWorkRevision(fm.workRevision)?.headSha ?? null,
               taskKey,
             ) ?? "",
-          // Ruling 162: the fact the acceptance gate refuses on (settled PRs
-          // carry none). Ruling 435: read as the gate reads it, pinned to the
-          // head it was measured on (ruling 405). Raw, it said `conflicting`
+          // Ruling 95: the fact the acceptance gate refuses on (settled PRs
+          // carry none). Ruling 242: read as the gate reads it, pinned to the
+          // head it was measured on (ruling 315). Raw, it said `conflicting`
           // for three minutes after the push that resolved AX-21's conflict,
           // and the operator told the reviewer to weigh it.
           mergeable:
@@ -1341,15 +1341,15 @@ export function operatorSnapshot(
               : null,
         }
       : null,
-    // Ruling 162 (pass 35, F35-12): the acceptance gate's verdict, from the ONE
+    // Ruling 95 (pass 35, F35-12): the acceptance gate's verdict, from the ONE
     // function every acceptance surface reads. KNC-6 and KNC-20 were
     // recommended for acceptance with `pr.mergeable: conflicting` already on
     // the file; the operator's snapshot simply did not carry the fact.
     notAcceptableReason: acceptanceRefusalFor({ projectSlug, taskKey }, ctx),
-    // Ruling 521: whether an acceptance offer may go out yet, and what the
+    // Ruling 130: whether an acceptance offer may go out yet, and what the
     // packet it needs must carry.
     completionPacket: completionPacketFact(fm, { projectSlug, taskKey, dataRoot: ctx.dataRoot }),
-    // Ruling 693: what the task took, from its run rows and the file read
+    // Ruling 83: what the task took, from its run rows and the file read
     // above. A read of what a task cost never fails the read of the task, so
     // a throw here leaves the key out.
     ...((): Pick<OperatorTaskSnapshot, "whatItTook"> => {
@@ -1364,7 +1364,7 @@ export function operatorSnapshot(
           }),
         };
       } catch (error) {
-        logger.warn("ruling 693 what-it-took read failed", {
+        logger.warn("ruling 83 what-it-took read failed", {
           projectSlug,
           taskKey,
           err: toError(error),
@@ -1379,7 +1379,7 @@ export function operatorSnapshot(
     // V19: the recorded branch-name collision, so the operator can author
     // `resolve_remote_collision` from a fact instead of timeline prose.
     unownedPr: fm.github?.unownedPr ?? null,
-    // Ruling 161: what origin's branch holds when it is not this task's work.
+    // Ruling 234: what origin's branch holds when it is not this task's work.
     foreignHead: fm.github?.foreignHead ?? null,
     // F37-11 (pass 37): how the branch stands against the base, read from the
     // reconciler's own last compare — the same row the GitHub page's sync pill
@@ -1389,7 +1389,7 @@ export function operatorSnapshot(
     // this one step. `null` means no pass has compared this task yet, which is
     // "unknown" and never an excuse to skip the call.
     baseBehindBy: baseCompare?.behindBy ?? null,
-    // Ruling 494 (F40-70): which head that count describes. Live on WEB-16 the
+    // Ruling 238 (F40-70): which head that count describes. Live on WEB-16 the
     // count was read 7 s before the delivery pushed a head that carried `main`,
     // and two packets told the owner the branch was 6 behind for five minutes.
     baseComparedHead: baseComparedHeadOf(baseCompare),
@@ -1418,7 +1418,7 @@ export function operatorSnapshot(
         profileId: r.agent_profile_id,
         state: r.state,
       })),
-    // Ruling 487: what is already set to happen later, so a wait on a clock
+    // Ruling 125: what is already set to happen later, so a wait on a clock
     // is read before it is asked about or scheduled twice.
     schedules: fm.schedules
       .filter((s) => s.status === "pending")
@@ -1448,18 +1448,18 @@ export function operatorSnapshot(
     },
   };
   if (snapshot.timelineTotal > snapshot.recentTimeline.length) {
-    // Ruling 302: the same rule the per-ENTRY clip beside it already follows.
+    // Ruling 117: the same rule the per-ENTRY clip beside it already follows.
     // A window that does not say it is a window is how a coordinator states
     // part of a history as the whole of it.
     const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
     const notShown = `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. `;
-    // Ruling 415: the address is only worth giving to an operator that can go
+    // Ruling 116: the address is only worth giving to an operator that can go
     // there. For one that cannot, say where the parts of that history that
     // still bind were carried instead.
     snapshot.timelineOlder = toolless
       ? notShown +
         "This turn cannot fetch them. What in them still binds you is carried in this snapshot: " +
-        "`humanDecisions` (every decision a person made here, in their own words), `unansweredRefusal`, " +
+        "`humanDecisions` (the newest five decisions a person made here, in their own words), `unansweredRefusal`, " +
         "`unfinishedReport` and `epic`."
       : notShown +
         `Call get_task with events up to ${OPERATOR_TIMELINE_MAX} to widen this window, ` +

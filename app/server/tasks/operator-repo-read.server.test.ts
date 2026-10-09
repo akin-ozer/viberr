@@ -23,7 +23,7 @@ function goLines(lines: number): string {
   return Array.from({ length: lines }, (_, i) => `\tresult${i} := step(ctx, ${i})`).join("\n") + "\n";
 }
 
-describe("ruling 436: a default-branch read comes in pages the CLI will carry", () => {
+describe("ruling 219(c): a default-branch read comes in pages the CLI will carry", () => {
   /**
    * Live on ax-clone at 02:08: the controller asked for
    * `internal/runtime/executor.go` (57,835 characters) and got "result (57,835
@@ -217,7 +217,7 @@ describe("readDefaultBranchFile", () => {
 });
 
 /**
- * Ruling 299 (pass 37, F37-134): the CONTROLLER reads the default branch too.
+ * Ruling 265 (pass 37, F37-134): the CONTROLLER reads the default branch too.
  *
  * `read_default_branch_file` was mounted on the operator and nowhere else. The
  * controller writes the architecture, the knowledge bases and the goals every
@@ -228,7 +228,7 @@ describe("readDefaultBranchFile", () => {
  * the repository yourself is the most-repeated rule in this project's own
  * rulings, and I am structurally unable to follow it."
  */
-describe("readProjectDefaultBranchFile (ruling 299)", () => {
+describe("readProjectDefaultBranchFile (ruling 265)", () => {
   const SLUG = "viberr-core";
   const REPO = "acme/widgets";
 
@@ -257,7 +257,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
       repo: REPO,
       files: {
         "services/catalog.ts": "nine routes live here\n",
-        // Ruling 436: past the old 240,000-byte buffer, which made git's overflow
+        // Ruling 219(c): past the old 240,000-byte buffer, which made git's overflow
         // read as "unavailable".
         "internal/runtime/executor.go": goLines(10_000),
       },
@@ -276,7 +276,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
     expect(read.kind === "found" && read.text).toContain("nine routes live here");
   });
 
-  it("ruling 436: a file far past one page is read to its end, page by page", async () => {
+  it("ruling 219(c): a file far past one page is read to its end, page by page", async () => {
     // CANARY: put the buffer back at four pages, and the first read is "unavailable".
     const whole = goLines(10_000);
     const seen: string[] = [];
@@ -305,7 +305,7 @@ describe("readProjectDefaultBranchFile (ruling 299)", () => {
 
   it("a path that is not on the branch is ABSENT, which is an answer", async () => {
     const read = await readIt("services/never-written.ts");
-    // Ruling 246: existence before type. "Not there" must not arrive as a
+    // Ruling 260: existence before type. "Not there" must not arrive as a
     // failure the caller reports as "I could not check".
     expect(read.kind).toBe("absent");
   });

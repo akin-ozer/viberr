@@ -46,7 +46,7 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
  * `performDelivery` now records that transition recommendation itself when
  * nothing else made the task actionable. The test project is VC-1's shape:
  * `impl → review` at an `approval` boundary, as the Standard template had it
- * then (`approveReviewEntry`). Since ruling 519 the Standard board's move into
+ * then (`approveReviewEntry`). Since ruling 126 the Standard board's move into
  * Review is `auto`: the operator makes it, and the delivery records nothing.
  *
  * push-workspace + pr-open are stubbed through `performDelivery`'s ctx `deps`
@@ -99,7 +99,7 @@ function seedTask(
     stage?: string;
     recommendations?: Recommendation[];
     packet?: TaskPacket | null;
-    /** Ruling 391: this task's deliverable is the files a run saved. */
+    /** Ruling 235: this task's deliverable is the files a run saved. */
     deliveredAt?: string;
   } = {},
 ): void {
@@ -168,7 +168,7 @@ afterEach(() => {
 });
 
 /** The operator's collision decision on VIB-1, `resolve_remote_collision`
- *  first: what F32-7 and ruling 136(a) resolve. */
+ *  first: what F32-7 and ruling 233 resolve. */
 const BLOCKED_COLLISION_PACKET: TaskPacket = {
   type: "blocked",
   kind: "Blocked decision",
@@ -217,7 +217,7 @@ async function seedCollision(routes: Record<string, { status?: number; body?: un
 
 /** GitHub lets the ceremony close PR #232, delete the branch and redeliver. */
 const clearedRoutes = () => ({
-  // Ruling 128: the delivery reads the base ref before pushing.
+  // Ruling 227: the delivery reads the base ref before pushing.
   "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
   "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
   "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
@@ -464,7 +464,7 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
     expect(inbox[0]!.from).toMatchObject({ kind: "system", name: "Delivery" });
   });
 
-  it("ruling 519: on the Standard board, where the move into Review is `auto`, a delivery records no card and rings no bell", async () => {
+  it("ruling 126: on the Standard board, where the move into Review is `auto`, a delivery records no card and rings no bell", async () => {
     // CANARY: drop the `auto` return in `recordDeliveredNextStep` and a person
     // is asked to confirm a move the operator makes itself.
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -668,15 +668,15 @@ describe("F19-1 — a successful delivery leaves an actionable next step", () =>
 });
 
 /**
- * Ruling 136(a) (pass 34, F34-10): the collision ceremony ends with EXACTLY
- * ONE hand-off. Full autonomy: the ruling-48 `delivered` re-queue the
+ * Ruling 233 (pass 34, F34-10): the collision ceremony ends with EXACTLY
+ * ONE hand-off. Full autonomy: the ruling-127 `delivered` re-queue the
  * re-delivery fired, and nothing else. Otherwise a `packet-resolved` re-queue
  * whose payload carries the ceremony's outcome in its own field. Canaries:
  * ignore `operatorRequeued` (two runs under full autonomy, which F32-7's
  * full-autonomy case above catches); drop the ceremony's own hand-off (no run
  * on the refusal arm or the edgeless board).
  */
-describe("ruling 136(a): the collision ceremony hands off exactly once", () => {
+describe("ruling 233: the collision ceremony hands off exactly once", () => {
   it("a refusal hands the operator the typed reason once, as Viberr's own record beside the human's decision", async () => {
     deployDeliveryOperator(store, "supervised");
     const github = await seedCollision({

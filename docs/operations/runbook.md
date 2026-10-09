@@ -47,36 +47,36 @@ The route spreads `healthSnapshot()` after `ok`, and key order is part of the co
 | `status` | `ok` \| `degraded` (`down` only in the 503 body below) |
 | `degraded[]` | any of `watcher`, `kbWatcher`, `lock`, `disk`, `projections`, `agentIsolation` |
 | `projections` | `{ projects, tasks }` row counts |
-| `projectionStore` | `null` while every canonical file projects; otherwise `{ files, latest: { at, sourcePath, message, failures } }` — how many files currently fail to rebuild and the most recent one, with the store's own error (rulings 217/218). A latch set by the rebuilder's catch and cleared per file by that file's next successful rebuild, never a probe. Non-null marks `degraded: ["projections"]` |
+| `projectionStore` | `null` while every canonical file projects; otherwise `{ files, latest: { at, sourcePath, message, failures } }` — how many files currently fail to rebuild and the most recent one, with the store's own error (ruling 22). A latch set by the rebuilder's catch and cleared per file by that file's next successful rebuild, never a probe. Non-null marks `degraded: ["projections"]` |
 | `watcher`, `kbWatcher` | store and knowledge-base watchers alive; a watcher error clears the handle, so `false` is a real dead watcher, not "never started" |
 | `lock` | `{ pid, hostname, startedAt }` of the single-writer holder, `null` if none |
-| `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 127), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner |
+| `backends` | `{ claude: { connectedUsers }, codex: { connectedUsers } }` → how many PEOPLE have connected each backend (ruling 137), recounted on every call. `0` is a normal reading, not a fault, and never degrades health; it is not a validity check, and it does not answer "can this task run", which is a fact about the task owner |
 | `browser` | `{ status: "ready" }` or `{ status: "unavailable", reason }` for the governed browser (the `@playwright/mcp` CLI missing, or a pinned `VIBERR_BROWSER_EXECUTABLE` not on disk) |
-| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, source: data-root\|host, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1). `source: host` means the host disk under the data root (`VIBERR_HOST_DISK_PATH`, Compose's `/host-disk` mount) had less room than the data root's own filesystem and is the reading (ruling 603): on Docker Desktop the named volume reports its disk image's virtual size, 940.8 GB free while the Mac had 19.9 GB |
+| `disk` | `{ freeBytes, totalBytes, usedPercent, status: ok\|low\|critical, source: data-root\|host, lowThresholdBytes, criticalThresholdBytes }` or `null` when neither source could measure the root (not degraded); 5 s cache. The reading comes from POSIX `df -kP` (fragment-size aware), with `statfs(2)` only as the fallback — Node exposes `bsize` alone, and on Docker Desktop's virtiofs `f_bsize` ≠ `f_frsize`, which reported a near-full 229 GB volume as 62 TB with 1 TB free (F32-1). `source: host` means the host disk under the data root (`VIBERR_HOST_DISK_PATH`, Compose's `/host-disk` mount) had less room than the data root's own filesystem and is the reading (ruling 40): on Docker Desktop the named volume reports its disk image's virtual size, 940.8 GB free while the Mac had 19.9 GB |
 | `maintenance` | `{ intervalMs, diskCheckIntervalMs, lastPassAt, lastPassReason: boot\|interval\|disk-pressure, lastFreedBytes, scheduled }` |
 | `build` | `{ version, revision, revisionSource: env\|git\|null, builtAt }`; `revision` is `null` in an image built without `npm run deploy` or the build args |
-| `quota` | one row per backend, `{ backend, reading, credentialRefused, exhausted }`: the latest rate-limit reading (a reading also lists every window it knows, `reading.windows`: Codex's from its rollout, ruling 608, and Claude's plan windows from the run's CLI, ruling 611; a window whose reset has passed reads `utilization: null`, and the binding fields move to the current window closest to its limit, ruling 612), the latest credential refusal and the latest quota exhaustion the run sink recorded (F32-9). On this unauthenticated route `credentialUserId` and `credentialLabel` are stripped from each record (ruling 130(d)); never `degraded` (ruling 146) |
-| `toolchain` | `{ node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages (rulings 182(b), 191, 196). Memoized per process. Never `degraded`: what an agent's shell finds is information, not a fault |
-| `mcpProxy` | `{ listening, port, liveTokens }` — the loopback MCP gateway (ruling 461): whether it is listening on `127.0.0.1`, on which port (`VIBERR_MCP_PROXY_PORT`, or the one picked at boot), and how many runs hold a live gateway token. Never `degraded`: a gateway that failed to bind leaves credentialed MCP servers unmountable, which each run's prompt states |
-| `agentIsolation` | (last) `{ status: on\|off\|degraded, uidFloor, reason }` (ruling 460). `on`: the launcher is installed and the boot probe, reading `state/projection.sqlite` as a uid that is not the server's, was refused — every agent process runs as its person's own OS user and cannot read the server's environment, the database or another person's home. `off`: no launcher (the host dev server, the test harness); runs spawn as the server's user; never `degraded`. `degraded` (marks `degraded: ["agentIsolation"]`): the launcher exists but the probe READ the store — the data root is on a mount that enforces no permissions between users, the macOS `./docker-data` bind mount; move it with `npm run store:to-volume` (deployment.md) — or the probe itself failed, with the launcher's own words in `reason` |
+| `quota` | one row per backend, `{ backend, reading, credentialRefused, exhausted }`: the latest rate-limit reading (a reading also lists every window it knows, `reading.windows`: Codex's from its rollout, ruling 161(b), and Claude's plan windows from the run's CLI, ruling 161(a); a window whose reset has passed reads `utilization: null`, and the binding fields move to the current window closest to its limit, ruling 161(c)), the latest credential refusal and the latest quota exhaustion the run sink recorded (F32-9). On this unauthenticated route `credentialUserId` and `credentialLabel` are stripped from each record (ruling 160(a)); never `degraded` (ruling 40) |
+| `toolchain` | `{ node, npm, git, python3, go, make, docker, pnpm, yarn, curl, codexCli, claudeAgentSdk }` — each version a string or `null` when that tool is not installed, plus the two pinned agent packages (rulings 40, 148, 42). Memoized per process. Never `degraded`: what an agent's shell finds is information, not a fault |
+| `mcpProxy` | `{ listening, port, liveTokens }` — the loopback MCP gateway (ruling 191): whether it is listening on `127.0.0.1`, on which port (`VIBERR_MCP_PROXY_PORT`, or the one picked at boot), and how many runs hold a live gateway token. Never `degraded`: a gateway that failed to bind leaves credentialed MCP servers unmountable, which each run's prompt states |
+| `agentIsolation` | (last) `{ status: on\|off\|degraded, uidFloor, reason }` (ruling 40). `on`: the launcher is installed and the boot probe, reading `state/projection.sqlite` as a uid that is not the server's, was refused — every agent process runs as its person's own OS user and cannot read the server's environment, the database or another person's home. `off`: no launcher (the host dev server, the test harness); runs spawn as the server's user; never `degraded`. `degraded` (marks `degraded: ["agentIsolation"]`): the launcher exists but the probe READ the store — the data root is on a mount that enforces no permissions between users, the macOS `./docker-data` bind mount; move it with `npm run store:to-volume` (deployment.md) — or the probe itself failed, with the launcher's own words in `reason` |
 
 Status codes: the bare URL is a **liveness** probe and returns `200` even when degraded;
 `?probe=readiness` (or `?probe=ready`) returns `503` with the same body while
 `degraded[]` is non-empty; `503 { "ok": false, "status": "down" }` when the snapshot
 itself threw (database unreachable). A zero `connectedUsers`, an unavailable browser, a
 `null` disk reading and a per-person backend refusal or spent quota are deliberately
-**not** degraded (ruling 146: one member's expired key must not make `?probe=readiness`
+**not** degraded (ruling 40: one member's expired key must not make `?probe=readiness`
 503 for an instance serving everyone else; the readings stay in the body under `quota`,
 and Insights and Profile render them per person). The compose healthchecks call the
 liveness form, so a degraded instance never fails the Docker healthcheck.
 
-**The controller's `instance_health`** (a `viberr_ops` tool, ruling 107) reads the same
+**The controller's `instance_health`** (a `viberr_ops` tool, ruling 269) reads the same
 `healthSnapshot`, signed in, so its `quota` rows keep the account they belong to, and adds:
 `backendCredentials` (per backend: `connectedUsers` and `askerConnected`, whether the
 person asking can run it on their own tasks), `runs` (`{ cap, lane, live, queued }` from
 the concurrency cap), `browserDetail` (org admins only, and only when there is one: the
 pinned executable path) and, when the caller passes `probe` (up to 8 bare command names,
-ruling 377), `probe[]` with `{ name, present: true, version }` or
+ruling 269), `probe[]` with `{ name, present: true, version }` or
 `{ name, present: false, reason }` for each. Every call is audited as a read.
 
 The boot log (structured JSON on stdout) prints one `boot integrity check` line:
@@ -94,7 +94,7 @@ database through `getDb` runs `ensureSingleFlightIndexes` and `ensureBaselineCol
 (`app/server/db/sqlite.server.ts`): each missing entry of `BASELINE_COLUMNS` is
 `ALTER TABLE … ADD COLUMN`ed, the missing `BASELINE_TABLES` and `BASELINE_INDEXES` are
 created and `user_backend_credentials` is created or brought to its several-accounts shape
-(ruling 507), idempotently, logging `added a baseline column this data root predated` for
+(ruling 138), idempotently, logging `added a baseline column this data root predated` for
 each column (the lists, table by table, are in
 [data-model.md §6](../architecture/data-model.md#6-schema-changes)). A column's one-time
 backfill runs in the same step when the DEFAULT would misdescribe the rows that predate it
@@ -102,7 +102,7 @@ backfill runs in the same step when the DEFAULT would misdescribe the rows that 
 history). Without that backstop every writer naming those columns would fail "no such
 column" (on `agent_runs`, every agent completion). A failure to ALTER is warned, not fatal,
 and retried next boot. Boot also widens a lagging `notifications.kind` CHECK in place
-(ruling 481). The
+(ruling 74). The
 re-baseline remains the remedy for the shape that cannot be patched additively — a CHECK
 constraint that refuses a value the running build produces.
 
@@ -138,11 +138,11 @@ The file watcher (chokidar, 250 ms trailing debounce per path, dotfiles and `*.t
 ignored, nothing below a task directory except `task.md`) drives incremental rebuilds in
 both dev and prod. A watcher error clears the handle and health reports `watcher: false`;
 transient errors (`EMFILE`, `ENFILE`, `ENOSPC`, `EPERM`, `EACCES`) re-arm the watcher
-after 2 s. A rebuild that FAILS is retried on its own (ruling 218): the watcher re-queues
+after 2 s. A rebuild that FAILS is retried on its own (ruling 22): the watcher re-queues
 that path after 2 s, 5 s, 15 s, 45 s and 120 s (`RETRY_BACKOFF_MS`), resets on the first
 success, and after the last step leaves the file in `projectionStore` on health, which
 marks the instance degraded until the file projects again. A `project.md` whose cascade
-could not re-project one of its tasks counts as failed (ruling 457): its own row and
+could not re-project one of its tasks counts as failed (ruling 21): its own row and
 members land, and the fault names the task's file.
 
 ## Diagnostics (a task looks wrong / stuck)
@@ -168,9 +168,9 @@ a readiness downgrade (tolerant parsing):
   question, no scheduled run, no agent running or queued and nothing it is waiting on,
   the stranded sweep that runs after the 60-second schedule tick writes a note ("Nothing
   has happened on this task for N minutes, and nothing is scheduled to. …") and
-  re-invokes the operator, once per silence (ruling 330, `stranded-sweep.server.ts`).
+  re-invokes the operator, once per silence (ruling 122, `stranded-sweep.server.ts`).
 - A run that ended in error: the Agent-logs footer names the classified cause for every
-  run kind (ruling 130(a)): "refused this run: the account's usage window is spent" or
+  run kind (ruling 155(a)): "refused this run: the account's usage window is spent" or
   "the account was rejected by the provider"; `continuity error` is only an
   unclassified failure. The terminal line in the log console carries the kind on its
   tag (`quota`, `auth`, `overloaded`, `idle_timeout`, `tool_loop`, `max_turns`, `max_budget`,
@@ -186,13 +186,13 @@ a readiness downgrade (tolerant parsing):
 ## Finding a request by its id
 
 Every response the app answers carries its request's id as `X-Request-Id` (ruling
-458(d)): the browser's devtools show it under the request's response headers. For a
+43): the browser's devtools show it under the request's response headers. For a
 failure met while moving around the app, it is the failing `.data` request's. An inbound
 `X-Request-Id`, from a proxy in front, is reused, so the proxy's access log and the app's
 records share one id. The error page shows it too, as "Request id: …", when the failure
 arrived with the document itself (a server render, or the hydration that reuses it); an
 error met on a later navigation shows none rather than an earlier request's, so read that
-one from devtools (ruling 458(n) raised the ruling-457 ceilings for the error page's id).
+one from devtools (ruling 11 raised the ruling-11 ceilings for the error page's id).
 
 The app logs JSON lines on stdout. To find one request's records:
 
@@ -211,11 +211,11 @@ Records from boot, the watchers and the timers, and from a run they started, car
 A few answers carry no header: static assets (served before the app sees the request),
 a document form post whose `Origin` header is not a URL, which React Router refuses
 before routing (a plain `400 Bad Request`, whose log record does carry an id; a
-cross-origin post gets the app's own 403, which carries the header, ruling 687), the route
+cross-origin post gets the app's own 403, which carries the header, ruling 28), the route
 manifest, and React Router's last-resort
 answers (a document it could not render at all). Match those by time, method and path.
 
-## A task waits on other work (ruling 131)
+## A task waits on other work (ruling 55)
 
 A task whose `blockedBy` list is non-empty is HELD, not stuck: its readiness is floored
 at `blocked`, the card leads with a neutral "blocked by …" chip, the task page names
@@ -242,7 +242,7 @@ recommendation is open. Nothing is owed by anyone while it waits.
 - **It never releases** when an entry was archived before it was done: the dependent
   gets one "Waiting on archived work" note, its watchers one notification, and it is left
   `waiting: human` until someone edits the list; the entry renders as "archived". An
-  entry archived at the terminal stage is done (ruling 651): archiving finished work,
+  entry archived at the terminal stage is done (ruling 55): archiving finished work,
   one task or a Done epic's all at once, releases or holds nothing.
 - **Converting an old hold** (the live JC-7 / JC-9 shapes): set the list on the task
   page first (setting a wait never touches a packet), then resolve any standing packet
@@ -254,7 +254,7 @@ recommendation is open. Nothing is owed by anyone while it waits.
   (the file also carries users, sessions and sealed PATs), and never a write against the
   running container.
 
-## Goal chains became epics (ruling 503)
+## Goal chains became epics (ruling 17)
 
 The first boot of a build with epics converts every chained-goal file once, after the
 rescan (`convertGoalsToEpics`). Each `projects/<slug>/goals/goal-N.md` becomes
@@ -284,7 +284,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
 - Per-project credential health and scope violations show on the GitHub view and the
   task. Diagnostics distinguish `insufficient_scope`, `expired`, `revoked`,
   `repo_not_found`, `org_approval_missing`, `network_error`.
-- **An empty repository needs nothing from you** (ruling 128). Viberr creates
+- **An empty repository needs nothing from you** (ruling 227). Viberr creates
   the default branch itself before a task's first branch (an initial commit through the
   Contents API, or the configured default at the first commit of a task branch GitHub
   made the default), disclosed on the task timeline and audited as
@@ -293,14 +293,14 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   (a `repo` scope violation opens) or GitHub refused the create; fix that, then deliver
   again. A delivery never pushes a task branch as the repository's first ref.
   A repository whose default branch is not named for one of the project's tasks is
-  not given another (ruling 670): when the project names a branch the repository does
-  not have (written unconfirmed before ruling 671 while GitHub was unreachable, or
+  not given another (ruling 227): when the project names a branch the repository does
+  not have (written unconfirmed before ruling 225 while GitHub was unreachable, or
   renamed on GitHub since), the project takes the repository's default, the task's
   timeline says so, and
   the audit row is `project.default_branch.adopted`. After a rename, a workspace that
   already has commits on the old name stays on it: rename that branch in the workspace,
   or let the task finish there.
-- **A board with no repository, and the question about one** (ruling 672). Any board
+- **A board with no repository, and the question about one** (ruling 224). Any board
   can be created with none; its tasks come back as files. The first time a task needs a
   repository its operator opens "Connect a repository to <project>?", which a project
   admin answers once for the board. **Connect** attaches what they type through the
@@ -313,15 +313,15 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   document in Instance settings → Agent resources; attaching a repository in project
   settings removes it too (`project.repo.ruling_removed`) and answers every task still
   asking. A task that shows "waiting on agent" with no run right after a connect is
-  waiting for the controller to finish the switch; the stranded sweep (ruling 330) starts
+  waiting for the controller to finish the switch; the stranded sweep (ruling 122) starts
   its operator after fifteen quiet minutes if nothing else does.
-- **A branch collision packet whose PR is the task's own** (ruling 136): the
+- **A branch collision packet whose PR is the task's own** (ruling 233): the
   `resolve_remote_collision` option performs the push the person asked for when origin's
   copy is behind or absent, keeps the block only for a diverged remote, and every branch
   delete re-confirms a cached open PR against GitHub before refusing. "GitHub could not
   confirm whether PR #N is still open" means the check itself failed: nothing was deleted;
   resolve the packet again when GitHub answers.
-- **"Delivery push refused: workflow scope"** (ruling 144): the task changes a file
+- **"Delivery push refused: workflow scope"** (ruling 221(a)): the task changes a file
   under `.github/workflows/` and the project's token cannot push it (a classic token without
   the `workflow` scope, refused before the push; or GitHub's own refusal on any token). A
   `workflow` scope violation is open on the task and the credential card carries the
@@ -342,7 +342,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   in the loop, and raises a notification after 3 consecutive failures for a project
   (`RECONCILE_FAILURE_ALERT_THRESHOLD`). The
   **Update status** button on the GitHub view forces an immediate reconcile; the page
-  shows how old the cached state is ("never synced" is neutral, ruling 46).
+  shows how old the cached state is ("never synced" is neutral, ruling 237).
 - Secret key rotation: set `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` to the retired key(s),
   `npm run keys -- status` (read-only, live instance) shows how many sealed secrets still
   open only under a retired key, `npm run keys -- reseal` (writer lock) moves them, then
@@ -350,7 +350,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
 
 ## Agent runtimes
 
-- **Whose account a run uses is the first question (ruling 127).** There is no
+- **Whose account a run uses is the first question (ruling 137).** There is no
   instance-level "the backend is configured". Every run bills ONE person, persisted on
   the run row as `agent_runs.credential_user_id`: the **task owner** for anything on a
   task (operator, specialist, resume, scheduled, boot recovery, retry) and the **asker**
@@ -367,17 +367,17 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   |---|---|---|
   | unowned | the task has no owner, so no account can pay for the run | take the task (Assign me) and run again |
   | owner-missing | the owner's user row is gone or disabled | assign a new owner |
-  | no-credential | the owner (or the asker) has not connected that backend, or the sign-in file of the account they have in use is missing | that person connects it on their own Profile → Agent accounts, or switches to another of their accounts there (ruling 507; the sentence says when one works) |
+  | no-credential | the owner (or the asker) has not connected that backend, or the sign-in file of the account they have in use is missing | that person connects it on their own Profile → Agent accounts, or switches to another of their accounts there (ruling 138; the sentence says when one works) |
 
   Each writes an honest `run·unavailable` error run and the usual blocked recovery packet
   through the normal completion pipeline. No agent process is started, so there is nothing
   to interrupt and no partial work to reconcile.
 
 - **A missing sign-in file after a volume wipe** is the common Docker case. A hosted
-  sign-in lives only in its account's own home (ruling 507),
+  sign-in lives only in its account's own home (ruling 138),
   `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json`
   or `.../codex-home/accounts/<accountId>/auth.json` (directly in `claude-home/` or
-  `codex-home/` for an account connected before ruling 507); deleting or recreating that
+  `codex-home/` for an account connected before ruling 138); deleting or recreating that
   directory removes it while the credential ROW stays in `user_backend_credentials` (a
   wipe of the WHOLE `viberr-data` volume takes the database with it, and then the row is
   gone too). Health for that person then reads "Your <Backend> sign-in file is missing
@@ -424,7 +424,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   docker compose exec -T app rm -rf /tmp/viberr-snap
   ```
 
-  A person may hold several accounts per backend (ruling 507): the first row of each
+  A person may hold several accounts per backend (ruling 138): the first row of each
   (email, backend) in that order is the account their runs bill.
 
   On bare metal (one host, one app process, a local `VIBERR_DATA_ROOT`) the rule is the
@@ -438,7 +438,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `access_token` carry a sealed `secret_box` you must never select into a terminal. A row
   is necessary but not sufficient for a `login`: the file above must also exist.
 
-- **Removing an org account retires its agent accounts** (ruling 127): the vendor logout
+- **Removing an org account retires its agent accounts** (ruling 137): the vendor logout
   runs, the sign-in file is deleted from that person's runtime home, and the credential
   rows go, before the `users` row cascades. The audit detail on `org.user.removed` lists
   `backendsRetired`. Nothing else on any path removes that file, and a removed person can
@@ -449,14 +449,14 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   the log panel projects them. Provider session transcripts live in the principal's own
   home. Interrupt is admin/maintainer-gated and audited.
 - Quota and rate-limit state per backend is on `/insights` (org admin), and it says WHOSE
-  account the refusal was (ruling 130(d)): a spent window or a rejected credential is one
+  account the refusal was (ruling 160(a)): a spent window or a rejected credential is one
   person's, not the instance's; the same person sees it on their Profile → Agent accounts
   card, and `/resources/health` names nobody. A quota-refused run opens a packet with a
   `retry_other_backend` option, offered only when the task owner has the other backend
   connected, and the switch sticks on the engagement (`pinnedBackend`). The Agent-logs
   "Retry on <other>" button passes the same test, so a task never offers in one surface
   what the other withholds.
-- Spending cap (ruling 175): Instance settings → the spending-cap row sets `maxRunSpendUsd`,
+- Spending cap (ruling 159): Instance settings → the spending-cap row sets `maxRunSpendUsd`,
   what one Claude run may spend (none by default). A run that reaches it ends
   `run·error·max_budget`, pill `cut off · spending cap`, and its line and packet name the
   cap and the spend. It is a cut-off, not a failure: re-run to continue, or raise the cap.
@@ -464,24 +464,24 @@ history opens with "Converted from goal-N …", and the project's Activity colum
 - Concurrency: Instance settings → runtime sets `maxConcurrentRuns` (0 = unlimited, ceiling
   64); excess runs wait in a `pending` queue that drains on every completion. Operator
   and controller turns have a lane of `max(1, ceil(cap / 4))` extra slots beyond the cap
-  and are promoted first (ruling 152(b)), so `live` may exceed the cap by that many. Past
+  and are promoted first (ruling 150), so `live` may exceed the cap by that many. Past
   its lane a coordination turn only borrows a cap slot no build is using: with a build
   parked, the next freed slot goes to the build. `instance_health` → `runs` shows
   `{ cap, lane, live, queued }` right now.
 - After a restart, orphaned `running|queued` rows are finalized as `interrupted` with
   `interrupted_reason: restart` (`interrupted_by` stays a person or null; the task page
   reads "interrupted by a restart", and Insights counts them as stopped, not as errors,
-  with a never-started queued run out of the completion rate; ruling 158 addendum) and
+  with a never-started queued run out of the completion rate; ruling 153 addendum) and
   the operator is re-invoked once per affected task (capped at `RECOVERY_REINVOKE_CAP`,
   3 per 30 min); finished runs whose completion never posted are replayed, and plans
   nobody executed are recovered. This is why `task.agent.replied` and
   `runtime.operator.plan_executed` audit rows are exempt from retention. A fourth pass,
-  `settleAbandonedWaits` (ruling 213), finds live tasks that claim `waiting: agent` with
+  `settleAbandonedWaits` (ruling 164), finds live tasks that claim `waiting: agent` with
   no run `running` or `queued`, skipping the tasks the orphan pass already took (ruling
-  215): each gets a "Left waiting on an absent agent" note and a fresh operator
+  164): each gets a "Left waiting on an absent agent" note and a fresh operator
   invocation, or is settled to `waiting: human` when the operator cannot start.
 - **`bwrap: No permissions to create a new namespace`, or `EPERM` from `npm ci` inside a
-  Codex run** — the image predates ruling 185 (2026-09-12), or something has
+  Codex run** — the image predates ruling 144 (2026-09-12), or something has
   re-introduced an OS sandbox. Viberr starts every Codex run `danger-full-access`:
   nothing should invoke bubblewrap, and no seccomp filter should be installed. Rebuild and
   recreate (`docker compose build app && docker compose up -d`; a restart keeps the old
@@ -490,30 +490,30 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   filter denies the socketpair libuv's synchronous spawn needs (F36-11) — both reported
   by the model as verdicts on correct work. `compose.yml` must NOT carry
   `security_opt: [seccomp=unconfined]`; see
-  [deployment.md — Codex runs are not OS-confined](deployment.md#codex-runs-are-not-os-confined-ruling-185).
+  [deployment.md — Codex runs are not OS-confined](deployment.md#codex-runs-are-not-os-confined-ruling-144).
 - **A Codex run says `codex-linux-sandbox` is missing or `launch rejected … No such file or
   directory` mid-run** (F36-3) — the CLI's exec helpers live in ONE directory per
-  `CODEX_HOME` and every new process of that home replaces it. Ruling 181 gives every run
+  `CODEX_HOME` and every new process of that home replaces it. Ruling 145 gives every run
   a private `CODEX_HOME` (`runtimes/users/<id>/codex-home/runs/<runId>/`, removed at
   settle), so this cannot recur on the current image; on an older one it means two Codex
   runs of one person overlapped. A `runs/` directory that survives with no live run is a
   crash's leftover and is replaced the next time that run id is prepared; deleting it by
   hand while the app is stopped is safe (the shared home's `auth.json` and `sessions/` are
   never inside it, only a copy and links).
-- A settled run leaves no live process (ruling 174). Every agent child carries
+- A settled run leaves no live process (ruling 142). Every agent child carries
   `VIBERR_RUN_ID=<runId>`, and when a run settles, or boot finalizes it as an orphan,
   Viberr SIGTERMs whatever still carries that id, waits 5 s (`RUN_REAP_GRACE_MS`) and
   SIGKILLs the rest. The `info` line `reaped the processes a settled run left behind`
   gives the run ids and how many were terminated and killed. A non-zero `killed` means
   something ignored SIGTERM. A process the run started that is still alive after its row
-  settled is a bug. An agent runs as its person's own uid (ruling 460), so the server
+  settled is a bug. An agent runs as its person's own uid (ruling 139), so the server
   user cannot read its environment: list a run's processes by hand with the launcher,
   which reads it as root, `docker compose exec -T app /usr/local/libexec/viberr-launch
   --reap 0 <runId>` (one pid per line; `--reap KILL <runId>` ends them).
-- **Every agent runs as its person's own OS user (ruling 460).** `ps -o user,pid,cmd`
+- **Every agent runs as its person's own OS user (ruling 139).** `ps -o user,pid,cmd`
   inside the container shows agent processes under numeric uids from 20001 (the person's
   uid is `agent_os_users.os_uid`, allocated once and never reused). A run that fails at
-  start with "The agent could not be started as its person's own user (ruling 460): …"
+  start with "The agent could not be started as its person's own user (ruling 139): …"
   is refused before any process started, and the sentence carries the launcher's own
   words: the person's home could not be handed to their uid (a directory on the path owned
   by someone else, a path outside `runtimes/users/`). Nothing falls back to the server's
@@ -523,7 +523,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `runtimes/users/<userId>/` are theirs: read them as the server (group `node` reads every
   file there once the launcher has handed the home back after a run) or with
   `docker compose exec`, never by changing their owner.
-- **A delivered page has no picture** (ruling 691). The task says why in three places: the
+- **A delivered page has no picture** (ruling 86). The task says why in three places: the
   "Page captures" note on its timeline ("Viberr could not picture `x.html`: …"), "No
   picture of this page: …" under that file on the completion or Result card, and
   `task.md` `pageCaptures.pages[].error`. The server logs `a page could not be captured`
@@ -572,7 +572,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
 - Sessions live in better-auth's own `session` table (singular, better-auth's schema).
   **Expiry is 30-day rolling**, slid at most once a day on an active session; the
   refreshed cookie is forwarded by root's `sessionRenewalMiddleware` on whichever GET
-  resolved the session (ruling 457). **Nothing prunes expired rows**; an
+  resolved the session (ruling 11). **Nothing prunes expired rows**; an
   expired row is simply never honoured. Rows are deleted only by an explicit act: sign-out
   (`routes/logout.tsx`), a self-serve password change (deletes every OTHER session), the
   auth guard (deletes the session of a disabled or deleted user on sight), and admin
@@ -588,7 +588,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   trust unverified provider emails (F28-A1).
 - Sign-in throttling keys on `email|ip`; behind a proxy set `VIBERR_TRUST_PROXY` or every
   client is `local`.
-- **Every request hangs, in every tab, with no error** (ruling 301): the browser's
+- **Every request hangs, in every tab, with no error** (ruling 25): the browser's
   per-origin connection pool is exhausted. Each visible Viberr page holds at most one SSE
   stream, except the project controller page, which holds two (the layout's and its own);
   `/insights` has none, and the controller dock opens one there while its panel is open.
@@ -613,9 +613,9 @@ sessionFiles, workspaces, freed, …}` and is reported on `/resources/health` un
 | `audit_events` | deleted after **90 days**, **exported first** (below), except the two recovery-marker actions | no |
 | `notifications` | trimmed to the **newest 500 per user** | no |
 | run transcripts `runtimes/<backend>/*.jsonl` | mtime older than **30 days** | `VIBERR_TRANSCRIPT_RETENTION_DAYS` (0 = forever) |
-| per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 127) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
+| per-person provider session homes `runtimes/users/*/claude-home/projects/**/*.jsonl` and `runtimes/users/*/codex-home/sessions/**/*.jsonl` | mtime older than **30 days**. `*.jsonl` ONLY: `auth.json`, `.credentials.json` and `.claude.json` are the vendor-held sign-ins and are never touched, so retention can never sign anybody out (ruling 137) | `VIBERR_SESSION_HOME_RETENTION_DAYS` (0 = forever) |
 | task `workspace/` directories | removed for tasks in the terminal stage, only when no run is queued or running | no |
-| a task's kept sources, `projects/<slug>/tasks/<KEY>/sources/` | **never pruned and never overwritten** (ruling 690). They go with the task's directory, so with the project when it is deleted. Past 30 days a kept source is the only copy of what a run read: its log lines and transcript are gone by then | no |
+| a task's kept sources, `projects/<slug>/tasks/<KEY>/sources/` | **never pruned and never overwritten** (ruling 82). They go with the task's directory, so with the project when it is deleted. Past 30 days a kept source is the only copy of what a run read: its log lines and transcript are gone by then | no |
 
 **Nothing in the app removes a kept source.** A task holds at most 200 of them and 100 MB
 (10 MB each), and a backup copies them with `projects/`. To take one out (a page that holds
@@ -644,13 +644,13 @@ would make the next boot redo the work. They are listed explicitly in
 
 **Audit is exported before it is purged.** Every expiring row is appended as one JSON
 line to `<dataRoot>/audit-exports/audit-events-<YYYY-MM-DD>.jsonl` before the delete; if
-the export fails the delete is skipped for that pass (ruling 102). On demand, Org
+the export fails the delete is skipped for that pass (ruling 33). On demand, Org
 settings → Audit export downloads CSV/JSON (cap 100 000 rows) or pushes to a configured
 S3 target; the same card browses the newest 150 org-scoped rows. Task-scoped history also
 lives in `task.md` indefinitely.
 
 **Those export files are deliberately unbounded and belong in your backups.** They are
-ruling 102's durable long-term record — the whole point is that they outlive the 90-day
+ruling 33's durable long-term record — the whole point is that they outlive the 90-day
 window the database enforces — so nothing rotates, ages out or size-caps them; the only
 supported way to shrink the directory is to move files off the box yourself, having
 decided you no longer need that history. `audit-exports/` is created at boot with the
@@ -660,7 +660,7 @@ rest of the data root (`DATA_ROOT_SUBDIRS`) and is one of `npm run backup`'s
 **Tables with no retention:** `provenance` (append-only observation ledger, the one that
 grows fastest; prune by hand with the app stopped: `DELETE FROM provenance WHERE
 observed_at < …; VACUUM;`), better-auth `session`, `agent_runs`, `goal_projections` (an
-upgraded root's; nothing writes it since ruling 503),
+upgraded root's; nothing writes it since ruling 273),
 `controller_conversations`, `controller_messages`, `staged_outcomes` (24 h TTL in code,
 rows kept), `scope_violations`, `model_availability`. `diagnostics` is rebuilt, not
 pruned.
@@ -679,18 +679,18 @@ pass, for tasks in their project's terminal stage, logging `reclaimed finished t
 workspaces` with count and MB. Removing a finished task's `workspace/` by hand is safe;
 removing one for a task in progress forces a re-clone and interrupts a running agent.
 Viberr removes a workspace, a checkout and anything else an agent writes as the person it
-belongs to (ruling 485), because a tool an agent ran can leave a directory only its uid can
+belongs to (ruling 140), because a tool an agent ran can leave a directory only its uid can
 enter (wrangler's 0700 `.wrangler/tmp/dev-*`), and the server's own `rm -rf` then deletes
 `.git` and stops half-way. By hand, do the same: find the owner with `docker compose exec
 -T app stat -c '%u' <dir>` and remove it as that uid, `docker compose exec -T -u
 <uid>:20000 app rm -rf <dir>`; anything left belongs to another uid, removed the same way.
 What is left as uid 1000 is the server's own (a run's skill plugin copied before ruling
-495, the `workspace/` root itself). Viberr opens that to the agents' group and never
-removes it with `rm` (ruling 495): do the same, `docker compose exec -T app chmod -R -P
+140, the `workspace/` root itself). Viberr opens that to the agents' group and never
+removes it with `rm` (ruling 140): do the same, `docker compose exec -T app chmod -R -P
 g+rwX <dir>`, then remove as the owner again, and take an emptied `workspace/` root with
 `docker compose exec -T app rmdir <dir>`. A finished task's reclaim does all of this
 itself, so a workspace logged as "could not reclaim a finished task's workspace" before
-ruling 495 goes at the next boot or maintenance pass.
+ruling 140 goes at the next boot or maintenance pass.
 A checkout left without `.git/HEAD` also heals by itself: the next run's checkout
 preparation removes it as its person and clones again. A run whose checkout could not be
 prepared says so as a workspace fault ("… could not be replaced: EACCES on <path>"), never
@@ -723,7 +723,7 @@ pins `hostname: viberr`). `VIBERR_FORCE_DATA_ROOT_LOCK=1` forces a takeover.
 | CLI | Lock | Where it runs on the Docker deployment |
 |---|---|---|
 | `npm run seed`, `seed:demo`, `rescan`, `restore` (whole root), `keys -- reseal` | **takes the writer lock**; against a running app prints `refused to run: it would be a SECOND writer on this data root` (to stderr, with the holder and, where there is one, the in-app alternative) and exits 1 | from the host, before the container starts or after `docker compose down`; the lock refuses anything else |
-| `npm run backup`, `keys -- status` | reader; no lock. A `state/writer.lock` of any age means they copy `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/` and open the copy, never the live file (ruling 158); only a root with no lock file at all is just files, which they open in place, read-only | either side of the container boundary, since neither opens a live database. The in-container form (`docker compose exec -T app …`) is the worked example for the backup, whose artefact must land outside `/data` and be copied out |
+| `npm run backup`, `keys -- status` | reader; no lock. A `state/writer.lock` of any age means they copy `projection.sqlite` and its `-wal` to `state/tmp/reader-<pid>/` and open the copy, never the live file (ruling 23); only a root with no lock file at all is just files, which they open in place, read-only | either side of the container boundary, since neither opens a live database. The in-container form (`docker compose exec -T app …`) is the worked example for the backup, whose artefact must land outside `/data` and be copied out |
 | `npm run store:check`, `restore --file` | no lock, no database | either side: they read and write the markdown tree only |
 
 So `docker compose exec app npm run seed` is refused. Seed before the container starts, or
@@ -735,7 +735,7 @@ The writer lock stops a second WRITER. Nothing stops a second READER, and a seco
 is the hazard: any process that opens `state/projection.sqlite` while the app holds it
 (`sqlite3`, a desktop SQLite browser, `node -e` with `readOnly: true`) maps the WAL index
 (`-shm`) the server has memory-mapped, and on the Docker deployment as it shipped until
-ruling 460 (`./docker-data`, a bind mount over VirtioFS) the open path's lock probe on
+ruling 38 (`./docker-data`, a bind mount over VirtioFS) the open path's lock probe on
 that file was unreliable, so a reader could truncate the index under the server; the store
 is now the named volume `viberr-data`, which the host cannot open at all, and the rule
 below stands regardless. A stale shared
@@ -743,7 +743,7 @@ mapping in the guest is what a SIGBUS looks like. `readOnly` is no protection an
 is being inside the container: pass 34 saw exit 135 one second after a host-side reader,
 pass 35 one second after an in-container `readOnly: true` reader (and boot recovery then
 interrupted 23 runs). The side of the boundary was never the point; the second mapping
-was. The rule (ruling 158), which `app/shared/docs/runbook-db-read.test.ts` holds this
+was. The rule (ruling 23), which `app/shared/docs/runbook-db-read.test.ts` holds this
 page, `deployment.md` and `scripts.md` to:
 
 - **No process but the server opens a live root's database. Copy first, never a second
@@ -792,7 +792,7 @@ page, `deployment.md` and `scripts.md` to:
   backup.
 - Low disk never refuses boot; it is logged, reported on health as `disk.status`, and
   triggers an extra maintenance pass. The status is the tighter of the data root and the
-  host disk under it (`disk.source`, ruling 603), and each transition's log line names
+  host disk under it (`disk.source`, ruling 40), and each transition's log line names
   which one; the first check after a boot only records its reading. `ENOSPC` on a canonical write becomes a named "No
   space left on the data root" error; `ESTALE`/`EIO` (a data-root mount gone stale under a
   running container) become a 503 naming the data root as unreachable.
@@ -820,15 +820,15 @@ docker compose cp app:/tmp/viberr-backups/. ./backups/    # now the artefact is 
 ```
 
 `runtimes/` is excluded unless you pass `--include-runtimes`, and that directory holds
-every person's live vendor sign-in (`runtimes/users/<userId>/…`, ruling 127), so an
+every person's live vendor sign-in (`runtimes/users/<userId>/…`, ruling 137), so an
 artefact taken with it is a secret. `npm run restore -- --from <artefact>` takes the
 lock, needs `--force` on an occupied root and moves displaced data to
 `<dataRoot>.replaced-<ts>/`; `--file <store path>` restores one canonical file without
 touching the database. A key the instance generated for itself travels in the artefact
-(`instance-secrets.json`, ruling 504), which makes the artefact a secret. Back up a
+(`instance-secrets.json`, ruling 38), which makes the artefact a secret. Back up a
 `VIBERR_SECRET_ENCRYPTION_KEY` set in the environment separately: without it every
 sealed PAT, MCP credential and **personal backend API key** (`user_backend_credentials`,
-ruling 127) in the artefact is unreadable, and restoring the database without the key
+ruling 137) in the artefact is unreadable, and restoring the database without the key
 leaves every person who pasted a key having to connect that backend again. Rotating is
 safe: `npm run keys -- reseal` covers that store like the others. A raw copy of the live
 `projection.sqlite` misses committed rows still in the WAL; use the CLI. Details and the

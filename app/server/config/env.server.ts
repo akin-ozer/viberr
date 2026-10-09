@@ -20,7 +20,7 @@ const MINUTE_S = 60;
 const HOUR_S = 60 * MINUTE_S;
 const MINUTE_MS = 60_000;
 
-/** Ruling 458(i): the longest period either maintenance timer may be set to —
+/** Ruling 39: the longest period either maintenance timer may be set to —
  *  a day. */
 const MAX_PERIOD_SECONDS = 24 * HOUR_S;
 /** Maintenance-pass cadence. Six hours: retention windows are 30-90 days, so a
@@ -55,7 +55,7 @@ const DEFAULT_TRANSCRIPT_RETENTION_DAYS = 30;
 const DEFAULT_SESSION_HOME_RETENTION_DAYS = 30;
 
 /**
- * Ruling 458(c): a knob that must be a positive number. `Number()` coercion,
+ * Ruling 39: a knob that must be a positive number. `Number()` coercion,
  * as the modules applied it, and a value that is not a finite number above zero
  * fails boot instead of quietly running the default.
  */
@@ -67,7 +67,7 @@ function positiveNumber(unit: string, fallback: number) {
     .default(fallback);
 }
 
-/** Ruling 458(j): a count of at least one, rounded down as its call site did
+/** Ruling 39: a count of at least one, rounded down as its call site did
  *  (`Math.floor`), so a fraction below one fails boot instead of meaning 0. */
 function wholeCount(unit: string, fallback: number) {
   const message = `must be a number of ${unit}, 1 or more`;
@@ -78,7 +78,7 @@ function wholeCount(unit: string, fallback: number) {
     .default(fallback);
 }
 
-/** Ruling 458(i): a timer period in seconds, above zero and at most a day. */
+/** Ruling 39: a timer period in seconds, above zero and at most a day. */
 function periodSeconds(fallback: number) {
   const message = `must be a number of seconds above 0 and at most ${MAX_PERIOD_SECONDS} (24 hours)`;
   return z.coerce
@@ -88,7 +88,7 @@ function periodSeconds(fallback: number) {
     .default(fallback);
 }
 
-/** Ruling 458(j): a retention window in days, where `0` is a real setting that
+/** Ruling 39: a retention window in days, where `0` is a real setting that
  *  keeps the files forever (not an absent one). */
 function retentionDays(fallback: number) {
   const message = "must be a number of days, 0 or more (0 keeps them forever)";
@@ -99,7 +99,7 @@ function retentionDays(fallback: number) {
 }
 
 /**
- * Ruling 458(i): variables the app no longer reads, each with the message that
+ * Ruling 39: variables the app no longer reads, each with the message that
  * names its replacement. A deployment that still sets one fails boot with the
  * rest of the invalid variables, instead of silently running the default.
  */
@@ -119,7 +119,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5173),
 
   /** Signs the session cookie. Random string, at least 32 characters.
-   *  `getEnv()` fills it from the data root when unset (ruling 504). */
+   *  `getEnv()` fills it from the data root when unset (ruling 38). */
   VIBERR_SESSION_SECRET: z
     .string({
       error:
@@ -141,7 +141,7 @@ const envSchema = z.object({
    * Absolute public origin of the app, e.g. https://viberr.example.com. Used
    * by better-auth to build OAuth callback + cookie URLs, and by
    * `assertTrustedOrigin` as the origin form posts are accepted from (ruling
-   * 687). Optional in dev (better-auth infers the origin from the request);
+   * 28). Optional in dev (better-auth infers the origin from the request);
    * REQUIRED behind a reverse proxy so redirects, cookies and form posts
    * resolve to the public host.
    */
@@ -150,7 +150,7 @@ const envSchema = z.object({
   /**
    * AES-256-GCM key for encrypting stored secrets (e.g. GitHub PATs).
    * Must be base64 that decodes to exactly 32 bytes. Parsed into a Buffer.
-   * `getEnv()` fills it from the data root when unset (ruling 504).
+   * `getEnv()` fills it from the data root when unset (ruling 38).
    */
   VIBERR_SECRET_ENCRYPTION_KEY: z
     .string({
@@ -187,7 +187,7 @@ const envSchema = z.object({
   // this machine can rule out.
   VIBERR_FORCE_DATA_ROOT_LOCK: z.string().optional(),
 
-  // Ruling 636: where each agent run's own temporary directory is made
+  // Ruling 141(c): where each agent run's own temporary directory is made
   // (`<root>/<runId>`, the run's TMPDIR), removed when the run settles. Unset,
   // it is `viberr-runs` under the server's temp directory: in the image the
   // container's /tmp, which goes with the container.
@@ -202,7 +202,7 @@ const envSchema = z.object({
   // at a local Chrome build.
   VIBERR_BROWSER_EXECUTABLE: z.string().min(1).optional(),
 
-  // Ruling 461: the port of the loopback MCP gateway (always bound to
+  // Ruling 191: the port of the loopback MCP gateway (always bound to
   // 127.0.0.1) that a run reaches a credentialed org MCP server through.
   // 0, the default, picks a free port at boot and reads it back; set it only
   // when something on the host needs the port fixed.
@@ -226,7 +226,7 @@ const envSchema = z.object({
     .min(8, "must be at least 8 characters")
     .optional(),
 
-  // Ruling 127: the deployment-wide agent-backend credentials are GONE
+  // Ruling 137: the deployment-wide agent-backend credentials are GONE
   // (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN, VIBERR_CLAUDE_USE_CLI_AUTH,
   // CLAUDE_CONFIG_DIR, CODEX_ACCESS_TOKEN, CODEX_API_KEY, OPENAI_API_KEY,
   // CODEX_HOME, VIBERR_CODEX_USE_CLI_AUTH). Every person connects Claude and
@@ -236,7 +236,7 @@ const envSchema = z.object({
   // instance-wide key would bill every run to whoever owns it, which is
   // exactly what the ruling forbids — so there is nothing to declare here.
 
-  // Optional runtime tuning knobs. Ruling 458(j): the schema parses them, as it
+  // Optional runtime tuning knobs. Ruling 39: the schema parses them, as it
   // does the C01-A6 knobs below, so each call site reads a typed value and a
   // value that does not parse fails boot, where the call sites' own coercion
   // used to run the default in silence:
@@ -266,7 +266,7 @@ const envSchema = z.object({
     DEFAULT_SESSION_HOME_RETENTION_DAYS,
   ),
   // C01-A6 (pass 32) declared the last raw `process.env` readers so the schema
-  // and `.env.example` stop denying they exist. Ruling 458(c): the schema also
+  // and `.env.example` stop denying they exist. Ruling 39: the schema also
   // parses the first five, and their modules read the typed value through
   // `getEnv()`. A value that does not parse fails boot like every other key,
   // where each module's own fallback used to run the default in silence:
@@ -274,13 +274,13 @@ const envSchema = z.object({
   //    (retention, transcript pruning; default 6 h).
   //  - VIBERR_DISK_CHECK_INTERVAL_SECONDS: period of the free-space check
   //    (default 5 minutes).
-  //    Ruling 458(i): both periods are in seconds, at most a day (a longer
+  //    Ruling 39: both periods are in seconds, at most a day (a longer
   //    period is refused, not stretched), and the `_MS` names they replace
   //    are refused at boot (`RETIRED_ENV`).
   //  - VIBERR_DISK_LOW_FREE_MB / VIBERR_DISK_CRITICAL_FREE_MB: the free-space
   //    thresholds behind health's `disk.status` (defaults 2048 / 512).
   //  - VIBERR_GITHUB_WRITE_PROBE: `1`/`true`/`yes` opts PAT validation into the
-  //    empty-payload write dry-run (ruling 18); `0`/`false`/`no`, or unset,
+  //    empty-payload write dry-run (ruling 220); `0`/`false`/`no`, or unset,
   //    leaves it off.
   //  - VIBERR_BUILD_VERSION / VIBERR_BUILD_SHA / VIBERR_BUILD_TIME: build
   //    identity baked into the image (build-info.server.ts); null when unset.
@@ -295,7 +295,7 @@ const envSchema = z.object({
     "MB",
     DEFAULT_DISK_CRITICAL_FREE_MB,
   ),
-  // Ruling 603: a directory on the host disk the data root's filesystem lives
+  // Ruling 40: a directory on the host disk the data root's filesystem lives
   // on, measured beside the data root (`measureDataRootSpace`). Compose sets
   // it to its read-only `/host-disk` mount, because Docker Desktop's volume
   // reports the VM disk image's virtual size, not the host's free space.
@@ -311,7 +311,7 @@ const envSchema = z.object({
   VIBERR_BUILD_VERSION: z.string().optional(),
   VIBERR_BUILD_SHA: z.string().optional(),
   VIBERR_BUILD_TIME: z.string().optional(),
-  // Ruling 108: the controller's configuration sections are LOCKED by default
+  // Ruling 270: the controller's configuration sections are LOCKED by default
   // — the Controller settings tab shows them read-only and `saveControllerConfig`
   // refuses a change, org admins included. A variable set to `enabled` unlocks
   // ONE section for in-app editing; `disabled` (or any other value, or unset)
@@ -397,7 +397,7 @@ function envSlot(): EnvSlot {
  * Parses process.env exactly once per process and caches the result.
  * Call at boot so a bad configuration fails fast with a clear message.
  * A secret the environment leaves unset comes from the data root, generated
- * there by the first process to get here (ruling 504).
+ * there by the first process to get here (ruling 38).
  */
 export function getEnv(): Env {
   const cache = envSlot();

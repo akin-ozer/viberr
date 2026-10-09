@@ -116,7 +116,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       filters: streamFilters,
     }),
     streamTotal: countActivityStream(db, params.slug, streamFilters),
-    // Ruling 681: a row that wrote a knowledge-base document links it for an
+    // Ruling 34: a row that wrote a knowledge-base document links it for an
     // org admin, who may open it in Instance settings. Nobody else is handed
     // the link, and no row carries the document's text.
     audit: listAuditLog(db, params.slug, {
@@ -158,5 +158,5 @@ export default function ActivityView({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.activity");

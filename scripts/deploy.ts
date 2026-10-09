@@ -1,12 +1,12 @@
 /**
- * Ruling 345 — build, deploy, and then READ BACK which build is serving.
+ * Ruling 41 — build, deploy, and then READ BACK which build is serving.
  *
  *   npm run deploy            — stamp from git, build, up, verify
  *   npm run deploy -- --no-up — stamp and build only
- *   --skip-disk-check         — build without measuring the host first (ruling 603)
+ *   --skip-disk-check         — build without measuring the host first (ruling 41)
  *
  * After the verify, it removes the older untagged builds of this project's app
- * and keeps the one it replaced, to roll back to (ruling 605).
+ * and keeps the one it replaced, to roll back to (ruling 41).
  *
  * `build-info.server.ts` has resolved build identity from env since gap 18, and
  * says plainly that env "is the only source a container can have" —
@@ -143,7 +143,7 @@ function dockerRootDir(): string | null {
   }
 }
 
-// Ruling 603: the build writes into Docker's disk, which on Docker Desktop is a
+// Ruling 41: the build writes into Docker's disk, which on Docker Desktop is a
 // sparse image file on this host. Measure the host before building.
 if (!process.argv.includes("--skip-disk-check")) {
   const disk = tightestHostDisk(
@@ -262,7 +262,7 @@ function supersededImages(): SupersededImage[] {
     .flatMap(([id, created]) => (id && created ? [{ id, created }] : []));
 }
 
-// Ruling 605: every build leaves the image it replaced untagged. Keep that one
+// Ruling 41: every build leaves the image it replaced untagged. Keep that one
 // to roll back to and remove the older ones; a removal that fails (an image a
 // container still uses) is left alone.
 const removable = supersededImagesToRemove(supersededImages());
@@ -271,7 +271,7 @@ if (removed.length > 0) {
   console.log(`removed ${removed.length} older build(s) of this app; kept the one this deploy replaced to roll back to.`);
 }
 
-// Ruling 628: BuildKit's cache grows with every build and nothing trimmed it.
+// Ruling 41: BuildKit's cache grows with every build and nothing trimmed it.
 // Keep the most recently used BUILD_CACHE_KEEP_BYTES, a whole build's layers,
 // so the next build stays incremental; Docker evicts the rest oldest first.
 const cacheTrim = dockerOut("builder", "prune", "-f", "--max-used-space", String(BUILD_CACHE_KEEP_BYTES));

@@ -24,7 +24,7 @@ against, run `npm run seed:demo` instead and sign in as `arda@viberr.dev` with t
 password.
 
 `.env.example` points `VIBERR_DATA_ROOT` at `./docker-data`, the dev server's store. The
-Docker setup uses the named volume `viberr-data` instead (ruling 460), so the dev server
+Docker setup uses the named volume `viberr-data` instead (ruling 38), so the dev server
 and the container never share a store. Only one process may hold a store: a second one,
 or a seed against a running app, is refused by the data-root writer lock.
 
@@ -42,11 +42,11 @@ or a seed against a running app, is refused by the data-root writer lock.
 ## Checks to run before you push
 
 ```sh
-npm run lint        # oxlint with the vendored anti-slop rules; must exit 0 (ruling 86)
+npm run lint        # oxlint with the vendored anti-slop rules; must exit 0 (ruling 7)
 npm run typecheck   # route typegen + tsc
 npm test            # vitest unit + integration suite
 npm run build       # production build
-node scripts/measure-routes.mjs --check   # bundle budgets, after the build (ruling 457)
+node scripts/measure-routes.mjs --check   # bundle budgets, after the build (ruling 11)
 npm run e2e         # Playwright vs the production Docker image (needs Docker)
 ```
 

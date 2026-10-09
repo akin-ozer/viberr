@@ -10,7 +10,7 @@ import App, { ErrorBoundary, Layout, type loader } from "./root";
 import type { ThemePreference } from "./server/theme/theme-cookie.server";
 
 /**
- * Ruling 459: after first paint `setDocumentTheme` is the ONE writer of
+ * Ruling 283: after first paint `setDocumentTheme` is the ONE writer of
  * <html data-theme> (docs/ui/surfaces.md "Theme"). Layout used to render the
  * attribute from live loader data, so React wrote the loader's raw preference
  * on every revalidation, past the one-clock fade: Dark -> System on a dark OS
@@ -190,7 +190,7 @@ async function serveAndHydrate(bootTheme: "dark" | "light"): Promise<HydrationRe
   return report;
 }
 
-describe("root Layout: setDocumentTheme is the one writer of data-theme (ruling 459)", () => {
+describe("root Layout: setDocumentTheme is the one writer of data-theme (ruling 283)", () => {
   const originalMatchMedia = window.matchMedia;
   beforeEach(() => {
     // ScrollRestoration scrolls on navigation; jsdom reports scrollTo as not

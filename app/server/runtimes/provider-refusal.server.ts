@@ -7,7 +7,7 @@ import { listRunLinesTail, profileRunsSince } from "./run-store.server";
  * How a run ENDED, as far as the question "was it the run's own work that
  * failed, or did the provider never serve it?" goes.
  *
- * Extracted from the run projection (ruling 416) so the review-round counter
+ * Extracted from the run projection (ruling 92) so the review-round counter
  * reads the SAME classification the run card prints, rather than a second
  * reading of the same lines that could drift from it.
  */
@@ -57,7 +57,7 @@ export interface RunEnd {
  * quota/rate-limit signatures), so the tag is trusted directly, and the prose
  * scan is the fallback for real backend errors that carry no tag.
  *
- * Ruling 130(a): the CLASSIFIED terminal line is consulted first, for every run
+ * Ruling 155(a): the CLASSIFIED terminal line is consulted first, for every run
  * kind; the raw scan stays as the fallback for lines written before the class
  * existed. And it is a real FALLBACK: as an `||` arm the prose scan also fired
  * for runs that WERE classified, as something else, so a hung or turn-capped
@@ -112,9 +112,9 @@ const NOT_FAILED: RunEnd = {
 /**
  * `classifyRunEnd` over the run's OWN newest lines, read only when it errored
  * (every field is empty otherwise). The one reading the run card and the
- * review-round counter share (ruling 416). The card used to classify the whole
+ * review-round counter share (ruling 92). The card used to classify the whole
  * console window the loader shipped, every earlier run of the agent included,
- * and that was one of the two reasons the window had to ship (ruling 457,
+ * and that was one of the two reasons the window had to ship (ruling 300,
  * TASK-1).
  */
 export function classifyRunEndOf(
@@ -131,10 +131,10 @@ export function classifyRunEndOf(
 }
 
 /**
- * Ruling 416 (F39-42): did the task's deliverer fight a ROUND of rework since
+ * Ruling 92 (F39-42): did the task's deliverer fight a ROUND of rework since
  * `since`?
  *
- * Ruling 242 (owner) counts a round by the deliverer having RUN since the
+ * Ruling 92 (owner) counts a round by the deliverer having RUN since the
  * reviewer's previous verdict, whatever the run's state, "because a rework
  * dispatched that crashed is still a round fought". A run the PROVIDER refused
  * fought nothing. Live on ax-clone AX-19 the rework was refused for quota three

@@ -10,14 +10,14 @@ const line = (display: LogLine | null, facts: EmittedLine["facts"] = {}): Emitte
 });
 
 /**
- * Ruling 348 (pass 38, F38-2). Live on the first controller turn of the pass:
+ * Ruling 166 (pass 38, F38-2). Live on the first controller turn of the pass:
  * `Working · mcp__viberr_controller__get_github_state · {…}` stood on the
  * strip for over two minutes after that call had answered, while the console
  * one panel down logged thinking lines. Measured over the last 40 controller
  * turns: 76 stretches longer than 20 s on 26 runs, 53 minutes of a finished
  * tool shown as the thing the run was doing.
  */
-describe("stepUpdateForLine (ruling 348)", () => {
+describe("stepUpdateForLine (ruling 166)", () => {
   it("names a tool the run invokes, with its input", () => {
     const update = stepUpdateForLine(
       line({ t: "02:10", ev: "tool", tag: "tool_use", name: "Bash", text: "npm test" }),
@@ -64,7 +64,7 @@ describe("stepUpdateForLine (ruling 348)", () => {
   });
 });
 
-describe("answeredStep (ruling 348)", () => {
+describe("answeredStep (ruling 166)", () => {
   it("leads with what the run is doing now and keeps the finished call for context", () => {
     expect(answeredStep("Bash · npm test")).toBe("composing · Bash · npm test answered");
   });

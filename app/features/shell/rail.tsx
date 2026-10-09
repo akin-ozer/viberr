@@ -5,7 +5,7 @@ import { boardHref, WORKSPACE_NAV, workspaceViewFromPathname } from "./nav";
 
 /**
  * Left workspace rail (shell spec §4.1). Live counts from the layout
- * loader: board = ALL tasks incl. Done (deliberate keep, ruling 16),
+ * loader: board = ALL tasks incl. Done (deliberate keep, ruling 295),
  * review = review-stage tasks, settings = open policy violations (only
  * rendered when > 0). Nav items are real links; an open task keeps the
  * Board item active (task view is "inside" Board).
@@ -58,7 +58,7 @@ export function Rail({
               (membersCount === 1 ? " member" : " members")
             }
           >
-            {/* Ruling 625: the repo clips; the count beside it never does. */}
+            {/* Ruling 280: the repo clips; the count beside it never does. */}
             {projectRepo && <span className="pj-repo">{projectRepo}</span>}
             <span>
               {(projectRepo ? "· " : "") +
@@ -72,7 +72,7 @@ export function Rail({
 
       {/* Design pass 2026-09-08: no "Workspace" eyebrow — it labelled the only
           group in the rail; space under the switcher does the separating. */}
-      {/* Ruling 667: a project with no repository has no GitHub page to
+      {/* Ruling 224: a project with no repository has no GitHub page to
           visit; attaching one is in Settings. */}
       {WORKSPACE_NAV.filter((n) => n.id !== "github" || projectRepo).map((n) => (
         <Link

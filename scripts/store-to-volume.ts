@@ -1,5 +1,5 @@
 /**
- * Ruling 460: move the store from the `./docker-data` bind mount into the named
+ * Ruling 38: move the store from the `./docker-data` bind mount into the named
  * volume `viberr-data` that compose.yml now mounts at /data — once.
  *
  *   docker compose stop app

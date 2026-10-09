@@ -1,8 +1,8 @@
 import type { DependencyRender, DependencyState } from "~/shared/dependencies";
 import { Icon, type IconName } from "~/ui/icon";
 
-/** An entry's state as a status ring, the family ruling 499's to-do steps
- *  draw: waiting, done, or a wait that can never complete (ruling 355). */
+/** An entry's state as a status ring, the family ruling 168's to-do steps
+ *  draw: waiting, done, or a wait that can never complete (ruling 58). */
 const WAIT_GLYPH = {
   open: "todo",
   done: "checkcircle",
@@ -11,9 +11,9 @@ const WAIT_GLYPH = {
 } satisfies Record<DependencyState, IconName>;
 
 /** One entry of the wait: its status ring, its label and, once it is not
- *  simply open, the word for where it stands. Ruling 548: `onRemove` adds the
+ *  simply open, the word for where it stands. Ruling 309: `onRemove` adds the
  *  Owner row's release cross; `removing` says the save it started is in
- *  flight (ruling 368), the cross spinning and still focusable. */
+ *  flight (ruling 286), the cross spinning and still focusable. */
 export function WaitChip({
   entry,
   onRemove,

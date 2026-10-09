@@ -24,7 +24,7 @@ import {
  *
  *   1. the docs that call themselves the source of the matrix
  *      (`docs/domain/auth-and-rbac.md` §3, `docs/domain/task-lifecycle.md` §2)
- *      are checked against `ACTION_ROLES` MECHANICALLY, the way ruling 27's PRD
+ *      are checked against `ACTION_ROLES` MECHANICALLY, the way ruling 4's PRD
  *      mirror and N19-3's file-formats mirror are (see
  *      `app/shared/docs/file-formats-sync.test.ts`). A hand-corrected doc with
  *      no gate is a fix with a half-life; a role tier that moved in the table
@@ -33,7 +33,7 @@ import {
  *   2. `rolesForAction`'s REFUSAL path — the throw on an action id the table
  *      does not know.
  *
- * Ruling 65 states the standard this file is built to: "an owner ruling whose
+ * Ruling 27 states the standard this file is built to: "an owner ruling whose
  * guard cannot go red is a ruling that gets reverted in silence." Every role
  * tier here IS an owner ruling.
  */
@@ -223,7 +223,7 @@ describe("the matrix is a policy decision, pinned by hand", () => {
     "create-task": "contributor",
     "own-task": "contributor",
     "edit-task-meta": "contributor",
-    // Ruling 503: an epic is planning, like a task's own metadata.
+    // Ruling 26: an epic is planning, like a task's own metadata.
     "manage-epics": "contributor",
     "attach-file": "contributor",
     // Governance of a task's movement, its acceptance contract, its agents and
@@ -242,10 +242,10 @@ describe("the matrix is a policy decision, pinned by hand", () => {
     "release-any-ownership": "admin",
     "manage-members": "admin",
     "manage-agents": "admin",
-    // Ruling 525: somebody else's controller conversation about the project.
+    // Ruling 26: somebody else's controller conversation about the project.
     "delete-controller-conversations": "admin",
     "edit-policy": "admin",
-    // Ruling 582: a file off a task's record.
+    // Ruling 80: a file off a task's record.
     "remove-from-record": "admin",
     "force-accept-completion": "admin",
   } satisfies Record<RbacAction, ProjectRole>;
@@ -279,7 +279,7 @@ describe("the matrix is a policy decision, pinned by hand", () => {
  * file-formats.md went stale (N19-3). Edit `RBAC_DEFINITIONS`; this makes the
  * doc a mechanical follow-up rather than a thing to remember.
  */
-describe("the domain docs render the SAME matrix (ruling 65: the guard must be able to go red)", () => {
+describe("the domain docs render the SAME matrix (ruling 27: the guard must be able to go red)", () => {
   it("docs/domain/auth-and-rbac.md §3 matches ACTION_ROLES exactly", () => {
     expect(docMatrix("docs/domain/auth-and-rbac.md")).toEqual(codeMatrix());
   });

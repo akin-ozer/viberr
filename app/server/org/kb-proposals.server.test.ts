@@ -25,10 +25,10 @@ import {
 } from "./kb-proposals.server";
 
 /**
- * Rulings 378 and 483: a proposed knowledge-base correction lives in the
+ * Rulings 210 and 267: a proposed knowledge-base correction lives in the
  * document it corrects, and the document is the record: open while the entry
  * stands under the heading, closed when a person (or the controller for them)
- * promotes or dismisses it. Ruling 498 ended the filing, so these documents are
+ * promotes or dismisses it. Ruling 210 ended the filing, so these documents are
  * built as the filing left them (`test-support/kb-legacy-proposals.ts`).
  */
 
@@ -108,11 +108,11 @@ describe("the proposals section of a document", () => {
     });
     expect(parsed[0]!.id).toMatch(/^kp-[0-9a-f]{10}$/);
     expect(parsed[0]!.id).not.toBe(parsed[1]!.id);
-    // Ruling 498 corrects around the section: it starts at its heading.
+    // Ruling 210 corrects around the section: it starts at its heading.
     expect(doc.slice(legacyProposalsSpan(doc)!.start)).toMatch(/^## Proposed corrections \(not binding\)\n/);
   });
 
-  it("reads ruling 378's section and entries", () => {
+  it("reads ruling 210's section and entries", () => {
     const legacy =
       "# Gates\n\n- Run every gate.\n\n## Proposed (not binding)\n\n" +
       "- **[AX-3, 2026-09-22]** Strike -race.\n  Evidence: exit 127\n\n" +

@@ -4,7 +4,7 @@ import { spawnClaudeCli, type ClaudeCli } from "./claude-spawn.server";
 import { gone } from "../../../test-support/process-liveness";
 
 /**
- * Ruling 174: Viberr spawns the Claude CLI itself, detached, through the SDK's
+ * Ruling 142: Viberr spawns the Claude CLI itself, detached, through the SDK's
  * `spawnClaudeCodeProcess`. A real `node` stands in for the CLI — the claims
  * are about the process tree and the pipes, which only the kernel can answer.
  */

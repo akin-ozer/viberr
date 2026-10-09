@@ -10,7 +10,7 @@ import { callToolText } from "../../../test-support/mcp-tool-meta";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
- * Ruling 99/100 — the controller's THREE access chokepoints, driven directly.
+ * Ruling 249/27 — the controller's THREE access chokepoints, driven directly.
  *
  * `canAccessConversation` and `canReadControllerRunLog` are the two predicates
  * every controller read funnels through (the dock loader, the controller
@@ -18,7 +18,7 @@ import type { JsonValue } from "~/features/runtime/runtime-types";
  * `viberr_ops.read_run_log` diagnostic), and `get_github_state` was the one
  * tool of the 38 in `viberr_controller` with no test anywhere. Nothing in the
  * suite called the two predicates by name, so their guards could be deleted
- * and every gate would stay green — ruling 65: "an owner ruling whose guard
+ * and every gate would stay green — ruling 27: "an owner ruling whose guard
  * cannot go red is a ruling that gets reverted in silence."
  *
  * What they guarantee:
@@ -117,7 +117,7 @@ beforeAll(async () => {
   );
   upsertRun(app.db, {
     id: CONTROLLER_RUN,
-    // Ruling 99's controller scope: no project, `task_key` = conversation id.
+    // Ruling 247's controller scope: no project, `task_key` = conversation id.
     projectSlug: "",
     taskKey: conversationId,
     threadId: "thread_acc_controller",
@@ -217,7 +217,7 @@ describe("canAccessConversation: a transcript belongs to ONE person", () => {
   });
 
   /**
-   * THE ruling-99 line, and the one most likely to be "fixed" by someone who
+   * THE ruling-249 line, and the one most likely to be "fixed" by someone who
    * assumes a board-bound conversation is board-readable: elif is the PROJECT
    * ADMIN of viberr-core, the very project this conversation is bound to, and
    * she reads nothing. Project authority buys no transcript access; a
@@ -412,7 +412,7 @@ describe("canInterruptControllerRun: stopping a turn follows the conversation to
 
 describe("controllerRunRoute: where a controller run's live frames go", () => {
   /**
-   * Ruling 99: the frames of a controller turn route to its conversation
+   * Ruling 249: the frames of a controller turn route to its conversation
    * OWNER's user stream (there is no task scope to route on). The resolver is
    * asked once per run by the sink and by the engine's no-handle interrupt.
    */
@@ -451,7 +451,7 @@ async function fetchRunLog(
 describe("GET /resources/run-log applies the same gate on the wire", () => {
   /**
    * The predicate is only worth anything if the route actually consults it, so
-   * this drives the real loader end to end with a signed session. Ruling 99:
+   * this drives the real loader end to end with a signed session. Ruling 249:
    * the controller branch is chosen by `run.kind` BEFORE the membership gate,
    * because a controller run has no project to be a member of.
    */
@@ -560,7 +560,7 @@ describe("viberr_controller.get_github_state", () => {
     for (const pr of state.prs) {
       expect(pr.task).toMatch(/^VIB-\d+$/);
       expect(Number.isInteger(pr.number)).toBe(true);
-      // Ruling 360: the THIRD kind of null `checks` — a read GitHub refused —
+      // Ruling 237: the THIRD kind of null `checks` — a read GitHub refused —
       // rides on every row (null here: nothing was refused in the seed), so
       // the controller never again takes a refusal for "nobody has looked".
       // CANARY: drop `checksUnread` from the reply.
@@ -573,17 +573,17 @@ describe("viberr_controller.get_github_state", () => {
   });
 
   /**
-   * Ruling 468 (F40-12): the model reads an empty repository as a fact
+   * Ruling 227 (F40-12): the model reads an empty repository as a fact
    * Viberr acts on. Live, `get_github_state` read "no branches" and the
    * operator asked the owner to push a README.
    */
-  it("ruling 468: an empty repository says the first commit is Viberr's; one with commits says nothing", async () => {
+  it("ruling 227: an empty repository says the first commit is Viberr's; one with commits says nothing", async () => {
     const { invalidateRepoAccess } = await import("~/features/github/github-query.server");
     const { createPat, deletePat, setProjectCredential } = await import(
       "~/server/secrets/pat-store.server"
     );
     const actor = { userId: ids.orgAdmin, label: "arda@viberr.dev" };
-    const pat = createPat(app.db, { userId: ids.orgAdmin, label: "ruling 468", token: "ghp_ruling468probe0000" }, actor);
+    const pat = createPat(app.db, { userId: ids.orgAdmin, label: "ruling 227", token: "ghp_ruling468probe0000" }, actor);
     setProjectCredential(app.db, { projectSlug: SLUG, patId: pat.id }, actor);
     // GitHub as the probe reads it: `size: 0` is only the cue, the commits
     // read's 409 is the proof, and `permissions` says whether the token could
@@ -617,7 +617,7 @@ describe("viberr_controller.get_github_state", () => {
       );
       commits = { body: [{ sha: "a".repeat(40) }] };
       expect((await read()).contents).toBeNull();
-      // R-repo-2 (ruling 468's dated note): a token that can only read gets
+      // R-repo-2 (ruling 227's dated note): a token that can only read gets
       // the first commit refused, so the model is told the token is the fix.
       commits = empty;
       push = false;
@@ -635,11 +635,11 @@ describe("viberr_controller.get_github_state", () => {
   });
 
   /**
-   * Ruling 496 (F40-72): `checksUnread.at` is when GitHub first refused the
+   * Ruling 236 (F40-72): `checksUnread.at` is when GitHub first refused the
    * read, not the last pass that met it, and this tool is the one reader that
-   * sees it (no pill prints it, ruling 491), so its description says which.
+   * sees it (no pill prints it, ruling 237), so its description says which.
    */
-  it("ruling 496: the description says `checksUnread.at` is when the refusal was first seen", async () => {
+  it("ruling 236: the description says `checksUnread.at` is when the refusal was first seen", async () => {
     // CANARY: drop the clause from the description.
     const { buildControllerToolkit } = await import("./controller-toolkit.server");
     const { findUserById } = await import("~/server/auth/user-store.server");

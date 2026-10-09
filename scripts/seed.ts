@@ -48,7 +48,7 @@ await runWithDataRootWriterLock(
     });
 
     // Org resources: KBs with real files and skills. No MCP servers, no GitHub
-    // connection and no Google allowlist domain (ruling 688) are fabricated.
+    // connection and no Google allowlist domain (ruling 28(c)) are fabricated.
     const org = seedOrgResources(getDb(), {
       dataRoot: env.VIBERR_DATA_ROOT,
       reset,

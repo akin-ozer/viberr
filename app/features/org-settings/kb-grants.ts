@@ -7,7 +7,7 @@
  * time. Rewrite what we can recognize, so opening and saving a profile repairs
  * it instead of preserving an unresolvable string forever. Exported for the
  * controller settings panel, whose KB grants follow the same dir/name split
- * (ruling 106) — the param is the structural pick both callers have.
+ * (ruling 270) — the param is the structural pick both callers have.
  */
 export const kbDirsOf = (
   list: string[],

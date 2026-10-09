@@ -63,10 +63,10 @@ function renderUsers({
   return render(<Stub initialEntries={[url]} />);
 }
 
-// Ruling 532: Home's setup checklist sends the default admin here to make an
+// Ruling 322: Home's setup checklist sends the default admin here to make an
 // account of their own, which an instance needs as an admin. Canary: open the
 // dialog with Member chosen, or not at all.
-it("ruling 532: ?add=admin opens Allow access with Admin chosen", async () => {
+it("ruling 322: ?add=admin opens Allow access with Admin chosen", async () => {
   const { findByRole } = renderUsers({ url: "/org/settings?tab=users&add=admin" });
   const dialog = within(await findByRole("dialog", { name: "Allow access" }));
   const role = within(dialog.getByRole("group", { name: "Instance role" }));
@@ -154,11 +154,11 @@ describe("LV-F1: a pending reset never hides the re-issue action", () => {
 });
 
 /**
- * Ruling 154 (pass 35, G35-3): the Edit-user modal is the org admin's door to
+ * Ruling 29 (pass 35, G35-3): the Edit-user modal is the org admin's door to
  * `users.github_handle` for a local or Google account. A GitHub account's
  * handle syncs from the provider, so that modal carries no field.
  */
-describe("ruling 154: the Edit-user modal links a GitHub handle", () => {
+describe("ruling 29: the Edit-user modal links a GitHub handle", () => {
   const OTHER = (over: Partial<OrgUserView> = {}): OrgUserView => ({
     ...ME,
     id: "u_maya",
@@ -288,7 +288,7 @@ describe("#20: a server refusal inside these modals is announced", () => {
 });
 
 /**
- * Interface review 2026-09-06 (ruling 148): the temp-password notice's dismiss
+ * Interface review 2026-09-06 (ruling 287): the temp-password notice's dismiss
  * was the app's only `.stg-x` that closed something rather than acting on a
  * list row — a 24px square with a different hover from every other ✕ the user
  * meets. It takes the shared close control now, at notice scale.
@@ -333,7 +333,7 @@ describe("the temp-password notice dismisses on the shared close control", () =>
 });
 
 /**
- * Ruling 149 (2026-09-06): the destructive row treatment is opt-in by NAME
+ * Ruling 278 (2026-09-06): the destructive row treatment is opt-in by NAME
  * where position cannot identify it.
  *
  * `.stg-x`'s destructive hover is positional for this list
@@ -343,7 +343,7 @@ describe("the temp-password notice dismisses on the shared close control", () =>
  * like Edit. It carries `.destructive` now; the self-guarded copy keeps `.off`
  * so it reads as unavailable rather than as a threat.
  */
-describe("ruling 149: Disable takes the destructive row treatment", () => {
+describe("ruling 278: Disable takes the destructive row treatment", () => {
   const OTHER: OrgUserView = {
     ...ME,
     id: "u_deniz",
@@ -371,13 +371,13 @@ describe("ruling 149: Disable takes the destructive row treatment", () => {
 });
 
 /**
- * Ruling 459 (better-ui icons): the Google mark was a typed ExtraBold "G" in
+ * Ruling 282 (better-ui icons): the Google mark was a typed ExtraBold "G" in
  * the identity chip, the Allow-access tile and the domain row, beside the
  * set's outline GitHub and lock glyphs. It is the set's `google` glyph now,
  * hidden from assistive tech like every Icon, so the names read "Google",
  * not "GGoogle".
  */
-describe("ruling 459: the Google mark is the icon set's glyph", () => {
+describe("ruling 282: the Google mark is the icon set's glyph", () => {
   it("draws it in the chip, the Allow-access tile and the domain row, and no letter stands in", () => {
     // Canary: put the typed "G" span back in the identity chip.
     const googleUser: OrgUserView = {
@@ -421,12 +421,12 @@ describe("ruling 459: the Google mark is the icon set's glyph", () => {
 });
 
 /**
- * Ruling 368: the password reset in flight shows itself on its button — busy,
+ * Ruling 286: the password reset in flight shows itself on its button — busy,
  * the loader spinning where the lock was, and a label naming the work — rather
  * than dimming to the .45 refused step with its resting label.
  * Canary: drop `aria-busy` from the reset button in `users-panel.tsx`.
  */
-describe("ruling 368: the reset in flight", () => {
+describe("ruling 286: the reset in flight", () => {
   it("Reset password reads Resetting… and is busy until the server answers", async () => {
     const user: OrgUserView = {
       ...ME,

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 const COPIED_MS = 1400;
 
 /**
- * A copy control's confirmation (ruling 451(c)): state that starts at `rest`
+ * A copy control's confirmation (ruling 284): state that starts at `rest`
  * and, once set to anything else, returns to `rest` 1.4 s later. `rest` is
  * compared by identity, so it is a primitive (`false`, `null`).
  *

@@ -102,7 +102,7 @@ import { normalizeRepoInput } from "~/shared/repo-ref";
  * The `GET /repos/{owner}/{repo}` fields the change reads, decoded by the
  * probe's `request`. Tolerant at every level: unreadable `permissions` or
  * `private` read as "unknown" and pass, and an unreadable `default_branch`
- * reads as none, which the probe refuses (ruling 669). The object-level catch
+ * reads as none, which the probe refuses (ruling 226). The object-level catch
  * means a 2xx never comes back as a `decode` failure, so a reachable repo
  * always reaches those checks.
  * The `permissions` block (F20-15, the read-only proof of write access) is
@@ -113,7 +113,7 @@ const repoProbeSchema = z
   .object({
     default_branch: z.string().min(1).nullable().catch(null),
     permissions: repoPermissionsSchema.nullable().catch(null),
-    // Ruling 517: the change records what it read, as the other probes do.
+    // Ruling 223: the change records what it read, as the other probes do.
     private: z.boolean().nullable().catch(null),
   })
   .catch({ default_branch: null, permissions: null, private: null });
@@ -169,7 +169,7 @@ export interface SettingsMutationContext {
   dataRoot?: string;
 }
 
-// Ruling 364: a new stage takes the first preset NAME no sibling wears
+// Ruling 279: a new stage takes the first preset NAME no sibling wears
 // (shared/workflow/stage-colors.ts). N20-10's hex palette went with the hex
 // contract — the name is what project.md holds and what an agent reads.
 
@@ -314,7 +314,7 @@ export async function setBranchCleanup(
 
 // ------------------------------------------------------- required reviewers
 
-/** Ruling 178: the audit action ONE writer records; the activity feed's
+/** Ruling 89: the audit action ONE writer records; the activity feed's
  *  catalog and the Policy page's last-change chip both name it. */
 const REQUIRED_REVIEWERS_AUDIT_ACTION = "project.required_reviewers.updated";
 
@@ -345,7 +345,7 @@ export function parseRequiredReviewerRulesField(raw: string): RequiredReviewerRu
 }
 
 /**
- * Ruling 396: the lease table, posted whole as one JSON field.
+ * Ruling 61: the lease table, posted whole as one JSON field.
  *
  * The shape only — every fact about the board (the holder exists, no two
  * leases cover one glob, a lease has at least one path) is checked by
@@ -377,10 +377,10 @@ export function parseFileLeasesField(
 }
 
 /**
- * Ruling 178 (pass 36, G36-3): check a submitted rule list against the
+ * Ruling 17 (pass 36, G36-3): check a submitted rule list against the
  * project — every stage id must be a non-terminal stage, every profile id a
  * deployed specialist that can report a validation verdict — and refuse by
- * name with nothing written otherwise (ruling 139's shape). Returns the list
+ * name with nothing written otherwise (ruling 261's shape). Returns the list
  * de-duplicated, in submitted order. Shared by the Settings form and the
  * controller's `set_required_reviewers`, so the two cannot drift.
  */
@@ -437,7 +437,7 @@ function validateRequiredReviewerRules(
 }
 
 /**
- * Ruling 178: replace the project's required-reviewer list — the WHOLE list,
+ * Ruling 89: replace the project's required-reviewer list — the WHOLE list,
  * `[]` clearing it — through the project writer, reproject (the project
  * cascade refreshes every task's projected acceptance block, so the review
  * queue follows at once) and audit with the resolved names. `edit-policy`
@@ -497,7 +497,7 @@ export async function setRequiredReviewers(
 const RULINGS_KB_AUDIT_ACTION = "project.rulings_kb.updated";
 
 /**
- * Ruling 239 (pass 37): name the project's RULINGS knowledge base, or clear it
+ * Ruling 208(a) (pass 37): name the project's RULINGS knowledge base, or clear it
  * with `dir: null`.
  *
  * Same authority as every other project policy (`edit-policy`), and validated
@@ -546,7 +546,7 @@ export async function setProjectRulingsKb(
       changed: false,
     };
   }
-  // Ruling 672: a decision that the board connects no repository lives in the
+  // Ruling 199: a decision that the board connects no repository lives in the
   // rulings knowledge base, so it moves with the project to the new one.
   moveNoRepositoryRuling(
     db,
@@ -575,7 +575,7 @@ export async function setProjectRulingsKb(
 const FILE_LEASES_AUDIT_ACTION = "project.file_leases.updated";
 
 /**
- * Ruling 245 (pass 37, F37-74): set the project's per-file LEASES, or clear
+ * Ruling 60 (pass 37, F37-74): set the project's per-file LEASES, or clear
  * them with an empty list.
  *
  * Same authority as every other project policy (`edit-policy`), and validated
@@ -615,7 +615,7 @@ export async function setProjectFileLeases(
     }
     cleaned.push({ paths, taskKey, reason: raw.reason.trim() });
   }
-  // Ruling 417: two ACTIVE holders may not lease globs that can match one
+  // Ruling 61: two ACTIVE holders may not lease globs that can match one
   // file, identical or not. Each would refuse the other's delivery, and the
   // exact-match check this replaces let `internal/**` stand beside
   // `internal/sandbox/local.go`.
@@ -672,7 +672,7 @@ export interface ProjectGateInput {
 }
 
 /**
- * Ruling 482: the gate table, posted whole as one JSON field. The shape only;
+ * Ruling 17: the gate table, posted whole as one JSON field. The shape only;
  * `setProjectGates` checks every fact, so the form and the controller's
  * `set_project_gates` are refused for the same reasons in the same words.
  */
@@ -699,7 +699,7 @@ export function parseProjectGatesField(raw: string): ProjectGateInput[] {
 }
 
 /** Check a submitted gate list and return it cleaned, or refuse by name with
- *  nothing written. A board import (ruling 653) holds a board file's gates to
+ *  nothing written. A board import (ruling 32) holds a board file's gates to
  *  the same rules. */
 export function validateProjectGates(gates: readonly ProjectGateInput[]): ProjectGate[] {
   if (gates.length > PROJECT_GATES_MAX) {
@@ -745,7 +745,7 @@ export function validateProjectGates(gates: readonly ProjectGateInput[]): Projec
 }
 
 /**
- * Ruling 482 (pass 40, F40-52): replace the project's GATES — the commands
+ * Ruling 17 (pass 40, F40-52): replace the project's GATES — the commands
  * Viberr itself runs in a checkout of every delivered revision — with the
  * whole list, `[]` clearing it. `edit-policy`, like every other rule about
  * what acceptance waits on. A changed list re-projects every task (their
@@ -836,9 +836,9 @@ export function boardWritesRepo(projectSlug: string, ctx: SettingsMutationContex
  * first delivery, so a PROVEN read-only target is refused where the board
  * pushes (`needsPush`); an unknown or absent permissions block still passes.
  *
- * Ruling 669: the answer has to name the repository's default branch. The
+ * Ruling 226: the answer has to name the repository's default branch. The
  * project takes it from here and from nowhere else, and one it kept from
- * another repository is a branch ruling 128's bootstrap would create on this
+ * another repository is a branch ruling 227's bootstrap would create on this
  * one.
  */
 async function probeRepoTarget(
@@ -890,7 +890,7 @@ async function probeRepoTarget(
 }
 
 /**
- * Rulings 667 and 669: the change of a project that has no credential to ask
+ * Ruling 226: the change of a project that has no credential to ask
  * GitHub with.
  *
  * That is a project with no repository (creation bound none, and removing a
@@ -899,7 +899,7 @@ async function probeRepoTarget(
  * skipped it kept the `defaultBranch` on file: the placeholder `main`, or the
  * default of the repository the project left. On a repository whose default
  * is another branch the next branch preparation would find no such ref, and
- * ruling 128's bootstrap would create it from the root commit and make it the
+ * ruling 227's bootstrap would create it from the root commit and make it the
  * repository's default branch.
  *
  * So the change is checked with the connection the project is about to be
@@ -979,7 +979,7 @@ async function changeRepoByConnection(
 }
 
 /**
- * Ruling 672: the change was checked against the repository the project had
+ * Ruling 224: the change was checked against the repository the project had
  * when it started, and GitHub was asked in between. Two people answering the
  * operator's repository question on two tasks at once would both attach, the
  * second over the first. Checked inside the project file's own lock, so the
@@ -999,13 +999,13 @@ export interface ChangedRepository {
   toast: string;
   changed: boolean;
   repo: string;
-  /** Ruling 672: what attaching it settled on a board that had none; absent
+  /** Ruling 224: what attaching it settled on a board that had none; absent
    *  on every other change. */
   settled?: RepositoryConnectedOutcome;
 }
 
 /**
- * Ruling 672: what attaching a repository settles on a board that had none,
+ * Ruling 224: what attaching a repository settles on a board that had none,
  * as the words its toast adds. The ruling that the board connects no
  * repository is removed, and every task still asking whether to connect one
  * is answered (`afterRepositoryConnected`).
@@ -1028,7 +1028,7 @@ function settledSentences(settled: RepositoryConnectedOutcome): string {
 
 /**
  * A project has ONE repository (owner ruling 2026-07-26), and this is the one
- * door that changes which. Ruling 539 renamed it: the owner pointed a new
+ * door that changes which. Ruling 226 renamed it: the owner pointed a new
  * project at the repository it should have had and called "repair" the wrong
  * word for that, so every surface says Change.
  *
@@ -1038,13 +1038,13 @@ function settledSentences(settled: RepositoryConnectedOutcome): string {
  *  - the new repo is probed live and a miss REFUSES the change (a change
  *    must not install the next misconfiguration); a hit also takes
  *    `defaultBranch` from GitHub. The bound credential asks; with none bound
- *    a connection does, and is bound (rulings 667 and 669). Nothing is
+ *    a connection does, and is bound (ruling 226). Nothing is
  *    written unchecked;
  *  - a project whose tasks already carry PRs or pushed commits demands
  *    `confirmFootprint` — those records keep pointing at the old repo;
  *  - `edit-policy` tier (admin), audited from → to;
  *  - the probe is recorded as the new repository's reading, and a reading of
- *    any other repository reads as none (ruling 517), so no surface goes on
+ *    any other repository reads as none (ruling 223), so no surface goes on
  *    describing the repository the project left.
  */
 export async function changeProjectRepo(
@@ -1053,7 +1053,7 @@ export async function changeProjectRepo(
     projectSlug: string;
     repo: string;
     confirmFootprint?: boolean;
-    /** Ruling 672: the repository is connected for the board to deliver
+    /** Ruling 224: the repository is connected for the board to deliver
      *  through, so its token has to be able to push, whoever on the board
      *  writes it today. Set by the operator's repository question and by the
      *  controller; the settings dialog asks what the roster asks. */
@@ -1063,10 +1063,10 @@ export async function changeProjectRepo(
   ctx: SettingsMutationContext = {},
   options: {
     fetchImpl?: typeof fetch;
-    /** Ruling 672: false when the caller settles the board's open repository
+    /** Ruling 224: false when the caller settles the board's open repository
      *  questions itself (the packet answer that made this change). */
     settle?: boolean;
-    /** Ruling 672: the controller makes the change, in a turn that goes on
+    /** Ruling 259: the controller makes the change, in a turn that goes on
      *  to switch the board. */
     byController?: boolean;
   } = {},
@@ -1105,7 +1105,7 @@ export async function changeProjectRepo(
     );
   }
   // Verify the target before anything is written, with the BOUND credential.
-  // Rulings 667 and 669: a project with nothing of its own to ask with (no
+  // Ruling 226: a project with nothing of its own to ask with (no
   // repository, or a credential cleared since) is checked with a connection.
   const ghOptions: GithubContextOptions = {};
   if (options.fetchImpl) ghOptions.fetchImpl = options.fetchImpl;
@@ -1173,7 +1173,7 @@ export async function changeProjectRepo(
   reprojectProject(db, ctx, input.projectSlug);
   // The 30 s memoized repo-access probe still describes the OLD repo.
   invalidateRepoAccess(db, input.projectSlug);
-  // Ruling 517: and so does the reading the board's banner and Home's pill
+  // Ruling 223: and so does the reading the board's banner and Home's pill
   // show. The probe above is a reading of the new one.
   recordRepoAccess(db, input.projectSlug, reading);
   const details: AuditDetails = { from, to: repo, probed: true, defaultBranch };
@@ -1198,7 +1198,7 @@ export async function changeProjectRepo(
 const unfinishedRepoWorkRow = z.object({ task_key: z.string() });
 
 /**
- * Ruling 667: the door that takes a project's repository away.
+ * Ruling 226: the door that takes a project's repository away.
  *
  * A board whose agents hand back the files they save on each task needs no
  * repository, and until this door a project could change its repository and
@@ -1331,7 +1331,7 @@ export async function renameStage(
 }
 
 /**
- * Ruling 364: recolour a stage to one of the twenty presets. The name is the
+ * Ruling 279: recolour a stage to one of the twenty presets. The name is the
  * whole value — the file stores it, every surface paints from it — so the
  * door checks the name and nothing else.
  */
@@ -1665,7 +1665,7 @@ export interface InviteMemberResult {
  * Users & access → Reset password and `statusOf` marks it setup-pending. The
  * temp password itself is generated but not surfaced on the members card (that
  * lives in Users & access, where the credential is handed over out-of-band — no
- * mailer, ruling 13); it is returned for a caller that wants to surface it.
+ * mailer, ruling 30); it is returned for a caller that wants to surface it.
  */
 export async function inviteMember(
   db: DatabaseSync,
@@ -1729,7 +1729,7 @@ export async function inviteMember(
     projectSlug: input.projectSlug,
     details: { email, role },
   });
-  // N20-6: no mailer exists (ruling 13) — do NOT claim an invite was sent. Name
+  // N20-6: no mailer exists (ruling 30) — do NOT claim an invite was sent. Name
   // what actually happened, and for a freshly minted account point at where the
   // sign-in credential is completed.
   const toast = tempPassword
@@ -1785,7 +1785,7 @@ export async function removeMember(
       // removal, Policy pointed back to Members to do it). A deleted or disabled
       // account is never the last live admin, so a ghost admin is always
       // removable; a real last live admin is still protected, by the predicate
-      // `setMemberRole`'s demotion guard reads too (ruling 705).
+      // `setMemberRole`'s demotion guard reads too (ruling 26).
       if (isLastLiveAdmin(db, parsed.frontmatter.members, input.targetUserId)) {
         throw AppError.conflict(
           `${displayName} is the only admin. Assign another admin in Policy first`,
@@ -1974,14 +1974,14 @@ export async function deleteProject(
     label: actor.label,
   });
   deleteRepoHealth(db, input.projectSlug);
-  // Ruling 274 (F37-107): the fourth app-owned table, and the one whose orphan
+  // Ruling 249 (F37-107): the fourth app-owned table, and the one whose orphan
   // is not merely stale. A conversation's `project_slug` is what `slugOf()`
   // defaults to, so a conversation left bound to a deleted slug acts on
   // whatever comes back under it — and a slug comes back the ordinary way, by
   // creating a project with the same name. The transcript is kept; only the
   // binding is released, with a message on the conversation saying why.
   releaseProjectConversations(db, input.projectSlug, projectName);
-  // Ruling 685: and the steps those conversations left on this project's
+  // Ruling 259: and the steps those conversations left on this project's
   // tasks. A released conversation is kept, so its rows are too, and a
   // project of the same name hands back the slug and the task keys: accepting
   // the new KEY-1 would start a step written for the old one.

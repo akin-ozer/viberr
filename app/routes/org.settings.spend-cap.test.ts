@@ -8,7 +8,7 @@ import { listAuditEvents } from "../../test-support/audit-log";
 import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 
 /**
- * Ruling 175: the org-settings `set-run-spend-cap` intent persists the
+ * Ruling 31: the org-settings `set-run-spend-cap` intent persists the
  * instance's spending cap per Claude run (owner decision D4: an instance
  * ceiling only, none by default). Blank clears it; zero, a negative, more than
  * two decimals and anything `Number` would invent ("1e3") are refused with the
@@ -45,7 +45,7 @@ async function setSpendCap(
   return { status, body };
 }
 
-describe("org-settings set-run-spend-cap (ruling 175)", () => {
+describe("org-settings set-run-spend-cap (ruling 31)", () => {
   it("has no cap until an admin sets one", () => {
     expect(getMaxRunSpendUsd(app.db)).toBeNull();
   });

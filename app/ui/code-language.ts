@@ -1,5 +1,5 @@
 /**
- * Ruling 363: which grammar a filename gets in the code reader.
+ * Ruling 317: which grammar a filename gets in the code reader.
  *
  * Extension first, then the handful of bare names that carry their language
  * (`Dockerfile`, `Makefile`), then the dotfile families (`.env.local`). Every
@@ -137,7 +137,7 @@ export function languageForName(name: string): string {
 }
 
 /**
- * Ruling 614: whether a file opens rendered as markdown (`.md`, `.markdown`),
+ * Ruling 317: whether a file opens rendered as markdown (`.md`, `.markdown`),
  * read off the same table, so a name it learns needs no second list. `.mdx`
  * stays source: its JSX and imports are not markdown, and rendered they would
  * print as stray text.

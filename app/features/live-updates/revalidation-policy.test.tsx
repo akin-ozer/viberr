@@ -30,7 +30,7 @@ import {
 import { REVALIDATION_RULES, revalidateWhen } from "./revalidation-policy";
 
 /**
- * Ruling 457: the revalidation policy's behaviour, on the harness in
+ * Ruling 11: the revalidation policy's behaviour, on the harness in
  * `test-support/revalidation-harness.tsx` (React Router with single fetch's
  * revalidation choice, the real broker in-process). The perf ratchet counts
  * the loads it saves; these pin that every change still reaches the page.
@@ -276,7 +276,7 @@ describe("live events (RF-4, RF-7)", () => {
     expect(harness.calls["routes/project.task"]).toBe(1);
   });
 
-  it("taking the hash away from the URL on screen reloads nothing (ruling 523)", async () => {
+  it("taking the hash away from the URL on screen reloads nothing (ruling 302(c))", async () => {
     const harness = await tab({ path: TASK_PAGE });
     // A notification's link lands on an event: React Router loads nothing for
     // a hash it adds.
@@ -300,7 +300,7 @@ describe("live events (RF-4, RF-7)", () => {
   });
 });
 
-describe("reconnects replay what the tab missed (RF-1, ruling 301)", () => {
+describe("reconnects replay what the tab missed (RF-1, ruling 25)", () => {
   it("an event published while opening a task re-scopes the stream is replayed to the page", async () => {
     const harness = await tab({ path: BOARD });
     await act(async () => {

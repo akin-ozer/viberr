@@ -16,7 +16,7 @@ import { accountKindWord } from "./agent-accounts-derive";
 import type { ProfileBackendAccount } from "./profile-query.server";
 
 /**
- * Profile → Agent accounts: the account picker (ruling 700(e), the split of
+ * Profile → Agent accounts: the account picker (ruling 13(b), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe), moved whole with
  * the hooks it always owned.
  */
@@ -34,15 +34,15 @@ interface MenuPlace {
 }
 
 /**
- * Ruling 616: which of a backend's accounts the person's runs use, as a select
+ * Ruling 323: which of a backend's accounts the person's runs use, as a select
  * (owner, 2026-10-01: "make this part shadcn like selection from the dropdown
  * between accounts of saved accounts to use a selected one in every
- * provider"). It replaces ruling 507's list of the other accounts, each with
+ * provider"). It replaces ruling 138's list of the other accounts, each with
  * its own Use this account.
  *
  * The trigger names the account in use. The menu lists every account the
  * person keeps on the backend, up to the store's ceiling, with the one in use
- * checked; choosing another is ruling 507's switch: one write, no sign-in, and
+ * checked; choosing another is ruling 138's switch: one write, no sign-in, and
  * the next run bills it. An account whose sign-in file this server no longer
  * holds is listed but cannot be chosen, because the store refuses that switch,
  * and its line says why. Under a rule the menu carries what else starts here:
@@ -51,7 +51,7 @@ interface MenuPlace {
  * disconnect an account would bill any run that started in between.
  *
  * The behaviour is this repo's menu contract (StageMenu, the run picker), not
- * Radix's: the Radix menu is about 32 KB gzip (ruling 457, `user-menu.tsx`)
+ * Radix's: the Radix menu is about 32 KB gzip (ruling 11, `user-menu.tsx`)
  * for what a few handlers do here. A real button with `aria-haspopup="menu"`,
  * `menuitemradio` rows, focus on the checked row when it opens, ↑/↓ wrapping,
  * Home/End, Escape and Tab back to the trigger, and a press outside closes it.
@@ -79,7 +79,7 @@ export function AccountPicker({
   maxAccounts: number;
   /** An account request is in flight: both cards share the fetcher. */
   busy: boolean;
-  /** Ruling 368: the account THIS card's switch names, while it is in flight. */
+  /** Ruling 286: the account THIS card's switch names, while it is in flight. */
   switchingTo: string | null;
   /** Where the card returns focus when what the menu opened is closed. */
   triggerRef: RefObject<HTMLButtonElement | null>;
@@ -113,7 +113,7 @@ export function AccountPicker({
   // Before paint: below when it fits there, else above when it fits there,
   // else the roomier side with the height capped to it. The box is the
   // nearest scroller (Profile's overlay body), clipped to the viewport, less
-  // the head the overlay pins over its top, read as ruling 532's
+  // the head the overlay pins over its top, read as ruling 322's
   // `revealUnderHead` reads it: a menu opened upward under that head covered
   // the page's title.
   useLayoutEffect(() => {
@@ -206,7 +206,7 @@ export function AccountPicker({
         // "Runs use work@example.com, Claude sign-in": the label and the
         // value, as the trigger shows them (WCAG 2.5.3).
         aria-labelledby={`${ids}-label ${ids}-value`}
-        // Ruling 368: the switch in flight shows on its trigger; any other
+        // Ruling 286: the switch in flight shows on its trigger; any other
         // request leaves the trigger waiting. Not `disabled`: a disabled
         // button drops the focus the menu has just handed back to it.
         aria-busy={switching ? true : undefined}

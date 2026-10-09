@@ -13,20 +13,20 @@ import { archivableTasks } from "./epic-helpers";
 import type { EpicPageView } from "./epics-query.server";
 
 /**
- * Ruling 503: one epic, the way Jira opens an epic and Linear a project: what
+ * Ruling 325: one epic, the way Jira opens an epic and Linear a project: what
  * it is for, its tasks with where each stands and what each waits on, its
  * progress, and its history. The tasks are the epic's: a person adds an
  * existing task, makes a new one in it, or takes one out, and each move lands
  * on the task's own timeline and on this history (`setTasksEpic`). Someone
  * who may archive a task archives one from its row and restores one from the
- * fold, and a Done epic's finished tasks all at once (ruling 651).
+ * fold, and a Done epic's finished tasks all at once (ruling 274).
  *
  * Nothing here starts, orders or holds a task: what a task waits on is its own
- * `blockedBy` (ruling 131), shown as a count beside it. The epic's status is a
+ * `blockedBy` (ruling 55), shown as a count beside it. The epic's status is a
  * person's call; when every task is done the history says so and the lead is
  * told, and closing it stays theirs.
  *
- * Ruling 700(e): the page holds its state, its requests (`epic-page-actions.tsx`)
+ * Ruling 13(b): the page holds its state, its requests (`epic-page-actions.tsx`)
  * and its dialogs; its regions are drawn in `epic-page-regions.tsx`.
  */
 
@@ -46,7 +46,7 @@ export function EpicPage({
   canEditTasks: boolean;
   /** `create-task`: make a new task in the epic. */
   canCreateTask: boolean;
-  /** `approve-transition`: archive a task and restore one (ruling 651). */
+  /** `approve-transition`: archive a task and restore one (ruling 274). */
   canArchive: boolean;
 }) {
   const { epic, stages } = view;
@@ -61,7 +61,7 @@ export function EpicPage({
 
   return (
     <div className="board-wrap" data-screen-label="Epic">
-      {/* Ruling 615: the head scrolls with the page, inside the one scroller,
+      {/* Ruling 325: the head scrolls with the page, inside the one scroller,
           so it ends where the panels end whether or not a scrollbar takes
           room beside them. The status is said once in it: the select, for
           someone who may change it, stands where everyone else reads the

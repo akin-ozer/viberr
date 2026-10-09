@@ -7,7 +7,7 @@ import {
   syncPill,
 } from "./github-pills";
 
-describe("syncPill (ruling 12 vocabulary)", () => {
+describe("syncPill (ruling 237 vocabulary)", () => {
   it("maps the three sync states to the mock pill kinds", () => {
     expect(syncPill("merged")).toEqual({ kind: "done", label: "merged", quiet: true });
     expect(syncPill("behind_main")).toEqual({
@@ -18,7 +18,7 @@ describe("syncPill (ruling 12 vocabulary)", () => {
   });
 });
 
-describe("prStatePill (ruling 12 incl. the closed-unmerged risk state)", () => {
+describe("prStatePill (ruling 237 incl. the closed-unmerged risk state)", () => {
   it("merged → done pill", () => {
     expect(prStatePill("merged")).toEqual({ kind: "done", label: "merged", quiet: true });
   });

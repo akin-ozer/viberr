@@ -1,5 +1,5 @@
 /**
- * Delivering a task's work for review (ruling 654): `performDelivery` pushes
+ * Delivering a task's work for review (ruling 13(a)): `performDelivery` pushes
  * the branch, opens or updates the pull request and records the delivered
  * revision, with the conflict and closed-PR remedies around it; a person's
  * manual delivery and the project gates run by hand; and a changed revision's
@@ -193,17 +193,17 @@ export type DeliveryOutcome =
        *  such as "no_commits" when an agent already delivered with its own
        *  creds). */
       pushStatus: string;
-      /** Ruling 134: the workspace head the delivery left on the PR (full
+      /** Ruling 229: the workspace head the delivery left on the PR (full
        *  sha), or null when git could not name it. */
       headSha: string | null;
-      /** Ruling 134: the PR was opened, or the push moved its head. A reuse
-       *  that pushed nothing is `false`, and re-queues nothing (ruling 48). */
+      /** Ruling 127: the PR was opened, or the push moved its head. A reuse
+       *  that pushed nothing is `false`, and re-queues nothing (ruling 127). */
       moved: boolean;
-      /** Ruling 134(b): a `delivered` operator run was queued for this outcome
-       *  (full autonomy, moved head). Ruling 357: false for a delivery made by
+      /** Ruling 127: a `delivered` operator run was queued for this outcome
+       *  (full autonomy, moved head). Ruling 127: false for a delivery made by
        *  a live operator drive — its own lease release decides the follow-up. */
       operatorRequeued: boolean;
-      /** Ruling 494: where the pushed branch stands against the base, from the
+      /** Ruling 238: where the pushed branch stands against the base, from the
        *  compare the push ran before this returned (or that it could not run
        *  it, so the count on record is the one from before the push). Null
        *  when the delivery pushed nothing. */
@@ -215,14 +215,14 @@ export type DeliveryOutcome =
   | { status: "grant_withheld"; message: string }
   /** The push failed outright; no PR was opened over a possibly-stale remote. */
   | { status: "push_failed"; message: string }
-  /** Ruling 144: a workflow-file push refused for the `workflow` scope; the
+  /** Ruling 221(a): a workflow-file push refused for the `workflow` scope; the
    *  violation is open on the task and the remedy is a human's. */
   | { status: "scope_violation"; scope: string; message: string }
-  /** Ruling 159: the revision's tree carries Viberr's own store layout
+  /** Ruling 229: the revision's tree carries Viberr's own store layout
    *  (`projects/<slug>/tasks/...`); nothing was pushed and `files` names the
    *  offending paths. The remedy is to remove them from the branch. */
   | { status: "store_layout"; files: string[]; message: string }
-  /** Ruling 160 (pass 35, F35-11): the task's pull request was closed WITHOUT
+  /** Ruling 232 (pass 35, F35-11): the task's pull request was closed WITHOUT
    *  merging by a person and no person has answered the recovery packet yet.
    *  No PR was opened; the branch was pushed (the rework waits on the branch
    *  for the person's answer). `closedBy` is the GitHub login GitHub named as
@@ -232,7 +232,7 @@ export type DeliveryOutcome =
   | { status: "failed"; message: string };
 
 /**
- * Ruling 160 (pass 35, F35-11): the ONE sentence every delivery door prints
+ * Ruling 232 (pass 35, F35-11): the ONE sentence every delivery door prints
  * when the task's pull request was closed by a person and nobody has answered
  * the recovery packet: the operator's tool result, the task page's Deliver
  * control and the timeline note all read it.
@@ -251,7 +251,7 @@ function closedByHumanDeliveryText(
   );
 }
 
-/** Ruling 321: what the branch is, read at the moment the push was refused.
+/** Ruling 230: what the branch is, read at the moment the push was refused.
  *  Guarded — a remedy sentence must never be the thing that throws a delivery. */
 function conflictDeparture(
   ctx: TaskActionContext,
@@ -267,7 +267,7 @@ function conflictDeparture(
 }
 
 /**
- * Ruling 321 — what a push conflict costs, by what is actually on the branch.
+ * Ruling 230 — what a push conflict costs, by what is actually on the branch.
  *
  * A non-fast-forward push used to end in one fixed sentence: *"Resolve the
  * remote branch `X` (delete or rename it, or force-push deliberately), then
@@ -354,12 +354,12 @@ export async function performDelivery(
   actor: TaskActor,
 ): Promise<DeliveryOutcome> {
   const dataCtx = { dataRoot: ctx.dataRoot };
-  // Ruling 494: the branch this delivery's push moved, until it is re-compared.
+  // Ruling 238: the branch this delivery's push moved, until it is re-compared.
   // Every path out after a push goes through the re-compare, the thrown one too.
   let pushedBranch: { branch: string; headSha: string | null } | null = null;
   try {
-    // Ruling 240 (F37-61): a HELD task refuses delivery, for ruling 186's own
-    // reason and against its own live case. Ruling 186 gated every DISPATCH
+    // Ruling 56 (F37-61): a HELD task refuses delivery, for ruling 56's own
+    // reason and against its own live case. Ruling 56 gated every DISPATCH
     // door after SHOP-2 "pushed a branch cut from a base that predated the
     // foundation it waited on" — and publishing that branch to a review PR is
     // this function, which had no `blockedBy` check at all. The operator's
@@ -378,8 +378,8 @@ export async function performDelivery(
         await surfaceDeliveryEvent(db, ctx, projectSlug, taskKey, "Delivery refused", message);
         return { status: "failed", message };
       }
-      // Ruling 647: a task delivered as the files its deliverer saved on it
-      // (rulings 388, 531) has no branch or pull request (rulings 546, 550).
+      // Ruling 102: a task delivered as the files its deliverer saved on it
+      // (rulings 84, 128) has no branch or pull request (rulings 235, 102).
       // The task page offered this push on every delivered task of the AWS
       // estimates board, whose repository the Calculator Builder's workspace
       // checks out, so one press would have opened a review pull request for
@@ -394,7 +394,7 @@ export async function performDelivery(
     }
     const canCommitPush = await resolveDeliveryPushGrant(ctx, projectSlug, taskKey);
 
-    // 0. Ruling 128 (F34-4): the base branch must exist BEFORE the push, or a
+    // 0. Ruling 227 (F34-4): the base branch must exist BEFORE the push, or a
     //    task branch becomes an empty repository's first ref. The gate splits by
     //    EVIDENCE: only a positive "there is no default ref and Viberr could not
     //    create it" (`bootstrap_failed`, `scope_violation`) refuses the push; a
@@ -425,7 +425,7 @@ export async function performDelivery(
       ...dataCtx,
     });
     if (push.status === "pushed") pushedBranch = { branch: push.branch, headSha: push.headSha };
-    // Ruling 202, corrected by ruling 211(d): the drive DELIVERED — stamped
+    // Ruling 121, corrected by ruling 121: the drive DELIVERED — stamped
     // once the push has actually been attempted, not on entry. Stamping on
     // entry counted the arms that do nothing at all as progress
     // (`grant_withheld`, `no_workspace`, `bootstrap_failed`), so a nudged drive
@@ -433,14 +433,14 @@ export async function performDelivery(
     // looked like it had moved, the stranded backstop skipped its durable
     // `heldAtStage` marker, and every later trigger re-armed the nudge from
     // scratch — F31-11's fourteen-drives loop, reached through the fix for
-    // ruling 202. It still stamps BEFORE the PR call and before the result is
+    // ruling 121. It still stamps BEFORE the PR call and before the result is
     // classified, because a refused push is a drive that acted; what it no
     // longer covers is a refusal that never reached the remote.
     if (ctx.operatorRun && push.status !== "grant_withheld" && push.status !== "no_workspace") {
       ctx.operatorRun.delivered = true;
     }
 
-    // Ruling 134: `up_to_date` is an ordinary delivery (origin already carries
+    // Ruling 229: `up_to_date` is an ordinary delivery (origin already carries
     // the head); only a real non-push is worth a log line.
     if (push.status !== "pushed" && push.status !== "up_to_date") {
       logger.info("workspace push before review PR did not push", {
@@ -449,7 +449,7 @@ export async function performDelivery(
       });
     }
 
-    // Ruling 245 (F37-74): a file another task LEASES. Surfaced and returned
+    // Ruling 60 (F37-74): a file another task LEASES. Surfaced and returned
     // here, before anything reads the push further: nothing was pushed, no PR
     // was opened, and the branch is exactly as it was — so this is a refusal a
     // person acts on, not a failure to diagnose. The sentence is the shared
@@ -496,7 +496,7 @@ export async function performDelivery(
         projectSlug,
         taskKey,
         "Delivery push conflicted",
-        // Ruling 321: the branch is not an anonymous ref. Read what is on it
+        // Ruling 230: the branch is not an anonymous ref. Read what is on it
         // before telling a person to destroy it.
         pushConflictRemedy({
           taskKey,
@@ -512,7 +512,7 @@ export async function performDelivery(
     // misrepresenting) the newest work — refuse to open a PR whose head would
     // not match the delivered commit, instead of opening one "best effort".
     if (push.status === "push_refused_scope") {
-      // Ruling 144(c): the refusal is a scope violation on the task, with the
+      // Ruling 221(a): the refusal is a scope violation on the task, with the
       // policy event, the inbox notification, the credential-card flag and the
       // rail count every other violation gets; the remedy names the control.
       const files = push.files.map((f) => `\`${f}\``).join(", ") || "files under `.github/workflows/`";
@@ -545,7 +545,7 @@ export async function performDelivery(
       return { status: "scope_violation", scope: push.scope, message };
     }
 
-    // Ruling 159 (F35-10): the same shape as the scope refusal above, with the
+    // Ruling 229 (F35-10): the same shape as the scope refusal above, with the
     // offending paths named. Viberr must never publish its own store layout
     // into a customer repository, whatever an agent did.
     if (push.status === "push_refused_store_layout") {
@@ -595,7 +595,7 @@ export async function performDelivery(
       return { status: "push_failed", message };
     }
 
-    // Ruling 144(c): a successful push of workflow files is the proof that
+    // Ruling 221(a): a successful push of workflow files is the proof that
     // resolves an open `workflow` violation on this project. A push whose
     // workflow files could NOT be measured (`null`, a degraded history read)
     // proves nothing and leaves the violation standing — an empty list is a
@@ -624,11 +624,11 @@ export async function performDelivery(
     // (a review PR whose head is not the delivery), reached through four
     // quieter doors. `no_commits` in particular was also what a FAILED
     // `git rev-list` looked like before push-workspace learned to say "unknown".
-    // Ruling 134: `up_to_date` (origin already carries the head) flows through
+    // Ruling 229: `up_to_date` (origin already carries the head) flows through
     // the reconcile and `openTaskPr` exactly like `pushed`.
     if (push.status !== "pushed" && push.status !== "up_to_date") {
       // F19-21 (pass 19) — R17-2's "Completed — no changes required" outcome was
-      // UNREACHABLE for the task shape ruling 43 named. `noChanges` had exactly
+      // UNREACHABLE for the task shape ruling 101 named. `noChanges` had exactly
       // two writers, both requiring a delivery that got far enough to see an
       // EMPTY BRANCH; but push-workspace classifies a workspace whose HEAD is on
       // the default branch as `no_branch` BEFORE it ever counts commits, so a
@@ -637,7 +637,7 @@ export async function performDelivery(
       // `acceptanceBlockedReason`'s "No reviewed revision yet — nothing for the
       // required reviewers to approve". Live (VC-5) the only exits left were
       // force-accept, archive, or an operator packet recommending "manually mark
-      // Done" — verbatim the ceremony bypass ruling 43 exists to prevent.
+      // Done" — verbatim the ceremony bypass ruling 101 exists to prevent.
       //
       // The delivery attempt is the honest place to answer it: a human or the
       // operator asked the server to ship this task and the server LOOKED at a
@@ -693,8 +693,8 @@ export async function performDelivery(
         verifiedNoChange && preFm && !activeWorkRevision(preFm.workRevision)
           ? await resolveNoChangeBaseRevision(db, ctx, projectSlug, taskKey)
           : null;
-      // Ruling 391's sentence for a task whose deliverable is files is gone with
-      // the push it followed: ruling 647 refuses that task before the push.
+      // Ruling 235's sentence for a task whose deliverable is files is gone with
+      // the push it followed: ruling 102 refuses that task before the push.
       const message =
         push.status === "no_commits"
           ? `${taskKey}'s workspace carries no commits ahead of the default branch, so there is ` +
@@ -715,7 +715,7 @@ export async function performDelivery(
                 `no review PR was opened. One opened now would review whatever the remote branch ` +
                 `already holds, not this task's work. Run the delivering agent, then deliver again.`
               : push.status === "no_repo"
-                ? // Ruling 667: a standing state of a board that delivers
+                ? // Ruling 224: a standing state of a board that delivers
                   // results, not a setting somebody forgot.
                   `${taskKey}'s project has no repository, so there is no branch to push and no ` +
                   `review PR to open: a task here is delivered as the files its delivering agent ` +
@@ -797,13 +797,13 @@ export async function performDelivery(
       });
     }
 
-    // Ruling 161 (pass 35, G35-6): the push is the moment the revision LEAVES
+    // Ruling 234 (pass 35, G35-6): the push is the moment the revision LEAVES
     // the workspace. Stamp `pushedAt` on the revision whose head origin now
     // carries (`up_to_date` says origin already had it), so the discard gate
     // can tell a reported head from a published one without a PR to prove it.
     // A revision whose head the push did not name (a stale reconcile) is not
     // stamped: the PR that opens next is the proof for that shape.
-    // Ruling 439: a head the revision reaches through Viberr's own base
+    // Ruling 239: a head the revision reaches through Viberr's own base
     // refreshes carries it too, so a push of the refreshed branch publishes it.
     const pushedHead = push.headSha;
     if (pushedHead) {
@@ -847,7 +847,7 @@ export async function performDelivery(
       },
       prCtx,
     );
-    // Ruling 494 (F40-70): the push moved the branch, so it is compared with
+    // Ruling 238 (F40-70): the push moved the branch, so it is compared with
     // the base again now, whatever the PR door answered, and before anything
     // below re-queues the operator or reads the count. After the PR door so the
     // pass sees the PR this delivery opened, and before `recordPushedHead`, so
@@ -882,7 +882,7 @@ export async function performDelivery(
           if (parsed.frontmatter.github?.unownedPr != null) {
             parsed.frontmatter.github.unownedPr = null;
           }
-          // Ruling 161: an `ok` PR open proves the head is this task's again.
+          // Ruling 234: an `ok` PR open proves the head is this task's again.
           if (parsed.frontmatter.github?.foreignHead != null) {
             delete parsed.frontmatter.github.foreignHead;
           }
@@ -924,9 +924,9 @@ export async function performDelivery(
       // human manual delivery gets neither — the human who just clicked Deliver is
       // present and needs no card. That keeps R18-2's full-autonomy behaviour
       // byte-for-byte unchanged and covers every other operator delivery.
-      // Ruling 134: did anything MOVE? A newly opened PR, or a push that moved
+      // Ruling 127: did anything MOVE? A newly opened PR, or a push that moved
       // the head of a reused PR. A reuse that pushed nothing (`up_to_date`)
-      // moved nothing and re-queues nothing, so ruling 48's loop cannot start.
+      // moved nothing and re-queues nothing, so ruling 127's loop cannot start.
       const moved = result.created || push.status === "pushed";
       const headSha = push.status === "pushed" || push.status === "up_to_date" ? push.headSha : null;
       if (!result.created && push.status === "pushed") {
@@ -937,7 +937,7 @@ export async function performDelivery(
           actor,
         });
       }
-      // Ruling 163 (pass 35, F35-13 (c)): a delivery that moved the head of a
+      // Ruling 90 (pass 35, F35-13 (c)): a delivery that moved the head of a
       // task standing PAST the review stage, on a revision that changed or
       // failed after the last verdict, records the transition back to the
       // review stage instead of leaving the task at Merge waiting for a verdict
@@ -951,10 +951,10 @@ export async function performDelivery(
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;
       if (autonomy === "full") {
-        // Ruling 48 as amended by ruling 134(b): a newly opened PR, OR a head
+        // Ruling 127 as amended by ruling 127: a newly opened PR, OR a head
         // the push moved, is a new review subject and re-queues the operator.
         if (moved && ctx.operatorRun) {
-          // Ruling 357 (pass 38, F38-11): the drive that delivered IS the
+          // Ruling 127 (pass 38, F38-11): the drive that delivered IS the
           // drive that would be re-queued. Its turn continues on its own (the
           // tool reply names the PR, the prompt says to move the task and
           // engage the reviewer), so queuing a `delivered` turn behind its own
@@ -966,7 +966,7 @@ export async function performDelivery(
           // delivering, and the follow-up did the move. So the stamp defers
           // the decision to the lease release, which fires the follow-up only
           // when the drive stopped without moving or dispatching
-          // (`deliveredFollowUpFor`), exactly as ruling 152(a) did for a move.
+          // (`deliveredFollowUpFor`), exactly as ruling 120 did for a move.
           ctx.operatorRun.deliveredHeadMoved = true;
         } else if (moved) {
           operatorRequeued = true;
@@ -988,7 +988,7 @@ export async function performDelivery(
         // never turned into an error by a failure to record the follow-up card.
         await recordDeliveredNextStep(db, ctx, projectSlug, taskKey, result.prNumber);
       }
-      // Ruling 482 (F40-52): the delivered revision is gated by Viberr, not by
+      // Ruling 104 (F40-52): the delivered revision is gated by Viberr, not by
       // an agent's report. Queued here and run off this path; a revision whose
       // gates already ran (a reuse that moved nothing) is not run again.
       const { requestProjectGatesQuietly } = await import("./project-gates.server");
@@ -1027,7 +1027,7 @@ export async function performDelivery(
       return { status: "failed", message: result.message };
     }
 
-    // Ruling 160 (pass 35, F35-11): a pull request a person closed without
+    // Ruling 232 (pass 35, F35-11): a pull request a person closed without
     // merging is that person's decision about the task. The push above put
     // the rework on the branch; no PR is opened over the closed one until a
     // person answers the recovery packet (the reconciler raised it inside
@@ -1076,7 +1076,7 @@ export async function performDelivery(
       );
       return { status: "nothing_to_review", message };
     }
-    // Ruling 128 (F34-4): GitHub ANSWERED. A missing base branch and any other
+    // Ruling 227 (F34-4): GitHub ANSWERED. A missing base branch and any other
     // refusal are named as what they are, never as "unreachable" and never with
     // "fix the credential settings" (nothing is wrong with them).
     if (result.status === "base_branch_missing") {
@@ -1103,10 +1103,10 @@ export async function performDelivery(
       result.status === "no_repo_configured"
     ) {
       /**
-       * Ruling 334: four statuses shared one remedy, and for the transport one
+       * Ruling 231(b): four statuses shared one remedy, and for the transport one
        * that remedy accuses a configuration that is provably fine.
        *
-       * Ruling 128's own comment twelve lines above states the rule — a GitHub
+       * Ruling 227's own comment twelve lines above states the rule — a GitHub
        * outcome must be "named as what they are, never as 'unreachable' and
        * never with 'fix the credential settings' (nothing is wrong with them)"
        * — and it fixed the `base_branch_missing` arm while leaving the arm that
@@ -1171,7 +1171,7 @@ export async function performDelivery(
       taskKey,
       err: toError(error),
     });
-    // Ruling 494: the push stands whatever threw after it, so the branch it
+    // Ruling 238: the push stands whatever threw after it, so the branch it
     // moved is compared again before this returns, as on every other path.
     if (pushedBranch) {
       await recompareDeliveredBranch(db, ctx, projectSlug, taskKey, pushedBranch, actor);
@@ -1184,7 +1184,7 @@ export async function performDelivery(
 }
 
 /**
- * Ruling 494 (pass 40, F40-70): compare the branch a delivery push moved with
+ * Ruling 238 (pass 40, F40-70): compare the branch a delivery push moved with
  * the base again, through the reconciler's per-task lock
  * (`recompareAfterPush`), as the delivering actor, and say what that found.
  * Never throws: a delivery is never failed by its own re-compare.
@@ -1282,7 +1282,7 @@ export async function manualDeliverForReview(
 }
 
 /**
- * Ruling 482 (F40-52): a person runs the project's gates on the revision under
+ * Ruling 104 (F40-52): a person runs the project's gates on the revision under
  * review again — after an interrupted or failed run, a gate list edited, or a
  * flaky gate. The same authority as a manual delivery (maintainer+, or the
  * task's owner), because it spends the same host time. Queued, never run on
@@ -1322,7 +1322,7 @@ export async function runProjectGatesByHand(
 }
 
 /**
- * Ruling 128: make sure the project's default branch exists before the push.
+ * Ruling 227: make sure the project's default branch exists before the push.
  * Reads the GitHub context the same way the PR open does; a project with no
  * repository or credential is `skipped` (the push path reports those itself).
  */
@@ -1352,7 +1352,7 @@ async function ensureDefaultBranchBeforePush(
 }
 
 /**
- * Ruling 134(a): a push that MOVED the head of a reused PR is recorded on the
+ * Ruling 229: a push that MOVED the head of a reused PR is recorded on the
  * timeline ("Pushed `<sha7>` to **PR #N** for review (was `<old7>`)"), with the
  * same author rule the "Opened PR" event uses (operator → the Operator; a
  * human → that human), and `pr.headSha` is brought up to the pushed head so
@@ -1404,7 +1404,7 @@ async function recordPushedHead(
 }
 
 /**
- * Ruling 163 (pass 35, F35-13 (c)): after a delivery MOVED the review PR's
+ * Ruling 90 (pass 35, F35-13 (c)): after a delivery MOVED the review PR's
  * head, a task standing past the review stage whose derived validation is
  * `changed` or `failing` (a verdict exists, on an older revision, or requests
  * changes) goes back to the review stage in one write: `previousStageId`, a
@@ -1419,9 +1419,9 @@ export async function returnChangedRevisionToReview(
   taskKey: string,
   headSha: string | null,
   actor: TaskActor,
-  /** Ruling 179 (pass 36): the reconciler's authored-drift door — the head
+  /** Ruling 240 (pass 36): the reconciler's authored-drift door — the head
    *  moved by a push Viberr did not make; the audit names it and the event is
-   *  the policy engine's. Absent = a delivery moved the head (ruling 163). */
+   *  the policy engine's. Absent = a delivery moved the head (ruling 90). */
   opts: { via?: "delivery" | "authored-drift" } = {},
 ): Promise<void> {
   const project = loadProjectContext(ctx, projectSlug);
@@ -1456,7 +1456,7 @@ export async function returnChangedRevisionToReview(
         via === "authored-drift"
           ? `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
             `${stageName(project, reviewId)}: the pull request's head moved to ${rev} after the ` +
-            `last verdict by commits Viberr did not deliver (ruling 179), so the reviewers judge it there.`
+            `last verdict by commits Viberr did not deliver (ruling 240), so the reviewers judge it there.`
           : `**Transition:** ${taskKey} returns from ${stageName(project, fromStageId)} to ` +
             `${stageName(project, reviewId)}: ${rev} changed after the last verdict, so the ` +
             `reviewers judge it there.`,
@@ -1525,9 +1525,9 @@ export async function surfaceDeliveryEvent(
         kind: "policy",
         title,
         text,
-        // Ruling 497: the row opens the note, which carries git's own output.
+        // Ruling 75: the row opens the note, which carries git's own output.
         about: { event: at },
-        // Ruling 361: the same system actor the note above carries.
+        // Ruling 74: the same system actor the note above carries.
         from: { kind: "system", name: systemIdToName("delivery") },
       },
       ctx,
@@ -1572,7 +1572,7 @@ const DELIVERY_NEXT_STEP_AUDIT_ACTION = "github.delivery.next_step";
  *    counting it would strand the task exactly as before;
  *  - a task already AT or PAST the review stage needs no move — B-FD5's
  *    acceptance predicate is what surfaces it there;
- *  - the edge into the review stage is `auto` (ruling 519): nobody confirms
+ *  - the edge into the review stage is `auto` (ruling 126): nobody confirms
  *    that move, the operator makes it;
  *  - an archived task or archived (read-only, R6-3) project takes no new cards.
  *
@@ -1602,7 +1602,7 @@ export async function recordDeliveredNextStep(
     const stageIdx = project.stages.findIndex((s) => s.id === fm.stage);
     const reviewIdx = project.stages.findIndex((s) => s.id === reviewStageId);
     if (stageIdx < 0 || reviewIdx < 0 || stageIdx >= reviewIdx) return;
-    // Ruling 519: an `auto` edge into the review stage is a move nobody
+    // Ruling 126: an `auto` edge into the review stage is a move nobody
     // confirms. The operator makes it itself: its drive goes on after the
     // delivery, and a drive that stops at a stage with an `auto` way out is
     // re-invoked by the settle-time backstop. A card here would ask a person to
@@ -1712,7 +1712,7 @@ export async function recordDeliveredNextStep(
         ptype: "input",
         title: `Next step recorded: ${label}`,
         text: detail,
-        // Ruling 497: the row opens the card, where it is applied.
+        // Ruling 75: the row opens the card, where it is applied.
         about: "recommendations",
         from: { kind: "system", name: "Delivery" },
       },

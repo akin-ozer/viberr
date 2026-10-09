@@ -8,7 +8,7 @@ import type { ControllerToolkitDeps } from "./controller-toolkit.server";
 import type { ControllerToolUser } from "./controller-tool-guards.server";
 
 /**
- * Ruling 503(f): the controller's epic tools.
+ * Ruling 273: the controller's epic tools.
  *
  * Goal chains became epics, and the controller's four goal tools became four
  * epic tools: `list_epics`, `get_epic`, `create_epic` (whose `tasks` puts
@@ -16,9 +16,9 @@ import type { ControllerToolUser } from "./controller-tool-guards.server";
  * `removeTasks`, and no delete). The task tools name the epic (`list_tasks`
  * with its `epicId` filter, `get_task`), `create_task` and `update_task` take
  * `epic`, `get_project` summarises the epics, and the per-turn board context
- * lists the open ones where it listed the chains (ruling 121).
+ * lists the open ones where it listed the chains (ruling 253).
  *
- * Every tool acts with the ASKER's authority (ruling 99): creating an epic and
+ * Every tool acts with the ASKER's authority (ruling 247): creating an epic and
  * changing what it is needs `manage-epics`, moving a task in or out needs
  * `edit-task-meta`, and both are held by the contributor and not the viewer.
  *
@@ -229,7 +229,7 @@ const RETIRED_GOAL_TOOLS = ["list_goals", "get_goal", "create_goal", "update_goa
 
 // ------------------------------------------------------------- the surface
 
-describe("ruling 503(f): the epic tools replace the goal tools", () => {
+describe("ruling 273: the epic tools replace the goal tools", () => {
   it("registers list_epics, get_epic, create_epic and update_epic, no goal tool, and no way to delete an epic", async () => {
     // CANARY: register `create_goal` again.
     const names = (await toolkitFor(ids.orgAdmin)).tools.map((t) => t.name);
@@ -253,7 +253,7 @@ describe("ruling 503(f): the epic tools replace the goal tools", () => {
 
 // ------------------------------------------------------------- create_epic
 
-describe("ruling 503(f): create_epic acts with the asker's authority", () => {
+describe("ruling 273: create_epic acts with the asker's authority", () => {
   it("a viewer is refused with nothing written; a contributor's epic takes the defaults", async () => {
     const before = mods.listEpicIds(SLUG, app.dataRoot);
     // CANARY: drop the `manage-epics` gate from `createEpic`.
@@ -342,7 +342,7 @@ describe("ruling 503(f): create_epic acts with the asker's authority", () => {
 
 // ------------------------------------------------------ list_epics, get_epic
 
-describe("ruling 503(f): list_epics and get_epic", () => {
+describe("ruling 273: list_epics and get_epic", () => {
   let epicId = "";
 
   beforeAll(async () => {
@@ -418,7 +418,7 @@ describe("ruling 503(f): list_epics and get_epic", () => {
 
 // ------------------------------------------------------------- update_epic
 
-describe("ruling 503(f): update_epic", () => {
+describe("ruling 273: update_epic", () => {
   it("changes every field and clears the lead and the dates; a viewer is refused", async () => {
     // An explicit colour, so the change below is one whichever number the
     // epic draws (the default colour follows the number).
@@ -566,7 +566,7 @@ describe("ruling 503(f): update_epic", () => {
 
 // ------------------------------------------------------- the task tools
 
-describe("ruling 503(f): the task tools name the epic", () => {
+describe("ruling 273: the task tools name the epic", () => {
   it("list_tasks names each task's epic and filters by epicId, `none` for the tasks in no epic", async () => {
     const epicId = await makeEpic("Specialist continuity", ["VIB-153"]);
     const all = parsed(taskListSchema, await call(ids.viewer, "list_tasks"));
@@ -665,7 +665,7 @@ describe("ruling 503(f): the task tools name the epic", () => {
 
 // ------------------------------------------------------- the context read
 
-describe("ruling 503(f): the per-turn context lists the open epics where it listed the chains", () => {
+describe("ruling 273: the per-turn context lists the open epics where it listed the chains", () => {
   /** The per-turn read for a turn in `projectSlug`, anchored on a task when given. */
   function contextRead(projectSlug: string, taskKey: string | null = null) {
     return mods.gatherControllerContext(app.db, {

@@ -129,7 +129,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
   });
 
   /**
-   * Ruling 222 (F37-42): the audit row above has named the agent since P11-23.
+   * Ruling 74 (F37-42): the audit row above has named the agent since P11-23.
    * The NOTIFICATION for the same event did not — `notifyTaskWatchers` stamps
    * `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so the owner's
    * inbox announced an agent's question under the Operator's name and avatar,
@@ -138,7 +138,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
    * arrived as "Operator·SHOP-18 cannot satisfy its required filter/facet
    * sidebar…" — the agent's own words, over the operator's name.
    */
-  it("attributes the question NOTIFICATION to the agent too, not the operator (ruling 222)", async () => {
+  it("attributes the question NOTIFICATION to the agent too, not the operator (ruling 74)", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", {
@@ -170,7 +170,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
   });
 
   /**
-   * Ruling 481(a) (F40-48): the question is filed as what it is. As `approval`
+   * Ruling 74 (F40-48): the question is filed as what it is. As `approval`
    * it wore the stage arrow and the "approval" pill, and "Approval requests"
    * off (a person quieting stage traffic) meant no bell row and no "Waiting on
    * you" row for any agent question, with nothing on that toggle saying so.
@@ -178,7 +178,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
    * Canary: write `kind: "approval"` in `openAgentQuestionPacket` again and
    * the owner with approvals silenced gets nothing.
    */
-  it("files an agent's question as a `question` that waits on the owner and ignores the approvals toggle (ruling 481)", async () => {
+  it("files an agent's question as a `question` that waits on the owner and ignores the approvals toggle (ruling 74)", async () => {
     const store = setupTestStore(ctx);
     const owner = store.users.arda.id;
     setNotifRoutingPref(store.db, owner, "approvals", false);
@@ -222,7 +222,7 @@ describe("agent-toolkit audit attribution (P11-23)", () => {
     expect(listNotifications(store.db, owner).filter((n) => n.taskKey === "VIB-8")).toEqual([]);
   });
 
-  it("ruling 137: an agent's question withdraws the standing acceptance offers on the record", async () => {
+  it("ruling 99: an agent's question withdraws the standing acceptance offers on the record", async () => {
     // Canary: remove the `withdrawAcceptanceOffers` call in
     // openAgentQuestionPacket and the accept card outlives the question.
     const store = setupTestStore(ctx);
@@ -415,14 +415,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   }
 
   /**
-   * Ruling 298 (pass 37, F37-133). The cap was always four; it used to be
+   * Ruling 202 (pass 37, F37-133). The cap was always four; it used to be
    * applied by a silent `.slice(0, 4)` in the packet builder, so an agent that
    * offered five got a decision card with four and nobody -- agent or person --
    * was told a choice had been removed. It is declared on the schema now, so a
    * fifth is refused by name, nothing is written, and the agent re-asks inside
    * the same run at no cost.
    */
-  it("ruling 298: a fifth answer choice is refused by name, not trimmed away", async () => {
+  it("ruling 202: a fifth answer choice is refused by name, not trimmed away", async () => {
     const server = mountFor({ ...BASE, ask: true });
     const client = await connectedClient(server);
 
@@ -455,13 +455,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 488 (F40-67): a specialist reaches another task through the report
+   * Ruling 202 (F40-67): a specialist reaches another task through the report
    * it already makes. `relay` rides every variant of `report_outcome`, holds
    * at most two entries (a third is refused by name, so the agent re-reports
    * inside the same run), and is staged with the outcome for the completion
    * pipeline to post.
    */
-  it("ruling 488: report_outcome stages up to two relay entries and refuses a third by name", async () => {
+  it("ruling 202: report_outcome stages up to two relay entries and refuses a third by name", async () => {
     // Evidence only: the WEB-9 Platform Engineer's shape, no verdict grant.
     const server = mountFor({ comment: false, ask: false, verdict: false, evidence: true });
     const client = await connectedClient(server);
@@ -488,12 +488,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 526: the timeline draws an outcome's rows as a checklist, so each
+   * Ruling 16: the timeline draws an outcome's rows as a checklist, so each
    * row says how it came out and carries its mark. A row without one is
    * refused by name, nothing is staged, and the agent re-reports inside the
    * same run.
    */
-  it("ruling 526: report_outcome refuses an evidence row with no mark, and stages a marked one", async () => {
+  it("ruling 16: report_outcome refuses an evidence row with no mark, and stages a marked one", async () => {
     const server = mountFor({ ...BASE, verdict: true, evidence: true });
     const client = await connectedClient(server);
     const toolText = z
@@ -528,14 +528,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 692(c): seven of the nine questions a writer put to a person were
+   * Ruling 202: seven of the nine questions a writer put to a person were
    * its own choices (the reader, the length, the tone), each with a default
    * to approve. One sentence says what a question is for, on the tool a Claude
    * run calls and on the field a Codex run fills, so it reaches an agent no
    * manual does. The run's collaboration note carries it too, which
    * `specialist-run.server.test.ts` owns.
    */
-  it("ruling 692: both asking channels say a person is asked only what they alone know, in one question", async () => {
+  it("ruling 202: both asking channels say a person is asked only what they alone know, in one question", async () => {
     const server = mountFor({ ...BASE, ask: true });
     const client = await connectedClient(server);
 
@@ -553,10 +553,10 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 478(e) (F40-31, F40-57): `ask_human` lets the agent say a choice
+   * Ruling 68 (F40-31, F40-57): `ask_human` lets the agent say a choice
    * needs a typed answer, and tells it an unmarked list recommends nothing.
    */
-  it("ruling 478(e): a `reply` choice reaches the packet, and an unmarked list recommends nothing", async () => {
+  it("ruling 68: a `reply` choice reaches the packet, and an unmarked list recommends nothing", async () => {
     const server = mountFor({ ...BASE, ask: true });
     const client = await connectedClient(server);
 
@@ -586,7 +586,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       [true, false],
       [false, false],
     ]);
-    // Ruling 586: the question's entry carries the card, which leaves the task
+    // Ruling 68: the question's entry carries the card, which leaves the task
     // when it is answered. CANARY: write the title alone again.
     const asked = readTaskFile({ projectSlug: lastStore.slug, taskKey: "VIB-3", dataRoot: lastStore.dataRoot })!
       .parsed.timeline.find((e) => e.type === "blocked");
@@ -621,7 +621,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 339 (pass 37, F37-175): the run record disclosed a toolkit it had
+   * Ruling 167 (pass 37, F37-175): the run record disclosed a toolkit it had
    * derived a SECOND time, from three of the six gates, and so under-reported
    * what it mounted on 460 of the 834 specialist runs of the shopify-clone
    * pass: `github_read` on 460, `read_board` on 307, `read_knowledge_doc` on
@@ -631,7 +631,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * `toolNames` comes off the definitions the builder just pushed, so the only
    * way to make this red again is to restate the gates somewhere.
    */
-  it("ruling 339: the toolkit reports exactly the tools it mounted", () => {
+  it("ruling 167: the toolkit reports exactly the tools it mounted", () => {
     // Canary: return a hand-built list from `buildAgentToolkit` instead of
     // `tools.map((t) => t.name)`.
     const store = setupTestStore(ctx);
@@ -678,7 +678,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 281 (pass 37, F37-114): an agent could read its repository and not
+   * Ruling 213(a) (pass 37, F37-114): an agent could read its repository and not
    * the board it works on. A task key it was TOLD about — in a document, a
    * directive, another agent's report — could not be checked.
    *
@@ -689,7 +689,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
    * re-raised a decision already made, and its recommended option would have
    * created a second task carrying SHOP-39's title word for word.
    */
-  it("ruling 281: read_board answers a key, lists the board, and denies a key that is not there", async () => {
+  it("ruling 213(a): read_board answers a key, lists the board, and denies a key that is not there", async () => {
     const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_board");
     const read = tools.read_board!;
     // Ungranted: every fact here is already in the agent's own prompt for its
@@ -736,7 +736,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(missing).toContain("that claim is wrong");
   });
 
-  it("ruling 563: read_timeline_entry reads one entry of this task whole", async () => {
+  it("ruling 213(b): read_timeline_entry reads one entry of this task whole", async () => {
     // The prompt clips each entry at 220 characters and names the stamp of a
     // clipped one; this is the other half. CANARY: leave it unbuilt and the
     // stamp names an address nothing can read.
@@ -769,17 +769,17 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   /**
-   * Ruling 644: a stamp names every entry written with it. A verdict's quality
+   * Ruling 72: a stamp names every entry written with it. A verdict's quality
    * marker and its report comment land in one millisecond, and the read took
    * the first in the file: on AWSC-96 the Estimate Judge asked for its own
    * earlier verdict, got the marker, and rebuilt the score split from memory.
    * CANARY: `find` instead of `filter` and the report never comes back.
    *
-   * Ruling 645: in the order they were written. The file holds them newest
+   * Ruling 72: in the order they were written. The file holds them newest
    * first; on AWSC-97 the Judge read the first listed as the first sent.
    * CANARY: drop the `.reverse()` and the marker comes back before its report.
    */
-  it("ruling 644: read_timeline_entry returns every entry a stamp names, in the order they were written", async () => {
+  it("ruling 72: read_timeline_entry returns every entry a stamp names, in the order they were written", async () => {
     const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_twins");
     const store = lastStore;
     const at = "2026-10-03T13:02:29.579Z";
@@ -813,7 +813,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(read.entries[0]!.text).toBe(report);
   });
 
-  it("ruling 594: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {
+  it("ruling 214: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {
     // Live on AWSC-33 the Estimate Judge was told to read two registers on
     // other tasks "where they are", which its workspace contract puts
     // off-limits, and asked a person for access. CANARY: leave the tool
@@ -843,7 +843,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(one.files).toEqual(["round-3-comparison.md"]);
   });
 
-  it("ruling 597: read_task_attachment reads a file as a kept delivery held it, and read_board lists the kept deliveries", async () => {
+  it("ruling 86: read_task_attachment reads a file as a kept delivery held it, and read_board lists the kept deliveries", async () => {
     // Live on AWSC-46 the Estimate Judge "could not independently diff it
     // against the prior version": the rework had saved the same name. CANARY:
     // drop `delivery` on the way to the reader and the first delivery reads as
@@ -885,7 +885,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
   });
 
-  it("ruling 690: keep_source is on the toolkit only for a profile that holds attach-evidence-references, and records the run that called it", async () => {
+  it("ruling 82: keep_source is on the toolkit only for a profile that holds attach-evidence-references, and records the run that called it", async () => {
     // CANARY: mount it under holdsCollaborationGrant(collab) and a profile
     // with every other grant, which may not save a file on the task, is
     // offered keep_source. Pass no run id from the handler and the record
@@ -939,7 +939,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     ]);
   });
 
-  it("ruling 690: read_task_source lists a task's sources with what each delivery rested on, opens one by id in pages, and reads another task's with taskKey", async () => {
+  it("ruling 82: read_task_source lists a task's sources with what each delivery rested on, opens one by id in pages, and reads another task's with taskKey", async () => {
     // The reader the operator's, the controller's and the gateway's tools
     // answer with, unchanged. CANARY: resolve the bytes by the record's
     // `name` instead of its `file` and the read answers [noop] for a source
@@ -1069,7 +1069,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
   });
 
-  it("ruling 706: read_task_source with `find` answers the places in one source that hold the words, each readable from the offset it gives", async () => {
+  it("ruling 82: read_task_source with `find` answers the places in one source that hold the words, each readable from the offset it gives", async () => {
     // The finding: BLOG-7's post said a figure "isn't recorded" on the
     // strength of one entry of a 2.25 MB decisions file, a later entry of
     // the same file said where it is recorded, and no review of the post
@@ -1100,7 +1100,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     keep("decisions.md", Buffer.from(record), "The decisions file");
     keep("chart.png", Buffer.from("not searched"), "A chart");
     // A page that embeds a picture: a read leaves the picture out (ruling
-    // 676), and a place's offset counts the text as a read returns it.
+    // 79), and a place's offset counts the text as a read returns it.
     const embedded = `<html><img src="data:image/png;base64,${"A".repeat(60_000)}"><p>after the picture: the needle</p></html>`;
     keep("report.html", Buffer.from(embedded), "A report");
     // SAFETY: every text answer here is `{ content: [{ type: "text", text }] }`.
@@ -1292,7 +1292,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
   });
 
   it("capture_page hands a run the pictures of a page on its task in readable stretches, saves nothing on the task, and names a file that is not a page", async () => {
-    // Ruling 691: a page judged from its source hides a broken table and a
+    // Ruling 194: a page judged from its source hides a broken table and a
     // layout that falls apart on a phone. CANARY: mount the tool without the
     // pageCaptureStatus check and a server with no browser lists a tool that
     // cannot answer.
@@ -1502,7 +1502,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     });
   });
 
-  it("ruling 596: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
+  it("ruling 213: read_board lists a task's timeline by stamp, and read_timeline_entry opens an entry on it or on another task", async () => {
     // Live in round 4, three Estimate Judges re-reviewing a rework could not
     // find their own first verdict: the prompt carries only recent entries,
     // read_board listed none, and read_timeline_entry read this task only.
@@ -1751,12 +1751,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     });
 
     /**
-     * Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+     * Ruling 205: a knowledge base is INDEXED into the prompt now, not injected,
      * so the grant only half-arrives without a way to pull a document. Its gate
      * is the KB grant, not U11's collaboration grants — an agent granted a
      * knowledge base and nothing else still has to be able to read it.
      */
-    it("rulings 283, 483 and 498: a KB grant alone mounts read_knowledge_doc and correct_knowledge_doc, and nothing else", () => {
+    it("rulings 205 and 210: a KB grant alone mounts read_knowledge_doc and correct_knowledge_doc, and nothing else", () => {
       const store = setupTestStore(ctx);
       writeTask(store.dataRoot, store.slug, {
         frontmatter: baseTaskFrontmatter("VIB-3", { stage: "review" }),
@@ -1781,19 +1781,19 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       });
       expect(built).not.toBeNull();
       const names = mountedTools.parse(built!.mcpServers.viberr_agent);
-      // Ruling 483 mounts after `read_board`, so a knowledge base alone still
+      // Ruling 210 mounts after `read_board`, so a knowledge base alone still
       // widens nothing on U11's collaboration gate.
       expect(Object.keys(names)).toEqual(["read_knowledge_doc", "correct_knowledge_doc"]);
     });
 
     /**
-     * Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
+     * Ruling 210 (F40-53): an agent that PROVES a line of one of its knowledge
      * bases wrong corrects the document. Live on WEB-3 the Platform Engineer
      * wrote "the knowledge-base runbook is read-only to me", an hour after the
-     * Site Engineer found the same stale dossier fact. Ruling 498 writes the
+     * Site Engineer found the same stale dossier fact. Ruling 210 writes the
      * correction into the settled text as it is made.
      */
-    it("rulings 483 and 498: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
+    it("ruling 210: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
       const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
       const { writeStoreDoc } = await import("~/server/org/store-files.server");
       const store = setupTestStore(ctx);
@@ -1817,8 +1817,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         "# Facts\n\n- T-003: wrangler 4.138.0\n- T-013: dist/server/ (see run 12)\n",
         admin,
       );
-      // Ruling 648: an agent on the project is not given the dossier, so the
-      // correction's entry quotes none of it (ruling 568).
+      // Ruling 211: an agent on the project is not given the dossier, so the
+      // correction's entry quotes none of it (ruling 211).
       reconfigureProject(store, (fm) => ({
         agents: [
           ...fm.agents,
@@ -1851,7 +1851,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
           name: "correct_knowledge_doc",
           arguments: {
             kb: kb.dir,
-            // Ruling 588: the document is `path`, as read_knowledge_doc names it.
+            // Ruling 210(a): the document is `path`, as read_knowledge_doc names it.
             // CANARY: name it `doc` again and the call is refused as invalid.
             path: "06-platform-facts.md",
             replaces: "- T-003: wrangler 4.138.0",
@@ -1875,7 +1875,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         filedBy: "Security review",
         taskKey: "VIB-3",
       });
-      // Ruling 648: this run is given the dossier, so it reads the correction
+      // Ruling 211: this run is given the dossier, so it reads the correction
       // whole though the entry quotes none of it. CANARY: drop `readerKbs` from
       // the toolkit's read_timeline_entry and this reads `notQuoted`.
       expect(top.text).toContain("The passage is not quoted here");
@@ -1892,7 +1892,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         evidence: "`npx wrangler --version` printed 4.139.0.",
       });
 
-      // Ruling 581: an empty `text` deletes the passage. Live on AWSC-18 the
+      // Ruling 210(b): an empty `text` deletes the passage. Live on AWSC-18 the
       // tool refused all 39 deletions a Researcher had to apply.
       const deleted = textResult.parse(
         await client.callTool({
@@ -2046,7 +2046,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       }
       expect(text).toContain("[truncated");
       expect(text).toContain("narrow the path or paginate");
-      // The cap holds (ruling 624): printed as the tool result it is, the
+      // The cap holds (ruling 215): printed as the tool result it is, the
       // message fits a Codex code-mode tool output, 10,000 tokens counted as
       // UTF-8 bytes / 4, not the ~220 KB raw body. CANARY: cap at 48,000.
       expect(Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text }] })) / 4).toBeLessThanOrEqual(10_000);

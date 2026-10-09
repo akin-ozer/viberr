@@ -275,7 +275,7 @@ async function recordReviewerReply(
 }
 
 describe("createTask", () => {
-  it("ruling 131: createTask with blockedBy is born held; a bad reference refuses before a key is allocated", async () => {
+  it("ruling 55: createTask with blockedBy is born held; a bad reference refuses before a key is allocated", async () => {
     // Canary: move the `validateDependencyRefs` call below `allocateTaskKey`
     // and the refused create burns VIB-100 (the good one lands on VIB-101).
     const store = setupProjectedStore(ctx);
@@ -289,7 +289,7 @@ describe("createTask", () => {
         { dataRoot: store.dataRoot },
       ),
     ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("VIB-999 is not a task in this project") });
-    // Ruling 255: a fixed creation instant, so the invariant below is a fact
+    // Ruling 72: a fixed creation instant, so the invariant below is a fact
     // about the code and not about how fast the machine ran.
     const CREATED_AT = "2026-09-15T09:00:00.000Z";
     const held = await createTask(
@@ -308,7 +308,7 @@ describe("createTask", () => {
     expect(parsed.frontmatter.blockedBy).toEqual(["VIB-1"]);
     expect(parsed.timeline[0]).toMatchObject({ type: "note", title: "Waits on other work" });
     expect(parsed.timeline[0]!.text).toContain("Created waiting on VIB-1");
-    // Ruling 356(b): a done entry is named as done in the creation note too.
+    // Ruling 58: a done entry is named as done in the creation note too.
     // Live on BNB-26: "Created waiting on BNB-5, BNB-22" with BNB-22 closed
     // 95 s before the mint — the fourth such note on the instance.
     // CANARY: join the raw labels again and the note reads "VIB-1, VIB-2".
@@ -340,7 +340,7 @@ describe("createTask", () => {
     );
 
     /**
-     * Ruling 255 (pass 37, F37-84): one creation is one instant.
+     * Ruling 72 (pass 37, F37-84): one creation is one instant.
      *
      * Measured live on SHOP-27: the wait note read `…19:27:52.529Z` and the
      * assign event below it read `…19:27:52.530Z` — a 1ms inversion in a
@@ -397,7 +397,7 @@ describe("createTask", () => {
   });
 
   /**
-   * Ruling 127 — creation SEATS the creator as owner.
+   * Ruling 137 — creation SEATS the creator as owner.
    *
    * Every agent run on a task bills the OWNER's own Claude/Codex accounts, so
    * a task with no owner cannot run an agent at all. Being born unowned meant
@@ -1054,12 +1054,12 @@ describe("appendComment", () => {
     });
   });
 
-  it("dedupes a dispatched run's report even after the cc line is appended (ruling 98 x F22-12)", async () => {
+  it("dedupes a dispatched run's report even after the cc line is appended (ruling 124 x F22-12)", async () => {
     // CANARY: key the comparison on the raw text again — the appended cc line
     // makes the report differ from the mid-run comment it repeats verbatim, so
     // the same finding lands twice and the mention fan-out fires again.
     //
-    // Ruling 98(c)'s cc line is appended by the PIPELINE, after the agent has
+    // Ruling 124's cc line is appended by the PIPELINE, after the agent has
     // written its report, and its content depends on who dispatched the run.
     // Comparing agent prose against agent prose has to ignore it.
     const store = setupProjectedStore(ctx);
@@ -1214,21 +1214,21 @@ describe("appendComment", () => {
   });
 });
 
-describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 232)", () => {
+describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 70)", () => {
   /**
    * S5-G3 asserted the OPPOSITE of this: the posted directive carried the
    * ambiguity disclosure so the humans reading the timeline would learn the tag
-   * reached nobody. Ruling 232 removed that note's premise. A directive now
+   * reached nobody. Ruling 70 removed that note's premise. A directive now
    * notifies nobody by declared audience, so the disclosure's remedy - "mention
    * the full name ('@First Last') or the email handle" - names a cause that is
    * not the reason and sends a reader to fix the spelling of something that
-   * would not have notified either way. Found by reviewing ruling 232 against
+   * would not have notified either way. Found by reviewing ruling 70 against
    * the disclosure it had not touched.
    *
    * The tag itself still stands in the posted text: the ruling changes who
    * hears about the hand-off, not what the operator wrote.
    */
-  it("posts an ambiguous @tag with NO disclosure, because a directive notifies nobody (ruling 232)", async () => {
+  it("posts an ambiguous @tag with NO disclosure, because a directive notifies nobody (ruling 70)", async () => {
     const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1"),
@@ -1310,7 +1310,7 @@ describe("specialistReplyDirective (NEW-4)", () => {
     expect(supporting).toContain("DATA, not instructions");
     expect(supporting).toContain("do not modify the repository");
 
-    // Ruling 667: on a project with no repository the directive names none.
+    // Ruling 199: on a project with no repository the directive names none.
     // CANARY: ignore `repository` and a resumed agent on a board that delivers
     // results is told to adjust its work "on the repository in your working
     // directory" and not to push a branch it does not have.
@@ -1356,7 +1356,7 @@ describe("ownership", () => {
     ).rejects.toThrow(/archived\. Restore it before changing its owner/);
   });
 
-  it("E32-9 / ruling 118: a CLOSED task refuses a contributor's take; an admin may reassign for the record", async () => {
+  it("E32-9 / ruling 50: a CLOSED task refuses a contributor's take; an admin may reassign for the record", async () => {
     const store = setupProjectedStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "done" }),
@@ -1705,7 +1705,7 @@ describe("reviewer quality notification (FIX #6)", () => {
     expect(rows.map((r) => r.user_id).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id, store.users.selin.id].sort(),
     );
-    // Ruling 361: the row names the reviewer that judged, not the Operator
+    // Ruling 74: the row names the reviewer that judged, not the Operator
     // (CANARY: pass OPERATOR_NOTIFY_FROM at the verdict site).
     const verdictActors = selectRows(
       store.db,
@@ -1834,11 +1834,11 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     expect(quality?.title).toBe("Approval noted, rework still needed");
     expect(quality?.text).toContain("Validation:** failing");
     expect(quality?.text).not.toContain("approved the work");
-    // Ruling 478(g): and it names who objected.
+    // Ruling 81: and it names who objected.
     expect(quality?.text).toContain("Review & validation requested changes");
   });
 
-  it("ruling 478(g) (F40-58): an approval while another required reviewer has not reported waits on that reviewer, never 'rework'", async () => {
+  it("ruling 81 (F40-58): an approval while another required reviewer has not reported waits on that reviewer, never 'rework'", async () => {
     /**
      * WEB-1 at 22:50: "Fact Checker · Review verdict · Approval noted, rework
      * still needed" while the Site Reviewer's run was still going and nobody
@@ -1870,7 +1870,7 @@ describe("validation state machine (A3 — a rejection is not a life sentence)",
     expect(quality?.text).toContain("Validation:** changed");
     expect(quality?.text).toContain("Review & validation has not reviewed it yet");
     expect(`${quality?.title} ${quality?.text}`).not.toMatch(/rework/i);
-    // Ruling 526: the timeline's card reads the note back, the revision for
+    // Ruling 313: the timeline's card reads the note back, the revision for
     // its head and only what the sentence says beyond "… approved on `sha`.".
     // CANARY: reword the note's opening ("signed off on" for "approved on")
     // and the card says it twice.
@@ -2170,7 +2170,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
 
 /**
  * F19-21 — R17-2's "Completed — no changes required" outcome, for the task
- * shape ruling 43 was actually written for.
+ * shape ruling 101 was actually written for.
  *
  * `noChanges` had two writers, both of them inside a delivery that got far
  * enough to see an EMPTY BRANCH. A verification-only task never has one:
@@ -2181,7 +2181,7 @@ describe("F19-18: the delivery push failure surfaces git's redacted stderr", () 
  * nothing for the required reviewers to approve" (the verbatim `[noop]` VC-5
  * hit live). The only exits left were force-accept, archive, or an operator
  * packet whose recommended option was "Manually mark Done" — the ceremony
- * bypass ruling 43 exists to prevent.
+ * bypass ruling 101 exists to prevent.
  *
  * The fix keeps the ceremony whole: the delivery records the verified
  * zero-diff AND mints a base-anchored work revision, so the required reviewers
@@ -2300,7 +2300,7 @@ describe("F19-21: a verification-only task reaches the no-change completion", ()
     expect(text).toContain("clean working tree");
   });
 
-  it("ruling 161 (G35-6): a reviewer's verdict never binds to a discarded revision", async () => {
+  it("ruling 234 (G35-6): a reviewer's verdict never binds to a discarded revision", async () => {
     // Canary: read `parsed.frontmatter.workRevision` instead of
     // `activeWorkRevision(...)` at the verdict binding and the approve pins to
     // the retired head, re-deriving `healthy` for a branch that no longer exists.
@@ -2785,7 +2785,7 @@ describe("U3: a concurrent double-submit writes ONE transition", () => {
   });
 });
 
-/** Ruling 88: the echo an accept dialog sends, built the way `ceremonyFacts`
+/** Ruling 97: the echo an accept dialog sends, built the way `ceremonyFacts`
  *  builds it (accept-confirm-derive.ts) from the task the dialog renders, so a
  *  door is proved against what a person read rather than against the
  *  server's own reading of the file. */
@@ -2795,7 +2795,7 @@ function renderedDisclosure(store: TestStore): AcceptanceDisclosure {
 }
 
 /**
- * F21-2 / ruling 88 (pass 21) — the acceptance ceremony, server-side.
+ * F21-2 / ruling 97 (pass 21) — the acceptance ceremony, server-side.
  *
  * R15-1 put every writer to Done behind one dialog; pass 21 found the whole
  * contract was CLIENT architecture. `AcceptConfirm` states what merges, which
@@ -2805,7 +2805,7 @@ function renderedDisclosure(store: TestStore): AcceptanceDisclosure {
  * a missing echo and a stale one (which is also the R17-1 hardening — the dialog
  * has surfaced head drift since pass 17 while the server enforced nothing).
  */
-describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
+describe("F21-2 / ruling 97: the server-side acceptance disclosure", () => {
   /** The pass-15 acceptable shape: delivered revision, its approving verdict,
    *  and a review PR — so the acceptance really would merge something. The
    *  `patch` / `packet` seams carry the standing OFFER each door is reached
@@ -2978,7 +2978,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
   });
 
-  it("ruling 177: accepting a task interrupts its live runs, notes them and audits the cause", async () => {
+  it("ruling 154: accepting a task interrupts its live runs, notes them and audits the cause", async () => {
     // F36-5 live: HLC-9 was force-accepted while its developer was building;
     // the run finished later and re-invoked the operator on the shipped task.
     // Canary: delete the `interruptLiveRunsOnClosure` call after
@@ -3129,7 +3129,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
    * complete the acceptance on a POST that carried nothing back from it. Their
    * server-side pins — the recommendation id, the packet identity — prove WHICH
    * decision is being settled; neither proves the human saw what merges, which
-   * is what ruling 88 is about.
+   * is what ruling 97 is about.
    */
   const ACCEPT_REC = {
     id: "rec-accept",
@@ -3284,14 +3284,14 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
       { dataRoot: store.dataRoot },
     );
     expect(task(store).frontmatter.stage).toBe("impl");
-    // Ruling 381: the move is BACKWARD, and Apply never asks the human for a
+    // Ruling 47: the move is BACKWARD, and Apply never asks the human for a
     // sentence — the card's own words are the reason, and they land on the
     // transition entry where the operator reads them.
     const applied = task(store).timeline.find((e) => e.type === "transition");
     expect(applied?.text).toContain("Move the task back to In Progress");
   });
 
-  it("ruling 327: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
+  it("ruling 100: the packet door dates the Done record when it WRITES it, not when the ceremony began", async () => {
     /**
      * `resolvePacket` captures `now` at the top and the accept_completion arm
      * used it 114 lines and one GitHub round-trip later — and
@@ -3303,7 +3303,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
      * 05:33:43.377Z, the branch deletion 05:33:44.631Z. The timeline is
      * newest-first, so the file puts the completion at the top while its own
      * timestamp is the oldest of the three — whichever a reader trusts, the
-     * other is wrong. Its text is ruling 318's drift note, correctly measured
+     * other is wrong. Its text is ruling 96's drift note, correctly measured
      * after the refresh, describing a state that did not exist at the instant
      * the record claims. 78 of the board's other 79 accepted tasks went through
      * the DIRECT door, which has always stamped at write time; this is the two
@@ -3406,7 +3406,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   });
 
   it("a NON-accepting packet resolution stays ack-free", async () => {
-    // The scope line of ruling 88: the ceremony fronts acceptances, not
+    // The scope line of ruling 97: the ceremony fronts acceptances, not
     // decisions. `hold_runtime_debug` resolves the packet, writes no Done and
     // merges nothing — a bare resolve is exactly right for it.
     const store = setupProjectedStore(ctx);
@@ -3437,7 +3437,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   });
 
   it("a card dropped on the board's FINAL column is refused bare and accepted with the echo", async () => {
-    // The board's own ceremony has fronted this drop since ruling 53 (R18-7),
+    // The board's own ceremony has fronted this drop since ruling 97 (R18-7),
     // and the reorder POST carried nothing back from it. CANARY: drop the
     // `"ack" in input` line from reorderTask.
     const store = setupProjectedStore(ctx);
@@ -3486,9 +3486,9 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     // from a projection summary, the summary carried no delivered revision, and
     // the ceremony therefore disclosed "No delivered revision recorded." and
     // echoed `revision: "none"` on every task. Against a task that HAD
-    // delivered, that echo is stale by construction — so ruling 88 turned the
+    // delivered, that echo is stale by construction — so ruling 97 turned the
     // board's terminal column into a door no delivered work could pass, while
-    // ruling 53 requires that same ceremony to disclose what it accepts.
+    // ruling 97 requires that same ceremony to disclose what it accepts.
     //
     // Built here the way the COMPONENT builds it (`ceremonyFacts`'s
     // `disclosure` in accept-confirm-derive.ts, off the fields the board hands
@@ -3532,7 +3532,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
   it("a drop on any OTHER column stays ack-free", async () => {
     // The board move is only an acceptance when it lands on the final column;
     // everywhere else it is the plain governed move it always was. (Backward, so
-    // ruling 381 asks for the sentence the drop already collects.)
+    // ruling 47 asks for the sentence the drop already collects.)
     const store = setupProjectedStore(ctx);
     seedReviewed(store);
     await reorderTask(
@@ -3623,7 +3623,7 @@ describe("F21-2 / ruling 88: the server-side acceptance disclosure", () => {
     expect(
       listAuditEvents(store.db, { action: "task.packet.resolved" }),
     ).toHaveLength(0);
-    // Ruling 686: nor does it run what follows an acceptance, which is the
+    // Ruling 154: nor does it run what follows an acceptance, which is the
     // racing write's to run. A resolution that accepted nothing ends no run.
     // CANARY: drop `!alreadyAccepted` from the guard after the write and a
     // person's no-op answer stops the run of whoever accepted first.
@@ -3832,17 +3832,17 @@ describe("recordAgentCompletion attachments (P21 — the producing message names
 });
 
 /**
- * Ruling 128 (pass 34, F34-4): the base branch is created BEFORE the first
+ * Ruling 227 (pass 34, F34-4): the base branch is created BEFORE the first
  * push, and the pre-push gate splits by EVIDENCE — only a positive "no default
  * ref and Viberr could not create it" refuses the push; a probe that merely
  * could not be READ pushes anyway and never claims the base is missing.
  */
-describe("ruling 128: performDelivery bootstraps the base before the first push", () => {
-  // Ruling 144(c): a refused workflow-file push opens a `workflow` scope
+describe("ruling 227: performDelivery bootstraps the base before the first push", () => {
+  // Ruling 221(a): a refused workflow-file push opens a `workflow` scope
   // violation on the task with its remedy, opens no PR, and the next
   // successful push of workflow files resolves it. Canaries: route
   // `push_refused_scope` into the `push_failed` arm; drop the resolve.
-  it("ruling 144: a refused workflow push opens the violation with the remedy, and no PR", async () => {
+  it("ruling 221(a): a refused workflow push opens the violation with the remedy, and no PR", async () => {
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -3897,14 +3897,14 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
   });
 
   /**
-   * Ruling 159 (pass 35, F35-10): a push refused for the store layout is a
+   * Ruling 229 (pass 35, F35-10): a push refused for the store layout is a
    * delivery refusal on the task with the offending paths named, the same
    * shape as the scope refusal above: no PR, a timeline line, a typed outcome
    * the operator and the Deliver button render. Canary: route
    * `push_refused_store_layout` into the `push_failed` arm (the typed outcome
    * and the paths vanish).
    */
-  it("ruling 159: a push refused for the store layout names the paths, opens no PR", async () => {
+  it("ruling 229: a push refused for the store layout names the paths, opens no PR", async () => {
     const store = setupProjectedStore(ctx);
     seedDeliverable(store);
     github = fakeGithubFetch({
@@ -3997,7 +3997,7 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
     expect(timeline[1]!.text).toContain("`d2e0fb0`");
   });
 
-  it("ruling 670: a base the project just took from the repository passes the gate and is the pull request's base", async () => {
+  it("ruling 227: a base the project just took from the repository passes the gate and is the pull request's base", async () => {
     // The gate finds no `main`, a repository with a `master` of its own, and
     // moves the project onto it. CANARY: refuse an adopted base and nothing is
     // pushed; open the pull request against the branch read before the gate
@@ -4059,11 +4059,11 @@ describe("ruling 128: performDelivery bootstraps the base before the first push"
 });
 
 /**
- * Ruling 134(a): a push that moved the head of a REUSED PR is recorded on the
+ * Ruling 229: a push that moved the head of a REUSED PR is recorded on the
  * timeline with the same author rule the "Opened PR" event uses — a human
  * delivery renders as that human. Canary: drop the `recordPushedHead` call.
  */
-describe("ruling 134: the pushed-head event on a reused PR", () => {
+describe("ruling 229: the pushed-head event on a reused PR", () => {
   it("writes `Pushed <sha> to PR #N (was <old>)` attributed to the human who delivered, and records the head on the PR", async () => {
     const REPO_PATH = "/repos/akin-ozer/viberr";
     const store = setupProjectedStore(ctx);
@@ -4118,11 +4118,11 @@ describe("ruling 134: the pushed-head event on a reused PR", () => {
 });
 
 /**
- * Ruling 137 (pass 34, F34-15): a move AWAY from the acceptance boundary
+ * Ruling 99 (pass 34, F34-15): a move AWAY from the acceptance boundary
  * withdraws the standing acceptance offers on the record. The transition
  * filter already dropped the cards; the point is the note and the audit row.
  */
-describe("ruling 137: a move off the acceptance boundary withdraws the offers", () => {
+describe("ruling 99: a move off the acceptance boundary withdraws the offers", () => {
   it("review → impl withdraws the accept card and the terminal transition card, on the record; the run_agent card survives", async () => {
     // Canary: drop the `transitionStage` withdrawal site — the cards still
     // vanish (the transition filter), but silently: no note, no row.
@@ -4154,7 +4154,7 @@ describe("ruling 137: a move off the acceptance boundary withdraws the offers", 
     expect(parsed.frontmatter.recommendations.map((r) => r.id)).toEqual(["r-run"]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Recommendation withdrawn");
     expect(note?.text).toContain('"Accept completion and move VIB-1 to Done"');
-    // Ruling 387 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
+    // Ruling 72 (F39-14): the withdrawal is a CONSEQUENCE of the move, and
     // its timestamp is the later of the two, so it sits ABOVE the transition in
     // a newest-first timeline — and the file stays strictly newest-first, which
     // viberr's own `timeline.out_of_order` diagnostic checks.
@@ -4195,12 +4195,12 @@ function deployOperatorOn(store: ReturnType<typeof setupProjectedStore>): void {
 }
 
 /**
- * Ruling 533: a task is filed WITH its input. On a board that delivers results
+ * Ruling 76: a task is filed WITH its input. On a board that delivers results
  * the file a person hands over (an inventory, a screenshot) is the task, and it
  * could only be attached after the operator had triaged a goal that could not
  * show it.
  */
-describe("ruling 533: a task filed with its input", () => {
+describe("ruling 76: a task filed with its input", () => {
   it("the operator's create trigger finds the files on disk and claimed for the person", async () => {
     // CANARY: leave the files out of `createTask`'s own writes (attach them
     // afterwards, the way the task page does) and the triage run starts on a
@@ -4236,7 +4236,7 @@ describe("ruling 533: a task filed with its input", () => {
     const note = parsed.timeline.find((e) => e.title === "Attachment added")!;
     expect(note.text).toContain("`inventory.csv`");
     expect(note.text).toContain("`portal.png`");
-    // Ruling 255: one creation is one instant.
+    // Ruling 72: one creation is one instant.
     expect(note.occurredAt).toBe(parsed.frontmatter.createdAt);
     // Both rows share the creation's instant, so they are compared by name.
     const added = listAuditEvents(store.db, { action: "task.attachment.added" });
@@ -4296,17 +4296,17 @@ describe("ruling 533: a task filed with its input", () => {
 });
 
 /**
- * Ruling 140(a) (pass 34, G34-3): a named owner is seated in the SAME write
+ * Ruling 50 (pass 34, G34-3): a named owner is seated in the SAME write
  * that creates the task, before the operator's `create` trigger, so the first
  * run bills the named owner; the hand-off rule is the ONE shared check.
  */
 /**
- * Ruling 573: a comment carries files. They land as the task's attachments,
+ * Ruling 76: a comment carries files. They land as the task's attachments,
  * claimed by the comment (so the panel says who added them and no run takes
  * them), the comment's text names them for every reader, and a refused file
  * refuses the comment with nothing written.
  */
-describe("ruling 573: a comment with files", () => {
+describe("ruling 76: a comment with files", () => {
   it("puts the files on the task, claimed and named by the comment", async () => {
     // CANARY: drop `attachments` from the comment's event and the files land
     // unclaimed, the next completion's to take.
@@ -4362,7 +4362,7 @@ describe("ruling 573: a comment with files", () => {
   });
 
   /**
-   * Rulings 388 and 675: a comment's file never replaces one an agent run
+   * Rulings 84 and 76: a comment's file never replaces one an agent run
    * saved, and the same name sent in the other Unicode form is that file.
    */
   it("refuses a file named like one an agent saved, in either Unicode form", async () => {
@@ -4408,7 +4408,7 @@ describe("ruling 573: a comment with files", () => {
   });
 });
 
-describe("ruling 140(a): a named owner at creation", () => {
+describe("ruling 50: a named owner at creation", () => {
   it("the operator's create trigger reads the NAMED owner from the file, exactly once", async () => {
     // Asserting right after `await createTask` proves nothing: the hand-off is
     // fired with `void` and awaits a dynamic import first. The injected
@@ -4527,12 +4527,12 @@ describe("ruling 140(a): a named owner at creation", () => {
 });
 
 /**
- * Ruling 140(b) (pass 34, U34-11): the person whose owner seat changed is
- * told. Under ruling 127 the seat is the credential principal and the
+ * Ruling 50 (pass 34, U34-11): the person whose owner seat changed is
+ * told. Under ruling 137 the seat is the credential principal and the
  * acceptance authority, so Omar learned he owned JC-15 from the failure packet
  * his missing credential produced.
  */
-describe("ruling 140(b): a seat change notifies the person whose seat it is", () => {
+describe("ruling 50: a seat change notifies the person whose seat it is", () => {
   /** Pass 34 review: BOTH sides of a hand-off are told, independently — an
    *  admin moving the seat between two other people used to tell the new owner
    *  and leave the displaced one to find out from a failure packet. */
@@ -4770,9 +4770,9 @@ describe("pass 35: operator and task actions", () => {
       5_000,
     );
 
-  describe("ruling 151 (F35-2): the boundary always wins in transitionStage", () => {
+  describe("ruling 111 (F35-2): the boundary always wins in transitionStage", () => {
     it("an operator-authorized move across an approval boundary is refused, whatever the caller", async () => {
-      // Canary: delete the ruling-151 throw in the `ctx.operatorAuthorized` arm.
+      // Canary: delete the ruling-111 throw in the `ctx.operatorAuthorized` arm.
       const store = setupProjectedStore(ctx);
       approveReviewEntry(store);
       seed(store, { stage: "impl" });
@@ -4802,7 +4802,7 @@ describe("pass 35: operator and task actions", () => {
     });
   });
 
-  describe("ruling 152(a) (G35-5): a live operator run's move queues no fresh operator turn", () => {
+  describe("ruling 120 (G35-5): a live operator run's move queues no fresh operator turn", () => {
     it("with ctx.operatorRun set the runOperator seam is never called; without it, once", async () => {
       // Canary: remove the `ctx.operatorRun` arm before the re-trigger.
       const store = setupProjectedStore(ctx);
@@ -4847,7 +4847,7 @@ describe("pass 35: operator and task actions", () => {
       expect(live).not.toHaveBeenCalled();
     });
 
-    it("ruling 357: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
+    it("ruling 127: a move after the drive's own delivery stamps `actedAfterDelivery`; a move without one stamps nothing", async () => {
       // CANARY: drop the stamp from the `ctx.operatorRun` arm.
       const store = setupProjectedStore(ctx);
       deployOperator(store);
@@ -4928,7 +4928,7 @@ describe("pass 35: operator and task actions", () => {
     it.each([
       ["without a completion packet, files no card and re-invokes the operator to write one", false],
       ["with the operator's completion packet on the revision, files the card", true],
-    ])("ruling 521: delivered work %s", async (_label, packetWritten) => {
+    ])("ruling 130: delivered work %s", async (_label, packetWritten) => {
       // CANARY: drop `requirePacket: true` from the fold and the first row
       // files an acceptance card for work Operator never summarized.
       const store = setupProjectedStore(ctx);
@@ -5058,7 +5058,7 @@ describe("pass 35: operator and task actions", () => {
   });
 
   describe("F35-5: an @mention whose run did not start leaves a note and an audit row", () => {
-    /** Ruling 177 tests: the `@operator` handle only routes when an operator is
+    /** Ruling 52 tests: the `@operator` handle only routes when an operator is
      *  deployed on the project — without one the mention is unrouted, not refused. */
     function deployOperatorFor(store: TestStore): void {
       const projectFile = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -5084,7 +5084,7 @@ describe("pass 35: operator and task actions", () => {
       });
     }
 
-    it("ruling 177: an @operator mention on an ARCHIVED task writes 'Mention not started' and starts no run", async () => {
+    it("ruling 52: an @operator mention on an ARCHIVED task writes 'Mention not started' and starts no run", async () => {
       // Canary: drop the `closed` refusal from `runOperator` (or the note from
       // the `operatorRefused` branch of `commentToAgent`): F36-4 — a paid
       // operator run starts on an archived task behind a page whose own
@@ -5109,7 +5109,7 @@ describe("pass 35: operator and task actions", () => {
       expect(listAuditEvents(store.db, { action: "task.comment.unrouted" })).toHaveLength(1);
     });
 
-    it("ruling 177: an @operator mention on a task at the terminal stage is refused the same way", async () => {
+    it("ruling 52: an @operator mention on a task at the terminal stage is refused the same way", async () => {
       const store = setupProjectedStore(ctx);
       deployOperatorFor(store);
       seed(store, { stage: "done", waiting: "none" });
@@ -5235,7 +5235,7 @@ describe("pass 35: operator and task actions", () => {
   });
 
   /**
-   * Ruling 216 (F37-36). `heldAtStage` is the stranded backstop's durable
+   * Ruling 120 (F37-36). `heldAtStage` is the stranded backstop's durable
    * marker, and its note tells the reader: "Coordination is paused here: run
    * the operator manually when the hold should end, adjust the goal, or loosen
    * the boundary." Live on SHOP-10 I did the first one. The operator ran, took
@@ -5245,7 +5245,7 @@ describe("pass 35: operator and task actions", () => {
    * not work. Every other human re-litigation clears it: a goal edit, a packet
    * resolution, a transition, acceptance.
    */
-  describe("ruling 216 (F37-36): liftStageHoldForPerson", () => {
+  describe("ruling 120 (F37-36): liftStageHoldForPerson", () => {
     function stageHeld(store: TestStore): void {
       seed(store, { stage: "review", heldAtStage: "review" });
     }
@@ -5289,7 +5289,7 @@ describe("pass 35: operator and task actions", () => {
     });
   });
 
-  describe("ruling 157 (F35-8): liftHoldForRun", () => {
+  describe("ruling 54 (F35-8): liftHoldForRun", () => {
     const hold: TaskPacket = {
       type: "blocked",
       kind: "Work stalled",
@@ -5371,14 +5371,14 @@ describe("pass 35: operator and task actions", () => {
 });
 
 /**
- * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13, G35-5 addendum (d)).
+ * Pass 35 S15: rulings 95 and 90 (F35-12, F35-13, G35-5 addendum (d)).
  *
  * A board with a stage PAST the review one (`merge`), as the k9s clone had:
  * the operators moved tasks to Merge and recommended acceptance on PRs whose
  * `mergeable: conflicting` was already on the file, and a conflict rework at
  * Merge had no route back to a stage where a reviewer could run.
  */
-describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
+describe("pass 35 S15: rulings 95 and 90 at the merge stage", () => {
   function withMergeBoard(store: TestStore): void {
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -5424,11 +5424,11 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   }
 
   /**
-   * Ruling 412 (F39-39), live on ax-clone AX-18.
+   * Ruling 47 (F39-39), live on ax-clone AX-18.
    *
    * The operator planned Review to Verify to rework against a reviewer's
    * complete blocker list. `validation` was `changed` rather than `failing`
-   * (the list arrived as a comment, not a verdict), so ruling 163 licensed
+   * (the list arrived as a comment, not a verdict), so ruling 90 licensed
    * exactly one backward move, into the review stage, where the task already
    * was. It got "No allowed transition from Review to Verify." and nothing
    * else -- and because the step THROWS rather than being refused, the rest of
@@ -5436,9 +5436,9 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
    *
    * Both the reason and the way out were in that function's own scope.
    */
-  it("ruling 412: a refused backward move says WHY, and names the way forward", async () => {
+  it("ruling 47: a refused backward move says WHY, and names the way forward", async () => {
     const store = setupProjectedStore(ctx);
-    // The deliverer is deployed here: ruling 702 names an engaged deliverer as
+    // The deliverer is deployed here: ruling 47 names an engaged deliverer as
     // the way out only when it can still run.
     withScopedDeveloper(store);
     seedChangedAt(store, "merge");
@@ -5468,7 +5468,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     );
   });
 
-  it("ruling 429(b): an UNFLAGGED backward move off a changed revision is told the truth, not 'neither'", async () => {
+  it("ruling 47: an UNFLAGGED backward move off a changed revision is told the truth, not 'neither'", async () => {
     // Live on AX-20 (00:47): the operator's plan moved Review to Verify without
     // the rework flag, on a task whose revision had changed after its verdict,
     // and was told "rework needs a failing verdict or a revision that changed
@@ -5495,7 +5495,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     );
   });
 
-  it("ruling 163 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
+  it("ruling 90 (a): the operator's rework move Merge to Review is allowed on `changed`; Merge to In Progress is not", async () => {
     // Canary: require `validation === "failing"` again in transitionStage's
     // `isReworkMove`. Live: KNC-20's operator was refused "No allowed
     // transition from Merge to Review" after a conflict rework.
@@ -5522,7 +5522,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 
   /**
-   * Ruling 702, live on BLOG-8.
+   * Ruling 112, live on BLOG-8.
    *
    * The task's files were taken from another task, so it passed its writing
    * stage with no run and no delivering agent. Two stages on the operator
@@ -5547,7 +5547,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
         },
       ],
       // As on a real board: the reviewer is the project's required reviewer,
-      // so it is never offered as an agent to hand delivery to (ruling 556).
+      // so it is never offered as an agent to hand delivery to (ruling 89).
       requiredReviewers: [{ stageId: "review", profileId: "reviewer" }],
     });
   }
@@ -5589,9 +5589,9 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   const NEITHER =
     "A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither.";
   const DELIVERER_RUNS =
-    " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task.";
+    " The engaged deliverer runs at every stage (ruling 181), so dispatch it here instead of moving the task.";
 
-  it("ruling 702: a task with no delivering agent goes back to where one can be engaged, by the operator's own move", async () => {
+  it("ruling 112: a task with no delivering agent goes back to where one can be engaged, by the operator's own move", async () => {
     // Canary: drop the `engage` arm of transitionStage's `isReworkMove`.
     const store = setupProjectedStore(ctx);
     withScopedDeveloper(store);
@@ -5603,7 +5603,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(rows.some((r) => r.details?.by === "operator" && r.details?.to === "impl")).toBe(true);
   });
 
-  it("ruling 702: any other backward move is refused, and the refusal names those stages and their agents, not a deliverer", async () => {
+  it("ruling 47: any other backward move is refused, and the refusal names those stages and their agents, not a deliverer", async () => {
     // Canary: restore the unconditional "engaged deliverer" sentence, or name
     // the required reviewer's stage among them.
     const store = setupProjectedStore(ctx);
@@ -5617,7 +5617,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("merge");
   });
 
-  it("ruling 702: with a delivering agent engaged nothing changes: the move is refused and the deliverer is the way out", async () => {
+  it("ruling 47: with a delivering agent engaged nothing changes: the move is refused and the deliverer is the way out", async () => {
     // Canary: license the move whenever a scoped agent exists, engaged or not.
     const store = setupProjectedStore(ctx);
     withScopedDeveloper(store);
@@ -5628,7 +5628,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("merge");
   });
 
-  it("ruling 702: a deliverer whose profile is no longer deployed is no deliverer: the move is open, and no refusal names it", async () => {
+  it("ruling 112: a deliverer whose profile is no longer deployed is no deliverer: the move is open, and no refusal names it", async () => {
     // The engagement outlived the agent: nobody can dispatch it, and the
     // refusal used to send the operator to it. Canary: read `delivers` alone.
     const store = setupProjectedStore(ctx);
@@ -5640,8 +5640,8 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("impl");
   });
 
-  it("ruling 702: a task that has delivered is not moved this way, and its refusal names no stage", async () => {
-    // What was delivered is reworked by review (R7-4, ruling 163).
+  it("ruling 112: a task that has delivered is not moved this way, and its refusal names no stage", async () => {
+    // What was delivered is reworked by review (R7-4, ruling 90).
     // Canary: drop the first guard of `engageStagesFor`.
     const store = setupProjectedStore(ctx);
     withScopedDeveloper(store);
@@ -5653,7 +5653,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("merge");
   });
 
-  it("ruling 702: the move is the operator's: the same call without its authority is refused and is told no stage", async () => {
+  it("ruling 112: the move is the operator's: the same call without its authority is refused and is told no stage", async () => {
     // Canary: drop `ctx.operatorAuthorized === true` from `isReworkMove`, or
     // name the stages to every caller.
     const store = setupProjectedStore(ctx);
@@ -5665,7 +5665,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("merge");
   });
 
-  it("ruling 702: whoever the caller, the deliverer is named when it can run and not when it cannot", async () => {
+  it("ruling 47: whoever the caller, the deliverer is named when it can run and not when it cannot", async () => {
     // Canary: name the deliverer to a caller without operator authority from
     // the engagement alone, or never name it to that caller.
     const store = setupProjectedStore(ctx);
@@ -5681,7 +5681,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     );
   });
 
-  it("ruling 702: where no earlier stage has an agent to engage, the refusal names no way out it does not have", async () => {
+  it("ruling 47: where no earlier stage has an agent to engage, the refusal names no way out it does not have", async () => {
     // The one agent on this board is declared for Review, where the task
     // stands: nothing earlier offers anybody.
     // Canary: name the stages whether or not there are any.
@@ -5693,7 +5693,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     );
   });
 
-  it("ruling 163 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
+  it("ruling 90 (b): resolving the conflict packet's redirect at Merge returns the task to Review in the same write", async () => {
     // Canary: drop the `option.rework` branch in resolvePacket's default arm.
     const store = setupProjectedStore(ctx);
     withMergeBoard(store);
@@ -5739,7 +5739,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(rows.some((r) => r.details?.via === "packet_redirect" && r.details?.to === "review")).toBe(true);
   });
 
-  it("ruling 163 (b): a redirect without the rework marker leaves the stage alone", async () => {
+  it("ruling 90 (b): a redirect without the rework marker leaves the stage alone", async () => {
     const store = setupProjectedStore(ctx);
     withMergeBoard(store);
     seedChangedAt(store, "merge", { readiness: "blocked", waiting: "human" });
@@ -5766,7 +5766,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(taskFile(store).frontmatter.stage).toBe("merge");
   });
 
-  it("ruling 163 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
+  it("ruling 90 (c): delivering a changed revision at Merge records the transition back to Review", async () => {
     // Canary: drop the `returnChangedRevisionToReview` call in performDelivery.
     const REPO_PATH = "/repos/akin-ozer/viberr";
     const store = setupProjectedStore(ctx);
@@ -5811,7 +5811,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(listAuditEvents(store.db, { action: "task.transition" }).some((r) => r.details?.via === "delivery")).toBe(true);
   });
 
-  it("ruling 162 (a0): a post-gate GitHub merge refusal prints the gate's sentence, from the gate function", async () => {
+  it("ruling 95 (a0): a post-gate GitHub merge refusal prints the gate's sentence, from the gate function", async () => {
     // KNC-16: the gate passed on a cached `clean`, GitHub answered 405 and the
     // person read a second sentence for the same fact, with no way out.
     // Canary: print `GitHub refuses to merge ...: <message>` whenever the merge
@@ -5850,12 +5850,12 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 
   /**
-   * Ruling 449 (O39-c): the accept dialog's "update the branch and re-review
+   * Ruling 97 (O39-c): the accept dialog's "update the branch and re-review
    * first". Live on ax-clone two green pull requests merged a minute apart
    * and left main red: the ceremony merged the newer base into the second and
    * merged a head nobody had run.
    */
-  describe("ruling 449: refreshAndReview", () => {
+  describe("ruling 97: refreshAndReview", () => {
     const approved = (store: TestStore) =>
       seedChangedAt(store, "review", {
         workRevision: workRev("rev_1"),
@@ -6013,7 +6013,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 
   /**
-   * Ruling 318. The permanent Done record's drift note was computed from
+   * Ruling 96. The permanent Done record's drift note was computed from
    * `existing` — the frontmatter read BEFORE `attemptAcceptanceMerge`. That
    * call is the thing that refreshes the branch: `refreshBranchForAcceptance` →
    * `recordBranchRefresh` pushes the merge commit, calls `reconcileTask`, and
@@ -6033,7 +6033,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
    * FILE CHANGES DURING THE MERGE, which is the mechanism, and whether the note
    * is read before or after it.
    */
-  it("ruling 318: the Done record names the drift the acceptance itself created", async () => {
+  it("ruling 96: the Done record names the drift the acceptance itself created", async () => {
     const store = setupProjectedStore(ctx);
     seedChangedAt(store, "review", {
       workRevision: workRev("rev_1"),
@@ -6127,7 +6127,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
     expect(line.text).toContain("README.md, Makefile");
   });
 
-  it("ruling 332: the refused acceptance hands the conflict to the operator instead of waking nobody", async () => {
+  it("ruling 244: the refused acceptance hands the conflict to the operator instead of waking nobody", async () => {
     /**
      * The refusal above stamps `mergeable: conflicting`, writes the note and
      * returns a 409 — and that used to be all of it. No packet, no run, no
@@ -6279,10 +6279,10 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
   });
 });
 
-// ------------------------------------------------ ruling 160: closed by a person
+// ------------------------------------------------ ruling 232: closed by a person
 
 /**
- * Ruling 160 (pass 35, F35-11): a pull request a person closed without merging
+ * Ruling 232 (pass 35, F35-11): a pull request a person closed without merging
  * is that person's decision about the task. `openTaskPr` answers
  * `closed_by_human`; the delivery door renders it as a refusal naming the PR
  * and the closer, and a person's answer to the recovery packet is what lets
@@ -6290,7 +6290,7 @@ describe("pass 35 S15: rulings 162 and 163 at the merge stage", () => {
  * of `performDelivery` (first test); drop the `closure.answered` stamp in
  * `resolvePacket` (second test).
  */
-describe("ruling 160: a PR closed by a person refuses delivery until the packet is answered", () => {
+describe("ruling 232: a PR closed by a person refuses delivery until the packet is answered", () => {
   function seedClosedPr(store: TestStore, closure: NonNullable<PrRef["closure"]> | null = {
     at: "2026-09-06T19:33:19.000Z",
     by: "akin-ozer",
@@ -6429,14 +6429,14 @@ describe("ruling 160: a PR closed by a person refuses delivery until the packet 
 
 
 /**
- * Ruling 245 (pass 37, F37-74): the anchor tells a run what another task owns,
+ * Ruling 60 (pass 37, F37-74): the anchor tells a run what another task owns,
  * BEFORE it edits anything.
  *
  * The delivery gate refuses a push that touches a leased file, but a refusal
  * that arrives after the work is done is a wasted turn, not a guard. The anchor
  * is the "read this before you act" block, so the lease belongs in it.
  */
-describe("ruling 245: the canonical anchor names the files another task owns", () => {
+describe("ruling 60: the canonical anchor names the files another task owns", () => {
   let canonicalTaskAnchorFn: typeof import("./task-replies.server").canonicalTaskAnchor;
   beforeEach(async () => {
     canonicalTaskAnchorFn = (await import("./task-replies.server")).canonicalTaskAnchor;
@@ -6481,7 +6481,7 @@ describe("ruling 245: the canonical anchor names the files another task owns", (
 });
 
 /**
- * Ruling 333 — the clause that told the next agent the tree was clean.
+ * Ruling 156(a) — the clause that told the next agent the tree was clean.
  *
  * "No changes were delivered." was a literal appended to every classified
  * provider refusal and to every unclassified failure except the two cut-off
@@ -6496,7 +6496,7 @@ describe("ruling 245: the canonical anchor names the files another task owns", (
  * "it ran 48 turns … That file is on disk and uncommitted. … Do not regenerate
  * work that is already in the tree."
  */
-describe("runOutcomeClause (ruling 333)", () => {
+describe("runOutcomeClause (ruling 156(a))", () => {
   it("says nothing survived only when nothing did", () => {
     expect(runOutcomeClause({ turns: 0, attachments: 0 })).toBe(" No changes were delivered.");
   });

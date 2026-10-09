@@ -86,7 +86,7 @@ async function takeSubsystemsDown(): Promise<void> {
  *  with any room at all classifies `ok` — the "low"/"critical" cases raise
  *  them instead of fabricating a measurement. The thresholds are read through
  *  `getEnv()`, which parses once per process, so the cached parse goes too
- *  (ruling 458(c)). */
+ *  (ruling 39). */
 async function setDiskThresholds(lowMb: number, criticalMb: number): Promise<void> {
   process.env.VIBERR_DISK_LOW_FREE_MB = String(lowMb);
   process.env.VIBERR_DISK_CRITICAL_FREE_MB = String(criticalMb);
@@ -138,7 +138,7 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   /**
-   * Ruling 217 (F37-37). Live on pass 37 the projection store went to
+   * Ruling 22 (F37-37). Live on pass 37 the projection store went to
    * `SQLITE_CORRUPT` under a running process: every rebuild threw, every task
    * page 500ed, and a run sat `running` for twenty minutes with no process
    * behind it. For the twelve minutes that lasted, this endpoint answered
@@ -146,7 +146,7 @@ describe("/resources/health — honest status (gap 17)", () => {
    * read fine, and nothing else was asked. Viberr wrote the store's own error
    * to the log on every failed rebuild and had nowhere to put the fact.
    */
-  it("names a projection that cannot be rebuilt from the files (ruling 217)", async () => {
+  it("names a projection that cannot be rebuilt from the files (ruling 22)", async () => {
     const { recordProjectionFault, resetProjectionFaultsForTests } = await import(
       "~/server/projections/store-health.server"
     );
@@ -183,14 +183,14 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   /**
-   * Ruling 218 (F37-38): the defect in 217's own first version. It held ONE
+   * Ruling 22 (F37-38): the defect in 217's own first version. It held ONE
    * slot, so the next file that projected fine cleared it — and ninety seconds
    * after the corruption above was repaired, a transient `disk I/O error` left
    * SHOP-4's card reading "waiting on you" while its file said `waiting:
    * agent`, with health back to `ok` because some other file had rebuilt in
    * between. A fault is a fact about ONE file.
    */
-  it("a different file projecting does not clear another file's fault (ruling 218)", async () => {
+  it("a different file projecting does not clear another file's fault (ruling 22)", async () => {
     const { recordProjectionFault, clearProjectionFault, resetProjectionFaultsForTests } =
       await import("~/server/projections/store-health.server");
     try {
@@ -206,7 +206,7 @@ describe("/resources/health — honest status (gap 17)", () => {
         latest: { sourcePath: "projects/shop/tasks/SHOP-4/task.md" },
       });
       // …and the file's OWN success is what ends it. A latch that outlived its
-      // fault would alarm forever, which is the thing ruling 146 refused to let
+      // fault would alarm forever, which is the thing ruling 40 refused to let
       // this endpoint do.
       clearProjectionFault("projects/shop/tasks/SHOP-4/task.md");
       const cleared = (await probe()).body;
@@ -259,11 +259,11 @@ describe("/resources/health — honest status (gap 17)", () => {
     expect(body.lock).toBeNull();
   });
 
-  it("ruling 146: one person's refused credential does not make the INSTANCE unready", async () => {
-    // Before ruling 146 this pushed `credential:<backend>` into `degraded`, so
+  it("ruling 40: one person's refused credential does not make the INSTANCE unready", async () => {
+    // Before ruling 40 this pushed `credential:<backend>` into `degraded`, so
     // `?probe=readiness` answered 503 for the whole deployment because ONE
     // member's key expired — and an orchestrator drained traffic from an
-    // instance serving everyone else fine. Since ruling 127 the credential is
+    // instance serving everyone else fine. Since ruling 137 the credential is
     // per person, so that is not an instance fact.
     // Canary: push `credential:`/`quota:` back into `degraded` in
     // health-snapshot.server.ts and the readiness probe below 503s again.
@@ -294,8 +294,8 @@ describe("/resources/health — honest status (gap 17)", () => {
     }
   });
 
-  it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 127)", async () => {
-    // Ruling 127 replaced "is this backend configured on the instance" with the
+  it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 137)", async () => {
+    // Ruling 137 replaced "is this backend configured on the instance" with the
     // only instance-level fact that survives a per-person credential model: how
     // many people have connected it. Nobody has here, and an instance where
     // nobody uses Codex is a CORRECT deployment — alarming would train the

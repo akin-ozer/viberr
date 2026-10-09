@@ -79,7 +79,7 @@ describe("buildResourceCatalog (item-2: live resource picker)", () => {
   });
 
   /**
-   * Ruling 479(b) (F40-37): live, `cloudflare-api` needed an OAuth sign-in, so
+   * Ruling 184 (F40-37): live, `cloudflare-api` needed an OAuth sign-in, so
    * every run dropped it, while the Agents page painted its chip like its
    * healthy neighbours. The catalog carries the registry's word against a
    * server, in the run resolver's order. Canary: drop `mcpRunWarning`'s oauth

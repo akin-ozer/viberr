@@ -13,7 +13,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
  * themselves are model-catalog.server.test.ts's), and defaults an unknown
  * backend to claude so the modal always renders.
  *
- * Ruling 127 gave this route BOTH arms to answer, and which one it takes is a
+ * Ruling 137 gave this route BOTH arms to answer, and which one it takes is a
  * fact about the person asking: Claude's live `supportedModels()` list is what
  * ONE account offers, so the route resolves the VIEWER's own credential
  * (`runCredentialFor`) and hands it to the catalog. A viewer who has not
@@ -33,7 +33,7 @@ beforeAll(async () => {
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda;
-  // Ruling 127: the enhanced probe needs the VIEWER's own Claude credential,
+  // Ruling 137: the enhanced probe needs the VIEWER's own Claude credential,
   // and the demo seed connects nobody — so the route takes the curated path by
   // construction and never spawns a live supportedModels() query. That is the
   // product's real behaviour for a person who has not connected Claude, not a
@@ -71,7 +71,7 @@ async function runLoader(
 
 describe("resources/model-catalog", () => {
   /**
-   * Ruling 457, test audit L14-29. The agent editors load this through a
+   * Ruling 11, test audit L14-29. The agent editors load this through a
    * fetcher when they open and when the backend changes, and `requireUser`
    * answered a missing session with a login redirect naming THIS route as the
    * returnTo: a fetcher follows a redirect as a navigation, so opening an
@@ -114,7 +114,7 @@ describe("resources/model-catalog", () => {
   });
 
   /**
-   * Ruling 127, the OTHER arm: a viewer who HAS connected Claude gets the list
+   * Ruling 137, the OTHER arm: a viewer who HAS connected Claude gets the list
    * their own account offers.
    *
    * Nothing here spawns a binary or opens a socket. The catalog caches a live
@@ -148,7 +148,7 @@ describe("resources/model-catalog", () => {
     await connectFakeBackend(app.db, ardaId, "claude");
     try {
       // The cache entry Arda's own credential would produce. The account's
-      // home is the identity the catalog keys on (ruling 507), and it is the
+      // home is the identity the catalog keys on (ruling 138), and it is the
       // one the route resolves for him (`runCredentialFor` reads the same one).
       const home = userBackendHome(ardaId, "claude");
       const account = getBackendCredential(app.db, ardaId, "claude")!;
@@ -221,7 +221,7 @@ describe("resources/model-catalog", () => {
       const body: ModelCatalogBody = await res.json();
       const sol = body.data.models.find((m) => m.value === "gpt-5.6-sol");
       expect(sol?.unavailable?.reason).toContain("not supported");
-      // An unmarked model carries no mark (unknown-but-offered, ruling 19).
+      // An unmarked model carries no mark (unknown-but-offered, ruling 220).
       expect(
         body.data.models.find((m) => m.value === "gpt-5.6-terra")?.unavailable,
       ).toBeUndefined();

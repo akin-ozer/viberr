@@ -4,7 +4,7 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
 import { useCsrfToken } from "~/ui/csrf-input";
 import { useActionToast, type ActionResult } from "~/ui/use-action-toast";
 
-/** The file a person takes off a task's record (ruling 582), posted to the
+/** The file a person takes off a task's record (ruling 80), posted to the
  *  route of the task that holds it. */
 export interface RemoveTarget {
   name: string;
@@ -12,10 +12,10 @@ export interface RemoveTarget {
 }
 
 /**
- * Ruling 582: the confirm before a project admin takes a file off a task's
+ * Ruling 80: the confirm before a project admin takes a file off a task's
  * record, and the one fetcher that sends it. The attachment viewer's provider
  * holds it, which stays mounted, so the answer lands after the dialog has gone.
- * Ruling 584 gave a comment's words to the operator; no person removes them.
+ * Ruling 133 gave a comment's words to the operator; no person removes them.
  */
 export function useRemoveFromRecord(): [ask: (target: RemoveTarget) => void, dialog: ReactNode] {
   const fetcher = useFetcher<ActionResult>();

@@ -72,7 +72,7 @@ export function taskDetail(patch: Partial<TaskDetail> = {}): TaskDetail {
   };
 }
 
-/** A run's principal: Arda Kaya (`u-arda`) with both backends connected (ruling 127). */
+/** A run's principal: Arda Kaya (`u-arda`) with both backends connected (ruling 137). */
 export function connectedPrincipal(patch: Partial<TaskRunPrincipalView> = {}): TaskRunPrincipalView {
   return {
     ownerUserId: "u-arda",

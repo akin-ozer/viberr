@@ -13,7 +13,7 @@ import {
 } from "./backend-quota.server";
 
 /**
- * G35-4 / ruling 152(c) (pass 35): the reset instant of a five-hour Codex
+ * G35-4 / ruling 151 (pass 35): the reset instant of a five-hour Codex
  * window and the hold a dispatch honours.
  *
  * Live, the Codex CLI refused with "try again at 6:18 PM": a time, no date,
@@ -87,7 +87,7 @@ describe("parseQuotaResetAt: a time-only Codex refusal (G35-4)", () => {
   });
 });
 
-describe("parseQuotaResetAt: an emitted epoch and a (UTC) clock (D5, ruling 130(d))", () => {
+describe("parseQuotaResetAt: an emitted epoch and a (UTC) clock (D5, ruling 160(a))", () => {
   it("reads an emitted epoch as exact and a (UTC) clock as its next UTC occurrence, and answers null rather than guessing", () => {
     const rows: { text: string; observed?: string; expected: QuotaReset | null }[] = [
       // Claude: a bare unix epoch after a pipe — no interpretation, no timezone.
@@ -120,7 +120,7 @@ describe("parseQuotaResetAt: an emitted epoch and a (UTC) clock (D5, ruling 130(
   });
 });
 
-describe("backendDispatchHold (ruling 152(c))", () => {
+describe("backendDispatchHold (ruling 151)", () => {
   const OBSERVED = "2026-09-06T14:03:00.000Z";
   const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
   const OWNER = "u_arda";
@@ -168,7 +168,7 @@ describe("backendDispatchHold (ruling 152(c))", () => {
     ).toBeNull();
   });
 
-  it("ruling 146: the hold is about the account it names, so another person's dispatch is not held; a record naming nobody holds everyone", () => {
+  it("ruling 151: the hold is about the account it names, so another person's dispatch is not held; a record naming nobody holds everyone", () => {
     const db = ctx.makeDb();
     recordBackendQuotaExhaustion(db, "codex", exhaustion());
     expect(backendDispatchHold(db, "codex", { nowMs, credentialUserId: "u_someone_else" })).toBeNull();
@@ -183,14 +183,14 @@ describe("backendDispatchHold (ruling 152(c))", () => {
 });
 
 /**
- * Ruling 165: a change to the named person's credential retires the records
+ * Ruling 160(b): a change to the named person's credential retires the records
  * observed on the credential it replaces, and the dispatch hold with them.
  * The exhaustion and the credential refusal are retired through the real
  * writers in `backend-credentials.server.test.ts` ("a change of the account in
  * use retires the refusal observed on the previous one"), which record no
  * reading; the reading is retired here.
  */
-describe("retireBackendRecordsFor (ruling 165)", () => {
+describe("retireBackendRecordsFor (ruling 160(b))", () => {
   const OBSERVED = "2026-09-07T15:33:00.000Z";
   const nowMs = Date.parse(OBSERVED) + 5 * 60_000;
   const nowIso = new Date(nowMs).toISOString();
@@ -199,8 +199,8 @@ describe("retireBackendRecordsFor (ruling 165)", () => {
     new Map(latestBackendRateLimits(db, nowIso).map((row) => [row.backend, row]));
 
   /**
-   * Ruling 294 (pass 37, F37-129): the utilization READING goes with the
-   * account too. Ruling 165's own sentence is "the refusal Viberr observed on
+   * Ruling 161 (pass 37, F37-129): the utilization READING goes with the
+   * account too. Ruling 160(b)'s own sentence is "the refusal Viberr observed on
    * the slot goes with it", and it was applied to two of the three records this
    * module keeps.
    *
@@ -210,7 +210,7 @@ describe("retireBackendRecordsFor (ruling 165)", () => {
    * connected, on the surface a person checks to decide whether there is room
    * to run. The refusal beside it retired correctly; only the percentage lied.
    */
-  it("ruling 294: retires the READING naming the person, and leaves another account's alone", () => {
+  it("ruling 161: retires the READING naming the person, and leaves another account's alone", () => {
     const db = ctx.makeDb();
     const reading = {
       credentialUserId: OWNER,

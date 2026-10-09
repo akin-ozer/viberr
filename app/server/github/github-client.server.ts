@@ -373,7 +373,7 @@ function tokenExpirationFrom(headers: Headers): string | null {
 
 
 /**
- * Ruling 128 (pass 34): is this ref-read answer "there is no such ref"? A 404,
+ * Ruling 227 (pass 34): is this ref-read answer "there is no such ref"? A 404,
  * or a 409 whose message says the repository is empty (`Git Repository is
  * empty.`, what GitHub answers on a repository with no refs at all) — never a
  * network failure. Shared by the branch-name probe, `ensureTaskBranch` and the
@@ -387,12 +387,12 @@ export function isMissingRefAnswer(result: GithubResponse<unknown>): boolean {
 }
 
 /**
- * Ruling 223 (F37-43): "this commit is not in the repository", as
+ * Ruling 243 (F37-43): "this commit is not in the repository", as
  * `GET /repos/{repo}/commits/{sha}` actually answers it.
  *
  * That endpoint does NOT 404 a well-formed 40-character SHA it cannot find. It
  * answers **422 Unprocessable Entity** with `No commit found for SHA: <sha>`.
- * Ruling 135's never-pushed probe asked {@link isMissingRefAnswer}, which knows
+ * Ruling 243's never-pushed probe asked {@link isMissingRefAnswer}, which knows
  * 404 and the empty-repository 409 — so on the real API the probe could never
  * confirm a missing commit, the refusal it guards was unreachable, and a
  * never-pushed revision degraded to an "unverifiable" head that acceptance lets

@@ -92,7 +92,7 @@ describe("ReviewQueuePage", () => {
     // UI-27/UI-49: REWRITTEN. The chip used to be a `<button class="hero-file">`
     // — visually identical to the non-interactive `hero-file` spans elsewhere,
     // so nothing announced it navigates; it became a real button, and is a
-    // real link now (ruling 477(c)). And the
+    // real link now (ruling 304). And the
     // "Review → Done" wording is no longer hardcoded: the page renders the
     // project's RESOLVED stage names (the default prop keeps this fixture's).
     const chip = getByTitle("Review → Done is locked to humans. See Policy");
@@ -156,7 +156,7 @@ describe("ReviewQueuePage", () => {
     const { container } = renderQueue([degraded], []);
     const row = container.querySelector(".rq-row")!;
     expect(row.textContent).toContain("degraded continuity");
-    // Ruling 625: the chip, not a risk pill. CANARY: render the Pill again.
+    // Ruling 306: the chip, not a risk pill. CANARY: render the Pill again.
     expect(row.querySelector(".rq-meta .chip.pb")!.textContent).toContain("degraded continuity");
   });
 
@@ -197,7 +197,7 @@ describe("ReviewQueuePage", () => {
     ).toBe(rows[0]);
   });
 
-  // Ruling 477(c) (F40-29, live on akinozer.com): the WEB-4 row was
+  // Ruling 304 (F40-29, live on akinozer.com): the WEB-4 row was
   // `<button type="button" class="rq-row">` with a <div> inside, calling
   // navigate() on click, so the queue could not open rows in new tabs or copy
   // their addresses and announced a button for a page link.
@@ -272,7 +272,7 @@ describe("ReviewQueuePage", () => {
   });
 
   it("F19-32: an ACCEPTED PR renders the amber 'merge pending' pill, not a bare in-review one", () => {
-    // Ruling 40/R16-6: acceptance and the real GitHub merge are two facts, and
+    // Ruling 244/R16-6: acceptance and the real GitHub merge are two facts, and
     // the difference must be visible on the board card AND here. The row type
     // hard-coded review|merged|closed and the projection coerced everything
     // else to "review", so prStatePill's `accepted` branch was unreachable from
@@ -364,7 +364,7 @@ describe("R16-3: a closed PR is stated as the terminal fact it is", () => {
     // carries the PR number the subline names.
     // UXA-2: it is now the CANONICAL `prStatePill` tone. This queue used to
     // colour PR state with its own private map, so a closed-unmerged (rejected)
-    // PR read neutral grey here while ruling 12's map renders it `risk` on the
+    // PR read neutral grey here while ruling 237's map renders it `risk` on the
     // board, task detail and the GitHub page — the same state wearing two
     // colours one click apart. The neutral class was incidental to this test's
     // point (the pill is present and names the PR); the rejection tone is not.
@@ -496,11 +496,11 @@ describe("U35-5: the header counts review work, not a stage", () => {
 });
 
 /**
- * Ruling 236 (owner, 2026-09-14) — the collision chip. Names the tasks, not the
+ * Ruling 242 (owner, 2026-09-14) — the collision chip. Names the tasks, not the
  * count: "two others" says there is a problem and nothing about which merge to
  * do first, which is the whole question a person is at this queue to answer.
  */
-describe("ruling 236: the collision chip", () => {
+describe("ruling 242: the collision chip", () => {
   const colliding = (overlaps: NonNullable<ReviewRowView["pr"]>["overlaps"]) => ({
     ...rowHuman,
     pr: { ...rowHuman.pr!, overlaps },

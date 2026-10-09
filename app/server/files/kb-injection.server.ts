@@ -51,7 +51,7 @@ export function isInjectableKbDoc(fileName: string): boolean {
 }
 
 /**
- * Ruling 283 (pass 37, F37-118): a knowledge base arrives as an INDEX, and the
+ * Ruling 205 (pass 37, F37-118): a knowledge base arrives as an INDEX, and the
  * run pulls the documents it decides it needs.
  *
  * Injecting the text was a budget problem with no good allocation. The docs of
@@ -66,7 +66,7 @@ export function isInjectableKbDoc(fileName: string): boolean {
  * published-history.md in the project's rulings knowledge base", naming a
  * document no run on it could ever receive.
  *
- * Ruling 261 had already raised a floor for exactly this — it was written
+ * Ruling 205 had already raised a floor for exactly this — it was written
  * because `standing-corrections.md` arrived cut off mid-word — and the floor
  * was then eaten by the alphabetically-first document inside the very KB it
  * was protecting. A second allocation rule would have had the same shape.
@@ -89,15 +89,15 @@ const KB_INDEX_OUTLINE_BUDGET = 4_000;
 const KB_INDEX_MAX_DOCS = 200;
 
 /**
- * Ruling 506: the size an index prints is a class on a 1-2-5 scale, not the
+ * Ruling 204: the size an index prints is a class on a 1-2-5 scale, not the
  * byte count.
  *
  * The index sits in the static prefix of every run its knowledge base is
- * attached to (ruling 370), so a byte of it that moves costs the next fresh
+ * attached to (ruling 169), so a byte of it that moves costs the next fresh
  * start of each of those its prompt cache, and a session resumed after it,
  * where the CLI does not record the system prompt, replays its whole history
  * cold. The exact count moved on EVERY edit: a one-word fix through
- * `correct_knowledge_doc` (ruling 498) turned "20,632 chars" into "20,641
+ * `correct_knowledge_doc` (ruling 210) turned "20,632 chars" into "20,641
  * chars" and re-priced every prompt on the project. A class moves only
  * when a document crosses a step, which a correction to its body almost never
  * does, and it still tells a run what the number did: whether a document is a
@@ -117,8 +117,8 @@ const KB_SIZE_CLASSES: readonly { below: number; label: string }[] = [
   { below: 1_000_000, label: "500k to 1M chars" },
 ];
 
-/** Ruling 678: a file's size as its index line prints it, in the wide classes
- *  ruling 506 gives a document's, so a re-saved template does not move a
+/** Ruling 205: a file's size as its index line prints it, in the wide classes
+ *  ruling 204 gives a document's, so a re-saved template does not move a
  *  cached prompt. */
 const KB_FILE_SIZE_CLASSES: readonly { below: number; label: string }[] = [
   { below: 10 * 1024, label: "under 10 KB" },
@@ -131,15 +131,15 @@ function kbFileSizeClass(size: number): string {
   return KB_FILE_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "10 MB or more";
 }
 
-/** How many files that are not documents one index names (ruling 678). */
+/** How many files that are not documents one index names (ruling 205). */
 const KB_INDEX_MAX_OTHER_FILES = 40;
 
-/** A document's size as its index line prints it (ruling 506). */
+/** A document's size as its index line prints it (ruling 204). */
 export function kbSizeClass(size: number): string {
   return KB_SIZE_CLASSES.find((c) => size < c.below)?.label ?? "1M chars or more";
 }
 
-/** Ruling 624: ONE `read_knowledge_doc` call returns a page of at most
+/** Ruling 215: ONE `read_knowledge_doc` call returns a page of at most
  *  `READ_PAGE_BYTES` of UTF-8, the most a Codex run's code-mode tool output
  *  carries whole. It was 48,000 characters, and a Codex model saw each page
  *  with its middle cut out. */
@@ -183,9 +183,9 @@ export interface KbDoc {
 
 /** Recursively collect injectable docs under `dir`, sorted by relative path so
  *  injection order is deterministic (and stable across runs). Code-point order
- *  (ruling 506), like every other list in a cached prefix: `localeCompare`
+ *  (ruling 169), like every other list in a cached prefix: `localeCompare`
  *  follows the process locale, and an index two servers order differently is
- *  not a shared prefix. Exported for the proposal reader (ruling 483), which
+ *  not a shared prefix. Exported for the proposal reader (ruling 267), which
  *  walks the documents a run is indexed with the same symlink and containment
  *  rules. */
 export function collectKbDocs(dir: string): KbDoc[] {
@@ -193,7 +193,7 @@ export function collectKbDocs(dir: string): KbDoc[] {
 }
 
 /**
- * Ruling 678: the files a knowledge base holds that are NOT documents: a
+ * Ruling 205: the files a knowledge base holds that are NOT documents: a
  * report template, a sample workbook, a logo. A run reads none of them through
  * `read_knowledge_doc`, which reads text, so the index names them apart and a
  * run opens them from its shell. Walked by the rules {@link collectKbDocs}
@@ -270,9 +270,9 @@ export interface UnresolvedKbGrant {
 }
 
 /**
- * Ruling 578: a knowledge base is private when its store folder grants nothing
+ * Ruling 209: a knowledge base is private when its store folder grants nothing
  * to its group or to others (0700, the server's alone). Every agent of a person
- * runs as that person's uid and can read `kb/` (ruling 460(d)), so a grant only
+ * runs as that person's uid and can read `kb/` (ruling 15(c)), so a grant only
  * decides what a run is given; this is what keeps a document from the shell of
  * a run it was not given to. The runs it is granted to read it through their
  * knowledge tool, which the server answers.
@@ -285,9 +285,9 @@ export function isPrivateKbFolder(dir: string): boolean {
   }
 }
 
-/** Ruling 578: whether the run an index is for can read a document without
+/** Ruling 209: whether the run an index is for can read a document without
  *  its shell (`read_knowledge_doc`). A Codex specialist has it only through
- *  the gateway's knowledge server (ruling 585). */
+ *  the gateway's knowledge server (ruling 216). */
 export interface KbIndexReader {
   hasKnowledgeTool?: boolean;
 }
@@ -305,7 +305,7 @@ export interface KbInjection {
  * nothing a run can read — a missing folder, a symlink out of the store, an
  * empty folder, an unreadable one. Those are now the ONLY ways a knowledge
  * base fails to arrive: an index is never clipped by another KB's size, so a
- * grant that resolves always names every document it holds (ruling 283).
+ * grant that resolves always names every document it holds (ruling 205).
  *
  * C1/pass-16: `unresolved` carries the same structured miss the MCP leg has
  * reported since P14-LV-09, so a renamed/typo'd KB folder reaches the run's own
@@ -351,10 +351,10 @@ function readKbIndexDetailed(
       );
     }
     const docs = collectKbDocs(dir);
-    // Ruling 678: the files it holds that are not documents, which a run opens
+    // Ruling 205: the files it holds that are not documents, which a run opens
     // from its shell.
     const others = collectKbOtherFiles(dir);
-    // Ruling 578: a private folder is the server's alone, so a run with no
+    // Ruling 209: a private folder is the server's alone, so a run with no
     // knowledge tool has no way in, and its index must not send it to a path.
     const hidden = isPrivateKbFolder(dir);
     if (docs.length === 0 && (others.length === 0 || hidden)) {
@@ -364,7 +364,7 @@ function readKbIndexDetailed(
       return miss(
         others.length === 0
           ? "its store folder holds no documents a run can read"
-          : "its store folder holds no documents, and it is private (ruling 578), so no run can open the files it does hold",
+          : "its store folder holds no documents, and it is private, so no run can open the files it does hold",
       );
     }
     if (docs.length === 0) {
@@ -374,14 +374,14 @@ function readKbIndexDetailed(
     }
     if (hidden && reader.hasKnowledgeTool === false) {
       return miss(
-        "it is private (ruling 578): its folder is closed to every shell, and this run has no knowledge tool to read it",
+        "it is private: its folder is closed to every shell, and this run has no knowledge tool to read it",
       );
     }
     const listed = docs.slice(0, KB_INDEX_MAX_DOCS);
     let outlineBudget = KB_INDEX_OUTLINE_BUDGET;
     const entries = listed.map((doc) => {
       const head = `- \`${doc.rel}\` · ${kbSizeClass(doc.size)}`;
-      // Ruling 283: the outline budget clips OUTLINES, never the list. A doc
+      // Ruling 205: the outline budget clips OUTLINES, never the list. A doc
       // whose sections do not fit is still named at full size, because the name
       // is the only thing the run needs in order to ask for the document — and
       // "a doc you cannot name" is the failure this ruling exists to end. The
@@ -413,7 +413,7 @@ function readKbIndexDetailed(
     return {
       body:
         (hidden
-          ? `Folder \`${dir}\` is private (ruling 578): no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
+          ? `Folder \`${dir}\` is private: no shell on this run can open it, so read each document with \`read_knowledge_doc\`. ` +
             `${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`
           : `Folder \`${dir}\`. ${countLabel(docs.length, "document")}:\n\n${entries.join("\n")}`) +
         otherFilesNote(others, hidden),
@@ -428,7 +428,7 @@ function readKbIndexDetailed(
 }
 
 /**
- * Ruling 678: the lines of an index that name the folder's other files.
+ * Ruling 205: the lines of an index that name the folder's other files.
  *
  * A knowledge base is a folder, and a board keeps there what its work must
  * follow as well as what its agents must know: the report a delivery is laid
@@ -467,7 +467,7 @@ export interface KbInjectionSet {
 
 /**
  * Index EVERY declared knowledge base. There is no budget to share and so no
- * ordering that decides who is starved (ruling 283): every declared KB that
+ * ordering that decides who is starved (ruling 205): every declared KB that
  * resolves is indexed in full, and `unresolved` now carries only the ways a
  * grant can genuinely deliver nothing — a folder that is missing, a symlink, an
  * empty folder, an unreadable one.
@@ -475,8 +475,8 @@ export interface KbInjectionSet {
 export function readKbIndexes(
   names: readonly string[],
   dataRoot?: string,
-  /** Ruling 286: which of these names is the project's RULINGS knowledge base
-   *  (ruling 239). A LABEL, not an allocation — ruling 283 removed the budget
+  /** Ruling 208(b): which of these names is the project's RULINGS knowledge base
+   *  (ruling 208(a)). A LABEL, not an allocation — ruling 205 removed the budget
    *  this argument used to feed, and it is back for the opposite reason: to say
    *  which index the run is OBLIGED to read rather than which one may take the
    *  most characters. */
@@ -484,9 +484,9 @@ export function readKbIndexes(
 ): KbInjectionSet {
   const parts: { name: string; body: string }[] = [];
   const unresolved: UnresolvedKbGrant[] = [];
-  // Ruling 239's emission order is untouched — a profile's own grants first,
+  // Ruling 208(a)'s emission order is untouched — a profile's own grants first,
   // the project's rulings last — but the ORDER no longer decides anything: it
-  // is a reading order now, not an allocation. Ruling 261's floor existed only
+  // is a reading order now, not an allocation. Ruling 205's floor existed only
   // to survive the allocation and is retired with it.
   for (const name of names) {
     const index = readKbIndexDetailed(name, dataRoot, opts);
@@ -503,19 +503,19 @@ export function readKbIndexes(
   return { parts, unresolved };
 }
 
-/** Ruling 286: the sentence that separates a BINDING index from an optional
+/** Ruling 208(b): the sentence that separates a BINDING index from an optional
  *  one, on the index itself — so it is read with the document list rather than
  *  in a note the run may have scrolled past. */
 const RULINGS_BINDING_LINE =
-  "**BINDING on this run.** This is the project's settled rulings knowledge base " +
-  "(ruling 239): an administrator made it binding on every run this project makes, " +
+  "**BINDING on this run.** This is the project's settled rulings knowledge base: " +
+  "an administrator made it binding on every run this project makes, " +
   "you included. Read it; the obligation is not conditional on your finding it " +
   "interesting.";
 
 /**
  * Where one document of one knowledge base lives, or `null` when the KB holds
  * no such readable document. The reader below and the proposal writer (ruling
- * 483) share it, so "which file does this path name" has one answer. The path
+ * 210) share it, so "which file does this path name" has one answer. The path
  * comes from a model, so it is treated exactly like a request from outside:
  * normalised, then proven to land inside this KB's folder. The realpath
  * comparison is what stops `../` and a symlink alike; `kbDirPath` has already
@@ -556,12 +556,12 @@ export function resolveKbDocPath(
 /** One document out of one knowledge base, or `null` when this KB has no such
  *  document. The caller decides WHICH knowledge bases may be asked for — this
  *  reader does not know a run's grants and must never be handed an
- *  unfiltered name (ruling 283). */
+ *  unfiltered name (ruling 205). */
 function readKbDoc(
   kb: string,
   docPath: string,
   dataRoot?: string,
-  /** Ruling 580: the character a read starts at, so a long document is read in pages. */
+  /** Ruling 215: the character a read starts at, so a long document is read in pages. */
   offset = 0,
 ): { text: string; rel: string; start: number; end: number; length: number } | null {
   const doc = resolveKbDocPath(kb, docPath, dataRoot);
@@ -574,26 +574,26 @@ function readKbDoc(
   return { rel: doc.rel, text: raw.slice(start, end), start, end, length: raw.length };
 }
 
-/** What a run's `read_knowledge_doc` says it does, on either backend (ruling 585). */
+/** What a run's `read_knowledge_doc` says it does, on either backend (ruling 216). */
 export const KB_DOC_TOOL_DESCRIPTION =
-  `Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name. A long document comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, each sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes.`;
+  `Read ONE document out of a knowledge base attached to you. Your prompt lists each knowledge base as an index (every document, its size and its sections), and the text itself is not there; this is how you get it. Pass the knowledge base's name exactly as the index heading gives it and the document's path exactly as the index lists it. Read a document before relying on what its name or a section heading suggests it says, and always read one a task, a directive or another agent told you to read by name. A long document comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, each sized to reach you whole: read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes.`;
 export const KB_DOC_KB_DESCRIPTION = "The knowledge base's name, as its index heading gives it.";
 export const KB_DOC_PATH_DESCRIPTION = "The document's path inside that knowledge base, e.g. 'conventions.md'.";
 
-/** Ruling 580: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
+/** Ruling 215: what a knowledge-base reader's `offset` does, one sentence for every tool that takes it. */
 export const KB_DOC_OFFSET_DESCRIPTION =
-  `Ruling 580: the character to start at. A read returns one page of at most ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes; ` +
+  `The character to start at. A read returns one page of at most ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes; ` +
   "when a document is longer, the read says which characters it returned and the offset to pass to read on.";
 
 /**
- * The instruction that ships WITH every knowledge-base index (ruling 283).
+ * The instruction that ships WITH every knowledge-base index (ruling 205).
  *
  * An index no one is told to follow is worse than the text it replaced. Both
  * channels are named because the toolkit tool is Claude-only — a Codex run
  * mounts no in-process Viberr tools at all, and its channel is the folder path
  * the index prints, which is a real path on the machine the run executes on.
  * A private knowledge base has no path a shell can open, so a Codex run that
- * holds one gets `read_knowledge_doc` from the gateway (ruling 585).
+ * holds one gets `read_knowledge_doc` from the gateway (ruling 216).
  */
 const KB_INDEX_NOTE =
   "\n\n---\n# How to read a knowledge base\n\n" +
@@ -658,7 +658,7 @@ export function readKbDocForRun(
 ): string {
   const wanted = kb.trim();
   if (!granted.includes(wanted)) {
-    // Ruling 246's shape: say what this reader IS rather than implying the
+    // Ruling 260's shape: say what this reader IS rather than implying the
     // knowledge base does not exist — it may well exist and belong to another
     // profile, and a run told "no such knowledge base" goes looking for a
     // deletion that never happened.
@@ -679,8 +679,8 @@ export function readKbDocForRun(
         : `It resolves to nothing this run can read${index.unresolved ? `: ${index.unresolved.reason}` : ""}.`)
     );
   }
-  // Ruling 580: a long document is read in pages. It used to stop at its
-  // opening with no way on, and a private knowledge base (ruling 578) has no
+  // Ruling 215: a long document is read in pages. It used to stop at its
+  // opening with no way on, and a private knowledge base (ruling 209) has no
   // shell to finish it from.
   const n = (count: number) => count.toLocaleString("en-US");
   if (offset > 0 && doc.start >= doc.length) {
@@ -698,10 +698,10 @@ export function readKbDocForRun(
 }
 
 /**
- * Ruling 286 (2026-09-15, pass 37; F37-121) — the teeth an index needs when the
+ * Ruling 208(b) (2026-09-15, pass 37; F37-121) — the teeth an index needs when the
  * documents behind it BIND.
  *
- * Ruling 283 made every knowledge base a pull, and the controller named the
+ * Ruling 205 made every knowledge base a pull, and the controller named the
  * regression that creates, with evidence from its own board: "Under injection,
  * reading is not a decision. Under index-and-fetch it becomes one, and it
  * competes with the agent's own turns — which on this board are scarce and
@@ -748,7 +748,7 @@ const KB_RULINGS_NOTE =
  * and knowledge bases (specialist, operator, controller), which each used to
  * push this sequence by hand. Prompt caching (rulings 369-376) keys on these
  * bytes — the block sits in every one of those prompts' static prefix (ruling
- * 370) — and `kb-prompt-block.server.test.ts` pins them element by element.
+ * 169) — and `kb-prompt-block.server.test.ts` pins them element by element.
  *
  * The caller reads the grants (`readSkillBodies`, then `readKbIndexes`) and
  * keeps their `unresolved` rows for its dynamic tail; this arranges only what
@@ -761,11 +761,11 @@ const KB_RULINGS_NOTE =
  *    `kbAddendum` when a knowledge base is attached, then every skill body.
  *  - R19-2: {@link KB_PRECEDENCE_NOTE} ONCE (not per KB) and BEFORE the
  *    indexes it ranks, so the rule is read before the guidance it qualifies;
- *    then ruling 283's {@link KB_INDEX_NOTE} on the same gate and for the same
+ *    then ruling 205's {@link KB_INDEX_NOTE} on the same gate and for the same
  *    reason — a run with no knowledge base is never told how to read one, and
  *    a run WITH one is never handed a list of documents and left to work out
  *    the channel.
- *  - Ruling 286: {@link KB_RULINGS_NOTE} only when the rulings KB actually
+ *  - Ruling 208(b): {@link KB_RULINGS_NOTE} only when the rulings KB actually
  *    RESOLVED. A run told its project's rulings bind it, on a project that
  *    names none or whose folder is missing, is being given an obligation it
  *    cannot discharge.
@@ -784,7 +784,7 @@ export function attachedResourcesBlock(input: {
   skills: readonly { name: string; body: string }[];
   /** The indexes, in order (`readKbIndexes(…).parts`). */
   indexes: readonly { name: string; body: string }[];
-  /** The rulings KB `readKbIndexes` was given (ruling 286), or null. */
+  /** The rulings KB `readKbIndexes` was given (ruling 208(b)), or null. */
   rulingsKb: string | null;
 }): string[] {
   const resourceParts: string[] = [];
@@ -809,10 +809,10 @@ export function attachedResourcesBlock(input: {
 }
 
 /**
- * Ruling 312: two ruling namespaces, one word. Tool descriptions cite "ruling N"
+ * Ruling 208(c): two ruling namespaces, one word. Tool descriptions cite "ruling N"
  * meaning VIBERR's own product decisions — which no run can read — while a
  * project's rulings knowledge base numbers its own rules from 1, and directives
- * on a live board cite those as "ruling 4". One constant, because the operator
+ * on a live board cite those as "ruling 293". One constant, because the operator
  * reads both namespaces at once (its own `get_task` description cites five
  * viberr rulings, and its grants carry the project's rulings KB) and the
  * controller's tool descriptions carry forty-one of the former.

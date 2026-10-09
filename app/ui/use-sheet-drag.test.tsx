@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSheetDrag } from "./use-sheet-drag";
 
 /**
- * Ruling 454: the dock's bottom sheet under a finger. jsdom lays nothing out,
+ * Ruling 285: the dock's bottom sheet under a finger. jsdom lays nothing out,
  * so the sheet's height is stubbed (600px, halfway at 300) and the clocks are
  * fake: a pointer move is a real event at a controlled time, and a spring
  * frame is a real requestAnimationFrame callback.
@@ -228,7 +228,7 @@ describe("useSheetDrag", () => {
     const head = getByTestId("head");
     pointer(head, "pointerdown", 500);
     // Held where it was caught on the HOST (the drag rule's `transition: none`
-    // cancels the entrance there, ruling 459). The sheet itself carries
+    // cancels the entrance there, ruling 285). The sheet itself carries
     // nothing the hook wrote, so nothing is left on it to replay.
     // CANARY: put `sheet.style.animation = "none"` back in onDown.
     expect(drag(host)).toBe(400);

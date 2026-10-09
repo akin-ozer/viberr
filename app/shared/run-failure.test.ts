@@ -5,7 +5,7 @@ import {
   runDidNotCompleteLead,
 } from "./run-failure";
 
-describe("formatUsd (ruling 175)", () => {
+describe("formatUsd (ruling 159)", () => {
   it("prints cents from a dollar up", () => {
     expect(formatUsd(1)).toBe("$1.00");
     expect(formatUsd(12.345)).toBe("$12.35");
@@ -23,14 +23,14 @@ describe("formatUsd (ruling 175)", () => {
 });
 
 /**
- * Ruling 397 (F39-24): the sentence and its matcher are one fact.
+ * Ruling 155 (F39-24): the sentence and its matcher are one fact.
  *
  * The operator's snapshot finds a standing report by matching the failure event
  * this lead writes. If the two drift, the operator silently stops being told
  * that a report is sitting under a failure note — the exact defect the ruling
  * exists to close, back again and invisible.
  */
-describe("ruling 397: the run-failure lead and its matcher", () => {
+describe("ruling 155: the run-failure lead and its matcher", () => {
   it("matches what the builder writes, for every role the product uses", () => {
     for (const role of ["Implementation", "Review & validation", "primary", "supporting"]) {
       for (const label of ["agent", "operator"]) {

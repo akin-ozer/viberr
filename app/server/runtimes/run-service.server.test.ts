@@ -65,10 +65,10 @@ const sdkServerStub = { type: "sdk" } as McpSdkServerConfigWithInstance;
 /** A portable stdio mount, shaped as `resolveSpecialistMcpServersDetailed` builds it. */
 const stdioServerStub = { command: "npx", args: ["-y", "example-mcp"] };
 
-/** Ruling 636(a): a launched run's temporary directory, `<root>/<runId>` under
+/** Ruling 141(c): a launched run's temporary directory, `<root>/<runId>` under
  *  the `VIBERR_RUN_TMP_ROOT` test-support/setup-env.ts gives each file. */
 const runTmpDirOf = (runId: string) => path.join(process.env.VIBERR_RUN_TMP_ROOT!, runId);
-/** Ruling 636(b): the directory goes twice ruling 174's 5 s reap grace and 2 s
+/** Ruling 141(c): the directory goes twice ruling 142's 5 s reap grace and 2 s
  *  after the settle. */
 const RUN_TMP_REMOVAL_MS = 12_000;
 
@@ -83,7 +83,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: a run bills a PERSON, so "this backend can run" is a fact about
+  // Ruling 137: a run bills a PERSON, so "this backend can run" is a fact about
   // the principal. Arda owns VIB-1 in this file and is every run's principal
   // unless a test says otherwise; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -110,7 +110,7 @@ type TestRunInput = Omit<
   "agentProfileId" | "credentialUserId"
 > & {
   agentProfileId?: string;
-  /** Ruling 127: defaults to arda, VIB-1's owner. Pass `null` for the refused
+  /** Ruling 137: defaults to arda, VIB-1's owner. Pass `null` for the refused
    *  run these tests exercise separately. */
   credentialUserId?: string | null;
 };
@@ -163,7 +163,7 @@ function captureSpecs(sessionId: string | null = null): RunSpec[] {
   return specs;
 }
 
-/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
+/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 172). */
 interface RolloutEventPayload {
   type: string;
   turn_id?: string;
@@ -364,7 +364,7 @@ describe("run-service lifecycle", () => {
     expect(JSON.parse(run.raw[0]!).line.ev).toBe("init");
   });
 
-  it("forwards input.effort onto the RunSpec handed to the adapter; an unset one is the SDK's on Claude and the catalog's on Codex (ruling 687)", async () => {
+  it("forwards input.effort onto the RunSpec handed to the adapter; an unset one is the SDK's on Claude and the catalog's on Codex (ruling 149)", async () => {
     const specs = captureSpecs();
 
     await startTestRun(store.db, {
@@ -384,7 +384,7 @@ describe("run-service lifecycle", () => {
     await settle();
     expect(specs[1]?.effort).toBeUndefined();
 
-    // Ruling 687: on Codex an omitted effort is the catalog's `medium`. The
+    // Ruling 149: on Codex an omitted effort is the catalog's `medium`. The
     // CLI's own default for gpt-6.1-sol is `low`, so an operator with no
     // stored effort would reason less than the picker says. CANARY: leave an
     // unset effort unset on Codex and this is undefined.
@@ -397,7 +397,7 @@ describe("run-service lifecycle", () => {
   });
 });
 
-describe("a run with no credential principal (ruling 127)", () => {
+describe("a run with no credential principal (ruling 137)", () => {
   /** The owner has not connected the backend — the ordinary refusal. */
   async function startWithoutCredential() {
     await disconnectFakeBackend(store.db, store.users.arda.id, "claude");
@@ -465,7 +465,7 @@ describe("a run with no credential principal (ruling 127)", () => {
   });
 
   it("hands the principal's credential to the adapter", async () => {
-    // The first half of ruling 127's spawn hygiene: the child env carries this
+    // The first half of ruling 137's spawn hygiene: the child env carries this
     // person's key. The second half is the test below.
     queueFakeRun(instantScript([{ t: "1", ev: "result", tag: "result", text: "done" }]));
     await startTestRun(store.db, {
@@ -527,7 +527,7 @@ describe("a run with no credential principal (ruling 127)", () => {
     expect(lines.some((l) => (l.display.text ?? "").includes("env says [redacted]"))).toBe(true);
   });
 
-  it("marks every process the run starts with the run's own id, over any caller overlay (ruling 174)", async () => {
+  it("marks every process the run starts with the run's own id, over any caller overlay (ruling 142)", async () => {
     // The settle sweep finds what a run left behind by this one variable, so
     // it must name THIS run: a caller overlay cannot rename the processes, and
     // the credential and the workspace overlay still land beside it.
@@ -544,7 +544,7 @@ describe("a run with no credential principal (ruling 127)", () => {
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.arda.id);
   });
 
-  it("gives a launched run a temporary directory of its own and removes it once the settle's grace is over (ruling 636)", async () => {
+  it("gives a launched run a temporary directory of its own and removes it once the settle's grace is over (ruling 141(c))", async () => {
     // Its processes find it under all three names, over a caller's overlay; it
     // is still there when the settle is done, because the sweep has not yet
     // stopped what the run left running; and it goes after that grace.
@@ -600,12 +600,12 @@ describe("a run with no credential principal (ruling 127)", () => {
 });
 
 /**
- * Ruling 185 (owner Q36-14, 2026-09-12): Viberr does not confine a Codex run
+ * Ruling 144 (owner Q36-14, 2026-09-12): Viberr does not confine a Codex run
  * with the CLI's OS sandbox, so there is no host condition left to refuse one
- * over. Rulings 182(d) and 184 are gone with it.
+ * over. Ruling 144 are gone with it.
  */
-describe("ruling 185: no Codex run is refused for a sandbox", () => {
-  it("a write-withheld reviewer — the shape ruling 182 refused — starts normally", async () => {
+describe("ruling 144: no Codex run is refused for a sandbox", () => {
+  it("a write-withheld reviewer — the shape ruling 144 refused — starts normally", async () => {
     // Canary: re-introduce `codexSandboxRefusal` in `startRun` and this run
     // ends `error` with `run·unavailable` instead of finishing. The refusal
     // existed because bubblewrap could not start under Docker's default
@@ -636,12 +636,12 @@ describe("ruling 185: no Codex run is refused for a sandbox", () => {
 });
 
 /**
- * Ruling 460: when this server launches agents, every run executes as its
+ * Ruling 139: when this server launches agents, every run executes as its
  * credential principal's own OS user — decided in `startRun`, the one funnel —
  * and a launch that cannot be prepared refuses the run; it never quietly runs
  * as the server's user.
  */
-describe("ruling 460: a run executes as its principal's own OS user", () => {
+describe("ruling 139: a run executes as its principal's own OS user", () => {
   afterEach(() => resetAgentIsolationForTests());
 
   function launcherScript(body: string): string {
@@ -681,7 +681,7 @@ describe("ruling 460: a run executes as its principal's own OS user", () => {
       home: path.join(userRoot, "home"),
     });
     expect(spec?.env?.HOME).toBe(path.join(userRoot, "home"));
-    // Ruling 507: the launcher hands back the whole backend home, but the CLI
+    // Ruling 138: the launcher hands back the whole backend home, but the CLI
     // is pointed at the billed account's own home inside it, and the row
     // records which account that was.
     const account = getBackendCredential(store.db, store.users.arda.id, "claude")!;
@@ -702,7 +702,7 @@ describe("ruling 460: a run executes as its principal's own OS user", () => {
     const result = await startTestRun(store.db, input());
     await settle();
     expect(result.outcome).toBe("refused");
-    expect(result.refusal).toMatch(/as its person's own user \(ruling 460\)/);
+    expect(result.refusal).toMatch(/as its person's own user \(ruling 139\)/);
     expect(result.refusal).toMatch(/belongs to someone else/);
     expect(result.refusal).toMatch(/nothing falls back to the server's own user/);
     // No process: the adapter never saw a spec.
@@ -950,7 +950,7 @@ describe("agent identity — startRun persists + resumeRun carries (BUG 2)", () 
   // between runs but the SDK options do not, and the persona built by the same
   // call already leaves a mounted skill's body out — so dropping it here would
   // strip the agent's granted craft mid-thread with nothing in its place.
-  it("ruling 175: the instance's spending cap rides every run, fresh and resumed, and is absent when none is set", async () => {
+  it("ruling 159: the instance's spending cap rides every run, fresh and resumed, and is absent when none is set", async () => {
     // Canary: drop the `getMaxRunSpendUsd` stamp from `startRun` and the
     // capped specs read undefined — every builder funnels through it, so no
     // path can start a run without the cap.
@@ -1098,9 +1098,9 @@ describe("D4 — allowedTools reaches the run and survives a resume", () => {
   });
 });
 
-/* ----------- ruling 176: an org server's marked write tools, denied --------- */
+/* ----------- ruling 188: an org server's marked write tools, denied --------- */
 
-describe("ruling 176 — marked MCP write tools reach the denylist", () => {
+describe("ruling 188 — marked MCP write tools reach the denylist", () => {
   it("denies each marked tool by its Claude name AFTER the server's auto-approval", async () => {
     // Canary: drop the `mcpToolDenials` fold in startRun and the names never
     // reach `disallowedTools`.
@@ -1160,9 +1160,9 @@ describe("ruling 176 — marked MCP write tools reach the denylist", () => {
   });
 });
 
-/* ------- ruling 658: the mounted servers a run may start without ------- */
+/* ------- ruling 190: the mounted servers a run may start without ------- */
 
-describe("ruling 658 — the servers a Codex run may start without", () => {
+describe("ruling 190 — the servers a Codex run may start without", () => {
   it("names only servers the run mounts, on a fresh run and on its resume", async () => {
     // Canary: drop the `mcpOptional` copy in startRun, or its carry in
     // `carryResumeOptions`, and Codex requires a server the run's prompt
@@ -1196,7 +1196,7 @@ describe("ruling 658 — the servers a Codex run may start without", () => {
 
 describe("resumeRun — continuity recovery", () => {
   /**
-   * Ruling 127: the transcript store is the PRINCIPAL's own runtime home, not a
+   * Ruling 137: the transcript store is the PRINCIPAL's own runtime home, not a
    * deployment-wide `CLAUDE_CONFIG_DIR` — so the probe reads
    * `<dataRoot>/runtimes/users/<owner>/claude-home/projects`. The consequence
    * the ruling makes explicit is exercised at the bottom of this block: an
@@ -1247,7 +1247,7 @@ describe("resumeRun — continuity recovery", () => {
     };
   }
 
-  it("ruling 434: a Codex rollout whose head is torn starts a fresh session, not a resume that fails", async () => {
+  it("ruling 162: a Codex rollout whose head is torn starts a fresh session, not a resume that fails", async () => {
     /**
      * Live on AX-5 at 01:49: the resume went to the CLI, which answered "does
      * not start with session metadata", and Viberr called it a failed run
@@ -1403,7 +1403,7 @@ describe("resumeRun — continuity recovery", () => {
   });
 
   /**
-   * Ruling 127, stated as behaviour: a resumed turn bills the task owner AS OF
+   * Ruling 137, stated as behaviour: a resumed turn bills the task owner AS OF
    * NOW, and the continuity probe reads THAT person's home. So a seat that
    * changed hands between the original run and the reply cannot resume the
    * previous owner's conversation inside the new owner's account — the
@@ -1433,7 +1433,7 @@ describe("resumeRun — continuity recovery", () => {
     );
     expect(spec.env?.CLAUDE_CONFIG_DIR).toContain(store.users.murat.id);
 
-    // Ruling 207(j): and the record says WHY. The owner-change branch decides
+    // Ruling 162: and the record says WHY. The owner-change branch decides
     // continuity before any filesystem is consulted, so the transcript is
     // intact in the previous owner's home — reporting it as "no longer has a
     // provider transcript … retention sweep or a wiped runtime volume" sent an
@@ -1465,7 +1465,7 @@ describe("resumeRun — continuity recovery", () => {
    * — whose contract is "resume as before". The previous owner's session id
    * then went to the SDK inside the new owner's home and failed at the vendor
    * ("No conversation found with session ID …"), producing a blocked packet
-   * instead of the one fresh re-anchored run ruling 127 promises.
+   * instead of the one fresh re-anchored run ruling 137 promises.
    */
   it("re-anchors for a new principal who has never had a run here", async () => {
     const { specs, resume } = await startThenResume();
@@ -1548,7 +1548,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     expect(specs[1]?.webSearchWithheld).toBeUndefined();
   });
 
-  it("ruling 559: a resumed Claude run is handed what its session last reported, read from the run log", async () => {
+  it("ruling 165(c): a resumed Claude run is handed what its session last reported, read from the run log", async () => {
     // After a restart the Claude adapter holds nothing for a session, and the
     // first resumed run recorded the whole session's spend as its own ($3.36
     // for a turn whose share was about $0.85, live). The newest result on the
@@ -1561,7 +1561,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
       modelUsage: { "claude-opus-5-5[1m]": { inputTokens: 2_889, outputTokens: 32_390, cacheReadInputTokens: 2_328_378, cacheCreationInputTokens: 106_679, costUSD: 1.9779 } },
     };
     // The account the fixture's runs bill: a session's cost state lives in that
-    // account's home (ruling 553).
+    // account's home (ruling 159).
     const accountId = getBackendCredential(store.db, store.users.arda.id, "claude")?.id ?? null;
     const row = { projectSlug: store.slug, taskKey: "VIB-1", role: "R", kind: "primary" as const, backend: "claude" as const, model: "opus", sdk: "claude", sessionId: "sess-559", agentProfileId: "developer", credentialAccountId: accountId };
     upsertRun(store.db, { ...row, id: "run_turn1", threadId: "t-559-1", state: "finished" });
@@ -1577,7 +1577,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
     });
     await settle();
     expect(specs[0]?.resumedSessionReported).toEqual(claudeReportedTotals(result));
-    // Ruling 553: the newest run where it works is this session's, so the CLI
+    // Ruling 159: the newest run where it works is this session's, so the CLI
     // will restore its cost state. CANARY: always false and the resumed run's
     // cap cannot make room for the restored spend.
     expect(specs[0]?.costStateRestored).toBe(true);
@@ -1968,7 +1968,7 @@ describe("startRun — foreign model substitution is disclosed (F21-13)", () => 
  * UPDATE per message.
  */
 describe("run phase throttling (R21-4)", () => {
-  it("writes a step the window suppressed when the window closes, and nothing once the run has settled (ruling 348)", async () => {
+  it("writes a step the window suppressed when the window closes, and nothing once the run has settled (ruling 166)", async () => {
     let callbacks: Parameters<RuntimeAdapter["start"]>[1] | null = null;
     const captureAdapter: RuntimeAdapter = {
       backend: "claude",
@@ -2240,13 +2240,13 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
 });
 
 /**
- * Rulings 369, 371 and 372 on the run service: every run stamps the kind of
- * credential it bills and, since ruling 376, carries no context window; a
+ * Rulings 172, 174 and 173 on the run service: every run stamps the kind of
+ * credential it bills and, since ruling 174, carries no context window; a
  * resume of a session that is BOTH idle past its cache TTL AND larger than the
  * replay threshold starts fresh on task.md and the last report, under its own
  * reason, on both backends and for the controller. Every clock is pinned.
  */
-describe("ruling 372: the resume policy, and the window and credential kind a run carries", () => {
+describe("ruling 173: the resume policy, and the window and credential kind a run carries", () => {
   const NOW = "2026-09-21T12:00:00.000Z";
   const minutesBefore = (m: number) => new Date(Date.parse(NOW) - m * 60_000).toISOString();
 
@@ -2343,19 +2343,19 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
     };
   }
 
-  it("startRun stamps the credential kind, and no kind carries a context window (ruling 376)", async () => {
+  it("startRun stamps the credential kind, and no kind carries a context window (ruling 174)", async () => {
     installFakeRuntime();
     const { runId } = await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
     });
     await settle();
-    // Ruling 376: no mid-run window rides the env on any kind.
+    // Ruling 174: no mid-run window rides the env on any kind.
     expect(lastRunSpec()?.env?.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     // SAFETY: `credential_kind` is a nullable TEXT column of agent_runs.
     const row = store.db.prepare(`SELECT credential_kind FROM agent_runs WHERE id = ?`).get(runId) as { credential_kind: string | null };
     expect(row.credential_kind).toBe("api_key");
-    // No kind carries a window (ruling 376); the credential kind still lands.
+    // No kind carries a window (ruling 174); the credential kind still lands.
     await startTestRun(store.db, {
       projectSlug: store.slug, taskKey: "VIB-1", threadId: "op", role: "Operator", kind: "operator",
       backend: "claude", model: "m", prompt: "go", dataRoot: store.dataRoot,
@@ -2460,12 +2460,12 @@ describe("ruling 372: the resume policy, and the window and credential kind a ru
 });
 
 /**
- * Ruling 376: a session larger than the completion threshold is compacted
+ * Ruling 174: a session larger than the completion threshold is compacted
  * at the end of its run, while its cache is warm, and the run's record says
  * so; a small session, an interrupted run and a backend that cannot compact
  * are left alone.
  */
-describe("compaction at completion (ruling 376)", () => {
+describe("compaction at completion (ruling 174)", () => {
   const bigCall = {
     cache: {
       messageId: "m1",
@@ -2504,7 +2504,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(run.state).toBe("finished");
     expect(run.phase).toBeNull();
     expect(run.compactions).toBe(1);
-    // What a resume replays now (ruling 372 reads it): the summary.
+    // What a resume replays now (ruling 173 reads it): the summary.
     expect(run.last_prompt_tokens).toBe(18_000);
     expect(run.peak_prompt_tokens).toBe(120_000);
     // The compaction's own cost rides the run's total.
@@ -2516,7 +2516,7 @@ describe("compaction at completion (ruling 376)", () => {
   });
 
   /** A controller turn, the one kind whose settle still waits for the
-   *  compaction (ruling 701): its next turn resumes the same session. */
+   *  compaction (ruling 255): its next turn resumes the same session. */
   const controllerTurn = (thread: string) => ({
     projectSlug: "", taskKey: thread, threadId: thread, role: "Controller", kind: "controller" as const,
     backend: "claude" as const, model: "claude-sonnet-4-5", prompt: "go", dataRoot: store.dataRoot,
@@ -2566,7 +2566,7 @@ describe("compaction at completion (ruling 376)", () => {
   });
 
   /**
-   * Ruling 701. Live on BLOG-5 a Diagrammer's report, and the hand-off to the
+   * Ruling 175. Live on BLOG-5 a Diagrammer's report, and the hand-off to the
    * next agent, waited 143 seconds for a summary of the session it had left.
    * On that instance 121 specialist runs waited two minutes each on average
    * for sessions of which a quarter were ever resumed. A specialist's run now
@@ -2598,8 +2598,8 @@ describe("compaction at completion (ruling 376)", () => {
   it.each([
     ["delivering", "primary"],
     ["supporting", "reviewer"],
-  ] as const)("ruling 701: a %s agent's run is over, and its completion fires, before its session is compacted", async (_name, kind) => {
-    // CANARY: await the compaction before the finalize (ruling 376's order),
+  ] as const)("ruling 175: a %s agent's run is over, and its completion fires, before its session is compacted", async (_name, kind) => {
+    // CANARY: await the compaction before the finalize (ruling 175's order),
     // for either kind, and the completion fires after the compaction was
     // asked for; drop the mark and the finished row says nothing of a
     // compaction a restart would have to finish.
@@ -2629,7 +2629,7 @@ describe("compaction at completion (ruling 376)", () => {
     compaction.answer();
     await settle();
     await settle();
-    // What the compaction learned still lands on that run (ruling 376).
+    // What the compaction learned still lands on that run (ruling 174).
     const after = getRun(store.db, runId)!;
     expect(after).toMatchObject({ state: "finished", phase: null, step: null, compactions: 1, last_prompt_tokens: 18_000 });
     expect(after.finished_at).toBe(during.finished_at);
@@ -2639,7 +2639,7 @@ describe("compaction at completion (ruling 376)", () => {
   it.each([
     ["delivering", "primary"],
     ["supporting", "reviewer"],
-  ] as const)("ruling 701: a run that resumes a %s agent's session waits, queued, until the compaction is over", async (_name, kind) => {
+  ] as const)("ruling 175: a run that resumes a %s agent's session waits, queued, until the compaction is over", async (_name, kind) => {
     // CANARY: drop the hold in `admitRun`, for either kind, and the resumed
     // run starts a second process on a transcript the compaction is still
     // rewriting; never remove the entry and the last start below is queued.
@@ -2675,7 +2675,7 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
   });
 
-  it("ruling 701: a held run that is stopped while it waits never starts", async () => {
+  it("ruling 175: a held run that is stopped while it waits never starts", async () => {
     // CANARY: admit the held run without reading its row and it springs to
     // life after the person stopped it.
     queueFakeRun(finished("sess-held-stopped", 120_000));
@@ -2685,7 +2685,7 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
     const startedBefore = startedRunSpecs().length;
     void runId;
-    // The door is told the run is queued, never that it started (ruling 263).
+    // The door is told the run is queued, never that it started (ruling 152).
     const resumed = await startTestRun(store.db, {
       ...specialist("primary-held"), prompt: "and the cover?", resumeSessionId: "sess-held-stopped",
     });
@@ -2702,7 +2702,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(getRun(store.db, resumed.runId)!.state).toBe("interrupted");
   });
 
-  it("ruling 701: a resume started from the run's own completion is held too", async () => {
+  it("ruling 175: a resume started from the run's own completion is held too", async () => {
     // A mention that arrived while the agent worked is delivered at its
     // completion and resumes this very session. CANARY: register the hold
     // after the completion has fired and that run starts under the compaction.
@@ -2726,7 +2726,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(getRun(store.db, resumedId)!.state).toBe("finished");
   });
 
-  it("ruling 701: once the compaction is over, a held run takes its turn under the cap like any other", async () => {
+  it("ruling 175: once the compaction is over, a held run takes its turn under the cap like any other", async () => {
     // CANARY: launch the held run without admitting it and it starts past a
     // full cap; leave its step and a run parked behind the cap still says it
     // waits for a summary.
@@ -2761,7 +2761,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(getRun(store.db, resumed.runId)!.state).toBe("finished");
   });
 
-  it("ruling 701: nothing else waits: the queue is drained and the next agent runs while the session settles", async () => {
+  it("ruling 175: nothing else waits: the queue is drained and the next agent runs while the session settles", async () => {
     // CANARY: keep the run's slot, or drain the queue only once the
     // compaction is over, and at a cap of one the next agent stays parked
     // behind a run that has finished.
@@ -2781,7 +2781,7 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
   });
 
-  it("ruling 701: a run parked behind the cap that resumes the session is passed over until the compaction is over", async () => {
+  it("ruling 175: a run parked behind the cap that resumes the session is passed over until the compaction is over", async () => {
     // CANARY: register the session after the queue is drained, or promote
     // the oldest parked run whatever its session, and it starts under the
     // compaction.
@@ -2808,8 +2808,8 @@ describe("compaction at completion (ruling 376)", () => {
     expect(getRun(store.db, parked.runId)!.state).toBe("finished");
   });
 
-  it("ruling 701: a run parked for a summary is not a build waiting for a slot: a coordination turn still borrows one", async () => {
-    // Ruling 152's borrow rule lets an operator or controller turn past the
+  it("ruling 175: a run parked for a summary is not a build waiting for a slot: a coordination turn still borrows one", async () => {
+    // Ruling 150's borrow rule lets an operator or controller turn past the
     // lane take a cap slot only when no build is parked for one. CANARY: count
     // the run held for its session as such a build and the turn below waits
     // for a compaction it has nothing to do with.
@@ -2841,7 +2841,7 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
   });
 
-  it("ruling 701: a held run that is stopped leaves the queue at once", async () => {
+  it("ruling 175: a held run that is stopped leaves the queue at once", async () => {
     // CANARY: leave its entry for the release and the instance counts a run
     // as queued, for as long as the compaction takes, that will never start.
     queueFakeRun(finished("sess-stopped-leaves", 120_000));
@@ -2863,7 +2863,7 @@ describe("compaction at completion (ruling 376)", () => {
     await settle();
   });
 
-  it("ruling 701: a held run whose step cannot be written is still parked, and still starts", async () => {
+  it("ruling 175: a held run whose step cannot be written is still parked, and still starts", async () => {
     // The step is the sentence on the row; the queue entry is what starts the
     // run. CANARY: write the step before the run is in the queue and a write
     // that fails leaves a `queued` row that nothing will ever start.
@@ -2892,7 +2892,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: a step that cannot be cleared does not keep the parked run from starting", async () => {
+  it("ruling 175: a step that cannot be cleared does not keep the parked run from starting", async () => {
     // CANARY: clear the steps and drain the queue under one `try`, and with
     // no cap the run stays parked on a session that is free.
     const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
@@ -2919,7 +2919,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: what a compaction says after its deadline is dropped, and its request is told to stop", async () => {
+  it("ruling 175: what a compaction says after its deadline is dropped, and its request is told to stop", async () => {
     // By then the console has said it did not happen and a run parked for
     // the session may be on it. CANARY: keep the late lines and the run
     // reads as compacted, with a summary's size, under a line that says the
@@ -2953,7 +2953,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: a controller turn whose compaction never answers is finalized at the deadline", async () => {
+  it("ruling 175: a controller turn whose compaction never answers is finalized at the deadline", async () => {
     // CANARY: bound a specialist's compaction alone and the turn stays
     // `running`, and its conversation closed to the next message, for good.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
@@ -2977,7 +2977,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: a compaction that never answers stops being waited for at its deadline", async () => {
+  it("ruling 175: a compaction that never answers stops being waited for at its deadline", async () => {
     // Claude's compaction request has no timeout of its own. CANARY: drop the
     // deadline and the run held for the session waits for good, with nothing
     // a person can stop: the run it waits on has finished.
@@ -3013,7 +3013,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: the run's temporary directory outlives the compaction that still writes it (ruling 636)", async () => {
+  it("ruling 175: the run's temporary directory outlives the compaction that still writes it (ruling 141(c))", async () => {
     // CANARY: tidy when the run ends and the directory goes under the
     // compaction's own process.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
@@ -3040,9 +3040,9 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: a resume during the compaction is never set aside as stale and large (ruling 372)", async () => {
+  it("ruling 175: a resume during the compaction is never set aside as stale and large (ruling 173)", async () => {
     // The row's finish and last prompt are the run's own, from before the
-    // summary. CANARY: read ruling 372's verdict while the session settles
+    // summary. CANARY: read ruling 173's verdict while the session settles
     // and a comment that lands past the TTL starts a fresh, memory-less
     // session moments before the summary it should have replayed is written.
     queueFakeRun(finished("sess-not-stale", 200_000));
@@ -3068,7 +3068,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(startedRunSpecs().at(-1)).toMatchObject({ runId: resumed.runId, resumeSessionId: "sess-not-stale" });
   });
 
-  it("ruling 701: a controller turn whose compaction throws is still finalized", async () => {
+  it("ruling 175: a controller turn whose compaction throws is still finalized", async () => {
     // Before, the throw skipped the finalize: the turn stayed `running` and
     // its completion was handed a row that said so. CANARY: let the
     // compaction's throw reach the settle.
@@ -3093,7 +3093,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: a compaction that throws leaves the run finished and its session resumable", async () => {
+  it("ruling 175: a compaction that throws leaves the run finished and its session resumable", async () => {
     // CANARY: release the hold only after a compaction that answered, and the
     // resume below waits for good.
     const logged = vi.spyOn(logger, "error").mockImplementation(() => {});
@@ -3118,7 +3118,7 @@ describe("compaction at completion (ruling 376)", () => {
     }
   });
 
-  it("ruling 701: an operator's session is never compacted, whatever its size", async () => {
+  it("ruling 175: an operator's session is never compacted, whatever its size", async () => {
     // Every operator turn starts a fresh session and nothing resumes one, so
     // the summary had no reader. CANARY: drop the kind from the condition and
     // a compaction is asked for.
@@ -3171,10 +3171,10 @@ describe("compaction at completion (ruling 376)", () => {
   });
 
   /**
-   * Ruling 599. Live, eight Codex runs the usage limit refused were compacted
+   * Ruling 174. Live, eight Codex runs the usage limit refused were compacted
    * on the same account: each stayed `running` five more minutes while its
    * compaction went unanswered, and the stall packets came late. A run that
-   * failed on its own work is still compacted (ruling 376): its next run
+   * failed on its own work is still compacted (ruling 174): its next run
    * resumes the session. CANARY: drop `!refused` and the first case asks for
    * a compaction; skip every errored run and the second one does not.
    */
@@ -3189,7 +3189,7 @@ describe("compaction at completion (ruling 376)", () => {
     extraFacts: [undefined, { cache: { ...bigCall.cache, promptTokens: 150_000 } }, undefined],
   });
 
-  it("ruling 599: never compacts a run its provider refused, whatever its size", async () => {
+  it("ruling 174: never compacts a run its provider refused, whatever its size", async () => {
     const before = compactedRunSpecs().length;
     queueFakeRun(failedWith("sess-refused", "quota"));
     const { runId } = await startTestRun(store.db, {
@@ -3203,7 +3203,7 @@ describe("compaction at completion (ruling 376)", () => {
     expect(getRun(store.db, runId)!.compactions).toBe(0);
   });
 
-  it("ruling 599: still compacts a large run that failed on its own work", async () => {
+  it("ruling 174: still compacts a large run that failed on its own work", async () => {
     const before = compactedRunSpecs().length;
     queueFakeRun(failedWith("sess-hung", "idle_timeout"));
     queueFakeCompaction("claude", { compacted: true, preTokens: 150_000, postTokens: 20_000 });
@@ -3274,8 +3274,8 @@ describe("compaction at completion (ruling 376)", () => {
       projectSlug: store.slug, taskKey: "VIB-1", role: "Primary specialist", kind: "primary",
       backend: "codex", model: "gpt-5.6-terra", prompt: "go", dataRoot: store.dataRoot,
     });
-    // Ruling 701 on Codex: the run's completion fires before the app-server
-    // is asked. CANARY: keep ruling 376's order for this backend.
+    // Ruling 175 on Codex: the run's completion fires before the app-server
+    // is asked. CANARY: keep ruling 175's order for this backend.
     const askedWhenCompleted: number[] = [];
     registerRunCompletion(runId, () => askedWhenCompleted.push(compactedRunSpecs().length - before));
     open();
@@ -3296,7 +3296,7 @@ describe("compaction at completion (ruling 376)", () => {
   });
 
   /**
-   * Ruling 414 (F39-40). The CLI writes ONE compaction as two spellings with
+   * Ruling 172 (F39-40). The CLI writes ONE compaction as two spellings with
    * its own size line between them. Live on ax-clone, every one of the 69
    * completion compactions left TWO timeline notes and two audit rows 2-11 ms
    * apart: "Viberr summarized ... at the end of the run" and "the provider

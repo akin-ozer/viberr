@@ -20,7 +20,7 @@ import {
 } from "~/features/agents/agent-types";
 
 /**
- * Template grant propagation (ruling 156, pass 35 F35-7).
+ * Template grant propagation (ruling 177, pass 35 F35-7).
  *
  * A library deploy copies the template's `resources` onto the project's
  * deployment (`definition.resources`, `agent-profile-actions.server.ts`), and
@@ -88,7 +88,7 @@ export function resourceDrift(
 }
 
 /** Every grant named in a drift half, rendered (`MCP server context7`). Its one
- *  home is the client-safe `agent-types.ts` since ruling 479(d): the Agents
+ *  home is the client-safe `agent-types.ts` since ruling 326: the Agents
  *  page's confirm names the same grants before the press. */
 export { describeDriftLists };
 
@@ -155,11 +155,11 @@ export function listTemplateResourceDrift(
 }
 
 /**
- * Ruling 277 (pass 37, F37-110): the projects whose deployed copy carries an
+ * Ruling 177 (pass 37, F37-110): the projects whose deployed copy carries an
  * OLDER persona or summary than the template's.
  *
  * `listTemplateResourceDrift` compares `definition.resources` and nothing else,
- * because ruling 156 was written about grants. The same copy also holds the
+ * because ruling 177 was written about grants. The same copy also holds the
  * `persona` — the run's whole system prompt — and the `desc` the operator
  * selects agents by, and nothing compared either. P13-AP-07 already settled
  * that a deployment is a SNAPSHOT and that a later org-level "persona fix never
@@ -218,7 +218,7 @@ interface PersonaCopyRead {
   backend: string;
 }
 
-/** Ruling 467: one deployed copy whose persona a propagation rewrote. */
+/** Ruling 177: one deployed copy whose persona a propagation rewrote. */
 export interface PersonaPropagatedCopy {
   projectSlug: string;
   projectName: string;
@@ -229,9 +229,9 @@ export interface PersonaPropagatedCopy {
 }
 
 /**
- * Ruling 467 (pass 40, F40-11): rewrite each named project's copy of
+ * Ruling 177 (pass 40, F40-11): rewrite each named project's copy of
  * `profileId`'s PERSONA to the template's. `propagateTemplateResources` below
- * rewrites only the grants (ruling 156), so a template whose persona the owner
+ * rewrites only the grants (ruling 177), so a template whose persona the owner
  * overturned kept running the old text on every deployment until a person
  * edited each copy by hand; live, the controller had to ask for two.
  *
@@ -327,13 +327,13 @@ export interface PropagateInput {
  * definition is left alone (it resolves the template live) and reported with
  * nothing added or removed.
  *
- * Ruling 479(c): the operator's template is a source too. Its three grant
+ * Ruling 177: the operator's template is a source too. Its three grant
  * lists have the same shape, an operator run mounts its copy's lists the way
  * an agent run does (`resolveOperatorAuthority`), and the Agents page computes
  * the operator's drift and offers this button for it. The old
  * `kind !== "specialist"` refusal answered every press on the Operator with
  * "No such agent profile." about the profile on screen. `readTemplate` still
- * resolves no controller template (ruling 99), so that stays refused.
+ * resolves no controller template (ruling 247), so that stays refused.
  */
 export async function propagateTemplateResources(
   db: DatabaseSync,

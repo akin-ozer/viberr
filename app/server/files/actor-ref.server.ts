@@ -8,7 +8,7 @@ import type { FileActorRef } from "~/schemas/task-file.schema";
  *   operator →  operator
  *   system   →  system:policy-engine
  *
- * The userId / profileId is the identity (ruling 6 + generic-agents D7); the
+ * The userId / profileId is the identity (ruling 26(a) + generic-agents D7); the
  * parenthesized display snapshot is a human-readability fallback used when
  * the user row / profile is gone.
  *
@@ -96,7 +96,7 @@ export function encodeActorRef(ref: FileActorRef): string {
 export function decodeActorRef(raw: string): FileActorRef {
   const text = raw.trim();
   if (text === "operator") return { kind: "operator" };
-  // Ruling 99: the instance controller, encoded like the operator's bare word.
+  // Ruling 247: the instance controller, encoded like the operator's bare word.
   if (text === "controller") return { kind: "controller" };
 
   const human = HUMAN_RE.exec(text);

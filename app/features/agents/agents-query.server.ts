@@ -56,7 +56,7 @@ import { resourceDrift } from "~/server/org/template-propagation.server";
  * The effective profile = template fields overridden per-field by the
  * deployment's `definition` (project-created profiles carry their FULL
  * definition there and have no template). Capability policy ALWAYS comes
- * from the deployment (id-based + extras — ruling 7); display labels are
+ * from the deployment (id-based + extras — ruling 62(a)); display labels are
  * rendered from the shared CAP_CATALOG.
  */
 
@@ -121,7 +121,7 @@ function applyAutonomyCeiling(
     // `authority.autonomy === "full" ? "direct" : "recommend"` for every
     // `recommend` grant EXCEPT acceptance, so a full-autonomy operator acts
     // directly on grants this display was calling "Recommends only" — the
-    // label whose legend says it proposes a card a human applies. Ruling 82's
+    // label whose legend says it proposes a card a human applies. Ruling 184's
     // claim is that the display MIRRORS the runtime gate; it mirrored one half.
     //
     // `autonomy` is undefined for a specialist, so this stays a no-op there,
@@ -197,7 +197,7 @@ function scannable(text: string, max = 240): string {
  * The org-level specialist TEMPLATES this project has NOT deployed — what the
  * project Agents page offers under "Add from library".
  *
- * P13-AP-05 (owner ruling 1, 2026-07-24): before this, NOTHING ever copied an
+ * P13-AP-05 (P13 owner decision 1, 2026-07-24): before this, NOTHING ever copied an
  * org template into a project's `agents:` list. A profile created in org
  * settings could never be deployed, run, or selected — `used` stayed 0 forever
  * and the create toast pointed at a project-policy control that did not exist.
@@ -248,7 +248,7 @@ export const VIEW_WITHOUT_POLICY: CapabilityMode = "direct";
  * R20-3 / F20-4: per-backend "the provider refused this model for this account"
  * marks (from the `model_availability` table), keyed by model id. Absent ⇒ the
  * view claims nothing about availability (a mark is earned only from a real run
- * failure — ruling 19). Optional so the actions/test callers that read only
+ * failure — ruling 220). Optional so the actions/test callers that read only
  * kind/backend/model can skip the DB read entirely.
  */
 export type ModelMarks = Partial<
@@ -285,7 +285,7 @@ function identityOverride(
     [def.icon, template.icon],
     [list(def.backends), list(template.backends)],
     [def.model, template.model],
-    // Ruling 153 (pass 35): a template may declare `effort` now, and the
+    // Ruling 264 (pass 35): a template may declare `effort` now, and the
     // library deploy copies it, so a stored tier equal to the template's is not
     // an override; one the template never named still is.
     [def.effort, template.effort],
@@ -301,7 +301,7 @@ function identityOverride(
 
 
 /**
- * Ruling 479(g): the definition fields a profile save always writes
+ * Ruling 177: the definition fields a profile save always writes
  * (`updateAgentProfile`) and a template also supplies. While the deployment
  * leaves one unset the view resolves it from the template live, so the save is
  * what ends that. `effort` and `persona` are not listed: a save writes each
@@ -322,14 +322,14 @@ const SAVE_SNAPSHOT_FIELDS = [
 ] as const satisfies readonly (keyof AgentDeploymentDefinition)[];
 
 /**
- * Ruling 479(g): does a save on the Agents page still cut this copy loose from
+ * Ruling 177: does a save on the Agents page still cut this copy loose from
  * its template? The editor said "Saving forks this profile" for every
  * template-sourced profile, but a library deploy and every earlier save already
- * hold a full snapshot, which a template edit never reaches (ruling 156,
+ * hold a full snapshot, which a template edit never reaches (ruling 177,
  * P13-AP-07): on akinozer.com all seven deployments did, and the sentence told
  * the owner that editing would end an inheritance that had already ended.
  *
- * Ruling 518: the operator's name and scope always resolve from its template
+ * Ruling 176: the operator's name and scope always resolve from its template
  * and no save writes them, so they never count as a field still to fork.
  */
 function tracksTemplateLive(
@@ -346,7 +346,7 @@ function tracksTemplateLive(
 }
 
 /**
- * Ruling 156 (pass 35, F35-7): how a deployment's COPY of the grants differs
+ * Ruling 177 (pass 35, F35-7): how a deployment's COPY of the grants differs
  * from its template's. Null when there is no template (a project-created
  * profile), no copy (a definition-less deployment resolves the template live)
  * or no difference. The card renders the exact difference and, for an org
@@ -382,7 +382,7 @@ function templateDriftOf(
  * pass "direct" and never touch `capabilities`.
  */
 /** The ids whose ABSENT mode is the project's delivery policy, materialised by
- *  the roster from the workflow (ruling 28 / R15-9), never by this rule. */
+ *  the roster from the workflow (ruling 109 / R15-9), never by this rule. */
 export const POLICY_DEPENDENT_CAPABILITY_IDS: readonly string[] = [
   "deliver-review-pr",
   "update-task-branch",
@@ -390,7 +390,7 @@ export const POLICY_DEPENDENT_CAPABILITY_IDS: readonly string[] = [
 
 /**
  * The mode a grant resolves to when it is ABSENT from project.md, per kind —
- * the ONE home of the rule (ruling 139: `list_capabilities` publishes it as
+ * the ONE home of the rule (ruling 261: `list_capabilities` publishes it as
  * `whenUngranted`, and the roster materialises absent grants with it):
  *  · always-human ids are `human`;
  *  · operator: `gate()` resolves an absent grant through `absentPolarityGate`
@@ -431,10 +431,10 @@ export function effectiveProfileView(
     deployment,
     dataRoot,
   );
-  // R7-5: on a specialist profile, a stored `recommend` grant is runtime-
-  // identical to `direct` and the picker no longer offers it — coerce it to
-  // `direct` ('Allowed') on read so the roster, matrix, policy counts and the
-  // edit-modal seed all show the honest mode. Seed/legacy files keep `recommend`
+  // R7-5: a specialist has no `recommend` lane (ruling 182) and the picker
+  // offers none, so a stored `recommend` grant is coerced to `off` on read and
+  // the roster, matrix, policy counts and the edit-modal seed all show the
+  // honest mode. Seed/legacy files keep `recommend`
   // on disk (no migration); this normalizes only the view. The operator keeps
   // its real `recommend` modes. Runtime tool policy reads `deployment.capabilities`
   // directly (not this view), so no runtime behavior changes.
@@ -543,7 +543,7 @@ export function effectiveProfileView(
   // R20-3 / F20-4: the model a run would actually resolve to is flagged when a
   // REAL run against it was refused by the provider for this account
   // (model_availability). The badge names the provider's own redacted sentence;
-  // an absent mark claims nothing (unknown-but-offered, ruling 19).
+  // an absent mark claims nothing (unknown-but-offered, ruling 220).
   const modelUnavailable = modelMarks?.[primaryBackend]?.get(runModel);
   // Operator only: default autonomy (supervised unless the deployment sets it) —
   // the ceiling `capabilitiesToActionLabels` applies to "Accept completion into
@@ -553,7 +553,7 @@ export function effectiveProfileView(
   const view: AgentProfileView = {
     id: deployment.profileId,
     kind,
-    // Ruling 518: the operator is called Operator, whatever its template or an
+    // Ruling 106: the operator is called Operator, whatever its template or an
     // older save says, and has no role.
     name: deploymentName(deployment, { def, template, kind }),
     // U12 residual: a specialist's default was "Specialist", retired
@@ -569,10 +569,10 @@ export function effectiveProfileView(
     model,
     modelLabel,
     modelKnown,
-    // Ruling 153: a definition-less deployment (the seeded rows) resolves the
+    // Ruling 264: a definition-less deployment (the seeded rows) resolves the
     // template live, its default effort included.
     effort: def?.effort ?? template?.effort ?? "",
-    // Ruling 518: the operator's scope line is fixed like its name.
+    // Ruling 176: the operator's scope line is fixed like its name.
     scope: kind === "operator" ? OPERATOR_SCOPE : (def?.scope ?? template?.scope ?? ""),
     // OBS-7: a deployment holds a `definition` only once this project WROTE one
     // — the seeded roster carries none (agent-catalog.server.ts deploys
@@ -616,7 +616,7 @@ export function effectiveProfileView(
     capabilities,
     extras,
     resources: deploymentResources({ def, template }),
-    // Ruling 156 (F35-7): the grants signal beside the identity one. A copy
+    // Ruling 177 (F35-7): the grants signal beside the identity one. A copy
     // exists only when the deployment wrote `definition.resources`; a
     // definition-less row resolves the template live and cannot drift.
     templateDrift: templateDriftOf(def, template),
@@ -626,7 +626,7 @@ export function effectiveProfileView(
     fingerprint: deploymentFingerprint(deployment),
   };
   // The key is set ONLY when a real run earned the mark: an absent
-  // `modelUnavailable` claims nothing about availability (ruling 19), so it must
+  // `modelUnavailable` claims nothing about availability (ruling 220), so it must
   // stay off the view rather than ride along as an explicit `undefined`.
   if (modelUnavailable) view.modelUnavailable = modelUnavailable;
   return view;

@@ -14,7 +14,7 @@ import {
 } from "./agent-isolation.server";
 
 /**
- * Ruling 174: the Claude CLI leads its own process group.
+ * Ruling 142: the Claude CLI leads its own process group.
  *
  * The SDK's own local spawn is not detached, so its abort ladder signals the
  * CLI alone and the stdio MCP servers the CLI started in its group outlive a
@@ -113,7 +113,7 @@ function keepTail(text: string): string {
 }
 
 /**
- * Ruling 460: with `launch`, the CLI runs as its person's own OS user. What is
+ * Ruling 139: with `launch`, the CLI runs as its person's own OS user. What is
  * spawned is then the launcher (`viberr-launch`), detached so it leads the
  * group Viberr signals, with the SDK's command resolved to an absolute path in
  * `VIBERR_LAUNCH_EXEC`, the uid in `VIBERR_LAUNCH_UID` and the SDK's argv passed

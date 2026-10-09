@@ -49,7 +49,7 @@ import {
 import { attachTaskFile } from "./task-edits.server";
 
 /**
- * Ruling 691 at the boundary that owns it: a files delivery stamped by the
+ * Ruling 86 at the boundary that owns it: a files delivery stamped by the
  * real completion pipeline (`applyAgentCompletionEffects`, so the stamp in
  * `recordAgentCompletion`, the delivery reconcile, the ask after it and the
  * bounded wait before the react are all on the path), on a `setupTestStore`
@@ -341,7 +341,7 @@ async function deliver(files: Record<string, string>, mode = "", sized: Sized = 
 
 const captureNote = () => timeline().find((event) => event.title === "Page captures");
 
-describe("a delivered page is pictured (ruling 691)", () => {
+describe("a delivered page is pictured (ruling 86)", () => {
   it("a stamped files delivery pictures each page an agent delivered at a desktop and a phone width, keeps the pictures on the task and in the kept delivery, and writes one record and one note", async () => {
     // A person's own upload is an input, not a result.
     await attachTaskFile(
@@ -561,7 +561,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     writeFileSync(log, "");
     writeDeliveringTask({ ownerUserId: null });
     await deliver({ "orphan.html": "<p>nobody's page</p>" });
-    // The delivery is every file on the task (ruling 610), so both pages say it.
+    // The delivery is every file on the task (ruling 81), so both pages say it.
     expect(frontmatter().pageCaptures!.pages).toEqual([
       { file: "orphan.html", shots: [], error: "the task has no owner to render it as" },
       { file: "post.html", shots: [], error: "the task has no owner to render it as" },
@@ -588,7 +588,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     const home = path.join(store.dataRoot, "runtimes", "users", store.users.arda.id);
     expect((await withBrowser("", () => ask("post.html"))).text).toBe(
       "[error] `post.html` could not be captured. " +
-        "The agent could not be started as its person's own user (ruling 460): " +
+        "The agent could not be started as its person's own user (ruling 139): " +
         `the launcher could not prepare ${home} (chown refused). ` +
         "Nothing ran; nothing falls back to the server's own user.",
     );
@@ -701,7 +701,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
       // the render is stopped, past a Codex tool call's 60 seconds.
       await vi.advanceTimersByTimeAsync(1_000);
       expect(answer.text).toBe("[busy] The renderer is working on other pages. Call again in a moment.");
-      await vi.advanceTimersByTimeAsync(25_000); // 40 s in; the bound is 45 s (ruling 691(d))
+      await vi.advanceTimersByTimeAsync(25_000); // 40 s in; the bound is 45 s (ruling 86)
       expect(settled).toBe(false);
       // CANARY: await the capture promise without the bound in
       // applyAgentCompletionEffects and the operator's run never starts while
@@ -734,7 +734,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
     saveFiles("VIB-1", { "landing.capture-desktop.png": "the agent's own", "other.html.capture-phone.png": "the agent's own" });
     // A reviewer's run that started before the render: its window holds the
     // pictures by their time, and must not hold them by name. Claiming one
-    // would name the run as its author and, since ruling 587, move
+    // would name the run as its author and, since ruling 85, move
     // `deliveredAt` under the verdict it is about to give.
     // CANARY: drop the picture skip in attachmentNamesSince and the run is
     // credited with post.html.capture-desktop.png. Recognise a picture by its
@@ -1118,7 +1118,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
   });
 
   it("pictures a page of a delivery of thousands of files: the renderer is handed its job on standard input, not as one argument", async () => {
-    // The job names every file of the kept delivery (ruling 610 keeps every
+    // The job names every file of the kept delivery (ruling 81 keeps every
     // file on the task). 4,400 names of 240 characters are over a megabyte
     // of job: past the 131,072 bytes Linux takes as one argument, and past
     // the megabyte macOS takes for all of them.
@@ -1143,7 +1143,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
   });
 
   it("an agent's ask finds a page in either Unicode form and renders it under the name the folder holds", async () => {
-    // Ruling 675's live case: a file uploaded from a Mac before that ruling,
+    // Ruling 76's live case: a file uploaded from a Mac before that ruling,
     // stored decomposed, asked for by the composed name every listing shows.
     const stored = "Özet.html".normalize("NFD");
     const typed = "Özet.html".normalize("NFC");
@@ -1164,7 +1164,7 @@ describe("a delivered page is pictured (ruling 691)", () => {
       "long.html": "<p>a layout that does not fit: fake-height:900 fake-width:1400</p>",
       "skew.html": "<p>comes back a px off the size asked: fake-short-by:1</p>",
     });
-    // Ruling 698: an agent that draws a diagram or a cover asks for its
+    // Ruling 194: an agent that draws a diagram or a cover asks for its
     // picture at the size the picture is for.
     const run = await liveRun("illustrator");
     const before = timeline();

@@ -11,7 +11,7 @@
  * Pure, client-safe, English-only (the product is monolingual today — when it
  * stops being, this is the single call site an Intl.PluralRules swap replaces).
  *
- * Ruling 457 keeps a few client modules on the hand-written tail. This module
+ * Ruling 11 keeps a few client modules on the hand-written tail. This module
  * ships as its own chunk, and the task page and the controller page load it
  * from none of their other modules, so importing it there adds ~100 B gzip to
  * two budgets that have no room: the run console (`runs-panels.tsx`,

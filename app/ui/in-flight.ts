@@ -1,5 +1,5 @@
 /**
- * Ruling 368: the intent a fetcher is carrying, or null while it is idle.
+ * Ruling 286: the intent a fetcher is carrying, or null while it is idle.
  *
  * A fetcher keeps its form data through `submitting` and the revalidating
  * `loading` that follows, which is exactly the stretch a person waits through,

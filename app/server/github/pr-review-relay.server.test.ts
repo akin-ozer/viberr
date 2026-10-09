@@ -23,7 +23,7 @@ import type { Engagement } from "~/schemas/task-file.schema";
 import { reconcileTask } from "./github-reconciler.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
+ * Ruling 246 (pass 40, F40-54): a project member's GitHub review of the
  * delivered revision reaches the agent that delivered it, once.
  *
  * Live on akin-ozer/website the owner's plan was to approve each note in
@@ -254,7 +254,7 @@ const SELIN_COMMENTS: GhCommentRow[] = [
     original_commit_id: HEAD,
   },
   {
-    // Ruling 509: a range from a removed line to an added one.
+    // Ruling 246: a range from a removed line to an added one.
     id: 104,
     path: "notes/swap.md",
     body: "Keep the old wording.",
@@ -276,7 +276,7 @@ const IGNORED_REVIEWS: GhReviewRow[] = [
   { id: 15, user: { login: "octocat" }, state: "CHANGES_REQUESTED", commit_id: HEAD, body: "y" },
 ];
 
-describe("ruling 484: the review relay", () => {
+describe("ruling 246: the review relay", () => {
   it("relays a member's review of the delivered head as ONE @deliverer comment quoting file:line, tagged from GitHub", async () => {
     const gh = fakeGithubFetch(
       routes(

@@ -129,7 +129,7 @@ export async function setMemberRole(
       // UI-29: count admins with a LIVE, enabled account. Counting project.md
       // entries let one ghost admin (an org-deleted user project.md still
       // listed) satisfy the guard, so the only real admin could demote
-      // themselves into a project nobody could govern. Ruling 705: refuse only
+      // themselves into a project nobody could govern. Ruling 26: refuse only
       // the demotion of the last of them, the seat `removeMember` guards; a
       // ghost or disabled admin's demotion leaves that count as it was.
       if (isLastLiveAdmin(db, parsed.frontmatter.members, input.targetUserId)) {

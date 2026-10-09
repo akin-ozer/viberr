@@ -4,7 +4,7 @@ import { ConfirmDialog } from "~/ui/confirm-dialog";
  * The org-settings removal confirm. It lives apart from `mini-modal.tsx`
  * because the profile page imports `MiniModal` and never this: while they
  * shared a module, /profile also loaded the shared `ConfirmDialog` this builds
- * on, which it never renders (ruling 457: bytes a closure ships and never
+ * on, which it never renders (ruling 11: bytes a closure ships and never
  * runs).
  */
 export function ConfirmDelete({

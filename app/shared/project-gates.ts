@@ -8,7 +8,7 @@ import type { ProjectGate } from "~/schemas/project-file.schema";
 import { slugify } from "~/shared/ids/slugify";
 
 /**
- * Ruling 482 (pass 40, F40-52): what the project's gates say about the
+ * Ruling 315 (pass 40, F40-52): what the project's gates say about the
  * revision under review, in ONE place.
  *
  * The acceptance gate (`acceptanceRefusalReasons`), the projection's
@@ -129,7 +129,7 @@ export function gateOutcomeText(result: Pick<GateResult, "exitCode" | "timedOut"
   return `exit ${result.exitCode}`;
 }
 
-/** Ruling 482(d): the system actor that writes a gate run's note. */
+/** Ruling 17: the system actor that writes a gate run's note. */
 export const GATES_SYSTEM_ID = "project-gates";
 
 /** The title a gate run's note carries, one per ending. The timeline reads
@@ -178,7 +178,7 @@ export interface GateNoteView {
 }
 
 /**
- * Ruling 493: a gate run's note read back into its ending, its revision and a
+ * Ruling 313: a gate run's note read back into its ending, its revision and a
  * row per gate, so the timeline draws the run as the gate table instead of a
  * sentence, a monospaced block and the same logs again as files. The note's
  * words stay the record (agents and task.md read them); this reads only the
@@ -320,7 +320,7 @@ export function failedGateResults(view: GatesView): GateResult[] {
 }
 
 /**
- * The acceptance refusal the gates impose, or null. Ruling 482: a failing
+ * The acceptance refusal the gates impose, or null. Ruling 104: a failing
  * gate BLOCKS a plain acceptance, and so does evidence that is missing, stale
  * or still being made — the person who merges is shown a fact about the sha,
  * never the absence of one. Force accept bypasses it like every other process

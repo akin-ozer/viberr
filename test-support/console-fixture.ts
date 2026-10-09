@@ -2,7 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { LogLine, RunKind } from "~/features/runtime/runtime-types";
 
 /**
- * Ruling 457, journeys `task-open` and `live-run`: the enlarged console the
+ * Ruling 11, journeys `task-open` and `live-run`: the enlarged console the
  * console ratchets measure on. Three agent groups on one task, the way a long
  * task accumulates them, each line carrying a unique display text of about
  * 560 characters and a stored envelope of about 1.3 KB (the measured ratio of

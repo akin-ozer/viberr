@@ -22,7 +22,7 @@ export { BROWSER_MCP_NAME };
  *
  * Why it is NOT an org-registry row: registry MCPs sit outside the capability
  * policy (P13-KM-04 — governance by instruction only, save the write tools an
- * admin marks, ruling 176), and a browser is exactly the tool that must not ride
+ * admin marks, ruling 188), and a browser is exactly the tool that must not ride
  * that gap. It IS network egress, it executes page
  * JavaScript, and it feeds page content back into an agent that may hold
  * repo-write. So the mount is capability-enforced:
@@ -54,7 +54,7 @@ export { BROWSER_MCP_NAME };
  *     stays workspace-local where no human sees it.
  *   - injection stance is prompt-level (owner decision b): page content is
  *     data, never instructions — `browserPersonaSection` below is the text.
- *   - it runs under `browser-supervisor.server.ts` (ruling 554): every tool
+ *   - it runs under `browser-supervisor.server.ts` (ruling 193): every tool
  *     call has a deadline, and a page that stops answering gets the browser
  *     restarted instead of holding every later call for the rest of the run.
  */
@@ -98,7 +98,7 @@ function playwrightMcpCliPath(): string | null {
 }
 
 /**
- * Ruling 554: the supervisor the server runs under, tried in order: beside
+ * Ruling 193: the supervisor the server runs under, tried in order: beside
  * this module (source, vitest), then where the image's `COPY app` puts it next
  * to the bundled server. Node runs it as TypeScript directly.
  */
@@ -118,7 +118,7 @@ function browserServerEntry():
   }
   const supervisor = SUPERVISOR_CANDIDATES.find((file) => existsSync(file));
   if (!supervisor) {
-    return { installed: false, missing: "the browser supervisor (ruling 554) is not installed in this deployment" };
+    return { installed: false, missing: "the browser supervisor (ruling 193) is not installed in this deployment" };
   }
   return { installed: true, supervisor, cli };
 }
@@ -136,7 +136,7 @@ export interface BrowserRuntimeStatus {
 /**
  * Is the browser capability's RUNTIME actually installed in this deployment?
  * Instance-level and capability-agnostic: the `@playwright/mcp` CLI and the
- * supervisor it runs under (ruling 554) must be on disk, and IF a browser
+ * supervisor it runs under (ruling 193) must be on disk, and IF a browser
  * executable is pinned it must exist too — the exact
  * gates `resolveBrowserMcp` applies per run, hoisted so a health/ops surface can
  * report the same verdict BEFORE a run is spent (the deployed-specialist view's
@@ -157,7 +157,7 @@ export function browserRuntimeStatus(): BrowserRuntimeStatus {
       // sentence travels on the unauthenticated health probe and on the
       // controller's `instance_health` reading for any signed-in person; the
       // pinned path is deployment configuration, so it rides on `detail`,
-      // which only the org-admin surfaces relay (ruling 107's own standard for
+      // which only the org-admin surfaces relay (ruling 269's own standard for
       // the credential explanation).
       reason:
         "the pinned browser executable (VIBERR_BROWSER_EXECUTABLE) is not on disk",
@@ -221,7 +221,7 @@ export function resolveBrowserMcp(input: {
     );
   }
 
-  // Ruling 460: the browser runs as the run's person and writes its output here.
+  // Ruling 15: the browser runs as the run's person and writes its output here.
   shareDirWithAgents(input.attachmentsDir);
 
   const args = [
@@ -258,7 +258,7 @@ export function resolveBrowserMcp(input: {
  * whatever lands there during the run onto the agent's reply — where images
  * render inline (timeline thumbnails).
  *
- * Ruling 159 (pass 35, F35-10): the path is the ABSOLUTE attachments dir. The
+ * Ruling 198 (pass 35, F35-10): the path is the ABSOLUTE attachments dir. The
  * store-relative form (`projects/<slug>/tasks/<key>/attachments`) was handed
  * to an agent whose cwd is the repo checkout two levels below it, and the
  * agent did the only thing the sentence allowed: it created the path inside
@@ -269,14 +269,14 @@ export function resolveBrowserMcp(input: {
 export function attachmentsDropSection(attachmentsDir: string): string {
   return (
     "\n\n---\n# Files on the task thread\n\n" +
-    // Ruling 306: the directory is read as well as written, and nothing said
+    // Ruling 217(b): the directory is read as well as written, and nothing said
     // so. It was introduced as a drop box, which is half of what it is: on a
     // task that has run before it already holds what every earlier run
     // attached -- 27 files on one of this instance's tasks, 90 on another --
     // and an agent reworking that task was standing next to the evidence its
     // directive was summarising, told only where to put things.
     `This is a real directory at \`${attachmentsDir}\`, and it is TWO-WAY.\n\n` +
-    // Ruling 530: a person's own upload lands here too (ruling 379), and on a
+    // Ruling 198: a person's own upload lands here too (ruling 76), and on a
     // board that delivers results it is usually the input the goal names.
     "READING: it holds the files people attached to this task, such as an input " +
     "the goal asks you to work from, and, on a task that has run before, the files " +
@@ -295,7 +295,7 @@ export function attachmentsDropSection(attachmentsDir: string): string {
     "evidence references. Use it for things humans need to SEE: screenshots, " +
     "captures, reports. On a task that changes the repository, code and large " +
     "artifacts belong in the repository and the pull request, not here. " +
-    // Ruling 530: on a board that delivers results, what the person asked for
+    // Ruling 198: on a board that delivers results, what the person asked for
     // is the delivery, and it lands on the task, never in a pull request.
     "On a task whose deliverable is a result rather than a change to the " +
     "repository (an estimate, a report, a dataset; its goal says which), the " +
@@ -352,7 +352,7 @@ export function browserPersonaSection(
     "references when a screenshot backs a claim. A screenshot you NAME " +
     "yourself saves into your working directory instead and no human will " +
     "see it.\n" +
-    // Ruling 554: said before it happens, so a long script in the page is kept
+    // Ruling 193: said before it happens, so a long script in the page is kept
     // short and a long form is saved as it goes, rather than learned at the
     // cost of every tab.
     `- **A browser call that runs past ${BROWSER_CALL_DEADLINE_MS / 1000} seconds restarts the browser.** ` +

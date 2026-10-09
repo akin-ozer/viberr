@@ -121,11 +121,11 @@ const LINE_LOST_TAG = "run·line_lost";
  * credential-shaped variable from both spawn envs (F10-02) and Codex runs with
  * `shell_environment_policy.inherit: "core"`. But the app then deliberately
  * re-adds ONE credential to the agent's child env: the credential principal's
- * own (`runCredentialFor`, ruling 127). Claude has no counterpart to Codex's
+ * own (`runCredentialFor`, ruling 137). Claude has no counterpart to Codex's
  * shell-env policy, so one `env`-printing tool call put that credential
  * verbatim into a member-visible console, the `{ } raw` toggle, and the
  * persisted `.jsonl` — the one concrete leak path PRD-8/NFR7 forbid. Since
- * ruling 127 it is somebody's PERSONAL key, which makes the leak worse: the
+ * ruling 137 it is somebody's PERSONAL key, which makes the leak worse: the
  * people who can read a task's run console are not the person paying for it.
  *
  * Three rules, all cheap enough to run per emitted line:
@@ -159,7 +159,7 @@ const MIN_SECRET_VALUE_LEN = 12;
  * PER-RUN secrets the run service resolved for this run's credential principal
  * — which together are exactly what that run's child env received.
  *
- * `extraSecrets` is the ruling-127 half and the load-bearing one now. A
+ * `extraSecrets` is the ruling-137 half and the load-bearing one now. A
  * personal API key lives sealed in `user_backend_credentials`, never in this
  * process's env, so the env sweep alone would not know it — and a run billed to
  * person A would then print person A's key verbatim into a member-visible
@@ -223,7 +223,7 @@ export interface RolloutStats {
 }
 
 export interface RunSinkOptions {
-  /** Ruling 127: the plaintext credentials this run's child env carries, from
+  /** Ruling 137: the plaintext credentials this run's child env carries, from
    *  `runCredentialFor`. Redacted from every persisted line and SSE payload. */
   secrets?: readonly string[];
 }
@@ -244,7 +244,7 @@ export function createRunSink(
 
   // Running usage totals. Both adapters emit CUMULATIVE figures (the Codex
   // adapter reads its turn's running total off the rollout after each model
-  // call, ruling 541; the Claude adapter sums its distinct API calls, and the
+  // call, ruling 165(b); the Claude adapter sums its distinct API calls, and the
   // result envelope then carries the SDK's own total), so max per field keeps
   // the row monotone and lets the final figure win (tokens/cost from real
   // envelopes ONLY — no fabrication).
@@ -263,7 +263,7 @@ export function createRunSink(
   let usageFinal = false;
   let totalCostUsd: number | null = null;
 
-  // Ruling 369: the prompt-cache record, folded from `facts.cache` — one fact
+  // Ruling 172: the prompt-cache record, folded from `facts.cache` — one fact
   // per model call on Claude (the adapter strips a message's repeat
   // envelopes), one per turn on Codex. The first fact is the run's FIRST
   // CALL; the write sums; the peak and the last fold only from per-call
@@ -271,7 +271,7 @@ export function createRunSink(
   // off the provider's split of each write; compactions count the boundary
   // facts. Everything lands on the row with the token counters below.
   let cacheWriteTokens = 0;
-  /** The folded facts as last written to the run row (ruling 457: a line
+  /** The folded facts as last written to the run row (ruling 11: a line
    *  that moves none of them writes no UPDATE). Null until the first write. */
   let persistedFold: string | null = null;
   let firstCall: RunPatch | null = null;
@@ -291,11 +291,11 @@ export function createRunSink(
   });
 
   // P13-U-1: built once per run — see createLineRedactor. `opts.secrets` is the
-  // principal's own credential (ruling 127), which lives sealed in the database
+  // principal's own credential (ruling 137), which lives sealed in the database
   // rather than in this process's env, so the env sweep could not find it.
   const redact = createLineRedactor(opts.secrets ?? []);
-  // Ruling 130(d): whose account this run bills, for the quota and credential
-  // observation records (ruling 127: a run bills one person's credential).
+  // Ruling 160(a): whose account this run bills, for the quota and credential
+  // observation records (ruling 137: a run bills one person's credential).
   const runRow = getRun(db, spec.runId);
   const principal = (() => {
     const userId = runRow?.credential_user_id ?? null;
@@ -303,7 +303,7 @@ export function createRunSink(
     const user = findUserById(db, userId);
     return { credentialUserId: userId, credentialLabel: user ? user.name || user.email : null };
   })();
-  // Ruling 99: a controller turn's frames route to its conversation owner (it
+  // Ruling 249: a controller turn's frames route to its conversation owner (it
   // has no task scope to route on). Resolved once per run, like the principal.
   const controller =
     spec.kind === "controller"
@@ -485,7 +485,7 @@ export function createRunSink(
           }
         }
         if (f.costUsd != null) totalCostUsd = f.costUsd;
-        // Ruling 376: the completion compaction's own call lands after the
+        // Ruling 174: the completion compaction's own call lands after the
         // run's result, so its cost and tokens ADD to the recorded figures.
         if (f.costAddUsd != null) totalCostUsd = (totalCostUsd ?? 0) + f.costAddUsd;
         if (f.usageAdd) {
@@ -493,7 +493,7 @@ export function createRunSink(
           cachedInputTokens += f.usageAdd.cached_input_tokens;
           outputTokens += f.usageAdd.output_tokens;
         }
-        // Ruling 369: fold the call's cache figures (see `cachePatch`).
+        // Ruling 172: fold the call's cache figures (see `cachePatch`).
         if (f.cache) {
           cacheWriteTokens += f.cache.cacheWrite;
           if (firstCall === null) {
@@ -514,15 +514,15 @@ export function createRunSink(
             if (f.cache.ttl.oneHour > 0) sawOneHour = true;
           }
         }
-        // Ruling 369: a compaction is counted on the row and audited — the
+        // Ruling 172: a compaction is counted on the row and audited — the
         // audit row is the governed record that the agent's context was
-        // replaced with a summary (no timeline note, ruling 490). Best-effort
+        // replaced with a summary (no timeline note, ruling 172). Best-effort
         // by construction, and never on the line's own persist path.
         if (f.compaction) {
           compactions += 1;
           // What a resume replays now is the summary, not the history the
           // compaction folded: the last prompt is the post size until the
-          // next call says otherwise (ruling 372 reads it; ruling 376 sets it
+          // next call says otherwise (ruling 173 reads it; ruling 174 sets it
           // at the end of the run).
           if (f.compaction.postTokens !== null && f.compaction.postTokens > 0) {
             lastPromptTokens = f.compaction.postTokens;
@@ -537,7 +537,7 @@ export function createRunSink(
           }
         }
         // Backend quota telemetry (pass 29): a rate_limit_event's reading, or
-        // the Codex rollout snapshot the adapter reads (ruling 604), is
+        // the Codex rollout snapshot the adapter reads (ruling 161(b)), is
         // folded into the instance-wide store so approaching exhaustion is
         // visible on /insights BEFORE a run fails on it. `recordBackendRateLimit`
         // is internally best-effort — it can never fail this persist path.
@@ -557,7 +557,7 @@ export function createRunSink(
 
         // D5 (pass 31): the OTHER half of quota telemetry. The live channel
         // above has no reading from a run refused before its first model call
-        // (and before ruling 604, none from Codex at all), so an already-spent
+        // (and before ruling 161(b), none from Codex at all), so an already-spent
         // Codex subscription produced no reading and /insights read "no
         // reading yet" for a backend that had been refusing every run for days
         // — with the reset date sitting in the failure the human just read.
@@ -578,7 +578,7 @@ export function createRunSink(
         // sentence (only that half of the line, never the adapter's canonical
         // prose) has to evidence a usage window before this store hears about
         // it — see `quotaExhaustionEvidence`.
-        // Ruling 130(d): the gate is the REJECTION, structured or in the
+        // Ruling 160(a): the gate is the REJECTION, structured or in the
         // provider's own words. A rejected rate-limit reading attached to the
         // line (`failure.windowRejected`) is the provider declaring the window
         // spent even when its sentence names no limit word; a transient 429
@@ -633,7 +633,7 @@ export function createRunSink(
 
         // 2. DB projection row, and 3. the facts folded into the run row.
         //
-        // Ruling 457 (LIVE-10, SRV-8): the fold is written only when a folded
+        // Ruling 11 (LIVE-10, SRV-8): the fold is written only when a folded
         // value moved since the last write — most streamed lines carry no fact
         // at all, and each used to rewrite ~20 unchanged columns (and bump
         // `updated_at`, which nothing reads as liveness). When a line has both
@@ -689,7 +689,7 @@ export function createRunSink(
     },
 
     /**
-     * Ruling 369: figures learned AFTER the stream ended — a Codex run's
+     * Ruling 172: figures learned AFTER the stream ended — a Codex run's
      * per-call prompt sizes and compactions, which its SDK never streams and
      * the run service reads off the rollout once the CLI has exited. Folded by
      * max so nothing a streamed fact already established is lowered; the
@@ -699,7 +699,7 @@ export function createRunSink(
       if (stats.peakPromptTokens > peakPromptTokens) peakPromptTokens = stats.peakPromptTokens;
       if (stats.lastPromptTokens > 0) lastPromptTokens = stats.lastPromptTokens;
       // Every compaction the rollout knows and the stream did not carry gets
-      // the same governed record a streamed one gets (ruling 369(d)): the
+      // the same governed record a streamed one gets (ruling 172): the
       // audit row, sizes from the rollout.
       const events = stats.compactionEvents ?? [];
       for (const event of events.slice(compactions)) {
@@ -775,7 +775,7 @@ export function createRunSink(
         patchRun(db, spec.runId, patch);
       });
       // D5: a run that COMPLETED on this backend is proof the account is not
-      // refusing work any more — the real run IS the re-probe (ruling 19), so
+      // refusing work any more — the real run IS the re-probe (ruling 220), so
       // the exhaustion flag is retired here rather than by a synthetic check.
       // Only on `finished`: an interrupted or errored run proves nothing.
       if (written && state === "finished") {

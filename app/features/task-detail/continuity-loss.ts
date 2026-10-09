@@ -43,7 +43,7 @@ export type VerdictProfile = { id: string; capabilities?: { verdict: boolean } }
 function roleLabelOf(run: RunView, agents: readonly VerdictProfile[]): string {
   if (run.op || run.kind === "operator") return "Operator";
   if (run.kind === "primary") return "Delivering agent";
-  // Ruling 662: `reviewer` is every non-delivering run (F31-C7), and the UI
+  // Ruling 292(b): `reviewer` is every non-delivering run (F31-C7), and the UI
   // calls one a reviewer only when its verdict gates acceptance, as the run
   // picker does; an unknown profile reads as supporting, the weaker claim.
   const verdict = agents.find((a) => a.id === run.profileId)?.capabilities?.verdict;

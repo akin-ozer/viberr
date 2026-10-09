@@ -40,7 +40,7 @@ import type { PrReviewState } from "~/schemas/task-file.schema";
  * `getProjectCredentialHealth` for the repository panel; task_projections
  * columns (branch / pr_json / github_json) for the PR + branch tables).
  *
- * Sync pill (ruling 12, merged > behind > synced): `merged` from the
+ * Sync pill (ruling 237, merged > behind > synced): `merged` from the
  * projected pr.state; `behind_main` from the REAL compare captured by the
  * latest `github.reconcile` provenance row for the task (the reconciler
  * records behindBy there) — never from `validation === "failing"` (the
@@ -52,7 +52,7 @@ import type { PrReviewState } from "~/schemas/task-file.schema";
 export interface PrRowView {
   taskKey: string;
   number: number;
-  /** Cache vocabulary: "review" | "merged" | "closed" (ruling 12). */
+  /** Cache vocabulary: "review" | "merged" | "closed" (ruling 237). */
   state: string;
   /** PR title (the row headline in the mock). */
   title: string;
@@ -61,11 +61,11 @@ export interface PrRowView {
    *  discarded or never read; the narrowing right here to number/state/title
    *  IS the "every consumer narrows" the finding describes. */
   checks: PrChecksRender | null;
-  /** Ruling 276: whether GitHub's check state has ever been read for this PR.
+  /** Ruling 237: whether GitHub's check state has ever been read for this PR.
    *  `checks: null` with `checksRead: true` means GitHub reported NO check
    *  runs; with `checksRead: false` it means nobody has looked. */
   checksRead: boolean;
-  /** Ruling 360: the refused read, while nothing was ever read. */
+  /** Ruling 237: the refused read, while nothing was ever read. */
   checksUnread?: PrChecksUnread | null;
   review: PrReviewState | null;
   /** P14-LV-07 / F17-L6: GitHub's last-read mergeability for an open PR — the
@@ -91,7 +91,7 @@ export interface BranchRowView {
   sync: SyncState;
   /** Task-key-associated commits from the github cache (VIB-142 seeds 3). */
   commitCount: number;
-  /** Ruling 187: how many of `commitCount` the remote does not have. */
+  /** Ruling 236: how many of `commitCount` the remote does not have. */
   unpushedCommitCount: number;
 }
 
@@ -156,13 +156,13 @@ export function invalidateRepoAccess(
 }
 
 /**
- * Ruling 540: take a new reading of a project's repository after something it
+ * Ruling 223: take a new reading of a project's repository after something it
  * depends on changed (the project's credential, or the token behind it) and
  * record it for the board and the home card (U33-2), which otherwise kept
  * their verdict about what was there before: "token revoked" after a working
  * connection was attached, "token expired" on every bound board after Update
  * token. Deleting the row would not do: it clears a failure the change did not
- * fix. As in ruling 517's re-check, an unreachable GitHub is not an answer, so
+ * fix. As in ruling 223's re-check, an unreachable GitHub is not an answer, so
  * it records nothing and a failure still shown is taken again by the poller.
  * The memo is dropped, not refilled: the GitHub page's next load asks again.
  * A project with no credential or no repository answers without a GitHub call.
@@ -200,7 +200,7 @@ async function checkRepoAccessCached(
   const result = await checkRepoAccess(db, projectSlug);
   byDb.set(projectSlug, { result, at: now });
   // U33-2: this page is one of the places that already knows the answer, so it
-  // is where the board and the home card get theirs from (ruling 517 names the
+  // is where the board and the home card get theirs from (ruling 223 names the
   // others). The in-memory cache above is per process and per 30s; the row is
   // what survives a restart and what a surface with no business calling GitHub
   // reads.
@@ -247,7 +247,7 @@ export async function getGithubViewData(
         // ("not compared") rather than borrowing `deriveSyncState`'s
         // "behindBy === 0 → synced" rule for a measurement that never ran.
         //
-        // Ruling 401: and a FINISHED task that never committed anything has no
+        // Ruling 237: and a FINISHED task that never committed anything has no
         // execution branch at all — the name was allocated at creation and
         // nothing was ever pushed to it. Whatever the last compare said about
         // its recorded revision, "behind main" is a demand nobody can meet on
@@ -264,7 +264,7 @@ export async function getGithubViewData(
                 ? ("unknown" as const)
                 : deriveSyncState({ prMerged: false, behindBy }),
         commitCount: t.commits.length,
-        // Ruling 187 (pass 37, F37-8): how many of those the REMOTE does not
+        // Ruling 236 (pass 37, F37-8): how many of those the REMOTE does not
         // have. A commit an agent made in its workspace is real work and
         // belongs in the count, but rendering it identically to a pushed one
         // is what let SHOP-2 read "1 commit · synced" for a change that
@@ -284,7 +284,7 @@ export async function getGithubViewData(
       title: t.pr!.title,
       branch: t.branch,
       checks: mapPrChecks(t.pr),
-      // Ruling 276: a null `checks` is two different facts, and the file keeps
+      // Ruling 237: a null `checks` is two different facts, and the file keeps
       // them apart. Carried beside the render rather than folded into it, so
       // the page's "no pill for zero checks" stays exactly as it was.
       checksRead: prChecksRead(t.pr),

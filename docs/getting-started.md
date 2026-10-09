@@ -15,7 +15,7 @@
 - **To run agents:** each person who owns tasks connects their own Claude account
   (Claude Pro/Max, or an Anthropic Console API key) or Codex account (a ChatGPT sign-in,
   an OpenAI API key, or a ChatGPT workspace access token). There is no shared instance
-  credential: a run bills the task's owner (ruling 127).
+  credential: a run bills the task's owner (ruling 137).
 - **To deliver code:** a GitHub repository and a personal access token that can push
   branches and open pull requests to it. A board that delivers results (files saved on
   each task, no code) needs none.
@@ -28,7 +28,7 @@ git clone https://github.com/akin-ozer/viberr.git && cd viberr
 docker compose up
 ```
 
-That is the whole install (ruling 504). The first `up` builds the image, creates the
+That is the whole install (ruling 38). The first `up` builds the image, creates the
 store volume `viberr-data`, generates the session secret and the encryption key into the
 store, and starts the app on <http://localhost:3000>. No `.env` file is needed.
 
@@ -51,7 +51,7 @@ Useful from here on:
 | Command | What it does |
 |---|---|
 | `docker compose up -d --build` | Rebuild after pulling a new version and restart |
-| `npm run deploy` | The same, stamped with the git revision and verified against `/resources/health` (ruling 345) |
+| `npm run deploy` | The same, stamped with the git revision and verified against `/resources/health` (ruling 41) |
 | `docker compose logs -f app` | Follow the structured JSON log |
 | `docker compose down` | Stop; the store volume is kept |
 | `docker compose down -v` | Stop **and delete the store**: every project, credential and sign-in |
@@ -61,14 +61,14 @@ store's writer lock (before the first `up`, or after `docker compose down`):
 `docker compose run --rm app npm run seed`. It adds three example knowledge bases
 (architecture notes, API contracts, deploy runbooks), four skills (conventional commits,
 Terraform review, API design, a changelog writer); it allowlists no Google sign-in domain
-(ruling 688), so add the domains you mean in *Instance settings → Sign-in & SSO*. A seed that finds the users table empty also creates the bootstrap
+(ruling 28(c)), so add the domains you mean in *Instance settings → Sign-in & SSO*. A seed that finds the users table empty also creates the bootstrap
 admin, with `VIBERR_SEED_ADMIN_PASSWORD` or else the development default
 `viberr-dev-2828`, so set the variable on any instance other people can reach.
 
 ## 3. First sign-in: the setup checklist
 
 Home opens on **Finish setting up**, a numbered list of what this instance and you still
-need (ruling 532). Each step's button opens the place where it is done, and the card leaves
+need (ruling 322). Each step's button opens the place where it is done, and the card leaves
 once every step is done. An org admin sees four steps; a member sees the last two.
 
 1. **GitHub** (org admin). *Instance settings → GitHub connections → New connection*. Paste
@@ -77,7 +77,7 @@ once every step is done. An org admin sees four steps; a member sees the last tw
    - A **fine-grained token**: resource owner is the account or organization that owns
      the repository; grant it that repository with **Contents: Read and write**,
      **Pull requests: Read and write** and **Metadata: Read-only**. To let Viberr create a
-     project's repository for you (ruling 462), also grant **Administration: Read and
+     project's repository for you (ruling 225), also grant **Administration: Read and
      write** on all repositories.
    - A **classic token** with the `repo` scope also works, and validates more precisely.
 
@@ -97,10 +97,10 @@ once every step is done. An org admin sees four steps; a member sees the last tw
    A hosted sign-in is run by the vendor's own CLI, and the credential it writes stays in
    your own runtime home on the server; Viberr never reads or stores your sign-in token.
    A pasted key is sealed in the database and only ever reaches the runs you pay for. You
-   can keep several accounts per backend and switch with **Runs use** (ruling 507). If
+   can keep several accounts per backend and switch with **Runs use** (ruling 138). If
    ChatGPT reports that device-code authorization is not enabled, ask your workspace admin
    to enable it, or paste a key instead. Detail:
-   [operations/deployment.md](operations/deployment.md#agent-accounts-are-per-person-ruling-127).
+   [operations/deployment.md](operations/deployment.md#agent-accounts-are-per-person-ruling-137).
 4. **First project.** *New project* on Home asks for:
    - a **name** and a **key** (the task-key prefix, `WEB` gives `WEB-1`, `WEB-2`, …);
    - **what the board delivers**: *Software* (a GitHub connection and a repository, or
@@ -224,7 +224,7 @@ The dev server keeps its store in `./docker-data` (from `.env.example`; `./data`
 variable is unset), separate from the container's volume. One process may hold a store at
 a time: a second server, or a seed while the app runs, is refused by the writer lock.
 Without the container's setuid launcher, agent runs start as your own OS user, and health
-reports `agentIsolation: off`; that is for development only (ruling 460).
+reports `agentIsolation: off`; that is for development only (ruling 139).
 
 The gates, the code layout and the definition of done:
 [development/contributing.md](development/contributing.md).

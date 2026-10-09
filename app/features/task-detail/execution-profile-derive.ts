@@ -12,7 +12,7 @@ import { backendRunRefusal, type TaskRunPrincipalView } from "./run-principal-vi
 
 /**
  * What the execution profile reads off its props before it draws (ruling
- * 700(e), the split of `execution-profile.tsx` along the task page's recipe):
+ * 13(b), the split of `execution-profile.tsx` along the task page's recipe):
  * who owns the task, what holds the operator's manual run, what a pick on the
  * run-an-agent control would meet (its refusal, its posture, its button's
  * title) and the words on both run buttons. Pure functions of the panel's
@@ -21,7 +21,7 @@ import { backendRunRefusal, type TaskRunPrincipalView } from "./run-principal-vi
  */
 
 /**
- * Ruling 368: the run button's words. While the control's own request is in
+ * Ruling 286: the run button's words. While the control's own request is in
  * flight they say which one it sent, a run now or a scheduled one, because
  * the picker resets to Now on the click; at rest, `runNow` for a run now and
  * "Schedule" once the when-picker leaves Now.
@@ -42,9 +42,9 @@ export function humanOwner(task: TaskSummary): Extract<ActorRender, { kind: "hum
   return task.owner && task.owner.kind === "human" ? task.owner : null;
 }
 
-/** Ruling 131(d): the run control's hold copy. */
+/** Ruling 115: the run control's hold copy. */
 function holdNoteFor(entries: readonly DependencyRender[]): string {
-  // Ruling 356: a done entry reads as done, not as still waited on.
+  // Ruling 58: a done entry reads as done, not as still waited on.
   return `Waiting on other work (${holdEntriesSentence(entries)}). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.`;
 }
 
@@ -58,7 +58,7 @@ export interface OperatorRunHold {
 /**
  * F20-5 (R20-1): the server refuses a MANUAL operator run while a decision
  * packet is open — coordination is paused by the packet, so a run would burn
- * several turns and take no action. Ruling 131(d): a task that waits on other
+ * several turns and take no action. Ruling 115: a task that waits on other
  * work only notes it beside an enabled Run; an open packet keeps precedence. A
  * closed task's control withdraws instead, so neither applies there.
  */
@@ -111,7 +111,7 @@ export interface AgentDispatch {
   /** Why a run NOW would be refused (the hold, the stage, the owner's
    *  backend), or null. */
   runRefusal: string | null;
-  /** Ruling 147(a): the start is unavailable. */
+  /** Ruling 288: the start is unavailable. */
   off: boolean;
   /** The posture the dispatch will give the pick, or null. */
   posture: string | null;
@@ -120,7 +120,7 @@ export interface AgentDispatch {
 }
 
 /** U36-10 (pass 36): the refusal the dispatch gate would give the pick at
- *  the task's stage, in the server's own sentence (ruling 133), or null when
+ *  the task's stage, in the server's own sentence (ruling 181), or null when
  *  the pick's stage scope admits the stage. */
 function stageRefusal(
   selected: DeployedSpecialistView | null,
@@ -155,8 +155,8 @@ function dispatchPosture(
     : ineligible
       ? null
       : selected.id === deliveringProfileId
-      ? // Ruling 665: a deliverer that cannot write the repository owns no
-        // branch. Its delivery is the files it saves (ruling 535).
+      ? // Ruling 228: a deliverer that cannot write the repository owns no
+        // branch. Its delivery is the files it saves (ruling 128).
         selected.capabilities?.delivery === false
         ? "Runs as the delivering agent: its delivery is the files it saves on the task."
         : "Runs as the delivering agent: it owns the branch and PR."
@@ -195,7 +195,7 @@ export function agentDispatch(pick: AgentPick): AgentDispatch {
   const { selected, selectedId, delay } = pick;
   const selectedRunning =
     !!selectedId && delay === "now" && pick.activeProfileIds.includes(selectedId);
-  // Ruling 127: the picked profile runs on ITS backend, billed to the task
+  // Ruling 137: the picked profile runs on ITS backend, billed to the task
   // owner — so the refusal is per-pick, not per-page. Same split the operator
   // control makes: a run NOW is refused, a SCHEDULED one is not (the owner can
   // connect the backend, or the seat can change hands, before it fires).
@@ -203,21 +203,21 @@ export function agentDispatch(pick: AgentPick): AgentDispatch {
   // the dispatch gate applies, so the refusal a person would meet after the
   // click is the one they read before it.
   const ineligible = stageRefusal(selected, pick.stage, pick.stages, pick.workflow);
-  // Ruling 186 (pass 37, F37-2): a held task refuses EVERY dispatch server-side,
+  // Ruling 310 (pass 37, F37-2): a held task refuses EVERY dispatch server-side,
   // so the control says so before the click. Unlike the per-pick refusals this
   // one does not depend on which agent is chosen — the hold is a fact about the
   // task — so it stands even with nothing picked.
   const held =
     pick.blockedBy.length > 0
-      ? // Rulings 355 and 356: the entries carry their states, so the sentence
+      ? // Ruling 58: the entries carry their states, so the sentence
         // names a dead one as dead and a done one as done.
         holdRefusal(pick.taskKey, pick.blockedBy, "running an agent on it")
       : null;
   const runRefusal = selected
     ? (held ?? ineligible ?? backendRunRefusal(pick.runPrincipal, selected.backend, pick.meId))
     : held;
-  // Ruling 147(a): only AVAILABILITY disables the start — a run in flight, a
-  // live run on this very profile, or the owner-credential refusal (ruling 127),
+  // Ruling 288: only AVAILABILITY disables the start — a run in flight, a
+  // live run on this very profile, or the owner-credential refusal (ruling 137),
   // each of which renders its own reason. An empty pick is validation, so it is
   // refused on the click instead (147(b)); `selectedRunning` and `runRefusal`
   // are both false with nothing picked, so this collapses to `busy` there.

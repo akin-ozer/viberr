@@ -19,7 +19,7 @@ type ProfileAction = typeof import("~/routes/profile").action;
 
 /**
  * Route-level tests for /profile (Phase 9C): loader shape (session user is
- * the single source of `me` — ruling 6; role from membership by id, never
+ * the single source of `me` — ruling 26(a); role from membership by id, never
  * hardcoded), prefs writes into user_prefs (the phase-5 tlDefault key
  * included), password change via the phase-2 machinery, and the GitHub
  * identity guards.
@@ -36,7 +36,7 @@ beforeAll(async () => {
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   ardaId = userIds.arda;
   murId = userIds.murat;
-  // Ruling 127: the route resolves its OWN vendor binaries (a form action must
+  // Ruling 137: the route resolves its OWN vendor binaries (a form action must
   // not take an executable path from its caller), so the only way to exercise
   // the sign-in intents without spawning the real `claude auth login` is the
   // resolver's named test seam.
@@ -126,7 +126,7 @@ describe("/profile loader", () => {
     // Pref defaults (nothing stored yet).
     expect(profile.prefs.notifs).toEqual(mergeNotifPrefs(null));
     expect(profile.prefs.tlDefault).toBe("all");
-    // Ruling 148(c): there is no motion preference any more.
+    // Ruling 30: there is no motion preference any more.
     expect("motion" in profile.prefs).toBe(false);
   });
 
@@ -178,7 +178,7 @@ describe("/profile action", () => {
     expect(profile.prefs.notifs.approvals.app).toBe(true);
   });
 
-  it("ruling 148(c): set-motion is not an intent any more", async () => {
+  it("ruling 30: set-motion is not an intent any more", async () => {
     const { data } = await postAction(ardaId, {
       intent: "set-motion",
       motion: "reduce",
@@ -349,14 +349,14 @@ describe("/profile action", () => {
 });
 
 /**
- * Ruling 127 — Profile → Agent accounts.
+ * Ruling 137 — Profile → Agent accounts.
  *
  * Every intent is driven through the real route action (session cookie, CSRF,
  * the module's own `resolveBackendBinary`), and the sign-in ones spawn a real
  * child: the fake vendor executables stand in for `claude` and `codex`, so what
  * is asserted is the route wired to the driver, not a stub of it.
  */
-describe("/profile agent accounts (ruling 127)", () => {
+describe("/profile agent accounts (ruling 137)", () => {
   /** The driver's own read path, polled until the session settles. */
   async function waitForLogin(
     userId: string,
@@ -394,7 +394,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     resetFakeVendorEnv();
   }
 
-  it("ruling 130(d): the loader attaches the viewer's OWN last refusal and never another person's", async () => {
+  it("ruling 160(a): the loader attaches the viewer's OWN last refusal and never another person's", async () => {
     // Live (F34-1): every run on an account was refused with a 403 while the
     // card said "connected · verified". Canary: drop the
     // `credentialUserId === userId` filter in `ownRefusal` and Murat's card
@@ -451,7 +451,7 @@ describe("/profile agent accounts (ruling 127)", () => {
   });
 
   /**
-   * Ruling 294 (pass 37, F37-129): the usage reading on this card is the
+   * Ruling 161 (pass 37, F37-129): the usage reading on this card is the
    * VIEWER's own or it is absent.
    *
    * The store keeps ONE reading per backend for the whole instance, stamped
@@ -460,10 +460,10 @@ describe("/profile agent accounts (ruling 127)", () => {
    * first NON-admin surface to carry a utilization figure at all, so an
    * unscoped field here would not duplicate an existing disclosure, it would
    * put one member's account consumption in front of every member under their
-   * own name. Ruling 146(a) settled the principle in the owner's words: the
+   * own name. Ruling 161 settled the principle in the owner's words: the
    * readings belong "per person on Insights ... and on Profile".
    */
-  it("ruling 294: a reading billed to somebody else never reaches this card", async () => {
+  it("ruling 161: a reading billed to somebody else never reaches this card", async () => {
     const quota = await import("~/server/runtimes/backend-quota.server");
     quota.recordBackendRateLimit(app.db, "claude", {
       credentialUserId: murId,
@@ -486,14 +486,14 @@ describe("/profile agent accounts (ruling 127)", () => {
   });
 
   /**
-   * Ruling 481(d) (F40-50): the viewer's own reading whose window reset
+   * Ruling 161(c) (F40-50): the viewer's own reading whose window reset
    * before this load is marked, from the one home Insights reads too, so the
    * card says "That window reset" instead of "The window resets".
    *
    * Canary: return `false` from `readingWindowReset`, or drop the field in
    * `ownReading`, and `windowReset` reads false.
    */
-  it("ruling 481: the viewer's reading whose window already reset is marked as such", async () => {
+  it("ruling 161: the viewer's reading whose window already reset is marked as such", async () => {
     const quota = await import("~/server/runtimes/backend-quota.server");
     quota.recordBackendRateLimit(app.db, "claude", {
       credentialUserId: ardaId,
@@ -515,7 +515,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     }
   });
 
-  it("ruling 294: a reading older than the connection describes the account it replaced", async () => {
+  it("ruling 161: a reading older than the connection describes the account it replaced", async () => {
     // The second gate, and the moment it matters: the panel revalidates the
     // loader the instant a sign-in SUCCEEDS, which is exactly when a surviving
     // reading from the account just replaced would be re-rendered as the new
@@ -558,7 +558,7 @@ describe("/profile agent accounts (ruling 127)", () => {
       expect(claude.usage ?? null).toBeNull();
     } finally {
       quota.retireBackendRecordsFor(app.db, "claude", ardaId);
-      // The connect left an account on Arda's Claude card, and the ruling 507
+      // The connect left an account on Arda's Claude card, and the ruling 138
       // cases below count her accounts.
       app.db
         .prepare(
@@ -674,7 +674,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     // A login row carries no secret at all: the vendor's client owns the file.
     expect(claude.health.secretSuffix).toBeNull();
 
-    // Ruling 507: a disconnect names the account it removes.
+    // Ruling 138: a disconnect names the account it removes.
     const disconnected = await postAction(murId, {
       intent: "backend-disconnect",
       backend: "claude",
@@ -746,7 +746,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     expect(gone.data.ok).toBe(true);
   });
 
-  it("ruling 507: a second account, a switch with no sign-in, a name, and the disconnect of the one in use", async () => {
+  it("ruling 138: a second account, a switch with no sign-in, a name, and the disconnect of the one in use", async () => {
     const realFetch = globalThis.fetch;
     // SAFETY: as above — the probe reads only `ok` and `status`.
     globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
@@ -821,7 +821,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     expect((await backendsOf(ardaId))[0]!.accounts).toEqual([]);
   });
 
-  it("ruling 507: one person's account id is refused to another person", async () => {
+  it("ruling 138: one person's account id is refused to another person", async () => {
     const realFetch = globalThis.fetch;
     // SAFETY: as above — the probe reads only `ok` and `status`.
     globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
@@ -884,7 +884,7 @@ describe("/profile agent accounts (ruling 127)", () => {
     expect(badKind.status).toBe(400);
     expect(badKind.data.error).toBe("Unknown credential kind.");
 
-    // Ruling 507: an account id is required, shaped like one, and the
+    // Ruling 138: an account id is required, shaped like one, and the
     // person's own — a malformed one is refused by name before any lookup, a
     // well-formed one that is not theirs as not connected.
     const noAccount = await postAction(ardaId, {

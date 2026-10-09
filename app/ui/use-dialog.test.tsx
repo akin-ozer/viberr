@@ -34,7 +34,7 @@ function Host() {
 }
 
 /** A confirm whose action takes its own opener away before the exit (ruling
- *  459) ends: it `disables` the opener until the request lands (the knowledge
+ *  287) ends: it `disables` the opener until the request lands (the knowledge
  *  panel's Undo and Dismiss), `replaces` it with text once the revalidation
  *  has landed (Undo's "Undone by …"), or `deletes` its whole row. It sits in a
  *  focusable <main>, as Home's skip-link target is; `inRow` puts the opener in
@@ -154,7 +154,7 @@ describe("useDialog focus restore", () => {
 });
 
 /**
- * Ruling 459: a dialog's primary action leaves the way Cancel, Escape and a
+ * Ruling 287: a dialog's primary action leaves the way Cancel, Escape and a
  * backdrop click do. `useDialog`'s `commit(fn)` runs fn once, then the same
  * animated close, which calls the dialog's onClose/onCancel to unmount it.
  * jsdom has no stylesheet, so the close is synchronous unless a test gives
@@ -187,7 +187,7 @@ function slow(dialog: HTMLDialogElement) {
   dialog.style.transitionDuration = "0.15s";
 }
 
-describe("ruling 459: a confirm leaves through the same exit as Cancel", () => {
+describe("ruling 287: a confirm leaves through the same exit as Cancel", () => {
   it("runs the confirm, plays the exit, and unmounts only when the exit ends", () => {
     // CANARY: put ConfirmDialog's primary back on `onClick={onConfirm}` (with
     // the caller's own unmount, the card vanished in one frame) and nothing

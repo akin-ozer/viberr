@@ -16,7 +16,7 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 import type { BackendLoginPollData } from "./resources.backend-login";
 
 /**
- * GET /resources/backend-login (ruling 127).
+ * GET /resources/backend-login (ruling 137).
  *
  * The Profile card polls this while a vendor sign-in runs on the server, so the
  * two things it must never get wrong are WHOSE session it answers with (the
@@ -101,7 +101,7 @@ async function startHungSignIn(userId: string, label: string): Promise<void> {
 
 describe("GET /resources/backend-login", () => {
   /**
-   * Ruling 457, test audit L14-29. Profile → Agent accounts polls this every
+   * Ruling 11, test audit L14-29. Profile → Agent accounts polls this every
    * 2 s through a fetcher while a sign-in runs, and `requireUser` answered a
    * missing session with a login redirect naming THIS route as the returnTo: a
    * fetcher follows a redirect as a navigation, so a stale tab went to /login

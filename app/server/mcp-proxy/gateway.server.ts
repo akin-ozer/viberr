@@ -107,7 +107,7 @@ import {
 } from "./upstream.server";
 
 /**
- * Ruling 461: Viberr's loopback MCP gateway. A credentialed org MCP server is
+ * Ruling 191: Viberr's loopback MCP gateway. A credentialed org MCP server is
  * never handed to an agent process.
  *
  * Before this, `resolveSpecialistMcpServersDetailed` decrypted a server's
@@ -122,7 +122,7 @@ import {
  *    React Router route and nothing outside the host reaches it.
  *  - A run that mounts credentialed servers gets ONE random 256-bit token,
  *    bound to its run id, the exact server names it mounts and the write tools
- *    it withholds on each (ruling 176). The token dies when the run settles
+ *    it withholds on each (ruling 188). The token dies when the run settles
  *    (`revokeRunMcpGateway`, called from every settle path) and with the
  *    process. An unknown, revoked or wrong-server token is answered 401 with a
  *    JSON-RPC error and nothing is forwarded.
@@ -134,15 +134,15 @@ import {
  *    server with the credential attached in THIS process (`upstream.server.ts`
  *    for HTTP with its SSE fallback, `upstream-stdio.server.ts` for a command
  *    the server spawns with `MCP_CREDENTIAL`; for an OAuth-signed-in server
- *    the access token, renewed as it runs out, ruling 469), one upstream per (run, server),
+ *    the access token, renewed as it runs out, ruling 192), one upstream per (run, server),
  *    closed at revoke. Withheld write tools are filtered from `tools/list` and
  *    refused on `tools/call`; every forwarded call is logged (never its
  *    arguments or result) and a call to a marked write tool is audited. An
  *    upstream authorization refusal on an OAuth connection whose grant holds
- *    no write gains one sentence naming the grant and the remedy (ruling 486).
+ *    no write gains one sentence naming the grant and the remedy (ruling 192).
  *  - On an OAuth-signed-in connection the gateway adds one tool of its own,
  *    `viberr_connection_grant`, and answers it itself: the granted scopes,
- *    writes and reads listed apart, and the sign-in's expiry (ruling 486,
+ *    writes and reads listed apart, and the sign-in's expiry (ruling 192,
  *    F40-66, `grant-tool.server.ts`).
  *
  * State lives on `globalThis`, like the run service's, so a dev-server module
@@ -174,12 +174,12 @@ interface RunGrant {
   /** The database the run was started against: the registry the upstream is
    *  read from and the audit table a write call lands in. */
   db: DatabaseSync;
-  /** Server name → the tools this run withholds on it (ruling 176). */
+  /** Server name → the tools this run withholds on it (ruling 188). */
   servers: Map<string, ReadonlySet<string>>;
-  /** Ruling 585: the servers this gateway answers itself (the knowledge
+  /** Ruling 216: the servers this gateway answers itself (the knowledge
    *  server), with the knowledge bases the run was given. Never upstreams. */
   knowledge: Map<string, KnowledgeMount>;
-  /** Ruling 589: the board server, answered here too, with the store the
+  /** Ruling 216: the board server, answered here too, with the store the
    *  run's task files are in. */
   board: Map<string, BoardMount>;
   /** Who a write-tool call is audited as. */
@@ -194,10 +194,10 @@ interface RunGrant {
    *  still opens `initialize` and the listings for its completion compaction,
    *  and refuses every call. */
   callsClosed: boolean;
-  /** Ruling 598: when each call came back with each answer, by a hash of
+  /** Ruling 158(b): when each call came back with each answer, by a hash of
    *  both, inside the last window. */
   repeats: Map<string, number[]>;
-  /** Ruling 598: the run was asked to stop for repeating one call. */
+  /** Ruling 158(b): the run was asked to stop for repeating one call. */
   loopStopped: boolean;
 }
 
@@ -213,7 +213,7 @@ interface Upstream {
   /** A reconnect in flight, so the calls that met one lost session wait for
    *  one new connection. */
   reconnecting: Promise<UpstreamConnection> | null;
-  /** Ruling 176's marks as the registry held them at the last connect: the
+  /** Ruling 188's marks as the registry held them at the last connect: the
    *  calls audited as write calls. */
   writeTools: ReadonlySet<string>;
   sessions: Set<Session>;
@@ -238,7 +238,7 @@ interface Session {
   server: string;
   mcp: Server;
   transport: StreamableHTTPServerTransport;
-  /** Null on a server the gateway answers itself (ruling 585). */
+  /** Null on a server the gateway answers itself (ruling 216). */
   upstream: Upstream | null;
 }
 
@@ -383,10 +383,10 @@ const gatewayMountSchema = z.object({
   tools: z
     .array(z.object({ name: z.string(), permission_policy: z.literal("always_deny") }))
     .optional(),
-  /** Ruling 585: set only on the knowledge mount, which the gateway answers
+  /** Ruling 216: set only on the knowledge mount, which the gateway answers
    *  itself. It stays here, and the run is handed the mount without it. */
   knowledge: knowledgeMountSchema.optional(),
-  /** Ruling 589: set only on the board mount, kept here the same way. */
+  /** Ruling 216: set only on the board mount, kept here the same way. */
   board: boardMountSchema.optional(),
 });
 
@@ -442,7 +442,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
       .flatMap((denial) => denial.tools);
     servers.set(mount.name, new Set(withheld));
     // Rebuilt from the parsed mount, so nothing but the URL, the run's token
-    // and ruling 176's per-tool denies reaches the run.
+    // and ruling 188's per-tool denies reaches the run.
     const config: HttpMcpServerConfig = {
       type: "http",
       url: mount.config.url,
@@ -477,7 +477,7 @@ export function bindRunToMcpGateway(input: GatewayRunBinding): RunServerMap {
 
 /**
  * The run's process has exited, and its completion compaction may be about to
- * replay the session (ruling 376). That request must carry the run's MCP
+ * replay the session (ruling 174). That request must carry the run's MCP
  * servers with the same tools, or it is a different prefix and misses the
  * cache it exists to read — so the token keeps opening `initialize` and the
  * listings (on the upstreams the run already holds), and from now on refuses
@@ -714,7 +714,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     sendJsonRpcError(res, 400, null, ErrorCode.InvalidRequest, "Bad Request: No valid session ID provided");
     return;
   }
-  // Rulings 585 and 589: the knowledge and board servers have no upstream;
+  // Ruling 216: the knowledge and board servers have no upstream;
   // this process answers them.
   const knowledge = grant.knowledge.get(server);
   const board = grant.board.get(server);
@@ -786,7 +786,7 @@ async function openConnection(
     throw new UpstreamConnectError(credential.reason);
   }
   const token = credential.state === "ok" ? credential.token : null;
-  // Ruling 469: an OAuth sign-in's access token is asked for on every request
+  // Ruling 192: an OAuth sign-in's access token is asked for on every request
   // (renewed when it has run out, and once after a 401), never handed over.
   const auth =
     credential.state === "oauth" ? mcpOAuthTokenSource(grant.db, row.id, row.target) : undefined;
@@ -981,7 +981,7 @@ function namedError(server: string, cause: unknown, connection: UpstreamConnecti
 }
 
 /**
- * Ruling 486(d): the words an upstream uses when it refuses the caller's
+ * Ruling 192: the words an upstream uses when it refuses the caller's
  * authority rather than the request — Cloudflare's API answers a write on a
  * read-only grant with "10000: Authentication error", inside a tool result.
  */
@@ -1005,7 +1005,7 @@ function toolRefusedAuthority(result: CallToolResult): boolean {
 }
 
 /**
- * `server`'s OAuth sign-in as its registry row reads now (ruling 469's public
+ * `server`'s OAuth sign-in as its registry row reads now (ruling 192's public
  * half, which holds no token), or null when it is not an OAuth connection. A
  * registry that cannot be read is logged and reads as null.
  */
@@ -1019,7 +1019,7 @@ function oauthViewOf(grant: RunGrant, server: string): McpOAuthView | null {
 }
 
 /**
- * Ruling 486(d): the sentence an authorization refusal gains when `server` is
+ * Ruling 192: the sentence an authorization refusal gains when `server` is
  * signed in with OAuth and its grant holds no write — read from the row now,
  * so a sign-in again with write scopes stops it at once. Before, the run read
  * only the upstream's words ("Authentication error") beside a connection
@@ -1030,7 +1030,7 @@ function readOnlyGrantNote(grant: RunGrant, server: string): string | null {
   return mcpReadOnlyRefusal(oauthViewOf(grant, server));
 }
 
-/** A named upstream error, with ruling 486's sentence after the upstream's
+/** A named upstream error, with ruling 192's sentence after the upstream's
  *  own words when it is an authorization refusal on a read-only grant. */
 function withGrantNote(grant: RunGrant, server: string, cause: unknown, named: GatewayRpcError): GatewayRpcError {
   if (!refusedAuthority(cause)) return named;
@@ -1067,7 +1067,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
   const upstreamCaps = opened.getServerCapabilities() ?? {};
   const capabilities: ServerCapabilities = {};
   if (upstreamCaps.tools) capabilities.tools = upstreamCaps.tools.listChanged ? { listChanged: true } : {};
-  // Ruling 486 (F40-66): an OAuth-signed-in connection offers the gateway's
+  // Ruling 192 (F40-66): an OAuth-signed-in connection offers the gateway's
   // grant tool, so it has tools even when its server offers none.
   if (!capabilities.tools && oauthViewOf(grant, server)?.status === "signed_in") capabilities.tools = {};
   if (upstreamCaps.resources) {
@@ -1094,11 +1094,11 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
             }),
           )
         : { tools: [] };
-      // Ruling 486 (F40-66): a connection signed in with OAuth now offers the
+      // Ruling 192 (F40-66): a connection signed in with OAuth now offers the
       // gateway's grant tool, once (on the first page), in place of any
       // upstream tool of that name.
       const grantTool = oauthViewOf(grant, server)?.status === "signed_in";
-      // Ruling 176: a withheld write tool is not offered at all.
+      // Ruling 188: a withheld write tool is not offered at all.
       const tools = result.tools.filter(
         (tool) => !withheld.has(tool.name) && !(grantTool && tool.name === MCP_GRANT_TOOL_NAME),
       );
@@ -1108,7 +1108,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
     mcp.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       assertCallsOpen(grant, server, "tools/call");
       const tool = request.params.name;
-      // Ruling 486 (F40-66): on an OAuth connection the grant tool is answered
+      // Ruling 192 (F40-66): on an OAuth connection the grant tool is answered
       // here, from the row's public half: never forwarded, never withheld,
       // never audited as a write.
       const signIn = tool === MCP_GRANT_TOOL_NAME ? oauthViewOf(grant, server) : null;
@@ -1160,12 +1160,12 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
           return stop;
         }
         outcome = result.isError ? "tool_error" : "ok";
-        // Ruling 486(d): the upstream's words stay as they are; the note
+        // Ruling 192: the upstream's words stay as they are; the note
         // follows them as one more text block.
         const note = toolRefusedAuthority(result) ? readOnlyGrantNote(grant, server) : null;
         return note ? { ...result, content: [...result.content, { type: "text", text: note }] } : result;
       } catch (error) {
-        // Ruling 598: an upstream that answers with an error answers too; a
+        // Ruling 158(b): an upstream that answers with an error answers too; a
         // script that catches it and sends the call again is the same loop.
         const failed: CallToolResult = { content: [{ type: "text", text: errorMessage(error) }], isError: true };
         const stop = repeatedCallStop(grant, server, tool, request.params.arguments, failed);
@@ -1176,7 +1176,7 @@ async function openSession(grant: RunGrant, server: string, upstream: Upstream):
         throw error;
       } finally {
         const durationMs = Date.now() - started;
-        // Ruling 461(5): every forwarded call, never its arguments or result.
+        // Ruling 191(5): every forwarded call, never its arguments or result.
         logger.info("mcp gateway call", { runId: grant.runId, mcp: server, tool, durationMs, outcome });
         // A call to a tool the admin marked as a write tool is the outward-
         // facing kind, so it is audited — a refused one too.
@@ -1283,7 +1283,7 @@ async function connectSession(
 }
 
 /**
- * Ruling 598: how often one call may come back with one answer inside
+ * Ruling 158(b): how often one call may come back with one answer inside
  * `LOOP_WINDOW_MS` before the run is stopped. A poll once a second never
  * reaches it; a script that retries without reading the answer reaches it in
  * about two seconds.
@@ -1294,7 +1294,7 @@ const LOOP_WINDOW_MS = 60_000;
 const LOOP_KEYS_PRUNE_AT = 2_000;
 
 /**
- * Ruling 598: a run that keeps sending one call and getting one answer is
+ * Ruling 158(b): a run that keeps sending one call and getting one answer is
  * stopped. Live on AWSC-49 (2026-09-30) the Estimate Judge ran a script in
  * Codex's code mode that corrected a golden entry in an unbounded loop, and
  * the correction was refused every time ("The passage you sent as `replaces`
@@ -1349,7 +1349,7 @@ function repeatedCallStop(
 type ToolCallArguments = NonNullable<CallToolRequest["params"]["arguments"]>;
 
 /**
- * Rulings 585 and 589: a session on a server this process answers itself. It
+ * Ruling 216: a session on a server this process answers itself. It
  * lists `tools`, and `call` answers a call to one of them. Like every gateway
  * call it is logged without its arguments or its result, and a run that has
  * ended calls nothing.
@@ -1384,7 +1384,7 @@ async function openOwnSession(
 }
 
 /**
- * Ruling 585: the knowledge server. It reaches only the knowledge bases the
+ * Ruling 216: the knowledge server. It reaches only the knowledge bases the
  * run's mount named: `read_knowledge_doc` reads, and `correct_knowledge_doc`
  * writes a correction as the run's agent on the run's task.
  */
@@ -1411,18 +1411,18 @@ function openKnowledgeSession(grant: RunGrant, server: string, mount: KnowledgeM
 }
 
 /**
- * Ruling 589: the board server. `read_board` reads the run's project, and
+ * Ruling 216: the board server. `read_board` reads the run's project, and
  * `read_timeline_entry` one entry of the run's own task, with the readers a
- * Claude run's toolkit calls; ruling 594 adds `read_task_attachment`, one
- * file of any task in the project. Ruling 690 adds `read_task_source`, and
+ * Claude run's toolkit calls; ruling 214 adds `read_task_attachment`, one
+ * file of any task in the project. Ruling 82 adds `read_task_source`, and
  * `keep_source` for a run whose mount says it may keep one.
  */
 async function openBoardSession(grant: RunGrant, server: string, mount: BoardMount): Promise<Session> {
-  // Ruling 691: `capture_page` is listed only while this server can render a
+  // Ruling 194: `capture_page` is listed only while this server can render a
   // page. Loaded here, not at the top: the capture reaches the task layer,
   // which reaches the run service that binds this gateway.
   const { pageCaptureStatus } = await import("~/server/tasks/page-capture.server");
-  // Ruling 690: a run that may save files on its task keeps sources here,
+  // Ruling 82: a run that may save files on its task keeps sources here,
   // told how for what its web grant lets it reach.
   const tools = [
     ...BOARD_TOOLS,
@@ -1435,7 +1435,7 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
     projectSlug: grant.projectSlug,
     taskKey: grant.taskKey,
     mount,
-    // Ruling 648: what the run's knowledge server lets it read.
+    // Ruling 211: what the run's knowledge server lets it read.
     readerKbs: [...grant.knowledge.values()].flatMap((knowledge) => knowledge.kb),
   };
   return openOwnSession(grant, server, tools, async (tool, raw) => {
@@ -1447,12 +1447,12 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
       const args = timelineEntryArgsSchema.safeParse(raw);
       return args.success ? await timelineEntryResult(context, args.data) : boardArgsRefusal(TIMELINE_ENTRY_TOOL);
     }
-    // Ruling 594: one attachment of a task in the run's project.
+    // Ruling 214: one attachment of a task in the run's project.
     if (tool === TASK_ATTACHMENT_TOOL.name) {
       const args = taskAttachmentArgsSchema.safeParse(raw);
       return args.success ? await taskAttachmentResult(context, args.data) : boardArgsRefusal(TASK_ATTACHMENT_TOOL);
     }
-    // Ruling 690: the sources a task of the run's project keeps.
+    // Ruling 82: the sources a task of the run's project keeps.
     if (tool === TASK_SOURCE_TOOL.name) {
       const args = taskSourceArgsSchema.safeParse(raw);
       return args.success ? await taskSourceResult(context, args.data) : boardArgsRefusal(TASK_SOURCE_TOOL);
@@ -1466,7 +1466,7 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
         ? await keepSourceResult({ ...context, runId: grant.runId }, args.data)
         : keepSourceArgsRefusal();
     }
-    // Ruling 691: one page of the run's own task, as a reader sees it.
+    // Ruling 194: one page of the run's own task, as a reader sees it.
     if (tool === PAGE_CAPTURE_TOOL.name && tools.includes(PAGE_CAPTURE_TOOL)) {
       const args = pageCaptureArgsSchema.safeParse(raw);
       return args.success ? await pageCaptureResult(context, args.data) : pageCaptureArgsRefusal();

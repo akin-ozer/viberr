@@ -28,7 +28,7 @@ import { getRun } from "./run-store.server";
 import { configureRunServiceForTests, startRun } from "./run-service.server";
 
 /**
- * Ruling 458(d): a run's own work (its adapter stream, the sink, the settle and
+ * Ruling 43: a run's own work (its adapter stream, the sink, the settle and
  * the completion callbacks) logs under its `runId` and `taskKey`, plus the
  * request and user that started it. The logger merges `currentCorrelation()`
  * into every record, so what the adapter's work SEES here is what its records
@@ -102,7 +102,7 @@ beforeEach(async () => {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   adapter = new CorrelationProbeAdapter();
   configureRunServiceForTests({ claude: adapter, codex: adapter });
-  // Ruling 127: every run here bills VIB-1's owner.
+  // Ruling 137: every run here bills VIB-1's owner.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
 });
 
@@ -134,7 +134,7 @@ function recorded(runId: string): RecordedRun {
   return run;
 }
 
-describe("a run's records name the run and the request behind it (ruling 458(d))", () => {
+describe("a run's records name the run and the request behind it (ruling 43)", () => {
   it("its work carries runId and taskKey with the request's ids; the request's own records do not", async () => {
     // CANARY: drop the `bindCorrelation` in `launch` and `atStart` has no runId.
     const request = { requestId: "req_start", method: "POST", path: "/x", userId: "u_asker" };

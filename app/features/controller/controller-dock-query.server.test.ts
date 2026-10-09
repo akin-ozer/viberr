@@ -28,10 +28,10 @@ import {
 import { NEW_CONVERSATION_PARAM } from "./conversation-param";
 
 /**
- * Ruling 121 — the controller dock's view.
+ * Ruling 256 — the controller dock's view.
  *
  * Two promises live in this module, and nothing in the suite imported it until
- * pass 33 (ruling 65: a guard that cannot go red is a ruling that gets
+ * pass 33 (ruling 27: a guard that cannot go red is a ruling that gets
  * reverted in silence).
  *
  * ONE, the scope binding. A conversation belongs to exactly one place — the
@@ -43,7 +43,7 @@ import { NEW_CONVERSATION_PARAM } from "./conversation-param";
  * TWO, nothing here throws. The dock's loader is a ROOT-owned fetcher, and
  * React Router routes a fetcher loader's thrown response to the boundary of
  * the route that OWNS the fetcher — root — so a throw would replace the whole
- * page with the root error page (the hazard ruling 121(f) named). A scope the
+ * page with the root error page (the hazard ruling 256 named). A scope the
  * person cannot reach therefore answers a benign, empty `unavailable` view,
  * and a selection that cannot be honoured falls back to the scope's newest
  * thread and reports `staleSelection` so the client forgets the id it asked for.
@@ -136,7 +136,7 @@ function dock(
 
 describe("conversationMatchesScope — one thread, one place", () => {
   /**
-   * THE cross-scope leak guard (ruling 121). The tempting shape — "same
+   * THE cross-scope leak guard (ruling 249). The tempting shape — "same
    * project, and the task matches when the scope names one" — reads fine and
    * leaks every task thread into its board's dock; the mirror slip leaks a
    * board thread into the task. So assert the whole matrix, both directions:
@@ -214,7 +214,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
   /**
    * `c` absent means "the newest thread here"; `c=new` means "an empty
    * composer". The distinction matters twice: every open of the panel asks for
-   * the newest thread (ruling 528), and `new` must NOT be reported stale —
+   * the newest thread (ruling 256), and `new` must NOT be reported stale —
    * `staleSelection` is what makes the client drop its selection for this
    * scope, so treating the deliberate "new" as a failed lookup would wipe the
    * person's choice on every load.
@@ -313,7 +313,7 @@ describe("getControllerDock — the dock lists one place's threads", () => {
   });
 
   /**
-   * Org admins READ every conversation (supervision, ruling 99) — so an
+   * Org admins READ every conversation (supervision, ruling 249) — so an
    * admin's selection of someone else's thread in this scope is honourable and
    * must not be discarded as stale. Speaking is another matter: only the owner
    * may, and `viewerOwnsActive` is the single flag the panel disables its
@@ -428,7 +428,7 @@ describe("unavailableDockView — the benign refusal", () => {
 describe("getControllerDock's scope — the pill and the one-line disclosure", () => {
   /**
    * The panel header is the person's only cue about WHICH controller context
-   * they are typing into, and the context line is the ruling-121 disclosure of
+   * they are typing into, and the context line is the ruling-256 disclosure of
    * what it can see there. Both are per-scope, and both have to name the
    * place: a board pill that showed a slug (or a task pill with no task key)
    * would leave a person answering about the wrong board with no way to tell.
@@ -473,7 +473,7 @@ describe("getControllerDock's scope — the pill and the one-line disclosure", (
     expect(task.contextLine).toContain("VIB-101 task file");
 
     // The disclosure every scope owes the person: the controller runs on THEIR
-    // permissions, not on a standing grant of its own (ruling 99).
+    // permissions, not on a standing grant of its own (ruling 247).
     for (const scope of [instance, board, task]) {
       expect(scope.contextLine).toContain("acts with your permissions");
     }
@@ -525,7 +525,7 @@ describe("available — the dock's honesty about the backend", () => {
    * report it too, or a dock that came back from `unavailable` would enable
    * the composer for somebody with nothing to run on.
    *
-   * Ruling 127 makes that a fact about the VIEWER, not the deployment: a turn
+   * Ruling 137 makes that a fact about the VIEWER, not the deployment: a turn
    * bills the asker's own Claude account, so one member reads `available:
    * false` while another, on the same instance, reads `true`.
    */

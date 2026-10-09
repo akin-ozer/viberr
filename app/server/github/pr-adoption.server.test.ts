@@ -124,13 +124,13 @@ describe("prAdoptionRefusalNote (pass 34, U34-6): names both collision origins, 
     ).toBe(true);
   });
 
-  it("explains the post-allocation unowned PR AND the pre-ruling-122 reused key, and commits to neither", () => {
-    // Origin one (ruling 122(d)): an unowned OPEN PR that appeared on the
+  it("explains the post-allocation unowned PR AND the pre-ruling-228 reused key, and commits to neither", () => {
+    // Origin one (ruling 233): an unowned OPEN PR that appeared on the
     // branch AFTER Viberr allocated the name. JC-8 hit exactly this at
     // 10:17:52Z and read a note blaming a reused task key it never had.
     expect(note).toMatch(/opened on `jc-8` after Viberr allocated the name to JC-8/);
-    // Origin two: a branch recorded before ruling 122 under a reused task key.
-    expect(note).toMatch(/JC-8's branch was recorded before ruling 122 under a task key/);
+    // Origin two: a branch recorded before ruling 228 under a reused task key.
+    expect(note).toMatch(/JC-8's branch was recorded before ruling 228 under a task key/);
     expect(note).toMatch(/keys restart at 1/);
     // Neither is asserted: the note says it cannot tell, and the old causal
     // paragraph ("This happens when a task key is reused … so this only

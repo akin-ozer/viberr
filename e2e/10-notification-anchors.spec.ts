@@ -2,7 +2,7 @@ import { expect, test, type Browser, type Page } from "@playwright/test";
 import { SEED_DEFAULT_PASSWORD } from "../app/server/seed/seed-credentials";
 
 /**
- * Rulings 497 and 547 in a browser: a notification about an event on ANOTHER
+ * Ruling 302 in a browser: a notification about an event on ANOTHER
  * task lands on that event, marked and in view. The page it opens mounts for
  * the link, draws its long comments whole, and folds them behind Show more in
  * the render after the one that revealed the event; the event then rose out of

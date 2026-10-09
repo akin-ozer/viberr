@@ -179,7 +179,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: an agent run bills the TASK OWNER's accounts. Arda owns every
+  // Ruling 137: an agent run bills the TASK OWNER's accounts. Arda owns every
   // task in this file, so connecting his backends is what makes a dispatch
   // reach an adapter at all — the refusal path is exercised deliberately, in
   // its own block near the bottom.
@@ -514,7 +514,7 @@ describe("engagement uniqueness (adversarial-review)", () => {
   });
 });
 
-describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's stage gate on a supporting one", () => {
+describe("startAgentRun — delivering (specialist) dispatch, and ruling 181's stage gate on a supporting one", () => {
   async function assign(): Promise<void> {
     await assignSpecialist(
       store.db,
@@ -553,8 +553,8 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     ).rejects.toMatchObject({ status: 409 });
   });
 
-  it("ruling 133: the ENGAGED deliverer runs at a stage its profile does not declare (reverses F1's deliverer half), and the audit row says why", async () => {
-    // Ruling 133 (pass 34, F34-16) REVERSES the F1 run-boundary case that used
+  it("ruling 181: the ENGAGED deliverer runs at a stage its profile does not declare (reverses F1's deliverer half), and the audit row says why", async () => {
+    // Ruling 181 (pass 34, F34-16) REVERSES the F1 run-boundary case that used
     // to stand here: rework, conflict resolution and follow-ups belong to the
     // agent that owns the branch, whatever stage the board shows the work at.
     // Canary: call `assertStageEligible` unconditionally in dispatchAgentRun
@@ -605,7 +605,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
   });
 
   /**
-   * Ruling 207(e) (claim audit). The dispatch-completion contract tells the
+   * Ruling 70 (claim audit). The dispatch-completion contract tells the
    * agent to close its report by tagging "@<dispatcher>" "so they are
    * notified". A schedule carries `createdByLabel`, which is whatever
    * `TaskActor.label` was when it was created — documented as "e.g. the email"
@@ -614,7 +614,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
    * which chips nothing, notifies nobody, and leaves no trace that the person
    * who scheduled the run was never told it finished.
    */
-  it("ruling 207(e): a dispatcher passed as an EMAIL is tagged by the name the mention ladder can resolve", async () => {
+  it("ruling 70: a dispatcher passed as an EMAIL is tagged by the name the mention ladder can resolve", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -647,7 +647,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     expect(prompt).not.toContain(store.users.arda.email);
   });
 
-  it("ruling 133: a SUPPORTING engagement stays stage-scoped at the run boundary, and a NEW delivering engagement is still gated", async () => {
+  it("ruling 181: a SUPPORTING engagement stays stage-scoped at the run boundary, and a NEW delivering engagement is still gated", async () => {
     // Canaries: return ok for every engaged profile in `runEligibilityFor`
     // (the supporting run starts); delete the `assertStageEligible` call in
     // `assignSpecialist` (the new engagement lands).
@@ -691,7 +691,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter.engagements.map((e) => e.profileId)).toEqual(["helper"]);
   });
 
-  it("ruling 157: a dispatch on a held task lifts the hold on the record", async () => {
+  it("ruling 54: a dispatch on a held task lifts the hold on the record", async () => {
     // Pass 35, F35-8 (KNC-25): `hold_runtime_debug` stored `readiness: blocked`
     // with no packet and nothing lifted it, so the card read "blocked" and
     // "agent working" on one line. Canary: remove the `liftHoldForRun` call
@@ -755,7 +755,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     await stopRun(second.runId);
   });
 
-  it("ruling 355: a refusal names an entry that can never complete instead of promising a release", async () => {
+  it("ruling 58: a refusal names an entry that can never complete instead of promising a release", async () => {
     // A MISSING entry: no such task exists, so `dependenciesSatisfied` can never
     // turn true and "Viberr releases it when every entry is done" was a promise
     // nothing could keep. CANARY: call `holdRefusal` without the resolved states.
@@ -776,7 +776,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     });
   });
 
-  it("ruling 356: the refusal names a done entry as done, not as still waited on", async () => {
+  it("ruling 58: the refusal names a done entry as done, not as still waited on", async () => {
     // CANARY: hand `holdRefusal` the labels as if every entry were open.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", engagements: [], blockedBy: ["VIB-2", "VIB-3"] }),
@@ -797,7 +797,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     });
   });
 
-  it("ruling 357: a dispatch after the operator drive's own delivery stamps `actedAfterDelivery`", async () => {
+  it("ruling 127: a dispatch after the operator drive's own delivery stamps `actedAfterDelivery`", async () => {
     // CANARY: drop the stamp before the run_started audit.
     await assign();
     const operatorRun: NonNullable<TaskMutationContext["operatorRun"]> = {
@@ -818,7 +818,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
 
 
   /**
-   * Ruling 311. `startRun` answers `outcome: "started" | "queued"` and the
+   * Ruling 166. `startRun` answers `outcome: "started" | "queued"` and the
    * timeline sentence discarded it, so a run parked behind the concurrent-run
    * cap wrote "Started a Claude run … streaming to the agent logs" — both
    * halves false for as long as the queue held it.
@@ -830,7 +830,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
    * "queued … starts when a slot frees" since B10 — the durable record that
    * everybody else reads said the opposite.
    */
-  describe("ruling 311: the dispatch line says which of the three things happened", () => {
+  describe("ruling 166: the dispatch line says which of the three things happened", () => {
     const base = {
       refusal: null,
       backendLabel: "Claude",
@@ -860,7 +860,7 @@ describe("startAgentRun — delivering (specialist) dispatch, and ruling 133's s
     it("a refused run is not described as started either — the third outcome", () => {
       // A refused dispatch still becomes a run row (`startRun` records it as an
       // honest terminal error) and `dispatchAgentRun` does not return between
-      // `startRun` and this line, so the ruling-311 defect had a third case.
+      // `startRun` and this line, so the ruling-166 defect had a third case.
       // CANARY: fold `refused` back into the non-queued branch and this reads
       // "Started … streaming".
       const line = runDispatchLine({
@@ -1243,7 +1243,7 @@ describe("assignReviewer / removeReviewer", () => {
    * never-validated while the approving verdict still sits in `verdicts[]` and
    * the timeline still says it was accepted. Disconnected history, not deleted.
    *
-   * Ruling 118 froze the OWNER seat on a closed task; this seat carries a
+   * Ruling 50 froze the OWNER seat on a closed task; this seat carries a
    * derived consequence the owner seat does not, so its freeze has no admin
    * escape. The gate must not be over-broad either: the UX19-3 cases below run
    * the same call on an OPEN task at `review` and must stay green.
@@ -1299,7 +1299,7 @@ describe("assignReviewer / removeReviewer", () => {
       removeReviewer(
         store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId },
-        // A project ADMIN — the tier ruling 118 lets reassign a closed task's
+        // A project ADMIN — the tier ruling 50 lets reassign a closed task's
         // owner "for the record". It buys nothing here.
         actorOf(store.users.arda),
         { dataRoot: store.dataRoot },
@@ -1346,7 +1346,7 @@ describe("assignReviewer / removeReviewer", () => {
       // checked nothing, so a run could be started on an abandoned task and
       // AUTO-ENGAGE a brand-new seat — which `removeReviewer` then refused to
       // release, with no admin escape. Add and remove now answer the same way.
-      // Deliberately archived-only: ruling 133 licenses engaging an eligible
+      // Deliberately archived-only: ruling 181 licenses engaging an eligible
       // profile at any STAGE, so a closed-but-open task is not tested here.
       // Canary: drop the archived gate in dispatchAgentRun and this resolves.
       writeAcceptedTask({ stage: "review", archived: true });
@@ -1561,7 +1561,7 @@ describe("assignReviewer / removeReviewer", () => {
 });
 
 /**
- * Ruling 127 — a dispatch with no credential principal.
+ * Ruling 137 — a dispatch with no credential principal.
  *
  * Every agent run bills the TASK OWNER's own Claude/Codex account, so three
  * states refuse before anything is spent: the task has no owner, the owner's
@@ -1571,7 +1571,7 @@ describe("assignReviewer / removeReviewer", () => {
  * they do for any other failed run), with no clone, no reservation, no
  * process, and the ONE sentence `principalRefusalMessage` writes.
  */
-describe("startAgentRun — no credential principal (ruling 127)", () => {
+describe("startAgentRun — no credential principal (ruling 137)", () => {
   async function dispatch(): Promise<string> {
     await assignSpecialist(
       store.db,
@@ -1613,7 +1613,7 @@ describe("startAgentRun — no credential principal (ruling 127)", () => {
     expect(text).toContain("the task owner");
     expect(text).toContain("Profile → Agent accounts");
     expect(text).toContain("No agent process was started.");
-    // No environment variable is named: ruling 127 left none to set.
+    // No environment variable is named: ruling 137 left none to set.
     expect(text).not.toContain("ANTHROPIC_API_KEY");
     // Nothing was spawned: the fake adapter never saw a spec.
     expect(startedRunSpecs()).toHaveLength(0);
@@ -1698,7 +1698,7 @@ describe("startAgentRun — supporting (reviewer) dispatch", () => {
     await stopRun(result.runId);
   });
 
-  it("ruling 556: runs the project's required reviewer to review, even when it could deliver", async () => {
+  it("ruling 89: runs the project's required reviewer to review, even when it could deliver", async () => {
     // A required reviewer holding repo-write, on a task nobody delivers yet:
     // the derived posture made it the deliverer, which the engage refuses, so
     // the Run control and the controller could not start its review at all.
@@ -1926,8 +1926,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
    * continuity reset alike.
    */
   /**
-   * Ruling 210 (owner). Viberr's doctrine addressed a reviewer whose objection
-   * SURVIVES a rework (ruling 193/204) and said nothing about one that answers
+   * Ruling 201 (owner). Viberr's doctrine addressed a reviewer whose objection
+   * SURVIVES a rework (ruling 93/92) and said nothing about one that answers
    * every round and returns a NEW valid objection each time — which costs
    * exactly as many rounds. Live on this board twice: SHOP-6 took seven, SHOP-10
    * five, every round correct on its own terms, and nobody ever asked the
@@ -1957,7 +1957,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   }
 
-  it("ruling 210: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
+  it("ruling 201: a verdict-capable reviewer is told a request_changes is a COMPLETE list", async () => {
     deployVerdictGranted();
 
     await startAgentRun(
@@ -1968,7 +1968,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     );
 
     const prompt = specs.at(-1)!.prompt;
-    // CANARY: drop the ruling-210 sentences and the contract asks only for "a
+    // CANARY: drop the ruling-201 sentences and the contract asks only for "a
     // one-paragraph justification", which a first-finding-only review satisfies.
     expect(prompt).toContain("A `request_changes` is a COMPLETE list, not the first thing you found");
     expect(prompt).toContain("name EVERY change you would block on");
@@ -1978,7 +1978,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(prompt).toContain("say THAT explicitly and why it could not have been named before");
   });
 
-  it("ruling 555: the deliverer is offered no verdict, whatever its profile grants", async () => {
+  it("ruling 200: the deliverer is offered no verdict, whatever its profile grants", async () => {
     deployVerdictGranted();
 
     await startAgentRun(
@@ -1995,7 +1995,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(prompt).not.toContain("report `approve` or `request_changes`");
   });
 
-  it("ruling 590: a reviewer that has judged the task before is told its new verdict replaces the old one, on either backend", async () => {
+  it("ruling 88: a reviewer that has judged the task before is told its new verdict replaces the old one, on either backend", async () => {
     // Live on AWSC-31 the Workflow Researcher reported two knowledge-base
     // passages as not fixed that the Estimate Judge's first verdict on AWSC-29
     // said it had corrected: the re-review that stands did not say so.
@@ -2044,7 +2044,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     }
   });
 
-  it("ruling 703: a reviewer judging a files delivery again is told how the task's files stand against the one it judged, on either backend", async () => {
+  it("ruling 201: a reviewer judging a files delivery again is told how the task's files stand against the one it judged, on either backend", async () => {
     // Live on BLOG-8 a reviewer sent one label of a diagram back, its maker
     // fixed it in 47 seconds, and the second review took 18 minutes: it hashed
     // every file against its own notes to learn which had changed, then
@@ -2172,7 +2172,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       const again = await review(JUDGED);
       expect(again, backend).toContain(REREVIEW_RESTATES_NOTE);
       // The tool that opens a kept delivery is named only to a run that holds
-      // it (ruling 594): this Codex run has no gateway.
+      // it (ruling 214): this Codex run has no gateway.
       // CANARY: append the sentence whatever the run can read.
       expect(again, backend).toContain(backend === "claude" ? `${NOTE}${READ}` : NOTE);
       if (backend === "codex") expect(again).not.toContain("returns a file as you judged it");
@@ -2180,15 +2180,15 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       // differ: a file can change on the task without the delivery moving.
       expect(await review(JUDGED, JUDGED), backend).toContain(NOTE);
       // A judged delivery Viberr did not keep says nothing: the run starts all
-      // the same, with ruling 590's note alone.
+      // the same, with ruling 88's note alone.
       const unkept = await review(NOT_KEPT);
       expect(unkept, backend).toContain(REREVIEW_RESTATES_NOTE);
       expect(unkept, backend).not.toContain("Viberr kept the delivery you judged last");
     }
   });
 
-  it("ruling 703: a reviewer asked again about the very delivery it judged, with nothing changed, gets no such note", async () => {
-    // Ruling 410's question ("Nothing was reworked. Name everything you would
+  it("ruling 201: a reviewer asked again about the very delivery it judged, with nothing changed, gets no such note", async () => {
+    // Ruling 93's question ("Nothing was reworked. Name everything you would
     // still block on") is about what the reviewer has NOT said yet. A note
     // that tells it what it may leave unchecked has no place on that run.
     // CANARY: push the note whenever the judged delivery was kept.
@@ -2238,7 +2238,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(await review(LATER)).toContain("Unchanged: `cover.png`, `post.md`. An unchanged file is the file you judged");
   });
 
-  it("ruling 703: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {
+  it("ruling 201: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {
     // A task can hold hundreds of files and a name can be as long as its
     // maker liked. Only the unchanged list is counted: a changed, new or
     // gone file named in no list would be one the note says nothing about.
@@ -2292,10 +2292,10 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
-   * Ruling 692(c): the note a Claude run reads about `ask_human` says what a
+   * Ruling 202: the note a Claude run reads about `ask_human` says what a
    * question is for, the same sentence the tool and the Codex field carry.
    */
-  it("ruling 692: an ask-granted Claude run is told a person is asked only what they alone know", async () => {
+  it("ruling 202: an ask-granted Claude run is told a person is asked only what they alone know", async () => {
     reconfigureProject(store, {
       repo: null,
       agents: [
@@ -2426,15 +2426,15 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
-   * Ruling 483 (F40-53): a run given a knowledge base is told how to get a
+   * Ruling 210 (F40-53): a run given a knowledge base is told how to get a
    * line of it corrected. Claude files through the tool its KB grant mounts;
-   * Codex without the gateway's knowledge server (ruling 585; no gateway runs
+   * Codex without the gateway's knowledge server (ruling 216; no gateway runs
    * here) mounts no Viberr tools, so its report carries the correction and
    * the operator relays it. Live on WEB-3 a Codex agent wrote "the
    * knowledge-base runbook is read-only to me".
    */
-  it("rulings 483 and 498: a KB-granted run is told its correction channel, per backend", async () => {
-    // Ruling 498: the correction is written, so Claude names the tool that
+  it("ruling 210: a KB-granted run is told its correction channel, per backend", async () => {
+    // Ruling 210: the correction is written, so Claude names the tool that
     // writes it and Codex hands the operator the exact passage to replace.
     expect(KB_CORRECTION_NOTE_CLAUDE).toContain("`correct_knowledge_doc`");
     expect(KB_CORRECTION_NOTE_CLAUDE).toContain("It is written at once");
@@ -2478,11 +2478,11 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
-   * Ruling 488 (F40-67): a run is told how to post on another task, per
+   * Ruling 202 (F40-67): a run is told how to post on another task, per
    * backend. Live on WEB-9 the Platform Engineer wrote its results for WEB-8
    * into attachments a person pasted over by hand.
    */
-  it("ruling 488: a run with an outcome channel is told its relay, per backend", async () => {
+  it("ruling 202: a run with an outcome channel is told its relay, per backend", async () => {
     for (const backend of ["codex", "claude"] as const) {
       reconfigureProject(store, {
         repo: null,
@@ -2518,12 +2518,12 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
   });
 
   /**
-   * Ruling 159 (pass 35, F35-10): the persona input of a fresh run carries the
+   * Ruling 198 (pass 35, F35-10): the persona input of a fresh run carries the
    * ABSOLUTE attachments dir, so the "Posting files" section names a path the
    * agent can reach from its checkout. The store-relative form it used to
    * print was created inside the clone and pushed (KNC-9).
    */
-  it("ruling 159: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
+  it("ruling 198: a fresh evidence-granted run's persona names the ABSOLUTE attachments dir", async () => {
     reconfigureProject(store, {
       repo: null,
       agents: [
@@ -2679,7 +2679,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("open a pull request");
   });
 
-  it("ruling 649: every run reads the people rule, one the operator dispatched included", async () => {
+  it("ruling 203: every run reads the people rule, one the operator dispatched included", async () => {
     // Live on AWSC-43 a Cloud Solutions Architect the operator dispatched
     // wrote "His existing answers still stand" about the board's owner: the
     // sentence was only in the prompt of a run a person asked directly.
@@ -2705,13 +2705,13 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   });
 
   /**
-   * Ruling 191 (F37-13, live): every agent discovered its own shell one
+   * Ruling 148 (F37-13, live): every agent discovered its own shell one
    * exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, 75
    * `command not found` lines across one pass — while Viberr had measured the
-   * inventory since ruling 182 and offered it only through the controller's
+   * inventory since ruling 40 and offered it only through the controller's
    * opt-in `instance_health`. The people whose shell it is now get it.
    */
-  it("ruling 191: the prompt names what this host's shell has and has not", () => {
+  it("ruling 148: the prompt names what this host's shell has and has not", () => {
     const prompt = buildAnalyzePrompt({
       ...base,
       delivery: { canBranch: true, canCommitPush: true, canOpenPr: true, repoWrite: true },
@@ -2723,7 +2723,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("npx <tool>");
   });
 
-  it("ruling 191: a task with NO repository still gets the inventory", () => {
+  it("ruling 148: a task with NO repository still gets the inventory", () => {
     // A docs/advisory task runs commands too — and pass 37's live example was
     // exactly that: a document-only task whose REQUIRED reviewer failed it for
     // not bringing a Docker stack up.
@@ -2768,7 +2768,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("wastes a human's time on a false lead");
   });
 
-  it("ruling 249: the prompt forbids the credential guess for a LOCAL checkout failure too", () => {
+  it("ruling 197: the prompt forbids the credential guess for a LOCAL checkout failure too", () => {
     // F37-78: the supporting checkout is cloned from the delivering one on
     // disk, so a failure there is never about a credential. The prompt used to
     // append its "do not ask for credentials" clause only when a token HAD been
@@ -2846,7 +2846,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("do NOT run `git commit`");
   });
 
-  it("ruling 535: a deliverer that posts files but cannot commit is told the files ARE its delivery", () => {
+  it("ruling 128: a deliverer that posts files but cannot commit is told the files ARE its delivery", () => {
     // It used to be told a human would publish its workspace to a PR, a
     // delivery that never happens for an agent whose result is files on the
     // task. CANARY: drop the `attachmentsDropDir` arm and this reads
@@ -2862,7 +2862,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("do NOT run `git commit`");
   });
 
-  it("ruling 535: a deliverer that may write the repo but not commit still delivers its workspace, drop folder or not", () => {
+  it("ruling 128: a deliverer that may write the repo but not commit still delivers its workspace, drop folder or not", () => {
     // The files arm keys on the repo-write grant, the fact `canOwnDelivery`
     // reads, not on commit alone: an agent with repo-write and commit
     // withheld (the B-AG1 posture) was told its delivery was files on the
@@ -2878,11 +2878,11 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).toContain("Report the exact branch name, commit SHAs, and PR URL");
   });
 
-  it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 101(b)); it never ships either way", () => {
-    // Ruling 101(b): a write-GRANTED supporting agent may edit and commit in
+  it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 183); it never ships either way", () => {
+    // Ruling 183: a write-GRANTED supporting agent may edit and commit in
     // its OWN isolated checkout (Claude's supporting denylist narrowed to the
     // delivery commands; Codex runs every thread `danger-full-access` since
-    // ruling 185). The prompt used to
+    // ruling 144). The prompt used to
     // forbid "edit files / git commit" for EVERY supporting run — stricter
     // than the enforcement, the mirror image of XS-4 — so a granted reviewer
     // asked to try a fix refused work its tools allowed.
@@ -2909,7 +2909,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
 
     // A write-WITHHELD supporting run keeps the full read-only contract — its
     // tools deny the edit on Claude; on Codex the prompt and the delivery gate
-    // carry it (ruling 185).
+    // carry it (ruling 183).
     const withheld = buildAnalyzePrompt({
       ...base,
       delivers: false,
@@ -2920,7 +2920,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(withheld).toContain("isolated checkout");
   });
 
-  it("ruling 641: a supporting run that may post files is told saving them on the task is not editing the checkout", () => {
+  it("ruling 217(c): a supporting run that may post files is told saving them on the task is not editing the checkout", () => {
     // Live on AWSC-95 a supporting Cloud Solutions Architect read "do NOT ...
     // edit files" over the attachments folder the same contract hands it, and
     // saved neither the mapping nor the ledger its directive asked for.
@@ -2988,8 +2988,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(delivering).not.toContain("PINNED to the delivered revision");
   });
 
-  it("ruling 185: no prompt claims an OS sandbox, on either backend", () => {
-    // Ruling 184's section existed to explain an `EPERM` the CLI's own sandbox
+  it("ruling 144: no prompt claims an OS sandbox, on either backend", () => {
+    // Ruling 144's section existed to explain an `EPERM` the CLI's own sandbox
     // produced; with the sandbox gone (owner Q36-14) the section would describe
     // a confinement the run does not have, in whatever words. Canary: re-add it.
     for (const delivers of [true, false]) {
@@ -3107,7 +3107,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(persona).toContain("Unavailable MCP servers");
     expect(persona).toContain("vm-memory");
     expect(persona).toContain("NOT mounted on this run");
-    // Ruling 310: with the reason the server itself gave. The prompt used to
+    // Ruling 190: with the reason the server itself gave. The prompt used to
     // assert one cause for every miss — "no such server is in the org
     // registry" — which it had never checked; live on SHOP-55 that sentence
     // was false and an agent relayed it to a human as fact.
@@ -3137,7 +3137,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     });
     expect(withDrop).toContain("is yours to READ and to COPY files INTO");
     expect(withDrop).toContain("`/data/projects/p/tasks/VIB-2/attachments`");
-    // Ruling 159: the exception names an absolute path outside the checkout
+    // Ruling 198: the exception names an absolute path outside the checkout
     // and forbids creating it inside the working directory.
     expect(withDrop).toContain("never create it inside the working directory");
     expect(withDrop).toContain("never commit it");
@@ -3150,7 +3150,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(without).toContain("Work ONLY inside the current working directory");
   });
 
-  it("ruling 592: the contract lets a run READ the task's attachments folder, with or without the drop", () => {
+  it("ruling 217(b): the contract lets a run READ the task's attachments folder, with or without the drop", () => {
     // Live on AWSC-32 the Estimate Judge obeyed a contract that named only the
     // write half of the attachments folder, never opened the delivery it was
     // asked to judge, and raised a packet asking permission to read it.
@@ -3176,7 +3176,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(readOnly).not.toContain("COPY files INTO");
   });
 
-  it("ruling 594: the contract names read_task_attachment for another task's files, only for a run that holds it", () => {
+  it("ruling 214: the contract names read_task_attachment for another task's files, only for a run that holds it", () => {
     // CANARY: drop the sentence, or give it to a run without the tool.
     const dir = "/data/projects/aws-cost-calculator/tasks/AWSC-33/attachments";
     const base = {
@@ -3200,7 +3200,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(buildAnalyzePrompt({ ...base, attachmentsDropDir: dir })).not.toContain("read_task_attachment");
   });
 
-  it("ruling 690: the workspace contract says a fact from outside rests on a kept source and how to keep one, with and without a checkout, and tells a run that cannot keep one so", () => {
+  it("ruling 204: the workspace contract says a fact from outside rests on a kept source and how to keep one, with and without a checkout, and tells a run that cannot keep one so", () => {
     // What a run read to state a figure was kept nowhere, and a reviewer
     // checked the claim against the page as it read on the day of the review.
     // CANARY: build the line inside `if (input.repo)` only and the run on a
@@ -3225,7 +3225,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       "The keep takes it out of the attachments folder and holds it with the task as a source (`S1`, `S2` and so on): " +
       "it is never overwritten, it is not posted on your reply or counted in your delivery, and it stays when the browser's working files are cleared after a run. " +
       "Say which id supports which claim in your report or in a notes file beside the result. Put an id in the result's own text only where its reader is meant to check it, and never in a piece that goes out under a person's name. A claim with no kept source is read as unsupported, so keep the source or say in your result that the claim is unverified. " +
-      // Ruling 706: a record that grows, for every agent a board deploys to
+      // Ruling 218: a record that grows, for every agent a board deploys to
       // deliver. CANARY: leave the sentence to the shipped Writer's manual,
       // and a board's own writer is never told.
       "A record of dated entries (a changelog, a decisions file, a thread) may have changed what one of its own earlier entries says: " +
@@ -3276,7 +3276,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     }
   });
 
-  it("ruling 690: a supporting run that can read them is told claims are checked against the kept sources, in both arms", () => {
+  it("ruling 204: a supporting run that can read them is told claims are checked against the kept sources, in both arms", () => {
     // CANARY: gate the line on attachmentsDropDir instead of taskFileReader
     // and a reviewer with no file grant, which still holds read_task_source,
     // loses it.
@@ -3298,7 +3298,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
       "- Checking claims: what the delivered work states from outside is checked against the sources kept on the task. " +
       "`read_task_source` lists them (where each came from, when and by which run it was kept, its hash, and which sources each delivery rested on), opens one by its id, and with `find` lists the places in one that hold a word or phrase. " +
       "Check a claim against its kept source, not against the page as it reads today and not against what you remember. " +
-      // Ruling 706: and for every reviewer a board deploys, whatever its
+      // Ruling 218: and for every reviewer a board deploys, whatever its
       // manual. CANARY: drop the sentence, or the word of `find` above it.
       "A kept record of dated entries (a changelog, a decisions file, a thread) may have changed what one of its own earlier entries says: " +
       "where the work states what holds now from such an entry, search the whole record for the later ones on the same thing, " +
@@ -3316,7 +3316,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     }
   });
 
-  it("ruling 422: the contract lets a run READ the knowledge-base folders its index points at", () => {
+  it("ruling 217(a): the contract lets a run READ the knowledge-base folders its index points at", () => {
     // Live on ax-clone: a Codex run has no `read_knowledge_doc`, its index says
     // "read the file directly" at /data/kb/..., and the contract said everything
     // outside the checkout "stays off-limits". AX-19's and AX-22's developers
@@ -3355,7 +3355,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(without).toContain("Everything else outside the working directory stays off-limits.");
   });
 
-  it("ruling 591: the contract names correct_knowledge_doc for a run that holds it, and only then", () => {
+  it("ruling 217(a): the contract names correct_knowledge_doc for a run that holds it, and only then", () => {
     // Live on AWSC-32 the Workflow Researcher's rework run read "Never write,
     // create or delete anything" in the knowledge-base folders against its
     // directive's corrections, made none of them and asked which governs.
@@ -3379,7 +3379,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(buildAnalyzePrompt(base)).not.toContain("correct_knowledge_doc");
   });
 
-  it("ruling 422: knowledgeBaseReadDirs keeps real folders only, once each, in order", () => {
+  it("ruling 217(a): knowledgeBaseReadDirs keeps real folders only, once each, in order", () => {
     const root = ctx.makeTempDir("kb-read-");
     mkdirSync(path.join(root, "kb", "rulings"), { recursive: true });
     mkdirSync(path.join(root, "kb", "house"), { recursive: true });
@@ -3389,7 +3389,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     ]);
   });
 
-  it("ruling 578: knowledgeBaseReadDirs never names a private folder, which no shell on the run can open", () => {
+  it("ruling 209: knowledgeBaseReadDirs never names a private folder, which no shell on the run can open", () => {
     // CANARY: drop the `isPrivateKbFolder` term and the workspace contract
     // tells the run to read a folder its shell is refused.
     const root = ctx.makeTempDir("kb-read-");
@@ -3412,7 +3412,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(withDrop).toContain("Files on the task thread");
     expect(withDrop).toContain("`/data/projects/p/tasks/T-1/attachments`");
     expect(withDrop).toContain("posted on your reply");
-    // Ruling 159: an absolute path, outside the checkout, never committed.
+    // Ruling 198: an absolute path, outside the checkout, never committed.
     expect(withDrop).toContain("outside the repository checkout");
     expect(withDrop).not.toContain("reachable from your working directory");
     // Without the evidence grant the section must not appear — the completion
@@ -3509,7 +3509,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
     expect(prompt).not.toContain("Clone");
   });
 
-  it("ruling 667: a run with no repository keeps its workspace contract: its knowledge bases, the task's files, and what it hands back", () => {
+  it("ruling 199: a run with no repository keeps its workspace contract: its knowledge bases, the task's files, and what it hands back", () => {
     // The contract used to be dropped whole with the repository, so a
     // deliverer on a board with none was told nothing about the attachments
     // folder or that its delivery is the files it saves. CANARY: put the
@@ -3548,11 +3548,11 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
 });
 
 describe("directiveRequestsDelivery (F10-31)", () => {
-  /** The detector returns the matched phrase now (ruling 323); these read it as
+  /** The detector returns the matched phrase now (ruling 200); these read it as
    *  the yes/no the older assertions were written against. */
   const asks = (d: string) => directiveRequestsDelivery(d) !== null;
 
-  it("ruling 423: another task's open PR, named by possessive, is a fact, not an instruction", () => {
+  it("ruling 200: another task's open PR, named by possessive, is a fact, not an instruction", () => {
     // The ten false notes on ax-clone, verbatim shapes. CANARY: drop the
     // possessive alternative (or the one-adjective slot) from ADJECTIVE_LEAD_RE.
     expect(asks("AX-21's open PR also touches internal/cli/cli.go, so avoid it.")).toBe(false);
@@ -3606,7 +3606,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
   });
 
   /**
-   * Ruling 323 — the fourteen live firings, all wrong.
+   * Ruling 200 — the fourteen live firings, all wrong.
    *
    * Across 81 tasks of a real board this detector fired fourteen times and was
    * wrong every one. Thirteen were the ADJECTIVE: "this branch has an open PR",
@@ -3616,13 +3616,13 @@ describe("directiveRequestsDelivery (F10-31)", () => {
    *
    * These are the real sentences, from the real tasks.
    */
-  it("ruling 323: an OPEN pull request is a fact about the branch, not an instruction", () => {
+  it("ruling 200: an OPEN pull request is a fact about the branch, not an instruction", () => {
     // CANARY: drop the ADJECTIVE_LEAD_RE check.
     for (const directive of [
       "Code Reviewer's request-changes finding on the open PR", // SHOP-12
       "**This branch has an open pull request**, so merge never rebase.", // SHOP-14
       "Rules for this round: `shop-34` has an open PR.", // SHOP-34
-      "The no-history rule (ruling 2): this branch has an open PR.", // SHOP-36
+      "The no-history rule (ruling 26(a)): this branch has an open PR.", // SHOP-36
       "Working on published history, this branch has an open PR.", // SHOP-49
       "§2 governs: `shop-54` has an open PR. **Merge, never rebase.**", // SHOP-54
       "this branch is published history behind an open PR", // SHOP-54
@@ -3639,7 +3639,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(asks("When the gate is green, open a PR against main.")).toBe(true);
   });
 
-  it("ruling 323: markdown emphasis is not part of the sentence, in either direction", () => {
+  it("ruling 200: markdown emphasis is not part of the sentence, in either direction", () => {
     // Live on SHOP-35, the negation guard P14-LV-10 added was defeated by the
     // operator's own bold: `do **not** open a PR` is `do ` + `**not**`, which
     // `\bdo\s+not\b` cannot match across.
@@ -3653,7 +3653,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
     expect(asks("`git push` origin HEAD")).toBe(true);
   });
 
-  it("ruling 323: the operator saying delivery is ITS job is not a demand on the agent", () => {
+  it("ruling 200: the operator saying delivery is ITS job is not a demand on the agent", () => {
     // SHOP-47, verbatim in shape: the operator telling the specialist to write
     // the body into its report BECAUSE the operator is the one who opens the PR.
     // CANARY: drop the OTHER_SUBJECT_RE check.
@@ -3697,7 +3697,7 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
     expect(persona).toContain("do not treat the gap as your own failure");
   });
 
-  it("ruling 578: a private KB reaches a Claude run through read_knowledge_doc, and a Codex run only through the gateway's knowledge server (ruling 585)", () => {
+  it("ruling 209: a private KB reaches a Claude run through read_knowledge_doc, and a Codex run only through the gateway's knowledge server (ruling 216)", () => {
     // CANARY: pass `hasKnowledgeTool: true` for every backend and the Codex
     // run is handed an index of a folder its shell is refused.
     const dataRoot = tempRoot();
@@ -3763,7 +3763,7 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
       skills: names,
       dataRoot,
     }));
-    // The writing guide that closes the static block (ruling 689) is no skill
+    // The writing guide that closes the static block (ruling 187) is no skill
     // and spends none of this budget, so the count is taken without it.
     const zChars = (persona.replace(HUMANIZER_SPECIALIST_SECTION, "").match(/Z/g) ?? []).length;
     // Per-skill budgeting produced 4 × 24k = 96k characters of skill text.
@@ -3790,7 +3790,7 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
     expect(none).not.toContain("MCP tools are governed too");
   });
 
-  it("ruling 176: a server whose marked write tools are withheld leaves the governance paragraph", () => {
+  it("ruling 188: a server whose marked write tools are withheld leaves the governance paragraph", () => {
     // Canary: drop the `gatedServers` filter and `github-mcp` is named in the
     // paragraph again although its write tools are gone from the run.
     const dataRoot = tempRoot();
@@ -3818,7 +3818,7 @@ describe("buildSpecialistPromptPrefix — attached resources", () => {
     expect(gatedOnly).not.toContain("No external MCP servers on this run");
   });
 
-  it("ruling 461: a server reached through Viberr's gateway is named as such, on both backends", () => {
+  it("ruling 191: a server reached through Viberr's gateway is named as such, on both backends", () => {
     const dataRoot = tempRoot();
     const personaOn = (backend: "claude" | "codex") =>
       joinedPrompt(buildSpecialistPromptPrefix({
@@ -4069,7 +4069,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
   it("mounts the grant as the run's plugin beside the workspace, passes it to the SDK, stops injecting the body, and removes it when the run settles", async () => {
     // End to end on the fresh-run path: store grant → plugin mount → RunSpec.
-    // Ruling 180 (F36-9): the plugin sits BESIDE the checkout, named by the
+    // Ruling 185 (F36-9): the plugin sits BESIDE the checkout, named by the
     // run, and nothing of Viberr's lands inside the tree the project's own
     // tools scan; run-service removes the plugin when the run settles.
     // Canary: drop `skills: skillMount.mounted` from the startRun call and the
@@ -4198,7 +4198,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(confinement.skills).toEqual(["conventional-commits"]);
     expect(joinedPrompt(confinement.systemPrompt ?? "")).not.toContain("SENTINEL-SKILL-BODY");
     expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("attached to this run as the `viberr` plugin");
-    // Ruling 180: the resumed run gets its OWN plugin beside the checkout
+    // Ruling 185: the resumed run gets its OWN plugin beside the checkout
     // (a fresh id: the resumed row does not exist yet) and nothing inside it.
     expect(confinement.skillPlugin?.name).toBe("viberr");
     expect(path.dirname(confinement.skillPlugin!.path)).toBe(
@@ -4210,7 +4210,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(existsSync(path.join(ws, ".claude"))).toBe(false);
   });
 
-  it("ruling 555: a RESUMED deliverer is offered no verdict either", async () => {
+  it("ruling 200: a RESUMED deliverer is offered no verdict either", async () => {
     // An @mention or an answered question resumes the deliverer's session, and
     // the resume builds its own toolkit. CANARY: build the resumed collab
     // without the deliverer term and `report_outcome` offers `verdict` again.
@@ -4298,13 +4298,13 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     expect(confinement.attachmentsWritableDir).toBe(attachments);
     expect(existsSync(attachments)).toBe(true);
     // The persona carries the same drop section the fresh run gets, and
-    // (ruling 159) it names the ABSOLUTE dir, never the store-relative form.
+    // (ruling 198) it names the ABSOLUTE dir, never the store-relative form.
     expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain("Files on the task thread");
     expect(joinedPrompt(confinement.systemPrompt ?? "")).toContain(`\`${attachments}\``);
     expect(joinedPrompt(confinement.systemPrompt ?? "")).not.toContain(
       `\`projects/${store.slug}/tasks/VIB-1/attachments\``,
     );
-    // Ruling 185: the resumed inputs carry no sandbox row at all — Viberr
+    // Ruling 144: the resumed inputs carry no sandbox row at all — Viberr
     // confines neither backend, and the denied-tool list is the disclosure.
     expect(confinement.runInputs).not.toHaveProperty("sandbox");
   });
@@ -4410,17 +4410,17 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
       // A run that stays LIVE, so the plugin can be inspected while it exists
-      // (run-service removes it the moment the run settles, ruling 180).
+      // (run-service removes it the moment the run settles, ruling 185).
       queueFakeRun({ lines: [], keepRunning: true });
       const run = await startAgentRun(store.db,
         { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev" },
         actorOf(store.users.arda), { dataRoot: store.dataRoot });
 
       const spec = lastRunSpec()!;
-      // (1) the native SDK channel (R18-5 / ruling 51) — exactly the grant.
+      // (1) the native SDK channel (R18-5 / ruling 185) — exactly the grant.
       expect(spec.skills).toEqual(["developer-expertise"]);
       // (2) the plugin the SDK resolves that filter against — exactly the grant,
-      //     beside the checkout and never inside it (ruling 180).
+      //     beside the checkout and never inside it (ruling 185).
       const plugin = spec.skillPlugin!.path;
       expect(path.dirname(plugin)).toBe(path.join(path.dirname(ws), ".viberr-plugins"));
       expect(readdirSync(path.join(plugin, "skills"))).toEqual(["developer-expertise"]);
@@ -4472,7 +4472,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   });
 
   /**
-   * R18-3 / ruling 49, read through the RUN seam rather than through
+   * R18-3 / ruling 185, read through the RUN seam rather than through
    * `stripUngovernedRepoCatalog` on its own (which skill-mount.server.test.ts
    * already covers). What matters to a human is the end state of a real run:
    * the cloned repository's own `.claude` — its slash-commands, sub-agents,
@@ -4512,7 +4512,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       await runDev();
 
       // The repo's own catalog is gone from the working tree — whole (ruling
-      // 180): no settings file of anyone's remains, hooks included, and the
+      // 185): no settings file of anyone's remains, hooks included, and the
       // grant lives in the run's plugin beside the checkout instead.
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
       expect(lastRunSpec()?.skills).toEqual(["granted-craft"]);
@@ -4581,7 +4581,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
 
       expect(confinement.skills).toEqual(["granted-craft"]);
       // The agent-written hooks settings died with the strip, and nothing
-      // replaced them (ruling 180: no run reads the checkout as a settings
+      // replaced them (ruling 185: no run reads the checkout as a settings
       // source); the grant is in the resumed run's own plugin.
       expect(existsSync(path.join(ws, ".claude"))).toBe(false);
       expect(readdirSync(path.join(confinement.skillPlugin!.path, "skills"))).toEqual([
@@ -4656,7 +4656,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(spec.skills).toEqual(["critic-craft"]);
       // P8 (pass 25): the reviewer runs in its OWN isolated checkout
       // (`workspace/support/<profileId>/<repo>`), not the delivering tree, so its
-      // plugin sits beside THAT checkout (ruling 180) — and the delivering
+      // plugin sits beside THAT checkout (ruling 185) — and the delivering
       // checkout and its neighbourhood stay untouched.
       const criticWs = path.join(
         path.dirname(ws),
@@ -4672,7 +4672,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(existsSync(path.join(criticWs, ".claude"))).toBe(false);
       expect(existsSync(path.join(path.dirname(ws), ".viberr-plugins"))).toBe(false);
       // The MCP servers are replaced by their NAMES before serialising: since
-      // ruling 283 this reviewer mounts a `viberr_agent` server (its inherited
+      // ruling 205 this reviewer mounts a `viberr_agent` server (its inherited
       // KB grant needs `read_knowledge_doc`) and an SDK server instance holds a
       // reference back to itself, which `JSON.stringify` cannot walk. The names
       // are what this assertion is about anyway — a skill leaking through a
@@ -4784,7 +4784,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     });
 
     /**
-     * Rulings 248 + 249 (pass 37, F37-77 / F37-78), both live on SHOP-5 in one
+     * Rulings 87 + 197 (pass 37, F37-77 / F37-78), both live on SHOP-5 in one
      * evening.
      *
      * The supporting checkout is cloned from the delivering one ON DISK, and
@@ -4799,7 +4799,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
      * report ("No content verdict recorded") was re-classified into a blocking
      * `request_changes` by the prose fallback.
      */
-    it("rulings 248/249: a failed LOCAL support clone marks the run checkout-less and blames no credential", async () => {
+    it("rulings 87/197: a failed LOCAL support clone marks the run checkout-less and blames no credential", async () => {
       const ws = await workspaceCheckout();
       // The delivering checkout is THERE (so the local arm is the one taken)
       // and unusable, so `git clone --local` fails the way it did live.
@@ -4814,26 +4814,26 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       const prompt = lastRunSpec()?.prompt ?? "";
       // The run really did lose its checkout.
       expect(prompt).toContain("The workspace has NO checkout");
-      // Ruling 249 CANARY: move `credential = "not_involved"` out of the local
+      // Ruling 197 CANARY: move `credential = "not_involved"` out of the local
       // arm and this reads "No GitHub credential is attached to this project",
       // which is what sent the operator to re-provision a working one.
       expect(prompt).not.toContain("No GitHub credential is attached");
       expect(prompt).not.toContain("ran anonymously");
-      // Ruling 485: the local clone is a local step, so its failure is a
+      // Ruling 197: the local clone is a local step, so its failure is a
       // workspace fault naming the path and git's exit.
       expect(prompt).toContain(
         `could not be cloned from the delivering checkout \`${ws}\`: git exit 128. ` +
           "The fault is in the task's workspace on the server's disk; nothing here reached GitHub.",
       );
 
-      // Ruling 248 CANARY: drop `noCheckout: !!cloneFailure` from the
+      // Ruling 87 CANARY: drop `noCheckout: !!cloneFailure` from the
       // completion contract and this is 0 — the verdict path stays open for a
       // run that read nothing.
       expect(getRun(store.db, runId)!.no_checkout).toBe(1);
     });
 
     /**
-     * Pass 40 review (R-seams-2). Under ruling 460 the delivering checkout's
+     * Pass 40 review (R-seams-2). Under ruling 196 the delivering checkout's
      * objects are written by an agent uid, and `git clone --local` HARDLINKS
      * them: the kernel's `fs.protected_hardlinks=1` refuses a link to a file the
      * server neither owns nor can write, so every supporting run after the first
@@ -4887,7 +4887,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       ).rejects.toMatchObject({ status: 409 });
     });
 
-    it("ruling 179: a supporting dispatch detaches its checkout at the task's active work revision", async () => {
+    it("ruling 240: a supporting dispatch detaches its checkout at the task's active work revision", async () => {
       // CANARY: drop `pinSubject` at the dispatch call site and the support
       // checkout stays on the delivering tree's head.
       const ws = await workspaceCheckout();
@@ -4925,7 +4925,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
   });
 
   /**
-   * Ruling 485 (F40-62, live on WEB-5 2026-09-25). The Site Reviewer ran
+   * Ruling 140 (F40-62, live on WEB-5 2026-09-25). The Site Reviewer ran
    * wrangler in its supporting checkout, which left two `mkdtemp` directories
    * at 0700 as the agent's uid. The next review's replace was the server's
    * `rmSync`: it deleted what the group could (`.git` first), threw EACCES on
@@ -4938,7 +4938,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
    * the agent's 0700 one (the server's own recursive remove cannot empty
    * either; its owner can once it made it removable).
    */
-  describe("ruling 485: an agent-written checkout is replaced as its person, and a local fault blames no credential", () => {
+  describe("ruling 140: an agent-written checkout is replaced as its person, and a local fault blames no credential", () => {
     /** Directories a test made unwritable, handed back before cleanup. */
     const locked: string[] = [];
     afterEach(() => {
@@ -5118,7 +5118,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
       expect(lastRunSpec()?.prompt).toContain("is already checked out in the current directory");
     });
 
-    it("ruling 129: a reused delivering checkout is refreshed before the run, and its contract and recorded inputs say what the refresh did", async () => {
+    it("ruling 195: a reused delivering checkout is refreshed before the run, and its contract and recorded inputs say what the refresh did", async () => {
       // CANARY: drop the `refreshWorkspaceFromMirror` call in cloneRepo's reuse
       // arm, or the `refreshed` it returns, and the second run is handed the
       // checkout with no word about the base that moved under it; drop
@@ -5362,7 +5362,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(JSON.parse(raw)).toMatchObject({ type: "run_inputs", source: "viberr" });
   });
 
-  it("ruling 185: a Codex run's inputs carry NO sandbox row — and the withheld grant still reaches the run", async () => {
+  it("ruling 144: a Codex run's inputs carry NO sandbox row — and the withheld grant still reaches the run", async () => {
     // The row disclosed the Codex OS sandbox; there is none now. What must
     // survive is the thing the row was really about: the run's denied tools,
     // which the prompt and the delivery gate act on. Canary: re-add
@@ -5434,7 +5434,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(joinedPrompt(lastRunSpec()?.systemPrompt ?? "")).toContain("did NOT fully reach this run");
   });
 
-  it("ruling 176: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {
+  it("ruling 188: a read-only agent's run withholds the org server's marked write tools, on the spec, the prompt and the record", async () => {
     // `dev` holds no grants, so its repo-write grant is withheld. The org row is
     // HTTP so no stdio pre-flight spawns anything.
     // Canary: pass `withholdWriteTools: false` in startAgentRun's mcpServersFor
@@ -5513,7 +5513,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(inputsLine(grantedRun)!.mcp.writeToolsDenied).toEqual([]);
   });
 
-  it("ruling 658: a server mounted on a failed probe is the one a run may start without, fresh and resumed", async () => {
+  it("ruling 190: a server mounted on a failed probe is the one a run may start without, fresh and resumed", async () => {
     // Codex makes every other mounted server required (codex-runtime). The
     // rows are HTTP so no stdio pre-flight spawns anything.
     // CANARY: drop the `mcpOptional` line from either path and the known-down
@@ -5559,7 +5559,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(confinement.mcpOptional).toEqual(["down"]);
   });
 
-  it("ruling 585: a Codex run that holds a knowledge base mounts the gateway's knowledge server, fresh and resumed", async () => {
+  it("ruling 216: a Codex run that holds a knowledge base mounts the gateway's knowledge server, fresh and resumed", async () => {
     // CANARY: leave the mount out of either path, index the private knowledge
     // base as unreachable, or send its corrections to the report, and this is
     // red.
@@ -5615,7 +5615,7 @@ describe("P19-G11 — the run records what it was given", () => {
     }
   });
 
-  it("ruling 591: a run that can correct its knowledge bases is told so in its workspace contract, on either backend", async () => {
+  it("ruling 217(a): a run that can correct its knowledge bases is told so in its workspace contract, on either backend", async () => {
     // CANARY: never set the flag, or set it on a Codex run the gateway does not
     // serve (it has no correction tool to name).
     mkdirSync(path.join(store.dataRoot, "kb", "house-style"), { recursive: true });
@@ -5659,7 +5659,7 @@ describe("P19-G11 — the run records what it was given", () => {
     }
   });
 
-  it("ruling 594: a run that holds read_task_attachment is told to read another task's files with it, on either backend", async () => {
+  it("ruling 214: a run that holds read_task_attachment is told to read another task's files with it, on either backend", async () => {
     // CANARY: never set the flag, or set it on a Codex run the gateway does
     // not serve.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -5697,7 +5697,7 @@ describe("P19-G11 — the run records what it was given", () => {
     }
   });
 
-  it("ruling 690: what a run is told about keeping a source is what it is offered: the tool where it is mounted, fresh and resumed, and a page only where it may fetch one", async () => {
+  it("ruling 204: what a run is told about keeping a source is what it is offered: the tool where it is mounted, fresh and resumed, and a page only where it may fetch one", async () => {
     // The prompt, the tool list and the tool's own description have to agree,
     // on either backend, on a fresh run and on a resumed one. A Claude run
     // with the grant has the tool in its toolkit; a Codex run has it from the
@@ -5857,7 +5857,7 @@ describe("P19-G11 — the run records what it was given", () => {
   });
 
   it("a run that holds capture_page is told to look at a page before it delivers or judges one, and a run without it is told nothing", async () => {
-    // Ruling 691. CANARY: append the sentence unconditionally and a run on a
+    // Ruling 194. CANARY: append the sentence unconditionally and a run on a
     // server with no browser, which is given no such tool, is told to call it.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
     const COLLABORATION = ["comment-on-task", "ask-human", "attach-evidence-references", "read-github-api"];
@@ -5914,7 +5914,7 @@ describe("P19-G11 — the run records what it was given", () => {
     });
   });
 
-  it("ruling 596: a fresh run's anchor names the readers of the entries it leaves out, only for a run that holds them", async () => {
+  it("ruling 213: a fresh run's anchor names the readers of the entries it leaves out, only for a run that holds them", async () => {
     // CANARY: pass false to freshRunAnchor, or name the readers to a Codex run
     // the gateway does not serve.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -5960,7 +5960,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(older(await prompt("codex"))).toMatch(/^\d+ older entries are not shown\.$/);
   });
 
-  it("ruling 589: a Codex run that holds a collaboration grant mounts the gateway's board server, fresh and resumed", async () => {
+  it("ruling 216: a Codex run that holds a collaboration grant mounts the gateway's board server, fresh and resumed", async () => {
     // Live on AWSC-24 the Workflow Researcher, on Codex, could not read the
     // Judge's verdicts on the tasks it compared. CANARY: leave the mount out of
     // either path, or mount it for a profile with no collaboration grant.
@@ -6014,7 +6014,7 @@ describe("P19-G11 — the run records what it was given", () => {
     // The caller (task-comments' @mention resume) owns the remaining four
     // fields and hands the whole thing to `recordRunInputs`.
     //
-    // Ruling 343: for two days it did not, and THIS test is why that lasted —
+    // Ruling 167: for two days it did not, and THIS test is why that lasted —
     // it asserted the record was BUILT and nothing asserted it was WRITTEN, so
     // `runInputs` had no reader anywhere in the app and eleven resumed runs
     // disclosed nothing. The canary for the write lives where the write is, in
@@ -6063,7 +6063,7 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(confinement.runInputs.delivers).toBe(true);
   });
 
-  it("ruling 564: a Claude run that posts files records its file tools as confined, not denied", async () => {
+  it("ruling 217(d): a Claude run that posts files records its file tools as confined, not denied", async () => {
     // The console reads what the adapter's hook reads (`fileWriteRoots`), so it
     // cannot say "denied: Write" on a run whose Write works. Canaries: drop the
     // `fileWriteRoots:` argument on the fresh path (the first block fails) or on
@@ -6103,7 +6103,7 @@ describe("P19-G11 — the run records what it was given", () => {
     // The adapter is still handed the grants' whole denylist, and confines from it.
     expect(claude.disallowedTools).toContain("Write");
 
-    // Codex: the write posture is advisory (ruling 185), nothing is confined,
+    // Codex: the write posture is advisory (ruling 183), nothing is confined,
     // and the row keeps every entry the grants deny.
     writeProject(store.dataRoot, { ...fm, agents: [postsFiles("codex")] });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
@@ -6251,7 +6251,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
 });
 
 /**
- * G35-4 / ruling 152(c) (pass 35): no dispatch into a backend the instance
+ * G35-4 / ruling 151 (pass 35): no dispatch into a backend the instance
  * already knows is out of quota for the account the run bills.
  *
  * Live, nine Codex deliveries were dispatched one after another into a window
@@ -6259,7 +6259,7 @@ describe("R21-4 — the run row exists while the workspace is prepared", () => {
  * run, an operator turn and a "Work stalled" packet. Canary: remove the
  * `backendDispatchHold` call in `dispatchAgentRun` and a run starts.
  */
-describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 152(c))", () => {
+describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 151)", () => {
   const CODEX_TIME_ONLY =
     "You've hit your usage limit. To continue using Codex, start a free trial of Plus today, or try again at 6:18 PM.";
 
@@ -6513,7 +6513,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
 });
 
 /**
- * Ruling 179 (pass 36), the CHECKOUT half. F15-15 pinned the reviewer's
+ * Ruling 240 (pass 36), the CHECKOUT half. F15-15 pinned the reviewer's
  * *prompt* to the delivered revision; live on HLC-18 (2026-09-11, 19:46Z) the
  * revision under review was a commit Viberr did not author and it was never in
  * the reviewer's clone of the delivering tree — so the reviewer judged the
@@ -6521,7 +6521,7 @@ describe("startAgentRun: a known-exhausted backend holds the dispatch (ruling 15
  * Viberr puts the checkout where the contract says, rather than asking the run
  * to fetch it.
  */
-describe("ruling 179: a supporting checkout is detached at the revision under review", () => {
+describe("ruling 240: a supporting checkout is detached at the revision under review", () => {
   const execFileAsync = promisify(execFile);
   let dir: string;
   let first: string;
@@ -6569,7 +6569,7 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
     expect(await head()).toBe(first);
   });
 
-  it("ruling 238: a base-refreshed subject is checked out AND the sentence says which revision the verdict binds to", async () => {
+  it("ruling 239: a base-refreshed subject is checked out AND the sentence says which revision the verdict binds to", async () => {
     // The reviewer is standing on a different commit from the one its verdict
     // will be recorded against. A sentence that still said "the revision under
     // review `<sha>`" would name a tree it never read.
@@ -6602,14 +6602,14 @@ describe("ruling 179: a supporting checkout is detached at the revision under re
 });
 
 /**
- * Ruling 186 (pass 37, F37-2). The hold was enforced by ASKING the model: three
+ * Ruling 56 (pass 37, F37-2). The hold was enforced by ASKING the model: three
  * operator triggers were refused and a prompt paragraph told every reactive
  * turn not to "dispatch delivery work", while `startAgentRun` checked nothing.
  * Live, SHOP-2 was marked "Held until every entry is done; Viberr releases it
  * then" and a Codex run started 1.9 seconds later, designed and committed a
  * whole service, and pushed a branch cut from a base predating its dependency.
  */
-describe("ruling 186: a held task refuses every agent dispatch", () => {
+describe("ruling 56: a held task refuses every agent dispatch", () => {
 
   /** Make VIB-1 wait on a second task that is nowhere near done. */
   async function hold(entries: string[] = ["VIB-2"]): Promise<void> {
@@ -6705,7 +6705,7 @@ describe("ruling 186: a held task refuses every agent dispatch", () => {
   });
 });
 
-describe("ruling 422: a dispatched run's contract names the knowledge-base folders it may read", () => {
+describe("ruling 217(a): a dispatched run's contract names the knowledge-base folders it may read", () => {
   it("puts the profile's KB folder and the project's rulings folder in the read-only exception, and hands the run the rulings index", async () => {
     // CANARY: stop setting `promptInput.kbReadDirs` in the dispatch.
     for (const name of ["house-rules", "project-rulings"]) {
@@ -6740,11 +6740,11 @@ describe("ruling 422: a dispatched run's contract names the knowledge-base folde
     const house = path.join(store.dataRoot, "kb", "house-rules");
     const rulings = path.join(store.dataRoot, "kb", "project-rulings");
     expect(prompt).toContain("- Read-only exception: the knowledge-base folders");
-    // Ruling 592: `critic` cannot post files and is still told it may read them.
+    // Ruling 217(b): `critic` cannot post files and is still told it may read them.
     expect(prompt).toContain("- Read-only exception: the task's attachments folder");
     expect(prompt).toContain(`\`${house}\``);
     expect(prompt).toContain(`\`${rulings}\``);
-    // Ruling 239: `critic` grants only `house-rules`, so the rulings index can
+    // Ruling 208(a): `critic` grants only `house-rules`, so the rulings index can
     // only reach this run through the fresh-run `withProjectRulings`. CANARY:
     // unwrap that call and the folder above is still named, but its index is
     // gone.

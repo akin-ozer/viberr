@@ -18,7 +18,7 @@ import { setupAppTest, type AppTestContext } from "../../test-support/test-app";
  * raw board (archived included) must still be one larger, otherwise the counts
  * would agree only because nothing was archived.
  *
- * Ruling 16 stays: Done tasks are LIVE work and stay counted.
+ * Ruling 295 stays: Done tasks are LIVE work and stay counted.
  */
 
 let app: AppTestContext;
@@ -42,7 +42,7 @@ interface RailData {
 }
 
 /** The rail (the workspace layout's loader) and the board it counts (ruling
- *  457, BOARD-6: the board route's own loader), as one board request runs
+ *  11, BOARD-6: the board route's own loader), as one board request runs
  *  them: together, on one Request. */
 async function railCounts(): Promise<RailData> {
   const [{ loader: layoutLoader }, { loader: boardLoader }] = await Promise.all([
@@ -118,7 +118,7 @@ describe("F19-9: the rail badges count the tasks their surfaces list", () => {
     }
   });
 
-  it("still counts Done tasks (ruling 16) — only archived work is excluded", async () => {
+  it("still counts Done tasks (ruling 295) — only archived work is excluded", async () => {
     const { baseTaskFrontmatter, writeTask } = await import(
       "../../test-support/test-store"
     );
@@ -142,10 +142,10 @@ describe("F19-9: the rail badges count the tasks their surfaces list", () => {
 });
 
 /**
- * Ruling 349 (pass 38, F38-3): the board reads the run row, so a run the cap
+ * Ruling 44 (pass 38, F38-3): the board reads the run row, so a run the cap
  * parked is "agent queued" and only a streaming one is "agent working".
  */
-describe("ruling 349: the board annotates each task with its live run", () => {
+describe("ruling 44: the board annotates each task with its live run", () => {
   // The loader ships board cards; RailData names only the fields the badge
   // tests read, so this test parses the three more it reads.
   const liveTaskSchema = z.object({

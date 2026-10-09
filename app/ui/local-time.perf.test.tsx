@@ -8,7 +8,7 @@ import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { observeMutations } from "../../test-support/render-counter";
 
 /**
- * Ruling 457 (CSS-3): a timestamp list mounted on the client after the page
+ * Ruling 11 (CSS-3): a timestamp list mounted on the client after the page
  * has hydrated (a navigation to a task, a new timeline row, a console opened
  * later) renders its viewer-local text in one commit. `useHydrated` used to
  * start false on every mount, so each such mount committed twice and rewrote
@@ -34,7 +34,7 @@ const STAMPS = Array.from(
   (_, i) => `2026-07-${String(1 + i).padStart(2, "0")}T20:${String(i).padStart(2, "0")}:00.000Z`,
 );
 
-describe("timestamps mounted after hydration (ruling 457)", () => {
+describe("timestamps mounted after hydration (ruling 11)", () => {
   it("render the viewer-local text in one commit, with no rewrite", () => {
     let commits = 0;
     const container = document.body.appendChild(document.createElement("div"));

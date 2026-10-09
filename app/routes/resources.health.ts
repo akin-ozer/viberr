@@ -5,7 +5,7 @@ import { healthSnapshot } from "~/server/ops/health-snapshot.server";
 import { toError } from "~/shared/errors";
 
 /**
- * GET /resources/health — ops probe (Phase 10, docs/architecture/decisions.md route map).
+ * GET /resources/health — ops probe (Phase 10, docs/ui/surfaces.md route table).
  * Unauthenticated by design (readiness checks run without a session);
  * exposes only aggregate counts, never data.
  *
@@ -35,7 +35,7 @@ import { toError } from "~/shared/errors";
  *    lock, so a serving process without one is not a normal state.
  *  - `disk.status` low/critical → degraded. Canonical state is files; a full
  *    volume is the corruption scenario this product cannot afford.
- *  - `projectionStore` non-null → degraded as `projections` (ruling 217). The
+ *  - `projectionStore` non-null → degraded as `projections` (ruling 22). The
  *    mirror could not be rebuilt from the canonical files, which is the other
  *    half of the same scenario: "files are truth" only helps while SQLite
  *    follows them. It is a LATCH, set by `rebuildPath`'s own catch and cleared
@@ -43,7 +43,7 @@ import { toError } from "~/shared/errors";
  *    cheap. Note that `projections` above (the row counts) keeps answering
  *    happily through a corrupt store, which is why a count is not a verdict.
  *  - `backends.<b>.connectedUsers` is a COUNT, never a verdict, and zero is
- *    **NOT** degraded. Ruling 127 made agent backends per-person: there is no
+ *    **NOT** degraded. Ruling 137 made agent backends per-person: there is no
  *    instance credential to probe, so the only true instance-level fact is how
  *    many people have connected each backend (a sealed key, or a vendor
  *    sign-in whose credential file is on this server — still never a
@@ -52,8 +52,8 @@ import { toError } from "~/shared/errors";
  *    alarm forever (R17-5: a never-checked thing renders neutral, not
  *    alarming).
  *  - A per-person BACKEND fact — one member's refused credential, one member's
- *    spent quota — is **NOT** degraded either (ruling 146, owner 2026-09-06,
- *    superseding the F32-4/F32-9 entries). Those entries predate ruling 127,
+ *    spent quota — is **NOT** degraded either (ruling 40, owner 2026-09-06,
+ *    superseding the F32-4/F32-9 entries). Those entries predate ruling 137,
  *    when a credential was deployment-wide and a refusal really was an instance
  *    outage; now it is one person's key, and letting it 503 this probe drained
  *    traffic from an instance serving everyone else. The readings stay in the
@@ -62,7 +62,7 @@ import { toError } from "~/shared/errors";
  *  - `disk: null` (unmeasurable) is NOT degraded — "we could not measure" is
  *    not "there is no space", and `build` identity is informational only.
  *  - `agentIsolation.status` `degraded` → degraded as `agentIsolation` (ruling
- *    460): the image's launcher exists but its boot probe could READ the store
+ *    40): the image's launcher exists but its boot probe could READ the store
  *    as another uid (a bind mount enforcing no permissions), so agents could
  *    read the database. `off` is NOT degraded: a host without the launcher (the
  *    dev server) never promised the isolation.
@@ -83,7 +83,7 @@ function requestedProbe(request?: Request): string | null {
 
 export async function loader(args?: { request?: Request }) {
   try {
-    // Ruling 107: the reading is assembled in `healthSnapshot` so the
+    // Ruling 269: the reading is assembled in `healthSnapshot` so the
     // controller's `viberr_ops` diagnostics tool answers from the SAME
     // derivation instead of a second one that drifts. Spread after `ok` keeps
     // the wire body byte-for-byte what it was.

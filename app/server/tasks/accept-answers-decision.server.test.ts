@@ -29,7 +29,7 @@ import { resolvePacket } from "./packet-resolution.server";
 import { transitionStage } from "./task-transitions.server";
 
 /**
- * Ruling 471: a direct acceptance answers the open decision that offers it.
+ * Ruling 100: a direct acceptance answers the open decision that offers it.
  *
  * Live on WEB-1 (2026-09-24) the operator's decision recommended
  * `accept_completion` ("Accept WEB-1 and merge PR #1"), the owner pressed the
@@ -184,7 +184,7 @@ function withdrawalNotes(): string[] {
     .filter((t) => t.includes("Withdrew the open decision") || t.includes("never answered"));
 }
 
-describe("ruling 471: a plain acceptance answers a decision that offers accept_completion", () => {
+describe("ruling 100: a plain acceptance answers a decision that offers accept_completion", () => {
   it("records the packet door's resolution, withdraws nothing, and hands nothing to the operator", async () => {
     // An operator is deployed, so a `packet-resolved` hand-off would reach
     // the stub: the answer must not make one (the task is Done).
@@ -296,7 +296,7 @@ describe("ruling 471: a plain acceptance answers a decision that offers accept_c
 });
 
 /**
- * Ruling 600: an acceptance leaves no decision on the task, so it leaves no
+ * Ruling 100: an acceptance leaves no decision on the task, so it leaves no
  * decision row unread. Live on AWSC-12 (2026-09-29) the operator's "Accept
  * completion" card was consumed by a direct Accept, and its `approval` row
  * stayed unread: every tab's title counted it for a day and a half. Only an
@@ -304,7 +304,7 @@ describe("ruling 471: a plain acceptance answers a decision that offers accept_c
  * `markTaskPacketApprovalRead` back under `answered.current && input.answerer`
  * and all three cases go red.
  */
-describe("ruling 600: an acceptance reads every decision row on the task", () => {
+describe("ruling 100: an acceptance reads every decision row on the task", () => {
   function unreadDecisions(): string[] {
     return listNotifications(store.db, store.users.arda.id)
       .filter((n) => n.unread && ["packet", "question", "approval"].includes(n.kind))
@@ -371,7 +371,7 @@ describe("ruling 600: an acceptance reads every decision row on the task", () =>
   });
 });
 
-describe("ruling 471: a forced acceptance answers force_accept, else accept_completion", () => {
+describe("ruling 100: a forced acceptance answers force_accept, else accept_completion", () => {
   it("the Force accept button answers a force_accept option with that option", async () => {
     wedged(FORCE_PACKET);
     await forceAcceptCompletion(

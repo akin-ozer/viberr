@@ -22,7 +22,7 @@ import {
  *    "no file");
  *  - `X-Content-Type-Options: nosniff` + `Content-Security-Policy: sandbox`
  *    on every response, and only whitelisted types render inline — HTML/SVG
- *    saved by a browsing agent must never execute on this origin. Ruling 690:
+ *    saved by a browsing agent must never execute on this origin. Ruling 317:
  *    `servedFileResponse` writes those headers, for this route, the
  *    controller's files and a task's kept sources alike.
  */
@@ -39,8 +39,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   } catch {
     return new Response("Not found", { status: 404 });
   }
-  // Ruling 552: never through a link. Agents can write this folder (ruling
-  // 460), and a link planted in it served the file it pointed at, one only
+  // Ruling 19: never through a link. Agents can write this folder (ruling
+  // 15), and a link planted in it served the file it pointed at, one only
   // the server may read, to anyone in the project.
   const read = readAttachmentBytes(abs, MAX_ATTACHMENT_BYTES);
   if (!read) return new Response("Not found", { status: 404 });
@@ -49,6 +49,6 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }
 
   // The stored name: a typed name finds the file in either Unicode form
-  // (ruling 675), and the header carries the one the folder holds.
+  // (ruling 76), and the header carries the one the folder holds.
   return servedFileResponse(request, path.basename(abs), read.bytes);
 }

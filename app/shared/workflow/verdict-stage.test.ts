@@ -3,7 +3,7 @@ import type { Engagement, ReviewVerdict, WorkRevision } from "~/schemas/task-fil
 import { verdictStageFor } from "./verdict-stage";
 
 /**
- * Ruling 163 (pass 35, F35-13): where a task whose revision changed after a
+ * Ruling 90 (pass 35, F35-13): where a task whose revision changed after a
  * verdict goes back to. Three doors share this one answer (the operator's
  * backward move, a conflict packet's redirect, a delivery that moved the head),
  * and each of them is scoped by the plan to a task standing AT OR PAST the
@@ -48,7 +48,7 @@ const reviewer: Engagement = {
 };
 
 /**
- * Ruling 208 (F37-29, live on SHOP-15). A board may declare required reviewers
+ * Ruling 90 (F37-29, live on SHOP-15). A board may declare required reviewers
  * at DIFFERENT stages — here a code reviewer at Review and an integration
  * verifier at Verify, which is exactly the shape the controller designed for
  * the shopify-clone board. Asking whether ANY required reviewer is eligible at
@@ -58,7 +58,7 @@ const reviewer: Engagement = {
  * transition from Verify to Review" — leaving the task unable to reach the only
  * stage where the reviewer it is actually waiting on can run.
  */
-describe("ruling 208: the reviewers who still OWE a verdict decide, not the ones who approved", () => {
+describe("ruling 90: the reviewers who still OWE a verdict decide, not the ones who approved", () => {
   const TWO_STAGE_BOARD = {
     stages: [
       { id: "triage" },
@@ -177,7 +177,7 @@ describe("verdictStageFor: only a task at or past the review stage is returned",
 
   it("still returns the reviewers' stage from the acceptance boundary and past it", () => {
     // Merge is `reviewId` here (the edge into Done) and no reviewer is eligible
-    // there, so the task goes back to Review — ruling 163's whole point.
+    // there, so the task goes back to Review — ruling 90's whole point.
     expect(
       verdictStageFor(BOARD, { stage: "merge", engagements: [reviewer] }, DEPLOYED),
     ).toBe("review");

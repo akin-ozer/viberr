@@ -88,12 +88,12 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
   });
 
   /**
-   * Ruling 675: a header value is Latin-1, so a name with a letter outside it
+   * Ruling 76: a header value is Latin-1, so a name with a letter outside it
    * made `new Response` throw. The owner's own input on AWSC-117, a PDF named
    * in Turkish and stored decomposed by a Mac's upload, answered 500 from its
    * tile and 404 when its name was typed.
    */
-  it("ruling 675: serves a file named outside Latin-1, under either Unicode form, with its name in a header that can carry it", async () => {
+  it("ruling 76: serves a file named outside Latin-1, under either Unicode form, with its name in a header that can carry it", async () => {
     const composed = "Aidea _ İçerik ve Eğitim _ AWS Maliyet Teklifi.pdf";
     const dir = path.join(app.dataRoot, "projects", "viberr-core", "tasks", "VIB-142", "attachments");
     writeFileSync(path.join(dir, composed.normalize("NFD")), "%PDF-1.4 the proposal");
@@ -127,7 +127,7 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect(res.headers.get("content-disposition")).toContain("attachment");
   });
 
-  it("ruling 105: a yml serves as inert text/plain inline (the viewer fetches it)", async () => {
+  it("ruling 78: a yml serves as inert text/plain inline (the viewer fetches it)", async () => {
     const res = await get(ardaId, "page-snap.yml");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/plain");
@@ -135,7 +135,7 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  it("ruling 105: ?download=1 forces the save dialog on an inline type", async () => {
+  it("ruling 78: ?download=1 forces the save dialog on an inline type", async () => {
     const res = await get(ardaId, "page-snap.yml", "?download=1");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toContain("attachment");
@@ -156,14 +156,14 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
   });
 
   /**
-   * Ruling 696: the task key is one folder under the project's tasks. The
+   * Ruling 15(b): the task key is one folder under the project's tasks. The
    * router hands a loader its params decoded, `%2F` as `/` (measured over HTTP
    * on the production build, 2026-10-07: `/projects/viberr-core/tasks/
    * ..%2F..%2Fbilling-service%2Ftasks%2FBIL-9/attachments/<file>` answered 200
    * with billing-service's bytes to a person who is not in it), so the key
    * this loader reads can hold a path.
    */
-  it("ruling 696: a key that walks to another task's folder serves nothing, another project's files least of all", async () => {
+  it("ruling 15(b): a key that walks to another task's folder serves nothing, another project's files least of all", async () => {
     const billing = { slug: "billing-service", key: "BIL-9" };
     const dir = path.join(app.dataRoot, "projects", billing.slug, "tasks", billing.key, "attachments");
     mkdirSync(dir, { recursive: true });

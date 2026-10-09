@@ -10,7 +10,7 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { createRenderCounter, observeMutations } from "../../../test-support/render-counter";
 
 /**
- * Ruling 457, board-live journey: what a revalidation of the board costs in the
+ * Ruling 11, board-live journey: what a revalidation of the board costs in the
  * browser when little or nothing changed. Every SSE event on the project
  * re-runs the layout loader, and single-fetch decodes a brand-new object for
  * every task, so the board is handed fresh columns many times a minute.
@@ -73,7 +73,7 @@ function boardTask(i: number): BoardTask {
     packet: null,
     quiet: false,
     continuity: null,
-    // Ruling 503: the filter reads it; the card draws no chip (ruling 172).
+    // Ruling 325: the filter reads it; the card draws no chip (ruling 306(e)).
     epicId: i % 4 === 1 ? "epic-1" : null,
   };
 }
@@ -141,7 +141,7 @@ function renderBoard(view?: "list") {
   };
 }
 
-describe("board revalidation cost (ruling 457)", () => {
+describe("board revalidation cost (ruling 11)", () => {
   it("a revalidation that changes nothing renders no card and writes nothing", () => {
     const b = renderBoard();
     expect(b.utils.container.querySelectorAll(".card-wrap")).toHaveLength(40);

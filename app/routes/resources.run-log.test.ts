@@ -133,13 +133,13 @@ describe("GET /resources/run-log paging (P13-D-11)", () => {
 });
 
 /**
- * Ruling 457: the console's two ruling-457 asks of this route. `raw=0` leaves
+ * Ruling 300: the console's two ruling-300 asks of this route. `raw=0` leaves
  * the stored envelopes out (the console asks for them only while its raw view
  * is open), every answer carries the run row's live facts (the Live run strip
  * follows the tail, LIVE-1), and `window=1` answers the group's console window
  * the way a hard refresh ships it (TASK-1).
  */
-describe("GET /resources/run-log for the console (ruling 457)", () => {
+describe("GET /resources/run-log for the console (ruling 300)", () => {
   it("`raw=0` drops each line's envelope and keeps its display", async () => {
     const data = await get("since=9&raw=0");
     expect(texts(data)).toEqual(["l10", "l11"]);
@@ -174,7 +174,7 @@ describe("GET /resources/run-log for the console (ruling 457)", () => {
 });
 
 /**
- * Ruling 457, test audit L14-29. The run console reads this in the background
+ * Ruling 11, test audit L14-29. The run console reads this in the background
  * with a plain `fetch`, which follows a redirect without a word: behind
  * `requireUser`'s login redirect, every tail read from a signed-out tab
  * rendered /login on the server, failed to parse as the log, and was retried
@@ -182,7 +182,7 @@ describe("GET /resources/run-log for the console (ruling 457)", () => {
  * the conventions' JSON error shape, which the console reports as a stopped
  * tail.
  */
-describe("GET /resources/run-log signed out (ruling 457)", () => {
+describe("GET /resources/run-log signed out (ruling 11)", () => {
   it("answers 401 in the conventions' error shape, never a login redirect", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     const { updateUserFields } = await import("~/server/auth/user-store.server");

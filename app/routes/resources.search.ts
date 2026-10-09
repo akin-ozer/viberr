@@ -13,7 +13,7 @@ import { searchWorkspace } from "~/features/shell/command-search.server";
  * guard of its own — there is no slug in the request to guard.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // Ruling 11 (test audit L14-29): a 401, never `requireUser`'s login
   // redirect, which named THIS route and the query as the returnTo. The
   // palette loads it through a fetcher as the person types, and a fetcher
   // follows a redirect as a navigation: typing in a stale tab went to /login
@@ -40,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 457: a failed search is the palette's, never the page's. React Router
+ * Ruling 11: a failed search is the palette's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, so a restart, a 5xx or a dead network while the person typed
  * replaced the page under the palette with its error page. Any failure answers

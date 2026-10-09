@@ -1,7 +1,7 @@
 import { isMarkdownName, languageForName } from "~/ui/code-language";
 
 /**
- * Ruling 691: the names and sizes of a page capture, in ONE place.
+ * Ruling 86: the names and sizes of a page capture, in ONE place.
  *
  * Viberr renders a delivered page (HTML or markdown) in a headless browser and
  * keeps the picture on the task beside the file. The writer
@@ -93,7 +93,7 @@ export function isPageCaptureName(name: string): boolean {
  * on the task: that file is the agent's, to be claimed by its run, kept with
  * the delivery and offered as a screenshot like any other. Only the picture
  * of a page the folder holds is the name the renderer writes and replaces.
- * The page is matched in either Unicode form (ruling 675): the store keeps a
+ * The page is matched in either Unicode form (ruling 76): the store keeps a
  * picture's name composed whatever form its page was stored in.
  */
 export function pageCapturesAmong(files: readonly string[], recorded: Iterable<string> = []): Set<string> {

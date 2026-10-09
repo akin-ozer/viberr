@@ -24,7 +24,7 @@ import type {
 import { ResourcesPanel } from "./resources-panel";
 import { UsersPanel } from "./users-panel";
 
-/** Ruling 99: minimal controller config for page renders. */
+/** Ruling 247: minimal controller config for page renders. */
 const CONTROLLER_CONFIG = {
   name: "Controller",
   model: "",
@@ -36,7 +36,7 @@ const CONTROLLER_CONFIG = {
   profilePresent: true,
 };
 
-/** Ruling 108: the PRODUCT default — every section locked (no unlock vars). */
+/** Ruling 270: the PRODUCT default — every section locked (no unlock vars). */
 const CONTROLLER_LOCKS = {
   skills: true,
   kb: true,
@@ -144,10 +144,10 @@ describe("ConnectionsPanel", () => {
     return render(<Stub initialEntries={[url]} />);
   }
 
-  // Ruling 480 (F40-45): a project's credential card links an instance admin
+  // Ruling 222 (F40-45): a project's credential card links an instance admin
   // to `?update=<connection id>`, the one place a token is replaced. Canary:
   // start the modal state at null and no dialog opens.
-  it("ruling 480: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
+  it("ruling 222: ?update=<id> opens that connection's Update token, and its note promises no dry-run", async () => {
     const { findByRole } = renderConnectionsAt("/org/settings?tab=connections&update=hepapi");
     const dialog = await findByRole("dialog", { name: "Update token for hepapi" });
     // F40-43: the dry-run is an env opt-in that is off by default.
@@ -157,15 +157,15 @@ describe("ConnectionsPanel", () => {
     );
   });
 
-  it("ruling 480: an unknown ?update= id opens nothing", () => {
+  it("ruling 222: an unknown ?update= id opens nothing", () => {
     const { queryByRole } = renderConnectionsAt("/org/settings?tab=connections&update=nobody");
     expect(queryByRole("dialog")).toBeNull();
   });
 
-  // Ruling 532: Home's setup checklist links "Connect GitHub" here with
+  // Ruling 322: Home's setup checklist links "Connect GitHub" here with
   // `?add`. Canary: drop the `add` branch from the modal's first state and the
   // page opens on no dialog.
-  it("ruling 532: ?add opens the new connection's dialog", async () => {
+  it("ruling 322: ?add opens the new connection's dialog", async () => {
     const { findByRole } = renderConnectionsAt("/org/settings?tab=connections&add=1");
     expect(await findByRole("dialog", { name: "New GitHub connection" })).toBeTruthy();
   });
@@ -221,11 +221,11 @@ describe("ConnectionsPanel", () => {
   });
 
   /**
-   * Ruling 463 (F40-6): the row says what the TOKEN reaches. It read "3
+   * Ruling 222 (F40-6): the row says what the TOKEN reaches. It read "3
    * public repos", the account's public count, while the fine-grained token
    * behind it had been granted a private repository that count cannot show.
    */
-  it("ruling 463: a row says which repositories the token reaches, private ones marked, one disclosure away", () => {
+  it("ruling 222: a row says which repositories the token reaches, private ones marked, one disclosure away", () => {
     // CANARY: drop <ReachLine> from the row, or render the list outside the
     // <details>, and the matching assertion fails.
     const { container } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
@@ -245,7 +245,7 @@ describe("ConnectionsPanel", () => {
     );
   });
 
-  it("ruling 463: a reach GitHub would not give says why instead of a count", () => {
+  it("ruling 222: a reach GitHub would not give says why instead of a count", () => {
     const unknown: ConnectionRecord[] = [
       {
         ...CONNECTIONS[1]!,
@@ -263,7 +263,7 @@ describe("ConnectionsPanel", () => {
     );
   });
 
-  it("ruling 463: Re-check posts connection-recheck for its own row", async () => {
+  it("ruling 222: Re-check posts connection-recheck for its own row", async () => {
     // CANARY: post another intent, or the default connection's id.
     const { getAllByText } = renderPanel(<ConnectionsPanel connections={CONNECTIONS} />);
     fireEvent.click(getAllByText("Re-check")[1]!);
@@ -309,7 +309,7 @@ describe("ConnectionsPanel", () => {
     fireEvent.click(getByText("Add connection"));
     expect(getByText("New GitHub connection")).toBeTruthy();
     const save = getByText("Validate & connect").closest("button")!;
-    // Ruling 147: enabled while incomplete; a click is refused with the
+    // Ruling 288: enabled while incomplete; a click is refused with the
     // unmet-requirements line as an alert and focus on the first empty field.
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
@@ -469,7 +469,7 @@ describe("UsersPanel", () => {
     // Disabling another user goes through the confirm.
     fireEvent.click(getByLabelText("Disable Selin Aksoy"));
     expect(getByText("Disable Selin Aksoy?")).toBeTruthy();
-    // Ruling 458(f): the shared ConfirmDialog, named by its title.
+    // Ruling 297: the shared ConfirmDialog, named by its title.
     expect(
       getByRole("alertdialog", { name: "Disable Selin Aksoy?" }).getAttribute(
         "data-screen-label",
@@ -523,7 +523,7 @@ describe("UsersPanel", () => {
     fireEvent.click(getByText("Allow access"));
     expect(getByPlaceholderText("username")).toBeTruthy();
     const whitelistBtn = getByText("Whitelist user").closest("button")!;
-    // Ruling 147: never disabled for an incomplete form; the click refuses.
+    // Ruling 288: never disabled for an incomplete form; the click refuses.
     expect(whitelistBtn.disabled).toBe(false);
     fireEvent.click(whitelistBtn);
     expect(document.activeElement).toBe(getByPlaceholderText("username"));
@@ -589,7 +589,7 @@ const STAGES: StageDef[] = [
   { id: "done", name: "Done", color: "green" },
 ];
 
-/** Ruling 618: live projects' own stages, as the loader serves them. */
+/** Ruling 326: live projects' own stages, as the loader serves them. */
 const BILLING_STAGES: ProjectCustomStages = {
   slug: "billing-service",
   name: "Billing Service",
@@ -626,7 +626,7 @@ const TEMPLATE_GRANTS = {
   skills: { "terraform-review": 1 },
 };
 
-/** Ruling 625: a resource row's meta line sets its store path in `<code>` and
+/** Ruling 280: a resource row's meta line sets its store path in `<code>` and
  *  the rest in the body face, so the line is matched whole, by text content. */
 const metaLine =
   (text: string) =>
@@ -871,7 +871,7 @@ describe("ResourcesPanel", () => {
     expect(chips.some((c) => c.textContent === "Done")).toBe(false);
     // P13-AP-05/AP-07: a template is ADOPTED (copied) by a project, so an org
     // edit does not silently reach an already-adopted project on its next run.
-    // Ruling 156 (pass 35): the hint no longer points at "re-adopt" (a door the
+    // Ruling 177 (pass 35): the hint no longer points at "re-adopt" (a door the
     // deploy refuses); the box above the foot copies the grants with this save.
     expect(
       getByText(
@@ -885,15 +885,15 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 479(h) (F40-46): live, Design Engineer and Content Writer carried
+   * Ruling 184 (F40-46): live, Design Engineer and Content Writer carried
    * akinozer.com's own `build` stage. The row printed the bare id, and the
    * editor offered only the default workflow's chips, so Content Writer opened
    * with nothing pressed and `build` could be neither seen nor removed while
-   * every save kept it. Ruling 618: a stage a live board has is offered in that
+   * every save kept it. Ruling 326: a stage a live board has is offered in that
    * project's row, so the stored-ids row holds only what no board has. Canary:
    * drop the `storedOnlyStages` chips.
    */
-  it("ruling 479(h): a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
+  it("ruling 184: a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
     const outside: GagentView[] = [
       { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
     ];
@@ -932,14 +932,14 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 618 (2026-10-01): a project's own stages were offered only
+   * Ruling 326 (2026-10-01): a project's own stages were offered only
    * once a profile already stored one, as a pressed chip after the defaults.
    * Each live project's stages are offered under its name now, and the
    * projects the profile already names lead. Canary: render the Custom stages
    * rows from `projectStages` in the loader's order, or drop `stageChip` from
    * a row.
    */
-  it("ruling 618: a project's own stages are offered in its row, and a press posts the stage id", async () => {
+  it("ruling 326: a project's own stages are offered in its row, and a press posts the stage id", async () => {
     const outside: GagentView[] = [
       { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
     ];
@@ -980,11 +980,11 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 618: the rows page three projects at a time behind the pager, and
+   * Ruling 326: the rows page three projects at a time behind the pager, and
    * the order is taken once, at the open, so a press never moves a row to
    * another page. Canary: page by 4, or reorder `projects` on every render.
    */
-  it("ruling 618: Custom stages page three projects at a time, and a press on one page keeps the others'", async () => {
+  it("ruling 326: Custom stages page three projects at a time, and a press on one page keeps the others'", async () => {
     const seven = Array.from({ length: 7 }, (_, i) => projectRow(i + 1));
     const sixth: GagentView[] = [{ ...GAGENTS[1]!, id: "sixth", name: "Sixth", stages: ["s6"] }];
     const { getByText, getByLabelText, getByRole } = renderPanel(
@@ -1025,12 +1025,12 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
+   * Ruling 177 (pass 35, F35-7): a project's deployment is its own COPY of the
    * grants, so an org edit never reached it. The modal offers the propagation
    * as a box, unchecked by default, and the save carries the decision. Canary:
    * drop `propagate` from the submitted fields.
    */
-  it("ruling 156: the copy-grants box posts propagate=1 with the save, and an unadopted template has no box", async () => {
+  it("ruling 177: the copy-grants box posts propagate=1 with the save, and an unadopted template has no box", async () => {
     const { getByLabelText, getByText, queryByLabelText } = renderResources();
     fireEvent.click(getByLabelText("Edit Developer"));
     const box = getByLabelText(
@@ -1074,7 +1074,7 @@ describe("ResourcesPanel", () => {
     );
     fireEvent.click(getByLabelText("Edit Spare"));
     const save = getByText("Save changes").closest("button")!;
-    // Ruling 147: the explanation is shown up front and Save stays enabled; a
+    // Ruling 288: the explanation is shown up front and Save stays enabled; a
     // click refuses (the modal's unmet line becomes an alert) and lands on the
     // empty role field.
     expect(save.disabled).toBe(false);
@@ -1096,7 +1096,7 @@ describe("ResourcesPanel", () => {
     ).toBeTruthy();
     // Its subtitle is the folder path alone (owner request 2026-10-01).
     // CANARY: put " · read live" back after the path and this exact match fails.
-    // (Scoped to the browser: the row's own `<code>` path matches too, ruling 625.)
+    // (Scoped to the browser: the row's own `<code>` path matches too, ruling 280.)
     const browser = document.querySelector<HTMLElement>('[aria-label="Files · Architecture notes"]')!;
     expect(
       [...browser.querySelectorAll<HTMLElement>("*")].some((el) => getNodeText(el) === "store://kb/architecture-notes/"),
@@ -1156,7 +1156,7 @@ describe("ResourcesPanel", () => {
     const { getByText, getByLabelText } = renderResources();
     // KB and skill rows have counted templates since P13-KM-08; the MCP row was
     // the one destructive path with no idea what depended on it.
-    // Ruling 461: a credentialed server's row says who holds the credential,
+    // Ruling 191: a credentialed server's row says who holds the credential,
     // between "auth: configured" and the grant tail (it used to carry F-P3's
     // Claude-only caveat, which the gateway ended).
     expect(
@@ -1399,16 +1399,16 @@ describe("ConnectionsPanel — scope evidence", () => {
       <ConnectionsPanel connections={[assumed]} />,
     );
     expect(container.querySelectorAll(".conn-row .scope-chip").length).toBe(0);
-    // Ruling 480 (F40-43): no promise the card then never kept.
+    // Ruling 220 (F40-43): no promise the card then never kept.
     expect(container.querySelector(".conn-row .scope-chips")!.textContent).toContain(
       "repo, pull_request:write unproven for the token as a whole: each repository proves them. No repository has proven them yet: attaching the token to a project does, and so does Viberr's first write there.",
     );
   });
 
-  // Ruling 480 (F40-43): live, the card read "repo unproven. Verified when
+  // Ruling 220 (F40-43): live, the card read "repo unproven. Verified when
   // attached to a project" for a token attached to a project that had pushed
   // and merged. Canary: stop rendering `repoProofs` and the line is gone.
-  it("ruling 480: lists what each repository proved, and no longer says none has", () => {
+  it("ruling 220: lists what each repository proved, and no longer says none has", () => {
     const proven: ConnectionRecord = {
       ...CONNECTIONS[1]!,
       id: "cx_proven",
@@ -1500,7 +1500,7 @@ describe("SkillModal — one entry point, two content modes", () => {
     const { nameInput, getByText } = openNewSkill();
     fireEvent.change(nameInput, { target: { value: "tf-review" } });
     const save = getByText("Create skill").closest("button")!;
-    // No summary yet: Save is enabled (ruling 147) but a click refuses and
+    // No summary yet: Save is enabled (ruling 288) but a click refuses and
     // lands on the summary field.
     expect(save.hasAttribute("disabled")).toBe(false);
     fireEvent.click(save);
@@ -1671,7 +1671,7 @@ describe("C9: instance storage line", () => {
     expect(getByText(/Automatic cleanup runs every 6h/)).toBeTruthy();
   });
 
-  it("names the host disk when that is the tighter reading (ruling 603)", () => {
+  it("names the host disk when that is the tighter reading (ruling 40)", () => {
     const { getByText } = renderPanel(
       orgPage({
         view: viewWith({
@@ -1728,10 +1728,10 @@ describe("run concurrency control", () => {
     expect(getByText(/2 runs live, 1 queued/)).toBeTruthy();
   });
 
-  // Ruling 152(b): a cap carries a coordination lane, and the control says so
+  // Ruling 150: a cap carries a coordination lane, and the control says so
   // under the field, because "capped at 2" beside three live runs would
   // otherwise read as a cap that does not hold.
-  it("ruling 152: a positive cap names the coordination lane under the field", () => {
+  it("ruling 150: a positive cap names the coordination lane under the field", () => {
     // Canary: drop the `.conc-lane` sentence from RunConcurrencyControl and
     // the first assertion fails.
     const { getByText } = renderPanel(
@@ -1747,7 +1747,7 @@ describe("run concurrency control", () => {
   // The lane is `max(1, ceil(cap / 4))`, so a sentence that states the rule
   // instead of the number lies at every cap that is not a multiple of four:
   // "one extra slot per four" reads as none at cap 2 and as one at cap 5.
-  it("ruling 152: the sentence prints the lane the server derived, at any cap", () => {
+  it("ruling 150: the sentence prints the lane the server derived, at any cap", () => {
     // Canary: render the words "one extra slot per four" again (or `cap` in
     // place of `countLabel`) and both assertions fail.
     const { getByText } = renderPanel(
@@ -1758,14 +1758,14 @@ describe("run concurrency control", () => {
     ).toContain("operator and controller turns");
   });
 
-  it("ruling 152: a cap of 1 counts one agent run and one slot", () => {
+  it("ruling 150: a cap of 1 counts one agent run and one slot", () => {
     const { getByText } = renderPanel(
       orgPage({ runConcurrency: { cap: 1, lane: 1, live: 1, queued: 0 } }),
     );
     expect(getByText(/Cap 1: up to 1 agent run at once, plus 1 slot for/)).toBeTruthy();
   });
 
-  it("says unlimited when the cap is 0, with no lane sentence (ruling 152)", () => {
+  it("says unlimited when the cap is 0, with no lane sentence (ruling 150)", () => {
     const { getByText, queryByText } = renderPanel(orgPage());
     // The reading says "Unlimited · 0 runs live" — distinct from the "0 =
     // unlimited" field hint.
@@ -1784,7 +1784,7 @@ describe("run concurrency control", () => {
     const row = input.closest(".guard-row")!;
     expect(row.querySelector(".guard-name")?.textContent).toBe("Run concurrency");
     expect(input.closest(".pol-note")).toBeNull();
-    // Ruling 175 put a second limit in the well, so the ROW is the group now,
+    // Ruling 31 put a second limit in the well, so the ROW is the group now,
     // named by its own name, and the well is the ground both rows stand on.
     const group = getByRole("group", { name: "Run concurrency" });
     expect(group.className).toBe("guard-row");
@@ -1794,10 +1794,10 @@ describe("run concurrency control", () => {
 
   // PG26-A: the in-app audit browse + the Org-scoped toggle that isolates the
   // events the project Activity page cannot show.
-  it("browses recent audit events; the Org-scoped toggle swaps to its own window (ruling 234)", () => {
+  it("browses recent audit events; the Org-scoped toggle swaps to its own window (ruling 33)", () => {
     const { getByText, queryByText } = renderPanel(
       orgPage({
-        // Ruling 234: the two windows are fetched SEPARATELY, so the unscoped
+        // Ruling 33: the two windows are fetched SEPARATELY, so the unscoped
         // list here deliberately does NOT contain the PAT row. That is the live
         // shape the ruling fixes: on a busy instance the org-scoped events fall
         // out of the unscoped window entirely (measured at 2 visible against 96
@@ -1854,10 +1854,10 @@ describe("run concurrency control", () => {
     });
   });
 
-  // Ruling 147(d): "nothing changed" is the only gate that keeps Save disabled.
+  // Ruling 288: "nothing changed" is the only gate that keeps Save disabled.
   // Validity used to be folded into that gate, so a typed "-1" was a changed
   // value that left Save dead with nothing said.
-  it("ruling 147: an unusable cap is refused on the click, not by a dead Save", async () => {
+  it("ruling 288: an unusable cap is refused on the click, not by a dead Save", async () => {
     const { getByLabelText, getByRole, queryByRole } = renderPanel(
       orgPage({ runConcurrency: { cap: 2, lane: 1, live: 0, queued: 0 } }),
     );
@@ -1892,7 +1892,7 @@ describe("run concurrency control", () => {
 
   // `Number("")` is 0, so an emptied box used to look like a valid, changed
   // value and silently set the cap to unlimited.
-  it("ruling 147: an emptied cap field is refused, never submitted as unlimited", () => {
+  it("ruling 288: an emptied cap field is refused, never submitted as unlimited", () => {
     const { getByLabelText, getByRole, queryByRole } = renderPanel(
       orgPage({ runConcurrency: { cap: 2, lane: 1, live: 0, queued: 0 } }),
     );
@@ -1911,11 +1911,11 @@ describe("run concurrency control", () => {
  * name where the rows actually land and when.
  */
 /**
- * Ruling 175: the instance's spending cap per Claude run, the second row in the
+ * Ruling 31: the instance's spending cap per Claude run, the second row in the
  * run-limits well. Blank means no cap; the action refuses what it cannot store,
  * and the row says plainly that Codex has no budget option.
  */
-describe("spending cap control (ruling 175)", () => {
+describe("spending cap control (ruling 31)", () => {
   const page = (runSpendCapUsd: number | null) => orgPage({ runSpendCapUsd });
 
   it("is its own row in the same well as run concurrency, and says Codex has no budget option", () => {
@@ -1956,7 +1956,7 @@ describe("spending cap control (ruling 175)", () => {
     });
   });
 
-  it("ruling 147: zero or a third decimal is refused on the click, not by a dead Save", () => {
+  it("ruling 288: zero or a third decimal is refused on the click, not by a dead Save", () => {
     const { getByLabelText, getByRole, queryByRole } = renderPanel(page(null));
     const input = getByLabelText("Max spend per Claude run, USD");
     const save = getByRole("button", { name: "Save spending cap" });
@@ -1983,7 +1983,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
   };
   const page = (s3Audit: typeof S3 | null) => orgPage({ s3Audit });
 
-  it("ruling 148(b): unconfigured, the six fields sit behind a Set up button", () => {
+  it("ruling 323: unconfigured, the six fields sit behind a Set up button", () => {
     const { getByText, container } = renderPanel(page(null));
     // The card used to serve the whole credential form open, on every tab.
     expect(document.querySelector(".audit-s3-grid")).toBeNull();
@@ -2004,10 +2004,10 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(push.disabled).toBe(true);
   });
 
-  // Ruling 368: the export in flight shows itself on Export to S3 now (busy,
+  // Ruling 286: the export in flight shows itself on Export to S3 now (busy,
   // the loader, "Exporting…"); Remove, which shares the fetcher, only waits.
   // Canary: drop `aria-busy={exporting || undefined}` in org-settings-page.tsx.
-  it("ruling 368: an export in flight reads Exporting… and Remove only waits", async () => {
+  it("ruling 286: an export in flight reads Exporting… and Remove only waits", async () => {
     const Stub = createRoutesStub([
       {
         path: "/org/settings",
@@ -2027,7 +2027,7 @@ describe("D04-U7 (pass 32): the S3 target card keeps the page to one primary", (
     expect(remove.hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("ruling 147: an incomplete target is refused in the modal, field by field", () => {
+  it("ruling 288: an incomplete target is refused in the modal, field by field", () => {
     const { getByText, getByPlaceholderText } = renderPanel(page(null));
     fireEvent.click(getByText("Set up S3 target").closest("button")!);
     const save = getByText("Save target").closest("button")!;
@@ -2225,7 +2225,7 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
   });
 
   /**
-   * Ruling 458(f), UI-58: the content group was a `role="radiogroup"` of plain
+   * Ruling 297, UI-58: the content group was a `role="radiogroup"` of plain
    * buttons, so it promised arrow keys it never wired and each radio was its
    * own tab stop. On `RadioSeg` it is one tab stop that ←/→ traverse, and a
    * choice commits on activation, never on focus (RadioSeg's note).
@@ -2277,10 +2277,10 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
   });
 });
 
-/* ------------- ruling 176: the MCP editor's "Write tools" section --------- */
+/* ------------- ruling 188: the MCP editor's "Write tools" section --------- */
 
 /**
- * Ruling 220 (F37-40). The MCP row stated the write-tool position only when a
+ * Ruling 188 (F37-40). The MCP row stated the write-tool position only when a
  * server was GATED, so the one state worth seeing — tools that look like
  * writes, nobody has reviewed them, so nothing is withheld — was the state the
  * list was silent about. Live on this instance, `kb-architecture` and
@@ -2290,7 +2290,7 @@ describe("KBModal — two content modes (P21, the skill modal's twin)", () => {
  * as configuration. The controller reasoned about that exact hazard for a third
  * such server and granted nothing; the list gave it and the admin nothing.
  */
-describe("MCP rows state where a server stands on write tools (ruling 220)", () => {
+describe("MCP rows state where a server stands on write tools (ruling 188)", () => {
   const FS_TOOLS = ["read_file", "list_directory", "write_file", "edit_file", "move_file"];
 
   function rowText(m: McpView): string {
@@ -2338,7 +2338,7 @@ describe("MCP rows state where a server stands on write tools (ruling 220)", () 
     expect(text).not.toContain("not reviewed");
   });
 
-  it("keeps ruling 176's sentence for a gated server, and stays quiet when nothing looks like a write", () => {
+  it("keeps ruling 188's sentence for a gated server, and stays quiet when nothing looks like a write", () => {
     expect(
       rowText({ ...MCPS[0]!, discoveredTools: FS_TOOLS, writeTools: ["write_file"] }),
     ).toContain("1 write tool withheld from read-only runs");
@@ -2354,7 +2354,7 @@ describe("MCP rows state where a server stands on write tools (ruling 220)", () 
   });
 });
 
-describe("McpModal — write tools (ruling 176)", () => {
+describe("McpModal — write tools (ruling 188)", () => {
   const LISTED = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];
 
   function renderWith(mcps: McpView[]) {
@@ -2440,11 +2440,11 @@ describe("McpModal — write tools (ruling 176)", () => {
 });
 
 /**
- * Ruling 483 (F40-59): a knowledge-base proposal links to the document it
+ * Ruling 267 (F40-59): a knowledge-base proposal links to the document it
  * stands in. `?kb=<dir>&doc=<path>` opens that base's browser and reads that
  * document, the way a click on its row would.
  */
-describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 483)", () => {
+describe("ResourcesPanel: the link a knowledge-base proposal carries (ruling 267)", () => {
   /** The panel at the proposal's link, with every form the browser posts. */
   function renderLinked() {
     const reads: Record<string, string>[] = [];

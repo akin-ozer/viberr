@@ -40,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!run) {
     return new Response("Run not found.", { status: 404 });
   }
-  // Ruling 99: a controller turn has no project scope — its session export is
+  // Ruling 249: a controller turn has no project scope — its session export is
   // gated on conversation ownership (or org-admin supervision), same as its log.
   if (run.kind === "controller") {
     const { canReadControllerRunLog } = await import(
@@ -60,7 +60,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     );
   }
   const backend: RealBackend = run.backend === "codex" ? "codex" : "claude";
-  // Ruling 127: the transcript lives in the home of the person the run billed
+  // Ruling 137: the transcript lives in the home of the person the run billed
   // (`credential_user_id`), because that is the home the vendor binary wrote
   // it into. A run with no principal never spawned a process and has none.
   const located = locateTranscript(

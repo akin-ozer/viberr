@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 
 /**
- * Ruling 457: structural sharing for rows that arrive from a loader.
+ * Ruling 11: structural sharing for rows that arrive from a loader.
  *
  * Every revalidation decodes a brand-new object for every row (single-fetch has
  * no memory of the last answer), so a list of memoised rows re-rendered every

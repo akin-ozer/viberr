@@ -2,14 +2,14 @@ import type { TranscriptJump } from "./transcript-follow";
 import { Icon } from "~/ui/icon";
 
 /**
- * Ruling 572: the transcript's way back to its newest message, the last thing
+ * Ruling 320: the transcript's way back to its newest message, the last thing
  * in the box it scrolls (the page's transcript and the dock's), pinned to that
  * box's foot while the reader is above the newest message (app.css
  * `.ctl-jump`).
  *
- * Ruling 476(c) leaves a reader who has scrolled up to history where they are
+ * Ruling 320 leaves a reader who has scrolled up to history where they are
  * when a reply lands, and nothing on screen said one had: the words went to a
- * screen reader only (ruling 476(d)). The jump says "New reply" then, on the
+ * screen reader only (ruling 320). The jump says "New reply" then, on the
  * accent face, and takes the reader to its first line; otherwise "Latest"
  * takes them where opening the thread would. A thread measured 12,625px long
  * on a phone, and scrolling was the only way back.

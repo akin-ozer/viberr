@@ -17,12 +17,12 @@ function pr(number: number, state: PrRef["state"], changed: string[]): PrRef {
 }
 
 /**
- * Ruling 475 (F40-55 (c)): the task page's accept dialog reads, from the
+ * Ruling 244 (F40-55 (c)): the task page's accept dialog reads, from the
  * projections, which other open review PRs share a changed path with the one
  * it merges. Live on akinozer-com WEB-4 and WEB-2 both changed `package.json`
  * and the dialog that merged WEB-4 said nothing.
  */
-describe("ruling 475: taskMergeCollisions", () => {
+describe("ruling 244: taskMergeCollisions", () => {
   it("names the other open PRs that share a path, and never an archived, merged or path-less one", () => {
     // CANARY: drop the `archived = 0` clause and the archived WEB-5 is named.
     const store = setupTestStore(ctx);

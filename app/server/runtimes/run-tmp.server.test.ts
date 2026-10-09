@@ -13,7 +13,7 @@ import {
 } from "./run-tmp.server";
 
 /**
- * Ruling 636: a run's temporary directory is its own, starts empty, and goes
+ * Ruling 141(c): a run's temporary directory is its own, starts empty, and goes
  * once the run is over. Which uid can enter it is the isolation module's
  * (`passThroughDirForAgents`, `shareDirWithAgents`) and the image's
  * (`scripts/check-agent-isolation.sh`); these pin the lifecycle, with no
@@ -31,7 +31,7 @@ afterEach(() => {
   ctx.cleanup();
 });
 
-describe("a run's temporary directory (ruling 636)", () => {
+describe("a run's temporary directory (ruling 141(c))", () => {
   it("is made under the root for the run alone, and starts clean", async () => {
     // A crashed predecessor of the same id never hands its files on.
     // CANARY: drop the removal before the `mkdirSync` in `prepareRunTmp` and

@@ -34,7 +34,7 @@ let app: AppTestContext;
  */
 let ids: SeedUserIds;
 
-/** Ruling 127: what the loader answers about backends. `backendHealth` is the
+/** Ruling 137: what the loader answers about backends. `backendHealth` is the
  *  ONE answer: the VIEWER's own connection (which the roster badge and the
  *  profile editor's advisory note read) plus the project-scoped count the
  *  roster line states. Authoring a profile is never gated on it, so there is no
@@ -53,7 +53,7 @@ type LoaderData = {
   stages: { id: string; name: string; color: string }[];
   projectName: string;
   backendHealth: Record<"codex" | "claude", BackendConnectionSummaryData>;
-  /** Ruling 156 (owner, Q35-8): who may copy a template's grants here. */
+  /** Ruling 177 (owner, Q35-8): who may copy a template's grants here. */
   viewerIsOrgAdmin: boolean;
 };
 
@@ -321,13 +321,13 @@ describe("loader", () => {
   });
 
   /**
-   * Ruling 127 — this page used to ask the deployment "is Codex configured?".
+   * Ruling 137 — this page used to ask the deployment "is Codex configured?".
    * There is no such fact: a run bills a PERSON. The loader answers two
    * person-shaped questions instead, and the second one is scoped to THIS
    * project's members, because a member of another project connecting Codex
    * changes nothing about what can run here.
    */
-  describe("backend connections (ruling 127)", () => {
+  describe("backend connections (ruling 137)", () => {
     const memberCount = async (): Promise<number> => {
       const { listProjectMembers } = await import(
         "~/server/projections/board-query.server"
@@ -353,7 +353,7 @@ describe("loader", () => {
           membersTotal: total,
         },
       });
-      // Ruling 127: the page answers backends ONCE. A fresh instance where
+      // Ruling 137: the page answers backends ONCE. A fresh instance where
       // nobody has connected anything must still be able to author profiles
       // (runs bill the task owner, not the author), so the loader ships no
       // second boolean pair for a form gate to read.
@@ -419,12 +419,12 @@ describe("action RBAC (profile CRUD is admin-only)", () => {
 });
 
 /**
- * Ruling 156 (pass 35, F35-7): "Use the template's grants" on the Agents page
+ * Ruling 177 (pass 35, F35-7): "Use the template's grants" on the Agents page
  * rewrites this project's copy of a template's grants. Org admins only (owner,
  * Q35-8): a project admin who is not one sees the marker and asks. The button
  * carries the record the page rendered (B5), so a stale one is refused.
  */
-describe("sync-profile-resources (ruling 156)", () => {
+describe("sync-profile-resources (ruling 177)", () => {
   const PROFILE = "sync-probe";
 
   async function saveTemplate(mcps: string[], create = false) {
@@ -494,8 +494,8 @@ describe("sync-profile-resources (ruling 156)", () => {
         fingerprint: drifted.fingerprint,
       }),
     );
-    // Ruling 479(d): the reply names what the press added (and, below, what
-    // it removed), as ruling 156 says it does.
+    // Ruling 326: the reply names what the press added (and, below, what
+    // it removed), as ruling 177 says it does.
     expect(synced.toast).toBe(
       '"Sync Probe" now carries the template\'s grants · added MCP server github · changes apply from the next run',
     );
@@ -512,7 +512,7 @@ describe("sync-profile-resources (ruling 156)", () => {
       details: { templateId: PROFILE, mcps: ["github"] },
     });
 
-    // Ruling 479(d): the template drops the grant, so the copy now holds one
+    // Ruling 326: the template drops the grant, so the copy now holds one
     // the template does not; the press takes it off and the toast says so.
     // Canary: drop the `removed` clause from the route's toast.
     await saveTemplate([]);
@@ -558,7 +558,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       icon: "agents",
       backends: ["codex"],
       // No picked model in FORM → per-backend catalog default, GPT-6.1 Sol on
-      // Codex since ruling 687.
+      // Codex since ruling 149.
       model: "gpt-6.1-sol",
       effort: "medium",
       scope: "Created in Viberr Core",
@@ -1065,7 +1065,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 
   it("edit stores the operator's backend/model/autonomy + governs its caps", async () => {
-    // Ruling 518: the operator is one agent, called Operator, with no role. The
+    // Ruling 176: the operator is one agent, called Operator, with no role. The
     // editor sends neither; this payload carries what an editor from before the
     // ruling sent, and the save stores neither.
     // CANARY: write `form.name`, `form.role` or `current.scope` into the
@@ -1141,7 +1141,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
   });
 });
 
-describe("AP-05 / owner ruling 1 — the global library is deployable", () => {
+describe("AP-05 / P13 owner decision 1 — the global library is deployable", () => {
   /**
    * Before this, NO code path added an org template to a project's `agents:`
    * list: a profile created in Settings → Global agent profiles could never be
@@ -1505,7 +1505,7 @@ describe("F20-20 — an operator autonomy elevation is audited + surfaced, not g
       autonomy: "supervised" | "full",
       accept: "recommend" | "direct",
     ) =>
-      // What the operator's editor sends: no name and no role (ruling 518).
+      // What the operator's editor sends: no name and no role (ruling 176).
       JSON.stringify({
         backend: "claude",
         stages: ["triage", "ready", "impl", "review", "done"],
@@ -1668,12 +1668,12 @@ describe("F21-13 — a model foreign to the chosen backend is refused", () => {
 });
 
 /**
- * Ruling 139 (pass 34, G34-1): the profile editor refuses a CHANGED effort
+ * Ruling 261 (pass 34, G34-1): the profile editor refuses a CHANGED effort
  * tier the backend does not offer, by name; an UNCHANGED stale tier a
  * deployment legitimately stores (Codex `minimal`, accepted but not offered)
  * still saves an unrelated field.
  */
-describe("effort tiers on the editor path (ruling 139)", () => {
+describe("effort tiers on the editor path (ruling 261)", () => {
   it("refuses a CHANGED out-of-list tier and names the valid ones", async () => {
     // Canary: make `assertEffortForBackend` a no-op — "ultra" lands in project.md.
     const result = await postAction(ids.arda, {

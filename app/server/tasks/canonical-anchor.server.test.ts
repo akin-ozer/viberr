@@ -98,7 +98,7 @@ beforeEach(async () => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
   installFakeRuntime();
-  // Ruling 127: a resumed specialist bills the TASK OWNER's own account, so
+  // Ruling 137: a resumed specialist bills the TASK OWNER's own account, so
   // the resume only reaches an adapter when the owner (arda, who owns VIB-1
   // here) has the backend connected. Without it the reply is refused before a
   // prompt is ever built, and this file asserts on the prompt.
@@ -161,7 +161,7 @@ describe("canonicalTaskAnchor", () => {
   });
 
   /**
-   * Ruling 392 (F39-19), live on ax-clone AX-12: the operator wrote
+   * Ruling 201 (F39-19), live on ax-clone AX-12: the operator wrote
    * "@Developer … read the Reviewer's request-changes findings in the timeline",
    * and no agent can. `read_board` answers stage, readiness, waits, archived and
    * goal, with no timeline at all; this anchor is every other word an agent
@@ -169,7 +169,7 @@ describe("canonicalTaskAnchor", () => {
    * worth reworking against. The deliverer raised a decision packet asking a
    * human to paste them, which cost a run and a human decision.
    */
-  it("ruling 392: the standing verdicts ride WHOLE, because rework has nowhere else to read them", () => {
+  it("ruling 201: the standing verdicts ride WHOLE, because rework has nowhere else to read them", () => {
     const reason =
       "Blocking findings:\n\n- internal/store/store.go:825 snapshot errors occur " +
       "after the WAL is synced, so Create returns an error while Get sees the object. " +
@@ -216,11 +216,11 @@ describe("canonicalTaskAnchor", () => {
   });
 
   /**
-   * Ruling 482 (F40-52): on WEB-1 the deliverer, the Site Reviewer and the
+   * Ruling 315 (F40-52): on WEB-1 the deliverer, the Site Reviewer and the
    * Fact Checker each ran the same four gates by hand and reported them in
    * prose. Every agent now reads what Viberr itself ran on the revision.
    */
-  it("ruling 482: carries the project's gates as Viberr ran them on the revision under review", () => {
+  it("ruling 315: carries the project's gates as Viberr ran them on the revision under review", () => {
     const sha = "d".repeat(40);
     const gates = [
       { name: "build", command: "pnpm build" },
@@ -264,7 +264,7 @@ describe("canonicalTaskAnchor", () => {
     );
   });
 
-  it("ruling 392: a task with no standing verdict gains no section", () => {
+  it("ruling 201: a task with no standing verdict gains no section", () => {
     const anchor = anchorOf({ parsed: parsed(), stageName: "In Progress" });
     expect(anchor).not.toContain("Review verdicts that stand right now");
   });
@@ -294,7 +294,7 @@ describe("canonicalTaskAnchor", () => {
     for (const line of anchor.split("\n")) expect(line.length).toBeLessThan(1600);
   });
 
-  it("ruling 563: a clipped timeline entry names the stamp that reads it whole, and a whole one does not", () => {
+  it("ruling 213(b): a clipped timeline entry names the stamp that reads it whole, and a whole one does not", () => {
     // Live on AWSC-4 a person's four-item answer reached a retried run as
     // "1=Shared … 2=RDS for SQL Server 2…", with nothing saying where the rest
     // was. CANARY: drop the stamp and a clipped answer is a dead end again;
@@ -330,13 +330,13 @@ describe("canonicalTaskAnchor", () => {
     expect(lines.find((l) => l.includes("The mapping is posted."))).toBe("- comment · operator: The mapping is posted.");
   });
 
-  it("ruling 596: the recent timeline says how many entries it leaves out, and names their readers only to a run that holds them", () => {
+  it("ruling 213: the recent timeline says how many entries it leaves out, and names their readers only to a run that holds them", () => {
     // Live on AWSC-36 the Estimate Judge, re-reviewing, wrote that the first
     // verdict's breakdown was "not present in the accessible AWSC-36 files or
     // timeline entries"; it was past the five this block shows, and nothing
     // said there were more. CANARY: drop the line and the window reads as the
     // whole history again; name the tools for every run and one that cannot
-    // call them is sent nowhere (ruling 415).
+    // call them is sent nowhere (ruling 116).
     const timeline = Array.from({ length: 7 }, (_, i) => ({
       occurredAt: `2026-09-30T01:0${6 - i}:00.000Z`,
       type: "comment" as const,
@@ -465,7 +465,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     expect(resumeSpec!.prompt).toContain("@dev continue");
 
     /**
-     * Ruling 343 (pass 37, F37-179): the resumed run carries the input
+     * Ruling 167 (pass 37, F37-179): the resumed run carries the input
      * disclosure too.
      *
      * `resolveResumeConfinement` returned `runInputs` for exactly this, and its
@@ -476,7 +476,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
      * talk to an agent — recorded nothing about what they were given.
      *
      * The resume half had a test, and it asserted the record was BUILT. That is
-     * why this lasted: the same shape as rulings 329 and 338, a third time in
+     * why this lasted: the same shape as rulings 64 and 166, a third time in
      * one pass.
      *
      * CANARY: delete the `recordRunInputs` call in `commentToAgent`'s resume
@@ -510,15 +510,15 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
   });
 
   /**
-   * Ruling 245: every run's anchor names the files another task owns, high in
+   * Ruling 60: every run's anchor names the files another task owns, high in
    * the block, before the run edits anything. A fresh run's anchor has carried
    * the project's leases since the ruling; the reply door built its own
    * without them, so a person's @mention resumed the deliverer with no word of
    * a lease until the push refused its delivery.
    */
-  it("ruling 245: the resume prompt names the files another task owns", async () => {
+  it("ruling 60: the resume prompt names the files another task owns", async () => {
     resumableTask("Split the build into fragments.");
-    // A live holder: a finished, archived or missing one binds nobody (ruling 247).
+    // A live holder: a finished, archived or missing one binds nobody (ruling 60).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-9", { stage: "impl", title: "Fragment the Makefile" }),
       goal: "Fragment the Makefile.",
@@ -536,7 +536,7 @@ describe("a RESUMED specialist re-anchors on the EDITED goal (UC-30)", () => {
     const prompt = startedRunSpecs().find((s) => s.prompt.includes("@dev continue"))?.prompt ?? "";
     // CANARY: hand the reply door's anchor (`commentToAgent`) `fileLeases: []`
     // and the resumed run learns of the lease only when its delivery is refused.
-    expect(prompt).toContain("### Files another task owns right now (ruling 245)");
+    expect(prompt).toContain("### Files another task owns right now (ruling 60)");
     expect(prompt).toContain("- `Makefile` → **VIB-9**: splitting it into fragments");
   });
 });

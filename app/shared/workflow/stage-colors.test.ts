@@ -8,8 +8,8 @@ import {
   TERMINAL_STAGE_COLOR,
 } from "./stage-colors";
 
-/* Ruling 364: the twenty presets are the whole vocabulary of a stage colour. */
-describe("stage colour presets (ruling 364)", () => {
+/* Ruling 279: the twenty presets are the whole vocabulary of a stage colour. */
+describe("stage colour presets (ruling 279)", () => {
   it("is exactly twenty distinct lower-case names", () => {
     expect(STAGE_COLORS).toHaveLength(20);
     expect(new Set(STAGE_COLORS).size).toBe(20);

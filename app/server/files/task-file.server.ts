@@ -40,13 +40,13 @@ import {
  *                    title: …          (optional metadata, completion only)
  *                    to: agent         (optional metadata, comments only)
  *                    notified: <id, id> (optional — who this event's own
- *                                       notification reached; ruling 382)
+ *                                       notification reached; ruling 20)
  *                    <blank line>
  *                    <text — RichText micro-format>
  *                    evidence:            (optional, outcome events — P13-D-26:
  *                    - [<status>] <label> · <result>   a completion, a
  *                                         reviewer's verdict, or an agent's
- *                                         report; ruling 526 put the status
+ *                                         report; ruling 16 put the status
  *                                         first, and an older
  *                                         `- <label> · <add> · <del>` row
  *                                         still reads)
@@ -150,7 +150,7 @@ function splitSections(body: string): RawSection[] {
 
 // ------------------------------------------------------------- timeline
 
-/** Ruling 526: an evidence row opens with its status in brackets. */
+/** Ruling 16: an evidence row opens with its status in brackets. */
 const EVIDENCE_ROW_RE = /^\[([a-z]+)\] (.+)$/;
 /** A count cell of an older row that is a diff's size ("+412", "−87"). */
 const SIGNED_COUNT_RE = /^[+−-]?\d+$/;
@@ -158,7 +158,7 @@ const SIGNED_COUNT_RE = /^[+−-]?\d+$/;
 /**
  * One `evidence:` row, less its `- `. A row reads `[<status>] <label> ·
  * <result>`, the result being the last segment (the label may hold the
- * separator itself). A row written before ruling 526 reads
+ * separator itself). A row written before ruling 16 reads
  * `<label> · <add> · <del>`: it becomes an `info` row whose result is its two
  * cells, a diff's two counts side by side ("+412 −87") and any other pair
  * with a comma ("102 passed, 0 failed"). Null for a row in neither shape.
@@ -259,7 +259,7 @@ function parseEventBlock(
       toAgent = line.slice("to:".length).trim() === "agent";
       i += 1;
     } else if (/^notified:\s/.test(line)) {
-      // Ruling 382: the recipients this event's fan-out reached. One line,
+      // Ruling 20: the recipients this event's fan-out reached. One line,
       // comma separated, ids only — compaction reads it and folds nothing that
       // notified somebody.
       notified = line
@@ -385,7 +385,7 @@ function serializeEvent(event: TaskFileEvent): string {
   // byte-stable (a parsed title has no newline to fold) and closes it.
   if (event.title) lines.push(`title: ${event.title.replace(/\s*\n\s*/g, " ")}`);
   if (event.toAgent) lines.push(`to: agent`);
-  // Ruling 382: one metadata line, same shape as `title:`/`to:` — a comma
+  // Ruling 20: one metadata line, same shape as `title:`/`to:` — a comma
   // separated id list the parser reads back whole.
   if (event.notified && event.notified.length > 0) {
     lines.push(`notified: ${event.notified.join(", ")}`);
@@ -502,7 +502,7 @@ function parsePacketSection(
   }
   const result = taskPacketSchema.safeParse(raw);
   if (result.success) {
-    // Ruling 478(e): NO recommendation is a legitimate packet (an agent's
+    // Ruling 68: NO recommendation is a legitimate packet (an agent's
     // question it has no pick on), so only a second recommendation is news.
     const recCount = result.data.options.filter((o) => o.rec).length;
     if (recCount > 1) {
@@ -630,7 +630,7 @@ export function parseTaskFileContent(
           // front of that array, and the task timeline component only filters
           // it. So the reader of a task whose file HAS an inversion was told the
           // page had compensated, on the one panel whose job is to tell them the
-          // truth about the record. Ruling 237's own note-ordering fix was made
+          // truth about the record. Ruling 94's own note-ordering fix was made
           // in the WRITE for exactly this reason.
           "Timeline entries are not strictly newest-first. The page renders file order, so an entry may sit out of place until the file is rewritten.",
           "timeline",

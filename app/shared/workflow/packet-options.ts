@@ -2,11 +2,11 @@ import type { PacketOptionKind } from "~/schemas/task-file.schema";
 import { escapeRegExp } from "~/shared/text/regexp";
 
 /**
- * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
+ * Ruling 131 (pass 35, F35-14) — an option title is a promise the resolution
  * keeps.
  *
  * The operator authors a packet's options; `resolvePacket` dispatches on the
- * option's KIND and never on its English title (ruling 7). Two live decisions
+ * option's KIND and never on its English title (ruling 62(a)). Two live decisions
  * proved what happens when the two disagree:
  *
  *  - KNC-3, 2026-09-07 06:06:57Z: a `custom` option titled "Force-accept as
@@ -103,7 +103,7 @@ export function misdirectedOptionPromise(
     readonly kind: PacketOptionKind;
     readonly title: string;
     readonly detail?: string;
-    /** Ruling 163: a redirect the branch-conflict packet marked `rework` DOES
+    /** Ruling 90: a redirect the branch-conflict packet marked `rework` DOES
      *  return the task to the review stage when the resolution lands, so its
      *  own "the task returns to Review" sentence is a promise it keeps. */
     readonly rework?: boolean;
@@ -122,7 +122,7 @@ export function misdirectedOptionPromise(
 
 /** The refusal the authoring door answers with, naming the kind that keeps the
  *  promise (or, for an agent profile, the surface a person uses: nothing a
- *  human confirms on a packet edits an agent's configuration, ruling 85). */
+ *  human confirms on a packet edits an agent's configuration, ruling 110). */
 export function misdirectedPromiseRefusal(
   promise: MisdirectedPromise,
   option: { readonly kind: PacketOptionKind; readonly title: string },
@@ -155,7 +155,7 @@ export function misdirectedPromiseRefusal(
         lede +
         "it cannot edit an agent profile, and no option kind can: an agent's stages, " +
         "grants and model are configuration a person changes on the project's Agents " +
-        "surface. State the gap as an observation and name that remedy (ruling 85), " +
+        "surface. State the gap as an observation and name that remedy (ruling 110), " +
         "then offer the options that act on this task."
       );
   }
@@ -209,7 +209,7 @@ export function moveStageTarget(
 }
 
 /**
- * Ruling 164, the half `misdirectedOptionPromise` cannot cover: a `move_stage`
+ * Ruling 131, the half `misdirectedOptionPromise` cannot cover: a `move_stage`
  * option does NOT describe itself. It carries a free-text title AND a separate
  * `toStage`, the card renders only the words, and the resolution reads only the
  * id — so "Move VIB-1 back to Review so the reviewer can verdict" with

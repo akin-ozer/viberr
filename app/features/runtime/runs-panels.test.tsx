@@ -21,7 +21,7 @@ import { staticRunLogStore } from "../../../test-support/static-run-log-store";
 type StreamedLine = { display: LogLine; raw: string | null; key?: string };
 
 /**
- * The console fed by hand (ruling 457): the lines, backward-paging state and
+ * The console fed by hand (ruling 11): the lines, backward-paging state and
  * stream error a live store would hold, in a `staticRunLogStore`.
  */
 function Logs({
@@ -45,7 +45,7 @@ function Logs({
   return <AgentLogsPanel {...props} store={store} />;
 }
 
-/** Ruling 366(f): the footer's total counts up to its figure, so a test reads
+/** Ruling 284(e): the footer's total counts up to its figure, so a test reads
  *  the figure itself off the ticker's `data-count`, not the moving text. */
 function footerCount(container: HTMLElement): string | null {
   return container.querySelector(".logs-foot [data-count]")?.getAttribute("data-count") ?? null;
@@ -91,7 +91,7 @@ describe("LiveRunPanel", () => {
     expect(getByText("1 agent running")).toBeTruthy();
     expect(container.querySelector(".who-chip")).not.toBeNull();
     // Elapsed derives from startedAt (~402s → 06:42), never a fabricated count.
-    // Ruling 366(e): the digits roll (`@number-flow/react`), and the plain
+    // Ruling 284(e): the digits roll (`@number-flow/react`), and the plain
     // figure rides the wrapper's `data-clock` for anyone reading the DOM.
     expect(container.querySelector(".run-cell .lw-clock")!.getAttribute("data-clock")).toBe("06:42");
     // The Runtime cell names the model the run is on, for the task page's
@@ -102,7 +102,7 @@ describe("LiveRunPanel", () => {
     expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
-  it("ruling 524(b): the Elapsed clock's digits land well inside its one-second tick", () => {
+  it("ruling 321: the Elapsed clock's digits land well inside its one-second tick", () => {
     // number-flow's own roll is a 900 ms spring, so the seconds were mid-roll
     // nine tenths of every second: two glyphs half in view, read as "03:1"
     // (owner's screenshot, 2026-09-27). A roll that ends inside half a tick
@@ -123,7 +123,7 @@ describe("LiveRunPanel", () => {
     }
   });
 
-  it("ruling 524(c): a controller turn's card names it once", () => {
+  it("ruling 147: a controller turn's card names it once", () => {
     // The turn is "Controller" in the role "Controller", and the card's head
     // read "Controller · Controller". A renamed controller keeps its role.
     // CANARY: append `who.role` after the name unconditionally again.
@@ -202,7 +202,7 @@ describe("LiveRunPanel", () => {
     expect(container.querySelector(".run-phase .step")?.textContent).toBe(
       "Cloning acme/app",
     );
-    // Ruling 478(c) (F40-33): phase and step sit in the text column the sheet
+    // Ruling 313 (F40-33): phase and step sit in the text column the sheet
     // lets shrink (`.run-phase-text { min-width: 0 }`, app.css.test.ts), so a
     // long step cuts at the strip's edge. CANARY: drop the class.
     const column = container.querySelector(".run-phase > .run-phase-text")!;
@@ -252,8 +252,8 @@ describe("LiveRunPanel", () => {
     );
     expect(queryByText("Interrupt")).toBeNull();
     rerender(<LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt interrupting={false} />);
-    // Ruling 150: a stop discards the work in flight, so this trigger wears
-    // ruling 149's red label like the confirm it opens — and its sibling
+    // Ruling 278: a stop discards the work in flight, so this trigger wears
+    // ruling 278's red label like the confirm it opens — and its sibling
     // "View logs", which takes nothing away, stays neutral. Canary: drop
     // `danger` from the class and the row holds no danger control at all.
     const reds = container.querySelectorAll(".run-actions .btn.danger");
@@ -279,7 +279,7 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelector(".logs-bar .pill.agent")).not.toBeNull();
   });
 
-  it("ruling 626: the console is a tab stop, so the keyboard scrolls it", () => {
+  it("ruling 320: the console is a tab stop, so the keyboard scrolls it", () => {
     // axe's scrollable-region-focusable (WCAG 2.1.1) on the task page and the
     // controller page: the log scrolls, and its lines hold nothing that takes
     // focus. CANARY: drop the console's `tabIndex`.
@@ -290,7 +290,7 @@ describe("AgentLogsPanel", () => {
   });
 
   it("a controller turn's streaming footer names the transcript, not a task record", () => {
-    // Ruling 99: the console now renders on the controller page too, where
+    // Ruling 247: the console now renders on the controller page too, where
     // "the task record" names a thing the run does not have.
     const run = mkRun({ id: "controller", kind: "controller", role: "Controller",
       who: { kind: "agent", backend: "claude", name: "Controller", role: "Controller" } });
@@ -300,7 +300,7 @@ describe("AgentLogsPanel", () => {
     expect(getByText("streaming: raw output stays here as evidence, never in the transcript")).toBeTruthy();
   });
 
-  it("ruling 419(d): a finished controller turn is continued from the composer, and wears no role", () => {
+  it("ruling 321: a finished controller turn is continued from the composer, and wears no role", () => {
     // Live on the ax-clone controller page: "Controller · supporting" and "run
     // finished at 00:56; thread can be re-engaged", two pieces of a task
     // engagement's vocabulary on a surface with no task and no engagement.
@@ -335,7 +335,7 @@ describe("AgentLogsPanel", () => {
   });
 
   /**
-   * Ruling 127: a run refused because the task has no owner is not a continuity
+   * Ruling 137: a run refused because the task has no owner is not a continuity
    * error, and no backend switch fixes it. The projection marks the run
    * `failedBackendUnavailable` (that is what happened) and withholds
    * `altBackend` (there is nobody to bill), so the footer must state the
@@ -409,7 +409,7 @@ describe("AgentLogsPanel", () => {
             backend: "claude",
             state: "error",
             lifecycle: "error",
-            // The classified quota footer — the sentence ruling 130(a) added,
+            // The classified quota footer — the sentence ruling 155(a) added,
             // which is where the clause was being appended.
             failureKind: "quota",
             failedBackendUnavailable: true,
@@ -445,7 +445,7 @@ describe("AgentLogsPanel", () => {
     fireEvent.click(getByText("Retry on Codex"));
     expect(onRetryBackend).toHaveBeenCalledWith("codex", run);
     expect(container.querySelector(".logs-bar .btn.sm")).not.toBeNull();
-    // Ruling 662: the button names the agent it re-runs. Titled from the run's
+    // Ruling 292(b): the button names the agent it re-runs. Titled from the run's
     // kind it said "specialist", a retired word, here, and "reviewer" for every
     // supporting agent. CANARY: title it from the kind again.
     expect(getByText("Retry on Codex").closest("button")!.title).toBe(
@@ -562,7 +562,7 @@ describe("AgentLogsPanel", () => {
       />,
     );
     // Folded: the summary is measured from the stored clocks, and the steps are
-    // behind it rather than gone. Ruling 499: the verb stands above the figure
+    // behind it rather than gone. Ruling 168: the verb stands above the figure
     // and a chevron opens the steps (AICSS's thinking block); a finished run's
     // fold never shimmers.
     const summary = getByRole("button", { name: "Thought for 4s · 2 steps" });
@@ -633,7 +633,7 @@ describe("AgentLogsPanel", () => {
   });
 
   /**
-   * Ruling 366: a call's heartbeats are one wait row — the orb while the call
+   * Ruling 168: a call's heartbeats are one wait row — the orb while the call
    * is still open, the clock once anything landed after it — and a Viberr
    * tool's chip is marked as the product's own. Canary: drop the wait branch
    * from `createConsoleFolder` and two `.log-line.wait` rows never appear (the
@@ -665,7 +665,7 @@ describe("AgentLogsPanel", () => {
     expect(rows.length).toBe(1);
     const row = rows[0]!;
     expect(row.className).toContain("lw-live");
-    // Ruling 499: AICSS's lattice orb, nine CSS dots; a Viberr tool's runs its
+    // Ruling 168: AICSS's lattice orb, nine CSS dots; a Viberr tool's runs its
     // ring rather than radiating.
     const orb = row.querySelector(".log-orb")!;
     expect(orb).not.toBeNull();
@@ -720,7 +720,7 @@ describe("AgentLogsPanel", () => {
     expect(past.className).not.toContain("lw-live");
     expect(past.querySelector("canvas")).toBeNull();
     expect(past.querySelector(".ico")).not.toBeNull();
-    // Ruling 459: the sheet sizes and greys the ended row's clock as
+    // Ruling 284: the sheet sizes and greys the ended row's clock as
     // `.lw-glyph > .ico`, so the clock must stay a direct child of the row's
     // glyph cell. That the rule never reaches the Viberr chip's V mark is the
     // sheet's side, pinned in app.css.test.ts by "(F47) the wait row's rule
@@ -756,7 +756,7 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelectorAll(".log-code .lk-line")).toHaveLength(4);
     expect(block.textContent).toContain("34 passed");
     expect(block.textContent).toContain("done in 1.2s");
-    // Ruling 499: AICSS's code block. The head names what it holds and its
+    // Ruling 168: AICSS's code block. The head names what it holds and its
     // size, and carries Copy with the copy mark; the lines are numbered in a
     // gutter assistive tech and the selection skip.
     expect(block.querySelector(".lk-meta")!.textContent).toBe("Output · 4 lines");
@@ -836,7 +836,7 @@ describe("AgentLogsPanel", () => {
     expect(container.querySelectorAll(".log-line")).toHaveLength(4);
     expect(container.textContent).toContain(rawTelemetry);
     // The footer counts stored lines, so folding never changes the total.
-    // Ruling 366(f): the total counts up, so the figure is read off `data-count`.
+    // Ruling 284(e): the total counts up, so the figure is read off `data-count`.
     expect(footerCount(container)).toBe("4");
   });
 
@@ -914,7 +914,7 @@ describe("AgentLogsPanel", () => {
     expect(getByRole("button", { name: /Copy full session id/ })).toBeTruthy();
   });
 
-  it("ruling 148: a run with no session id says so in words", () => {
+  it("ruling 291: a run with no session id says so in words", () => {
     const run = mkRun({ backend: "claude", sid: null, state: "idle", lifecycle: "finished" });
     const { container, queryByRole } = render(
       <Logs runtime={[run]} sel="primary" onSel={() => {}} linesByThread={{ primary: [] }} />,
@@ -928,7 +928,7 @@ describe("AgentLogsPanel", () => {
     expect(queryByRole("button", { name: /Copy full session id/ })).toBeNull();
   });
 
-  it("ruling 148: a finished run with no timestamp drops the clause", () => {
+  it("ruling 291: a finished run with no timestamp drops the clause", () => {
     // The same class inside a SENTENCE: "run finished at −; thread can be
     // re-engaged" read as a broken template.
     // Canary: put the `: "−"` fallback back and this goes red.
@@ -1140,7 +1140,7 @@ describe("P13-D-11: the console pages backwards", () => {
 /**
  * UXV19-3 + UXV19-5: the run picker is the surface a user reads FIRST to choose
  * which stream to inspect, and it was the one place in the panel that spoke
- * neither the product's engagement vocabulary nor ruling 11's run lifecycle.
+ * neither the product's engagement vocabulary nor ruling 165's run lifecycle.
  */
 describe("the run picker speaks the same vocabulary as the panel around it", () => {
   const interruptedDev = () =>
@@ -1208,7 +1208,7 @@ describe("the run picker speaks the same vocabulary as the panel around it", () 
   });
 });
 
-describe("a queued run's footer says what it waits for (ruling 701)", () => {
+describe("a queued run's footer says what it waits for (ruling 175)", () => {
   const queued = (step: string | null) =>
     mkRun({
       id: "c0",
@@ -1278,10 +1278,10 @@ describe("AgentPicker dismissal (shared useDismiss)", () => {
 });
 
 /**
- * Ruling 478(d) (F40-34): the stream picker says whose console is shown, and
+ * Ruling 313 (F40-34): the stream picker says whose console is shown, and
  * only a deliberate choice switches it.
  */
-describe("ruling 478(d): the agent log stream picker", () => {
+describe("ruling 313: the agent log stream picker", () => {
   const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
   const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "Platform Engineer", role: "developer" }, state: "idle", lifecycle: "finished" });
   const rev = mkRun({ id: "c0", kind: "reviewer", who: { kind: "agent", backend: "claude", name: "Site Reviewer", role: "reviewer" }, state: "idle", lifecycle: "finished" });
@@ -1302,7 +1302,7 @@ describe("ruling 478(d): the agent log stream picker", () => {
     expect(getByRole("button", { name: `Agent log stream: ${visible}` })).toBe(trigger);
   });
 
-  it("ruling 524(c): the operator's stream is named once", () => {
+  it("ruling 147: the operator's stream is named once", () => {
     // The trigger read "Operator · operator": the name, then a role that is
     // the same word. A renamed operator keeps it. CANARY: print `roleShort`
     // after every name again.
@@ -1473,7 +1473,7 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
     // ...and, like every other line, it is patched there rather than replaced:
     // a reader's selection in its clock or tag survives the toggle, and so
     // does the size `content-visibility` remembered for the row. Ruling
-    // 700(e)'s split once drew this branch as a component of its own, a
+    // 13(b)'s split once drew this branch as a component of its own, a
     // different element type from the other branch's fragment, and React
     // swapped the whole row on every toggle with the same markup either side.
     // CANARY: make `runInputsRow` a component LineRow renders
@@ -1488,12 +1488,12 @@ describe("AgentLogsPanel — run inputs (P19-G11)", () => {
 });
 
 /**
- * Ruling 130(a): the Agent-logs footer selects its SENTENCE from the
+ * Ruling 155(a): the Agent-logs footer selects its SENTENCE from the
  * classified failure for every run kind; the retry button stays gated on the
  * offer. Canary: restore the kind gate on the sentence (operator runs fall
  * back to "continuity error").
  */
-describe("ruling 130(a): the classified footer", () => {
+describe("ruling 155(a): the classified footer", () => {
   it("an OPERATOR run tagged run·error·quota renders the classified footer, and no retry button", () => {
     const run = mkRun({ id: "operator", kind: "operator", state: "error", lifecycle: "error", failureKind: "quota", failedBackendUnavailable: true });
     const { getByText, queryByText } = render(
@@ -1506,7 +1506,7 @@ describe("ruling 130(a): the classified footer", () => {
     expect(queryByText(/Retry on/)).toBeNull();
   });
 
-  it("ruling 598: a run the gateway stopped for repeating one call says so in the footer and the pill", () => {
+  it("ruling 158(b): a run the gateway stopped for repeating one call says so in the footer and the pill", () => {
     // CANARY: drop either arm and the run reads as a continuity error.
     const run = mkRun({ state: "error", lifecycle: "error", failureKind: "tool_loop" });
     const { getByText, queryByText } = render(
@@ -1583,7 +1583,7 @@ describe("a run interrupted by a restart", () => {
       "interrupted · by a restart",
     );
     /**
-     * Ruling 338: this assertion REQUIRED the lie.
+     * Ruling 166: this assertion REQUIRED the lie.
      *
      * Its fixture is a bare `lifecycle: "interrupted", interruptedReason:
      * "restart"` run — exactly the case where whether recovery re-invoked
@@ -1622,11 +1622,11 @@ describe("a run interrupted by a restart", () => {
 });
 
 /**
- * Ruling 350 (pass 38, F38-4): the Agent-logs footer says what the run row
+ * Ruling 166 (pass 38, F38-4): the Agent-logs footer says what the run row
  * says, whatever the run's kind. Lens-2 of the pass found the pill and the
  * footer reading one RunView through different gates.
  */
-describe("ruling 350: the footer follows the classified failure for every run kind", () => {
+describe("ruling 166: the footer follows the classified failure for every run kind", () => {
   it("an operator drive refused for `unavailable` names the class, not a continuity error", () => {
     // Live: one operator drive on this instance carried `run·unavailable`, and
     // the footer beneath its "backend unavailable" pill read "stream ended on
@@ -1686,12 +1686,12 @@ describe("ruling 350: the footer follows the classified failure for every run ki
 });
 
 /**
- * Ruling 366(e): while the call is open the count runs on from the
+ * Ruling 284(e): while the call is open the count runs on from the
  * heartbeat's own instant, one second at a time, and the next heartbeat
  * resyncs it. Canary: count from the render instead of `progress.at` and the
  * first reading below is 30, not 40.
  */
-describe("the wait row's live count (ruling 366(e))", () => {
+describe("the wait row's live count (ruling 284(e))", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -1773,11 +1773,11 @@ describe("the wait row's live count (ruling 366(e))", () => {
 });
 
 /**
- * Ruling 369: the console's facts row carries the run's cache record on
+ * Ruling 311: the console's facts row carries the run's cache record on
  * `data-` attributes (the DOM reads without the words), and the strip's Tokens
  * cell says on hover what the cache wrote and read.
  */
-describe("the console's prompt-cache facts (ruling 369)", () => {
+describe("the console's prompt-cache facts (ruling 311)", () => {
   const facts = (run: RunView) => {
     const { container, unmount } = render(
       <Logs runtime={[run]} sel={run.id} onSel={() => {}} linesByThread={{}} />,
@@ -1873,11 +1873,11 @@ describe("the console's prompt-cache facts (ruling 369)", () => {
 });
 
 /**
- * Ruling 451 (motion from transitions.dev, owner 2026-09-23). The live strip's
+ * Ruling 284 (motion from transitions.dev, owner 2026-09-23). The live strip's
  * status line arrives as a new line when its words change, the Turns figure
  * rolls with its neighbours, and a copy control trades its glyph in place.
  */
-describe("ruling 451: the live strip's motion", () => {
+describe("ruling 284: the live strip's motion", () => {
   const panel = (run: RunView) => (
     <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />
   );
@@ -1911,7 +1911,7 @@ describe("ruling 451: the live strip's motion", () => {
   });
 });
 
-describe("ruling 451(c): copy controls trade their glyph in place", () => {
+describe("ruling 284: copy controls trade their glyph in place", () => {
   it("the session id's copy button keeps both marks and flips data-copied", async () => {
     // CANARY: render `<Icon name={copied ? "check" : "copy"} />` again and the
     // button holds one glyph, swapped in a single frame.
@@ -1986,13 +1986,13 @@ describe("ruling 451(c): copy controls trade their glyph in place", () => {
 });
 
 /**
- * Ruling 459 (amending 451(a)): the status line on screen when the strip opens
+ * Ruling 284 (amending 451(a)): the status line on screen when the strip opens
  * is not news, so it stands still; only a line that replaces it carries
  * `data-fresh`, the mark the sheet's `swap-in` reads. A latch, so a line that
  * repeats the first words later (Working, Compacting context, Working) still
  * rises.
  */
-describe("ruling 459: the live strip's first line stands still", () => {
+describe("ruling 284: the live strip's first line stands still", () => {
   const panel = (run: RunView) => (
     <LiveRunPanel runtime={[run]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />
   );
@@ -2031,10 +2031,10 @@ describe("ruling 459: the live strip's first line stands still", () => {
 });
 
 /**
- * Ruling 457: the console reads a live store (`createLiveRunLogStore`, the one
+ * Ruling 11: the console reads a live store (`createLiveRunLogStore`, the one
  * `useRunLogStream` holds) rather than lines handed down by the page.
  */
-describe("the console on a live store (ruling 457)", () => {
+describe("the console on a live store (ruling 11)", () => {
   const text = (seq: number): LogLine => ({ t: "10:00:00", ev: "text", tag: "assistant", text: `line ${seq}` });
   const running = () =>
     mkRun({
@@ -2118,7 +2118,7 @@ describe("the console on a live store (ruling 457)", () => {
 
   /**
    * CON-4: the console's rows skip layout until they are near the view
-   * (`content-visibility: auto`, ruling 457 CSS-6), so a row the follow jump
+   * (`content-visibility: auto`, ruling 11 CSS-6), so a row the follow jump
    * brings into view counts at its 21px placeholder when `scrollHeight` is read
    * and reaches its real height in a later frame. Nothing re-pinned, so the
    * newest line sat below the fold with `follow` still on; and the scroll
@@ -2297,7 +2297,7 @@ describe("the console on a live store (ruling 457)", () => {
   });
 
   it("UI-03: says the live tail is down while the tab's stream reconnects", () => {
-    // The tab's one stream is the layout's (`useLiveUpdates`, ruling 457); its
+    // The tab's one stream is the layout's (`useLiveUpdates`, ruling 11); its
     // failure is what the console reads. It used to watch its own.
     class FailingEventSource {
       static CONNECTING = 0;
@@ -2335,11 +2335,11 @@ describe("the console on a live store (ruling 457)", () => {
 });
 
 /**
- * Ruling 459: a wait row's orb and clock share one cell and trade in place
+ * Ruling 284: a wait row's orb and clock share one cell and trade in place
  * as the wait ends. React swapped the 20px canvas for the 14px clock in one
  * frame, so the tool chip beside it jumped 6px left.
  */
-describe("ruling 459: the wait row's orb trades for the clock in place", () => {
+describe("ruling 284: the wait row's orb trades for the clock in place", () => {
   const beat = (n: number, elapsed: number): StreamedLine => ({
     display: {
       t: `10:0${n}:00`, ev: "meta", tag: "tool_progress", name: "Bash",
@@ -2391,17 +2391,17 @@ describe("ruling 459: the wait row's orb trades for the clock in place", () => {
 });
 
 /**
- * Ruling 368: a run request shows itself on the button that started it. The
+ * Ruling 286: a run request shows itself on the button that started it. The
  * task page's run fetcher carries interrupts, retries and merges alike, so
  * Interrupt and Retry used to go `disabled` for ANY of them with their resting
  * glyph and label: the one that was pressed painted the .45 refused step and
  * said nothing. The page now names the run (or agent) in flight; that button
  * carries `aria-busy`, the loader spinning and the work's own name. Ruling
- * 459: the loader trades in for the resting glyph in its GlyphSwap cell, where
+ * 284: the loader trades in for the resting glyph in its GlyphSwap cell, where
  * it is always drawn, so "shown" is the cell's `data-copied`.
  * Canary: drop `aria-busy` from Interrupt in `runs-panels.tsx`.
  */
-describe("ruling 368: run requests in flight", () => {
+describe("ruling 286: run requests in flight", () => {
   it("Interrupt reads Interrupting… for the run being stopped", () => {
     const { getByText } = render(
       <LiveRunPanel
@@ -2468,13 +2468,13 @@ describe("ruling 368: run requests in flight", () => {
 });
 
 /**
- * Ruling 499: the console draws what an agent did the way agent tools draw
+ * Ruling 168: the console draws what an agent did the way agent tools draw
  * it. An edit is its diff (the owner, 2026-09-26, of the `+ old_string,
  * new_string` link: "this diff looks dated"), a to-do list is its steps, a
  * thought still running shimmers "Thinking", and `{ } raw` still shows every
  * stored envelope and none of it.
  */
-describe("ruling 499: the console draws an agent's edits, to-dos and thinking", () => {
+describe("ruling 168: the console draws an agent's edits, to-dos and thinking", () => {
   const W = "/data/projects/akinozer-com/tasks/WEB-3/workspace/website/";
   const line = (display: LogLine, n: number): StreamedLine => ({
     display,

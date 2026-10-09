@@ -4,7 +4,7 @@ import { withTransaction } from "~/server/db/transaction.server";
 import { countLabel } from "~/shared/text/plural";
 
 /**
- * Ruling 465: which user message each controller row answers, for the rows
+ * Ruling 252: which user message each controller row answers, for the rows
  * written before `reply_to` existed, and which old user messages are earlier
  * history that boot recovery owes nothing.
  *

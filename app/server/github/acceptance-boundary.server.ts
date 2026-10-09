@@ -3,7 +3,7 @@ import { resolveStageRoles, stageName } from "~/shared/workflow/stage-roles";
 import { liveMergeable } from "~/features/github/github-pills";
 
 /**
- * Ruling 162 / G35-5(d) (pass 35): why the operator may not refresh the
+ * Ruling 95 / G35-5(d) (pass 35): why the operator may not refresh the
  * branch from where the task stands, or null. At the acceptance boundary (the
  * stage with the edge into the terminal one, and anything past it) the base
  * refresh belongs to the acceptance ceremony, which brings the branch up to
@@ -13,9 +13,9 @@ import { liveMergeable } from "~/features/github/github-pills";
  * only refuse, so the tool's job is to attempt the merge, record the
  * conflict list and open the conflict packet.
  *
- * Ruling 429 narrows it to APPROVED work (see below).
+ * Ruling 241 narrows it to APPROVED work (see below).
  *
- * Ruling 424: its own module so the operator's snapshot can carry the same
+ * Ruling 116: its own module so the operator's snapshot can carry the same
  * verdict as `notRefreshableReason` — the tool and the snapshot read one
  * function — without the snapshot importing the tool that imports it.
  */
@@ -30,10 +30,10 @@ export function acceptanceBoundaryRefusal(
   const reviewIndex = project.stages.findIndex((s) => s.id === roles.reviewId);
   if (stageIndex < 0 || reviewIndex < 0) return null;
   if (stageIndex < reviewIndex || fm.stage === roles.terminalId) return null;
-  // Ruling 435: a conflict measured on an older head says nothing about this
-  // one (ruling 405), so it does not lift the boundary.
+  // Ruling 242: a conflict measured on an older head says nothing about this
+  // one (ruling 315), so it does not lift the boundary.
   if (liveMergeable(fm.pr) === "conflicting") return null;
-  // Ruling 429 (pass 39): the ceremony is next only once the work is approved.
+  // Ruling 241 (pass 39): the ceremony is next only once the work is approved.
   // While a verdict is failing or a revision awaits its verdict the task is
   // still in its review loop, and on a board that reviews AT the acceptance
   // stage (ax-clone: Review → Done) this refusal blocked every refresh before

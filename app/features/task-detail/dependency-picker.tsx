@@ -3,21 +3,21 @@ import type { DependencyCandidatesView } from "~/routes/task-dependency-candidat
 import { candidateRefusal, type DependencyCandidate } from "~/shared/dependency-candidates";
 import type { DependencyRender } from "~/shared/dependencies";
 // The parser from its home, not `shared/dependencies`: that module's hold
-// sentences would follow it into a chunk of their own (ruling 457).
+// sentences would follow it into a chunk of their own (ruling 11).
 import { canonicalDependencyRef } from "~/shared/task-refs";
 import { WaitChip } from "./wait-chip";
 
 /**
- * Ruling 548: what a task waits on, edited the way the Current-state card's
+ * Ruling 59: what a task waits on, edited the way the Current-state card's
  * Owner row releases its owner. Each entry is the chip the Blocked by row
- * draws (ruling 501(c)) with the owner's release cross after it, and the field
+ * draws (ruling 309) with the owner's release cross after it, and the field
  * after the chips finds the project's tasks by key or title in the wait
  * editor's read (`/projects/:slug/tasks/:key/dependency-candidates`): every
  * task but this one and, once the person types, the ones the writer would
  * refuse as a new entry (archived, already waiting on this task, already
  * done), dimmed, the reason where the stage was.
  *
- * Its own chunk (ruling 457): the Details panel loads it when a person heads
+ * Its own chunk (ruling 11): the Details panel loads it when a person heads
  * for the Blocked by trigger, so a task page nobody edits the wait on pays
  * nothing for it. It can arrive after its editor opened, so it takes the
  * focus into its field as it mounts.
@@ -25,7 +25,7 @@ import { WaitChip } from "./wait-chip";
  * The list stays under the field while the editor is open: a list that folded
  * away on the press that leaves the field moved Save out from under that same
  * press. The picker edits a draft, and the wait's form posts the whole list on
- * Save (ruling 131), so nothing reads as saved before the server answers.
+ * Save (ruling 55), so nothing reads as saved before the server answers.
  * Arrows walk the list; Enter adds the highlighted task, or with nothing
  * highlighted saves; Backspace in the empty field removes the last entry; a
  * key typed in full before a comma, or pasted as a list, goes in by itself.

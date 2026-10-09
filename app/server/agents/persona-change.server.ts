@@ -1,5 +1,5 @@
 /**
- * Ruling 467: what a persona edit changed, in one line a person or the
+ * Ruling 261: what a persona edit changed, in one line a person or the
  * controller can check without diffing two documents by eye.
  *
  * A persona is the run's whole system prompt, so a reply that only said

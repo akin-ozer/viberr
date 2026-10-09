@@ -10,7 +10,7 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
 import type { BoardStage, BoardTask } from "./board-page";
 
 /**
- * The board's acceptance ceremony (ruling 700(e), the split of
+ * The board's acceptance ceremony (ruling 13(b), the split of
  * `board-page.tsx`): the ONE shared `AcceptConfirm` a board move into the final
  * stage opens, and the refusals a board summary can answer. Its own module so
  * the page's move hooks (`useMoveConfirms`, board-page-actions.tsx) can place
@@ -18,7 +18,7 @@ import type { BoardStage, BoardTask } from "./board-page";
  */
 
 /**
- * D3 (rulings 14 + 53) — as much of `acceptanceRefusalReason`
+ * D3 (rulings 297 + 97) — as much of `acceptanceRefusalReason`
  * (task-acceptance.server.ts) as a board SUMMARY can answer, composed into the one
  * `blockedReason` the shared ceremony renders.
  *
@@ -34,7 +34,7 @@ import type { BoardStage, BoardTask } from "./board-page";
  *     precedence (a terminal GitHub fact outranks every process gate);
  *   - the STAGE gate — `acceptanceStageBlockedReason`, the one the task file
  *     cannot answer (it turns on the PROJECT's workflow edges). Not guessed from
- *     column ORDER (rulings 12/14): `TaskSummary.atAcceptanceBoundary` carries
+ *     column ORDER (rulings 237/297): `TaskSummary.atAcceptanceBoundary` carries
  *     the graph's answer, derived server-side through the same `resolveStageRoles`;
  *   - the blocked-packet and conflicting-PR gates — belt-and-braces so a stale
  *     projection fails CLOSED rather than opening a confident dialog on a click
@@ -60,20 +60,20 @@ function boardAcceptRefusal(
     (task.readiness === "blocked" && task.packet?.type === "blocked"
       ? "An open blocked decision is holding this task."
       : null) ??
-    // Ruling 135: the delivered revision is not on the PR, above the conflict.
+    // Ruling 243: the delivered revision is not on the PR, above the conflict.
     unpushedRevisionBlockedReason(task.pr, task.workRevisionSha ?? null, task.key) ??
     conflictingPrBlockedReason(task, task.key)
   );
 }
 
 /**
- * D3 (rulings 14 + 53) — the board's acceptance ceremony.
+ * D3 (rulings 297 + 97) — the board's acceptance ceremony.
  *
  * A human moving a card into the FINAL stage is not a bare move: the server
  * routes it through the full acceptance contract, which attempts a real PR
  * merge (`reorderTask` → `acceptCompletion`, task-transitions.server.ts and
- * task-acceptance.server.ts). Ruling 53 (R18-7) required this confirmation to
- * "match the task-detail dialog"; ruling 14 forbids forking a shared surface
+ * task-acceptance.server.ts). Ruling 97 (R18-7) required this confirmation to
+ * "match the task-detail dialog"; ruling 297 forbids forking a shared surface
  * per screen. The board nonetheless carried `AcceptOnBoardConfirm`, its OWN
  * dialog, disclosing LESS than the task page: no merge target, no
  * delivered-revision row, no verdict attribution, no no-change disposition.
@@ -92,13 +92,13 @@ function boardAcceptRefusal(
  * The refusals a board summary CAN answer are composed by `boardAcceptRefusal`.
  *
  * The delivered REVISION used to be in that list — hardcoded `null`, so the
- * ceremony always drew "No delivered revision recorded." — and once ruling 88
+ * ceremony always drew "No delivered revision recorded." — and once ruling 97
  * made the confirmed click echo its own disclosure back, that hardcoded absence
  * stopped being merely a thinner disclosure and became a dead door: the server
  * compares the echo against the live task, so every board drop onto the terminal
  * stage of a task that had actually DELIVERED was refused as stale. The revision
  * is projected now (`TaskSummary.workRevisionSha`) and disclosed like every
- * other fact — which is also what ruling 53 asked for. `?? null` keeps the
+ * other fact — which is also what ruling 97 asked for. `?? null` keeps the
  * honest-absence row for a task with nothing delivered.
  */
 export function AcceptOnBoardConfirm({
@@ -112,7 +112,7 @@ export function AcceptOnBoardConfirm({
   onConfirm,
 }: {
   task: BoardTask;
-  /** Ruling 475 (F40-55 (c)): the other open PRs on this board that change a
+  /** Ruling 244 (F40-55 (c)): the other open PRs on this board that change a
    *  path this task's PR changes, from the cards the board already holds. */
   mergeCollisions: readonly PrOverlap[];
   /** Project stages in order — supplies the shared ceremony's stage list and
@@ -125,7 +125,7 @@ export function AcceptOnBoardConfirm({
   defaultBranch: string;
   busy: boolean;
   onCancel: () => void;
-  /** Ruling 88: the shared ceremony hands the confirmed click its own
+  /** Ruling 97: the shared ceremony hands the confirmed click its own
    *  disclosure — the board POSTs it, exactly like the task page. */
   onConfirm: (disclosure: AcceptanceDisclosure) => void;
 }) {
@@ -140,7 +140,7 @@ export function AcceptOnBoardConfirm({
         validation: task.validation,
         branch: task.branch,
         pr: task.pr,
-        // Ruling 304: the board summary carries the checks too, so the same
+        // Ruling 97: the board summary carries the checks too, so the same
         // dialog says the same thing from either door.
         prChecks: task.prChecks ?? null,
       }}
@@ -150,7 +150,7 @@ export function AcceptOnBoardConfirm({
       noPullRequest={false}
       // F32-11: the board summary carries the open packet too.
       openPacketTitle={task.packet?.title ?? null}
-      // Ruling 471: and, from the loader, the option this move answers it with.
+      // Ruling 316: and, from the loader, the option this move answers it with.
       answersWith={task.packet?.acceptAnswersWith ?? null}
       defaultBranch={defaultBranch}
       // The STAGE gate the summary CAN answer (F19-27). The board never
@@ -164,7 +164,7 @@ export function AcceptOnBoardConfirm({
       }}
       verdictSatisfiedBy={null}
       blockedReason={boardAcceptRefusal(task, fromStageName, terminalName)}
-      // Ruling 162's interlock is for the refusal the server re-decides. This
+      // Ruling 95's interlock is for the refusal the server re-decides. This
       // one is composed from a projection SUMMARY on purpose (see
       // `boardAcceptRefusal`), so it is a disclosure, not a verdict: the board
       // discloses it and lets the confirmed move be answered by the server,

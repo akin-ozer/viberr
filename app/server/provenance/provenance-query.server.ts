@@ -55,7 +55,7 @@ const reconcileDetailsSchema = z.object({ behindBy: z.number() });
 /** The sync verdict a row recorded, when it recorded one. */
 const reconcileSyncSchema = z.object({ sync: z.string() });
 
-/** Ruling 494: the head a row names (the compare's on a `github.reconcile`
+/** Ruling 238: the head a row names (the compare's on a `github.reconcile`
  *  row, the pushed one on a `github.push` row). Absent, null or unreadable is
  *  "not named", which a reader treats as unknown, never as a match. */
 const rowHeadSchema = z.object({ headSha: z.string().min(1).nullish().catch(null) });
@@ -70,7 +70,7 @@ function rowHeadOf(details: ProvenanceDetails | null): string | null {
 export interface ReconcileObservation {
   /** Its sync verdict, or null when it recorded none. */
   sync: string | null;
-  /** Ruling 494: the branch head its compare read, or null when it named none
+  /** Ruling 238: the branch head its compare read, or null when it named none
    *  (a row written before the ruling, or an answer that did not name it). */
   headSha: string | null;
 }
@@ -79,7 +79,7 @@ export interface ReconcileObservation {
  * The sync verdict and the compared head the NEWEST observation row for this
  * task file recorded, or null when there is no row.
  *
- * Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
+ * Ruling 236's sibling (pass 37, F37-9): the sync pill reads the newest
  * `github.reconcile` row, and the reconciler withheld that row on any pass
  * whose only change was the compare — so when `main` moved, the pill kept
  * rendering the last verdict. Live, SHOP-2 showed **synced** while the
@@ -87,7 +87,7 @@ export interface ReconcileObservation {
  * agreed with the audit. "Behind main" is only interesting BECAUSE main
  * moved, which was the one transition the pill could not see.
  *
- * Ruling 494 (pass 40, F40-70): the same holds for the head the compare read.
+ * Ruling 238 (pass 40, F40-70): the same holds for the head the compare read.
  * The count is true only of that head, so a pass that compared a DIFFERENT
  * head than the newest row names is a change worth a row too (and a row that
  * names none is replaced by the first pass that does).
@@ -118,12 +118,12 @@ export function latestReconcileObservation(
   };
 }
 
-/** Ruling 494: the row a Viberr push of a task branch leaves beside the
+/** Ruling 238: the row a Viberr push of a task branch leaves beside the
  *  compares (`recompareAfterPush`, github-reconciler.server.ts). */
 export const PUSH_ACTION = "github.push";
 
 /**
- * Ruling 494 (pass 40, F40-70): the newest compare's count for a task branch,
+ * Ruling 238 (pass 40, F40-70): the newest compare's count for a task branch,
  * with the head it was counted on and the push Viberr made that it does not
  * describe, if there is one.
  *
@@ -159,7 +159,7 @@ type CompareLookupRow = {
 };
 
 /**
- * Ruling 494: the newest push, when the count was not read on the head it
+ * Ruling 238: the newest push, when the count was not read on the head it
  * published.
  *
  * - A push recorded AFTER the compare moved the branch past what was counted,

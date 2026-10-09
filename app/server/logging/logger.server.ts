@@ -13,7 +13,7 @@ import { currentCorrelation } from "./request-context.server";
  *
  * Correlation (P13-D-30): every record picks up the active request's
  * `requestId` (plus method/path and what `bindCorrelation` added: the signed-in
- * `userId`, and a run's `runId` and `taskKey` on its own work, ruling 458(d))
+ * `userId`, and a run's `runId` and `taskKey` on its own work, ruling 43)
  * with no work at the call site. That is the whole point — the previous attempt
  * at this was an opt-in `logger.child({ requestId })` that no call site ever
  * used and was deleted unused. Explicit `fields` still win over correlation on

@@ -8,14 +8,14 @@ import { signInStateKey, signInStatus } from "./resource-modals-derive";
 import { useOrgAction, type OrgAction } from "./use-org-action";
 
 /**
- * The MCP-server editor's OAuth sign-in (ruling 469) and what it was granted
- * (ruling 486). Split out of `resource-modals.tsx` by ruling 700(e), along
+ * The MCP-server editor's OAuth sign-in (ruling 192) and what it was granted
+ * (ruling 192). Split out of `resource-modals.tsx` by ruling 13(b), along
  * the task-page recipe: McpSignIn keeps the two posts it always owned, and
  * its controls take their slot of its markup without a hook of their own.
  */
 
 /**
- * Ruling 486: what a sign-in was granted, under its status line. The summary
+ * Ruling 192: what a sign-in was granted, under its status line. The summary
  * ("read-only · 194 scopes") says whether a run may write through the
  * connection; the full list sits in a disclosure, each write marked. It looks
  * like a GitHub connection's reach list (`.conn-reach`), so the stylesheet
@@ -112,7 +112,7 @@ function McpSignInActions({
 }
 
 /**
- * Ruling 469: the editor's OAuth sign-in, beside the pasted credential. "Sign
+ * Ruling 192: the editor's OAuth sign-in, beside the pasted credential. "Sign
  * in" asks the server to discover the server's authorization server, register
  * Viberr there and hand back the authorization URL; the admin opens it in a
  * new tab (a link, so no popup blocker stands in the way) and approves Viberr

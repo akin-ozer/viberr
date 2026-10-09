@@ -11,7 +11,7 @@ import type { RealBackend } from "./runtime-registry.server";
  * invalid_request_error saying "The 'gpt-5.6-sol' model is not supported when
  * using Codex with a ChatGPT account." Codex exposes no list endpoint, so the
  * only honest way to know a model is unusable is to WATCH a run fail on it.
- * Ruling 19 (chips render proven verdicts only; an unproven state renders as an
+ * Ruling 220 (chips render proven verdicts only; an unproven state renders as an
  * honest "unproven" line, never a pseudo-check) decides the shape: a mark
  * earned from a real run's failure is evidence; a save-time synthetic tick is
  * the pseudo-check that ruling bans.

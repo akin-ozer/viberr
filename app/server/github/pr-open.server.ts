@@ -71,7 +71,7 @@ function composePrBody(input: {
   } else {
     // N20-4 (§5a): no absolute origin to link to — name the task by its store
     // key so a reviewer can still find it, rather than emitting a relative link
-    // that dead-ends on github.com (ruling 3: the store-relative key is the
+    // that dead-ends on github.com (ruling 15(a): the store-relative key is the
     // honest fallback).
     lines.push(`**Viberr task:** ${input.taskKey} · ${input.title}`);
   }
@@ -95,7 +95,7 @@ function composePrBody(input: {
   return lines.join("\n");
 }
 
-/** Ruling 526: a PR-body row names a check's ending in words; a reference
+/** Ruling 231: a PR-body row names a check's ending in words; a reference
  *  that is neither goes unmarked. */
 const EVIDENCE_LINE_LEAD = { pass: "**Passed:** ", fail: "**Failed:** ", info: "" } as const;
 
@@ -215,7 +215,7 @@ function deliveredStatsToPrParts(
 }
 
 /**
- * Ruling 474: the hash recorded for a PR body Viberr wrote (`pr.bodyWritten`),
+ * Ruling 231(c): the hash recorded for a PR body Viberr wrote (`pr.bodyWritten`),
  * compared with the body GitHub holds to tell a person's edit from Viberr's
  * own text. Line endings read as LF: GitHub's web editor saves CRLF, so a
  * description opened and saved unchanged is not an edit.
@@ -244,7 +244,7 @@ function prBodyOrigin(input: { projectSlug: string; taskKey: string }): string |
 /**
  * The review PR body for the task as it stands: the current goal, the
  * delivered revision and the live compare's stats. The create path and ruling
- * 474's rewrite of a reused PR both compose through here, so a rewritten body
+ * 231(c)'s rewrite of a reused PR both compose through here, so a rewritten body
  * is exactly the body a freshly opened PR would carry.
  */
 function composeTaskPrBody(
@@ -310,7 +310,7 @@ export type OpenTaskPrResult =
       message: string;
     }
   | { status: "scope_violation"; scope: string; violationId: string }
-  /** Ruling 160 (pass 35, F35-11): the task's pull request was closed WITHOUT
+  /** Ruling 232 (pass 35, F35-11): the task's pull request was closed WITHOUT
    *  merging by a person, and no person has answered the recovery packet yet.
    *  Nothing was opened. `closedBy` is the GitHub login GitHub named as the
    *  closer, null when it named none. */
@@ -323,11 +323,11 @@ export type OpenTaskPrResult =
    *  must not arrive here — a task whose PR already exists has not "produced no
    *  change", and the delivery path acts on this by flagging the task `noChanges`. */
   | { status: "nothing_to_review"; message: string }
-  /** Ruling 128: GitHub refused the PR because the BASE branch does not exist
+  /** Ruling 227: GitHub refused the PR because the BASE branch does not exist
    *  (422 `field: base, code: invalid`). The repository has no default branch
    *  to open the pull request against; never a network failure. */
   | { status: "base_branch_missing"; base: string; message: string }
-  /** Ruling 128: GitHub ANSWERED and refused, for a reason this reader does
+  /** Ruling 227: GitHub ANSWERED and refused, for a reason this reader does
    *  not map (any other 422, a decode failure, an unmapped HTTP status). The
    *  message quotes GitHub; it was not the network. */
   | { status: "refused"; message: string }
@@ -358,7 +358,7 @@ const ghPullSchema = z.object({
     .object({ sha: z.string().optional().catch(undefined) })
     .optional()
     .catch(undefined),
-  /** Ruling 474: the description as GitHub holds it now (null when empty), on
+  /** Ruling 231(c): the description as GitHub holds it now (null when empty), on
    *  the list item and the detail alike. Absent only on drift, which leaves a
    *  recorded body unverifiable rather than assumed unedited. */
   body: z.string().nullable().optional().catch(undefined),
@@ -399,7 +399,7 @@ const ghValidationBodySchema = z
       .array(
         z.object({
           message: z.string().catch(""),
-          // Ruling 128: GitHub's structured refusal row. A missing base branch
+          // Ruling 227: GitHub's structured refusal row. A missing base branch
           // answers `{resource: "PullRequest", field: "base", code: "invalid"}`
           // with NO message, which is why the prose sniff below could never
           // name it and the residual called it a network failure.
@@ -451,7 +451,7 @@ export async function openTaskPr(
   //    · MERGED (cached, or discovered live): DG-1. Reworking a branch whose PR
   //      already merged must open a new review PR, never resurrect the merged
   //      one (which would dead-end acceptance at "merge pending" forever).
-  //    · CLOSED WITHOUT MERGING: ruling 160 (pass 35, F35-11). A person closed
+  //    · CLOSED WITHOUT MERGING: ruling 232 (pass 35, F35-11). A person closed
   //      the pull request, and that is a decision about the task. No new PR is
   //      opened for the branch until a person has answered the closed-PR
   //      recovery packet (`pr.closure.answered`); until then delivery answers
@@ -516,7 +516,7 @@ export async function openTaskPr(
       const liveClosedUnmerged =
         live.data.state === "closed" && mapPrToCacheState(live.data) === "closed";
       if (liveClosedUnmerged) {
-        // Ruling 160: the transition is the reconciler's to record. It reads
+        // Ruling 232: the transition is the reconciler's to record. It reads
         // the cached number directly when the branch listing no longer names
         // it (the push that preceded this call moved the branch), writes the
         // closure with the closer's login, posts the divergence note, notifies
@@ -658,7 +658,7 @@ export async function openTaskPr(
     prBodyOrigin(input),
     await deliveredDiffStats(gh, gh.defaultBranch, branch),
   );
-  // Ruling 474: what this body is, recorded with the PR so a later delivery
+  // Ruling 231(c): what this body is, recorded with the PR so a later delivery
   // can tell whether it still describes the head and whether a person has
   // edited it since.
   const bodyWritten = (prHeadSha: string | undefined): PrBodyWritten => ({
@@ -810,7 +810,7 @@ export async function openTaskPr(
       const raced = await prAlreadyOnHead();
       if (raced) return raced;
     }
-    // Ruling 128 (F34-4): the base branch does not exist. GitHub sends the
+    // Ruling 227 (F34-4): the base branch does not exist. GitHub sends the
     // structured row with no message, so only the fields can say it.
     if (rows.some((row) => row.field === "base" && row.code === "invalid")) {
       return {
@@ -821,7 +821,7 @@ export async function openTaskPr(
     }
     return { status: "refused", message: detail };
   }
-  // Ruling 128: GitHub answered with a status nothing above maps. That is a
+  // Ruling 227: GitHub answered with a status nothing above maps. That is a
   // REFUSAL that quotes GitHub, never "unreachable" (a body this reader could
   // not decode took the salvage path above).
   return {
@@ -840,7 +840,7 @@ async function writePrToTask(
   created: boolean,
   ctx: OpenTaskPrContext,
   existingPr: PrRef | null,
-  /** Ruling 474: the body this call just sent, on a create. A reuse passes
+  /** Ruling 231(c): the body this call just sent, on a create. A reuse passes
    *  nothing and the SAME number keeps its record through the spread below. */
   bodyWritten: PrBodyWritten | null = null,
 ): Promise<void> {
@@ -862,7 +862,7 @@ async function writePrToTask(
   // from scratch would blank both pills until the next 5-minute poll. A
   // DIFFERENT (freshly opened) PR correctly starts with neither.
   const fresh: PrRef = { number: pr.number, state, title: pr.title };
-  // Ruling 135: the PR head as GitHub reported it on THIS read. Carried across
+  // Ruling 243: the PR head as GitHub reported it on THIS read. Carried across
   // a reuse of the SAME number by the spread below; a different PR never
   // inherits the old head (the salvage path passes no `head` at all).
   if (pr.head?.sha) fresh.headSha = pr.head.sha;
@@ -934,7 +934,7 @@ async function writePrToTask(
   }
 }
 
-/** Ruling 474: the revision a PR body describes — the delivered revision its
+/** Ruling 231(c): the revision a PR body describes — the delivered revision its
  *  Evidence line names, else the PR head as GitHub reported it. */
 function bodyRevisionOf(
   fm: TaskFrontmatter,
@@ -970,7 +970,7 @@ function deliveryNote(text: string): TaskFileEvent {
 }
 
 /**
- * Ruling 474 (pass 40, F40-19): a reused review PR's body follows the delivery
+ * Ruling 231(c) (pass 40, F40-19): a reused review PR's body follows the delivery
  * it describes. The body used to be composed on the create path only, so a
  * rework pushed to the same PR left it describing the FIRST delivery: live on
  * akin-ozer/website PR #2 the Evidence said "3 commit(s) delivered, revision
@@ -1090,7 +1090,7 @@ async function refreshReusedPrBody(
   }
 }
 
-/** Ruling 474: a person edited the body on GitHub, so it stays as written. One
+/** Ruling 231(c): a person edited the body on GitHub, so it stays as written. One
  *  note per delivered revision (`keptRevision`), naming what it no longer says. */
 async function recordPrBodyKept(
   db: DatabaseSync,
@@ -1116,7 +1116,7 @@ async function recordPrBodyKept(
   rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
 }
 
-/** Ruling 474: the body could not be brought up to date. The delivery stands;
+/** Ruling 231(c): the body could not be brought up to date. The delivery stands;
  *  the timeline says which revision the body still describes, and why. */
 async function recordPrBodyUpdateFailed(
   db: DatabaseSync,

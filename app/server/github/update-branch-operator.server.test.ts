@@ -52,7 +52,7 @@ const SYS = { userId: null, label: "test" };
 beforeEach(() => {
   ctx = createTestDbContext();
   store = setupTestStore(ctx);
-  // Ruling 162 (pass 35): the tool refuses at the acceptance boundary (Review
+  // Ruling 95 (pass 35): the tool refuses at the acceptance boundary (Review
   // on this board), so the ordinary fixtures stand at the work stage.
   writeTask(store.dataRoot, store.slug, {
     frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1" }),
@@ -86,16 +86,16 @@ function fakeGit(
   opts: {
     conflict?: boolean;
     behind?: number;
-    /** Ruling 134(c): origin's copy of the branch (default current). */
+    /** Ruling 229: origin's copy of the branch (default current). */
     remote?: "current" | "behind" | "diverged" | "absent";
     ahead?: number;
-    /** Ruling 133(b): the push is refused non-fast-forward (a `push_conflict`). */
+    /** Ruling 129: the push is refused non-fast-forward (a `push_conflict`). */
     pushRefused?: boolean;
-    /** Ruling 159(b): the store-layout paths HEAD's tree carries. */
+    /** Ruling 229: the store-layout paths HEAD's tree carries. */
     storeLayoutFiles?: string[];
-    /** Ruling 428: the files the branch changes since it forked. */
+    /** Ruling 241: the files the branch changes since it forked. */
     branchFiles?: string[];
-    /** Ruling 475: the base tip `origin/<base>` resolves to. */
+    /** Ruling 129: the base tip `origin/<base>` resolves to. */
     baseSha?: string;
   } = {},
 ) {
@@ -170,7 +170,7 @@ function fakeGit(
   return { exec, calls };
 }
 
-/** Ruling 133(b): deploy `dev` (with or without repo-write) and engage it as
+/** Ruling 129: deploy `dev` (with or without repo-write) and engage it as
  *  VIB-1's deliverer, so the conflict packet has a resolver to consider. */
 function deployDeliverer(repoWrite: boolean, engaged = true): void {
   const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -198,12 +198,12 @@ function deployDeliverer(repoWrite: boolean, engaged = true): void {
 }
 
 /** Every call carries a canned transport: the post-update reconcile (ruling
- *  132) must never reach GitHub from a test. Unrouted answers 404, which the
+ *  239) must never reach GitHub from a test. Unrouted answers 404, which the
  *  reconcile degrades from honestly. */
 type DispatchAgent = NonNullable<TaskActionDeps["dispatchAgent"]>;
 
 /**
- * Ruling 475: the handoff's dispatch. A real one prepares the agent's
+ * Ruling 129: the handoff's dispatch. A real one prepares the agent's
  * workspace from GitHub (the branch ensure, the mirror refresh), which no test
  * may reach, so every call carries a stub. The default refuses the way a task
  * with no owner to bill is refused, so a test that is not about the handoff
@@ -254,7 +254,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     // undefined, so the settle cannot tell a drive that stopped halfway.
     expect(await run(fakeGit({ behind: 2 }))).toBe(true);
     expect(await run(fakeGit({ behind: 0 }))).toBe(true);
-    // Ruling 134(c)'s arm: the workspace is current and origin lags it.
+    // Ruling 229's arm: the workspace is current and origin lags it.
     expect(await run(fakeGit({ behind: 0, remote: "behind" }))).toBe(true);
     expect(await run(fakeGit({ conflict: true }))).toBeUndefined();
   });
@@ -279,9 +279,9 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
   });
 
   it("a CONFLICT whose deliverer cannot be started opens a BLOCKING decision packet naming the files, and never retries", async () => {
-    // Ruling 133(b): the redirect is recommended because the task HAS a
+    // Ruling 129: the redirect is recommended because the task HAS a
     // deployed, repo-write deliverer. Canary: pass `{kind: "none"}`
-    // unconditionally into `conflictOptions`. Ruling 475: the operator handed
+    // unconditionally into `conflictOptions`. Ruling 129: the operator handed
     // the conflict to Dev first; this fixture's task has no owner to bill, so
     // no run could start and the packet is the fallback, saying so.
     deployDeliverer(true);
@@ -292,7 +292,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.outcome).toBe("noop");
     expect(res.message).toContain("CONFLICTS");
     expect(res.message).toContain("decision packet");
-    // Ruling 443: the packet is the step's outcome. CANARY: drop the mark and
+    // Ruling 118: the packet is the step's outcome. CANARY: drop the mark and
     // a Codex plan narrates this step as one that "did not apply".
     expect(res.openedPacket).toBe(true);
     const file = readTaskFile({
@@ -334,7 +334,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(git.calls.some((c) => c.includes("push"))).toBe(false);
   });
 
-  it("ruling 443: a conflict whose packet could not open carries no packet mark", async () => {
+  it("ruling 118: a conflict whose packet could not open carries no packet mark", async () => {
     // An operator that may not open packets: the conflict has no decision to
     // point at, so it stays a state refusal the plan narrates.
     const noPackets = authority({
@@ -349,7 +349,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(res.openedPacket).toBeUndefined();
   });
 
-  it("ruling 133(b): with NO delivering agent the packet offers only what can execute and says why", async () => {
+  it("ruling 129: with NO delivering agent the packet offers only what can execute and says why", async () => {
     // Canary: always build the three options.
     const git = fakeGit({ conflict: true });
     await act(git.exec);
@@ -364,7 +364,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "conflict", resolver: "none" });
   });
 
-  it("ruling 133(b): a deliverer whose repo-write grant was withdrawn is not offered as the resolver", async () => {
+  it("ruling 129: a deliverer whose repo-write grant was withdrawn is not offered as the resolver", async () => {
     // Canary: treat any deployed deliverer as a resolver.
     deployDeliverer(false);
     const git = fakeGit({ conflict: true });
@@ -375,7 +375,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(packet.body).toContain("its delivering agent (Dev) holds no repo-write grant any more");
   });
 
-  it("ruling 133(b): a PUSH conflict takes the same rule, with its own wording", async () => {
+  it("ruling 129: a PUSH conflict takes the same rule, with its own wording", async () => {
     // Canary: route push_conflict through the merge wording (the deliverer
     // case's option detail speaks of merging the base).
     deployDeliverer(true);
@@ -392,7 +392,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")?.details).toMatchObject({ status: "push_conflict", resolver: "deliverer" });
   });
 
-  it("ruling 133(b): a PUSH conflict with no delivering agent recommends resolving by hand, with the push wording", async () => {
+  it("ruling 129: a PUSH conflict with no delivering agent recommends resolving by hand, with the push wording", async () => {
     const noDev = fakeGit({ pushRefused: true });
     await act(noDev.exec);
     const packet = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet!;
@@ -402,7 +402,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(packet.body).toContain("this task has no delivering agent");
   });
 
-  it("ruling 159(b): refuses a branch carrying the store layout, names the paths and pushes nothing", async () => {
+  it("ruling 229: refuses a branch carrying the store layout, names the paths and pushes nothing", async () => {
     const stray = `projects/${store.slug}/tasks/VIB-1/attachments/knc-9.txt`;
     const git = fakeGit({ behind: 2, storeLayoutFiles: [stray] });
     const res = await act(git.exec);
@@ -414,7 +414,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     expect(git.calls.some((c) => c.includes("merge") && !c.includes("merge-base"))).toBe(false);
   });
 
-  it("ruling 428: a branch that changes a leased path is not refreshed, and the operator is told to wait for the holder", async () => {
+  it("ruling 241: a branch that changes a leased path is not refreshed, and the operator is told to wait for the holder", async () => {
     // CANARY: drop the `lease_held` arm from `outcomeSentence` and the message
     // falls to the generic "The branch was not updated" with no next step.
     writeTask(store.dataRoot, store.slug, {
@@ -433,7 +433,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
   });
 
   it("says so honestly when the branch is already current — and calls it DONE", async () => {
-    // Ruling 229 (F37-49): `done`, not `noop`. This is the tool's success
+    // Ruling 129 (F37-49): `done`, not `noop`. This is the tool's success
     // condition, and its own description tells the operator to call it
     // speculatively for exactly this reason ("idempotent and cheap… call it
     // when you are unsure rather than guessing"). Returned as `noop` it landed
@@ -503,7 +503,7 @@ describe("the operator persona teaches the branch update", () => {
     path.join(REPO_ROOT, "app/server/seed/assets/operator.definition.md"),
     "utf8",
   );
-  // Ruling 460 moved the live store into the named volume `viberr-data`; the
+  // Ruling 9 moved the live store into the named volume `viberr-data`; the
   // host's `./docker-data` is at most the pre-move fallback copy, so it is no
   // longer compared here. The store copy is upgraded at boot from this asset
   // by its shipped hash (`PRIOR_SHIPPED_HASHES`, default-assets.server.ts).
@@ -514,7 +514,7 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/never ask an agent to rebase or force-push, never ask it to bring the branch up to date/i);
   });
 
-  it("ruling 438: names the one merge an agent makes, the conflict a person routed to it", () => {
+  it("ruling 129: names the one merge an agent makes, the conflict a person routed to it", () => {
     /**
      * Live on AX-28 at 02:45: I answered the branch-conflict packet by sending
      * the conflict to the Developer, which is what the packet's own recommended
@@ -527,21 +527,21 @@ describe("the operator persona teaches the branch update", () => {
      * CANARY: restore "never ask an agent to rebase, merge, or force-push".
      */
     expect(seed).not.toMatch(/never ask an agent to rebase, merge/i);
-    expect(seed).toMatch(/that is the one merge an agent makes \(ruling 438\)/);
+    expect(seed).toMatch(/that is the one merge an agent makes \(ruling 129\)/);
     expect(seed).toMatch(/direct it to merge `origin\/<base>` into the task branch in its own workspace/);
   });
 
-  it("ruling 134(c): says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
+  it("ruling 229: says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
     // Canary: revert the seed sentence.
     expect(seed).toMatch(/It also reports whether origin carries the workspace head/);
     expect(seed).toMatch(/When it says the remote copy is behind, call `deliver_for_review` to push it; do not ask a person to push\./);
   });
 
-  it("ruling 475: a conflict goes to the delivering agent, a person only when no agent can take it, and nothing is retried or forced", () => {
+  it("ruling 129: a conflict goes to the delivering agent, a person only when no agent can take it, and nothing is retried or forced", () => {
     // CANARY: restore "A CONFLICT is not yours to settle ... a blocking packet
     // goes to a human" and the handoff sentences are gone.
     expect(seed).not.toMatch(/A CONFLICT is not yours to settle/i);
-    expect(seed).toMatch(/A CONFLICT is the delivering agent's to resolve, never yours to force \(ruling 475\)/);
+    expect(seed).toMatch(/A CONFLICT is the delivering agent's to resolve, never yours to force \(ruling 129\)/);
     expect(seed).toMatch(/the tool hands the conflict to it itself/);
     expect(seed).toMatch(/Only when no agent can take it \(no deliverer, no repo-write grant, or the deliverer already failed this same conflict once\) does a blocking packet go to a human/);
     expect(seed).toMatch(/Never open a packet of your own for a conflict/);
@@ -549,7 +549,7 @@ describe("the operator persona teaches the branch update", () => {
   });
 
   /**
-   * Ruling 232: the persona used to close with "The mention is what notifies
+   * Ruling 70: the persona used to close with "The mention is what notifies
    * them" and no qualification, which the ruling made FALSE for the one comment
    * the operator writes most — the directive it hands a specialist. An operator
    * that believes a tag in a directive reaches a person will keep putting
@@ -559,7 +559,7 @@ describe("the operator persona teaches the branch update", () => {
    *
    * Canary: delete the directive sentence from the seed asset.
    */
-  it("ruling 232: says a directive reaches only the specialist, so a person named in one is not notified", () => {
+  it("ruling 70: says a directive reaches only the specialist, so a person named in one is not notified", () => {
     expect(seed).toMatch(/A directive you hand a specialist reaches only that specialist/);
     expect(seed).toMatch(/naming a person inside one notifies nobody/);
     // The instruction that remains true is still there, now scoped to a comment.
@@ -582,17 +582,17 @@ describe("the operator persona teaches the branch update", () => {
 });
 
 /**
- * Ruling 134(c): `update_branch_from_base` reports origin's copy of the task
+ * Ruling 229: `update_branch_from_base` reports origin's copy of the task
  * branch and points at `deliver_for_review` when origin lags; the record is as
  * idempotent as the tool (one timeline line across two identical calls, an
  * audit row per call). Canary: revert the `already_current` arm (no remote
  * sentence); append the line unconditionally.
  */
-describe("ruling 134(c): the remote report", () => {
+describe("ruling 229: the remote report", () => {
   const REPO_PATH = "/repos/akin-ozer/viberr";
   it("names a lagging origin, points at deliver_for_review, and writes ONE timeline line across two calls", async () => {
     const first = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
-    // Ruling 229: `done` — see the already-current test above.
+    // Ruling 129: `done` — see the already-current test above.
     expect(first.outcome).toBe("done");
     expect(first.message).toContain("already up to date with `main`");
     expect(first.message).toContain("Origin's copy of `vib-1` (`remote0`) is 2 commits behind the workspace head");
@@ -601,7 +601,7 @@ describe("ruling 134(c): the remote report", () => {
     const second = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);
     expect(second.message).toBe(first.message);
     const file = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!;
-    // Ruling 475 (F40-60): the timeline carries the PERSON's sentence, once.
+    // Ruling 241 (F40-60): the timeline carries the PERSON's sentence, once.
     const lines = file.parsed.timeline.filter((e) => e.type === "github");
     expect(lines).toHaveLength(1);
     expect(file.parsed.packet).toBeNull();
@@ -611,7 +611,7 @@ describe("ruling 134(c): the remote report", () => {
   });
 
   /**
-   * Ruling 475 (F40-60): live on WEB-1, WEB-2 and WEB-4 every delivery was
+   * Ruling 241 (F40-60): live on WEB-1, WEB-2 and WEB-4 every delivery was
    * preceded on the owner's timeline by "call `deliver_for_review` to push it.
    * Do not ask a person to push." (an instruction to the operator), and the
    * diverged variant told the person who has to act "That is a person's act,
@@ -620,7 +620,7 @@ describe("ruling 134(c): the remote report", () => {
    *
    * CANARY: append `outcomeSentence(result)` to the timeline again.
    */
-  it("ruling 475 (F40-60): the timeline line is written for a person, and the tool result stays the operator's", async () => {
+  it("ruling 241 (F40-60): the timeline line is written for a person, and the tool result stays the operator's", async () => {
     const line = () =>
       readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
         .parsed.timeline.find((e) => e.type === "github")!;
@@ -647,7 +647,7 @@ describe("ruling 134(c): the remote report", () => {
     expect(readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.timeline).toHaveLength(0);
     const diverged = await act(fakeGit({ behind: 0, remote: "diverged" }).exec);
     expect(diverged.message).toContain("holds commits this workspace does not");
-    // Ruling 321: one sentence for a diverged branch, wherever it is said.
+    // Ruling 230: one sentence for a diverged branch, wherever it is said.
     expect(diverged.message).toContain(DIVERGED_BRANCH_REMEDY);
     expect(diverged.message).toContain("never a force-push");
     expect(diverged.message).not.toContain("deliver_for_review");
@@ -656,12 +656,12 @@ describe("ruling 134(c): the remote report", () => {
   });
 
   /**
-   * Ruling 132: a successful update records the refresh row, reconciles so
+   * Ruling 239: a successful update records the refresh row, reconciles so
    * drift is re-measured NOW, and says so from the re-read. Canaries: remove
    * the `reconcileTask` call (no drift is measured); remove the `baseRefreshes`
    * push (the row is missing).
    */
-  it("ruling 132: a successful update records the row, re-measures drift and says so", async () => {
+  it("ruling 239: a successful update records the row, re-measures drift and says so", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -681,7 +681,7 @@ describe("ruling 134(c): the remote report", () => {
     const res = await act(fakeGit({ behind: 2 }).exec, authority(), gh.fetchImpl);
     expect(res.outcome).toBe("done");
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    // Ruling 439: and the head it merged onto, which is what lets the reviewed
+    // Ruling 239: and the head it merged onto, which is what lets the reviewed
     // revision be followed through the refresh. Canary: drop `onto` from the
     // push in recordBranchRefresh.
     expect(fm.frontmatter.baseRefreshes).toEqual([
@@ -752,7 +752,7 @@ describe("ruling 134(c): the remote report", () => {
     });
   });
 
-  it("ruling 132: when the reconcile cannot run, the row still lands and the message says the drift was not re-measured", async () => {
+  it("ruling 239: when the reconcile cannot run, the row still lands and the message says the drift was not re-measured", async () => {
     // Canary: swallow the reconcile result silently (no "could not be re-measured").
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/compare/main...vib-1`]: { status: 500, body: { message: "boom" } },
@@ -767,8 +767,8 @@ describe("ruling 134(c): the remote report", () => {
 });
 
 /**
- * Pass 35 S15: ruling 162 / G35-5 (d) (the operator stops refreshing at the
- * acceptance boundary) and ruling 163 (the conflict packet's redirect returns
+ * Pass 35 S15: ruling 95 / G35-5 (d) (the operator stops refreshing at the
+ * acceptance boundary) and ruling 90 (the conflict packet's redirect returns
  * a task past the review stage to it).
  */
 describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework marker", () => {
@@ -801,13 +801,13 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     );
     expect(git.calls).toHaveLength(0);
     expect(listAuditEvents(store.db).find((e) => e.action === "github.branch_update.operator")).toBeUndefined();
-    // Ruling 424: the operator reads this refusal before it plans. The snapshot
+    // Ruling 116: the operator reads this refusal before it plans. The snapshot
     // and the tool share one function, so they say the same thing.
     const snap = operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority());
     expect(snap.notRefreshableReason).toBe(res.message);
   });
 
-  it("ruling 429: while the work is still in its review loop the refresh runs at the acceptance stage", async () => {
+  it("ruling 241: while the work is still in its review loop the refresh runs at the acceptance stage", async () => {
     // Live on AX-20: validation `changed` at Review, and the deliverer needed
     // AX-19's merged work to build its integration test. CANARY: drop the
     // `failing`/`changed` arm from `acceptanceBoundaryRefusal`.
@@ -835,7 +835,7 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     expect(packet.title).toContain("conflicts with");
   });
 
-  it("ruling 163 (b): past the review stage the redirect option carries the rework marker and says the task returns to Review", async () => {
+  it("ruling 90 (b): past the review stage the redirect option carries the rework marker and says the task returns to Review", async () => {
     // Canary: pass `null` for `returnsToReview` unconditionally.
     deployDeliverer(true);
     withMergeBoard();
@@ -854,7 +854,7 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
     expect(redirect.d).toContain("The task returns to Review for the re-verdict.");
   });
 
-  it("ruling 163 (b): at the work stage there is nothing to return to: no marker, no sentence", async () => {
+  it("ruling 90 (b): at the work stage there is nothing to return to: no marker, no sentence", async () => {
     deployDeliverer(true);
     withMergeBoard();
     seedAt("impl", {
@@ -869,7 +869,7 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
 });
 
 /**
- * Ruling 475 (F40-20, owner decision 2026-09-25): live on akinozer-com WEB-2's
+ * Ruling 129 (F40-20, owner decision 2026-09-25): live on akinozer-com WEB-2's
  * accept was refused over a `package.json` conflict with WEB-4's merge; the
  * operator ran this door, wrote the exact fix in a comment, and then opened
  * "A person decides how this is resolved." The owner's whole part was to
@@ -877,7 +877,7 @@ describe("pass 35 S15: the acceptance-boundary refusal and the redirect's rework
  * conflict". The operator now routes it: the deployed, repo-write deliverer
  * gets it, and the packet is the fallback when no agent can.
  */
-describe("ruling 475 (F40-20): the operator hands a conflict to the delivering agent", () => {
+describe("ruling 129 (F40-20): the operator hands a conflict to the delivering agent", () => {
   const DEV_DELIVERS = {
     profileId: "dev",
     backend: "claude" as const,
@@ -924,7 +924,7 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
     });
   }
 
-  it("sends the conflict to the deliverer with ruling 438's directive, writes a person-facing line, and opens no packet", async () => {
+  it("sends the conflict to the deliverer with ruling 129's directive, writes a person-facing line, and opens no packet", async () => {
     // CANARY: send every conflict to the packet (skip the handoff arm in
     // `routeConflict`) and this reads a packet and no dispatch.
     seedDeliverer();
@@ -932,7 +932,7 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
     const res = await act(fakeGit({ conflict: true }).exec, authority(), undefined, started.dispatch);
     expect(res.outcome).toBe("done");
     expect(res.message).toContain("`vib-1` CONFLICTS with `main` in app/main.ts.");
-    expect(res.message).toContain("Ruling 475: handed it to Dev, the delivering agent. Prompted @Dev (the delivering agent) and started its run.");
+    expect(res.message).toContain("Ruling 129: handed it to Dev, the delivering agent. Prompted @Dev (the delivering agent) and started its run.");
     expect(res.message).toContain("When it reports the merge committed, deliver the result with `deliver_for_review`");
     expect(res.openedPacket).toBeUndefined();
     expect(started.calls).toHaveLength(1);
@@ -1141,14 +1141,14 @@ describe("ruling 475 (F40-20): the operator hands a conflict to the delivering a
 });
 
 /**
- * Ruling 494 (pass 40, F40-70): every push that moves the task branch is
+ * Ruling 238 (pass 40, F40-70): every push that moves the task branch is
  * followed by a compare of the head it pushed, before its caller returns. Live
  * on WEB-16 `update_branch_from_base` found the workspace level with `main`
  * and GitHub's copy behind it; a poll 0.2 s later counted that unpushed copy 6
  * behind; the delivery pushed seven seconds later, and `get_task` said 6 for
  * the five minutes until the next poll.
  */
-describe("ruling 494: a branch update and the push after it leave the pushed head's count", () => {
+describe("ruling 238: a branch update and the push after it leave the pushed head's count", () => {
   const SLOW = { userId: null, label: "poller" };
 
   const rowSchema = z.object({

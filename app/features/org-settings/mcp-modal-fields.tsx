@@ -4,7 +4,7 @@ import { Icon } from "~/ui/icon";
 import type { McpWriteTools } from "./resource-modals-draft";
 
 /**
- * The MCP-server editor's fields (ruling 700(e), the split of
+ * The MCP-server editor's fields (ruling 13(b), the split of
  * `resource-modals.tsx`): name and transport, the command or endpoint, the
  * grants a rename rewrites, the credential, the requested scopes and the
  * write tools. Each takes the slot its markup held in McpModal and calls no
@@ -147,7 +147,7 @@ export function McpGrantsAtStake({
 }
 
 /** The pasted credential, or, while a live sign-in holds the connection's one
- *  credential (ruling 469), the sentence that stands in for it. */
+ *  credential (ruling 192), the sentence that stands in for it. */
 export function McpCredentialField({
   replaced,
   hasCred,
@@ -169,7 +169,7 @@ export function McpCredentialField({
   setErr: SetErr;
 }) {
   if (replaced) {
-    // Ruling 469: a connection holds one credential, and a live sign-in is
+    // Ruling 192: a connection holds one credential, and a live sign-in is
     // it. The server refuses a pasted token over it; the field says why.
     return (
       <div className="field">
@@ -246,7 +246,7 @@ export function McpCredentialField({
   );
 }
 
-/** Ruling 486(c): what the next OAuth sign-in asks for. Only an HTTP server
+/** Ruling 192: what the next OAuth sign-in asks for. Only an HTTP server
  *  signs in, so McpModal shows this for one alone. */
 export function McpScopesField({
   scopes,
@@ -285,7 +285,7 @@ export function McpScopesField({
   );
 }
 
-/** Ruling 176: the write tools, offered from discovery, the saved list and the
+/** Ruling 188: the write tools, offered from discovery, the saved list and the
  *  names typed in, with the field that adds a name. */
 export function McpWriteToolsField({
   editing,

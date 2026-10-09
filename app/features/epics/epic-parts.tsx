@@ -18,7 +18,7 @@ import { EPIC_STATUS_PILL } from "./epic-helpers";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**
- * Ruling 503: the pieces both Epics pages draw: an epic's status pill, its
+ * Ruling 325: the pieces both Epics pages draw: an epic's status pill, its
  * progress, and the one dialog that creates an epic or edits what it is.
  */
 
@@ -92,7 +92,7 @@ export function EpicProgressBar({
   );
 }
 
-/** Ruling 651: the trigger, on an Epics row and in an epic's Tasks head. */
+/** Ruling 274: the trigger, on an Epics row and in an epic's Tasks head. */
 export function ArchiveEpicTasksButton({ busy, onClick }: { busy: boolean; onClick: () => void }) {
   return (
     <button
@@ -109,7 +109,7 @@ export function ArchiveEpicTasksButton({ busy, onClick }: { busy: boolean; onCli
 }
 
 /**
- * Ruling 651: "Archive tasks", held by the page rather than its button. The
+ * Ruling 325: "Archive tasks", held by the page rather than its button. The
  * button leaves with the tasks it archived, and a fetcher that unmounted with
  * it would never deliver the answer's toast.
  */
@@ -135,7 +135,7 @@ export function useArchiveEpicTasks() {
   };
 }
 
-/** Ruling 651: the one question before a Done epic's tasks are filed away. */
+/** Ruling 274: the one question before a Done epic's tasks are filed away. */
 export function ArchiveEpicTasksConfirm({
   epicId,
   count,
@@ -174,7 +174,7 @@ export function ArchiveEpicTasksConfirm({
  * page and the board. The server checks everything again (`manage-epics`,
  * the dates' order, the lead's membership) and a refusal keeps the dialog
  * open beside its sentence. An edit's answer is the dialog's own: it toasts
- * and closes. A create's is the page's (ruling 700(c)).
+ * and closes. A create's is the page's (ruling 325).
  */
 export function EpicDialog({
   epic,
@@ -187,7 +187,7 @@ export function EpicDialog({
   epic: EpicSummary | null;
   members: EpicMemberView[];
   onClose: () => void;
-  /** Ruling 700(c): a create's fetcher, held by the page that acts on its
+  /** Ruling 325: a create's fetcher, held by the page that acts on its
    *  answer, so the new epic's id never goes up through an effect. */
   fetcher?: ReturnType<typeof useFetcher<EpicActionResult>>;
   /** The dialog's animated close, for the page to play once it has acted. */

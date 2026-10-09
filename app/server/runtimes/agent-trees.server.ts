@@ -15,10 +15,10 @@ import {
 import { filteredSpawnEnv } from "./spawn-env.server";
 
 /**
- * Ruling 485: a tree an agent can write is removed AS ITS PERSON, through the
+ * Ruling 140: a tree an agent can write is removed AS ITS PERSON, through the
  * launcher, never by the server's own recursive remove.
  *
- * Ruling 460 runs every agent as its person's own uid in a shared group, and
+ * Ruling 139 runs every agent as its person's own uid in a shared group, and
  * the directories a run writes are group-writable so the server can read and
  * replace them. A tool can still make a directory the group cannot enter:
  * wrangler's `mkdtemp` dirs are 0700 as the agent's uid. The server's
@@ -45,7 +45,7 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  * and no person named, it refuses and removes nothing — it never falls back to
  * the server's user (460(h), the rule R-seams-1 set for git).
  *
- * Ruling 495 (F40-71) completes this for what the SERVER wrote in such a tree,
+ * Ruling 140 (F40-71) completes this for what the SERVER wrote in such a tree,
  * which no agent pass could remove: a run's skill plugin as `cpSync` copied it
  * (its files in folders the store's 0755 left the person unable to write),
  * and the workspace root (`node`'s 2770, in a task directory only `node`
@@ -208,7 +208,7 @@ function agentOwnersIn(target: string): number[] {
   return [...owners].sort((a, b) => a - b);
 }
 
-/** Ruling 495: what is left once the agent passes are done. */
+/** Ruling 140: what is left once the agent passes are done. */
 function leftOf(target: string): "entries" | "empty-server" | "other" {
   let st: Stats;
   try {
@@ -228,7 +228,7 @@ function leftOf(target: string): "entries" | "empty-server" | "other" {
   return st.uid === process.getuid?.() ? "empty-server" : "other";
 }
 
-/** Ruling 495: a folder an agent could have put a link in: an agent uid owns
+/** Ruling 140: a folder an agent could have put a link in: an agent uid owns
  *  it, or it grants group or other write. Which group is not asked: the
  *  folders agents write are 2770 or 2775 in theirs, and a folder of the
  *  server's that its umask left writable to its own group holds no link of
@@ -242,7 +242,7 @@ function agentWritableFolder(dir: string): boolean {
   }
 }
 
-/** Ruling 495: the first directory above `target` that is a link an agent
+/** Ruling 140: the first directory above `target` that is a link an agent
  *  could have put there, or null: a link an agent uid owns, or any link in a
  *  folder an agent can write, whoever owns it. A link the server made (a
  *  symlink a repository commits, checked out by the server's clone) is the
@@ -289,7 +289,7 @@ const FS_VIEW: TreeView = {
  * entries, the server opens its own to the group (`chmod -R -P g+rwX`, or
  * without `-P` on a chmod that lacks it, where no agent may replace the
  * target) and the person's pass and the rounds run again; when it leaves an empty
- * directory the server owns, the server's `rmdir` removes it (ruling 495).
+ * directory the server owns, the server's `rmdir` removes it (ruling 140).
  * Exported for the plan's own tests, which pass a {@link TreeView}.
  */
 export function* removalPlan(
@@ -331,13 +331,13 @@ export function* removalPlan(
     return false;
   }
   if (!person) {
-    // Isolation off: one user, nobody else to ask, and none of ruling 495's
+    // Isolation off: one user, nobody else to ask, and none of ruling 140's
     // steps either (495(d)).
     yield* pass(null, "u+rwX");
     return view.present(target) ? stderr : null;
   }
   if (yield* agentPasses(person)) return null;
-  // Ruling 495(b): what is left is the server's own; opened to the group,
+  // Ruling 140: what is left is the server's own; opened to the group,
   // never removed, by the server.
   if (view.left(target) === "entries" && serverMayAct()) {
     const opened: StepOutcome = yield { launch: null, command: "chmod", args: ["-R", "-P", "g+rwX", "--", target] };
@@ -350,7 +350,7 @@ export function* removalPlan(
     }
     if (yield* agentPasses(person)) return null;
   }
-  // Ruling 495(c): the emptied root the server owns goes with its rmdir.
+  // Ruling 140: the emptied root the server owns goes with its rmdir.
   if (view.left(target) === "empty-server" && serverMayAct()) {
     const removed: StepOutcome = yield { launch: null, command: "rmdir", args: ["--", target] };
     if (!view.present(target)) return null;
@@ -430,7 +430,7 @@ function refuseNobody(target: string): AppError {
     code: ERROR_CODES.RUN_UNAVAILABLE,
     status: 409,
     userMessage:
-      `${target} could not be removed as its person's own user (ruling 485): no person is named to remove it as. ` +
+      `${target} could not be removed as its person's own user (ruling 140): no person is named to remove it as. ` +
       "Nothing was removed; a tree an agent writes is never removed as the server's own user.",
   });
 }
@@ -455,7 +455,7 @@ function settle(target: string, left: string | null): void {
  * on it refuses (a `run_unavailable` AppError) and removes nothing. What the
  * agent passes leave of the server's own is opened by the server and removed
  * by the person, and an emptied root the server owns goes with the server's
- * `rmdir` (ruling 495). Resolves when the tree is gone (or was never there);
+ * `rmdir` (ruling 140). Resolves when the tree is gone (or was never there);
  * throws an {@link AgentTreeRemovalError} naming the path and the OS error
  * otherwise.
  */

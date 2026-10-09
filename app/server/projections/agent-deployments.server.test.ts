@@ -11,7 +11,7 @@ import { upsertRun } from "~/server/runtimes/run-store.server";
 import { listAgentDeployments } from "./agent-deployments.server";
 
 /**
- * Live-deployment projection (agents spec §3.3 + ruling 7): derivation from
+ * Live-deployment projection (agents spec §3.3 + ruling 62(a)): derivation from
  * task assignment records by PROFILE ID, done-stage exclusion, and the
  * agent_runs join — which since F34-5 is what the status vocabulary is
  * derived FROM: a running row reads "working" (operator: "coordinating"), a
@@ -282,7 +282,7 @@ describe("F34-5: an engagement's status is read from its own run row", () => {
     expect(rows.find((d) => d.engagement === "primary")!.status).toBe("waiting on human");
   });
 
-  it("a supporting run's r<n> thread id picks the n-th supporting engagement (ruling 458(a))", () => {
+  it("a supporting run's r<n> thread id picks the n-th supporting engagement (ruling 153)", () => {
     // Canary: read index 0 for every reviewer thread and the live run lands on
     // the first supporting engagement instead of the second.
     const store = setupTestStore(ctx);

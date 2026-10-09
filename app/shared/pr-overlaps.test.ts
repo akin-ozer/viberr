@@ -3,7 +3,7 @@ import type { PrRef } from "~/schemas/task-file.schema";
 import { mergeCollisions, openPrDiffPaths } from "./pr-overlaps";
 
 /**
- * Ruling 475 (F40-55 (c)): the accept dialog's "Collides" row, as a pure rule
+ * Ruling 244 (F40-55 (c)): the accept dialog's "Collides" row, as a pure rule
  * both of its doors share. A pull request collides when it is still OPEN on
  * GitHub (`review`, or `accepted` with the merge pending) and changes a path
  * the merging one changes.
@@ -15,7 +15,7 @@ function pr(number: number, state: PrRef["state"], changed: string[] | null, tru
   return ref;
 }
 
-describe("ruling 475: mergeCollisions", () => {
+describe("ruling 244: mergeCollisions", () => {
   it("names each other OPEN pull request that shares a path, with only the shared paths", () => {
     // CANARY: drop the `accepted` arm of `openPrDiffPaths` and WEB-6 (merge
     // pending, still open on GitHub) goes unnamed.

@@ -20,7 +20,7 @@ import type { CapSelection } from "./create-profile-modal";
 
 /**
  * What the agent profile editor reads off the profile it opens and the fields
- * it holds (ruling 700(e), the large-component split of
+ * it holds (ruling 13(b), the large-component split of
  * `create-profile-modal.tsx`, on the task page's recipe): the capability policy
  * for the profile's kind, the seed of its capability grants, where the form
  * stands against what a save requires, and the sentences the model picker and
@@ -150,7 +150,7 @@ export interface SaveReadiness {
 
 export function saveReadiness(draft: ProfileDraft, isOperator: boolean): SaveReadiness {
   const { name, role, backend, stg, model } = draft;
-  // Ruling 518: the operator's editor has no name or role to fill.
+  // Ruling 176: the operator's editor has no name or role to fill.
   const identityValid = isOperator || Boolean(name.trim() && role.trim());
   const fieldsValid = Boolean(identityValid && backend && stg.length);
   // F21-13: this profile has a backend but no model for it — `pickBackend`

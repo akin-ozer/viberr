@@ -30,7 +30,7 @@ import {
  * this way). updateTaskFile repairs a provably-stale read from the
  * in-process write cache, while a genuine EXTERNAL edit wins. What counts as
  * provably stale, and how soon another writer may land, is write-cache's own
- * test (ruling 513); these two prove the writer reads through it.
+ * test (ruling 18); these two prove the writer reads through it.
  */
 
 const ctx = createTestDbContext();

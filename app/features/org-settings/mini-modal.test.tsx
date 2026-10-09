@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { MiniModal } from "./mini-modal";
 
 /**
- * Ruling 459: a MiniModal whose save lands leaves through the exit Cancel
+ * Ruling 287: a MiniModal whose save lands leaves through the exit Cancel
  * plays (`done`), rather than being unmounted by its caller in one frame.
  * jsdom reads no stylesheet, so the test gives the dialog the sheet's closing
  * clock; the exit then waits for the dialog's own transitionend.
@@ -28,7 +28,7 @@ function modal(done: boolean, log: string[]) {
   );
 }
 
-describe("ruling 459: a save that lands plays the modal's exit", () => {
+describe("ruling 287: a save that lands plays the modal's exit", () => {
   it("done plays the exit, and onClose unmounts it only when the exit ends", () => {
     // CANARY: drop MiniModal's `done` effect and nothing is marked closing,
     // so every caller's success would have to unmount it in one frame again.

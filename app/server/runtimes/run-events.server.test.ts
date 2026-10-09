@@ -22,10 +22,10 @@ import {
  * validator downstream: whatever these functions build goes on the wire
  * verbatim, to whatever connections the route matches.
  *
- * The load-bearing line is the ruling-99 guard. A controller conversation turn
+ * The load-bearing line is the ruling-247 guard. A controller conversation turn
  * is a real `agent_runs` row that streams through the same sink, but it carries
  * `project_slug = ''` and `task_key = <conversation id>` — "a scope no task
- * query matches" (ruling 99(d)). An empty slug is not a harmless one:
+ * query matches" (ruling 249). An empty slug is not a harmless one:
  * `routeMatchesConnection` only skips project routing when `projectSlug` is
  * *undefined*, so `""` is a live route that every `projects`-scoped connection
  * (the Home firehose, on every signed-in user's landing page) matches
@@ -35,7 +35,7 @@ import {
  * controller has its own owner-routed `controller.updated` reference instead.
  *
  * Until this file existed, nothing in the suite imported the module: the guard
- * could be deleted and every gate stayed green (ruling 65).
+ * could be deleted and every gate stayed green (ruling 27).
  */
 
 beforeEach(() => resetSseBrokerForTests());
@@ -100,7 +100,7 @@ describe("publishRunLogAppended", () => {
     // the project revalidating its logs on every line of somebody else's run.
     expect(own.names()).toContain("run.log-appended");
     expect(sibling.names()).not.toContain("run.log-appended");
-    // Ruling 457 (LIVE-5): a project-scoped subscriber (the board) no longer
+    // Ruling 300 (LIVE-5): a project-scoped subscriber (the board) no longer
     // receives a console line: nothing it renders changes per line, and the
     // one reader, the console of the task's own page, holds the task scope.
     // CANARY: drop `taskOnly` from publishRunLogAppended.
@@ -155,12 +155,12 @@ describe("publishRunLogAppended", () => {
     });
 
     // `seq` is a zero-based counter and 0 is falsy: a truthiness guard added
-    // beside the ruling-99 one would silently swallow the opening line of every
+    // beside the ruling-247 one would silently swallow the opening line of every
     // run, and the console would sit empty until the second line arrived.
     expect(page.names()).toContain("run.log-appended");
   });
 
-  it("ruling 99: a controller turn (project_slug = \"\") publishes nothing at all", () => {
+  it("ruling 247: a controller turn (project_slug = \"\") publishes nothing at all", () => {
     // Every signed-in user's Home page holds a `projects` firehose connection,
     // and `routeMatchesConnection` matches that scope on ANY defined slug — ""
     // included. This is the leak the guard exists to stop, so the firehose is
@@ -240,7 +240,7 @@ describe("publishRunStateChanged", () => {
     });
   });
 
-  it("ruling 99: a controller turn's state changes stay off the stream too", () => {
+  it("ruling 247: a controller turn's state changes stay off the stream too", () => {
     // Same guard, second function — the controller run settles through
     // `publishState` in the sink on exactly the same spec, so a guard fixed in
     // one publisher and forgotten in the other still leaks the whole turn
@@ -266,7 +266,7 @@ describe("publishRunStateChanged", () => {
 });
 
 /**
- * Ruling 99, the other half: a controller turn DOES stream — to its owner.
+ * Ruling 249, the other half: a controller turn DOES stream — to its owner.
  *
  * The guard above keeps a controller run off the project routes; without a
  * route of its own the controller page had no console at all (the run row

@@ -1,8 +1,8 @@
 /**
- * Ruling 597: a delivery that is not a commit is kept as it was delivered.
+ * Ruling 86: a delivery that is not a commit is kept as it was delivered.
  *
- * A files delivery is reviewed as `files:<deliveredAt>` (ruling 388) and moves
- * when a delivered file is saved again (ruling 587), but the attachments folder
+ * A files delivery is reviewed as `files:<deliveredAt>` (ruling 84) and moves
+ * when a delivered file is saved again (ruling 85), but the attachments folder
  * holds only the newest bytes under each name. A commit stays readable after
  * the branch moves on; a rework that saves `mapping.md` again left every
  * verdict on the earlier delivery pointing at content that no longer existed.
@@ -54,7 +54,7 @@ function dirStamp(dir: string): string | null {
   return m ? `${m[1]}T${m[2]}:${m[3]}:${m[4]}Z` : null;
 }
 
-/** Ruling 691: the folder that holds the kept delivery `stamp`, or null for a
+/** Ruling 86: the folder that holds the kept delivery `stamp`, or null for a
  *  stamp that cannot be one. Whether it exists is the reader's to find out. */
 export function keptDeliveryDir(slug: string, key: string, stamp: string, dataRoot?: string): string | null {
   const dir = stampDir(stamp);
@@ -169,7 +169,7 @@ function sameBytes(a: string, b: string): boolean {
 }
 
 /**
- * Ruling 703: the task's files as they stand now set against the kept
+ * Ruling 81: the task's files as they stand now set against the kept
  * delivery `judged`, byte for byte, or null when that delivery was not kept.
  *
  * `now` is the names in the task's attachments folder that the caller counts
@@ -179,12 +179,12 @@ function sameBytes(a: string, b: string): boolean {
  * name, a person's upload or removal). `leftOut` is the caller's rule for a
  * name of the kept delivery that is not one of the task's files either.
  *
- * The pictures Viberr makes of a delivered page (ruling 691) are left out of
+ * The pictures Viberr makes of a delivered page (ruling 86) are left out of
  * the kept side here as the caller leaves them out of `now`: they are remade
  * at every delivery, and the note is about the files, not about Viberr's own
  * pictures of them.
  *
- * A name is paired with its kept file by ruling 675's rule (`storedNameAmong`):
+ * A name is paired with its kept file by ruling 76's rule (`storedNameAmong`):
  * one file stored under two Unicode forms of its name is one file, named as
  * the folder has it now, and two files a folder holds apart stay two.
  */
@@ -211,7 +211,7 @@ export function changesSinceKeptDelivery(
   const paired = new Set<string>();
   // Code-unit order, so the lists read the same on every machine.
   for (const name of [...now].sort()) {
-    // Ruling 675's rule: the kept file of exactly this name, else the single
+    // Ruling 76's rule: the kept file of exactly this name, else the single
     // one that composes to it. Twins a folder holds apart stay apart.
     const was = storedNameAmong(kept, name);
     if (was === null || paired.has(was)) {

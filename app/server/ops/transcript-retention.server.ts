@@ -25,7 +25,7 @@ import { toError } from "~/shared/errors";
  *    deleted by nothing except the destructive `npm run seed -- --reset`.
  *  - `runtimes/users/<userId>/claude-home/projects/<cwd-as-dashes>/<sid>.jsonl`
  *    and `runtimes/users/<userId>/codex-home/sessions/YYYY/MM/DD/rollout-…jsonl`
- *    — the per-person provider session homes (ruling 127), one rollout per run,
+ *    — the per-person provider session homes (ruling 137), one rollout per run,
  *    forever.
  *
  * The asymmetry this fixes is the dishonest part: `run_log_lines` is deleted at
@@ -38,11 +38,11 @@ import { toError } from "~/shared/errors";
  * ## Rules
  *
  * - **Only under the data root, only under `runtimes/users/`.** The homes are
- *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 127) and
+ *   app-owned per-person directories (`listUserRuntimeRoots`, ruling 137) and
  *   nothing else is walked — no host `~/.claude`, no personal `~/.codex`, no
  *   directory whose name is not a path-safe user id.
  * - **Only `*.jsonl` files.** `auth.json` and `.credentials.json` (in each
- *   account's home, ruling 507) are the VENDOR-held sign-ins that make
+ *   account's home, ruling 138) are the VENDOR-held sign-ins that make
  *   those people's backends usable, and `.claude.json` is config; deleting any
  *   of them signs somebody out of their own account (P11-04, and now it would
  *   be one person's account, not the instance's). Extension-gated, never
@@ -77,7 +77,7 @@ export interface TranscriptReclamation {
 /** C3 (pass 31): both windows come off the VALIDATED env (`getEnv`) rather
  *  than a `process.env[name]` lookup by string — the schema declares them, so a
  *  typo in the variable name is a compile error here instead of a silent
- *  fallback to the default. Ruling 458(j): the schema also owns the defaults
+ *  fallback to the default. Ruling 39: the schema also owns the defaults
  *  (`DEFAULT_TRANSCRIPT_RETENTION_DAYS`, `DEFAULT_SESSION_HOME_RETENTION_DAYS`)
  *  and the coercion. `0` is a real value meaning "keep forever", and a
  *  negative or non-numeric value fails boot where it used to read as unset. */
@@ -193,7 +193,7 @@ export function pruneRuntimeTranscripts(
 
   if (sessionDays > 0) {
     const cutoff = now - sessionDays * 86_400_000;
-    // Ruling 127: one pair of session trees PER PERSON, and only the ones the
+    // Ruling 137: one pair of session trees PER PERSON, and only the ones the
     // app itself created. `listUserRuntimeRoots` skips any directory whose name
     // is not a path-safe user id, so nothing a sweep did not put there can be
     // walked into.

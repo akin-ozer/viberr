@@ -15,17 +15,17 @@ import { normalizeEscapedNewlines } from "~/server/tasks/model-prose.server";
 import { toError } from "~/shared/errors";
 
 /**
- * Ruling 585: the knowledge server Viberr's MCP gateway answers itself for a
+ * Ruling 216: the knowledge server Viberr's MCP gateway answers itself for a
  * Codex specialist, with the two knowledge tools a Claude specialist has.
  *
  * A Claude run's toolkit holds `read_knowledge_doc` and `correct_knowledge_doc`
  * for the knowledge bases it was given. A Codex run mounts no in-process tools
- * (ruling 422), so it read an open knowledge base from its shell, reported a
+ * (ruling 217(a)), so it read an open knowledge base from its shell, reported a
  * correction in its final reply for the operator to write, and could not use
- * a private knowledge base at all (ruling 578). Live on the AWS calculator
+ * a private knowledge base at all (ruling 209). Live on the AWS calculator
  * board the Estimate Judge could not move to GPT-6 Luna: the golden set it
  * scores against and writes is private. The gateway already serves a Codex
- * run over a run-scoped token (ruling 461), so it serves these two tools too,
+ * run over a run-scoped token (ruling 191), so it serves these two tools too,
  * from this process, over exactly the knowledge bases the run was given. The
  * same reader and writer answer them, so both backends read the same pages,
  * write the same corrections and get the same refusals.
@@ -60,13 +60,13 @@ export const KNOWLEDGE_READ_TOOL: Tool = {
   annotations: { title: "Read a knowledge-base document", ...READ_ONLY },
 };
 
-/** Rulings 483 and 498: what a specialist's `correct_knowledge_doc` says it
+/** Ruling 210: what a specialist's `correct_knowledge_doc` says it
  *  does, on either backend. */
 export const KB_CORRECTION_SPECIALIST_DESCRIPTION =
   "Correct a passage of one of YOUR knowledge bases that your work has PROVEN wrong: a version you measured, a path or command that is not what the document says, a step that no longer works. Send `replaces` EXACTLY as the document has it (read_knowledge_doc returns it; list marker and emphasis included) and `text` as it should read instead, in the document's own form, with your evidence; an empty `text` deletes the passage. Send only the passage that changes: the record keeps what it needs around it for an undo. It is written into the document at once, so every later run reads the corrected passage; a person undoes it if they disagree, and a correction a person undid is refused if written again. Use it instead of only reporting a discrepancy: a comment is read once, the document is read by every later run. The task's entry quotes the passage only when every agent on the project is given that knowledge base, so correcting one given to few agents keeps its text off the task.";
 
 /** The correction's fields, described once for both backends. The document is
- *  `path`, as `read_knowledge_doc` names it (ruling 588). */
+ *  `path`, as `read_knowledge_doc` names it (ruling 210(a)). */
 export const KB_CORRECTION_FIELDS = {
   kb: "The knowledge base the passage is in, by the name its index heading gives it.",
   path: KB_DOC_PATH_DESCRIPTION,

@@ -59,10 +59,10 @@ import { MessageList } from "./message-list";
 import { surfaceLabel } from "./surface-label";
 
 /**
- * The controller surface (ruling 99): a conversation list, one transcript,
+ * The controller surface (ruling 247): a conversation list, one transcript,
  * a composer, and — on the project surface — the Knowledge base panel. The
  * Goals panel that stood under it went with the chains it showed (ruling
- * 503): a board's planned work is its epics, on the Epics page.
+ * 273): a board's planned work is its epics, on the Epics page.
  *
  * Shared by `/controller` (instance scope) and `/projects/:slug/controller`
  * (board scope). The active conversation rides `?c=<id>`; a bare URL opens
@@ -71,7 +71,7 @@ import { surfaceLabel } from "./surface-label";
  * revalidates on the owner-routed `controller.updated` SSE reference; while a
  * turn is working the console reads the turn's tail every 5 s as the fallback
  * for a missed settle, and revalidates once the tail says it ended (ruling
- * 457, CTL-2).
+ * 11, CTL-2).
  */
 
 /**
@@ -99,10 +99,10 @@ function sendForm(
   text: string,
   surface: string,
   conversationId: string | null,
-  /** Ruling 527: what the message does while a turn works; the server
+  /** Ruling 319: what the message does while a turn works; the server
    *  steers when the form names none. */
   mode: SendMode = "steer",
-  /** Ruling 573: the files it carries. */
+  /** Ruling 258: the files it carries. */
   files: readonly File[] = [],
 ): FormData {
   const body = new FormData();
@@ -119,7 +119,7 @@ function sendForm(
 }
 
 /**
- * Ruling 527: Retract hands a message's text back to the composer. The box's
+ * Ruling 251: Retract hands a message's text back to the composer. The box's
  * text is the composer's own state (a keystroke re-renders the composer, not
  * the transcript beside it), so the composer lends its setter here while it is
  * mounted and the transcript's Retract calls it.
@@ -145,7 +145,7 @@ export function ControllerPage({
           : [sseScopes.user()],
       [projectSlug],
     ),
-    // Ruling 457: this page renders the conversation, so `controller.updated`
+    // Ruling 11: this page renders the conversation, so `controller.updated`
     // revalidates it; every other surface hands that event to the dock.
     { conversations: true },
   );
@@ -168,14 +168,14 @@ export function ControllerPage({
 
   return (
     // The instance controller (/controller) sits under the standalone-page
-    // header with no rail beside it (ruling 623), so it keeps a frame of its
+    // header with no rail beside it (ruling 321), so it keeps a frame of its
     // own; inside a project it takes the workspace shell's.
     <main
       className={"ctl-wrap" + (projectSlug ? "" : " standalone")}
       data-screen-label="Controller"
     >
       <header className="ctl-head">
-        {/* Ruling 625: inside a project the head is its rail siblings' head
+        {/* Ruling 321: inside a project the head is its rail siblings' head
             (Board, Agents, Policy: the title at the page's left edge, the
             rail's own glyph names the page). The standalone page has no rail,
             so it keeps its mark. */}
@@ -187,11 +187,11 @@ export function ControllerPage({
         <div className="ctl-head-text">
           <div className="ctl-head-title">
             <h1>{view.controllerName}</h1>
-            {/* Ruling 127: a controller turn runs on the ASKER's own Claude
+            {/* Ruling 137: a controller turn runs on the ASKER's own Claude
                 account, so this pill is about the person reading it. Another
                 member with Claude connected converses normally while this one
                 cannot, which the old instance-wide wording could not express.
-                Ruling 625: beside the noun it describes, as on Agents. */}
+                Ruling 321: beside the noun it describes, as on Agents. */}
             {!view.available && (
               <Pill kind="risk" sm>
                 Claude not connected
@@ -206,7 +206,7 @@ export function ControllerPage({
                 : "Managing this instance with your own permissions."}
           </p>
         </div>
-        {/* Ruling 419(a): the page's two navigation moves live at its top.
+        {/* Ruling 321: the page's two navigation moves live at its top.
             "New" sat in the Conversations panel's head, and on a project the
             rail stacked that panel under every goal chain the page then
             showed: live on ax-clone it began 4,419px down on a desktop and
@@ -222,9 +222,9 @@ export function ControllerPage({
             <Icon name="plus" />
             New conversation
           </Link>
-          {/* No Home button (ruling 623): the app header's brand and its
+          {/* No Home button (ruling 321): the app header's brand and its
               `Home ›` crumb are that way back, as on every standalone page
-              (ruling 145(b)). */}
+              (ruling 294). */}
         </div>
       </header>
       <TurnAnnouncer view={view} />
@@ -257,14 +257,14 @@ export function ControllerPage({
             <Composer view={view} csrf={csrf} send={send} />
           </div>
         )}
-        {/* Ruling 419(a)/(b): the conversations lead the rail, and on a
+        {/* Ruling 321/(b): the conversations lead the rail, and on a
             desktop the rail is its own scroller beside the conversation
             (app.css `.ctl-side`), so a long panel under the list neither
             buries the list nor stretches the page beside it. */}
         <aside className="ctl-side">
           <ConversationList view={view} csrf={csrf} />
-          {/* Ruling 498: what the board's agents changed in its knowledge,
-              where the owner looks; with ruling 483's proposals that
+          {/* Ruling 321: what the board's agents changed in its knowledge,
+              where the owner looks; with ruling 267's proposals that
               documents still hold. */}
           {view.corrections && view.proposals !== null && projectSlug && (
             <KnowledgePanel
@@ -295,7 +295,7 @@ export function ControllerPage({
 }
 
 /**
- * Ruling 476(d) (F40-24): the page's one status region, mounted outside the
+ * Ruling 320 (F40-24): the page's one status region, mounted outside the
  * per-thread subtree so it is on the page before the first message of a new
  * thread starts a turn, and only its text changes: "<name> is working" when a
  * turn starts, "<name> replied: <first sentence>" when the reply lands.
@@ -310,16 +310,16 @@ function TurnAnnouncer({ view }: { view: ControllerSurfaceView }) {
   );
 }
 
-/** Ruling 457 (CTL-2): how often a working turn's tail is read when no line
- *  arrives, the cadence the page's revalidation poll had (ruling 250). */
+/** Ruling 11 (CTL-2): how often a working turn's tail is read when no line
+ *  arrives, the cadence the page's revalidation poll had (ruling 257). */
 const TURN_POLL_MS = 5_000;
 
 /** The open conversation's run-log store, for the transcript's working row. */
 const TurnStoreContext = createContext<RunLogStore | null>(null);
 
 /**
- * Ruling 250's step on the working row, from the console's tail reads (ruling
- * 457, CTL-2): each line and each 5 s status read carries the run row's phase
+ * Ruling 257's step on the working row, from the console's tail reads (ruling
+ * 11, CTL-2): each line and each 5 s status read carries the run row's phase
  * and step, so the row moves without the page revalidating. Until a read moves
  * them past what the page loaded, the loader's own turn state stands (it and
  * the run projection were read together).
@@ -339,13 +339,13 @@ function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime:
 /**
  * The open conversation's EXECUTION, on this surface: the task page's two
  * runtime panels, fed by the same projection (`view.runtime`, asked for the
- * ruling-99 scope a controller run is stored under).
+ * ruling-247 scope a controller run is stored under).
  *
  * - The **Live run** strip while a turn is working: what the controller is
  *   doing (its phase and last tool step), elapsed from the run's own start,
  *   turns and tokens off the run row (refreshed by each tail read of the
  *   console, a line or the 5 s status read, and by the `controller.updated`
- *   reference a lifecycle flip publishes; ruling 457), the model,
+ *   reference a lifecycle flip publishes; ruling 11), the model,
  *   View logs, and Interrupt for the conversation's owner or an org admin
  *   (`canInterruptTurn`; the engine re-checks). Interrupt confirms first (D6):
  *   a stopped turn settles with "This turn was stopped before I could answer."
@@ -355,9 +355,9 @@ function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime:
  *   of `useRunLogStream` (`controller.log-appended` on the owner's user
  *   stream) and paged backwards through `/resources/run-log`, behind the same
  *   owner-or-admin gate that serves the raw view. Disclosed on the strip while
- *   a turn streams (ruling 380), the settled-runs archive after.
+ *   a turn streams (ruling 311), the settled-runs archive after.
  *
- * Ruling 524(a): it renders the conversation's column (`.ctl-main`, the
+ * Ruling 321: it renders the conversation's column (`.ctl-main`, the
  * transcript and composer it wraps) and then the run pane (`.ctl-run`, the
  * strip or the archive), both cells of the page's grid, so a wide screen puts
  * the run beside the conversation and a narrow one under the composer, in the
@@ -385,7 +385,7 @@ function ConversationRuntime({
     source: { kind: "controller", conversationId },
     threads: runtime,
     hasActiveRun: runtime.some((r) => r.state === "running"),
-    // Ruling 457 (CTL-2): the fallback for a settle the stream missed (a
+    // Ruling 11 (CTL-2): the fallback for a settle the stream missed (a
     // paused stream drops the `controller.updated` that shows the reply). It
     // used to revalidate root, the layout and this page every 5 s of a turn,
     // transcript, goals and console included, to move one step line; now it
@@ -427,9 +427,9 @@ function ConversationRuntime({
   return (
     <TurnStoreContext.Provider value={runLog}>
       <div className="ctl-main">{children}</div>
-      {/* Ruling 524(a): the run pane. While a turn streams it holds the strip
+      {/* Ruling 321: the run pane. While a turn streams it holds the strip
           with its console on it; after, the archive of the settled runs. One
-          console either way, never two (ruling 380). `data-console` tells the
+          console either way, never two (ruling 311). `data-console` tells the
           sheet which, so a hidden console hands its column back to the
           conversation instead of leaving it empty under the strip. */}
       {runtime.length > 0 && (
@@ -452,8 +452,8 @@ function ConversationRuntime({
         </div>
       )}
       {/* D6: stopping a turn discards what it was about to apply, which is
-          ruling 149's destructive class, so the commit keeps the shared
-          `danger` default. Ruling 150 puts the same red on the trigger: the
+          ruling 278's destructive class, so the commit keeps the shared
+          `danger` default. Ruling 278 puts the same red on the trigger: the
           shared `btn ghost sm danger` in `LiveRunPanel`. */}
       {confirmInterrupt && (
         <ConfirmDialog
@@ -471,7 +471,7 @@ function ConversationRuntime({
 }
 
 /**
- * Ruling 419(a): the phone's conversation switcher, in the page head.
+ * Ruling 321: the phone's conversation switcher, in the page head.
  *
  * Below the two-column breakpoint the rail stacks under the conversation, so on
  * a phone the list of threads was the LAST thing on the page — after a
@@ -497,7 +497,7 @@ function ConversationPicker({ view }: { view: ControllerSurfaceView }) {
       {/* The blank composer is a place too: a person who pressed New is not
           reading any thread, and the select must not claim they are. */}
       {!active && <option value="">New conversation</option>}
-      {/* Ruling 525: a thread the viewer may delete but not read opens
+      {/* Ruling 250: a thread the viewer may delete but not read opens
           nothing, so it is not a place to switch to. */}
       {view.conversations.filter((c) => c.readable).map((c) => (
         <option key={c.id} value={c.id}>
@@ -517,7 +517,7 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
   // mark the row the transcript is actually showing.
   const active = view.conversation?.id ?? null;
   const href = (c: ConversationListItem) => conversationHref(params, view.showingAll, c.id);
-  // Ruling 525: each row the viewer may delete carries its Delete, confirmed
+  // Ruling 278: each row the viewer may delete carries its Delete, confirmed
   // first. Deleting the open thread answers with a redirect to where a bare
   // visit lands, which carries no result to toast: the fetcher keeps the data
   // it had, so an unchanged result is that redirect, and it is said here. A
@@ -548,7 +548,7 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
   const deletingId = deleting ? String(remove.formData?.get("conversationId") ?? "") : null;
   return (
     <section className="panel ctl-convs">
-      {/* Ruling 419(a): New moved to the page head, where it is reachable
+      {/* Ruling 321: New moved to the page head, where it is reachable
           from wherever this panel happens to be. */}
       <div className="panel-head">
         <Icon name="message" />
@@ -568,7 +568,7 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
         </p>
       )}
       {view.conversations.length === 0 ? (
-        // Ruling 625: no direction; the composer is beside the rail on a wide
+        // Ruling 292: no direction; the composer is beside the rail on a wide
         // page and above it on a narrow one.
         <p className="empty sm">No conversations yet. Your first message starts one.</p>
       ) : (
@@ -609,7 +609,7 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
                     {face}
                   </Link>
                 ) : (
-                  // Ruling 525: listed so it can be deleted, never opened. Not
+                  // Ruling 250: listed so it can be deleted, never opened. Not
                   // a `.ctl-conv`: that is a link, and presses like one.
                   <div className="ctl-conv-sealed">{face}</div>
                 )}
@@ -644,8 +644,8 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
 }
 
 /**
- * Ruling 525: what deleting a conversation does, said before it is done. It
- * is permanent, so the commit keeps the shared `danger` (ruling 149), and the
+ * Ruling 278: what deleting a conversation does, said before it is done. It
+ * is permanent, so the commit keeps the shared `danger` (ruling 278), and the
  * sentence names whose it is when it is not the reader's own.
  */
 function DeleteConversationConfirm({
@@ -699,30 +699,30 @@ function Transcript({
   restoreDraft,
 }: {
   view: ControllerSurfaceView;
-  /** Ruling 419(g): ruling 314's examples, on the blank transcript only. */
+  /** Ruling 321: ruling 319's examples, on the blank transcript only. */
   examples?: ControllerExample[];
   examplesDisabled?: boolean;
   onExample?: (text: string) => void;
-  /** Ruling 527: where Retract hands a message back. */
+  /** Ruling 251: where Retract hands a message back. */
   restoreDraft?: RestoreDraft;
 }) {
   const scrollRef = useRef<HTMLElement | null>(null);
   const csrf = useCsrfToken();
-  // Ruling 451(d): a reply that lands while the transcript is up enters the way
+  // Ruling 284: a reply that lands while the transcript is up enters the way
   // it does in the dock; history never animates.
   const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
-  // Ruling 419(b): scroll the TRANSCRIPT, never the page. This used to be
+  // Ruling 321: scroll the TRANSCRIPT, never the page. This used to be
   // `scrollIntoView` on an end marker, which scrolls every scrollable
   // ancestor too: on a phone the page itself jumped to the bottom of a
   // 12,625px conversation, past the header, the thread switcher and the
   // rail, on every load and every new message. The transcript is its own
   // capped scroller at every width now, so only its own box moves. Ruling
-  // 476(c): and a reply that lands shows its first line, not its last.
-  // Ruling 572: and a reader who scrolled away has the way back.
+  // 320: and a reply that lands shows its first line, not its last.
+  // Ruling 320: and a reader who scrolled away has the way back.
   const jump = useTranscriptFollow(scrollRef, view.messages, fresh, view.turn.working, view.conversation?.id ?? "");
   // A reply that names an open knowledge-base proposal links it to its entry
   // in the panel beside the transcript (owner, 2026-09-25), and one that names
-  // a correction to its entry there too (ruling 498).
+  // a correction to its entry there too (ruling 321).
   const messageLinks = useMemo(
     () =>
       view.proposals?.length || view.corrections?.shown.length
@@ -744,7 +744,7 @@ function Transcript({
       // sentence pinned to its top edge in --placeholder. It is the app's
       // composed empty state now (the hero Home and Insights use), centred in
       // the column the transcript will fill; the composer under it is the
-      // page's single object until something is said. Ruling 626: named and
+      // page's single object until something is said. Ruling 320: named and
       // focusable like the transcript it stands in for; on a phone it scrolls,
       // and with Claude not connected its examples are disabled, so nothing in
       // it took the keyboard.
@@ -759,7 +759,7 @@ function Transcript({
             resources, agents. Everything runs with your own permissions, and
             refusals say why.
           </p>
-          {/* Ruling 314 as the dock has it: clicking one SENDS it. Ruling 625:
+          {/* Ruling 319 as the dock has it: clicking one SENDS it. Ruling 319:
               not while the viewer cannot send at all; three suggestions at
               half opacity were a fourth way of saying "not connected". */}
           {examples.length > 0 && onExample && view.available && (
@@ -771,14 +771,14 @@ function Transcript({
   }
   const conversationId = view.conversation.id;
   const onRetracted = (text: string, files: readonly File[]) => restoreDraft?.current?.(text, files);
-  // Ruling 476(d): the row is what a sighted person watches. The page's one
+  // Ruling 320: the row is what a sighted person watches. The page's one
   // status region (`TurnAnnouncer`) says that the turn started and that it
   // replied; this row, inserted with its sentence already in it, was skipped.
   const working = view.turn.working && (
     <div className="ctl-working">
       <span className="live-dot" />
       <WorkingSentence name={view.controllerName} />
-      {/* Ruling 250 (F37-79): the turn's own phase and step, in the place
+      {/* Ruling 257 (F37-79): the turn's own phase and step, in the place
           the person is waiting. Both are on the run row already and both
           already render in the run pane beside the conversation;
           the conversation showed one static line for turns measured in
@@ -792,7 +792,7 @@ function Transcript({
       ref={scrollRef}
       className="panel ctl-transcript"
       aria-label="Conversation transcript"
-      // Ruling 626: the keyboard scrolls it too. A reply with no link in it
+      // Ruling 320: the keyboard scrolls it too. A reply with no link in it
       // left nothing inside that took focus.
       tabIndex={0}
     >
@@ -821,16 +821,16 @@ function Composer({
   view: ControllerSurfaceView;
   csrf: string;
   send: ReturnType<typeof useFetcher<ActionResult>>;
-  /** Ruling 527: lent to the transcript's Retract. */
+  /** Ruling 251: lent to the transcript's Retract. */
   restoreDraft?: RestoreDraft;
 }) {
   const [text, setText] = useState("");
-  // Ruling 573: the files going with the message, and the first one refused.
+  // Ruling 319: the files going with the message, and the first one refused.
   const [files, setFiles] = useState<File[]>([]);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const location = useLocation();
-  // Ruling 527: the transcript's Retract puts a message back in this box.
-  // Ruling 573: and its files back in the tray.
+  // Ruling 251: the transcript's Retract puts a message back in this box.
+  // Ruling 258: and its files back in the tray.
   useEffect(() => {
     if (!restoreDraft) return;
     restoreDraft.current = (retracted, back) => {
@@ -841,13 +841,13 @@ function Composer({
       restoreDraft.current = null;
     };
   }, [restoreDraft]);
-  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // Ruling 321: the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55's rule, which P13-D-39 applied to the comment
   // composer and this one missed).
   const sendHint = useModifierHint("↵");
   const queueHint = useModifierHint("⇧↵");
   const busy = send.state !== "idle";
-  // Ruling 527: while a turn holds the conversation, a message steers it or
+  // Ruling 319: while a turn holds the conversation, a message steers it or
   // queues behind it, and the composer offers both.
   const live = view.turn.answering !== null;
   const addFiles = (incoming: File[]) => {
@@ -856,7 +856,7 @@ function Composer({
     setFileProblem(next.problem);
   };
   const sending = busy ? (send.formData?.get("mode") === "queue" ? "queue" : "steer") : null;
-  // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
+  // Ruling 319 (pass 37, F37-90): the box keeps the words until the server
   // takes them. `setText("")` used to run at submit, optimistically, and
   // nothing anywhere held the string — an expired CSRF token (refused before
   // the engine runs, so the text reaches no transcript), a 404 on a scope that
@@ -872,7 +872,7 @@ function Composer({
     // clears like any other. `sent` is read before the ref is nulled, because
     // React may run the updater later than this line. On a failure the text
     // and the Send button both stay, so the person can retry or copy it out.
-    // Ruling 573: the files the same way, each one that went out.
+    // Ruling 319: the files the same way, each one that went out.
     const sent = pending.current;
     const sentFiles = pendingFiles.current;
     pending.current = null;
@@ -886,7 +886,7 @@ function Composer({
   const disabled =
     !view.available || (view.conversation !== null && !view.viewerOwnsActive);
   const { dropping, dropProps } = useFileDrop(addFiles, disabled);
-  // Ruling 573: files alone are a message.
+  // Ruling 258: files alone are a message.
   const empty = !text.trim() && files.length === 0;
   const submit = (mode: SendMode = "steer") => {
     const value = text.trim();
@@ -915,7 +915,7 @@ function Composer({
         autoFocus={!disabled}
         onChange={(e) => setText(e.target.value)}
         onPaste={(e) => {
-          // Ruling 573 (ruling 533's rule): a bare screenshot goes with the
+          // Ruling 319 (ruling 76's rule): a bare screenshot goes with the
           // message; copied text, cells included, stays text.
           const pasted = filesFromPaste(e.clipboardData, true, files);
           if (!pasted) return;
@@ -925,7 +925,7 @@ function Composer({
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
-            // Ruling 527: ⇧ queues behind a working turn instead of steering it.
+            // Ruling 319: ⇧ queues behind a working turn instead of steering it.
             submit(live && e.shiftKey ? "queue" : "steer");
           }
         }}
@@ -934,8 +934,8 @@ function Composer({
           disabled
             ? view.available
               ? "Read-only: only the conversation's owner can talk in it."
-              : // Ruling 127's sentence is the note above the box (U39-10);
-                // ruling 625: the box does not say it a third time.
+              : // Ruling 137's sentence is the note above the box (U39-10);
+                // ruling 319: the box does not say it a third time.
                 undefined
             : "Ask the controller, or tell it what to do…"
         }
@@ -958,7 +958,7 @@ function Composer({
 }
 
 /**
- * The composer's foot (ruling 700(e), split out of `Composer` on the task
+ * The composer's foot (ruling 13(b), split out of `Composer` on the task
  * page's recipe; it calls no hook): attach, the key hint, and Queue beside
  * Steer or Send, each naming the send it made while that send is out.
  */

@@ -39,7 +39,7 @@ import { TRANSITION_TO_DONE_EXCEPTION } from "~/features/policy/policy-data";
 afterEach(cleanup);
 
 /**
- * F19-12 lineage, re-anchored by the dynamic-dispatch rework (ruling 98): the
+ * F19-12 lineage, re-anchored by the dynamic-dispatch rework (ruling 124): the
  * capability LABEL is rendered copy (capability matrix, profile detail panel,
  * policy page), and the id is the persisted key — now `dispatch-agents`, the
  * collapsed assign/summon pair. Read the label from the REAL catalog so this
@@ -76,7 +76,7 @@ function renderModal(props: {
   onSubmit?: (p: ProfileFormPayload) => void;
   onClose?: () => void;
   resourceCatalog?: ResCatalogGroup[];
-  /** Ruling 127: the VIEWER's own connections. Omitted = not probed. */
+  /** Ruling 137: the VIEWER's own connections. Omitted = not probed. */
   viewerConnected?: Record<"codex" | "claude", boolean>;
 }): RenderResult {
   const Stub = createRoutesStub([
@@ -160,7 +160,7 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     // OBS-7: the default fixture is a deployment that still tracks its global
     // base; the fork case sets this explicitly.
     customized: false,
-    // Ruling 156: the grants signal beside it; the drift case sets it.
+    // Ruling 177: the grants signal beside it; the drift case sets it.
     templateDrift: null,
     desc: "Implements stage work on the task-key branch.",
     definition: "",
@@ -181,7 +181,7 @@ function mkProfile(patch: Partial<AgentProfileView>): AgentProfileView {
     extras: [],
     resources: { skills: ["repo-write"], mcps: ["github"], kb: [] },
     source: "template",
-    // Ruling 479(g): the default fixture still follows its template (no
+    // Ruling 177: the default fixture still follows its template (no
     // snapshot yet); the already-forked case sets this false.
     tracksTemplate: true,
     ...patch,
@@ -328,14 +328,14 @@ describe("ProfileDetail", () => {
   });
 
   /**
-   * Ruling 156 (pass 35, F35-7): a library deploy COPIES the template's grants,
+   * Ruling 177 (pass 35, F35-7): a library deploy COPIES the template's grants,
    * and a run mounts that copy, so a template grant never reached this project
    * while the card read "MCP servers: None" with no divergence marker. The
    * card names the exact difference under each list and on the scope line;
    * only an org admin gets the button (owner, Q35-8). Canary: drop the `drift`
    * prop from the MCP `ResGroup`.
    */
-  it("ruling 156: a copy whose grants differ says so, and only an org admin gets the button", () => {
+  it("ruling 177: a copy whose grants differ says so, and only an org admin gets the button", () => {
     const templateDrift = {
       missing: { skills: [], mcps: ["context7"], kb: [] },
       extra: { skills: ["k8s-notes"], mcps: [], kb: [] },
@@ -358,7 +358,7 @@ describe("ProfileDetail", () => {
       getByText("Differs from the template: k8s-notes is granted here, not on the template."),
     ).toBeTruthy();
     fireEvent.click(getByText("Use the template's grants"));
-    // Ruling 479(d): the press asks first; the confirm is what submits.
+    // Ruling 326: the press asks first; the confirm is what submits.
     expect(onSync).not.toHaveBeenCalled();
     fireEvent.click(getByText("Replace grants"));
     expect(onSync).toHaveBeenCalledTimes(1);
@@ -381,7 +381,7 @@ describe("ProfileDetail", () => {
     expect(none("Use the template's grants")).toBeNull();
   });
 
-  it("ruling 156: the page's button submits sync-profile-resources with the record it rendered", async () => {
+  it("ruling 177: the page's button submits sync-profile-resources with the record it rendered", async () => {
     let posted: Record<string, string> | null = null;
     const Stub = createRoutesStub([
       {
@@ -421,7 +421,7 @@ describe("ProfileDetail", () => {
       <Stub initialEntries={["/projects/viberr-core/agents?profile=developer"]} />,
     );
     fireEvent.click(getByText("Use the template's grants"));
-    // Ruling 479(d): nothing is posted until the confirm is pressed.
+    // Ruling 326: nothing is posted until the confirm is pressed.
     expect(posted).toBeNull();
     fireEvent.click(getByText("Replace grants"));
     await waitFor(() =>
@@ -443,7 +443,7 @@ describe("ProfileDetail", () => {
    */
   it("says 'advisory on Codex' once on the row where both reasons apply", () => {
     // The repo-write row satisfies BOTH hint conditions on a Codex profile —
-    // the Claude-only-enforcement one and ruling 185's carve-out — and each
+    // the Claude-only-enforcement one and ruling 183's carve-out — and each
     // used to render its own span, so the row read "Execute code or write to
     // the repo · advisory on Codex · advisory on Codex". Same four words twice,
     // with the only difference buried in a tooltip nobody opens. The card makes
@@ -475,7 +475,7 @@ describe("ProfileDetail", () => {
     // And the one that survives is the SPECIFIC one: it says why the
     // withholding is advisory on this runtime, not merely that it is.
     expect(row!.querySelector(".fhint")!.getAttribute("title")).toContain(
-      "ruling 185",
+      "ruling 183",
     );
   });
 
@@ -621,7 +621,7 @@ describe("ProfileDetail", () => {
       detail(mkProfile({}), { insts: [mkDeployment({})], onDelete }),
     );
     fireEvent.click(getByText("Delete"));
-    // Ruling 458(f): the shared ConfirmDialog, named by its title, with the
+    // Ruling 297: the shared ConfirmDialog, named by its title, with the
     // confirm button's glyph kept.
     const dialog = container.querySelector('[role="alertdialog"]')!;
     expect(dialog.getAttribute("aria-label")).toBe("Delete the Developer profile?");
@@ -633,7 +633,7 @@ describe("ProfileDetail", () => {
     expect(onDelete).toHaveBeenCalledWith("developer");
   });
 
-  // Ruling 459: the confirm plays its exit after the delete lands, and the page
+  // Ruling 287: the confirm plays its exit after the delete lands, and the page
   // then selects another profile. The dialog keeps the words it opened with, so
   // its fade never names the next profile.
   // Canary: read `a` from props in DeleteConfirm and the heading turns to Reviewer.
@@ -715,7 +715,7 @@ describe("ProfileDetail", () => {
   });
 
   /**
-   * Ruling 133 (F34-16): the panel said WHERE ("2 of 5 stages") and never what
+   * Ruling 181 (F34-16): the panel said WHERE ("2 of 5 stages") and never what
    * the where gates. Live, a human read the count as "this agent can act at
    * these stages", picked "Have the delivering agent resolve the conflict" on
    * a task at Review, and watched the dispatcher refuse it — while a human
@@ -732,7 +732,7 @@ describe("ProfileDetail", () => {
     ).container.querySelector(".stage-chips")!.parentElement!.textContent!;
   }
 
-  it("ruling 133: a restricted profile's panel states the rule AND the scoping clause", () => {
+  it("ruling 181: a restricted profile's panel states the rule AND the scoping clause", () => {
     // Canary: delete the paragraph.
     const text = renderEligibility(mkProfile({ stages: ["ready", "impl"] }));
     expect(text).toContain("2 of 5 stages");
@@ -740,7 +740,7 @@ describe("ProfileDetail", () => {
     expect(text).toMatch(SCOPING);
   });
 
-  it("ruling 133: an UNRESTRICTED profile states the rule but never names a scope it does not have", () => {
+  it("ruling 181: an UNRESTRICTED profile states the rule but never names a scope it does not have", () => {
     // Canary: render the paragraph unconditionally. "The stages above" would
     // name a scope for a profile that has none here — a new copy lie, and one
     // that contradicts the R14-1 note beside it.
@@ -793,7 +793,7 @@ describe("ProfileDetail resource chips (P14-KM-11)", () => {
     expect(getByText("writer-skill").closest(".res-chip")!.className).not.toContain("missing");
   });
 
-  it("ruling 239: says the rulings KB reaches this profile, EVEN when the profile grants it too", () => {
+  it("ruling 208(a): says the rulings KB reaches this profile, EVEN when the profile grants it too", () => {
     // The first version of this note only rendered when the profile did NOT
     // grant the KB, which is backwards for the case that actually exists on a
     // live board: every profile granted it, so the note never appeared and the
@@ -839,7 +839,7 @@ describe("LiveRoster", () => {
     expect(rendered).toHaveLength(3);
     // F10-20: the "Profile" column shows the profile IDENTITY (operator → "Operator").
     expect(rendered[0]!.querySelector(".live-name")!.textContent).toBe("Operator");
-    // Ruling 479(e): the operator's row names the backend its run starts on,
+    // Ruling 326: the operator's row names the backend its run starts on,
     // not "orchestration". CANARY: restore the literal and this reads it.
     expect(rendered[0]!.querySelector(".live-be")!.textContent).toBe("Codex");
     expect(rendered[1]!.querySelector(".live-be")!.textContent).toBe("Codex");
@@ -890,7 +890,7 @@ describe("LiveRoster", () => {
 });
 
 describe("CapabilityMatrixModal", () => {
-  it("renders catalog groups + Operator actions, and closes on Escape (ruling 16)", () => {
+  it("renders catalog groups + Operator actions, and closes on Escape (ruling 295)", () => {
     const onClose = vi.fn();
     const profiles = [
       mkProfile({
@@ -929,9 +929,9 @@ describe("CapabilityMatrixModal", () => {
     // legend label (CAP_META.forbidden), so match at least one.
     expect(getAllByText("Human-only").length).toBeGreaterThan(0);
     // The operator's own capabilities, outside the agent catalog, are their
-    // own group (ruling 479(a); advisory lines never reach the grid).
+    // own group (ruling 184; advisory lines never reach the grid).
     expect(getByText("Operator actions")).toBeTruthy();
-    // Ruling 98: the exact rendered label, pinned against the shipped
+    // Ruling 124: the exact rendered label, pinned against the shipped
     // vocabulary (the one dispatch verb).
     expect(DISPATCH_AGENTS_LABEL).toBe("Select & run agents");
     expect(getByText(DISPATCH_AGENTS_LABEL)).toBeTruthy();
@@ -994,7 +994,7 @@ describe("CapabilityMatrixModal", () => {
   });
 
   /**
-   * F19-16 / ruling 51 (R18-5) — the Claude-native vs Codex-injected skills
+   * F19-16 / ruling 185 (R18-5) — the Claude-native vs Codex-injected skills
    * asymmetry is canon *because it is disclosed*: "Codex keeps prompt-text
    * injection — the asymmetry is disclosed, not silent". It was disclosed in
    * code comments and in this ledger only; the runtime-differences section this
@@ -1027,7 +1027,7 @@ describe("CapabilityMatrixModal", () => {
 });
 
 describe("CreateProfileModal", () => {
-  it("ruling 133: the Eligible stages hint says the stages gate NEW engagements", () => {
+  it("ruling 181: the Eligible stages hint says the stages gate NEW engagements", () => {
     // Canary: restore "stages this profile may work in" — the pre-ruling rule,
     // which a delivering engagement no longer obeys on its own task.
     const { getByText, queryByText } = renderModal({ initial: null });
@@ -1074,7 +1074,7 @@ describe("CreateProfileModal", () => {
   it("D5: a failed model-catalog load offers a retry instead of deadlocking Save", async () => {
     // The model-catalog load fails: a restart, a 5xx or a dead network (the
     // endpoint answers its curated fallback even with no credential, so
-    // nothing else leaves the editor without a catalog). Ruling 457: the
+    // nothing else leaves the editor without a catalog). Ruling 11: the
     // route's `clientLoader` answers null for it, so the failure reaches this
     // editor, not the error boundary of the page it sits on. Save must not sit
     // held with an empty picker and no way out.
@@ -1270,7 +1270,7 @@ describe("CreateProfileModal", () => {
     fireEvent.click(getByText("Claude"));
     // The Codex id is gone on the click — not "still shown but about to change".
     expect(modelSel().value).toBe("");
-    // Ruling 147: the hold is ENFORCED by submit's refusal guard, never by a
+    // Ruling 288: the hold is ENFORCED by submit's refusal guard, never by a
     // disabled (or aria-disabled) button, so the explain-on-click state stays
     // reachable and the click puts focus on the empty model picker.
     expect(save().disabled).toBe(false);
@@ -1550,7 +1550,7 @@ describe("CreateProfileModal", () => {
   });
 
   /**
-   * Ruling 459: a grant chip's check is always drawn and the sheet fades it in
+   * Ruling 284: a grant chip's check is always drawn and the sheet fades it in
    * on `.on`, so a toggle never widens the chip and re-wraps the row under the
    * pointer.
    */
@@ -1765,7 +1765,7 @@ describe("CreateProfileModal", () => {
   /**
    * F19 UX-19 — UXA-4 gave this control the radiogroup ROLE and stopped there.
    * A radiogroup promises arrow-key traversal (then the `rovingRadioKeyDown`
-   * helper, retired by ruling 166), which UXA-7 wired into the twins on the
+   * helper, retired by ruling 14), which UXA-7 wired into the twins on the
    * Policy sheet (`HumanAccess`'s role group and `WorkflowRules`' boundary group
    * in policy-page.tsx) and never into this one: ←/→ did nothing, and every
    * radio was its own tab stop (15 instead of 5 for an expanded Collaboration
@@ -1776,7 +1776,7 @@ describe("CreateProfileModal", () => {
     const seg = container.querySelector<HTMLElement>('.cap-seg[role="radiogroup"]')!;
     const radios = [...seg.querySelectorAll<HTMLElement>('[role="radio"]')];
     expect(radios).toHaveLength(3);
-    // Ruling 166 moved the roving wiring to Radix (`app/ui/radio-seg.tsx`), and
+    // Ruling 14 moved the roving wiring to Radix (`app/ui/radio-seg.tsx`), and
     // the one-tab-stop guarantee is now expressed the other way round: the GROUP
     // carries the tab stop and delegates entry focus to the checked option,
     // rather than the checked radio holding `tabindex=0` itself. Either way the
@@ -1860,7 +1860,7 @@ describe("P13-AP-07 — the edit modal states that saving FORKS a library profil
 
   it("a project-created profile has nothing to fork and says so plainly", () => {
     const { getByText, queryByText } = renderModal({
-      // A project-created profile has no template to follow (ruling 479(g)).
+      // A project-created profile has no template to follow (ruling 177).
       initial: mkProfile({ source: "project", name: "Migrations", tracksTemplate: false }),
     });
     expect(
@@ -1906,7 +1906,7 @@ describe("P13-UI-52 — the editor states the backend narrowing before the save"
 });
 
 /**
- * Ruling 127 (live): the editor inherited RU-2's rule "disable a backend that
+ * Ruling 137 (live): the editor inherited RU-2's rule "disable a backend that
  * cannot run", which used to mean "not configured on this deployment". Since a
  * run bills the TASK OWNER, the author's own credential decides nothing about
  * whether this profile runs, and gating on it made a FRESH INSTANCE unable to
@@ -1915,7 +1915,7 @@ describe("P13-UI-52 — the editor states the backend narrowing before the save"
  * only explanation lived in a `title` on a disabled button, which no browser
  * opens (the same P14 rule the policy rows follow).
  */
-describe("ruling 127 — the editor advises about the viewer's account, it does not gate on it", () => {
+describe("ruling 137 — the editor advises about the viewer's account, it does not gate on it", () => {
   const NOTHING_CONNECTED = { claude: false, codex: false } as const;
 
   it("a viewer who has connected neither backend can still author a profile", async () => {
@@ -1961,7 +1961,7 @@ describe("ruling 127 — the editor advises about the viewer's account, it does 
     // tasks it is dispatched on.
     expect(note.textContent).toContain("runs use the task owner's account");
     expect(note.textContent).toContain("Profile → Agent accounts");
-    // No environment variable to set, and no instance-level claim: ruling 127
+    // No environment variable to set, and no instance-level claim: ruling 137
     // left neither.
     expect(container.textContent).not.toContain("on this instance");
     expect(container.textContent).not.toContain("VIBERR_CLAUDE_USE_CLI_AUTH");
@@ -2033,7 +2033,7 @@ function openLibrary(view: RenderResult) {
   fireEvent.click(view.getAllByText(/Add from library/)[0]!);
 }
 
-describe("LibraryPicker (owner ruling 1 / AP-05)", () => {
+describe("LibraryPicker (P13 owner decision 1 / AP-05)", () => {
   const TEMPLATES: LibraryProfileView[] = [
     {
       id: "security-reviewer",
@@ -2140,7 +2140,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     resources: { skills: [], mcps: [], kb: [] },
   };
 
-  // Ruling 638 (and ruling 368's in-flight rule): the picked row names the
+  // Ruling 316 (and ruling 286's in-flight rule): the picked row names the
   // work while the deploy is in flight, read off the page's own fetcher; the
   // other rows only wait at the busy step.
   it("the picked library row says Adding while its deploy is in flight", async () => {
@@ -2201,7 +2201,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
  * click away disagreed. Availability is two claims — nothing is running it,
  * AND a run could start — and only the first was ever checked here.
  *
- * Ruling 127 makes the second claim person-shaped: a run bills the task
+ * Ruling 137 makes the second claim person-shaped: a run bills the task
  * owner's own account, so what this page answers is whether the VIEWER has
  * connected the backend (they are who presses Run on the tasks they own),
  * alongside how many project members have.
@@ -2240,7 +2240,7 @@ describe("F16: the roster tells the truth about backend connections", () => {
     expect(queryByText(/not connected/)).toBeNull();
   });
 
-  it("states WHOSE account a run spends, and how many members could (ruling 127)", () => {
+  it("states WHOSE account a run spends, and how many members could (ruling 137)", () => {
     // The runtime row's old answer was a deployment claim. This page is not on
     // a task, so it cannot name the person a run will bill — it states the
     // RULE, and the one instance-level number that survives per-person
@@ -2268,11 +2268,11 @@ describe("F16: the roster tells the truth about backend connections", () => {
     expect(queryByText("idle · available")).toBeNull();
     expect(getByText("idle · Codex not connected")).toBeTruthy();
     // The actionable sentence is on screen, addressed to the person and naming
-    // where they fix it — no environment variable, because ruling 127 left
+    // where they fix it — no environment variable, because ruling 137 left
     // none to set.
     expect(container.textContent).toContain("Profile → Agent accounts");
     expect(container.textContent).not.toContain("VIBERR_CODEX_USE_CLI_AUTH");
-    // Ruling 625: said once per place. The chip the note names carries no
+    // Ruling 280: said once per place. The chip the note names carries no
     // second badge, the members' count is the runtime line's alone, and the
     // empty-deployments copy neither repeats the refusal nor calls the
     // profile assignable. CANARY: badge the noted chip again.
@@ -2313,16 +2313,16 @@ describe("F16: the roster tells the truth about backend connections", () => {
     // The row badge stops saying the flat "idle" and carries the reason.
     expect(container.querySelector(".profile-list .ag-idle")).toBeNull();
     const badge = container.querySelector(".profile-list .pill.risk")!;
-    // Ruling 127: the hover sentence names the person's own remedy, not a
+    // Ruling 137: the hover sentence names the person's own remedy, not a
     // deployment file path — there is no instance credential to point at.
     expect(badge.getAttribute("title")).toContain("Profile → Agent accounts");
-    // Ruling 625: the chips' phrase and the hero's hue, not a vaguer amber
+    // Ruling 280: the chips' phrase and the hero's hue, not a vaguer amber
     // "no runtime"; the hover sentence names the backend.
     expect(badge.textContent).toBe("not connected");
     expect(badge.getAttribute("title")).toContain("You haven't connected Codex");
   });
 
-  it("still badges a second backend the note does not name (ruling 625)", () => {
+  it("still badges a second backend the note does not name (ruling 280)", () => {
     // The note under the runtime row names the FIRST backend only; a profile
     // that also lists Claude, unconnected, keeps that chip's own badge.
     const { container } = render(
@@ -2390,7 +2390,7 @@ describe("UXA-15: the Agents page explains its read-only state", () => {
  * UX19-11 — the delete-profile confirm is the last guardrail before an
  * irreversible policy change, and it stated the opposite of the ruling that
  * decides the outcome. "Those threads keep running until the operator reassigns
- * them" promised continuity twice over: ruling 26 (R15-7) makes every
+ * them" promised continuity twice over: ruling 182 (R15-7) makes every
  * subsequent run of an unresolvable profile fully conservative — no delivery,
  * no comments, no ask-human, no evidence — and `deleteAgentProfile` queues no
  * operator run, writes no task timeline event and sends no notification, so
@@ -2410,7 +2410,7 @@ describe("UX19-11: the delete-profile confirm states R15-7's real outcome", () =
     expect(dialog.textContent).not.toContain("until the operator reassigns");
   });
 
-  it("names what ruling 26 actually withholds, and whose job the recovery is", () => {
+  it("names what ruling 182 actually withholds, and whose job the recovery is", () => {
     const dialog = renderConfirm([
       mkDeployment({}),
       mkDeployment({ taskKey: "VIB-151" }),
@@ -2578,13 +2578,13 @@ describe("C11: the Agents page drops the retired 'specialist profile' vocabulary
 });
 
 /**
- * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 106 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." The operator's roster row read "Operator / Task
  * coordinator" under a group label of its own, "Orchestration"; its hero wore
  * a "Task coordinator" pill; and its editor asked for a name and a role, which
  * a save copied onto the project's deployment.
  */
-describe("ruling 518: the operator is one agent, called Operator", () => {
+describe("ruling 106: the operator is one agent, called Operator", () => {
   it("its roster row and hero give the name alone, with no group label of its own", () => {
     // CANARY: give the operator a label in `profileRoleLabel`, or put the
     // "Orchestration" group label back above it.
@@ -2746,7 +2746,7 @@ describe("CreateProfileModal — a provider-refused model is disabled + explaine
  * list. The re-seed judged the stored tier against the backend-wide list while
  * the select renders the selected model's own (narrower) list, so a stored
  * `max` on a model that stops at `high` stood as the picker's value with no
- * option to match, and the save would refuse it by name (ruling 139).
+ * option to match, and the save would refuse it by name (ruling 261).
  */
 describe("CreateProfileModal — a tier the selected model does not offer is re-seeded", () => {
   const NARROWING: ModelCatalog = {
@@ -2801,7 +2801,7 @@ describe("CreateProfileModal — a tier the selected model does not offer is re-
     // backend-wide list, so it survives the re-seed and is SAVED even though
     // the picker only ever showed low/medium (the browser renders the first
     // option for an unmatched value, so the screen looks fine and the stored
-    // value is the one ruling 139's save refuses).
+    // value is the one ruling 261's save refuses).
     const { onSubmit, effortSelect, getByText } = mount(
       mkProfile({ backends: ["claude"], model: "haiku", effort: "max" }),
     );
@@ -3138,8 +3138,8 @@ describe("F34-5: the Agents stats and the pulse read runs, not the waiting flag"
   });
 });
 
-/** Ruling 139: the editor never offers a tier it cannot save. */
-describe("CreateProfileModal effort seeding (ruling 139)", () => {
+/** Ruling 261: the editor never offers a tier it cannot save. */
+describe("CreateProfileModal effort seeding (ruling 261)", () => {
   it("a profile whose stored effort is out of the backend's list shows the backend default and submits it", async () => {
     // Canary: restore the preserved `<option value={effort}>` (the stale tier
     // stays selected and is submitted).
@@ -3177,10 +3177,10 @@ describe("CreateProfileModal fingerprint (B5)", () => {
 });
 
 /**
- * Ruling 479 (pass 40, the Agents page and the global profile editor). Each
+ * Ruling 184 (pass 40, the Agents page and the global profile editor). Each
  * case names its finding and the canary that turns it red.
  */
-describe("ruling 479: the Agents page says what the runtime does", () => {
+describe("ruling 184: the Agents page says what the runtime does", () => {
   const site = { projectName: "akinozer.com" };
 
   /**

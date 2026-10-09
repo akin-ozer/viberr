@@ -1,5 +1,5 @@
 /**
- * Route-closure bundle measurement (modernization gate; ruling 457 ratchet).
+ * Route-closure bundle measurement (modernization gate; ruling 11 ratchet).
  *
  * For each route id given on the command line (default: the three gate
  * routes), collects the full client asset closure — global entry module +

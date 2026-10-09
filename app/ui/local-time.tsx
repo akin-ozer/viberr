@@ -25,7 +25,7 @@ export function LocalDayDotTime({ iso }: { iso: string }) {
  * viewer-local form during SSR: render a timezone-DETERMINISTIC form (UTC, or
  * the raw stored value) while this is false, and the local form after.
  *
- * Ruling 457: false only on the server and during hydration, where React uses
+ * Ruling 11: false only on the server and during hydration, where React uses
  * the server snapshot and then re-renders once with the client's. A component
  * that mounts later (a client navigation, a new row, a console opened on
  * demand) reads true on its first render. The per-mount effect this replaced

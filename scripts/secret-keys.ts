@@ -14,7 +14,7 @@
  *
  * `status` is a reader and takes no lock, so it answers on a live instance;
  * while the app holds the writer lock it reads a copy of the database taken
- * next to the store, never a second connection to the live file (ruling 158).
+ * next to the store, never a second connection to the live file (ruling 23).
  * `reseal` writes, so it takes the data-root writer lock and refuses while the
  * app is running.
  */

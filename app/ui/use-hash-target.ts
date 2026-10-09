@@ -4,7 +4,7 @@ import { hashTarget } from "~/shared/page-anchors";
 import { useHydrated } from "./local-time";
 
 /**
- * Ruling 419(h), shared by ruling 497: bring `target` to the top of the nearest
+ * Ruling 273, shared by ruling 302: bring `target` to the top of the nearest
  * box that scrolls it (the rail on a desktop, the page column on a phone), and
  * focus it without scrolling again. `scrollIntoView` would move every
  * scrolling ancestor, the document included, which the shell never lets a
@@ -30,7 +30,7 @@ export function scrollingBox(el: HTMLElement): HTMLElement | null {
 }
 
 /**
- * Ruling 497: the element a URL's hash names, when `accepts` claims that id,
+ * Ruling 302: the element a URL's hash names, when `accepts` claims that id,
  * revealed once for each navigation that names it, a click on a link to the
  * place already on screen included (a new location carrying the same hash).
  * Returns the claimed id, which the page marks (`data-targeted`); null when the
@@ -46,14 +46,14 @@ export function scrollingBox(el: HTMLElement): HTMLElement | null {
  * a deploy) rendered no mark on the server, and hydration does not patch an
  * attribute the client would have drawn.
  *
- * Ruling 523: the mark says where a link landed, so it lasts until the person
+ * Ruling 302(c): the mark says where a link landed, so it lasts until the person
  * does something on the page. Their next press anywhere in the document (a
  * pointer on anything, the marked place included, or a key other than a lone
  * modifier) takes the hash out of the URL, in place and with no scroll: every
  * reader of the location lets go of the place at once, and a reload does not
  * bring the mark back. The press itself goes on to do what it does.
  *
- * Ruling 547: the place stays where the reveal put it while the page goes on
+ * Ruling 302: the place stays where the reveal put it while the page goes on
  * laying out around it (`holdInView`), until the person moves the page.
  * `reveal` returns the element it brought into view, or null when the page
  * cannot show one yet.
@@ -135,7 +135,7 @@ function offsetIn(box: HTMLElement, el: HTMLElement): number {
 const MOVES = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
 
 /**
- * Ruling 547: keep a revealed place `at` px below the top of the box that
+ * Ruling 302: keep a revealed place `at` px below the top of the box that
  * scrolls it while the page goes on laying out around it. A task page that
  * mounts for the link (another task's) draws its long entries whole and folds
  * them only in the render after the one that revealed the place: on AWSC-2 the

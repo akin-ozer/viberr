@@ -5,7 +5,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { similarOpenTasks } from "./similar-tasks.server";
 
 /**
- * Ruling 324 — the two real near-misses, and the board they were measured on.
+ * Ruling 67 — the two real near-misses, and the board they were measured on.
  *
  * The controller named these unprompted when asked what a reader of the final
  * state would not learn from it: a `create_task` option one confirmation from

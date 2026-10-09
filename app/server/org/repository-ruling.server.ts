@@ -13,11 +13,11 @@ import { kbStoreTargetForDir, saveKnowledgeBase } from "./resources.server";
 import { deleteStoreNode, writeStoreDoc } from "./store-files.server";
 
 /**
- * Ruling 672: a person's decision that a board connects no repository.
+ * Ruling 199: a person's decision that a board connects no repository.
  *
  * The owner, 2026-10-06: "If they refuse that's stored as a ruling on project
  * kb never asked again." So the decision is one document in the project's
- * rulings knowledge base (ruling 239), which Viberr puts in front of every run
+ * rulings knowledge base (ruling 208(a)), which Viberr puts in front of every run
  * the project makes: the operator reads it, and so does each agent it
  * dispatches. The document's presence is the whole fact. Nothing else stores
  * the decision, so a person who deletes it, or the connection of a repository

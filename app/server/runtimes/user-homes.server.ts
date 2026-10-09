@@ -28,7 +28,7 @@ import type { RealBackend } from "./runtime-registry.server";
 import { toError } from "~/shared/errors";
 
 /**
- * Per-person runtime homes (ruling 127).
+ * Per-person runtime homes (ruling 137).
  *
  * Every agent run bills ONE person, so every vendor binary a run spawns reads
  * its credential and writes its transcripts inside THAT person's own home:
@@ -48,7 +48,7 @@ import { toError } from "~/shared/errors";
  * The homes replace the deployment-wide `runtimes/claude-home` /
  * `runtimes/codex-home` and the host `~/.codex` mount: a credential in a shared
  * home is a credential every person's runs bill to whoever owns it, which is
- * exactly what ruling 127 forbids.
+ * exactly what ruling 137 forbids.
  *
  * The credential FILES here are vendor-owned — Viberr creates the directory and
  * never reads, copies or parses what the binary writes into it (Anthropic's
@@ -56,9 +56,9 @@ import { toError } from "~/shared/errors";
  * Claude.ai credentials). The only thing this module asserts about them is
  * whether they EXIST, which is what per-person availability is derived from.
  * (Codex's `auth.json` is the one exception, and only inside the person's own
- * home: ruling 181's per-run fork copies it in and back.)
+ * home: ruling 145's per-run fork copies it in and back.)
  *
- * Ruling 507: a person may keep several accounts per backend, so each account
+ * Ruling 138: a person may keep several accounts per backend, so each account
  * connected since that ruling has a home of its OWN inside the backend home,
  * where its vendor sign-in was written and stays:
  *
@@ -73,14 +73,14 @@ import { toError } from "~/shared/errors";
  * shared by link: a Claude account home's `projects/` points at the backend
  * home's, so every transcript lands where resume, the exporter and the
  * retention sweep look, whichever account wrote it. An account connected
- * before ruling 507 keeps its sign-in in the backend home itself
+ * before ruling 138 keeps its sign-in in the backend home itself
  * (`legacyHome`).
  */
 
 /** The directory under `<dataRoot>/runtimes` that holds the per-person homes. */
 const USER_RUNTIMES_DIR = "users";
 
-/** A user id — and, since ruling 181, a run id — may become a PATH SEGMENT
+/** A user id — and, since ruling 145, a run id — may become a PATH SEGMENT
  *  here, so each is validated as one. Viberr mints ids as `u_<base64url>` /
  *  `run_<base64url>` (`newId`), which this matches; anything else — a
  *  hand-edited row, a traversal attempt, an empty string — is refused rather
@@ -137,7 +137,7 @@ export function userBackendHome(
  * sign-in. `recursive` applies the mode to every directory this call creates;
  * the process umask can only narrow it further, never widen it. In the image
  * the server creates it as itself and `agentLaunchFor` then hands it to the
- * person's agent uid (`<uid>:node`, 2770, ruling 460) before anything runs in
+ * person's agent uid (`<uid>:node`, 2770, ruling 139) before anything runs in
  * it: the person's agents own it, the server reaches it through its group,
  * and nobody else's agents reach it at all.
  */
@@ -156,7 +156,7 @@ export function ensureUserBackendHome(
 /** The directory under a backend home that holds its accounts' own homes. */
 const ACCOUNT_HOMES_DIR = "accounts";
 
-/** What locates one account's vendor home (ruling 507): its id, and whether it
+/** What locates one account's vendor home (ruling 138): its id, and whether it
  *  was connected before the ruling and so lives in the backend home itself. */
 export interface BackendAccountRef {
   id: string;
@@ -168,7 +168,7 @@ export interface BackendAccountRef {
  * backend. Claude writes its transcripts under `projects/` and every reader of
  * them (`probeSessionContinuity`, the exporter, the retention sweep, a resume on
  * another account) looks in the backend home's. Codex needs none: its runs fork
- * a private home from the backend home anyway (ruling 181) and only take the
+ * a private home from the backend home anyway (ruling 145) and only take the
  * account's `auth.json` from here.
  */
 const ACCOUNT_HOME_SHARED_DIRS = {
@@ -189,7 +189,7 @@ function assertPathSafeAccountId(accountId: string): string {
 }
 
 /**
- * The vendor home of ONE account (ruling 507): where its sign-in was written,
+ * The vendor home of ONE account (ruling 138): where its sign-in was written,
  * what a Claude run on it gets as `CLAUDE_CONFIG_DIR`, and where a Codex run on
  * it takes its `auth.json` from (and hands the refreshed one back to).
  */
@@ -208,7 +208,7 @@ export function backendAccountHome(
 export interface EnsuredAccountHome {
   home: string;
   /**
-   * Ruling 460: the directories an agent process on this account writes that
+   * Ruling 139: the directories an agent process on this account writes that
    * the server may have just created as itself — the account home and the
    * shared directories it links to. `agentLaunchFor` hands each one that is not
    * already the person's to their uid (the launcher also takes over the
@@ -306,13 +306,13 @@ export function listUserRuntimeRoots(
 // ------------------------------------------------------ per-run Codex homes
 
 /**
- * Ruling 181: every Codex run gets a PRIVATE `CODEX_HOME`, forked from the
+ * Ruling 145: every Codex run gets a PRIVATE `CODEX_HOME`, forked from the
  * person's shared home.
  *
  * F36-3 (pass 36): the Codex CLI extracts its exec helpers
  * (`codex-linux-sandbox`, `codex-execve-wrapper`, `apply_patch`) into ONE
  * directory per home, `$CODEX_HOME/tmp/arg0/codex-arg0XXXXXX/`, and every new
- * process of the same home replaces it. Ruling 127 gave every run of one
+ * process of the same home replaces it. Ruling 137 gave every run of one
  * person the same `codex-home`, so a reviewer, the operator and a developer
  * running at once deleted each other's sandbox helper mid-run ("launch
  * rejected … No such file or directory"). The binary offers no override for
@@ -321,7 +321,7 @@ export function listUserRuntimeRoots(
  * So a run is handed `<codex-home>/runs/<runId>/` as its `CODEX_HOME`:
  *
  *  - `auth.json` and `config.toml` are COPIED in (when present): the sign-in
- *    from the home of the account the run bills (ruling 507; the shared home
+ *    from the home of the account the run bills (ruling 138; the shared home
  *    for an account connected before it), the config from the shared home. A
  *    copy, not a link: the CLI rewrites `auth.json` on a token refresh, and two
  *    runs writing one shared file through a link is the race this must not
@@ -352,7 +352,7 @@ const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;
 const CODEX_HOME_SEEDED_FILES = ["auth.json", "config.toml"] as const;
 
 const AUTH_WRITE_BACK_LOCK = ".auth.json.lock";
-/** Ruling 507: beside a run home's seeded `auth.json`, the digest of what it
+/** Ruling 138: beside a run home's seeded `auth.json`, the digest of what it
  *  was seeded with, so the settle can tell a token the CLI refreshed from a
  *  copy that merely went stale while another run refreshed the account. */
 const AUTH_SEED_DIGEST = ".auth.json.seed";
@@ -373,7 +373,7 @@ export interface CodexRunHome {
   /** The person's shared codex-home it was forked from. */
   sharedHome: string;
   /**
-   * Ruling 507: the home of the account the run bills, which its `auth.json`
+   * Ruling 138: the home of the account the run bills, which its `auth.json`
    * is copied from and the refreshed one is written back to (under that home's
    * own lock). The shared home itself for an account connected before the
    * ruling. Never another account's: a run that started on one account and
@@ -389,7 +389,7 @@ export function codexRunHomeDir(sharedHome: string, runId: string): string {
   return path.join(sharedHome, CODEX_RUN_HOMES_DIR, assertPathSafeRunId(runId));
 }
 
-/** Ruling 507: the id a run's completion compaction forks its own private home
+/** Ruling 138: the id a run's completion compaction forks its own private home
  *  under (`runs/<runId>-compaction`), beside the run's. Path-safe, unlike the
  *  compaction's process marker (`compactionRunId`, which carries a colon). */
 export function codexCompactionHomeId(runId: string): string {
@@ -397,7 +397,7 @@ export function codexCompactionHomeId(runId: string): string {
 }
 
 /**
- * Ruling 460: what hands a path in a person's home to their agent uid (the
+ * Ruling 139: what hands a path in a person's home to their agent uid (the
  * launcher's `--prepare-home`, supplied by the caller that knows the uid). The
  * server writes the run home's copies and the written-back sign-in as itself;
  * the CLI that reads them runs as the person.
@@ -405,7 +405,7 @@ export function codexCompactionHomeId(runId: string): string {
 export type HomeOwner = (target: string) => void;
 
 /**
- * Ruling 485: what removes a tree in a person's home — as them, through the
+ * Ruling 140: what removes a tree in a person's home — as them, through the
  * launcher (`removeAgentTreeSync` with their launch), never the server's own
  * recursive remove: their CLI writes the run home, and a tool it runs can
  * leave a directory only its uid can enter. Supplied by the caller that knows
@@ -430,7 +430,7 @@ function removeRunHomeTree(target: string, person: RunHomePerson | undefined): v
  *  are handed to the person's uid before the CLI starts (it throws when that
  *  fails: a run whose home it cannot use must not start), and a predecessor's
  *  tree is removed as them. `authHome` is the billed account's home (ruling
- *  507); the sign-in is taken from there and from nowhere else, so a pasted-key
+ *  138); the sign-in is taken from there and from nowhere else, so a pasted-key
  *  account's run never inherits another account's `auth.json`. */
 export function prepareCodexRunHome(
   sharedHome: string,
@@ -484,16 +484,16 @@ function ownQuietly(own: HomeOwner | undefined, target: string, runId: string): 
 
 /**
  * The settle half: carry a refreshed `auth.json` back to the billed account's
- * home (`authHome`, ruling 507) when the CLI refreshed it (under that home's
+ * home (`authHome`, ruling 138) when the CLI refreshed it (under that home's
  * lock), then remove the run home. Never throws — a settle that cannot clean
  * up is logged, not propagated.
  *
- * With a `person` (ruling 460): the run home is first handed to the person's
+ * With a `person` (ruling 139): the run home is first handed to the person's
  * uid and the server's group as a whole, so the server can read what the CLI
  * wrote there 0600; the written-back `auth.json` is the server's file, so it
  * is handed back too, or the vendor's own `login status` and `logout`, which
  * run as the person in that home, could not read their own sign-in. The run
- * home is then removed as the person (ruling 485).
+ * home is then removed as the person (ruling 140).
  */
 export function finishCodexRunHome(home: CodexRunHome, person?: RunHomePerson): void {
   const own = person?.own;
@@ -507,7 +507,7 @@ export function finishCodexRunHome(home: CodexRunHome, person?: RunHomePerson): 
       err: toError(error),
     });
   }
-  // Ruling 199: BEFORE the directory goes, re-point the CLI's own index at the
+  // Ruling 145: BEFORE the directory goes, re-point the CLI's own index at the
   // path the transcript actually occupies. The rollout is written THROUGH the
   // `sessions` symlink, so the bytes land in the shared home and survive — but
   // the CLI recorded the path it saw, `…/runs/<runId>/sessions/…`, and this
@@ -525,7 +525,7 @@ export function finishCodexRunHome(home: CodexRunHome, person?: RunHomePerson): 
 }
 
 /**
- * Ruling 199: the run home's removal leaves the CLI's thread index pointing at
+ * Ruling 145: the run home's removal leaves the CLI's thread index pointing at
  * a path that no longer exists, so every later `thread/resume` fails with
  * "no rollout found for thread id" — and Viberr reported that as "the agent's
  * stored Codex session no longer exists" while the transcript sat in the shared
@@ -559,7 +559,7 @@ function repointRunRollouts(home: CodexRunHome): void {
         if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) {
           logger.warn(
             "codex rollout paths NOT re-pointed: this state database has no `threads.rollout_path`; " +
-              "the vendor schema changed and thread resume will break again until ruling 199 is updated",
+              "the vendor schema changed and thread resume will break again until ruling 145 is updated",
             { runId: home.runId, dbFile },
           );
           continue;
@@ -599,7 +599,7 @@ function repointRunRollouts(home: CodexRunHome): void {
 }
 
 /**
- * Ruling 199, the retroactive half: every thread recorded BEFORE the settle
+ * Ruling 145, the retroactive half: every thread recorded BEFORE the settle
  * learned to re-point is still aimed at a run home that is long gone. Live,
  * that was 135 of 137 threads — every Codex conversation the instance had —
  * and each one's transcript was sitting at the shared path all along. One
@@ -627,7 +627,7 @@ export function repairCodexRolloutPaths(dataRoot?: string): number {
           if (!columns.success || !columns.data.some((c) => c.name === "rollout_path")) {
             logger.warn(
               "codex rollout paths NOT repaired at boot: this state database has no " +
-                "`threads.rollout_path`; the vendor schema changed and ruling 199 needs updating",
+                "`threads.rollout_path`; the vendor schema changed and ruling 145 needs updating",
               { dbFile },
             );
             continue;
@@ -660,7 +660,7 @@ export function repairCodexRolloutPaths(dataRoot?: string): number {
   return repaired;
 }
 
-/** The two vendor shapes ruling 199 reads, parsed at the boundary. A row that
+/** The two vendor shapes ruling 145 reads, parsed at the boundary. A row that
  *  does not match is not this schema's business — the whole read is skipped. */
 const columnNamesSchema = z.array(z.object({ name: z.string() }).loose());
 const threadRowsSchema = z.array(
@@ -684,7 +684,7 @@ function codexStateDatabases(sharedHome: string): string[] {
 function writeBackAuth(home: CodexRunHome): boolean {
   const refreshed = readIfPresent(path.join(home.dir, "auth.json"));
   if (!refreshed) return false;
-  // Ruling 507: a copy the CLI never refreshed is not news — handing it back
+  // Ruling 138: a copy the CLI never refreshed is not news — handing it back
   // would put the seed over a token another run of the same account refreshed
   // meanwhile (and a refresh token that was rotated away with it). A run home
   // from before the digest existed has none, and keeps the old comparison.
@@ -692,7 +692,7 @@ function writeBackAuth(home: CodexRunHome): boolean {
   if (seed && seed.toString("utf8") === digestOf(refreshed)) return false;
   const sharedAuth = path.join(home.authHome, "auth.json");
   // Checked again under the lock below; this early answer is for an account
-  // whose whole home went while the run was live (ruling 507), where there is
+  // whose whole home went while the run was live (ruling 138), where there is
   // no directory to put a lock in and nothing to hand a token back to.
   if (!existsSync(sharedAuth)) return false;
   let written = false;
@@ -722,7 +722,7 @@ function readIfPresent(file: string): Buffer | null {
 /** A lockfile with retry: `O_EXCL` create, poll while held, break a holder
  *  that is older than a settle could possibly be. Serializes the write-back
  *  between concurrent runs of one account (the lock sits in its home, ruling
- *  507); last writer wins by design. */
+ *  138); last writer wins by design. */
 function withAuthLock(authHome: string, runId: string, action: () => void): void {
   const lock = path.join(authHome, AUTH_WRITE_BACK_LOCK);
   const deadline = Date.now() + AUTH_LOCK_WAIT_MS;

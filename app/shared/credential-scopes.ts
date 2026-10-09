@@ -1,6 +1,6 @@
 /**
  * Which GitHub scopes a refusal is a VIOLATION of, and which are advisory
- * (F39-5, ruling 380(b)). Client-safe and dependency-free on purpose: both the
+ * (F39-5, ruling 221(b)). Client-safe and dependency-free on purpose: both the
  * timeline writer (`server/github/scope-flag.server.ts`) and the credential
  * card's advisories (`server/secrets/pat-store.server.ts`) read it, and those
  * two import each other's neighbours — a shared constant in either of them is
@@ -10,7 +10,7 @@
  * The distinction is not cosmetic. Live in pass 39, one minute apart, viberr
  * told its owner both of these about one fact: the task record said
  * "**Policy violation:** active PAT is missing `checks:read`" under the coral
- * shield, and the credential card said "All required scopes proven". Ruling 360
+ * shield, and the credential card said "All required scopes proven". Ruling 237
  * had already settled it — merging never needed `checks:read` — but only the
  * card had learned.
  */

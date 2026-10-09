@@ -68,7 +68,7 @@ describe("/resources/controller-unseen (O39-d)", () => {
     expect(ids).not.toContain(stranded.id);
   });
 
-  it("rides no page revalidation, and neither does the dock's view (ruling 457)", async () => {
+  it("rides no page revalidation, and neither does the dock's view (ruling 11)", async () => {
     // CTL-3 / RF-8. CANARY: drop `shouldRevalidate` from either route and
     // React Router reloads it on every navigation, action and revalidation of
     // every page; the view with the last `seen=1` it was loaded with.
@@ -79,7 +79,7 @@ describe("/resources/controller-unseen (O39-d)", () => {
   });
 
   /**
-   * Ruling 457, test audit L14-29. The dock loads this through a root-owned
+   * Ruling 11, test audit L14-29. The dock loads this through a root-owned
    * fetcher on every page it mounts on, on each `controller.updated` and every
    * 5 s while a turn works. `requireAuth` answered a missing session with a
    * login redirect naming THIS route as the returnTo, and a fetcher follows a

@@ -9,7 +9,7 @@ import { useEffect, useRef } from "react";
  * rollback); dedupe is by data identity. useActionToast, the path for
  * server-computed toasts, is built on it. No data is no result: a fetcher that
  * has not answered, or a load a route's `clientLoader` answered with null for
- * a failure (ruling 457).
+ * a failure (ruling 11).
  */
 export function useFetcherResult<T>(
   fetcher: { state: "idle" | "loading" | "submitting"; data?: T },

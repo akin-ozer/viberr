@@ -13,12 +13,12 @@ Source of truth: `app/schemas/project-file.schema.ts`, `app/schemas/task-file.sc
 `task-writer.server.ts`, `epic-writer.server.ts`, `actor-ref.server.ts` (parsers and writers);
 `app/server/org/board-file.server.ts` and `app/server/files/zip.server.ts` (the board file, §9);
 `app/server/files/task-sources.server.ts` (a task's kept sources, §10).
-Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 503
+Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against ruling 17
 (2026-09-26).
 
 Humans and agents may edit these files directly. The watcher (250 ms debounce) and the manual
 rescan reconcile them into projections. The UI always renders the REAL store-relative path
-(`projects/<slug>/tasks/<KEY>/task.md`), never the mock's `.viberr/…` (orchestrator ruling 3).
+(`projects/<slug>/tasks/<KEY>/task.md`), never the mock's `.viberr/…` (orchestrator ruling 15(a)).
 
 Data-root layout (the nine `DATA_ROOT_SUBDIRS` are created at boot by
 `app/server/files/file-store-root.server.ts`, the rest when first written; the full list is
@@ -30,38 +30,38 @@ ${VIBERR_DATA_ROOT}/
   projects/<slug>/tasks/<KEY>/task.md     ← task truth
   projects/<slug>/tasks/<KEY>/attachments/ ← files agents save and people upload on the task
                                              (canonical bytes, served member-only, not
-                                             projected; ruling 96, ruling 379), and Viberr's
+                                             projected; ruling 78, ruling 76), and Viberr's
                                              own pictures of the delivered pages,
                                              `<file>.capture-desktop.png` and
-                                             `<file>.capture-phone.png` (ruling 691)
+                                             `<file>.capture-phone.png` (ruling 86)
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/ ← each files delivery as it was delivered,
                                              copied when `deliveredAt` is stamped, the stamp's
-                                             colons as dashes (a record, not projected; ruling 597):
+                                             colons as dashes (a record, not projected; ruling 86):
                                              every file on the task then, whichever agent saved
-                                             it, the browser's working files aside (ruling 610),
+                                             it, the browser's working files aside (ruling 81),
                                              then that delivery's own page pictures, added
-                                             when its render finishes (ruling 691)
+                                             when its render finishes (ruling 86)
   projects/<slug>/tasks/<KEY>/sources/    ← the sources the task's result rests on, kept apart
                                              from its files: `index.jsonl` and one bytes file a
                                              source (§10). The server's own folder: an agent
                                              reads it and cannot write it (a record, not
-                                             projected; ruling 690)
+                                             projected; ruling 15)
   projects/<slug>/tasks/<KEY>/workspace/  ← git clones (deliverer + operator share
                                              <repo-name>/; each supporting run gets
                                              support/<profileId>/<repo-name>/). NOT canonical,
                                              not watched, not projected; reclaimed for
                                              terminal-stage tasks at boot and on
                                              maintenance passes when no run is live
-  projects/<slug>/epics/<id>.md           ← epic truth (ruling 503)
+  projects/<slug>/epics/<id>.md           ← epic truth (ruling 17)
   projects/<slug>/goals/converted/        ← the retired chained-goal files, filed by the
-                                             one-time conversion to epics (ruling 503);
+                                             one-time conversion to epics (ruling 17);
                                              a record, not watched or projected
-  projects/<slug>/.repo-mirror/           ← bare per-repo mirror (ruling 87); a cache
+  projects/<slug>/.repo-mirror/           ← bare per-repo mirror (ruling 195); a cache
   agents/profiles/<id>.md                 ← org-level agent profile templates
   agents/definitions/{operator,controller}.md ← shipped doctrine files
-  agents/controller-requests.md           ← the controller's resource requests (ruling 390)
+  agents/controller-requests.md           ← the controller's resource requests (ruling 271)
   runtimes/<backend>/<runId>.jsonl        ← raw NDJSON run logs (the truth for run logs)
-  runtimes/users/<userId>/claude-home/    ← one person's own agent home (ruling 127): the
+  runtimes/users/<userId>/claude-home/    ← one person's own agent home (ruling 137): the
   runtimes/users/<userId>/codex-home/       vendor's sign-in file, which only the vendor
                                             binary reads, plus their provider sessions,
                                             which session export serves and transcript
@@ -91,7 +91,7 @@ General rules for the canonical files:
   diagnostics + safe fallbacks, and list fields parse one row at a time (a bad row drops only
   itself, with an indexed diagnostic). `project.md` and `task.md` share one set of these readers
   (`app/schemas/file-diagnostics.ts`), and a field that falls back names the value it used:
-  ``Frontmatter field `readiness` is missing; using "ready".`` (ruling 458(h)). Parsing never
+  ``Frontmatter field `readiness` is missing; using "ready".`` (ruling 16(a)). Parsing never
   throws and never drops a task or project.
   Diagnostics floor readiness (warning → `input_required`, error →
   `inconsistency_risk_detected`, hard stop → `blocked`) — see
@@ -118,8 +118,8 @@ slug: viberr-core                 # must match the directory; the directory name
 archived: true                    # optional; only an archived project carries the key
 repo: akin-ozer/viberr            # THE project's GitHub repo (one per project), or
                                   # null: a board that delivers results needs none
-                                  # (ruling 667). `owner/name` as GitHub allows it
-                                  # (ruling 700(a), `REPO_SLUG_RE`): an owner of
+                                  # (ruling 224). `owner/name` as GitHub allows it
+                                  # (ruling 225, `REPO_SLUG_RE`): an owner of
                                   # letters, digits and single hyphens, up to 39; a
                                   # name of letters, digits, `.`, `_`, `-`, up to
                                   # 100, never `.` or `..`. Any other value reads as
@@ -133,10 +133,10 @@ repo: akin-ozer/viberr            # THE project's GitHub repo (one per project),
 defaultBranch: main
 taskPrefix: VIB                   # letters only; task keys: VIB-142. `EPIC` is reserved
 nextTaskNumber: 169               # atomic per-project key counter
-stages:                           # per-project, ordered (ruling 15)
+stages:                           # per-project, ordered (ruling 47)
   - id: triage
     name: Triage
-    color: slate                  # one of twenty preset names (ruling 364); absent = slate
+    color: slate                  # one of twenty preset names (ruling 279); absent = slate
   # … ready / impl / review / done
 workflow:                         # governed boundaries: auto|approval|human
   - from: triage
@@ -152,48 +152,48 @@ members:                          # project roles (4-role system, contracts §3.
   - userId: u_abc123
     role: admin                   # admin | maintainer | contributor | viewer
                                   # (strict tier; `reviewer` was renamed `contributor` —
-                                  # ruling 2 amendment. Source of truth: app/shared/rbac.ts)
+                                  # ruling 26(a) amendment. Source of truth: app/shared/rbac.ts)
 agents:                           # per-project DEPLOYMENT of profile templates
   - profileId: operator
     capabilities: []
     definition:                   # optional per-field override of the template;
                                   # never name, role or scope on the operator, which
-                                  # is always "Operator" with no role (ruling 518:
+                                  # is always "Operator" with no role (ruling 176:
                                   # resolving drops them, boot removes them)
-      autonomy: supervised        # operator only: supervised | full (ruling 67)
+      autonomy: supervised        # operator only: supervised | full (ruling 108)
   - profileId: developer
-    capabilities:                 # id-based against the shared catalog (ruling 2)
+    capabilities:                 # id-based against the shared catalog (ruling 26(a))
       - capabilityId: create-task-branch
         mode: direct              # direct | recommend | human | off — specialists have
                                   # no recommend lane; a stored recommend reads as off
-                                  # (ruling 81). Modes: CAPABILITY_MODES
+                                  # (ruling 182). Modes: CAPABILITY_MODES
     extras:                       # display-only bespoke labels (near-misses)
       - label: Push commits to the branch
         mode: human
     definition:                   # kind, name, role, icon, backends, model, effort,
       model: sonnet               # scope, desc, persona, stages, spanAll, autonomy,
       effort: high                # resources — each optional, template wins when absent
-      resources:                  # ruling 156: the deploy-time COPY of the template's
+      resources:                  # ruling 177: the deploy-time COPY of the template's
         skills: [developer-expertise]  # grants; a run mounts this copy
         mcps: []
         kb: []
 credentialPolicy:                 # NON-secret policy; the PAT itself lives
   credentialLabel: viberr-bot · fine-grained PAT     # sealed in SQLite
   masked: github_pat_••••42af
-  requiredScopes: [repo, pull_request:write]   # the exact minimum (ruling 18)
+  requiredScopes: [repo, pull_request:write]   # the exact minimum (ruling 220)
 guardrails:                       # four defaults (shared/workflow/templates.ts):
                                   # meaningful-comment, no-duplicate-summary,
                                   # compression-threshold (value 40), evidence-separation;
                                   # delete-branch-after-merge is a fifth row whose
-                                  # ABSENCE means on (ruling 24). The four defaults are
-                                  # edited on Policy → Guardrails (ruling 112), the fifth
+                                  # ABSENCE means on (ruling 233). The four defaults are
+                                  # edited on Policy → Guardrails (ruling 134), the fifth
                                   # on Settings → GitHub
   - id: compression-threshold
     desc: Long timelines compress once routine events pass the threshold; typed events are always kept.
     on: true
     value: 40
     unit: events
-requiredReviewers:                # ruling 178: reviewers the project REQUIRES per review
+requiredReviewers:                # ruling 17: reviewers the project REQUIRES per review
                                   # stage — a non-terminal stage id and a deployed
                                   # verdict-capable profile id; `[]` (the default) means
                                   # only the reviewers an operator engages are required.
@@ -201,10 +201,10 @@ requiredReviewers:                # ruling 178: reviewers the project REQUIRES p
                                   # controller's set_required_reviewers; read on Policy.
   - stageId: review
     profileId: reviewer
-rulingsKb: viberr-rulings         # ruling 239: the project's rulings knowledge base, by
+rulingsKb: viberr-rulings         # ruling 208(a): the project's rulings knowledge base, by
                                   # store directory, or null. Every agent run on the
                                   # project reads it, and the controller while scoped here
-fileLeases:                       # ruling 245: which TASK owns which shared paths
+fileLeases:                       # ruling 60: which TASK owns which shared paths
                                   # until it merges — the ordering statement
                                   # `blockedBy` cannot make (`blockedBy` says "do not
                                   # START until done"). Enforced at DELIVERY: another
@@ -217,10 +217,10 @@ fileLeases:                       # ruling 245: which TASK owns which shared pat
   - paths: ["pnpm-lock.yaml"]
     taskKey: SHOP-11
     reason: regenerating it for the cart importer
-gates:                            # ruling 482: the commands VIBERR runs on every
+gates:                            # ruling 17: the commands VIBERR runs on every
                                   # delivered revision, in order, each with `sh -c`
                                   # in a fresh checkout of the revision's sha, as the
-                                  # task owner's agent uid (ruling 460), with no
+                                  # task owner's agent uid (ruling 139), with no
                                   # credential. A plain acceptance waits until every
                                   # one exited 0 on the revision under review. Absent
                                   # (not `[]`) when the project declares none; at most
@@ -257,16 +257,16 @@ Notes:
   template) and an optional `definition` whose fields override the template's one by one.
   Task assignments store `profileId` — never joined by role text.
   `definition.resources` is a COPY of the template's grants taken at deploy
-  time (ruling 156): it changes only through the project editor,
+  time (ruling 177): it changes only through the project editor,
   `update_agent_deployment`, the org resource-rename rewriter, or a propagation
   from the template (`save_global_agent { propagate }`, the org modal's box, the
   Agents page's "Use the template's grants", the operator's template included, ruling
-  479(c)), and a run mounts the copy.
+  177), and a run mounts the copy.
   `definition.persona` is a snapshot the same way: the project editor,
   `update_agent_deployment`'s `persona` and a template save that changes the persona
-  with `propagate` rewrite it (ruling 467).
+  with `propagate` rewrite it (ruling 177).
 - A lease whose holder task is archived, in the terminal stage or gone binds nobody
-  (resolved at read time by `activeFileLeases`, ruling 247); the row stays in the file until
+  (resolved at read time by `activeFileLeases`, ruling 60); the row stays in the file until
   someone clears it.
 - The three always-human capabilities (`merge-pull-request`,
   `transition-to-done`, `change-project-policy`) are a server invariant list
@@ -286,26 +286,26 @@ title: Attach execution workspace to task runtime
 stage: review                     # id into the project's stage list
 previousStageId: impl             # where the task CAME from (null until the
                                   # first transition) — the operator's agent
-                                  # choice weighs it (ruling 98)
+                                  # choice weighs it (ruling 124)
 heldAtStage: null                 # durable deliberate-hold marker (V18): the
                                   # stage the operator held twice in a row on
                                   # purpose; while it names the CURRENT stage
                                   # the stranded backstop stays quiet. Cleared
                                   # by transitions, packet resolutions, goal
                                   # edits and a person's own operator run
-                                  # (ruling 216), never by a schedule or a
+                                  # (ruling 120), never by a schedule or a
                                   # machine trigger
-readiness: input_required         # canonical 4-value enum ONLY (ruling 1):
+readiness: input_required         # canonical 4-value enum ONLY (ruling 44):
                                   # ready | input_required |
                                   # inconsistency_risk_detected | blocked
 waiting: human                    # human | agent | none (secondary signal)
-                                  # ruling 225: the PROJECTION also derives a
+                                  # ruling 45: the PROJECTION also derives a
                                   # fourth value, `schedule`, for a task resting
                                   # on a pending occurrence with nothing pending
                                   # on a person. Never written to a task file.
 ownerUserId: u_abc123             # ONE human owner; null when unowned
 engagements:                      # ONE uniform list of engaged agents (G1),
-  - profileId: developer          # written by the DISPATCH since ruling 98 —
+  - profileId: developer          # written by the DISPATCH since ruling 51 —
     backend: codex                # running an unengaged deployed profile
     role: Developer               # engages it (delivering iff no deliverer AND
     delivers: true                # repo-write; supporting otherwise). At most
@@ -315,19 +315,19 @@ engagements:                      # ONE uniform list of engaged agents (G1),
     role: Review & validation     # report-validation-verdict:direct grant and
     delivers: false               # makes a supporting engagement a REQUIRED
     verdictCapable: true          # reviewer.
-operator:                         # null in triage (ruling 16: store stage id;
+operator:                         # null in triage (ruling 295: store stage id;
   assignedAtStageId: triage       # UI renders "stage <1-based index>")
 recommendations: []               # pending operator recommendation cards:
                                   # transition | run_agent | accept_completion |
                                   # delivery. An accept_completion card carries
                                   # `forHeadSha`, the work revision it binds to,
                                   # and is withdrawn on the record when that
-                                  # changes (ruling 137)
-schedules: []                     # pending/fired scheduled runs (O-3, ruling 98:
+                                  # changes (ruling 99)
+schedules: []                     # pending/fired scheduled runs (O-3, ruling 53:
                                   # run-operator | run-agent; the agent arm pins
                                   # profileId + prompt, nothing else)
-queuedQuestions: []               # ruling 241: reviewer questions a dependency
-                                  # hold refused (ruling 186 refuses every agent
+queuedQuestions: []               # ruling 66: reviewer questions a dependency
+                                  # hold refused (ruling 56 refuses every agent
                                   # dispatch while `blockedBy` is non-empty).
                                   # Each entry pins profileId + the directive
                                   # text + who decided; `announceRelease` drains
@@ -351,20 +351,20 @@ workRevision:                     # the immutable revision under review, or null
   sourceProfileId: developer
   kind: delivered                 # delivered (absent = delivered) | verified (a
                                   # no-change verification, names the base sha) |
-                                  # discarded (ruling 161: a person discarded the
+                                  # discarded (ruling 234: a person discarded the
                                   # never-pushed branch; the record stays so the
                                   # verdicts read as history, readers go through
                                   # `activeWorkRevision`, which answers null) |
-                                  # external (ruling 179: the reconciler minted it
+                                  # external (ruling 240: the reconciler minted it
                                   # from a PR head moved by commits Viberr did not
                                   # deliver, so older verdicts stop binding)
-  pushedAt: 2026-09-06T19:10:35Z  # ruling 161: stamped by the delivery push that
+  pushedAt: 2026-09-06T19:10:35Z  # ruling 234: stamped by the delivery push that
                                   # published this head (pushed, or up_to_date with
                                   # it). Absent = no delivery has seen it on origin;
                                   # `revisionLeftWorkspace` reads it (never
                                   # `github.commits`, which the workspace reconcile
                                   # writes from the local clone)
-deliveredAt: null                 # ruling 388: when a DELIVERER last saved files
+deliveredAt: null                 # ruling 84: when a DELIVERER last saved files
                                   # into attachments/ — this task's delivery when
                                   # the deliverable is not a commit (a report, a
                                   # design note, an audit). It is what a review
@@ -373,18 +373,18 @@ deliveredAt: null                 # ruling 388: when a DELIVERER last saved file
                                   # new revision does. Only the delivering
                                   # engagement sets it: a reviewer's own captures
                                   # are evidence, and a person's upload is an
-                                  # input (ruling 379), not the work.
+                                  # input (ruling 76), not the work.
 verdicts:                         # per-engagement, each bound to a SUBJECT
   - profileId: reviewer
-    revisionId: rev_9f2c          # ruling 388: the workRevision.id, or
+    revisionId: rev_9f2c          # ruling 84: the workRevision.id, or
                                   # files:<deliveredAt> for a non-commit delivery
     headSha: a91f7c2e…            # absent when the subject is not a commit
     result: approve               # approve | request_changes
     reason: Scope matches the goal.
     at: 2026-07-04T06:52:00.000Z
-    rounds: 1                     # ruling 204: times this reviewer returned THIS
+    rounds: 1                     # ruling 92: times this reviewer returned THIS
                                   # result on THIS revision (absent reads 1)
-baseRefreshes: []                 # ruling 132: every base refresh the operator's
+baseRefreshes: []                 # ruling 239: every base refresh the operator's
                                   # update_branch_from_base landed on the branch,
                                   # recorded as it is pushed: { mergeSha, baseSha,
                                   # base, commits, at, onto }. A merge listed here is
@@ -393,16 +393,16 @@ baseRefreshes: []                 # ruling 132: every base refresh the operator'
                                   # base refresh from authored drift. The refresh merges
                                   # with --no-ff, so mergeSha is always a two-parent
                                   # merge commit, never the base tip itself. `onto`
-                                  # (ruling 439) is the branch head the merge was made
+                                  # (ruling 239) is the branch head the merge was made
                                   # on, which lets a revision be followed through
                                   # Viberr's own refreshes instead of re-minted
 branch: vib-142-attach-workspace  # task-key branch; null before creation, and for
-                                  # good on a task delivered as files (ruling 665)
+                                  # good on a task delivered as files (ruling 228)
 archived: false                   # R14-3: filed away, kept for the record —
                                   # leaves the board's default view and the review
                                   # queue, keeps its timeline, restorable; archived
                                   # at the terminal stage it still counts as done
-                                  # (ruling 651), before it as abandoned work
+                                  # (ruling 274), before it as abandoned work
 noChanges: true                   # optional; R17-2/R19-1 — this task completes
                                   # with NOTHING to deliver (see the note below)
 pr:                               # GitHub projection mirrored into the file
@@ -413,18 +413,18 @@ pr:                               # GitHub projection mirrored into the file
   checks: { total: 4, passing: 4, failing: 0, pending: 0 }
   review: approved                # approved | changes_requested | review_required
   mergeable: clean                # clean | conflicting | unknown
-  mergeableAt: 60049586…          # ruling 405: the head `mergeable` was measured on;
+  mergeableAt: 60049586…          # ruling 242: the head `mergeable` was measured on;
                                   # a conflict measured on an older head stops blocking
-  headSha: 60049586…              # ruling 135: the PR head as GitHub last reported
+  headSha: 60049586…              # ruling 243: the PR head as GitHub last reported
                                   # it (optional key; carried across a reuse of the
                                   # SAME number, never inherited by a different PR)
-  revisionDrift:                  # ruling 132: AUTHORED commits since the reviewed
+  revisionDrift:                  # ruling 239: AUTHORED commits since the reviewed
     headSha: 60049586…            # revision, with a base refresh reported apart —
     authored: 0                   # never as unreviewed work; describeRevisionDrift
     baseRefresh:                  # (app/shared/revision-drift.ts) is the ONE
       merges: 1                   # sentence every surface prints; null baseRefresh
       commits: 4                  # when the head carries none
-  unpushedRevision:               # ruling 135: the DELIVERED revision is not on
+  unpushedRevision:               # ruling 243: the DELIVERED revision is not on
     revisionSha: 385047c…         # the PR — behind (a plain push fast-forwards),
     prHeadSha: 60049586…          # diverged (a push is refused non-fast-forward)
     relation: unknown             # or unknown (GitHub does not have the sha at
@@ -432,14 +432,14 @@ pr:                               # GitHub projection mirrored into the file
                                   # and by the workspace reconcile the moment a run
                                   # mints a new revision on an open PR; cleared by
                                   # a delivery that pushes; never for `verified`
-  closure:                        # ruling 160: a person closed this PR without
+  closure:                        # ruling 232: a person closed this PR without
     at: 2026-09-06T19:33:19Z      # merging. Stamped by the reconciler on the
     by: akin-ozer                 # transition into `closed` (the closer's GitHub
     answered:                     # login, or null); `answered` is stamped when a
       at: 2026-09-06T19:40:02Z    # person resolves a packet while the PR is closed
       byUserId: u_arda            # (null until then). Until answered, delivery
                                   # refuses `closed_by_human`; dropped on reopen
-  bodyWritten:                    # ruling 474: the PR body Viberr last wrote, set
+  bodyWritten:                    # ruling 231(c): the PR body Viberr last wrote, set
     sha256: 03a8caef…             # on create and on every rewrite: its hash (CRLF
     revision: 60049586…           # read as LF) and the revision it describes (the
     keptRevision: 60049586…       # PR head when the task records none, else null);
@@ -447,7 +447,7 @@ pr:                               # GitHub projection mirrored into the file
                                   # found and kept at (one note each). Absent = never
                                   # recorded, and a delivery treats the body as its
                                   # own. Carried for the same PR, never inherited
-  reviewRelay:                    # ruling 484 (a loose key, like humanApproval):
+  reviewRelay:                    # ruling 246 (a loose key, like humanApproval):
     relayed: [review:2197, comment:88410]  # the GitHub reviews and line comments
                                   # the reconciler relayed to the deliverer, stamped
                                   # in the write that appends their comment (a
@@ -458,7 +458,7 @@ github:                           # more GitHub cache: commits + change stats
   changed: { files: 9, add: 412, del: 87 }
   unownedPr: 232                  # R15-15: a PR on the branch name this task did
                                   # not open (null/absent = no collision)
-  foreignHead:                    # ruling 161 (U35-8): origin's branch carries
+  foreignHead:                    # ruling 234 (U35-8): origin's branch carries
     sha: d5f23aa…                 # commits this task's record does not account
     prNumber: 232                 # for. Written by the reconciler while it holds
                                   # (the unowned PR's head, else the compare's tip;
@@ -470,8 +470,8 @@ priority: normal                  # low | normal | high | urgent (PRIORITY_VALUE
                                   # reads; never in the specialist prompt
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
 dueDate: null                     # R26-1: `YYYY-MM-DD` or null — advisory metadata
-blockedBy:                        # ruling 131: what this task WAITS ON, as task
-  - JC-6                          # keys (app/shared/dependencies.ts; ruling 503
+blockedBy:                        # ruling 55: what this task WAITS ON, as task
+  - JC-6                          # keys (app/shared/dependencies.ts; ruling 55
   - JC-9                          # retired `<goal-id> link <n>`). Non-empty
                                   # floors the derived readiness at `blocked`,
                                   # settles `waiting: none`, refuses the operator's
@@ -482,7 +482,7 @@ blockedBy:                        # ruling 131: what this task WAITS ON, as task
                                   # reserved taskPrefix: `EPIC-1` would read as
                                   # the epic `epic-1` wherever it is named
 acceptance: forced                # optional; N20-14 — set when an admin force-accepted
-gateRun:                          # optional; ruling 482 — the project's gates as VIBERR
+gateRun:                          # optional; ruling 17 — the project's gates as VIBERR
   id: gate_Xk2…                   # last ran them, bound to a revision like a verdict.
   revisionId: rev_9f2c            # The workRevision.id and the full sha checked out.
   headSha: a91f7c2e…              # status: queued | running | finished | error (the
@@ -500,7 +500,7 @@ gateRun:                          # optional; ruling 482 — the project's gates
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
-pageCaptures:                     # optional; ruling 691 — Viberr's own pictures of the
+pageCaptures:                     # optional; ruling 86 — Viberr's own pictures of the
   deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
   pages:                          # the render finished. One entry per delivered page
@@ -518,7 +518,7 @@ pageCaptures:                     # optional; ruling 691 — Viberr's own pictur
       error: the render ran past 25 seconds   # the task's own. A malformed record reads
                                   # as absent (no picture is drawn; the next delivery's
                                   # render rewrites it)
-completionPacket:                 # optional; ruling 521 — what Operator hands over at
+completionPacket:                 # optional; ruling 17 — what Operator hands over at
   subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or
   summary: "One repo per task…"   # `files:<deliveredAt>`; headSha only for a revision).
@@ -538,14 +538,14 @@ completionPacket:                 # optional; ruling 521 — what Operator hands
                                   # offer to accept is refused until it is written again.
                                   # It stays after the acceptance, as the task's result.
                                   # A malformed record reads as absent (a diagnostic)
-headCheckWaiver:                  # optional; ruling 226 — a maintainer took a merge whose
+headCheckWaiver:                  # optional; ruling 243 — a maintainer took a merge whose
   prNumber: 114                   # containment check GitHub refused to run. Pinned to all
   revisionHeadSha: a1b2c3d…       # three: the gate re-reads the LIVE head and honours it only
   liveHeadSha: f9e8d7c…           # while the triple still matches, so it cannot outlive the
   at: 2026-09-14T02:40:00.000Z    # head it was granted for and become a standing permission.
   byUserId: u_abc123
   byLabel: Arda
-epic: epic-3                      # ruling 503: the epic this task is in, or absent
+epic: epic-3                      # ruling 272: the epic this task is in, or absent
                                   # (null) for none. The task carries the membership
                                   # (the project→task shape of `stage`), so a task is
                                   # in at most one epic; written by `setTasksEpic`
@@ -581,7 +581,7 @@ observations:
     v: 9 files · +412 / −87
     code: true                    # true → render v as <code>
 options:
-  - kind: accept_completion       # STABLE kind (ruling 7). The 21 kinds:
+  - kind: accept_completion       # STABLE kind (ruling 62(a)). The 21 kinds:
     t: Accept completion          #   accept_completion | request_edit |
     d: Mark task done …           #   block_on_policy | hold_runtime_debug |
     rec: true                     #   redirect | retry_other_backend |
@@ -602,7 +602,7 @@ options:
     d: …
     rec: false
     ev: "**Decision:** request one edit. …"   # pre-authored timeline copy
-  - kind: move_stage              # ruling 164: the stage the resolution moves to,
+  - kind: move_stage              # ruling 131: the stage the resolution moves to,
     t: Move KNC-16 back to Review #   on the stage picker's own path. Required on
     d: So the reviewer can run.   #   this option, refused on every other, and the
     toStage: review               #   terminal stage is refused (that is an accept).
@@ -611,12 +611,12 @@ options:
     t: Align the goal to the merged spec
     d: Why the goal should change.
     rec: false
-    goalDraft: |                  # ruling 138: the proposed goal text itself,
+    goalDraft: |                  # ruling 63: the proposed goal text itself,
       Deliverable: …              # written AS a goal; what the editor opens with.
       Acceptance: …               # Absent → the editor prefills t + d verbatim.
                                   # Refused on any other option.
 awaiting: goal_edit               # set when an edit_goal option was confirmed;
-decided:                          # ruling 138: WHICH option, so a reload renders
+decided:                          # ruling 63: WHICH option, so a reload renders
   optionIndex: 3                  # the packet as decided (chosen option locked,
   at: 2026-07-04T07:00:00.000Z    # one "Edit the goal" control) and rebuilds the
   byUserId: u_abc123              # same draft; both clear with the packet
@@ -652,7 +652,7 @@ Notes:
 
 - **`engagements` replaced `specialist:` / `reviewers:` / `consultants:`** (generic-agents
   pass, 2026-07-19), and the legacy-key absorption was deleted in the dynamic-dispatch rework
-  (ruling 98; no back-compat). A file still carrying those keys parses with whatever
+  (ruling 180; no back-compat). A file still carrying those keys parses with whatever
   `engagements:` says (or none) and keeps the legacy keys verbatim as unknown fields; nothing
   reads them. The parser keeps the first engagement per `profileId` and demotes every
   `delivers: true` after the first, each with a warning. Engagements are created by the
@@ -663,9 +663,9 @@ Notes:
   not hand-edit it as a source of truth. A verdict names the subject it judged
   (`reviewSubjectId`: the active revision's id, else `files:<deliveredAt>`), so a new subject
   staleness-expires every prior verdict, and it is only ever the subject the reviewer's run
-  was dispatched on (ruling 544). A head reached from the reviewed one only through
-  Viberr's own recorded base refreshes is the same subject (ruling 439). A `kind: discarded`
-  revision (ruling 161) is a retired record: `validation` derives to `none` over it, no
+  was dispatched on (ruling 84). A head reached from the reviewed one only through
+  Viberr's own recorded base refreshes is the same subject (ruling 239). A `kind: discarded`
+  revision (ruling 234) is a retired record: `validation` derives to `none` over it, no
   verdict binds to it, and the next delivered head mints a fresh id even for the same tree.
 - **`repo` is not a task frontmatter key.** The task-level repository override was struck by
   owner ruling (P13-D-5): one project, one repository. A `repo:` line in an existing `task.md`
@@ -681,30 +681,30 @@ Notes:
 - **Nested fields the sample does not show:**
   - `engagements[].pinnedBackend` (set by a `retry_other_backend` resolution so the switch
     sticks, F27-B1) and `engagements[].question: { kind: completeness, runId, at }` (ruling
-    421: the run putting the completeness question to this reviewer, consumed by the verdict
+    93: the run putting the completeness question to this reviewer, consumed by the verdict
     that run returns);
   - `recommendations[]`: `id`, `kind`, `label`, `detail`, and per kind `profileId`, `prompt`,
     `delivers`, `completeness` (`run_agent`), `toStageId` (`transition`), `forHeadSha`
     (`accept_completion`);
   - `schedules[]`: `id`, `action` (`run-operator | run-agent`), `dueAt`, `profileId` (null for
     `run-operator`), `prompt`, `createdBy` (the scheduler's user id, or `operator` for an entry
-    the operator made, ruling 487), `createdByLabel`, `createdAt`, `status`
+    the operator made, ruling 125), `createdByLabel`, `createdAt`, `status`
     (`SCHEDULE_STATUS_VALUES`: `pending | claimed | fired | failed | cancelled`), `claimedAt`,
     `firedAt`, `retries`;
   - `queuedQuestions[]`: `id`, `profileId`, `directive`, `decidedBy`, `decidedByLabel`,
     `decidedAt`, `heldBy`;
-  - `verdicts[].reviews` (ruling 416(b): same-result reviews of the revision, fought or not;
-    absent reads as `rounds`) and `verdicts[].answers: completeness` (ruling 421: the reviewer
+  - `verdicts[].reviews` (ruling 92: same-result reviews of the revision, fought or not;
+    absent reads as `rounds`) and `verdicts[].answers: completeness` (ruling 93: the reviewer
     answered the completeness question on this revision in the current same-result streak);
-  - `pr.checksUnread: { status, message, at }` (ruling 360: a check-runs read GitHub refused,
+  - `pr.checksUnread: { status, message, at }` (ruling 237: a check-runs read GitHub refused,
     kept only while `checks` has never been read; `at` is when that refusal was first seen,
     kept by every later pass that meets the same status and message on the same PR, ruling
-    496) and `pr.paths: { headSha, changed, truncated }` (ruling 236: the paths the PR
+    236) and `pr.paths: { headSha, changed, truncated }` (ruling 242: the paths the PR
     changes, pinned to the head they were read at, capped at `PR_PATHS_MAX` = 300). Every
     `pr` fact is an optional key: absent means never read, and an unparseable value reads as
     null without dropping the PR;
-  - `github.otherCommits` (ruling 179: branch commits without this task's `[KEY]` prefix) and
-    `github.commits[].pushed` (ruling 187: whether the remote has the commit; absent = not
+  - `github.otherCommits` (ruling 315: branch commits without this task's `[KEY]` prefix) and
+    `github.commits[].pushed` (ruling 236: whether the remote has the commit; absent = not
     judged).
 - **Identity fallbacks**: a `key` that differs from the task directory is an error
   diagnostic and the directory name wins; a missing `key` is inferred from the directory. A
@@ -718,44 +718,44 @@ Packet notes:
 - Beyond `kind`, `t`, `d` and `rec`, an option carries the payload its kind needs. Authoring
   refuses a required payload that is missing, and refuses `goalDraft`, `toStage`, `dueAt`,
   `blockedBy` and `newTask` on any other kind. `accept_unverified_head` is never authored by
-  an operator: the acceptance gate writes it itself, pinned to the shas it read (ruling 226).
+  an operator: the acceptance gate writes it itself, pinned to the shas it read (ruling 243).
   `deliver_for_review` carries no payload: it delivers the task's committed head, and
-  authoring refuses it unless that head is committed and not delivered (ruling 489).
+  authoring refuses it unless that head is committed and not delivered (ruling 62).
   `connect_repository` and `keep_without_repository` are never written through the general
   packet tool: `ask_for_repository` writes both, on a project with no repository whose
-  rulings hold no decision to keep none (ruling 672).
+  rulings hold no decision to keep none (ruling 107).
 
   | Field | Kind | Meaning |
   |---|---|---|
   | `ev` | any | pre-authored timeline text written when the option is chosen |
   | `backend` | `retry_other_backend` | the backend to re-run the failed agent on |
-  | `profileId` | `retry_other_backend`, `question_reviewer` | the reviewer to retry, or the engaged non-delivering reviewer the question goes to (ruling 237; required) |
+  | `profileId` | `retry_other_backend`, `question_reviewer` | the reviewer to retry, or the engaged non-delivering reviewer the question goes to (ruling 94; required) |
   | `deleteBranch` | `archive_task` | also delete the remote branch (refused while the PR is open) |
-  | `goalDraft` | `edit_goal` | the proposed goal text (ruling 138) |
-  | `toStage` | `move_stage` | the stage id the resolution moves the task to (ruling 164; required) |
-  | `dueAt` | `wait_for_window` | the instant the provider said its window reopens; the resolution schedules a `run-operator` resume a minute after it (ruling 224; required) |
-  | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 230) |
-  | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (rulings 269, 287) |
-  | `repo` | `connect_repository` | the repository the operator could name, as `owner/name`; the card opens its repository box with it, and the person's typed answer is what the resolution attaches (ruling 672) |
-  | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 163) |
-  | `reply` | `custom` (an agent's question); `redirect`, `request_edit` (an operator's); `connect_repository` (always) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 478(e)). Written by `ask_human` and the Codex envelope, whose options-less fallback always carries it, and by an operator on a send-back that asks what to change (ruling 650; dropped on its other kinds) |
+  | `goalDraft` | `edit_goal` | the proposed goal text (ruling 63) |
+  | `toStage` | `move_stage` | the stage id the resolution moves the task to (ruling 131; required) |
+  | `dueAt` | `wait_for_window` | the instant the provider said its window reopens; the resolution schedules a `run-operator` resume a minute after it (ruling 157; required) |
+  | `blockedBy` | `block_on_dependencies` | what this task will wait on, in `blockedBy` spellings (ruling 66) |
+  | `newTask` | `create_task` | `{ title, goal, blockedBy?, blocks?, labels? }`: the task the resolution creates; `blocks` names existing tasks that must wait on it (ruling 67) |
+  | `repo` | `connect_repository` | the repository the operator could name, as `owner/name`; the card opens its repository box with it, and the person's typed answer is what the resolution attaches (ruling 224) |
+  | `rework` | `redirect` | set by the branch-conflict packet: the resolution returns a task standing at or past the review stage to it in the same write (ruling 90) |
+  | `reply` | `custom` (an agent's question); `redirect`, `request_edit` (an operator's); `connect_repository` (always) | `true` when choosing the option needs the person's typed answer: the card requires the answer box and `resolvePacket` refuses the option without a note (ruling 68). Written by `ask_human` and the Codex envelope, whose options-less fallback always carries it, and by an operator on a send-back that asks what to change (ruling 132; dropped on its other kinds) |
 
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus
   the admin|maintainer re-check in `resolvePacket`.
-- Packet-level fields beside the sample's: `cause` (ruling 315: the shared cause string,
+- Packet-level fields beside the sample's: `cause` (ruling 63: the shared cause string,
   `backend:<backend>:<kind>:<credentialUserId>`, stamped on a quota, auth or unavailable
   failure; answering one such packet applies the same option to every sibling still carrying
-  it, ruling 319, and a quota answer stands for the rest of its window, ruling 602, kept
+  it, ruling 65, and a quota answer stands for the rest of its window, ruling 65, kept
   in `instance_settings` under `packetCauseDecision:<cause>`; the repository question
   carries `repository:<projectSlug>`, so its answer reaches every task on the board that
-  asked, ruling 672), `stalled: true` (ruling 432: a stall escalation, the only kind a later
+  asked, ruling 65), `stalled: true` (ruling 123: a stall escalation, the only kind a later
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself
   (`packet.invalid_option`, `packet.invalid_observation`). A packet with more than one
   `rec: true` gets a `packet.rec_count` info diagnostic. None is legitimate: an agent's
-  question carries `rec` only on the option the agent marked "(Recommended)" (ruling 478(e)).
+  question carries `rec` only on the option the agent marked "(Recommended)" (ruling 68).
 - The writer fences the block with more backticks than the longest run inside it, and the
   reader closes it only on a fence at least as long, so packet prose that quotes a code fence
   stays inside the block.
@@ -764,7 +764,7 @@ Packet notes:
   `app/shared/mapping/task.server.ts`): `goalDraftForOption` of the option
   `decided.optionIndex` names, present exactly while `awaiting: goal_edit` and a decision is
   recorded. It is never written to the file. Every door into the goal editor reads that one
-  field. The render also derives `answerTo` (ruling 478(e)): the asking agent's display name,
+  field. The render also derives `answerTo` (ruling 68): the asking agent's display name,
   set exactly when `kind` is `Agent question` and `askedBy` is set, the packets whose answer
   `resolvePacket` sends back to that agent; the card names its answer box after it.
 
@@ -782,16 +782,16 @@ Packet notes:
   `<space>·<space>` (U+00B7). `type` is one of the 13 contract types in
   `TIMELINE_EVENT_TYPES` (`comment completion github policy note quality transition blocked
   agent assign continuity proposal kb_correction`); unknown types are kept (info diagnostic) and
-  render as plain comments. `proposal` is a proposed knowledge-base correction (ruling 483),
+  render as plain comments. `proposal` is a proposed knowledge-base correction (ruling 267),
   titled "Proposed ruling change" or "Proposed knowledge-base correction"; it asked a person to
-  decide, so it is neither a review verdict (`quality`, where ruling 378 filed it) nor a
-  neutral `note`. Nothing writes one since ruling 498, and task files keep theirs.
+  decide, so it is neither a review verdict (`quality`, where ruling 210 filed it) nor a
+  neutral `note`. Nothing writes one since ruling 210, and task files keep theirs.
   `kb_correction` is a correction an agent wrote into a knowledge base, titled "Knowledge base
   corrected" (or "Rulings corrected" in the project's rulings), or a person's undo of one,
-  titled "Knowledge-base correction undone" (ruling 498, §8). Its text names the document and
+  titled "Knowledge-base correction undone" (ruling 210, §8). Its text names the document and
   the correction's id, then lists the passage before and after as `- **Was:** ~~…~~` and
   `- **Now:** …` (`- **Added:**` or `- **Removed:**` for text added at the end), then, on a
-  correction, its `- **Evidence:** …` (ruling 645), each flattened to one line and clipped; an
+  correction, its `- **Evidence:** …` (ruling 211), each flattened to one line and clipped; an
   undo adds `**Why:**` with the person's reason.
   `continuity` marks a runtime-continuity RESET — a resumed session whose provider
   transcript was gone, so the agent re-anchored on `task.md` in a fresh one. It is
@@ -805,9 +805,9 @@ Packet notes:
   blank line), each one line: `title: <text>` (a completion's heading, `Review verdict` on a
   reviewer's verdict report, `Compacted` on a compaction marker), `to: agent` (a comment
   routed to the operator — `comment-card toagent` tint) and `notified: <id>, <id>` (ruling
-  382: the users this event's own notification reached, after routing preferences).
+  20: the users this event's own notification reached, after routing preferences).
 - Then a blank line and the event text: GFM markdown for every event type, comments and
-  typed events alike (ruling 478(a); `@mention` chips for known names). Multi-line text,
+  typed events alike (ruling 313; `@mention` chips for known names). Multi-line text,
   paragraphs and fenced blocks are allowed. The activity and notification feeds render it
   through the inline `RichText` micro-format (`**bold**`, `` `code` ``, `@mention`).
 - **Body-line escaping** (structure-like text): an event-body line whose raw
@@ -833,16 +833,16 @@ Packet notes:
   readiness at `input_required`).
 - Optional evidence block on outcome events (a completion, a reviewer's verdict, an agent's
   report — P13-D-26): a line containing exactly `evidence:` followed by
-  `- [<status>] <label> · <result>` rows (ruling 526). The status is `pass`, `fail`, or `info`
+  `- [<status>] <label> · <result>` rows (ruling 16). The status is `pass`, `fail`, or `info`
   for a reference that is neither; the result says in a few words how it came out
   (`102 passed, 0 failed`, `+412 −87` with U+2212), and `—` stands for none. A label may
   itself hold ` · `: the result is the last segment, and a writer strips the separator from a
-  result. A row written before ruling 526, `- <label> · <add> · <del>`, still reads, as an
+  result. A row written before ruling 16, `- <label> · <add> · <del>`, still reads, as an
   `info` row whose result is its two cells (signed counts spaced, words joined by a comma,
   `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label and
-  result 200 characters each, ruling 639). An optional `attachments:` block follows the same way, one `- <file name>`
-  per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 96), or, on a
-  person's note or comment, per file that person put there with it (rulings 533(b) and 573);
+  result 200 characters each, ruling 16). An optional `attachments:` block follows the same way, one `- <file name>`
+  per file the event's run saved under `tasks/<KEY>/attachments/` (ruling 78), or, on a
+  person's note or comment, per file that person put there with it (ruling 76);
   the directory stays the truth.
 - **Compaction**: when the project's `compression-threshold` guardrail is on and a timeline
   passes its `value` (40 by default), writers fold older routine comments into ONE `comment`
@@ -855,7 +855,7 @@ Packet notes:
   evidence row in neither form above) are skipped with a warning diagnostic (readiness floors
   at `input_required`) — the task itself is never dropped.
 
-## 2b. `projects/<slug>/epics/<epic-id>.md` (epics — ruling 503)
+## 2b. `projects/<slug>/epics/<epic-id>.md` (epics — ruling 17)
 
 Frontmatter + `## Description` (what the body of work is for, markdown) + `## Timeline`
 (history bullets, newest first: `- <UTC ISO> · <text>`). Epic ids are `epic-<n>`, the next
@@ -867,7 +867,7 @@ id: epic-3
 title: Checkout redesign          # 3..120 characters (EPIC_TITLE_MAX)
 status: in_progress               # planned | in_progress | paused | done | cancelled:
                                   # a person's call, never derived from the tasks
-color: violet                     # one of the twenty stage presets (ruling 364); a
+color: violet                     # one of the twenty stage presets (ruling 279); a
                                   # new epic takes the next of a far-apart sequence
 leadUserId: u_def456              # a project member, or null: the person the epic's
                                   # notices reach (its creator while null)
@@ -875,7 +875,7 @@ startDate: 2026-09-28             # YYYY-MM-DD or null; planning facts only, not
 targetDate: 2026-10-16            # waits on them; the target may not precede the start
 createdBy: u_abc123
 createdByLabel: arda@viberr.dev
-conversationId: cnv_3fQk9x2LmP0a  # ruling 476(h): the controller conversation whose
+conversationId: cnv_3fQk9x2LmP0a  # ruling 273: the controller conversation whose
                                   # turn created it, or null; the epic page links
                                   # back to it for a viewer who may open it
 convertedFrom: null               # `goal-3` for an epic the boot conversion made
@@ -911,7 +911,7 @@ Notes:
   leading backslash, the same convention as task.md, so prose cannot close the description
   early and forge history bullets. A history bullet is one line: the writer flattens
   whitespace in its text.
-- Ruling 99's chained-goal files (`goals/goal-<n>.md`: `status`, `onFailure`, `links[]`
+- Ruling 273's chained-goal files (`goals/goal-<n>.md`: `status`, `onFailure`, `links[]`
   with `blockedBy` in `task key | goal-N link M`) are read once more, by the boot conversion
   to epics, and filed under `goals/converted/`, where each stays as the record of its chain
   ([controller-and-epics.md §7.6](../domain/controller-and-epics.md#76-the-conversion-from-chained-goals)).
@@ -921,10 +921,10 @@ Notes:
 | Actor | File encoding | Render shape |
 |---|---|---|
 | Human | `user:<userId>` or `user:<userId> (Display Name)` | `{ kind:"human", userId, name, initials, tone, guest? }` — resolved from the users table at projection time; the parenthetical is a snapshot fallback for deleted users; `guest` derives from project membership |
-| Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name, role }` — the second segment is the **profile id**, never a role slug; `name` is the deployed agent's own name, falling back to the backend label "Codex" or "Claude" (ruling 92) |
+| Agent | `agent:<backend>/<profileId>` e.g. `agent:codex/developer`, optionally with a role snapshot `agent:codex/developer (Implementation)` | `{ kind:"agent", backend, name, role }` — the second segment is the **profile id**, never a role slug; `name` is the deployed agent's own name, falling back to the backend label "Codex" or "Claude" (ruling 298) |
 | Operator | `operator` | `{ kind:"agent", name:"Operator" }` (NO backend, NO role) |
-| Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 99 — instance machinery, same backend-less shape) |
-| System | `system:<id>` e.g. `system:policy-engine`; `system:epic-conversion` signs the creation events of a task the goal-to-epic conversion made for an unstarted link (ruling 503, keeping ruling 477(b)'s signature; older files carry the chain's own `system:goal-chain`) | `{ kind:"system", name:"Policy engine" }` |
+| Controller | `controller` | `{ kind:"agent", name:"Controller" }` (ruling 247 — instance machinery, same backend-less shape) |
+| System | `system:<id>` e.g. `system:policy-engine`; `system:epic-conversion` signs the creation events of a task the goal-to-epic conversion made for an unstarted link (ruling 17, keeping ruling 273's signature; older files carry the chain's own `system:goal-chain`) | `{ kind:"system", name:"Policy engine" }` |
 
 Any other string decodes as an unknown actor: it is re-encoded verbatim and renders as
 `{ kind:"system", name:"Unknown actor" }`, so an event is never dropped over its author. The
@@ -936,10 +936,10 @@ can never break the heading line.
 ```markdown
 ---
 id: developer
-kind: specialist                  # operator | specialist | controller (ruling 99)
+kind: specialist                  # operator | specialist | controller (ruling 247)
 name: Developer
 role: Implementation              # required of every kind but the operator, which
-                                  # has none (ruling 518)
+                                  # has none (ruling 176)
 desc: Implements the change on the task branch and reports what it did.
                                   # one scannable paragraph — what the OPERATOR
                                   # reads when picking a profile. Distinct from
@@ -948,10 +948,10 @@ icon: branch                      # an ICON_PATHS name (app/ui/icon.tsx); defaul
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-                                  # ruling 153: the template's DEFAULT, taken by a
+                                  # ruling 264: the template's DEFAULT, taken by a
                                   # library deploy when no override is given
 effort: high                      # optional reasoning effort: the controller (ruling
-                                  # 106) and, ruling 153, a specialist template's
+                                  # 270) and, ruling 264, a specialist template's
                                   # default that a library deploy copies onto the
                                   # deployment when the backend offers the tier. A
                                   # non-string value reads as absent
@@ -977,7 +977,7 @@ and raise an `agent_profile.unknown_field` drift warning against `AGENT_PROFILE_
 A `kind: controller` profile is instance machinery: never deployed into a project's
 `agents:` list.
 
-`operator.md` is the one operator template (ruling 518). It has no `role`: a copy from
+`operator.md` is the one operator template (ruling 176). It has no `role`: a copy from
 before the ruling still carries `role: Task coordinator`, which the parse drops with the
 drift warning. Its `name` and `scope` are documentation only, because every surface shows
 the operator as "Operator" over "Built in · runs on every task" (`OPERATOR_NAME`,
@@ -1006,17 +1006,17 @@ re-attach them.)
 
 | File | Written by | Format |
 |---|---|---|
-| `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 108); a save keeps the frontmatter head. |
-| `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 390); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
-| `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 183). A mounted copy gets normalized frontmatter. |
-| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; an agent's correction from a task and a person's undo of one (ruling 498, §8) | any documents; agents read the live folder at run time. A document may still end in a proposals section filed before ruling 498 (§7) |
+| `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 270); a save keeps the frontmatter head. |
+| `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 271); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
+| `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 186). A mounted copy gets normalized frontmatter. |
+| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; an agent's correction from a task and a person's undo of one (ruling 210, §8) | any documents; agents read the live folder at run time. A document may still end in a proposals section filed before ruling 210 (§7) |
 | `state/shipped-assets.json` | boot | JSON map of store-relative asset path → SHA-256 of the bytes last shipped |
 | `audit-exports/audit-events-<YYYY-MM-DD>.jsonl` | the audit purge | one `audit_events` row per line, exactly as the table stores it, appended per purge day |
 | `runtimes/<backend>/<runId>.jsonl` | the run sink | one raw provider envelope per line; the truth `run_log_lines` projects |
 
-## 7. A knowledge-base document's proposals section (rulings 378 and 483)
+## 7. A knowledge-base document's proposals section (ruling 210)
 
-Before ruling 498 an agent that proved a line of a knowledge-base document wrong filed the
+Before ruling 210 an agent that proved a line of a knowledge-base document wrong filed the
 correction in that document, for a person to promote or dismiss. Nothing files one now
 (§8 writes the correction into the settled text instead), but a document keeps the section it
 holds until its entries are closed: `app/server/org/kb-proposals.server.ts` reads them, and
@@ -1035,19 +1035,19 @@ Raised by agents from evidence on a task. **Nothing here is binding.** A person,
 
 - The heading is `## Proposed corrections (not binding)`; the filing created it at the END of
   the document and filed later entries at the end of the section, in order. The reader also
-  takes ruling 378's `## Proposed (not binding)` as the section. A heading inside a fenced
+  takes ruling 210's `## Proposed (not binding)` as the section. A heading inside a fenced
   block is not the section; the section ends at the next `#` or `##` heading.
 - An entry is a list item opening with a bold `[<task key>, <YYYY-MM-DD>, <filer>]`
-  stamp (ruling 378's entries have no filer), then the correction; its other lines are
+  stamp (ruling 210's entries have no filer), then the correction; its other lines are
   indented two spaces: `Line:` (the settled line it corrects, absent when it adds
   something) and `Evidence:`.
 - An entry's id is `kp-` and the first ten hex characters of the SHA-256 of
   `<kb>\n<doc>\n<entry text>`: stable while nobody edits that entry.
 - The settled text is the document without this section: a promotion's `replaces` must stand
-  in it exactly once, and so must the passage a ruling-498 correction replaces. Promoting or
+  in it exactly once, and so must the passage a ruling-210 correction replaces. Promoting or
   dismissing the last entry removes the heading and the intro with it.
 
-## 8. A knowledge-base correction (rulings 498 and 581)
+## 8. A knowledge-base correction (rulings 210 and 210(b))
 
 An agent that proves a passage of a knowledge-base document wrong writes the correction into
 the document (`mergeKbCorrection`, `app/server/org/kb-corrections.server.ts`); a person undoes
@@ -1056,7 +1056,7 @@ corrected, or as it did before. The record is the audit row (below).
 
 - **Replace.** `replaces` must stand exactly once in the settled text (§7: an unmerged
   proposals section is not part of it), compared exactly once the two normalizations below
-  are applied; `text` takes its place, and an empty `text` deletes the passage (ruling 581). A
+  are applied; `text` takes its place, and an empty `text` deletes the passage (ruling 210(b)). A
   refusal hands back the document's closest lines verbatim, fenced, for the agent to copy; when
   a standing correction's record holds the passage and text sent, it names that correction
   instead, and text that merely stands elsewhere is reported as that, never as a correction made.
@@ -1068,7 +1068,7 @@ corrected, or as it did before. The record is the audit row (below).
   text (matches counted with overlaps). When the written `text` is blank or would not stand
   once, the record takes the lines it sits in, then the lines after and before in turn, until
   it does (past 400 characters on a side, characters instead, finishing the word it cut), and
-  records the passage with the same lines around it (ruling 581); the document is written the
+  records the passage with the same lines around it (ruling 210(b)); the document is written the
   same either way. Each side the filer sends is at most 8 KB (`KB_CORRECTION_MAX_BYTES`, UTF-8
   bytes). An addition the document already holds is left alone.
 - **Undo.** The recorded `text` must still stand exactly once: the undo puts the recorded
@@ -1078,10 +1078,10 @@ corrected, or as it did before. The record is the audit row (below).
   characters, `kb`, `doc`, `rulings`, `replaced`, `text`, `evidence` clipped to 4,000
   characters, `filedBy`, `actorRef`, `bytes`) and `task.kb_correction.undone` (`id`, `kb`,
   `doc`, `reason`, `byName`), beside the `org.store.doc_written` row every store write makes,
-  which for a correction and its undo names the task (`task {project, key}`, ruling 681).
+  which for a correction and its undo names the task (`task {project, key}`, ruling 34).
   Audit retention (90 days) bounds how long a correction is listed and undoable.
 
-## 9. A board file (ruling 653)
+## 9. A board file (ruling 32)
 
 A board's workflow without its work, for starting the same board again here or on another
 instance: Instance settings → Import & export writes one for any project and imports one
@@ -1115,7 +1115,7 @@ knowledgeBases:                   # each kb/<dir>/ folder, with its settings
   - dir: release-rulings
     name: Release rulings
     refresh: manual               # on change | manual
-    private: false                # ruling 578
+    private: false                # ruling 209
 skills:                           # each skills/<name>/ folder, with its summary
   - name: release-notes
     summary: Drafts release notes from merged pull requests.
@@ -1123,7 +1123,7 @@ mcpServers:                       # registry rows, NEVER a credential or a sign-
   - name: linear
     transport: HTTP               # HTTP | stdio
     target: https://mcp.linear.app/mcp
-    writeTools: [create_issue]    # ruling 176; absent when never reviewed
+    writeTools: [create_issue]    # ruling 188; absent when never reviewed
 exportedAt: 2026-10-04T12:00:00.000Z
 exportedFrom: release-train       # the slug it was exported from
 viberrVersion: 0.19.0
@@ -1167,7 +1167,7 @@ How an import reads one (`readBoardFile`, `parseBoardFile`):
   the same path and bytes; an MCP server when its transport and target are; a template when
   its parsed frontmatter and body are. A different one is never overwritten.
 
-## 10. A task's kept sources (ruling 690)
+## 10. A task's kept sources (ruling 15)
 
 A task keeps, apart from its files, the sources its result rests on: a page as an agent
 fetched it, a repository file at a commit, an API answer, a command's output. They live in
@@ -1181,7 +1181,7 @@ sources/S2            the id alone when the handed file had no extension to keep
 
 The folder is the server's own. It is not one of the directories a run writes
 (`TASK_SHARED_DIRS` names `workspace/`, `attachments/` and `.operator-scratch/`) and is
-never handed to the agent group, so where agents run as their own users (ruling 460) an
+never handed to the agent group, so where agents run as their own users (ruling 15) an
 agent reads a kept source and cannot change or delete it. `writeTaskSource`
 (`app/server/files/task-sources.server.ts`) is its only writer: it opens a bytes file with
 `O_CREAT | O_EXCL | O_NOFOLLOW`, never an existing one, and only appends to the index. On a
@@ -1223,7 +1223,7 @@ A `source` line is one kept source:
 | `bytes`, `sha256` | The size and the SHA-256 of the bytes file |
 
 A `delivery` line records the ids of the sources the task held when a files delivery was
-stamped (`recordDeliverySources`, written with the kept delivery of ruling 597). A task
+stamped (`recordDeliverySources`, written with the kept delivery of ruling 86). A task
 that keeps no source gets no line, and a stamp already recorded keeps its line. A files
 delivery with no line rested on the sources kept at or before its stamp
 (`deliverySourceIds`), which for one stamped before the task kept anything is none: the

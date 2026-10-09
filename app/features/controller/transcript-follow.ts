@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 /**
- * Ruling 476(c) and (d): how a controller transcript (the page's and the
+ * Ruling 320 and (d): how a controller transcript (the page's and the
  * dock's) meets a reply, for the eye and for a screen reader. One home, so the
- * two surfaces cannot disagree about either. Ruling 572: and how a reader who
+ * two surfaces cannot disagree about either. Ruling 320: and how a reader who
  * has scrolled away gets back.
  */
 
@@ -55,9 +55,9 @@ function below(box: HTMLElement, id: string | null): boolean {
 }
 
 /**
- * Ruling 572: the way back for a reader who has scrolled away from the newest
+ * Ruling 320: the way back for a reader who has scrolled away from the newest
  * message. `reply` is a reply that landed while they read history, which
- * ruling 476(c) leaves where it is; `newest` is the place an open would show.
+ * ruling 320 leaves where it is; `newest` is the place an open would show.
  */
 export type JumpKind = "reply" | "newest";
 
@@ -69,12 +69,12 @@ export interface TranscriptJump {
 }
 
 /**
- * Ruling 476(c) (F40-23): a reply that lands is shown from its first line.
+ * Ruling 320 (F40-23): a reply that lands is shown from its first line.
  *
  * Both transcripts set `scrollTop = scrollHeight` whenever the message count or
  * the working flag changed. Live at 375px the newest reply was 1,017px in a
  * 452px box, so a person who had waited minutes for it met its last
- * paragraphs; under ruling 465's reply order a reply to a message with queued
+ * paragraphs; under ruling 320's reply order a reply to a message with queued
  * messages behind it sits ABOVE them, and the scroll went about 13,000px past
  * the answer to the last queued message.
  *
@@ -90,7 +90,7 @@ export interface TranscriptJump {
  * `fresh` is `useFreshMessageIds` for the same messages; `openKey` names what
  * makes this a newly opened transcript.
  *
- * Ruling 572: the reader who has scrolled away is offered the way back, the
+ * Ruling 320: the reader who has scrolled away is offered the way back, the
  * transcript's jump (`TranscriptJumpButton`), null while nothing is below
  * them. A reply the rule above left where it landed is `reply` until the
  * reader has been to it, and the jump puts its first line at the top of the
@@ -106,7 +106,7 @@ export function useTranscriptFollow(
   const opened = useRef<string | null>(null);
   const newestReply = useRef<string | null>(null);
   const wasWorking = useRef(working);
-  // Ruling 572: the reply left below a reader in history, and where an open
+  // Ruling 320: the reply left below a reader in history, and where an open
   // puts the box (the newest message's first line when it is a reply, else
   // the end).
   const held = useRef<string | null>(null);
@@ -157,7 +157,7 @@ export function useTranscriptFollow(
     }
     measure();
   }, [boxRef, messages, fresh, working, openKey, measure]);
-  // Ruling 572: the reader's own scrolling brings the jump and takes it away,
+  // Ruling 320: the reader's own scrolling brings the jump and takes it away,
   // measured once a frame. `openKey` is also what names a new box.
   useEffect(() => {
     const box = boxRef.current;
@@ -212,7 +212,7 @@ function replyGist(text: string): string {
 }
 
 /**
- * Ruling 476(d) (F40-24): the sentence a screen reader hears about a turn, for
+ * Ruling 320 (F40-24): the sentence a screen reader hears about a turn, for
  * a `role="status"` region that is mounted at all times and only changes its
  * text (a region inserted together with its text is the one case screen
  * readers skip, docs/ui/surfaces.md).

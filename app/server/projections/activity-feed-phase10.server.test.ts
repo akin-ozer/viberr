@@ -101,7 +101,7 @@ describe("audit panel — Phase 10 action kinds render readably", () => {
     expect(entry.taskKey).toBe("VIB-7");
   });
 
-  it("ruling 462: a repository created with the project reads as a sentence naming it", () => {
+  it("ruling 225: a repository created with the project reads as a sentence naming it", () => {
     // CANARY: drop the action from AUDIT_ACTION_KINDS and the row never
     // reaches the panel.
     recordAudit(store.db, {

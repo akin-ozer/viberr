@@ -2,7 +2,7 @@ import { resetEnvCacheForTests } from "~/server/config/env.server";
 
 /**
  * Runs `run` with `vars` set in the process env, where a deployment sets them,
- * and puts each one back afterwards. Ruling 512(c): a test reaches a switch the
+ * and puts each one back afterwards. Ruling 8: a test reaches a switch the
  * way production does, not through a parameter only it passes. `getEnv()`
  * parses the env once per process, so the cached parse is dropped on the way in
  * and on the way out.

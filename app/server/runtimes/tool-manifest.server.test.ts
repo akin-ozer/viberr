@@ -8,7 +8,7 @@ const probe = (name: string, description: string) =>
   }));
 
 /**
- * Ruling 297 (pass 37, F37-132). The controller reported this from inside its
+ * Ruling 255 (pass 37, F37-132). The controller reported this from inside its
  * own prompt, and the report is the specification: three tools arrive whole,
  * everything else is names only in a per-turn reminder, and "the list is
  * incremental, not a manifest -- the turn that shipped `list_decisions` listed
@@ -16,7 +16,7 @@ const probe = (name: string, description: string) =>
  * complete toolkit exists in my context only as a union across eleven turns of
  * reminders, never as one list."
  */
-describe("toolManifest (ruling 297)", () => {
+describe("toolManifest (ruling 255)", () => {
   it("lists every tool it is given, with the count, so a short list is visibly short", () => {
     const manifest = toolManifest(
       [
@@ -60,7 +60,7 @@ describe("toolManifest (ruling 297)", () => {
     const long = `Do the thing ${"and then some more of it ".repeat(12)}right now.`;
     const manifest = toolManifest([probe("big", long)], "s");
     const line = manifest.split("\n").find((l) => l.startsWith("- mcp__s__big:"))!;
-    // Ruling 285's rule: a cut that does not say it cut is the defect, and it
+    // Ruling 117's rule: a cut that does not say it cut is the defect, and it
     // has to name where the rest is. CANARY: drop the marker.
     expect(line).toContain("... (clipped; the whole description is in the tool itself)");
     // And the cut lands on a word boundary of the original, never mid-word:

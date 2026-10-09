@@ -12,10 +12,10 @@ import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
  * The attached-resources block, byte for byte: the trusted banner, the skill
- * bodies, the knowledge-base notes (R19-2, ruling 283, ruling 286) and the
+ * bodies, the knowledge-base notes (R19-2, ruling 205, ruling 208(b)) and the
  * indexes, as the operator, specialist and controller prompts each carry it.
  *
- * The block sits in every one of those prompts' STATIC prefix (ruling 370), and
+ * The block sits in every one of those prompts' STATIC prefix (ruling 169), and
  * prompt caching (rulings 369-376) keys on that prefix: one changed character
  * re-bills the cached prefix of every profile that holds a skill or a
  * knowledge base. So the expected text is written out below rather than
@@ -158,7 +158,7 @@ const TEAM_FACTS =
 const TEAM_RULES =
   "\n\n---\n# team-rules (knowledge base)\n\n" +
   "**BINDING on this run.** This is the project's settled rulings knowledge " +
-  "base (ruling 239): an administrator made it binding on every run this " +
+  "base: an administrator made it binding on every run this " +
   "project makes, you included. Read it; the obligation is not conditional " +
   "on your finding it interesting.\n\n" +
   "Folder `<dataRoot>/kb/team-rules`. 1 document:\n\n" +
@@ -172,7 +172,7 @@ interface Grants {
   skills: string[];
   kb: string[];
   /** The project's rulings KB. For the controller it is named in project.md
-   *  and added by a project-scoped conversation (ruling 239), so its config
+   *  and added by a project-scoped conversation (ruling 208(a)), so its config
    *  holds the other KBs only. */
   rulingsKb: string | null;
 }

@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef } from "react";
 
 /**
  * Which of a conversation's messages arrived while it was on screen, for the
- * entry motion (`.ctl-msg[data-fresh]`): the dock since ruling 121, the full
- * controller page since ruling 451(d), one rule for both. Ids seen in the
+ * entry motion (`.ctl-msg[data-fresh]`): the dock since ruling 256, the full
+ * controller page since ruling 284, one rule for both. Ids seen in the
  * previous render of the same conversation are settled; a switched (or first)
  * conversation settles everything, so history never animates.
  */

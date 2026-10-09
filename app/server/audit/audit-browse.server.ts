@@ -12,7 +12,7 @@ import { z } from "zod";
  * the most recent events, newest first, with just the columns a browse row shows
  * (no `details` blob — the export carries that). Org-admin gated at the route.
  *
- * ## Ruling 234 (F37-52) — the window is a row count, so what fills it decides
+ * ## Ruling 33 (F37-52) — the window is a row count, so what fills it decides
  *    what the panel can show
  *
  * The panel above shipped as ONE `ORDER BY occurred_at DESC LIMIT 150` with the
@@ -55,7 +55,7 @@ const AUDIT_BROWSE_DEFAULT_LIMIT = 150;
 const AUDIT_BROWSE_MAX_LIMIT = 500;
 
 /**
- * Actions excluded from the BROWSE (ruling 234). A poller heartbeat is a
+ * Actions excluded from the BROWSE (ruling 33). A poller heartbeat is a
  * freshness fact, not an event a person reads: `github.reconcile.task` is
  * written on every completed pass per delivered task, changed or not, and it is
  * already rendered where it means something (the GitHub panel's "last checked",
@@ -84,7 +84,7 @@ const rowSchema = z.object({
  *
  * `orgOnly` scopes to instance-level events (`project_slug IS NULL`) IN SQL, so
  * the org-scoped view gets its own 150 rows instead of whatever survives a
- * client-side filter of the unscoped window (ruling 234).
+ * client-side filter of the unscoped window (ruling 33).
  */
 export function listRecentAuditEvents(
   db: DatabaseSync,

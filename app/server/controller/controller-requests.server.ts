@@ -25,7 +25,7 @@ import {
 } from "~/shared/controller-locks";
 
 /**
- * Ruling 390 (F39-17): the controller's standing ask for a resource it cannot
+ * Ruling 271 (F39-17): the controller's standing ask for a resource it cannot
  * grant itself.
  *
  * Live in pass 39 the owner's instance-wide rule ("the controller runs opus at
@@ -36,7 +36,7 @@ import {
  * The controller worked the mechanism out correctly on its own: a skill is
  * injected verbatim every turn, a knowledge base is injected as an INDEX of
  * names and headings, and it may not edit its own profile, skill or handbook
- * (ruling 108 locks all three, org admins included). So it wrote the rule into
+ * (ruling 270 locks all three, org admins included). So it wrote the rule into
  * a NEW org knowledge base with the rule as the heading — and then could not
  * attach it to itself. Its own words: "I created the resource, I cannot grant
  * it to myself." The document sat in the store, unread, and the ask existed
@@ -46,18 +46,18 @@ import {
  * give the ask somewhere durable and human-visible to live instead. This is
  * that record.
  *
- * The GRANT happens outside the app, and the record says so. Ruling 108 makes
+ * The GRANT happens outside the app, and the record says so. Ruling 270 makes
  * controller grants a deployment decision with no in-app override anywhere, so
  * this surface never offers a Grant button that does not exist: it names the
  * environment variable, the value, and the restart, and then gets out of the
- * way. The ANSWER is recorded in the app (ruling 390, amended 2026-09-23): the
+ * way. The ANSWER is recorded in the app (ruling 271, amended 2026-09-23): the
  * Controller-tab save that leaves the resource granted closes the request as
  * `granted`, and an admin's Decline closes it as `declined`. Until then it
  * stays open, and the controller keeps being told it does not have the
  * resource.
  */
 
-/** Which kind of resource a request is for — the three ruling-108 sections. */
+/** Which kind of resource a request is for — the three ruling-270 sections. */
 export const REQUESTABLE_KINDS = ["skills", "kb", "mcps"] as const;
 export type RequestableKind = (typeof REQUESTABLE_KINDS)[number];
 
@@ -87,7 +87,7 @@ export type ResourceRequest = z.infer<typeof resourceRequestSchema>;
 
 /**
  * Where the record lives: beside the controller's profile, never inside it.
- * The profile is what the controller is READ BY and ruling 108 locks it; this
+ * The profile is what the controller is READ BY and ruling 270 locks it; this
  * file is a record ABOUT the controller, so writing it changes nothing about
  * how the controller is loaded.
  */
@@ -97,7 +97,7 @@ function controllerRequestsFilePath(dataRoot?: string): string {
 
 const HEADER =
   "Resource grants the controller has asked for and cannot make itself " +
-  "(ruling 390). Each one names the deployment change that answers it.";
+  "(ruling 271). Each one names the deployment change that answers it.";
 
 /** Every request on file, newest first. Empty for a store that has none. */
 export function readResourceRequests(dataRoot?: string): ResourceRequest[] {
@@ -236,7 +236,7 @@ function recordAnswer(
 }
 
 /**
- * Ruling 390 (amended 2026-09-23): close, as `granted`, every open request
+ * Ruling 271 (amended 2026-09-23): close, as `granted`, every open request
  * the controller's grants now answer.
  *
  * Called by `saveControllerConfig` with the grants the save left in place, the
@@ -264,7 +264,7 @@ export function closeRequestsAnsweredByGrants(
 }
 
 /**
- * Ruling 390 (amended 2026-09-23): an admin's explicit "no". The request
+ * Ruling 271 (amended 2026-09-23): an admin's explicit "no". The request
  * leaves the settings panel and the controller's context. If the controller
  * asks again later, that is a new request.
  */
@@ -291,7 +291,7 @@ export function declineResourceRequest(
 /**
  * What answering this request actually takes — the whole point of the record.
  *
- * Ruling 108 put controller grants outside the app on purpose, so a surface
+ * Ruling 270 put controller grants outside the app on purpose, so a surface
  * that rendered a Grant button would be promising something no code can do.
  * This sentence is what goes on the settings panel and into the controller's
  * own context instead. It also says what closes the request, because that
@@ -299,7 +299,7 @@ export function declineResourceRequest(
  */
 export function resourceRequestRemedy(kind: RequestableKind): string {
   return (
-    `${CONTROLLER_SECTION_LABEL[kind]} are deployment-locked (ruling 108): set ` +
+    `${CONTROLLER_SECTION_LABEL[kind]} are deployment-locked (ruling 270): set ` +
     `${CONTROLLER_UNLOCK_ENV[kind]}=${CONTROLLER_UNLOCK_VALUE} and restart, then add it ` +
     `on the Controller tab; saving it there answers this request. There is no in-app ` +
     `grant while the section is locked.`

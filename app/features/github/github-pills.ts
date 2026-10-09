@@ -3,7 +3,7 @@ import type { RepoAccessResult } from "~/server/github/repo-access-check.server"
 
 /**
  * Client-safe pill mappings for the GitHub view (github-view spec §4.3/§4.4,
- * ruling 12). `prStatePill` is the single PR-state → pill mapping (the old
+ * ruling 237). `prStatePill` is the single PR-state → pill mapping (the old
  * server-side `prPillFor` duplicate was removed); the sync labels mirror
  * `branch-sync.server.ts` (`deriveSyncState`) — duplicated here only because
  * server modules must never reach client components; the shapes are covered by
@@ -19,12 +19,12 @@ export interface PillView {
    *  that renders them says so the same way; the states that want a person
    *  (closed, behind main, changes requested, a failing check, a missing
    *  credential) keep their fills. A pass of the checks or the gates is a
-   *  green fill (ruling 491: as an outline it read as dry). */
+   *  green fill (ruling 315: as an outline it read as dry). */
   quiet?: boolean;
 }
 
 /**
- * Sync column vocabulary (ruling 12: merged > behind > synced), plus `unknown`.
+ * Sync column vocabulary (ruling 237: merged > behind > synced), plus `unknown`.
  *
  * UI-05: `unknown` exists because "we never measured this" is NOT "synced". The
  * behind-by resolver defaulted to 0 when no `github.reconcile` provenance row
@@ -34,11 +34,11 @@ export interface PillView {
  * and read by maintainers as "this branch is up to date with main".
  */
 /**
- * Ruling 401 (F39-28): `no_branch` exists for the same reason `unknown` does,
+ * Ruling 237 (F39-28): `no_branch` exists for the same reason `unknown` does,
  * one step further along.
  *
  * A task can finish without ever committing anything — a report, a design
- * note, an upstream comparison delivered as an attachment (ruling 391 settled
+ * note, an upstream comparison delivered as an attachment (ruling 235 settled
  * that such work is delivered work). Viberr allocates its branch NAME at
  * creation, so the row existed and carried whatever the last compare said.
  * Live on ax-clone AX-12 — done, `noChanges: true`, no PR, zero commits, and
@@ -67,7 +67,7 @@ export function syncPill(state: SyncState): PillView {
 }
 
 /**
- * PR state pill (ruling 12): merged → done, closed-unmerged → risk "closed"
+ * PR state pill (ruling 237): merged → done, closed-unmerged → risk "closed"
  * (the rendering the mock never designed), accepted (human accepted, real
  * merge pending — D3/S2) → amber "merge pending" matching the task-detail
  * branch panel, anything else ("review", open/draft) → info "in review".
@@ -147,7 +147,7 @@ export function mergeablePill(
 }
 
 /**
- * Ruling 405: the verdict, but only while it still belongs to the live head.
+ * Ruling 242: the verdict, but only while it still belongs to the live head.
  *
  * GitHub recomputes mergeability asynchronously, so the read right after a
  * push answers "unknown" and the reconciler keeps the last-known verdict for
@@ -156,7 +156,7 @@ export function mergeablePill(
  *
  * Lives here, in the client-safe module, because BOTH sides need it: the
  * server mapping (`mapPrMergeable`) that feeds the GitHub page and the review
- * queue, and the task page's own pill. Ruling 405(b) put it in the server
+ * queue, and the task page's own pill. Ruling 315(d) put it in the server
  * module first, which the task page could not import at all.
  */
 export function liveMergeable(
@@ -208,10 +208,10 @@ export function connectionPill(
 }
 
 /**
- * Ruling 482 (F40-52): the project's gates as Viberr ran them on the revision
+ * Ruling 315 (F40-52): the project's gates as Viberr ran them on the revision
  * under review. A fill wherever the gates stand between the task and an
  * acceptance (failed, could not run, not run, out of date, still running), and
- * a green fill for the pass (ruling 491: as an outline it read as dry). One
+ * a green fill for the pass (ruling 315: as an outline it read as dry). One
  * mapping for the PR card and the accept dialog.
  */
 export function gatesPill(

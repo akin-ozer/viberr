@@ -146,7 +146,7 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
   });
 
   /**
-   * Ruling 225 (F37-45). A task resting on a clock is between two moves, on
+   * Ruling 45 (F37-45). A task resting on a clock is between two moves, on
    * purpose, and the gap can be hours — the agent threshold would light the
    * "no activity" cue on the healthiest wait there is. But a schedule that came
    * DUE and did not fire is a real stall (the runner is what broke), so the
@@ -231,7 +231,7 @@ describe("isQuiet — the threshold follows who is on the hook", () => {
     expect(isQuiet({ ...base, waiting: "agent", lastActivityAt: null })).toBe(false);
   });
 
-  it("ruling 131: a task waiting on other work is held, never quiet", () => {
+  it("ruling 55: a task waiting on other work is held, never quiet", () => {
     // Canary: delete the `held` early return in `isQuiet`.
     const longAgo = ago(30 * 24 * 60 * 60_000);
     expect(isQuiet({ ...base, waiting: "none", lastActivityAt: longAgo, held: true })).toBe(false);
@@ -324,7 +324,7 @@ describe("listProjectTasks annotates the whole board", () => {
     expect(quietByKey(store).get("VIB-300")!.quiet).toBe(false);
   });
 
-  it("ruling 131: a held task carries its resolved list and is never quiet, however long it waits", () => {
+  it("ruling 55: a held task carries its resolved list and is never quiet, however long it waits", () => {
     // Canary: drop `held` from the board query's QuietCheck (VIB-301 reads
     // quiet), or resolve nothing (`blockedBy` reads empty).
     const store = setupTestStore(ctx);
@@ -368,7 +368,7 @@ describe("getTaskDetail carries the same two fields", () => {
     expect(detail.quiet).toBe(true);
   });
 
-  it("ruling 131: the task page carries the resolved list and a held task is not quiet", () => {
+  it("ruling 55: the task page carries the resolved list and a held task is not quiet", () => {
     // Canary: drop `held` from the detail query's QuietCheck.
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {

@@ -17,7 +17,7 @@ import { ACCOUNT_MENU_LABEL, type MenuHandOver, type MenuUser } from "./user-men
  * the Home header (the mock duplicates it). Real session identity, real logout
  * POST, theme cycling persisted to the user row + cookie via /prefs/theme.
  *
- * Ruling 457: this module is the menu itself and is loaded lazily. Pages ship
+ * Ruling 11: this module is the menu itself and is loaded lazily. Pages ship
  * `user-menu.tsx`, a trigger that looks the same and fetches this module on
  * intent (pointer over it, focus) or on the first press; see there.
  *
@@ -25,7 +25,7 @@ import { ACCOUNT_MENU_LABEL, type MenuHandOver, type MenuUser } from "./user-men
  * (rapid cycling UX). Additions (sanctioned): Escape closes; admins get an
  * "Instance settings" quick link to the instance admin surface.
  *
- * Ruling 166 (2026-09-08): this is a real ARIA menu again. UI-45 had DROPPED
+ * Ruling 14 (2026-09-08): this is a real ARIA menu again. UI-45 had DROPPED
  * `role="menu"`/`role="menuitem"` because they were declared with no arrow-key
  * handling — a contract that tells a screen-reader user to expect Up/Down
  * navigation that does not exist — and hand-rolling a full menu widget (roving
@@ -94,7 +94,7 @@ export function UserMenuPanel({
   // press landed on Dark, not System). A refused save clears the form data,
   // so this falls back to `theme`, where the rollback below puts the page.
   // Inline, not a shared helper: a module shared with /profile becomes a chunk
-  // of its own, and every page preloads it with this menu (ruling 457).
+  // of its own, and every page preloads it with this menu (ruling 11).
   const inFlight = fetcher.formData?.get("theme");
   const current: ThemePreference =
     inFlight === "light" || inFlight === "dark" || inFlight === "system" ? inFlight : theme;
@@ -122,7 +122,7 @@ export function UserMenuPanel({
     // Toast fires on the server result (effect above), not on submit.
   };
 
-  // Ruling 457: this trigger replaced the plain one in `UserMenu`. If a Tab
+  // Ruling 11: this trigger replaced the plain one in `UserMenu`. If a Tab
   // had put the focus there, it moves here; an open menu takes it instead.
   useLayoutEffect(() => {
     const hadFocus = handOver.current.focused;

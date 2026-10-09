@@ -236,7 +236,7 @@ describe("UI-15: the dimmed band is the TERMINAL stage, not the id 'done'", () =
     expect(bands).toHaveLength(2);
     expect(bands[0]!.style.opacity).toBe("1");
     expect(bands[1]!.style.opacity).toBe("0.45");
-    // Ruling 364: the band carries the preset NAME for the sheet to paint —
+    // Ruling 279: the band carries the preset NAME for the sheet to paint —
     // never an inline colour (the shopify meter's `amber` band painted nothing
     // that way). CANARY: put `background: s.color` back.
     expect(bands[0]!.dataset.stageColor).toBe("stone");
@@ -245,7 +245,7 @@ describe("UI-15: the dimmed band is the TERMINAL stage, not the id 'done'", () =
   });
 });
 
-describe("StageMeter (per-project stages, ruling 15)", () => {
+describe("StageMeter (per-project stages, ruling 47)", () => {
   const stages = [
     { id: "todo", name: "To do", color: "slate" },
     { id: "doing", name: "In progress", color: "violet" },
@@ -303,7 +303,7 @@ describe("UI-24: the org tile counts the population the panel shows", () => {
   it("discloses disabled accounts inside the total", () => {
     const { getByText, container } = renderHome(baseData([card()]));
     expect(getByText("5 users")).toBeTruthy();
-    // Each count is its own unbreakable span (ruling 625), so read the line.
+    // Each count is its own unbreakable span (ruling 280), so read the line.
     const lines = [...container.querySelectorAll(".org-tile .sub")].map((s) => s.textContent);
     expect(lines).toContain("1 admin · 4 members · 2 disabled");
   });
@@ -328,7 +328,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(paused.container.querySelector(".home-top-in .pill")).toBeNull();
   });
 
-  it("ruling 149: the sentence is a status line, the retry a real control", () => {
+  it("ruling 278: the sentence is a status line, the retry a real control", () => {
     // The same split the workspace header uses: a `.pill` has no cursor and no
     // hover, so one element that was both sentence and control read as neither.
     // Canary: put `role="status"` on the strip and the sentence is read twice.
@@ -346,7 +346,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(live?.textContent).toBe(PAUSED);
   });
 
-  it("ruling 149: no Retry when there is nothing to reconnect", () => {
+  it("ruling 278: no Retry when there is nothing to reconnect", () => {
     // The prop is optional, and a button that calls nothing is a control that
     // does nothing — the strip still states the fact.
     const { getByText, queryByRole } = renderHome(baseData([card()]), {
@@ -356,7 +356,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("ruling 149: the announcer is mounted before the stream drops", () => {
+  it("ruling 278: the announcer is mounted before the stream drops", () => {
     // A live region inserted together with its text is not announced, so the
     // node has to exist (and be empty) while the stream is healthy.
     const { container } = renderHome(baseData([card()]));
@@ -552,7 +552,7 @@ describe("F13: the home footer says what it is", () => {
     const dialog = container.querySelector("dialog.confirm-card")!;
     expect(dialog.textContent).toContain("Rebuild all projections?");
     // Named by its title, and labelled for tests and agents (surfaces.md §4).
-    // It stays hand-written under ruling 457 (ruling 458's 2026-09-24 note).
+    // It stays hand-written under ruling 11 (ruling 297's 2026-09-24 note).
     expect(dialog.getAttribute("aria-labelledby")).toBe("rebuild-confirm-title");
     expect(dialog.querySelector("#rebuild-confirm-title")!.textContent).toBe(
       "Rebuild all projections?",
@@ -564,11 +564,11 @@ describe("F13: the home footer says what it is", () => {
     ]);
   });
 
-  // Ruling 368: the rebuild in flight shows itself on its trigger (busy, the
+  // Ruling 286: the rebuild in flight shows itself on its trigger (busy, the
   // loader spinning, "Rebuilding…") and cannot be pressed again: it used to
   // stay live and reopen its confirm while the rebuild it had started ran.
   // Canary: drop `disabled={rebuilding}` from the strip's Rebuild button.
-  it("ruling 368: a rebuild in flight is busy on its trigger and does not reopen the confirm", async () => {
+  it("ruling 286: a rebuild in flight is busy on its trigger and does not reopen the confirm", async () => {
     const Stub = createRoutesStub([
       {
         path: "/",
@@ -854,12 +854,12 @@ describe("acce-8: the project link is named by what it shows", () => {
 });
 
 /**
- * Ruling 532: the setup checklist. The first step the viewer can take leads
+ * Ruling 322: the setup checklist. The first step the viewer can take leads
  * with its sentence and the primary action; every other open step keeps its
- * own action, each going where that thing is done. Ruling 667: the first
+ * own action, each going where that thing is done. Ruling 322: the first
  * project waits on nothing, GitHub included.
  */
-describe("ruling 532: the setup checklist", () => {
+describe("ruling 322: the setup checklist", () => {
   const steps: HomePageData["setup"] = [
     { id: "github", state: "todo" },
     { id: "account", state: "done" },
@@ -886,7 +886,7 @@ describe("ruling 532: the setup checklist", () => {
     expect(agents.classList.contains("primary")).toBe(false);
     // The check is drawn aria-hidden, so the words say which steps are done.
     expect(list.getByText("Your own account").closest("li")?.textContent).toBe("Done: Your own account");
-    // Ruling 667. CANARY: hold the project step behind GitHub again and an
+    // Ruling 322. CANARY: hold the project step behind GitHub again and an
     // instance with no connection has no way to start a board that needs none.
     expect(list.getByRole("button", { name: "New project" }).classList.contains("primary")).toBe(false);
   });
@@ -907,11 +907,11 @@ describe("ruling 532: the setup checklist", () => {
 });
 
 /**
- * Ruling 621: the checklist's close. It comes with the first project (before
+ * Ruling 322: the checklist's close. It comes with the first project (before
  * that the card is the empty Home's way to start one), the card goes while
  * the close is posted, and a refused close brings it back with the reason.
  */
-describe("ruling 621: closing the setup checklist", () => {
+describe("ruling 322: closing the setup checklist", () => {
   const close = { name: "Hide for this session" };
   const region = { name: "Finish setting up" };
 

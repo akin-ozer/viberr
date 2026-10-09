@@ -15,7 +15,7 @@ export interface JsonSchemaNode {
  * Walks recursively, so a nested object's violation is caught too. Returns
  * one line per violation; an empty list is a schema the API accepts.
  *
- * Shared by the agent envelope and, since ruling 433 nested `newTask` inside
+ * Shared by the agent envelope and, since ruling 132 nested `newTask` inside
  * the operator plan's options, the operator plan: a violation in either fails
  * every Codex run that carries it.
  */

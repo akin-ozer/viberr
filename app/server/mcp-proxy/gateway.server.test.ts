@@ -32,9 +32,9 @@ import {
 } from "./gateway.server";
 
 /**
- * Ruling 461: the loopback gateway, end to end against real MCP servers that
+ * Ruling 191: the loopback gateway, end to end against real MCP servers that
  * REQUIRE their bearer — the resolver's config, the run's token, the upstream
- * with the credential attached in the server process, the ruling-176 filter,
+ * with the credential attached in the server process, the ruling-188 filter,
  * and the refusals.
  */
 
@@ -168,7 +168,7 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     expect(new Set(upstream.authorizations)).toEqual(new Set([`Bearer ${SECRET}`]));
   });
 
-  it("ruling 176: a withheld write tool is absent from the list and refused on call, and the call is audited", async () => {
+  it("ruling 188: a withheld write tool is absent from the list and refused on call, and the call is audited", async () => {
     const upstream = await startHttpUpstream(SECRET);
     upstreams.push(upstream);
     addMcp("cloudflare", "HTTP", upstream.url, SECRET);
@@ -216,7 +216,7 @@ describe("the gateway against an HTTP upstream that requires its bearer", () => 
     ]);
   });
 
-  it("ruling 486 (F40-66): a connection not signed in with OAuth offers no grant tool, and a call by that name is the server's", async () => {
+  it("ruling 192 (F40-66): a connection not signed in with OAuth offers no grant tool, and a call by that name is the server's", async () => {
     // CANARY: offer the grant tool on every gateway connection, and both
     // listings carry it.
     const upstream = await startHttpUpstream(SECRET);

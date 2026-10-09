@@ -60,7 +60,7 @@ const SEALED_STORES = [
     nameColumn: "name",
     idColumn: "id",
   },
-  // Ruling 469: an MCP connection's OAuth sign-in (client secret and tokens),
+  // Ruling 192: an MCP connection's OAuth sign-in (client secret and tokens),
   // a second sealed column on the same table. Its own entry, so a rotation
   // re-seals it and the convergence count sees it.
   {
@@ -95,7 +95,7 @@ const SEALED_STORES = [
     nameColumn: "bucket",
     idColumn: "id",
   },
-  // Ruling 127: the API keys and workspace access tokens people paste on
+  // Ruling 137: the API keys and workspace access tokens people paste on
   // Profile → Agent accounts. `login` rows carry no box (the vendor binary
   // holds that credential in the person's runtime home), which is why the box
   // column is nullable and the scans below filter on `IS NOT NULL`. The row's

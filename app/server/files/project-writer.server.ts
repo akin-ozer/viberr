@@ -43,7 +43,7 @@ export function readProjectFile(
   try {
     absPath = resolveProjectFilePath(ref);
   } catch (error) {
-    // Ruling 697: a slug that is not one folder under `projects/` names no
+    // Ruling 15(b): a slug that is not one folder under `projects/` names no
     // project, the same null an absent project.md gives. The membership guard
     // turns that into its "No project" 404.
     if (isAppError(error) && error.code === ERROR_CODES.NOT_FOUND) return null;

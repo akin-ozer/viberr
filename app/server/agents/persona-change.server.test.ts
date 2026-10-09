@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { describePersonaChange } from "./persona-change.server";
 
 /**
- * Ruling 467: the reply to a persona edit names the length before and after
+ * Ruling 261: the reply to a persona edit names the length before and after
  * and the first and last changed lines, and never shortens a line without
  * saying so.
  */
-describe("describePersonaChange (ruling 467)", () => {
+describe("describePersonaChange (ruling 261)", () => {
   it("says nothing for an unchanged persona", () => {
     expect(describePersonaChange("same", "same")).toBeNull();
   });

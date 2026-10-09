@@ -64,7 +64,7 @@ beforeAll(async () => {
   app = await setupAppTest();
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
-  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a
+  // Ruling 137: an agent run bills the TASK OWNER's own accounts, so a
   // dispatch (and the operator drive a packet resolution re-queues) only
   // reaches an adapter when that person has the backend connected. These five
   // are the demo humans this file acts as; connecting both backends for each
@@ -213,10 +213,10 @@ describe("loader — VIB-142 fidelity", () => {
   });
 });
 
-/* ---------------------------------------------- ruling 127 run principal */
+/* ---------------------------------------------- ruling 137 run principal */
 
 /**
- * Ruling 127 — the loader ships WHOSE accounts this task's agent runs would
+ * Ruling 137 — the loader ships WHOSE accounts this task's agent runs would
  * bill, not whether the deployment holds a credential.
  *
  * The old `backendAvailable` pair answered one question for every task in the
@@ -226,7 +226,7 @@ describe("loader — VIB-142 fidelity", () => {
  * backend connected, owner without, no owner at all) and the hard rule that
  * nothing about the credential itself reaches the browser.
  */
-describe("loader — runPrincipal (ruling 127)", () => {
+describe("loader — runPrincipal (ruling 137)", () => {
   it("names the OWNER and answers per backend from THEIR accounts", async () => {
     // VIB-142 is seeded owned by Arda, and the file's beforeAll connected both
     // backends for every demo human.
@@ -265,7 +265,7 @@ describe("loader — runPrincipal (ruling 127)", () => {
         available: true,
         detail: null,
       });
-      // Ruling 127 deleted the deployment credentials: no surface may send a
+      // Ruling 137 deleted the deployment credentials: no surface may send a
       // person hunting for one.
       const wire = JSON.stringify(data.runPrincipal);
       for (const dead of [
@@ -422,7 +422,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
   });
 
   /**
-   * Ruling 315. The note is the one field on this card that holds a person's
+   * Ruling 63. The note is the one field on this card that holds a person's
    * own words, and the ROUTE cut it to 2,000 characters with `.slice(0, 2000)`
    * before the request reached the server — no `maxLength` on the box, no
    * counter, no marker on the record, no error, and nothing anywhere holding
@@ -430,7 +430,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
    *
    * Live on SHOP-76 a 4,454-character decision was stored at exactly 2,000,
    * ending mid-word, and a rework round ran on the operator's reconstruction of
-   * the deleted sentence. Ruling 292 permits a cut on a VERDICT because "the
+   * the deleted sentence. Ruling 262 permits a cut on a VERDICT because "the
    * full text is never lost — the agent's own report is on the same timeline,
    * untruncated"; a typed note has no second copy.
    *
@@ -438,7 +438,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
    * that called `resolvePacket` directly passed with the slice restored — the
    * first version of this test did exactly that, and its canary came out green.
    */
-  it("ruling 315: the route records a long note WHOLE", async () => {
+  it("ruling 63: the route records a long note WHOLE", async () => {
     const long = `HEAD ${"x".repeat(2600)} TAIL`;
     expect(long.length).toBeGreaterThan(2000);
     // Option 1 is `request_edit` — it resolves and records the decision. Option
@@ -465,7 +465,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(recorded).toContain("TAIL");
   });
 
-  it("ruling 672: keeping the board without a repository says what was recorded, not a generic decision", async () => {
+  it("ruling 224: keeping the board without a repository says what was recorded, not a generic decision", async () => {
     // CANARY: let the answer fall through to "Decision recorded: …" and the
     // person is not told the board now holds a ruling, nor that the question
     // is closed for good.
@@ -504,7 +504,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(readProjectFile(ref)!.parsed.frontmatter.repo).toBeNull();
   });
 
-  it("ruling 672: the route says a repository is connected, and that a question a maintainer cannot answer went to a project admin", async () => {
+  it("ruling 224: the route says a repository is connected, and that a question a maintainer cannot answer went to a project admin", async () => {
     // CANARY: keep "the operator re-runs" in the toast and it is said on a
     // board whose operators wait for the controller; count "maintainers" in
     // the escalation's toast and it names people who cannot answer.
@@ -552,7 +552,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(readTaskFile({ ...ref, taskKey: "VIB-142" })!.parsed.packet).toBeNull();
   });
 
-  it("ruling 315: a note past the shared cap is refused, and the packet stays open", async () => {
+  it("ruling 63: a note past the shared cap is refused, and the packet stays open", async () => {
     const { PACKET_NOTE_MAX } = await import("~/schemas/task-file.schema");
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const read = () =>
@@ -582,7 +582,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(read().timeline.length).toBe(before);
   });
 
-  it("ruling 138: the resolve response prefers the option's goalDraft, and a reload rebuilds the SAME draft from the decided packet", async () => {
+  it("ruling 63: the resolve response prefers the option's goalDraft, and a reload rebuilds the SAME draft from the decided packet", async () => {
     // Canary: compose title + detail inline again in the route (drop
     // `goalDraftForOption`) — the response stops matching the option's draft.
     // Canary 2: drop the `decided` stamp in resolvePacket — the reload path
@@ -655,7 +655,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
    * task-governance.server.test.ts.
    */
   it.each([
-    // Ruling 130(c) (pass 34): the toast states the EFFECT and restates no
+    // Ruling 62 (pass 34): the toast states the EFFECT and restates no
     // claim. Canary: restore the old "Policy / credential updated" literal.
     { kind: "block_on_policy", key: "VIB-142", by: "arda", option: "2", reruns: true, toast: "Unblocked · the operator re-runs to re-check" },
     { kind: "request_edit", key: "VIB-142", by: "arda", option: "1", reruns: true, toast: "Decision recorded: Request one edit" },
@@ -674,7 +674,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     ).toMatchObject({ ok: true, kind, toast });
   });
 
-  it("ruling 131 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
+  it("ruling 55 set-task-dependencies: sets the wait, clears it as a release, refuses a bad reference by name", async () => {
     // Canary: drop the intent's `case` (every shape answers the unknown-intent
     // refusal), or route it through `setTaskMetadata`.
     // SAFETY: arda holds `edit-task-meta`, so a valid list returns the intent's
@@ -705,7 +705,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(released.task.timeline.some((e) => e.type === "note" && /Dependencies released/.test(e.title ?? ""))).toBe(true);
   });
 
-  it("ruling 620 set-task-dependencies: an edit that leaves only done entries releases the task and toasts it", async () => {
+  it("ruling 57 set-task-dependencies: an edit that leaves only done entries releases the task and toasts it", async () => {
     // CANARY: toast "Waits on VIB-139" for the released list.
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
@@ -725,7 +725,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
     expect(after.task.timeline.some((e) => e.type === "note" && e.title === "Dependencies released")).toBe(true);
   });
 
-  it("ruling 501 set-task-metadata: an edit writes only the axis its form carries", async () => {
+  it("ruling 49 set-task-metadata: an edit writes only the axis its form carries", async () => {
     // Canary: read an absent field as empty again (the old full replace), and
     // the priority edit below clears VIB-142's labels and due date.
     const before = await runLoader("VIB-142", ids.arda);
@@ -950,7 +950,7 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
     expect(result.data.error).toContain("change the task stage");
   });
 
-  it("ruling 381: that same backward move with no reason is refused, after the authority gate", async () => {
+  it("ruling 47: that same backward move with no reason is refused, after the authority gate", async () => {
     // Runs BEFORE the move below, which lands VIB-145 on triage for good.
     // SAFETY: the route answers its refusal envelope, not the transition arm.
     const result = (await postIntent("VIB-145", ids.arda, {
@@ -986,7 +986,7 @@ describe("transition action (manual stage move — admin|maintainer)", () => {
 
 /* ---------------------------------------------- agent dispatch (run-agent) */
 
-describe("loader — ruling 550: a task delivered as files", () => {
+describe("loader — ruling 316: a task delivered as files", () => {
   it("hands the accept confirm the delivery's time, and nothing for a task with a commit revision", async () => {
     // CANARY: drop `filesDeliveredAt` from the loader and the confirm promises
     // a GitHub re-check that would close a delivered result "with no changes".
@@ -1011,7 +1011,7 @@ describe("loader — ruling 550: a task delivered as files", () => {
   });
 });
 
-describe("loader — ruling 690: the sources a task keeps", () => {
+describe("loader — ruling 82: the sources a task keeps", () => {
   it("ships the task's sources, named by the agent that kept each, and the sources the delivery rested on for the card; a task that keeps none ships neither", async () => {
     // What the loader adds to the store's list: who kept each source, by the
     // name the page knows the agent under; the newest first; a long origin
@@ -1134,7 +1134,7 @@ describe("loader — deployed specialists", () => {
 
 describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
   it("dispatching the developer AUTO-ENGAGES it as the deliverer and starts the run (streaming toast)", async () => {
-    // Ruling 127: VIB-166 is seeded UNOWNED, and an unowned task cannot run
+    // Ruling 137: VIB-166 is seeded UNOWNED, and an unowned task cannot run
     // agents at all — there is no account to bill, so the dispatch would be
     // refused before any adapter. Arda takes the seat first, which is exactly
     // what the refusal tells a human to do ("Own the task (Assign me)").
@@ -1206,7 +1206,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
     );
   });
 
-  it("ruling 152(c) (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, the hand-off comment stays on the record unanswered (ruling 375), and the retry is on the schedule", async () => {
+  it("ruling 151 (pass 35, G35-4): a dispatch into a backend the instance knows is out of quota is HELD: the toast names the hold, no run starts, the hand-off comment stays on the record unanswered (ruling 69), and the retry is on the schedule", async () => {
     // Canary: remove the `isDispatchHeld` catch in the run-agent arm and the
     // route answers the 409 as an error instead of the hold toast.
     const { recordBackendQuotaExhaustion, clearBackendQuotaExhaustion } = await import(
@@ -1239,7 +1239,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
       const held = after.task.timeline.find((e) => e.title === "Dispatch held");
       expect(held?.text).toContain("**Held:** Codex is out of quota until");
       expect(held?.text).toContain("Developer's run starts when the window reopens");
-      // Ruling 375: the prompt is recorded BEFORE the start (so a run's own
+      // Ruling 69: the prompt is recorded BEFORE the start (so a run's own
       // directive is never redelivered), which on a hold leaves the person's
       // words on the record with the hold note beside them and no reply.
       const handOff = after.task.timeline.find(
@@ -1357,7 +1357,7 @@ describe("acceptance affordance (P14-LV-06)", () => {
 
   it("accept-completion refuses when the task is not at the boundary", async () => {
     // The POST carries the echo the dialog would send for VIB-166 as the page
-    // shows it, so it clears ruling 88's disclosure check (a bare POST is
+    // shows it, so it clears ruling 97's disclosure check (a bare POST is
     // refused there first) and meets the boundary itself.
     const shown = await runLoader("VIB-166", ids.arda);
     // SAFETY: VIB-166 is not at the review boundary, so acceptance is refused
@@ -1467,7 +1467,7 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
 });
 
 /**
- * F21-2 / ruling 88 — the acceptance disclosure at the HTTP door.
+ * F21-2 / ruling 97 — the acceptance disclosure at the HTTP door.
  *
  * The pass-21 finding: the R15-1 ceremony was client architecture only, so a
  * POST that never opened `AcceptConfirm` accepted the completion and merged its
@@ -1479,7 +1479,7 @@ describe("F20-11: task-view read-marking fires only on a genuine navigation", ()
  * carries no acknowledgment and still succeeds, because only a move that IS an
  * acceptance is held to the ceremony.
  */
-describe("acceptance disclosure (ruling 88) — the HTTP door", () => {
+describe("acceptance disclosure (ruling 97) — the HTTP door", () => {
   it("refuses an accept-completion POST that carries no acknowledgment", async () => {
     // SAFETY: arda holds acceptance authority, so the refusal that answers is
     // the disclosure — not RBAC, which is checked first and passes.
@@ -1526,7 +1526,7 @@ describe("acceptance disclosure (ruling 88) — the HTTP door", () => {
  * acceptance, and a non-accepting packet option, still POST bare and still
  * succeed — proved at the server level in `task-actions.server.test.ts`.
  */
-describe("acceptance disclosure (ruling 88) — the indirect HTTP doors", () => {
+describe("acceptance disclosure (ruling 97) — the indirect HTTP doors", () => {
   // The packet cases below consume VIB-142's open packet, and the earlier
   // describes in this file resolve it too. Re-seed so each case starts from the
   // seeded (open-packet) state rather than from whatever ran before it.
@@ -1631,9 +1631,9 @@ describe("acceptance disclosure (ruling 88) — the indirect HTTP doors", () => 
  */
 describe("run-agent auto-engage — reviewer vs supporting agent, and release-agent", () => {
   /**
-   * Ruling 127 + ruling 263: both tasks below ship OWNERLESS in the seed, and a
+   * Ruling 137 + ruling 152: both tasks below ship OWNERLESS in the seed, and a
    * run bills the owner's accounts — so the dispatch was refused for a missing
-   * principal and, until ruling 263, still toasted "Claude run started for
+   * principal and, until ruling 152, still toasted "Claude run started for
    * Reviewer · streaming to agent logs". Owning the task is what a person has
    * already done before they run an agent on it; these tests are about the
    * engagement's posture, not about ownership.
@@ -1747,12 +1747,12 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
 });
 
 /**
- * Ruling 320 — a field the loader computes for the page has to reach the page.
+ * Ruling 10 — a field the loader computes for the page has to reach the page.
  *
  * `queuedQuestions` was read from the task file by this loader, returned by it,
  * accepted by `TaskDetailPage` and rendered by `TaskDetailsPanel` — and the
  * route never passed it. Both ends default to `[]`, so nothing failed, nothing
- * logged, and the row ruling 241 built ("Viberr puts Arda's question to
+ * logged, and the row ruling 66 built ("Viberr puts Arda's question to
  * @reviewer when the wait clears") simply never appeared on any task. The
  * promise stayed in the timeline note; the surface that was supposed to carry
  * it standing was dead from the day it shipped.
@@ -1767,7 +1767,7 @@ describe("run-agent auto-engage — reviewer vs supporting agent, and release-ag
  * A loader field that is deliberately not a page prop is out of scope by
  * construction: the rule is about props that EXIST and go unfed.
  */
-describe("ruling 320 — the loader-to-page wire", () => {
+describe("ruling 10 — the loader-to-page wire", () => {
   it("passes every loader field the page declares as a prop", async () => {
     const { readFileSync } = await import("node:fs");
     const routeSrc = readFileSync("app/routes/project.task.tsx", "utf8");
@@ -1783,7 +1783,7 @@ describe("ruling 320 — the loader-to-page wire", () => {
     expect(loaderKeys.length).toBeGreaterThan(20);
 
     // The page's declared props: the `interface TaskDetailPageProps` block its
-    // signature names (ruling 700(d) moved it out of the signature).
+    // signature names (ruling 13(b) moved it out of the signature).
     const propsAt = pageSrc.indexOf("interface TaskDetailPageProps {");
     const propsBlock = pageSrc.slice(propsAt, pageSrc.indexOf("\n}\n", propsAt));
     const props = new Set(
@@ -1912,7 +1912,7 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
   });
 
   /**
-   * Ruling 388 binds a review to WHEN a deliverer saved its files, not to
+   * Ruling 84 binds a review to WHEN a deliverer saved its files, not to
    * their bytes, so a person's upload over one of them would leave an
    * approval standing on content no reviewer read.
    */
@@ -1945,7 +1945,7 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
     );
     expect(readTaskFile(ref)!.parsed.timeline[0]!.title).not.toBe("Attachment added");
 
-    // Ruling 675: the same name in the other Unicode form is still the
+    // Ruling 76: the same name in the other Unicode form is still the
     // agent's file, now that the store finds a file by either form.
     // CANARY: compare the names byte for byte and a Mac's upload of
     // "Çıktı.md", sent decomposed, replaces the report an agent saved under it.
@@ -2024,11 +2024,11 @@ describe("attach-file (F39-6) — the human writer, end to end through the route
 });
 
 /**
- * Ruling 482: "Run gates" on the PR card. The intent reaches the gate request
+ * Ruling 104: "Run gates" on the PR card. The intent reaches the gate request
  * at the manual delivery's tier; on a project that declares no gates it says
  * so rather than claiming a run.
  */
-describe("run-gates (ruling 482)", () => {
+describe("run-gates (ruling 104)", () => {
   it("refuses a contributor, and answers a maintainer honestly when nothing is owed", async () => {
     // CANARY: drop the `run-gates` case and both answers are the unknown
     // intent's 400.

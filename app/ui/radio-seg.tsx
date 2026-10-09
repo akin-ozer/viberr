@@ -5,7 +5,7 @@ import { ToggleGroup } from "radix-ui";
  * A single-select option group: arrow-key traversal, roving tabindex, Home/End
  * and RTL from Radix, styled entirely with viberr's own classes.
  *
- * Ruling 166: `radix-ui` ships behaviour, not appearance. Nothing here passes a
+ * Ruling 14: `radix-ui` ships behaviour, not appearance. Nothing here passes a
  * utility class, and the primitive lands behind this boundary so a revert is
  * one file.
  *

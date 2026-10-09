@@ -16,10 +16,10 @@ import { kbStoreTargetForDir, resolveStoreTarget } from "./resources.server";
 import { type StoreTarget, utf8Bytes, writeStoreDoc } from "./store-files.server";
 
 /**
- * Ruling 498: a correction an agent PROVED, written straight into the
+ * Ruling 210: a correction an agent PROVED, written straight into the
  * knowledge-base document it corrects, and undone by a person who disagrees.
  *
- * Rulings 378 and 483 filed every correction as a proposal under "Proposed
+ * Rulings 210 and 267 filed every correction as a proposal under "Proposed
  * corrections (not binding)" for a person to promote, one controller turn per
  * Promote. The owner, 2026-09-26, on a Platform Engineer's proposal about the
  * deploy runbook: "proposal spam is exhausting, it should be easier to get them
@@ -50,7 +50,7 @@ const KB_CORRECTION_MERGED_ACTION = "task.kb_correction.merged";
 const KB_CORRECTION_UNDONE_ACTION = "task.kb_correction.undone";
 
 /** A correction replaces a passage, not a document: each side is capped, which
- *  also bounds the audit row that carries both (UTF-8 bytes, ruling 466). */
+ *  also bounds the audit row that carries both (UTF-8 bytes, ruling 18(b)). */
 const KB_CORRECTION_MAX_BYTES = 8 * 1024;
 
 /** The evidence kept on the record. It is read, never replayed, so a long
@@ -101,7 +101,7 @@ function asDocText(value: string, eol: string): string {
 
 /**
  * How many times `needle` stands in `hay`, overlapping ones included (ruling
- * 581): an undo takes the first match, so "\n- a\n" in "\n- a\n- a\n" stands
+ * 210(b)): an undo takes the first match, so "\n- a\n" in "\n- a\n- a\n" stands
  * twice, not the once a split sees.
  */
 function occurrences(hay: string, needle: string): number {
@@ -112,7 +112,7 @@ function occurrences(hay: string, needle: string): number {
 }
 
 /**
- * The document with an unmerged proposals section (rulings 378 and 483) masked
+ * The document with an unmerged proposals section (ruling 210) masked
  * out, index for index: a passage an entry merely quotes is not in the settled
  * text, so it can be neither replaced nor counted.
  */
@@ -357,14 +357,14 @@ export type MergeKbCorrectionResult =
   | { ok: true; correction: KbCorrection }
   | { ok: false; message: string };
 
-/** Ruling 581: the most neighbouring characters a record takes on each side. */
+/** Ruling 210(b): the most neighbouring characters a record takes on each side. */
 const ANCHOR_MAX_CHARS = 400;
 
 /** Not whitespace, and not a masked proposals character. */
 const isWordChar = (ch: string | undefined) => ch !== undefined && ch !== "\u0000" && !/\s/.test(ch);
 
 /**
- * Ruling 581: the span of `doc` a record names for the text written at
+ * Ruling 210(b): the span of `doc` a record names for the text written at
  * `doc[start, start + length)`, so that it stands once and is not blank: the
  * text itself when it does; else the lines it sits in, taking the lines after
  * and before in turn until they do; else, where lines run long, characters
@@ -414,13 +414,13 @@ function anchorAround(doc: string, start: number, length: number): { from: numbe
  * Write one correction into a document the knowledge base already holds, and
  * keep the record an undo reads.
  *
- * An empty `text` deletes the passage `replaces` names (ruling 581). When the
+ * An empty `text` deletes the passage `replaces` names (ruling 210(b)). When the
  * text written would not stand once, the record takes the lines around it
  * until it does, so an undo can still find it; the document is written the
  * same.
  *
  * Refuses, writing nothing: a document the knowledge base does not hold (a
- * typo would otherwise CREATE a settled-looking document, ruling 378); a
+ * typo would otherwise CREATE a settled-looking document, ruling 210); a
  * passage that does not stand exactly once in the settled text, handing back
  * the document's closest lines; an addition the document already holds; a
  * side over {@link KB_CORRECTION_MAX_BYTES}; and a correction a person already
@@ -465,7 +465,7 @@ export async function mergeKbCorrection(
     const eol = eolOf(raw);
     const text = asDocText(input.text, eol);
     const replaces = input.replaces === null ? null : asDocText(input.replaces, eol);
-    // Ruling 581: an empty `text` deletes the passage `replaces` names; with
+    // Ruling 210(b): an empty `text` deletes the passage `replaces` names; with
     // no passage there is nothing to delete and nothing to add.
     if (!text.trim() && !replaces) {
       return {
@@ -483,12 +483,12 @@ export async function mergeKbCorrection(
     }
     const settled = settledView(raw);
     let next: string;
-    /** What the record names, which an undo swaps back: ruling 581 widens it. */
+    /** What the record names, which an undo swaps back: ruling 210(b) widens it. */
     let recorded = { replaced: replaces, text };
     if (replaces) {
       const count = occurrences(settled, replaces);
       if (count === 0) {
-        // Ruling 581: a retry finds its own record. Text that merely stands
+        // Ruling 210(b): a retry finds its own record. Text that merely stands
         // in the document proves nothing: " Evidence:" stood 56 times in the
         // calculator research when a Researcher's passage was one character
         // off, and a deletion writes no text at all.
@@ -537,7 +537,7 @@ export async function mergeKbCorrection(
       }
       const at = settled.indexOf(replaces);
       next = raw.slice(0, at) + text + raw.slice(at + replaces.length);
-      // Ruling 581: an undo finds a correction by the text it wrote, so that
+      // Ruling 210(b): an undo finds a correction by the text it wrote, so that
       // text has to stand once. A deletion writes none, and a corrected line
       // can repeat one the document holds elsewhere, so the record takes the
       // lines around it until it does. The document written is the same
@@ -574,13 +574,13 @@ export async function mergeKbCorrection(
           "Nothing was written. Include more of the line in `replaces` and `text`, so the corrected text stands once.",
       };
     }
-    // Ruling 581: the same correction made again takes the same lines around
+    // Ruling 210(b): the same correction made again takes the same lines around
     // it, so a person's undo still refuses its repeat.
     const undoneAnchored = recorded.text === text ? null : undoneBefore(recorded.text);
     if (undoneAnchored) return undoneAnchored;
     const segments = located.rel.split("/");
     const name = segments.pop()!;
-    // Ruling 681: the task's own entry is this board's record of the write.
+    // Ruling 34: the task's own entry is this board's record of the write.
     writeStoreDoc(db, target, segments, name, next, input.actor, {
       overwrite: true,
       onTask: { projectSlug: input.projectSlug, taskKey: input.taskKey },
@@ -617,7 +617,7 @@ export async function mergeKbCorrection(
         evidence: correction.evidence,
         filedBy: correction.filedBy,
         actorRef: input.actorRef,
-        // Ruling 466: UTF-8 bytes, never a string length.
+        // Ruling 18(b): UTF-8 bytes, never a string length.
         bytes: utf8Bytes(text),
       },
     });
@@ -645,7 +645,7 @@ export type EditKbPassageResult =
   | { ok: false; message: string };
 
 /**
- * Ruling 637: a person's edit of one passage of a knowledge-base document,
+ * Ruling 212(b): a person's edit of one passage of a knowledge-base document,
  * made through the controller.
  *
  * The controller could only replace a document whole or append to it. Live on
@@ -703,14 +703,14 @@ export type EditSkillPassageResult =
   | { ok: false; message: string };
 
 /**
- * Ruling 680: {@link editKbPassage} for a skill's SKILL.md.
+ * Ruling 267: {@link editKbPassage} for a skill's SKILL.md.
  *
  * A skill could only be saved whole. Live on 2026-10-07, to add one section
  * to the Calculator Builder's skill and one check to the Estimate Judge's, the
  * controller typed both back in full, 16,981 and 31,289 characters: two of its
  * turn's three minutes, and every line of both now the model's copy of what
  * it had read. One passage is replaced under the same rules, and the body
- * that results is judged as every SKILL.md write is (ruling 183).
+ * that results is judged as every SKILL.md write is (ruling 186).
  */
 export async function editSkillPassage(
   db: DatabaseSync,
@@ -812,7 +812,7 @@ function replacePassage(
         edit: { replaced: was, text: now },
       });
     } catch (error) {
-      // Ruling 183: a SKILL.md the edit would leave malformed is refused by
+      // Ruling 186: a SKILL.md the edit would leave malformed is refused by
       // the writer, in its own sentence.
       if (isAppError(error)) return { ok: false as const, message: `${error.userMessage} Nothing was written.` };
       throw error;

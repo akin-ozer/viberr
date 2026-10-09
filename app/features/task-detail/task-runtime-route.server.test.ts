@@ -38,7 +38,7 @@ beforeAll(async () => {
   const { runDemoSeed } = await import("../../../test-support/demo-seed");
   ids = (await runDemoSeed(app.db, { dataRoot: app.dataRoot })).userIds;
 
-  // Ruling 127: these runs bill arda (the demo tasks' owner), so he needs the
+  // Ruling 137: these runs bill arda (the demo tasks' owner), so he needs the
   // backend connected — the same thing that makes a real dispatch reach an
   // adapter.
   const { connectFakeBackend } = await import(
@@ -164,7 +164,7 @@ describe("loader — runtime projection shape", () => {
     const run = runtime.find((r) => r.serverRunId === finishedRunId)!;
     expect(run).toMatchObject({ backend: "codex", state: "done" });
     expect(run.lines.length).toBeGreaterThan(0);
-    // Ruling 457 (owner decision 2, 2026-09-24): a document load carries the
+    // Ruling 300 (owner decision 2, 2026-09-24): a document load carries the
     // shown agent's display lines, each with its key, and no stored envelope;
     // the console loads the envelopes when its raw view opens.
     expect(run.lineKeys).toHaveLength(run.lines.length);

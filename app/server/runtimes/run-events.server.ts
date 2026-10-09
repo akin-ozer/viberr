@@ -13,7 +13,7 @@ import { publishSseEvent } from "~/server/events/sse-broker.server";
  * the dedicated logs consumer fetches content.
  *
  * Two routes. A task run's frames are scoped to its task. A CONTROLLER run
- * (ruling 99) has no task scope — `project_slug = ''`, the conversation id
+ * (ruling 249) has no task scope — `project_slug = ''`, the conversation id
  * standing in for a task key — so its frames route to the conversation
  * owner's `user` stream instead, as `controller.log-appended` (the console
  * tails it) and `controller.updated` (the page revalidates on it). The caller
@@ -29,7 +29,7 @@ export function publishRunLogAppended(input: {
   runId: string;
   threadId: string;
   seq: number;
-  /** Ruling 99: set for a controller run; its frames go to the owner. */
+  /** Ruling 249: set for a controller run; its frames go to the owner. */
   controller?: ControllerRunRoute | null;
 }): void {
   if (input.controller) {
@@ -70,7 +70,7 @@ export function publishRunLogAppended(input: {
     // line of output. `run.state-changed` stays on the firehose: that one is a
     // real project fact and fires a handful of times per run.
     //
-    // Ruling 457 (LIVE-5): and off the `project:` scope too. That fix kept the
+    // Ruling 300 (LIVE-5): and off the `project:` scope too. That fix kept the
     // board as a recipient because the board revalidated on a line then; since
     // 2026-09-23 nothing but the console of the page showing THIS task reads
     // the frame, and that page holds the task's scope. Every open board of the
@@ -85,7 +85,7 @@ export function publishRunStateChanged(input: {
   runId: string;
   threadId: string;
   state: RunState;
-  /** Ruling 99: set for a controller run; the owner's page revalidates. */
+  /** Ruling 249: set for a controller run; the owner's page revalidates. */
   controller?: ControllerRunRoute | null;
 }): void {
   if (input.controller) {

@@ -37,7 +37,7 @@ export function isTelemetryLine(line: LogLine): boolean {
 }
 
 /** The collapsed row's own copy — names what was folded and where it went.
- *  The plurals are inline, not `countLabel`, under ruling 457
+ *  The plurals are inline, not `countLabel`, under ruling 11
  *  (shared/text/plural.ts). */
 export function telemetryLabel(entry: {
   count: number;

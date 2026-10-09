@@ -3,7 +3,7 @@ import type { WorkRevision } from "~/schemas/task-file.schema";
 import { engageStagesFor, hasDeliveringAgent, type EngageTaskState } from "./engage-stages";
 
 /**
- * Ruling 702: where a task with no delivering agent may go back to so that one
+ * Ruling 112: where a task with no delivering agent may go back to so that one
  * can be engaged. Three callers share this answer (the operator's snapshot,
  * its move, and `transitionStage`), so the cases live here once.
  */
@@ -62,7 +62,7 @@ function task(stage: string, patch: Partial<EngageTaskState> = {}): EngageTaskSt
 const at = (stage: string, patch: Partial<EngageTaskState> = {}, deployed = DEPLOYED, required = REQUIRED) =>
   engageStagesFor(BOARD, task(stage, patch), deployed, required);
 
-describe("ruling 702: the stages a task with no delivering agent may go back to", () => {
+describe("ruling 112: the stages a task with no delivering agent may go back to", () => {
   it("BLOG-8 at Cover: the stages where an agent that cannot be engaged there can be, with who", () => {
     // Canary: return [] whenever the task has any engagement at all.
     expect(at("cover")).toEqual([
@@ -85,7 +85,7 @@ describe("ruling 702: the stages a task with no delivering agent may go back to"
       sourceProfileId: null,
     };
     expect(at("cover", { workRevision: revision })).toEqual([]);
-    // A revision that was discarded is under nobody's review (ruling 161):
+    // A revision that was discarded is under nobody's review (ruling 234):
     // the task has delivered nothing again. Canary: read `workRevision`
     // without asking whether it is still active.
     const discarded: WorkRevision = { ...revision, kind: "discarded" };
@@ -106,7 +106,7 @@ describe("ruling 702: the stages a task with no delivering agent may go back to"
   });
 
   it("offers nothing once a delivering agent that can run is engaged, and offers it again when that agent is no longer deployed", () => {
-    // Ruling 133 covers the first task: its deliverer runs where it stands.
+    // Ruling 181 covers the first task: its deliverer runs where it stands.
     // The second names an agent nobody can dispatch.
     // Canary: count any engagement with `delivers`, deployed or not.
     const engagements = [{ profileId: "writer", delivers: true }];
@@ -135,7 +135,7 @@ describe("ruling 702: the stages a task with no delivering agent may go back to"
   it("an agent that cannot be given a delivery is no reason either: no grant to save or commit, or the project's required reviewer", () => {
     // Past Review on a longer board, the Editor is declared for an earlier
     // stage. As the project's required reviewer it cannot deliver (ruling
-    // 556), and a hand-off to it would be refused. Canary: drop that half of
+    // 89), and a hand-off to it would be refused. Canary: drop that half of
     // the filter, and the Editor is offered at Review.
     const board = {
       stages: [...BOARD.stages.slice(0, 5), { id: "publish" }, { id: "done" }],

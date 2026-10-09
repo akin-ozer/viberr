@@ -86,7 +86,7 @@ describe("runSetCredential refreshes the PAT cache with project context", () => 
     });
     expect(outcome.result).toBe("attached");
     // One read proves the scopes; the other is the board's new reading of the
-    // repository (ruling 540).
+    // repository (ruling 223).
     expect(attachTime.callsTo(`GET /repos/${REPO}`)).toHaveLength(2);
 
     // 3. The SHARED cache (what the org card renders too) is upgraded.
@@ -290,12 +290,12 @@ describe("runSetCredential binds by repo owner, not by org default", () => {
 });
 
 /**
- * Ruling 480 (F40-45): "Rotate credential" rotated nothing. On a one-connection
+ * Ruling 222 (F40-45): "Rotate credential" rotated nothing. On a one-connection
  * instance it bound the same PAT again and toasted "Credential rotated to
  * akin-ozer's connection. Sync uses it now", while the token that ran was byte
  * for byte the one before. The toast now says which happened.
  */
-describe("ruling 480: re-attaching says what it did, never 'rotated'", () => {
+describe("ruling 222: re-attaching says what it did, never 'rotated'", () => {
   const CLASSIC = (owner: string) =>
     fakeGithubFetch({
       "GET /user": { body: { login: owner }, headers: { "x-oauth-scopes": "repo" } },
@@ -362,13 +362,13 @@ describe("ruling 480: re-attaching says what it did, never 'rotated'", () => {
 });
 
 /**
- * Ruling 540: the board's Repository strip and the home card read the check
+ * Ruling 223: the board's Repository strip and the home card read the check
  * remembered per project (U33-2). Attaching, re-checking and removing the
  * credential change what that check describes, so each takes a new reading.
  * Before, each cleared only the 30-second memo in front of it, and the strip
  * went on showing its verdict about the credential that was there before.
  */
-describe("ruling 540: a credential change takes a new reading for the board", () => {
+describe("ruling 223: a credential change takes a new reading for the board", () => {
   it("attach, Re-check scopes and remove each leave the check describing the credential as it now stands", async () => {
     const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };

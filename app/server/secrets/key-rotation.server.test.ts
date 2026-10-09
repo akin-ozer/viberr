@@ -222,10 +222,10 @@ describe("SEALED_STORES covers every sealed store", () => {
       "server/audit/s3-config.server.ts",
       "server/auth/oauth-providers.server.ts",
       "server/org/resources.server.ts",
-      // Ruling 469: an MCP connection's OAuth sign-in, `oauth_ref`.
+      // Ruling 192: an MCP connection's OAuth sign-in, `oauth_ref`.
       "server/org/mcp-oauth.server.ts",
       "server/secrets/pat-store.server.ts",
-      // Ruling 127: the personal Claude/Codex keys people paste on their
+      // Ruling 137: the personal Claude/Codex keys people paste on their
       // profile. A `login` row has no box; a pasted one does, and a rotation
       // that skipped this table would brick every person's agent runs.
       "server/runtimes/backend-credentials.server.ts",
@@ -238,12 +238,12 @@ describe("SEALED_STORES covers every sealed store", () => {
       // R19-16: sign-in client secrets rotate with everything else — an
       // unregistered store would silently outlive a key rotation.
       "oauth_providers",
-      // Ruling 469: `org_mcp_servers` twice — `oauth_ref` and `cred_ref`.
+      // Ruling 192: `org_mcp_servers` twice — `oauth_ref` and `cred_ref`.
       "org_mcp_oauth",
       "org_mcp_servers",
       // Pass-25: the S3 audit-export secret access key.
       "s3_audit_config",
-      // Ruling 127: personal backend API keys / workspace access tokens.
+      // Ruling 137: personal backend API keys / workspace access tokens.
       "user_backend_credentials",
     ]);
   });

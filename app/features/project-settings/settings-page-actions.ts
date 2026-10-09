@@ -9,7 +9,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 import type { MembershipView } from "./membership.server";
 
 /**
- * The project settings page's posts (ruling 700(e), the split of
+ * The project settings page's posts (ruling 13(b), the split of
  * `settings-page.tsx` along the task-page recipe), each with its fetcher and
  * its toast: the identity, the stage editor, the members, the repository, the
  * credential, the danger zone and the three whole-list saves. The page calls
@@ -218,7 +218,7 @@ export function useListSave<Row>(csrf: string, intent: string, field: string) {
 /**
  * The Change repository dialog's form: the typed repository, the footprint
  * acknowledgement, what is still missing, the refusal count and the submit.
- * The dialog plays its exit once its change landed (`done`, ruling 459).
+ * The dialog plays its exit once its change landed (`done`, ruling 287).
  */
 export function useChangeRepoForm({
   footprintTasks,
@@ -244,11 +244,11 @@ export function useChangeRepoForm({
   const [sent, setSent] = useState(false);
   const repoRef = useRef<HTMLInputElement>(null);
   const ackRef = useRef<HTMLInputElement>(null);
-  // Ruling 147: the primary stays enabled; a refused submit names what is
+  // Ruling 288: the primary stays enabled; a refused submit names what is
   // missing, marks it and moves focus there. Counted so each refusal
   // re-inserts the alert.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const missing: "repo" | "ack" | null =
     repo.trim().length <= 2 ? "repo" : footprintTasks > 0 && !ack ? "ack" : null;

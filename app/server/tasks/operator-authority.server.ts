@@ -1,5 +1,5 @@
 /**
- * What the operator may do on a project (ruling 656): its autonomy, clamped
+ * What the operator may do on a project (ruling 13(a)): its autonomy, clamped
  * by the deployment; its grants and the gates every operator action asks first
  * (`gate`, `deliverGate`, `dispatchGate`); and the result every action
  * answers with.
@@ -32,8 +32,8 @@ export type OperatorAutonomy = "supervised" | "full";
 export interface OperatorAuthority {
   /** capabilityId → mode, from the project's operator deployment. */
   policy: Map<string, CapabilityMode>;
-  /** Ruling 286: which of `kb` is the project's RULINGS knowledge base (ruling
-   *  239), so its index can say it BINDS. A label; ruling 283 removed the
+  /** Ruling 208(b): which of `kb` is the project's RULINGS knowledge base (ruling
+   *  208(a)), so its index can say it BINDS. A label; ruling 205 removed the
    *  budget this used to feed. On the authority because that is where `kb`
    *  already lives; null when `kb` holds none. */
   rulingsKb: string | null;
@@ -49,7 +49,7 @@ export interface OperatorAuthority {
    * R19-A — non-null when THIS run asked for more autonomy than the project
    * allows and was reduced to the ceiling. Carries what was asked for, so the
    * reduction is named instead of silently happening: to people by the audit
-   * row, and to the run by its prompt's autonomy line (ruling 67).
+   * row, and to the run by its prompt's autonomy line (ruling 108).
    */
   autonomyClampedFrom: OperatorAutonomy | null;
   backend: RealBackend;
@@ -84,7 +84,7 @@ export interface OperatorAuthority {
    */
   humanGatedBeforeWork: boolean;
   /**
-   * Ruling 672: whether this run may ask a person to connect a repository.
+   * Ruling 107: whether this run may ask a person to connect a repository.
    * `open` on a project with none, `declined` once a person decided the board
    * keeps none, null for a project that has one. It offers
    * `ask_for_repository` on both backends and words the run's workspace
@@ -113,11 +113,11 @@ export interface OperatorActionResult {
   outcome: "done" | "recommended" | "denied" | "noop";
   message: string;
   /**
-   * Ruling 443: the step's outcome IS a decision packet it opened, as when a
+   * Ruling 118: the step's outcome IS a decision packet it opened, as when a
    * base refresh meets a conflict. It tried what it could and left the choice
    * to a person, which is not a refusal: `outcome` stays `noop` (the state
    * split above), and a plan's narration does not file it as a step that "did
-   * not apply". Ruling 430 already pauses the acting steps after it.
+   * not apply". Ruling 118 already pauses the acting steps after it.
    */
   openedPacket?: true;
   /** Users the action's own watcher notification actually REACHED (routing
@@ -128,12 +128,12 @@ export interface OperatorActionResult {
 }
 
 /**
- * Ruling 406: an operator that ACTED did not hold. Stamps the drive's
+ * Ruling 121: an operator that ACTED did not hold. Stamps the drive's
  * `carriedOutAction` when an action's result says it was carried out, `done`
- * or (ruling 443) a step whose outcome is the decision packet it opened,
+ * or (ruling 118) a step whose outcome is the decision packet it opened,
  * whatever effect it had.
  *
- * Ruling 705: the ONE predicate both operator backends answer from. A Codex
+ * Ruling 121: the ONE predicate both operator backends answer from. A Codex
  * plan's steps pass through `executeCodexPlan`'s `record` and a Claude drive's
  * governed tools reply through the toolkit's `resultText`, and each calls
  * this, so the next action shape counts on both the day it is added. The
@@ -162,7 +162,7 @@ export interface RefusedPlanStep {
 }
 
 /**
- * Ruling 443: what one action's result refuses, if anything. `denied` is a
+ * Ruling 118: what one action's result refuses, if anything. `denied` is a
  * refusal by authority and `noop` one by state (the LV-03 split), except a
  * step whose outcome is the decision packet it opened. Live on ax-clone AX-21,
  * AX-28 and AX-5 a refresh that met a conflict was narrated "This step did not
@@ -186,7 +186,7 @@ export function planRefusalOf(
 }
 
 /**
- * Ruling 399 on Claude (ruling 705): record a Claude drive's refused governed
+ * Ruling 121 on Claude (ruling 121): record a Claude drive's refused governed
  * call on the drive, for the settle's hold note. A Codex plan's refusals are
  * narrated onto the timeline once the plan has run (`narrateRefusedActions`);
  * a Claude drive's reach the model in-run, as its tool's reply, and nothing
@@ -206,7 +206,7 @@ export function noteRefusedCall(
 
 /** Refused actions as a person reads them, one "- `tool`: message" line each:
  *  a Codex plan's refusal note and a stopped Claude drive's hold note (ruling
- *  399) print the same list. */
+ *  121) print the same list. */
 export function refusalList(refusals: readonly { tool: string; message: string }[]): string {
   return refusals.map((r) => `- \`${r.tool}\`: ${r.message}`).join("\n");
 }
@@ -240,7 +240,7 @@ const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
  * `recommend` capability (stage transitions, packets, typed events,
  * `deliver-review-pr`) to direct execution, with no confirm, no distinct audit
  * row, and only a toast. The Policy page presents operator autonomy as PROJECT
- * configuration (ruling 2); a per-run dropdown that silently outranks it makes
+ * configuration (ruling 26(a)); a per-run dropdown that silently outranks it makes
  * that page a lie.
  *
  * This is a CEILING, not a pin: choosing LESS autonomy for a single run stays
@@ -460,7 +460,7 @@ export function resolveOperatorAuthority(
       effort: "",
       name: "Operator",
       skills: [],
-      // Ruling 239: every run a project makes reads its rulings, and this one
+      // Ruling 208(a): every run a project makes reads its rulings, and this one
       // still runs: `runOperator` refuses no undeployed operator (the Run
       // operator control, a schedule, boot recovery and the controller each
       // start one), so it plans from the rules the deployed branch reads.
@@ -509,12 +509,12 @@ export function resolveOperatorAuthority(
     effort: backend === declaredBackend ? view.effort || "" : "",
     name: view.name || "Operator",
     skills: view.resources.skills,
-    // Ruling 239: the operator reads the project's rulings the same as every
+    // Ruling 208(a): the operator reads the project's rulings the same as every
     // agent it coordinates. It writes the packets and scoping notes those
     // agents work from, so an operator that had not read the project's settled
     // rules would re-open questions the project had closed.
     kb: withProjectRulings(view.resources.kb ?? [], projectSlug, ctx),
-    // Ruling 286: which of those names binds. The operator writes the packets
+    // Ruling 208(b): which of those names binds. The operator writes the packets
     // and scoping notes every specialist works from, so it is the worst actor
     // on the board to be planning from rules it never opened.
     rulingsKb: projectRulingsKb(projectSlug, ctx),
@@ -549,7 +549,7 @@ function absentPolarityGate(
       // mode rides the promotion in the mode arm below).
       return absentDeliverReviewPrMode(authority.humanGatedBeforeWork);
     case "dispatch-agents":
-      // Ruling 98(b): dispatch IS the old assign/summon pair's default.
+      // Ruling 124: dispatch IS the old assign/summon pair's default.
       return "direct";
     case "update-task-branch":
       // Bringing the branch up to date is delivery's sibling — absent
@@ -639,9 +639,9 @@ export function deliverGate(authority: OperatorAuthority): Gate {
 
 /**
  * The `dispatch-agents` gate with ABSENT-means-granted polarity (dispatch-
- * rework bug hunt, 2026-08-29). Ruling 98(b) collapsed the persisted
+ * rework bug hunt, 2026-08-29). Ruling 124 collapsed the persisted
  * `assign-primary-specialist` + `summon-reviewers` pair into this id, and the
- * canon (capabilities.ts, ruling 98) promised that an absent grant resolves to
+ * canon (capabilities.ts, ruling 124) promised that an absent grant resolves to
  * the catalog default so existing operator deployments keep dispatching — but
  * every consumer went through the plain `gate()`, whose absent arm is `off` →
  * deny: on EVERY deployment persisted before the rework (which stores only the

@@ -23,7 +23,7 @@ import { useDismiss } from "./use-dismiss";
  *
  * `align` is the trigger edge the menu hangs from: its right edge on a board
  * card, whose trigger ends the card's head; its left edge in a property row
- * (ruling 520), whose value starts the row's value column, so the menu opens
+ * (ruling 309(a)), whose value starts the row's value column, so the menu opens
  * over the values rather than over the labels.
  */
 
@@ -52,7 +52,7 @@ export function StageMenu({
   onReorder?: (dir: -1 | 1) => void;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
-  /** Ruling 520: the trigger edge the menu lines up with. */
+  /** Ruling 309(a): the trigger edge the menu lines up with. */
   align?: "start" | "end";
 }) {
   const [open, setOpen] = useState(false);
@@ -232,7 +232,7 @@ export function StageMenu({
         disabled={busy}
         aria-haspopup="menu"
         aria-expanded={open}
-        // Ruling 148: a stage id the project no longer lists is stated in
+        // Ruling 291: a stage id the project no longer lists is stated in
         // words, the same words everywhere. The visible label was a "−" that
         // read as a cleared control while this name said "unknown", so the
         // accessible name did not even contain the visible one.

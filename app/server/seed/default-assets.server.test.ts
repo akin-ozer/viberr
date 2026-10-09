@@ -162,12 +162,12 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 468 (F40-12): the operator never asks a person for a repository's
+   * Ruling 107 (F40-12): the operator never asks a person for a repository's
    * first commit. Live on WEB-1 its first run found an unborn `main` and
    * opened a packet whose recommended option was "I pushed an initial commit
    * to main"; nothing it read said Viberr makes that commit.
    */
-  it("ruling 468: the doctrine says an empty repository is Viberr's to initialize, and its outgoing hash is recorded", async () => {
+  it("ruling 107: the doctrine says an empty repository is Viberr's to initialize, and its outgoing hash is recorded", async () => {
     // Canaries: drop the sentence; remove the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     expect(shippedCopyIsUnedited(OPERATOR_REL, "1763e3889a2da992052bebd5accbe51854baea010bc80d7e8d7aa96266715c13", {})).toBe(true);
@@ -178,13 +178,13 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 487 (F40-65): a wait on a clock is scheduled, never asked, and a
+   * Ruling 125 (F40-65): a wait on a clock is scheduled, never asked, and a
    * hold a pending schedule explains needs no packet. Live on WEB-9 the
    * operator asked the owner to route a 12:25Z run through the controller and
    * opened a packet only to record the wait, obeying "never leave a pre-work
    * or `auto` stage with nothing done and no packet".
    */
-  it("ruling 487: the doctrine schedules a wait on a clock and records a scheduled hold with a note, and its outgoing hash is recorded", async () => {
+  it("ruling 125: the doctrine schedules a wait on a clock and records a scheduled hold with a note, and its outgoing hash is recorded", async () => {
     // Canaries: drop the new sentences; restore "nothing done and no packet";
     // remove the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -199,11 +199,11 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 488 (F40-67): text meant for another task is relayed, never handed
+   * Ruling 135 (F40-67): text meant for another task is relayed, never handed
    * to a person to post there. Live on WEB-9 the acceptance packet asked the
    * owner to confirm two attachments had been pasted onto WEB-8 by hand.
    */
-  it("ruling 488: the doctrine and the specialist handbook relay text between tasks and never hand it to a person, and their outgoing hashes are recorded", async () => {
+  it("ruling 135: the doctrine and the specialist handbook relay text between tasks and never hand it to a person, and their outgoing hashes are recorded", async () => {
     // Canaries: drop the doctrine's paragraph, the app skill's tool line or
     // the Developer's reporting bullet; remove any of the three hashes.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -230,7 +230,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     const asset = (file: string) =>
       readFileSync(path.join(REPO_ROOT, "app/server/seed/assets", file), "utf8");
     expect(asset("viberr-app-expertise.skill.md")).toContain(
-      "- `relay_to_task` posts on ANOTHER task in this project (ruling 488)",
+      "- `relay_to_task` posts on ANOTHER task in this project (ruling 135)",
     );
     expect(asset("developer-expertise.skill.md")).toContain(
       "put it in the `relay` entries of your reported outcome",
@@ -241,7 +241,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 492 (F40-69): a done signal is something the task can show before
+   * Ruling 105 (F40-69): a done signal is something the task can show before
    * acceptance, which closes the task. Goals kept asking for a proof only the
    * merged or deployed code could show (the operator's option on WEB-16,
    * WEB-13, goal-1 links 9 and 11), and nothing their authors read said
@@ -256,13 +256,13 @@ describe("shipped-asset refresh (B-OP1)", () => {
    * acceptance withdraws an open decision unanswered. The first doctrine
    * said "Never hold this task back for that proof" instead.
    */
-  it("ruling 492: the controller guide and the operator doctrine carry the done-signal rule, and their outgoing hashes are recorded", async () => {
+  it("ruling 105: the controller guide and the operator doctrine carry the done-signal rule, and their outgoing hashes are recorded", async () => {
     // Canaries: drop the rule from the guide's "Creating a task" section or
     // its bullet from "Epics"; drop the rule or the create_task sentence from
     // the doctrine; remove either outgoing hash. Review canaries: drop the
     // merge check from the guide's read task or its epic example; drop the
     // doctrine's wait for the answer; restore "Never hold this task back for
-    // that proof". Ruling 503 moved the guide's bullet from "Chained goals"
+    // that proof". Ruling 273 moved the guide's bullet from "Chained goals"
     // to "Epics" and the doctrine's check from `goalChain` to the task's epic.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const guideRel = path.join("skills", "controller-guide", "SKILL.md");
@@ -298,7 +298,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(epics, "the guide's Epics section").toContain(
       "confirms the job is merged and deployed, then reads its first run on the deployed build",
     );
-    expect(section("Chained goals"), "ruling 503 retired the Chained goals section").toBe("");
+    expect(section("Chained goals"), "ruling 273 retired the Chained goals section").toBe("");
     expect(doctrine, "the operator doctrine").toContain(DONE_SIGNAL_RULE);
     expect(doctrine, "the operator doctrine").toContain(
       "raise a `create_task` option for the read: its `newTask.blockedBy` names this task, its `newTask.goal` has the read confirm this task's change is merged and deployed before it reads",
@@ -315,16 +315,16 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 494 (F40-70): a behind count is true only of the head it was
+   * Ruling 116 (F40-70): a behind count is true only of the head it was
    * counted on. Live on WEB-16 two packets told the owner the branch was 6
    * commits behind `main`, five minutes after a push that carried `main`.
    */
-  it("ruling 494: the doctrine checks a behind count's head against the head just pushed and keeps another head's count out of packets, and its outgoing hashes are recorded", async () => {
+  it("ruling 116: the doctrine checks a behind count's head against the head just pushed and keeps another head's count out of packets, and its outgoing hashes are recorded", async () => {
     // Canaries: drop the sentences; remove either outgoing hash; say "Never
     // call it" again after the packet sentence.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     expect(shippedCopyIsUnedited(OPERATOR_REL, "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8", {})).toBe(true);
-    // The text as ruling 494 first shipped it, before its review named the tool.
+    // The text as ruling 116 first shipped it, before its review named the tool.
     expect(shippedCopyIsUnedited(OPERATOR_REL, "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4", {})).toBe(true);
     const doctrine = shipped();
     expect(doctrine).toContain(
@@ -341,12 +341,12 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 531: the operator scopes and delivers a task whose deliverable is a
-   * result (ruling 530) on the task. The turn prompt carries both rules from
+   * Ruling 128: the operator scopes and delivers a task whose deliverable is a
+   * result (ruling 268) on the task. The turn prompt carries both rules from
    * `result-delivery.server.ts`; the doctrine a project reads quotes them, so
    * the two cannot drift, and a store seeded before them upgrades in place.
    */
-  it("ruling 531: the operator doctrine quotes the result rules word for word, and its outgoing hash is recorded", async () => {
+  it("ruling 128: the operator doctrine quotes the result rules word for word, and its outgoing hash is recorded", async () => {
     // CANARY: drop either rule from the doctrine, or reword one side only; or
     // remove the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -378,7 +378,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(shippedCopyIsUnedited(path.join("skills", "controller-guide", "SKILL.md"), "69805ce6bb7bd0180014e164ae6d863268813bd4fb6a0f61bfa4e333b6674608", {})).toBe(true);
   });
 
-  it("ruling 483: the operator skill and controller guide shipped before knowledge-base proposals are recorded prior hashes", async () => {
+  it("ruling 210: the operator skill and controller guide shipped before knowledge-base proposals are recorded prior hashes", async () => {
     // Canary: omit either outgoing hash and a live store keeps the version that
     // names `propose_ruling` or never mentions `resolve_kb_proposal`.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -402,7 +402,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(guide).toContain("`resolve_kb_proposal`");
   });
 
-  it("ruling 498: the operator skill and controller guide shipped before corrections were written are recorded prior hashes", async () => {
+  it("ruling 210: the operator skill and controller guide shipped before corrections were written are recorded prior hashes", async () => {
     // Canary: omit either outgoing hash and a live store keeps the version that
     // tells agents to propose and the controller to wait for a person.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -432,11 +432,11 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 
   /**
-   * Ruling 526: the timeline draws a verdict's evidence as a checklist, so the
+   * Ruling 16: the timeline draws a verdict's evidence as a checklist, so the
    * Reviewer is told what each row carries: what it checked, how it came out,
    * and its pass, fail or info mark. A store seeded before it upgrades in place.
    */
-  it("ruling 526: the reviewer skill asks for each row's result and mark, and its outgoing hash is recorded", async () => {
+  it("ruling 16: the reviewer skill asks for each row's result and mark, and its outgoing hash is recorded", async () => {
     // Canaries: drop the mark from the skill's evidence-rows bullet; remove
     // the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -451,7 +451,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     expect(skill).toContain("so mark a row that blocks as `fail`");
   });
 
-  it("ruling 619: the operator skill carries an earlier stage's fix through a later stage's file, and its outgoing hash is recorded", async () => {
+  it("ruling 124: the operator skill carries an earlier stage's fix through a later stage's file, and its outgoing hash is recorded", async () => {
     // Canaries: drop the bullet; remove the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const rel = path.join("skills", "viberr-app-expertise", "SKILL.md");
@@ -497,7 +497,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
   // CANARY: record nothing after a refresh and an upgrade that replaced the
   // operator's doctrine leaves a log line and no row; record on every boot
   // and each restart of an unchanged build writes one.
-  it("ruling 681: a boot that refreshed a shipped file records which and under which build, and one that refreshed nothing records nothing", async () => {
+  it("ruling 34: a boot that refreshed a shipped file records which and under which build, and one that refreshed nothing records nothing", async () => {
     const { recordShippedAssetRefresh, seedDefaultAgentAssets } = await import("./default-assets.server");
     const dataRoot = freshStore();
     const db = dbCtx.makeDb();
@@ -619,9 +619,9 @@ describe("shipped-asset refresh (B-OP1)", () => {
   });
 });
 
-// ------------------------------------------------------------ ruling 121
+// ------------------------------------------------------------ ruling 256
 
-describe("the controller doctrine and skill upgrade in place (ruling 121)", () => {
+describe("the controller doctrine and skill upgrade in place (ruling 256)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
 
   it("lists the outgoing versions of both files, so an unedited store copy is refreshed at boot", async () => {
@@ -648,7 +648,7 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
    * this change is committed (HEAD would hold the new text, and CI clones at
    * depth 1), so what is asserted here is the MECHANISM the hash list feeds:
    * a store copy this app is recorded as having written is really replaced by
-   * the shipped one, for the two ruling-121 assets specifically.
+   * the shipped one, for the two ruling-256 assets specifically.
    */
   it("upgrades a recorded copy of the controller doctrine and skill in place", async () => {
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
@@ -703,14 +703,14 @@ describe("the controller doctrine and skill upgrade in place (ruling 121)", () =
 });
 
 /**
- * Ruling 462 (pass 40, F40-5): the controller's playbook says a project's
+ * Ruling 266 (pass 40, F40-5): the controller's playbook says a project's
  * repository need not exist first and names `createRepository`. The outgoing
  * version is listed so an unedited store copy upgrades at boot.
  *
  * Canary: drop the bullet, or the outgoing hash, and the matching assertion
  * fails.
  */
-describe("the controller playbook learns createRepository (ruling 462)", () => {
+describe("the controller playbook learns createRepository (ruling 266)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names the flag and lists its outgoing version", async () => {
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -726,19 +726,19 @@ describe("the controller playbook learns createRepository (ruling 462)", () => {
 });
 
 /**
- * Ruling 463 (pass 40, F40-6): the controller's playbook sends it to
+ * Ruling 266 (pass 40, F40-6): the controller's playbook sends it to
  * `list_github_connections` before `create_project`. The outgoing version is
  * listed so an unedited store copy upgrades at boot.
  *
  * Canary: drop the bullet, or the outgoing hash, and the matching assertion
  * fails.
  */
-describe("the controller playbook learns list_github_connections (ruling 463)", () => {
+describe("the controller playbook learns list_github_connections (ruling 266)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names the read and lists its outgoing version", async () => {
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const skill = readFileSync(path.join(assetsDir, "controller-guide.skill.md"), "utf8");
-    // Ruling 667 scoped the bullet to the board that needs a connection.
+    // Ruling 224 scoped the bullet to the board that needs a connection.
     expect(skill).toContain("For a software board, read the GitHub connections before you create anything.");
     expect(skill).toContain("`list_github_connections` first");
     expect(skill).not.toMatch(/[–—]/);
@@ -750,14 +750,14 @@ describe("the controller playbook learns list_github_connections (ruling 463)", 
 });
 
 /**
- * Ruling 464 (pass 40, F40-7): the controller's playbook says to pass the
+ * Ruling 266 (pass 40, F40-7): the controller's playbook says to pass the
  * designed roster as `agents` and names the one removal it holds. The
  * outgoing version is listed so an unedited store copy upgrades at boot.
  *
  * Canary: drop the bullet, the removal sentence, or the outgoing hash, and the
  * matching assertion fails.
  */
-describe("the controller playbook learns `agents` and remove_agent_deployment (ruling 464)", () => {
+describe("the controller playbook learns `agents` and remove_agent_deployment (ruling 266)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("names both and lists its outgoing version", async () => {
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -773,7 +773,7 @@ describe("the controller playbook learns `agents` and remove_agent_deployment (r
 });
 
 /**
- * Ruling 134 (pass 34, F34-11): the shipped operator doctrine says that
+ * Ruling 229 (pass 34, F34-11): the shipped operator doctrine says that
  * rework on an open PR is delivered with `deliver_for_review`, and that
  * pushing is never a person's or an agent's job. The outgoing sha256 is
  * listed so an unedited store copy upgrades at boot.
@@ -781,7 +781,7 @@ describe("the controller playbook learns `agents` and remove_agent_deployment (r
  * Canary: revert the persona sentence (or drop the outgoing hash) and the
  * matching assertion fails.
  */
-describe("the operator doctrine upgrade in place (ruling 134)", () => {
+describe("the operator doctrine upgrade in place (ruling 229)", () => {
   const assetsDir = path.join(import.meta.dirname, "assets");
   it("carries the rework-delivery sentence and lists its outgoing version", async () => {
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -798,7 +798,7 @@ describe("the operator doctrine upgrade in place (ruling 134)", () => {
 });
 
 /**
- * Ruling 437 (F39-60): the operator's app skill told it to resolve any packet
+ * Ruling 131 (F39-60): the operator's app skill told it to resolve any packet
  * that had become moot. `resolve_packet` refuses every packet the operator did
  * not raise, and operators planned it on agents' questions twice in half an
  * hour. The skill now draws the same line as the snapshot and the refusal.
@@ -806,7 +806,7 @@ describe("the operator doctrine upgrade in place (ruling 134)", () => {
  * CANARY: restore "If a packet becomes moot because its input arrived another
  * way, resolve it." with no qualification.
  */
-describe("ruling 437: the app skill says whose packets the operator may resolve", () => {
+describe("ruling 131: the app skill says whose packets the operator may resolve", () => {
   const skill = readFileSync(
     path.join(import.meta.dirname, "assets/viberr-app-expertise.skill.md"),
     "utf8",
@@ -826,9 +826,9 @@ describe("ruling 437: the app skill says whose packets the operator may resolve"
  * forbids `git push` and PRs; the Reviewer "raises typed quality flags" with no
  * such tool; the operator's playbook read an absent grant as "do not attempt"
  * while four capabilities resolve an absent grant to a default; the controller
- * created "only the first link's task" of a goal that ruling 398 fans out; and
+ * created "only the first link's task" of a goal that ruling 273 fans out; and
  * the operator was told that "advancing a single `auto` boundary and stopping is
- * correct", which ruling 152(a) made a paid extra turn per stage.
+ * correct", which ruling 120 made a paid extra turn per stage.
  *
  * Each rewritten asset's outgoing version is a recorded prior hash, so an
  * unedited store copy upgrades at boot.
@@ -854,7 +854,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     );
     expect(skill).not.toContain("Open the review PR");
     expect(skill).not.toContain("the review PR is open");
-    // Ruling 133: an engaged deliverer runs at EVERY stage.
+    // Ruling 181: an engaged deliverer runs at EVERY stage.
     expect(skill).not.toContain("You do your work at the implementation stage");
     expect(skill).toContain("you run at EVERY stage");
     // The run prompt prefixes a commit with the task key, never a literal `[TASK]`.
@@ -891,14 +891,14 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     }
     expect(skill).toContain("Missing from `operatorPolicy`: withheld, except four capabilities");
     // `read_board` is built only beside another Viberr tool, on either backend:
-    // on Codex through Viberr's gateway (ruling 589).
+    // on Codex through Viberr's gateway (ruling 216).
     expect(skill).toContain("An agent that holds any other Viberr tool, on Claude or on");
     expect(skill).not.toContain("an agent on Codex gets no board read");
   });
 
-  it("ruling 503: the controller's doctrine, guide and handbook say an epic holds nothing back and order is each task's own wait", async () => {
-    // Ruling 398 taught these three that a chain started every link whose
-    // wait was met. Ruling 503 retired the chains: an epic is a group, and
+  it("ruling 272: the controller's doctrine, guide and handbook say an epic holds nothing back and order is each task's own wait", async () => {
+    // Ruling 273 taught these three that a chain started every link whose
+    // wait was met. Ruling 272 retired the chains: an epic is a group, and
     // the one ordering is `blockedBy`. Canaries: bring back a chain sentence,
     // a goal-chain tool, or the handbook's goals bullet.
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
@@ -916,7 +916,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(handbook).not.toContain("Goals decompose one outcome into links");
     for (const text of [definition, skill]) {
       expect(text).not.toContain("born held");
-      expect(text).toContain("ruling 503");
+      expect(text).toContain("ruling 272");
       expect(text).toMatch(/an epic starts, orders and holds nothing/i);
       expect(text).toContain("`blockedBy`");
       expect(text).toContain("`create_epic`");
@@ -926,17 +926,17 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       }
     }
     expect(handbook).toContain("An epic holds nothing back");
-    expect(handbook).toContain("ruling 503");
+    expect(handbook).toContain("ruling 272");
   });
 
   /**
-   * Ruling 530: a board may deliver results, not only software. Asked for a
+   * Ruling 268: a board may deliver results, not only software. Asked for a
    * board that turns an inventory into a calculator.aws estimate, the
    * controller followed the guide's toolchain and gate bullets and planned a
    * TypeScript estimate pipeline in the repository (aws-cost-calculator CALC-2
    * and CALC-4), when the owner wanted the board's agents to make the estimate.
    */
-  it("ruling 530: the controller's doctrine, guide and handbook settle what a board delivers and build a results board out of the board itself", async () => {
+  it("ruling 268: the controller's doctrine, guide and handbook settle what a board delivers and build a results board out of the board itself", async () => {
     // CANARY: drop the doctrine's paragraph, the guide's first bring-up bullet
     // or its results section, or put the gate bullets back on every board, and
     // the controller plans software for a person who asked for results.
@@ -949,7 +949,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       path.join(dataRoot, "kb", "controller-handbook", "handbook.md"),
       "utf8",
     );
-    expect(definition).toContain("settle what its board delivers (ruling 530)");
+    expect(definition).toContain("settle what its board delivers (ruling 268)");
     expect(definition).toContain(
       "never plan an application, a pipeline or a toolchain to do what the agents would do on each task",
     );
@@ -958,7 +958,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // board without asking; words that only name the work fit both.
     expect(definition).toContain("words that only name the work");
     const bringUp = markdownSection(guide, "Bringing up a new project");
-    const settle = bringUp.indexOf("**Settle what the board delivers before you design it** (ruling 530)");
+    const settle = bringUp.indexOf("**Settle what the board delivers before you design it** (ruling 268)");
     expect(settle, "the bring-up section opens by settling what the board delivers").toBeGreaterThan(-1);
     expect(settle).toBeLessThan(bringUp.indexOf("**For a software board, read the GitHub connections"));
     expect(bringUp).toContain("Words that only name the work");
@@ -972,14 +972,14 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   });
 
   /**
-   * Rulings 667 and 668 (owner, 2026-10-06): "now this is a no-code development
+   * Rulings 224 and 103 (owner, 2026-10-06): "now this is a no-code development
    * board. So let's just make the github connection for this board type
    * optional", and the operator summarizes a task's result before it asks for
    * Done. The guide said "Every project still needs a repository", so the
    * controller asked for one on a board whose agents commit nothing: the AWS
    * calculator board's repository held 92 branches with no commit on them.
    */
-  it("rulings 667 and 668: the shipped prompts know a board with no repository and the result a completion packet becomes, and their outgoing hashes are recorded", async () => {
+  it("rulings 224 and 103: the shipped prompts know a board with no repository and the result a completion packet becomes, and their outgoing hashes are recorded", async () => {
     // CANARY: restore the guide's "still needs a repository" sentence, drop
     // the `delivers` bullet or the doctrine's sentence, drop the operator's
     // no-repository clause or its notes, or drop an outgoing hash.
@@ -993,18 +993,18 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const operator = read("operator.definition.md");
     const handbook = readFileSync(path.join(dataRoot, "kb", "controller-handbook", "handbook.md"), "utf8");
 
-    expect(definition).toContain("Say which one when you create the project (`delivers`, ruling 667).");
+    expect(definition).toContain("Say which one when you create the project (`delivers`, ruling 224).");
     expect(definition).toContain("never ask the person for a repository it will not use");
     const bringUp = markdownSection(guide, "Bringing up a new project");
-    const say = bringUp.indexOf("**Say what the board delivers when you create it** (ruling 667)");
+    const say = bringUp.indexOf("**Say what the board delivers when you create it** (ruling 224)");
     expect(say, "the bring-up section says how a results board is created").toBeGreaterThan(-1);
     expect(say).toBeLessThan(bringUp.indexOf("**For a software board, read the GitHub connections"));
     const results = markdownSection(guide, "A board that delivers results");
     expect(guide).not.toContain("still needs a repository");
-    expect(results).toContain("The\n  board needs no repository (ruling 667)");
-    expect(results).toContain("**The result is summarized before it is accepted** (ruling 668).");
-    expect(handbook).toContain("a board that delivers results needs none (ruling 667)");
-    expect(operator).toContain("or that the project has no repository at all (ruling 667)");
+    expect(results).toContain("The\n  board needs no repository (ruling 199)");
+    expect(results).toContain("**The result is summarized before it is accepted** (ruling 103).");
+    expect(handbook).toContain("a board that delivers results needs none (ruling 224)");
+    expect(operator).toContain("or that the project has no repository at all (ruling 199)");
     expect(operator).toContain("what stays on the task as its result once they do");
     for (const field of ["`considerations`", "`assumptions`", "`gaps`", "`completionPacket.resultFileCandidates`"]) {
       expect(operator, field).toContain(field);
@@ -1022,7 +1022,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     }
   });
 
-  it("ruling 672: the shipped prompts know a board can start with no repository, how its operator asks for one, and how a board is switched to pull requests", async () => {
+  it("ruling 224: the shipped prompts know a board can start with no repository, how its operator asks for one, and how a board is switched to pull requests", async () => {
     // CANARY: drop the operator's `ask_for_repository` sentence or the tool
     // from its skill, the doctrine's or the guide's "can start without", the
     // guide's switching section, a grant id it names or its step that starts
@@ -1038,7 +1038,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     const skill = read("viberr-app-expertise.skill.md");
     const handbook = readFileSync(path.join(dataRoot, "kb", "controller-handbook", "handbook.md"), "utf8");
 
-    expect(operator).toContain("call `ask_for_repository` with the reason and stop (ruling 672)");
+    expect(operator).toContain("call `ask_for_repository` with the reason and stop (ruling 107)");
     expect(operator).toContain("while it stands the question is not yours to ask again");
     // The doctrine is the same text for every operator, so it says when the
     // tool is absent instead of telling an operator without it to call it.
@@ -1046,11 +1046,11 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       "The tool is in your toolkit only while the question is yours to ask. It is absent once a person decided the board keeps none",
     );
     expect(operator).toContain("and when opening decision packets is not granted to you. Without it, deliver what can be delivered as files");
-    expect(skill).toContain("- `ask_for_repository` asks a person to connect a repository to a board that has none (ruling 672)");
-    expect(definition).toContain("A board that builds software can start without one too (ruling 672)");
-    expect(handbook).toContain("which it may connect later (ruling 672)");
+    expect(skill).toContain("- `ask_for_repository` asks a person to connect a repository to a board that has none (ruling 107)");
+    expect(definition).toContain("A board that builds software can start without one too (ruling 224)");
+    expect(handbook).toContain("which it may connect later (ruling 224)");
     expect(markdownSection(guide, "Bringing up a new project")).toContain(
-      "**A software board can start without its repository** (ruling 672).",
+      "**A software board can start without its repository** (ruling 224).",
     );
     const switching = markdownSection(guide, "Switching a board to pull requests");
     expect(switching).toContain("`connect_project_repository` (`delivers: true`)");
@@ -1061,7 +1061,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
       expect(switching, id).toContain(`\`${id}\``);
     }
     // The operators that waited are the controller's to start: nothing else
-    // does before ruling 330's sweep, fifteen minutes on.
+    // does before ruling 122's sweep, fifteen minutes on.
     expect(switching).toContain("**Start the operators that waited.**");
     expect(switching).toContain("start each with `run_agent_on_task`");
     // A project admin's turn is refused a knowledge-base edit, so the guide
@@ -1082,18 +1082,18 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   });
 
   /**
-   * Rulings 677 to 679: asked to make a delivered report a board's template,
+   * Rulings 262, 205 and 186: asked to make a delivered report a board's template,
    * the controller left it on the task that made it, and the skills it wrote
    * had outgrown what a run is given without a save ever saying so.
    */
-  it("rulings 677 to 679: the guide keeps a board's template in a knowledge base, a skill within what a run is given, and names the reader of one correction", async () => {
+  it("rulings 262, 205 and 186: the guide keeps a board's template in a knowledge base, a skill within what a run is given, and names the reader of one correction", async () => {
     // CANARY: drop the guide's template bullet or the tool it names, its
     // sentence on a skill's size, `read_kb_correction`, or the outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     const { SKILL_INJECTION_BUDGET } = await import("~/server/files/skill-body.server");
     const guide = read("controller-guide.skill.md");
     const results = markdownSection(guide, "A board that delivers results");
-    expect(results).toContain("**A file the result must follow lives in a knowledge base, not on a task** (ruling 678).");
+    expect(results).toContain("**A file the result must follow lives in a knowledge base, not on a task** (ruling 268).");
     expect(results).toContain("rulings knowledge base with `copy_task_file_to_knowledge_base`");
     // Read as sentences: where a line wraps is not what the guide says.
     const said = results.replace(/\s+/g, " ");
@@ -1101,7 +1101,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(said).toContain("carry the step into the skill of the agent that makes the result and of the reviewer that checks it");
     // The number is the budget's own, so a change to one is a change to both.
     expect(results).toContain(
-      `gets at most ${SKILL_INJECTION_BUDGET.toLocaleString("en-US")} characters of them, and \`save_skill\` says when\n  one is past that (ruling 679)`,
+      `gets at most ${SKILL_INJECTION_BUDGET.toLocaleString("en-US")} characters of them, and \`save_skill\` says when\n  one is past that (ruling 186)`,
     );
     expect(markdownSection(guide, "Keeping a project's rulings current")).toContain("(`read_kb_correction` reads one\n  whole)");
     const rel = path.join("skills", "controller-guide", "SKILL.md");
@@ -1113,13 +1113,13 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
   });
 
   /**
-   * Rulings 684 and 685 (owner, 2026-10-07: "why would controller make the
+   * Rulings 268 and 259 (owner, 2026-10-07: "why would controller make the
    * template with data? ... Even if we manually fix Aidea, controller will
    * still create wrong templates in the future"). The guide itself told the
    * controller to copy the report a person liked into the knowledge base and
    * to write beside it that its content was not to be used.
    */
-  it("rulings 684 and 685: the guide has a template made from an example, a flow that names no task, and the controller continue on acceptance", async () => {
+  it("rulings 268 and 259: the guide has a template made from an example, a flow that names no task, and the controller continue on acceptance", async () => {
     // CANARY: put back "copy it out of the task that holds it" as the whole
     // of the rule, or drop the flow bullet, the continuation bullet, either
     // tool's name or the outgoing hash.
@@ -1128,7 +1128,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     // Read as sentences: where a line wraps is not what the guide says.
     const said = (section: string) => markdownSection(guide, section).replace(/\s+/g, " ");
     const results = said("A board that delivers results");
-    expect(results).toContain("**A template is made from an example. It is never the example** (ruling 684).");
+    expect(results).toContain("**A template is made from an example. It is never the example** (ruling 268).");
     expect(results).toContain("with a `[[what goes here]]` placeholder wherever that task's content stood");
     expect(results).toContain("You cannot write files, so an agent makes it.");
     expect(results).toContain("Leave yourself `continue_when_done` on that task");
@@ -1142,7 +1142,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(guide).not.toContain("copy it out of the task that holds it");
     const agents = said("Working with operators and agents");
     expect(agents).toContain(
-      "**When a request needs a task's work before you can finish it, continue on its acceptance** (ruling 685).",
+      "**When a request needs a task's work before you can finish it, continue on its acceptance** (ruling 259).",
     );
     expect(agents).toContain("When the task is accepted (by a person, or by the operator on a board that lets it accept)");
     expect(agents).toContain("A turn started that way finishes the request and leaves no further step");
@@ -1154,7 +1154,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(shippedCopyIsUnedited(rel, sha256Hex(guide), {})).toBe(false);
   });
 
-  it("rulings 690 to 692: the guide starts a prose board from the shipped Writer and Editor, keeps a result's sources and has a page pictured", async () => {
+  it("rulings 82, 86 and 268: the guide starts a prose board from the shipped Writer and Editor, keeps a result's sources and has a page pictured", async () => {
     // CANARY: drop any of the five bullets, either tool's name or the
     // outgoing hash.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
@@ -1163,15 +1163,15 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(results).toContain("**A person is asked only what they alone know, once.**");
     expect(results).toContain("A choice the agent can make (how long, in what order, which detail) it makes and lists as an assumption.");
     expect(results).toContain(
-      "**When the result is prose a person puts their name to, start from the shipped Writer and Editor** (ruling 692)",
+      "**When the result is prose a person puts their name to, start from the shipped Writer and Editor** (ruling 268)",
     );
     expect(results).toContain("Pass `writer` and `editor` in `agents`, hand the Writer delivery and make the Editor the required reviewer.");
     expect(results).toContain("the board's own skill and rulings hold only what is this board's");
     expect(results).toContain("never write the account's name into the rulings as the author");
     expect(results).toContain('A sample itself is kept only as `kind: "sample"`, and nothing in a sample is carried into a result.');
-    expect(results).toContain("**A result that states facts keeps its sources** (ruling 690).");
+    expect(results).toContain("**A result that states facts keeps its sources** (ruling 82).");
     expect(results).toContain("An agent hands what it opened to `keep_source`");
-    expect(results).toContain("**A result that is a page is seen before it is accepted** (ruling 691).");
+    expect(results).toContain("**A result that is a page is seen before it is accepted** (ruling 86).");
     expect(results).toContain("an agent gets the same pictures with `capture_page`");
     // Nothing in the doctrine every board reads is about one kind of writing.
     expect(guide).not.toMatch(/\bblog\b/i);
@@ -1189,7 +1189,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(skill).toContain("so does every GitHub read");
   });
 
-  it("ruling 152(a): the shipped operator definition and the system prompt around it both walk auto boundaries in one turn", async () => {
+  it("ruling 120: the shipped operator definition and the system prompt around it both walk auto boundaries in one turn", async () => {
     // The whole prompt a real operator gets: the STORE's definition (seeded)
     // plus the non-negotiable rules appended after it. Both said the opposite.
     const { seedDefaultAgentAssets } = await import("./default-assets.server");
@@ -1241,7 +1241,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "cbb114a5d3e41103ddf201f40f7e549739de05c659f40ed9b87b3c35372f3055",
       ],
     } satisfies Record<string, readonly string[]>;
-    // Ruling 503: the versions that still spoke of goal chains.
+    // Ruling 273: the versions that still spoke of goal chains.
     const beforeEpics = {
       [path.join("agents", "definitions", "controller.md")]: [
         "70e659083faffa3b93564e77c5f9d0034bb5e60b1393b0cf84e415227ee0ace7",
@@ -1262,14 +1262,14 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
         "8d89f1bedb4a339b7541961051b69647539c092bd72bb0ceb6e265162e233e55",
       ],
     } satisfies Record<string, readonly string[]>;
-    // Ruling 518: the operator's template while it still had a role ("Task
+    // Ruling 176: the operator's template while it still had a role ("Task
     // coordinator") and a "System role" scope line.
     const beforeOneOperator = {
       [path.join("agents", "profiles", "operator.md")]: [
         "557b495c6f42f3d0e0516ee33230dfbd5c6c4554dee0d4a3aa4db303c4ba6786",
       ],
     } satisfies Record<string, readonly string[]>;
-    // Ruling 530: the controller's versions that planned every board as software.
+    // Ruling 268: the controller's versions that planned every board as software.
     const beforeResultsBoards = {
       [path.join("agents", "definitions", "controller.md")]: [
         "a92a8bbfbdbdd69429784ea8ab1a6738987cb490e053ab1d968a4d66514cd21c",

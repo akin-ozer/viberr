@@ -4,13 +4,13 @@ import { imageResult } from "~/server/runtimes/strict-tool.server";
 import { controllerToolGuards } from "./controller-tool-guards.server";
 
 /**
- * Ruling 677: what leaves a controller tool is never longer than a turn
+ * Ruling 260: what leaves a controller tool is never longer than a turn
  * carries. The CLI passes a text result of at most 50,000 characters as it is
  * and may refuse a longer one, handing the model a file path with advice to
  * grep it, which the controller has no tool for: on the AWS calculator board
  * `get_project` did that on three turns out of three.
  */
-describe("ruling 677: a controller tool reply longer than a turn carries", () => {
+describe("ruling 260: a controller tool reply longer than a turn carries", () => {
   const guards = controllerToolGuards(
     new DatabaseSync(":memory:"),
     { id: "u_1", email: "arda@viberr.test", name: "Arda" },

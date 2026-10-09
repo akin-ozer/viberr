@@ -47,14 +47,14 @@ import {
 import { actorProseName, userDisplayName } from "./user-display-name.server";
 
 /**
- * Epics (ruling 503): the actions.
+ * Epics (ruling 272): the actions.
  *
  * An epic is a named body of work in one project, the way Jira draws an epic
  * and Linear a project. Tasks join and leave it one at a time, whoever they
  * are and whatever stage they stand at, and the membership is the TASK's own
  * `epic` field: `setTasksEpic` below is its one writer after creation. An epic
  * never creates, starts, orders or holds a task. What a task waits on is its
- * own `blockedBy` (ruling 131), which the release engine honours whatever
+ * own `blockedBy` (ruling 55), which the release engine honours whatever
  * epic the task is in.
  *
  * AUTHORITY

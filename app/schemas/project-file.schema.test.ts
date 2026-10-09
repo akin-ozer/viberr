@@ -130,11 +130,11 @@ describe("parseProjectFrontmatter — one bad capability grant costs only itself
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): `requiredReviewers` is a project rule whose loss
+ * Ruling 17 (pass 36, G36-3): `requiredReviewers` is a project rule whose loss
  * would silently reopen the acceptance gate, so it is parsed per row like the
  * other lists and defaults to an empty list when the file predates it.
  */
-describe("parseProjectFrontmatter — requiredReviewers (ruling 178)", () => {
+describe("parseProjectFrontmatter — requiredReviewers (ruling 17)", () => {
   it("keeps valid rules, drops only a malformed row, and defaults to [] when absent", () => {
     const { frontmatter, diagnostics } = parseProjectFrontmatter(
       {
@@ -165,11 +165,11 @@ describe("parseProjectFrontmatter — requiredReviewers (ruling 178)", () => {
 });
 
 /**
- * Ruling 458(h): project.md reads through the task file's tolerant helpers, so
+ * Ruling 16(a): project.md reads through the task file's tolerant helpers, so
  * a field that falls back names the value it used ("; using <fallback>."),
  * where it used to say "— using a default." and name nothing.
  */
-describe("parseProjectFrontmatter — gates (ruling 482)", () => {
+describe("parseProjectFrontmatter — gates (ruling 17)", () => {
   it("keeps valid gates in order, drops only a malformed row, and stays absent when undeclared", () => {
     // CANARY: parse `gates` with the whole-array `tolerant` and one bad row
     // silently stops every gate from running or blocking.
@@ -196,7 +196,7 @@ describe("parseProjectFrontmatter — gates (ruling 482)", () => {
   });
 });
 
-describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
+describe("parseProjectFrontmatter — fallback wording (ruling 16(a))", () => {
   it("names the fallback for a missing or invalid field", () => {
     const { frontmatter, diagnostics } = parseProjectFrontmatter(
       { slug: "proj", defaultBranch: "" },
@@ -230,12 +230,12 @@ describe("parseProjectFrontmatter — fallback wording (ruling 458(h))", () => {
 });
 
 /**
- * Ruling 700(a): every checkout path is `<taskDir>/workspace/<name>`, so a
+ * Ruling 225: every checkout path is `<taskDir>/workspace/<name>`, so a
  * hand-edited `owner/..` made the checkout the task directory itself, and
  * `owner/.` made it the whole workspace, support checkouts included. The
  * "no `.git/HEAD`, remove and re-clone" step could remove either.
  */
-describe("parseProjectFrontmatter — repo (ruling 700(a))", () => {
+describe("parseProjectFrontmatter — repo (ruling 225)", () => {
   const read = (repo: string) =>
     parseProjectFrontmatter({ slug: "proj", repo }, { fallbackSlug: "proj" });
 

@@ -1,6 +1,6 @@
 import type { RunCacheView, RunView } from "~/features/runtime/runtime-types";
 
-/** Ruling 369: the cache record of a run that has reported nothing yet. */
+/** Ruling 172: the cache record of a run that has reported nothing yet. */
 export const NO_RUN_CACHE: RunCacheView = {
   writeTokens: 0,
   readTokens: 0,

@@ -3,7 +3,7 @@ import { EPIC_ID_RE, EPIC_STATUS_VALUES, epicNumber } from "~/shared/task-refs";
 import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 
 /**
- * Epic file schema (ruling 503): `projects/<slug>/epics/<id>.md`.
+ * Epic file schema (ruling 17): `projects/<slug>/epics/<id>.md`.
  *
  * An epic is a named body of work inside ONE project, the way Jira draws an
  * epic and Linear a project. Tasks join and leave it one at a time, and the
@@ -11,7 +11,7 @@ import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
  * as `stage`: this file owns what the epic IS (its name, its description, its
  * status, who leads it and when it is meant to land), each task says which
  * epic it belongs to. An epic never creates, starts, orders or holds a task:
- * what a task waits on is its own `blockedBy` (ruling 131), and the release
+ * what a task waits on is its own `blockedBy` (ruling 55), and the release
  * engine starts it when that work is done.
  *
  * Body layout: `## Description` (markdown prose) then `## Timeline`
@@ -37,7 +37,7 @@ import { STAGE_COLORS, type StageColor } from "~/shared/workflow/stage-colors";
 
 /** The epic's id and statuses live in `shared/task-refs.ts`, which the task
  *  schema (on every page) and the board and task page read without loading
- *  this file (ruling 457, FL-1). */
+ *  this file (ruling 11, FL-1). */
 export {
   EPIC_ID_RE,
   EPIC_STATUS_LABEL,
@@ -49,7 +49,7 @@ export {
 } from "~/shared/task-refs";
 
 /**
- * An epic's colour is one of the twenty stage presets (ruling 364): the file
+ * An epic's colour is one of the twenty stage presets (ruling 279): the file
  * stores the NAME, the markup carries `data-stage-color`, and `app.css` is the
  * one place the name becomes paint in either theme.
  */

@@ -240,7 +240,7 @@ describe("path 3 — operatorAcceptCompletion", () => {
     expect(result.message).toMatch(/accepted|Done/i);
     expect(task().frontmatter.stage).toBe("done");
     const completion = task().timeline.find((e) => e.type === "completion");
-    // Ruling 132: the record says AUTHORED, in the shared vocabulary.
+    // Ruling 239: the record says AUTHORED, in the shared vocabulary.
     expect(completion?.text).toContain("2 authored commits were added to the PR head");
     // The note shows the first 12 chars of the drifted head sha.
     expect(completion?.text).toContain("aheadhead000");
@@ -369,7 +369,7 @@ describe("path 3 — operatorAcceptCompletion", () => {
       headSha: null,
       unpushedRevision: null,
       unpushedRevisionSentence: "",
-      // Ruling 162 (pass 35): a settled PR carries no mergeability.
+      // Ruling 95 (pass 35): a settled PR carries no mergeability.
       mergeable: null,
     });
   });
@@ -487,7 +487,7 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
    * INVERTED from pass 13 ("the admin override still works, and NAMES the gate
    * it bypassed", which asserted `stage === "done"` on a closed-PR task).
    *
-   * That test was written before R16-3 (ruling 37, 2026-08-04) and pinned the
+   * That test was written before R16-3 (ruling 95, 2026-08-04) and pinned the
    * exact write the ruling names as the harm: "moves the task to Done over a
    * rejection and stamps `pr.state: accepted` on a PR GitHub has already
    * closed". Pass 19 found the withdrawal had shipped CLIENT-side only
@@ -517,7 +517,7 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
   });
 
-  it("ruling 123: force-accept refuses an ARCHIVED task and says to restore it first", async () => {
+  it("ruling 98: force-accept refuses an ARCHIVED task and says to restore it first", async () => {
     // Pass 33 / F33-6, proven live on SBX-1: `force` skipped the shared refusal
     // helper, which is where the archived gate lives, so an admin could leave a
     // task both archived AND accepted — a state every other path forbids.
@@ -541,7 +541,7 @@ describe("F19-25 — the admin override is WITHDRAWN on the server too, not only
     expect(listAuditEvents(store.db, { action: "task.acceptance.forced" })).toHaveLength(0);
   });
 
-  it("ruling 123: the force affordance is WITHDRAWN on an archived task", async () => {
+  it("ruling 98: the force affordance is WITHDRAWN on an archived task", async () => {
     seedClosedPrTask({
       archived: true,
       pr: { number: 318, state: "review", title: "[VIB-1] Attach execution workspace" },

@@ -74,7 +74,7 @@ import {
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
-// Ruling 296: every tool on this server refuses arguments it does not
+// Ruling 136: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { imageResult, strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { tasksReleasedBy } from "~/server/projections/dependencies.server";
@@ -284,7 +284,7 @@ import { listTookRowsForProject, type ProjectTookRunRow } from "~/server/runtime
 import { runTotalsLine, type TaskTook, whatItTookFor } from "~/server/tasks/what-it-took.server";
 
 /**
- * The controller's in-process toolkit (ruling 99) — a Claude Agent SDK MCP
+ * The controller's in-process toolkit (ruling 247) — a Claude Agent SDK MCP
  * server ("viberr_controller") whose handlers execute the SAME governed
  * mutations humans reach through routes, with the ASKING USER as the actor.
  *
@@ -301,15 +301,15 @@ import { runTotalsLine, type TaskTook, whatItTookFor } from "~/server/tasks/what
  * a probe must not learn that a project exists).
  *
  * NO DELETES: no tool destroys a project, task, user, template or resource, in
- * either scope. Ruling 464 amends the older "nothing is deleted" wording by
+ * either scope. Ruling 248 amends the older "nothing is deleted" wording by
  * one edit: `remove_agent_deployment` takes a specialist off a project's
  * roster, the way `update_stages op: remove` takes a stage off its board, and
  * the global template stays. The always-human
  * decisions (merge, acceptance, force-accept, packet resolution, a move into
  * the terminal stage) have no tool here at all — the move tool refuses a
- * terminal target and points at the task page's own ceremony (ruling 88).
+ * terminal target and points at the task page's own ceremony (ruling 97).
  *
- * Ruling 251 (pass 37, F37-80) keeps that line and fixes what it cost. The
+ * Ruling 263 (pass 37, F37-80) keeps that line and fixes what it cost. The
  * boundary was right and unnavigable: live, the controller answered a person
  * who had said "I want to lean on you rather than clicking through task pages
  * myself" with "Resolving it is yours on the task page — I have no tool for
@@ -323,23 +323,23 @@ import { runTotalsLine, type TaskTook, whatItTookFor } from "~/server/tasks/what
 export interface ControllerToolkitDeps {
   db: DatabaseSync;
   /** `fetchImpl` is a test seam for the GitHub calls `create_project` makes
-   *  (ruling 462); production leaves it off and reaches the real `fetch`. */
+   *  (ruling 225); production leaves it off and reaches the real `fetch`. */
   ctx: { dataRoot?: string; fetchImpl?: typeof fetch };
   /** The asking user — the only authority anything here runs under. */
   user: { id: string; email: string; name: string };
   /** The conversation's bound project, when it has one (tool default). */
   projectSlug?: string | null;
-  /** Ruling 121: the conversation's anchored task, when it has one — every
+  /** Ruling 260: the conversation's anchored task, when it has one — every
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
-  /** Ruling 476(h): the conversation this turn answers in. `create_epic`
-   *  records it on the epic (ruling 503), so the epic's page can link back to
+  /** Ruling 273: the conversation this turn answers in. `create_epic`
+   *  records it on the epic (ruling 273), so the epic's page can link back to
    *  where it was planned. */
   conversationId?: string | null;
-  /** Ruling 685: the user message this turn answers. A turn that answers the
+  /** Ruling 259: the user message this turn answers. A turn that answers the
    *  message a follow-up sent leaves no further step. */
   answering?: string | null;
-  /** Ruling 283: the knowledge bases this turn's prompt INDEXED. The pull tool
+  /** Ruling 205: the knowledge bases this turn's prompt INDEXED. The pull tool
    *  is mounted over exactly these — `controllerKbNames` builds the list once
    *  so the prompt and the tool cannot name different sets. */
   kb?: readonly string[];
@@ -358,9 +358,9 @@ const CONTROLLER_TOOLKIT_INSTRUCTIONS =
   "their role in that project. A [denied] answer is final; relay it with its reason. Reads " +
   "are your ground truth; call them before asserting state. Nothing here deletes a project, " +
   "task, user, template or resource (taking a deployment off a project's roster edits the " +
-  "roster, ruling 464), merges, " +
+  "roster, ruling 248), merges, " +
   "accepts completions, resolves decision packets, or moves a task into its final stage. " +
-  "Ruling 251: those stay with the person, and `list_decisions` is how you put each one in " +
+  "Ruling 263: those stay with the person, and `list_decisions` is how you put each one in " +
   "front of them, with its options and the link that opens it. " +
   "When the conversation is bound to a project, tools default to it; when it is anchored to a " +
   "task, the task tools default to that task as well.";
@@ -378,7 +378,7 @@ const prose = normalizeEscapedNewlines;
 const EFFORT_TIERS_SENTENCE = `Claude ${effortsFor("claude").join("|")}, Codex ${effortsFor("codex").join("|")}`;
 
 /**
- * Ruling 156: "1 project copy does not carry this change: k9c-k9s-clone is
+ * Ruling 177: "1 project copy does not carry this change: k9c-k9s-clone is
  * missing MCP server context7." One clause per project, joined with
  * semicolons; a copy holding grants the template does not says so too.
  */
@@ -396,7 +396,7 @@ function divergedSentence(diverged: TemplateCopyDrift[]): string {
 }
 
 /**
- * Ruling 486: an OAuth sign-in's grant as `list_mcp_servers` reports it —
+ * Ruling 192: an OAuth sign-in's grant as `list_mcp_servers` reports it —
  * counted, labelled and with its writes by name, never the whole list (a
  * Cloudflare read-only grant is 194 scopes). Null when the server did not
  * say what it granted.
@@ -414,7 +414,7 @@ function grantOf(scope: string | null) {
 }
 
 /**
- * Ruling 302: the controller's own timeline window, and the most it will widen
+ * Ruling 117: the controller's own timeline window, and the most it will widen
  * to. The operator's twins are OPERATOR_TIMELINE_DEFAULT / _MAX; this window
  * is larger because a controller reads across tasks rather than coordinating
  * one, and smaller than the whole history because it reads MANY tasks a turn.
@@ -423,7 +423,7 @@ const CONTROLLER_EVENTS_DEFAULT = 12;
 const CONTROLLER_EVENTS_MAX = 50;
 
 /**
- * Ruling 677: how much of a correction's passage `get_project` carries.
+ * Ruling 262: how much of a correction's passage `get_project` carries.
  *
  * It carried each correction whole: the passage replaced, the text written and
  * the evidence, up to 8 KB a side. On the AWS calculator board twenty of them
@@ -453,7 +453,7 @@ interface KnowledgeBaseListing {
   files: number;
   documents: string[];
   private: boolean;
-  /** Ruling 678: its files that are not documents, when it holds any. */
+  /** Ruling 205: its files that are not documents, when it holds any. */
   otherFiles?: string[];
 }
 
@@ -463,25 +463,25 @@ interface SkillListing {
   id: string;
   name: string;
   summary: string;
-  /** Ruling 679: the length of its body, when it has a readable one. */
+  /** Ruling 267: the length of its body, when it has a readable one. */
   chars?: number;
-  /** Ruling 679: how much of its end a run is never given, when any. */
+  /** Ruling 267: how much of its end a run is never given, when any. */
   charsPastBudget?: number;
 }
 
-/** Ruling 679: a skill's size against what its holder is given. */
+/** Ruling 267: a skill's size against what its holder is given. */
 interface SkillSizeAsHeld extends SkillBodySize {
   /** Whether `over` is what a controller turn loses of it, not an agent's run. */
   ofATurn: boolean;
 }
 
-/** Ruling 302: present on a `get_task` reply ONLY when entries were left out,
+/** Ruling 117: present on a `get_task` reply ONLY when entries were left out,
  *  naming the count and both ways to reach them. */
 interface TimelineWindowNote {
   timelineOlder?: string;
 }
 
-/** Ruling 693: what the task took on a `get_task` reply, left out only when
+/** Ruling 83: what the task took on a `get_task` reply, left out only when
  *  its read failed. */
 interface TookNote {
   whatItTook?: TaskTook;
@@ -508,13 +508,13 @@ interface ListedTask {
   archived: boolean;
   epic: string | null;
   waitsOn: string[];
-  /** Ruling 693: the run part on one line (`runTotalsLine`), only when the
+  /** Ruling 83: the run part on one line (`runTotalsLine`), only when the
    *  call asked for it and a run started on the task. */
   whatItTook?: string;
 }
 
 /**
- * Ruling 684: what a copy's reply says about the kind it was kept as. A
+ * Ruling 267: what a copy's reply says about the kind it was kept as. A
  * template says how many placeholders its text holds, or that nothing here
  * could read it, and in neither case that it is free of a task's content,
  * which nothing here can tell; a sample says whose content it carries.
@@ -544,7 +544,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   const dataRoot = ctx.dataRoot;
 
   // The refusal voice, the live-authority gates and the audit actor are shared
-  // with the controller's other in-process server (`viberr_ops`, ruling 107):
+  // with the controller's other in-process server (`viberr_ops`, ruling 269):
   // one definition, so a reworded refusal cannot drift between them.
   const { actor, orgAdmin, requireOrgAdmin, requireVisible, run, runWith, json } =
     controllerToolGuards(db, user, dataRoot);
@@ -562,7 +562,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   }
   const boundTask = deps.taskKey ?? null;
 
-  /** Ruling 257: the document names a KB folder holds, so a write can see a
+  /** Ruling 212: the document names a KB folder holds, so a write can see a
    *  collision coming. Names only — content comes from
    *  `read_knowledge_base_doc`, which is org-admin gated like every other read
    *  here. Best effort: a folder that cannot be scanned lists nothing rather
@@ -579,7 +579,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     }
   }
   /**
-   * Ruling 679: what a skill write owes its writer when the body is longer
+   * Ruling 267: what a skill write owes its writer when the body is longer
    * than a run can be given. "" when it fits.
    */
   function skillBudgetNote(name: string): string {
@@ -603,7 +603,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   }
 
   /**
-   * Ruling 679: a skill's size against what its holder is given. An agent's
+   * Ruling 267: a skill's size against what its holder is given. An agent's
    * skills share 24,000 characters. A skill the controller's own profile
    * holds draws from the controller's 40,000 in its turn's order, the guide
    * first, so it is measured against what is left when its turn to draw
@@ -624,7 +624,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   }
 
   /**
-   * Resolve a task tool's key against the conversation's anchor (ruling 121).
+   * Resolve a task tool's key against the conversation's anchor (ruling 260).
    *
    * The anchor only applies to ITS OWN project. A call that overrides
    * `projectSlug` and leaves `taskKey` off used to silently inherit the
@@ -702,7 +702,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_capabilities",
-      "The capability catalogue the deployments are written against (ruling 139): for each kind (the operator, a specialist) the settable ids with their label, the modes that kind takes, and `whenUngranted`, the mode a deployment RESOLVES to when project.md carries no grant for the id (not the create-seed default). `deliver-review-pr` and `update-task-branch` depend on the project's workflow policy: read get_project for a deployment's resolved mode. Any signed-in person; instance scope.",
+      "The capability catalogue the deployments are written against (ruling 261): for each kind (the operator, a specialist) the settable ids with their label, the modes that kind takes, and `whenUngranted`, the mode a deployment RESOLVES to when project.md carries no grant for the id (not the create-seed default). `deliver-review-pr` and `update-task-branch` depend on the project's workflow policy: read get_project for a deployment's resolved mode. Any signed-in person; instance scope.",
       {},
       run(() => {
         const policyDependent = new Set(POLICY_DEPENDENT_CAPABILITY_IDS);
@@ -870,9 +870,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "set_user_org_role",
   );
 
-  // Ruling 283: the controller's own granted knowledge bases are indexed into
+  // Ruling 205: the controller's own granted knowledge bases are indexed into
   // its prompt, not injected, so it pulls the documents it needs. This is NOT
-  // `read_store_doc` (ruling 107), which reads ANY knowledge base or skill in
+  // `read_store_doc` (ruling 269), which reads ANY knowledge base or skill in
   // the store and is org-admin only: this one reads only what was granted to
   // this turn, and needs no admin, because the text it replaces needed none.
   if (deps.kb && deps.kb.length > 0) {
@@ -898,7 +898,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     );
   }
 
-  /** Ruling 390: the grant keys that exist for one locked section — what a
+  /** Ruling 271: the grant keys that exist for one locked section — what a
    *  request may name, and what the refusal lists when it names nothing real.
    *  A KB is granted by its store DIRECTORY (F33-8), never by its id. */
   const knownResourceNames = (kind: RequestableKind): string[] =>
@@ -911,7 +911,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "request_resource_grant",
-      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 108 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on the Controller tab of Instance settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
+      "Ask for a skill, knowledge base or MCP server to be attached to YOUR OWN profile, when you have created or found one your next conversation needs. Org admins only. You cannot grant it yourself (ruling 270 makes controller grants a deployment decision, with no in-app override for anyone), and this is how the ask survives the conversation: it goes on the record, it appears on the Controller tab of Instance settings for whoever runs this deployment, and it comes back in your own turn context until it is answered. Idempotent per (kind, name) while open, so re-asking never stacks duplicates on a person. Naming a resource that does not exist is refused: create it first.",
       {
         kind: z
           .enum(REQUESTABLE_KINDS)
@@ -931,7 +931,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         requireOrgAdmin("ask for a resource grant");
         const name = args.name.trim();
         if (!name) throw AppError.validation("Which resource?");
-        // Ruling 390: refuse an ask nobody can answer. A request naming a
+        // Ruling 271: refuse an ask nobody can answer. A request naming a
         // resource the store does not have would sit on an admin's screen
         // forever, and the remedy it prints would not work.
         const known = knownResourceNames(args.kind);
@@ -978,7 +978,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_knowledge_bases",
-      "List the org knowledge bases (grant key, name, folder, file count, refresh mode). Org admins only. `grantKey` is the store DIRECTORY, the only form save_global_agent's `kbs` accepts; `id` is for save_knowledge_base. `documents` names the top-level documents each holds; `otherFiles`, when present, names its files that are not documents (ruling 678: a template or sample copied in with copy_task_file_to_knowledge_base, or uploaded), which runs open from their shell.",
+      "List the org knowledge bases (grant key, name, folder, file count, refresh mode). Org admins only. `grantKey` is the store DIRECTORY, the only form save_global_agent's `kbs` accepts; `id` is for save_knowledge_base. `documents` names the top-level documents each holds; `otherFiles`, when present, names its files that are not documents (ruling 205: a template or sample copied in with copy_task_file_to_knowledge_base, or uploaded), which runs open from their shell.",
       {},
       run(() => {
         requireOrgAdmin("read the org knowledge bases");
@@ -988,7 +988,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // this list used to carry — and granted a dud on every template.
           listKnowledgeBases(db, { dataRoot }).map((kb) => {
             const names = kbDocumentNames(kb.id);
-            // Ruling 678: a file that is not a document (a template, a sample)
+            // Ruling 205: a file that is not a document (a template, a sample)
             // is named apart: the document tools neither read nor edit it.
             const otherFiles = names.filter((name) => !isInjectableKbDoc(name));
             const row: KnowledgeBaseListing = {
@@ -998,13 +998,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               dir: kb.dir,
               refresh: kb.refresh,
               files: kb.fileCount,
-              // Ruling 257 (F37-88): the NAMES, not just a count. A `doc` write
+              // Ruling 212 (F37-88): the NAMES, not just a count. A `doc` write
               // replaces a whole file, and the model could not see that the name
               // it was about to write was already taken — the tool's own example
               // path, `conventions.md`, is the live rulings file on this very
               // instance.
               documents: names.filter((name) => isInjectableKbDoc(name)),
-              // Ruling 578: closed to every agent's shell; only granted runs
+              // Ruling 267: closed to every agent's shell; only granted runs
               // read it, through their knowledge tool.
               private: kb.private,
             };
@@ -1020,7 +1020,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_knowledge_base_doc",
-      "Read one document out of a knowledge base: the passage an `edit_knowledge_base_doc` replaces is copied from here, and a whole-document `save_knowledge_base` write carries the text forward from here instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 246: existence before type). Ruling 580: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
+      "Read one document out of a knowledge base: the passage an `edit_knowledge_base_doc` replaces is copied from here, and a whole-document `save_knowledge_base` write carries the text forward from here instead of destroying it. Org admins only. Returns null when the KB or the file is not there (ruling 260: existence before type). Ruling 215: a long document comes back in pages; `nextOffset` is where the next read starts, null at the end, and a whole-document replace needs every page.",
       {
         id: z.string().describe("KB id, from list_knowledge_bases."),
         path: z.string().describe("File name inside the KB folder, e.g. conventions.md."),
@@ -1037,18 +1037,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `list_knowledge_bases names what it holds.`
           );
         }
-        // Ruling 580: a long document comes back in pages. Whole, a 94 KB
+        // Ruling 215: a long document comes back in pages. Whole, a 94 KB
         // document was more than the controller could take in, and it could
         // not safely change what it could not read.
         const start = Math.min(Math.max(0, args.offset ?? 0), doc.text.length);
-        // Ruling 624: a page is bounded in UTF-8 bytes, as every agent read is.
+        // Ruling 215: a page is bounded in UTF-8 bytes, as every agent read is.
         const end = pageEnd(doc.text, start);
         return json({
           path: args.path,
-          // Ruling 466: UTF-8 bytes, the unit the write replies use.
+          // Ruling 18(b): UTF-8 bytes, the unit the write replies use.
           bytes: utf8Bytes(doc.text),
           truncated: doc.truncated,
-          // Ruling 305: hand back the version this text IS, so a replace can
+          // Ruling 212(a): hand back the version this text IS, so a replace can
           // say which one it is replacing and Viberr can refuse when the
           // document moved underneath it.
           version: storeDocVersion(target, [args.path]),
@@ -1065,7 +1065,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_knowledge_base",
-      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 578: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). Ruling 637: to change part of a document that exists, use edit_knowledge_base_doc, which replaces one passage in place: a replace sends the whole document back, so every line becomes your copy of it, and a document rebuilt over several calls is partial to every reader in between. A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 257 and 305): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 466), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
+      "Create or update a knowledge base (name, refresh mode, `private`), optionally writing one document into its folder. Org admins only. Ruling 267: every agent can read an open knowledge base from its shell, granted or not (a grant decides what a run is given, not what it can read), so anything the agents under test must not see, such as a benchmark's answer key, goes into a private one. The reply names the KB's id (what the next save takes) and its grantKey (what a grant takes). Ruling 212(b): to change part of a document that exists, use edit_knowledge_base_doc, which replaces one passage in place: a replace sends the whole document back, so every line becomes your copy of it, and a document rebuilt over several calls is partial to every reader in between. A `doc` REPLACES the whole file, so a name that already exists is refused unless you pass `replace: true` AND `replaces`, the `version` read_knowledge_base_doc returned beside the text (rulings 212 and 212(a)): read the existing text first, send it back with your change, or nothing you leave out survives. If the document moved between your read and your write the write is refused whole with both versions named, because somebody else's edit is in there. The reply says which happened, and how many bytes a replace destroyed. To BUILD a long document, pass `doc.append: true` and send it a section at a time: append destroys nothing, so it needs no version, and a 2 KB call is far likelier to arrive intact than an 8 KB one (F39-3: a 7,356-byte document write came back unparseable as JSON and had to be re-emitted whole). An append adds EXACTLY the text you send, nothing trimmed and nothing inserted (ruling 18(b)), so you own the separators and newlines: end a part with a newline when the next part starts a new line, and a part may end mid-table, mid-list or inside a fenced block. Every size the reply names is in UTF-8 bytes.",
       {
         id: z
           .string()
@@ -1083,7 +1083,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Ruling 578: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, which a Codex specialist gets from Viberr's MCP gateway (ruling 585). false opens it again. Omit to leave it as it is.",
+            "Ruling 267: true closes the KB's folder to every agent's shell; the runs it is granted to read it through read_knowledge_doc, which a Codex specialist gets from Viberr's MCP gateway (ruling 216). false opens it again. Omit to leave it as it is.",
           ),
         doc: z
           .strictObject({
@@ -1097,7 +1097,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .boolean()
               .optional()
               .describe(
-                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one. Ruling 466: `content` is appended byte for byte, with no trimming and no separator, so end a part with a newline if the next part starts a new line.",
+                "F39-1: add `content` to the END of the document instead of replacing it, creating the file when it is absent. Destroys nothing, so no `replace`/`replaces` is needed (passing either with this is refused). Use it to build a long document in bounded calls rather than one large one. Ruling 18(b): `content` is appended byte for byte, with no trimming and no separator, so end a part with a newline if the next part starts a new line.",
               ),
             replace: z
               .boolean()
@@ -1109,7 +1109,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               .string()
               .optional()
               .describe(
-                "Ruling 305: the `version` read_knowledge_base_doc returned beside the text you are replacing. Required to overwrite an existing file. If the document has changed since that read, the write is refused with nothing written and both versions named, because somebody else's edit is in there and a whole-document replace would delete it.",
+                "Ruling 212(a): the `version` read_knowledge_base_doc returned beside the text you are replacing. Required to overwrite an existing file. If the document has changed since that read, the write is refused with nothing written and both versions named, because somebody else's edit is in there and a whole-document replace would delete it.",
               ),
           })
           .optional()
@@ -1139,7 +1139,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // U36-4 (pass 36): the reply carries what the next call needs — the
           // id for a save, the grantKey for a grant. The toast alone named the
           // folder, and the controller then guessed `disk:<dir>`.
-          // Ruling 578: the folder's own mode is the flag.
+          // Ruling 267: the folder's own mode is the flag.
           const privacy =
             args.private === undefined
               ? ""
@@ -1157,7 +1157,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (!target) {
               return `${head} The document could not be written: the KB folder did not resolve.`;
             }
-            // Ruling 257 (pass 37, F37-88): `overwrite: true` used to be
+            // Ruling 212 (pass 37, F37-88): `overwrite: true` used to be
             // hardcoded, so the writer's own collision guard could never fire
             // and the returned `replaced` flag was discarded — the reply read
             // "Document conventions.md written" whether it created a file or
@@ -1168,8 +1168,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // refused once the folder has a metadata row), and the project's
             // rulings KB — injected into EVERY run on the project — is one call
             // away from being erased by a model writing the obvious filename.
-            // F39-1: APPEND. It cannot destroy anything, so rulings 257 and
-            // 305 (the collision guard and the version check) do not apply —
+            // F39-1: APPEND. It cannot destroy anything, so rulings 212 and
+            // 212(a) (the collision guard and the version check) do not apply —
             // they exist to stop a whole-document replace deleting text the
             // writer never read. Mixing the two modes would be a caller that
             // does not know which it meant, so it is refused rather than
@@ -1182,7 +1182,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                   "a replace overwrites the whole document. Send one or the other."
                 );
               }
-              // Ruling 466 (F40-13): the writer concatenates EXACTLY what was
+              // Ruling 18(b) (F40-13): the writer concatenates EXACTLY what was
               // sent. This used to trim the part and force a blank line before
               // it, so a part boundary inside a markdown table split the table
               // in two (live, the controller rewrote the whole document to
@@ -1204,8 +1204,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               );
             }
             const before = readStoreDoc(target, [args.doc.path]);
-            // Ruling 305: a whole-document replace names the version it read.
-            // `writeStoreDoc`'s own collision guard (ruling 257) asks whether
+            // Ruling 212(a): a whole-document replace names the version it read.
+            // `writeStoreDoc`'s own collision guard (ruling 212) asks whether
             // the file EXISTS; this asks whether it is still the one you read.
             // The controller hit the difference live: correcting one paragraph
             // of the 26 KB rulings document, it re-read first and found that
@@ -1251,13 +1251,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "save_knowledge_base",
   );
 
-  // Ruling 637: one passage, in place. A whole-document replace was the only
+  // Ruling 212(b): one passage, in place. A whole-document replace was the only
   // way to change part of a document, and live it re-typed 104 KB in nine
   // calls to add three sentences.
   add(
     tool(
       "edit_knowledge_base_doc",
-      "Replace ONE passage of a knowledge-base document in place (ruling 637). Org admins only. `was` is the passage exactly as the document has it: copy it character for character from read_knowledge_base_doc, list markers and emphasis included, and send enough of it to stand exactly once. `now` is what takes its place; an empty `now` deletes the passage. The document is written once, under the lock agent corrections take, so no reader ever sees half of it and nothing you did not send changes. Refused, with nothing written, when the passage is not there (the reply shows the closest lines) or stands more than once, when `now` changes nothing, and when either side is over 8 KB: change a long section in several edits. To add text at the end of a document, use save_knowledge_base with `doc.append`. Every size the reply names is in UTF-8 bytes.",
+      "Replace ONE passage of a knowledge-base document in place (ruling 212(b)). Org admins only. `was` is the passage exactly as the document has it: copy it character for character from read_knowledge_base_doc, list markers and emphasis included, and send enough of it to stand exactly once. `now` is what takes its place; an empty `now` deletes the passage. The document is written once, under the lock agent corrections take, so no reader ever sees half of it and nothing you did not send changes. Refused, with nothing written, when the passage is not there (the reply shows the closest lines) or stands more than once, when `now` changes nothing, and when either side is over 8 KB: change a long section in several edits. To add text at the end of a document, use save_knowledge_base with `doc.append`. Every size the reply names is in UTF-8 bytes.",
       {
         id: z.string().describe("KB id, from list_knowledge_bases."),
         path: z.string().describe("File name inside the KB folder, e.g. mapping.md."),
@@ -1284,14 +1284,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "edit_knowledge_base_doc",
   );
 
-  // Ruling 678: the one write a controller could not make. A knowledge-base
+  // Ruling 267: the one write a controller could not make. A knowledge-base
   // write takes text the model types; a file a board's work must follow (a
   // report template with its images inside, the PDF printed from it, a sample
   // workbook) is bytes on a task. Copied here, it stops depending on that task.
   add(
     tool(
       "copy_task_file_to_knowledge_base",
-      "Copy ONE file from a task's attachments into a knowledge base's folder, bytes and all (rulings 678 and 684). Org admins only. This is how a file a board's work must FOLLOW gets a home of its own, in the knowledge base every run on the project reads (its `rulingsKb`, from get_project) unless the person names another. Say what you are keeping, in `kind`. A `template` is what later results are filled into, so it holds NONE of any task's content, only `[[what goes here]]` placeholders where content goes: a result a task delivered is an example, never a template. You cannot write files, so an agent makes the template: file a task for the agent that makes such results (the same layout, everything that belongs to that task replaced by placeholders, and a list of them), leave yourself `continue_when_done`, and copy what it delivered when the task is accepted. A template whose text holds no placeholder is refused. A `sample` is a worked example kept WITH one task's content: only when the person asks for exactly that; it is stored under a name that says whose example it is. An `asset` is no task's work: a logo, a letterhead, a price list, the notes that go with a template. Then name the file in the rulings and in the skill of each agent that uses it, and say which you changed. Never leave such a file on the task and tell operators to copy it over each time: a task's files change with its next rework, an archived task hands nothing over (take_from_task refuses it), and every task that took a copy carries another customer's document. A file that is not a document (.html, .pdf, .xlsx, an image) is named in the knowledge base's index to every run given it and opened from the run's shell in the folder the reply names; a document (.md, .txt, .json, .yaml) becomes one of the knowledge base's documents. Refused, with nothing written: a name the folder already holds unless you pass `replace: true`; a document the knowledge base already holds (change that with edit_knowledge_base_doc); a file that is not a document for a PRIVATE knowledge base, where no run could open it; and a file over 10 MB.",
+      "Copy ONE file from a task's attachments into a knowledge base's folder, bytes and all (ruling 267). Org admins only. This is how a file a board's work must FOLLOW gets a home of its own, in the knowledge base every run on the project reads (its `rulingsKb`, from get_project) unless the person names another. Say what you are keeping, in `kind`. A `template` is what later results are filled into, so it holds NONE of any task's content, only `[[what goes here]]` placeholders where content goes: a result a task delivered is an example, never a template. You cannot write files, so an agent makes the template: file a task for the agent that makes such results (the same layout, everything that belongs to that task replaced by placeholders, and a list of them), leave yourself `continue_when_done`, and copy what it delivered when the task is accepted. A template whose text holds no placeholder is refused. A `sample` is a worked example kept WITH one task's content: only when the person asks for exactly that; it is stored under a name that says whose example it is. An `asset` is no task's work: a logo, a letterhead, a price list, the notes that go with a template. Then name the file in the rulings and in the skill of each agent that uses it, and say which you changed. Never leave such a file on the task and tell operators to copy it over each time: a task's files change with its next rework, an archived task hands nothing over (take_from_task refuses it), and every task that took a copy carries another customer's document. A file that is not a document (.html, .pdf, .xlsx, an image) is named in the knowledge base's index to every run given it and opened from the run's shell in the folder the reply names; a document (.md, .txt, .json, .yaml) becomes one of the knowledge base's documents. Refused, with nothing written: a name the folder already holds unless you pass `replace: true`; a document the knowledge base already holds (change that with edit_knowledge_base_doc); a file that is not a document for a PRIVATE knowledge base, where no run could open it; and a file over 10 MB.",
       {
         kbId: z.string().describe("The knowledge base's id, from list_knowledge_bases."),
         kind: z
@@ -1354,18 +1354,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "copy_task_file_to_knowledge_base",
   );
 
-  // Ruling 483 (F40-59): the door a person's Promote or Dismiss button asks
-  // the controller to walk. Ruling 378 left promotion to "a human or the
+  // Ruling 267 (F40-59): the door a person's Promote or Dismiss button asks
+  // the controller to walk. Ruling 210 left promotion to "a human or the
   // controller" and gave neither a way to find or close a proposal; live on
   // WEB-1 two sat unpromoted while the next packet asked the owner to type the
   // "not binding" build command into Cloudflare. Org-admin gated like every
   // other knowledge-base write, because a proposal lives in an org knowledge
-  // base. Since ruling 498 nothing files a proposal; this closes the ones
+  // base. Since ruling 210 nothing files a proposal; this closes the ones
   // documents still hold.
   add(
     tool(
       "resolve_kb_proposal",
-      "Promote or dismiss one open knowledge-base proposal (ruling 483): an entry an agent filed, before corrections were written straight into the document (ruling 498), under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: their Promote, Dismiss and Promote all buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
+      "Promote or dismiss one open knowledge-base proposal (ruling 267): an entry an agent filed, before corrections were written straight into the document (ruling 210), under \"Proposed corrections (not binding)\" in a knowledge-base document, listed in your turn context and in get_project's `openProposals` by id. Org admins only, and only when the person asked you to: their Promote, Dismiss and Promote all buttons on a project's Controller page send you exactly that request. `promote` writes `text` into the document's SETTLED text, in place of `replaces` (the exact passage it corrects, which must stand once in the settled text; read the document first with read_knowledge_base_doc) or appended to the settled text when `replaces` is omitted, and removes the entry in the same write. `dismiss` removes the entry and changes nothing else. `reason` is recorded on the audit row.",
       {
         id: z.string().describe("The proposal's id, e.g. 'kp-3f9a1c2b7d'."),
         action: z.enum(["promote", "dismiss"]),
@@ -1413,13 +1413,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "resolve_kb_proposal",
   );
 
-  // Ruling 677: one correction whole. get_project lists a project's with each
+  // Ruling 262: one correction whole. get_project lists a project's with each
   // passage cut to an excerpt, and the task's own entry may not quote it (a
   // passage from a knowledge base a reader of the task was not given).
   add(
     tool(
       "read_kb_correction",
-      "Read ONE knowledge-base correction whole (ruling 498): the passage it replaced, the text it wrote and its evidence, with the task and agent that made it and whether a person undid it. get_project lists a project's recent ones in `kbCorrections` with each passage cut to its first characters (ruling 677); read one here, by its id (`kc-` and ten hex characters), before you tell a person what it changed or undo it for them. Gated on membership of the project whose task made it.",
+      "Read ONE knowledge-base correction whole (ruling 210): the passage it replaced, the text it wrote and its evidence, with the task and agent that made it and whether a person undid it. get_project lists a project's recent ones in `kbCorrections` with each passage cut to its first characters (ruling 262); read one here, by its id (`kc-` and ten hex characters), before you tell a person what it changed or undo it for them. Gated on membership of the project whose task made it.",
       { id: z.string().describe("The correction's id, e.g. 'kc-3f9a1c2b7d'.") },
       runWith((args: { id: string }) => {
         const id = args.id.trim();
@@ -1453,14 +1453,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_kb_correction",
   );
 
-  // Ruling 498: an agent's knowledge-base correction is written as it is made,
+  // Ruling 210: an agent's knowledge-base correction is written as it is made,
   // and a person undoes the ones they disagree with. Their Undo on a project's
   // Controller page does it directly; this is the same undo for a person who
   // asks in a conversation. Org-admin gated like every knowledge-base write.
   add(
     tool(
       "undo_kb_correction",
-      "Undo one knowledge-base correction an agent wrote (ruling 498), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`, and read_kb_correction reads one whole). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change the passage with edit_knowledge_base_doc.",
+      "Undo one knowledge-base correction an agent wrote (ruling 210), by its id (`kc-` and ten hex characters; get_project lists a project's in `kbCorrections`, and read_kb_correction reads one whole). Org admins only, and only when the person asked you to. It puts back the passage the correction replaced (or removes the text it added) and notes the undo on the task that made it; an agent that later tries to write the same text into that document is refused and told who undid it and why, so pass the person's `reason`. It refuses, writing nothing, when the document was edited since: then read it with read_knowledge_base_doc and change the passage with edit_knowledge_base_doc.",
       {
         id: z.string().describe("The correction's id, e.g. 'kc-3f9a1c2b7d'."),
         projectSlug: z
@@ -1495,7 +1495,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_skills",
-      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 679: 24,000 characters for all of an agent's skills together; a skill your own profile holds is also measured against what a controller turn has left for it, of 40,000 with your guide drawn first, and the larger loss is the one listed).",
+      "List the org skills (grant key, name, summary, size). Org admins only. `grantKey` is the skill FOLDER NAME, the only form save_global_agent's `skills` accepts; `id` is for save_skill. `chars` is the length of the skill's body, and `charsPastBudget`, when present, is how much of its end a run handed its skills as prompt text is never given (ruling 267: 24,000 characters for all of an agent's skills together; a skill your own profile holds is also measured against what a controller turn has left for it, of 40,000 with your guide drawn first, and the larger loss is the one listed).",
       {},
       run(() => {
         requireOrgAdmin("read the org skills");
@@ -1504,7 +1504,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // must carry; `id` (a `disk:`/`sk_` handle) leading the row is what
           // the controller granted before, and it mounted nothing.
           listSkills(db, { dataRoot }).map((s) => {
-            // Ruling 679: its size beside its name, and how much of it a run
+            // Ruling 267: its size beside its name, and how much of it a run
             // handed its skills as prompt text cannot be given.
             const size = skillSize(s.name);
             const row: SkillListing = { grantKey: s.name, id: s.id, name: s.name, summary: s.summary };
@@ -1521,7 +1521,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_skill",
-      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes). To change part of a skill that exists, use edit_skill, which replaces one passage in place (ruling 680). Ruling 679: a run handed its skills as prompt text gets at most 24,000 characters of all its agent's skills together, so keep a skill to how its step is done and put reference material (tables, long rule lists, past findings) in a knowledge base document, which a run reads on demand with no cap; the reply says when this body is past that and by how much, and list_skills carries each skill's size.",
+      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes). To change part of a skill that exists, use edit_skill, which replaces one passage in place (ruling 267). Ruling 267: a run handed its skills as prompt text gets at most 24,000 characters of all its agent's skills together, so keep a skill to how its step is done and put reference material (tables, long rule lists, past findings) in a knowledge base document, which a run reads on demand with no cap; the reply says when this body is past that and by how much, and list_skills carries each skill's size.",
       {
         id: z
           .string()
@@ -1535,7 +1535,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "SKILL.md content with REAL newlines: a --- frontmatter block (name, description) followed by markdown, or plain markdown. Required on a create; omit on an update to keep what is on disk. An empty, JSON-escaped (literal \\n and no newline) or unparseable body is refused, never rewritten (ruling 183).",
+            "SKILL.md content with REAL newlines: a --- frontmatter block (name, description) followed by markdown, or plain markdown. Required on a create; omit on an update to keep what is on disk. An empty, JSON-escaped (literal \\n and no newline) or unparseable body is refused, never rewritten (ruling 186).",
           ),
       },
       runWith(async (args: { id?: string; name: string; summary: string; body?: string }) => {
@@ -1558,13 +1558,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "save_skill",
   );
 
-  // Ruling 680: one passage of a skill, as ruling 637 edits one passage of a
+  // Ruling 267: one passage of a skill, as ruling 212(b) edits one passage of a
   // knowledge-base document. A whole-body `save_skill` to add a section is the
   // model retyping the skill, every line of it.
   add(
     tool(
       "edit_skill",
-      "Replace ONE passage of a skill's SKILL.md in place (ruling 680). Org admins only. Use it to add, change or remove part of a skill that exists; save_skill replaces the whole body, so every line of it becomes your copy of what you read. `was` is the passage exactly as the SKILL.md has it: copy it character for character from read_store_doc (kind `skill`, path `[\"SKILL.md\"]`), list markers and emphasis included, and send enough of it to stand exactly once. `now` is what takes its place; an empty `now` deletes the passage. To ADD text, send the line it follows as `was` and that line with your text after it as `now`. The file is written once, under the lock every edit of it takes, and the result is judged as every SKILL.md write is. It refuses, writing nothing, when `was` is not in the file (the reply names the closest lines) or stands more than once (send more of it), when the edit changes nothing, and when either side is over 8 KB (make more than one edit). The reply says when the skill is past what a run is given (ruling 679).",
+      "Replace ONE passage of a skill's SKILL.md in place (ruling 267). Org admins only. Use it to add, change or remove part of a skill that exists; save_skill replaces the whole body, so every line of it becomes your copy of what you read. `was` is the passage exactly as the SKILL.md has it: copy it character for character from read_store_doc (kind `skill`, path `[\"SKILL.md\"]`), list markers and emphasis included, and send enough of it to stand exactly once. `now` is what takes its place; an empty `now` deletes the passage. To ADD text, send the line it follows as `was` and that line with your text after it as `now`. The file is written once, under the lock every edit of it takes, and the result is judged as every SKILL.md write is. It refuses, writing nothing, when `was` is not in the file (the reply names the closest lines) or stands more than once (send more of it), when the edit changes nothing, and when either side is over 8 KB (make more than one edit). The reply says when the skill is past what a run is given (ruling 267).",
       {
         id: z.string().describe("Skill id, from list_skills."),
         was: z.string().describe("The passage to replace, exactly as SKILL.md has it, standing once in it."),
@@ -1586,7 +1586,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_mcp_servers",
-      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 278) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 469): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 486): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME, the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
+      "List the org MCP connections (grant key, name, transport, target, health). Org admins only. `up` is a CACHED verdict: read `lastCheckedAt` for its age and `warmingSince` for a server still installing on first use, and call test_mcp_server rather than relaying a stale red. `storeAccessNote` is present when the server's command is pointed inside Viberr's own store, which lets an agent rewrite the knowledge bases, skills and agent profiles Viberr injects into runs (ruling 188) - relay it whenever you are asked about that server or asked to grant it. `signIn` is an HTTP server's OAuth sign-in (ruling 192): null when it is not an OAuth server, else `needs_sign_in` (runs do not mount it), `signed_in` (with `expiresAt` and whether it `renews`) or `expired` (with the reason); `signInNote` says it in words. A signed-in server's `signIn.grant` is what its authorization server granted (ruling 192): `scopes` and `writes` counted, `readOnly` when no scope writes, `summary` (such as read-only · 194 scopes), and `writeScopes` by name; null when the server did not say. A read-only grant refuses every call that writes, so relay it before anyone plans a write through that server. `requestedScopes` is what the next sign-in asks for (null asks for what the server advertises). Only an org admin signs a server in or out, in Instance settings → Agent resources; you cannot. Credentials and tokens are never shown. `grantKey` is the REGISTRY NAME, the only form save_global_agent's `mcps` accepts; `id` is for save_mcp_server and test_mcp_server.",
       {},
       run(() => {
         requireOrgAdmin("read the MCP connections");
@@ -1601,7 +1601,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             transport: m.transport,
             target: m.target,
             up: m.up,
-            // Ruling 278 (F37-111): `up` is a CACHED verdict and the row
+            // Ruling 188 (F37-111): `up` is a CACHED verdict and the row
             // carries when it was taken — this read did not. Live, the
             // controller saw `up: false` with the reason "no response in 20s.
             // npx fetches its package on first use, so this is probably still
@@ -1614,7 +1614,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             tools: m.tools,
             hasCredential: m.hasCred,
             lastError: m.lastError,
-            // Ruling 188 (pass 37, F37-6): ruling 176's marking, which the Org
+            // Ruling 262 (pass 37, F37-6): ruling 188's marking, which the Org
             // settings row states ("N write tools withheld from read-only
             // runs") and this read did not carry at all. Live, the controller
             // reasoned correctly from what it could see — "if Viberr enforces
@@ -1624,18 +1624,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             writeToolsReviewed: m.writeToolsReviewed,
             writeToolsNote:
               m.writeTools.length > 0
-                ? `${m.writeTools.length} write ${m.writeTools.length === 1 ? "tool is" : "tools are"} withheld from every run without execute-code-or-write-repo, and from every operator run (ruling 176).`
+                ? `${m.writeTools.length} write ${m.writeTools.length === 1 ? "tool is" : "tools are"} withheld from every run without execute-code-or-write-repo, and from every operator run (ruling 188).`
                 : m.writeToolsReviewed
                   ? "Reviewed: no tool on this server is marked as a write tool, so none is withheld."
                   : "Not reviewed yet: nothing is withheld. Viberr makes no claim about the tools nobody has marked.",
-            // Ruling 278: the one case that is qualitatively different from
+            // Ruling 188: the one case that is qualitatively different from
             // writing a repo — a server pointed INSIDE Viberr's own store can
             // rewrite the knowledge bases, skills and agent profiles Viberr
             // injects into runs, including the rules its reviewers judge
             // against. Found live on this instance.
             storePaths: m.storePaths,
             storeAccessNote: mcpStoreAccessNote(m.storePaths),
-            // Ruling 469: the public half of an OAuth sign-in, never a token.
+            // Ruling 192: the public half of an OAuth sign-in, never a token.
             signIn: m.oauth
               ? {
                   status: m.oauth.status,
@@ -1643,7 +1643,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                   renews: m.oauth.renews,
                   issuer: m.oauth.issuer,
                   reason: m.oauth.reason,
-                  // Ruling 486 (F40-63): what the sign-in may do. Live, this
+                  // Ruling 192 (F40-63): what the sign-in may do. Live, this
                   // read said "signed_in" over a grant of 194 read-only
                   // scopes, and the first write came back "Authentication
                   // error" with nothing here to say why.
@@ -1662,7 +1662,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_mcp_server",
-      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. `requestedScopes` records the OAuth scopes an HTTP server's next sign-in asks for (ruling 486); it takes effect when an org admin signs in again, and the server decides what it grants. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 469). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 176). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
+      "Create or update an org MCP connection (name, transport, endpoint or command). Org admins only. `requestedScopes` records the OAuth scopes an HTTP server's next sign-in asks for (ruling 192); it takes effect when an org admin signs in again, and the server decides what it grants. Credentials do NOT travel through chat: tell the admin to add the secret in Instance settings → Agent resources, then test the server. An HTTP server that asks for an OAuth sign-in (the reply says so) is signed in by an org admin from its editor in Instance settings → Agent resources (Sign in), which you cannot do: tell the admin, and until then runs do not mount it (ruling 192). `writeTools` marks the tools Viberr withholds from every run without execute-code-or-write-repo and from every operator run (ruling 188). Marking is a REVIEW, so nothing is marked unless you say so: a server saved without it withholds NOTHING, and the reply names the tools whose names look like writes so you can mark them in a second call. Pass [] to record that none should be withheld. On an UPDATE, omitting the field leaves the existing marking untouched.",
       {
         id: z.string().optional().describe("Existing server id to update; omit to create."),
         name: z.string(),
@@ -1678,7 +1678,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "HTTP only (ruling 486): the OAuth scopes the next sign-in asks for, space-separated (e.g. \"workers-scripts.write zone.read\"). The authorization server decides what it grants; list_mcp_servers shows it. Omit to leave the stored request unchanged; \"\" clears it, so the server's advertised scopes are asked for.",
+            "HTTP only (ruling 192): the OAuth scopes the next sign-in asks for, space-separated (e.g. \"workers-scripts.write zone.read\"). The authorization server decides what it grants; list_mcp_servers shows it. Omit to leave the stored request unchanged; \"\" clears it, so the server's advertised scopes are asked for.",
           ),
       },
       runWith(
@@ -1714,21 +1714,21 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // the marking that actually landed rather than the one we asked for.
           const policy = saved.mcp.writeTools;
           const suggestion = saved.writeToolsSuggestion;
-          // Ruling 278 (F37-111): said at the moment the server is saved,
+          // Ruling 188 (F37-111): said at the moment the server is saved,
           // because this is where the path is chosen. A command pointed inside
-          // Viberr's own store is the one case ruling 176's marking cannot
+          // Viberr's own store is the one case ruling 188's marking cannot
           // cover — it binds only on a run that withholds
           // execute-code-or-write-repo, and an agent that runs tests holds it.
           const storeNote = mcpStoreAccessNote(saved.mcp.storePaths);
           return (
             `[done] ${saved.toast}. ` +
             (policy.length > 0
-              ? `${countLabel(policy.length, "write tool")} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 176): ${policy.join(", ")}. `
+              ? `${countLabel(policy.length, "write tool")} withheld from every run without execute-code-or-write-repo and from every operator run (ruling 188): ${policy.join(", ")}. `
               : suggestion.length > 0
                 ? `NOTHING is withheld: no tool on this server is marked, so every tool it exposes, including the ones that write, reaches every run that mounts it. From the names the probe listed, these look like write tools: ${suggestion.join(", ")}. Call save_mcp_server again with \`writeTools\` to mark them (or an explicit [] to record that none should be), then say which you chose. `
                 : "Nothing is marked as a write tool, so nothing is withheld. The probe listed no tool whose name looks like a write. ") +
             (storeNote ? `${storeNote} ` : "") +
-            // Ruling 469: a server that asked for an OAuth sign-in is the
+            // Ruling 192: a server that asked for an OAuth sign-in is the
             // admin's to sign in; the reply says so rather than "add a secret".
             (saved.mcp.oauth && saved.mcp.oauth.status !== "signed_in"
               ? `${mcpSignInNote(saved.mcp.oauth)} `
@@ -1744,7 +1744,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "test_mcp_server",
-      "Probe one org MCP connection now and report its health in the command's own words; a server signed in with OAuth also names what its sign-in was granted (\"read-only · 194 scopes\", ruling 486). Org admins only.",
+      "Probe one org MCP connection now and report its health in the command's own words; a server signed in with OAuth also names what its sign-in was granted (\"read-only · 194 scopes\", ruling 192). Org admins only.",
       { id: z.string().describe("The server's id or its name (from list_mcp_servers).") },
       runWith(async (args: { id: string }) => {
         requireOrgAdmin("test MCP connections");
@@ -1758,7 +1758,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_global_agents",
-      "List the org's global agent templates (specialists a project can deploy), each with its full persona, the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 156). A deployment is a SNAPSHOT: editing a template does NOT reach a project that already deployed it, for the persona or the summary any more than for the grants, so `copiesWithOlderText` lists the projects still running the older text and which field it is (ruling 277). Fixing one is a project-level edit on that project's Agents page, or save_global_agent with propagate for the grants. Org admins only. Read this before save_global_agent so an edit is not blind.",
+      "List the org's global agent templates (specialists a project can deploy), each with its full persona, the resource grants it holds, its default model and effort, and `copiesDiffering`: the projects whose deployed copy no longer carries the template's grants (ruling 177). A deployment is a SNAPSHOT: editing a template does NOT reach a project that already deployed it, for the persona or the summary any more than for the grants, so `copiesWithOlderText` lists the projects still running the older text and which field it is (ruling 177). Fixing one is a project-level edit on that project's Agents page, or save_global_agent with propagate for the grants. Org admins only. Read this before save_global_agent so an edit is not blind.",
       {},
       run(() => {
         requireOrgAdmin("read the global agent templates");
@@ -1774,7 +1774,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             model: g.model,
             effort: g.effort,
             summary: g.summary,
-            // Ruling 197 (F37-18): F33-7 put the GRANTS here so an edit was not
+            // Ruling 261 (F37-18): F33-7 put the GRANTS here so an edit was not
             // blind, and left out the biggest field of all. Live pass 37 the
             // controller needed to correct three stale summaries, would not
             // risk the personas it could not read, and left summaries
@@ -1786,12 +1786,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             mcps: g.mcps,
             kbs: g.kbs,
             usedByProjects: g.used,
-            // Ruling 156: "is it granted on the project?" is answerable
+            // Ruling 177: "is it granted on the project?" is answerable
             // without a run.
             copiesDiffering: listTemplateResourceDrift(db, g.id, { dataRoot }).map(
               (d) => d.projectSlug,
             ),
-            // Ruling 277 (F37-110): the grants are not the only thing a
+            // Ruling 177 (F37-110): the grants are not the only thing a
             // deployment SNAPSHOTS. The same copy holds the persona — the
             // run's whole system prompt — and the summary the operator selects
             // by, and nothing compared either, so `copiesDiffering: []` read as
@@ -1829,7 +1829,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Default model id for the template's backend, checked by name (ruling 139); deploy_agent uses it when no override is given. Omit to keep the stored default; \"\" clears it.",
+            "Default model id for the template's backend, checked by name (ruling 261); deploy_agent uses it when no override is given. Omit to keep the stored default; \"\" clears it.",
           ),
         effort: z
           .string()
@@ -1841,7 +1841,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Also rewrite the grants of every project copy that no longer matches this template, and, when THIS call changes the persona, the persona of every copy still running older text (ruling 467); the reply names each copy and what it rewrote. Off by default: a project's copy is its own record.",
+            "Also rewrite the grants of every project copy that no longer matches this template, and, when THIS call changes the persona, the persona of every copy still running older text (ruling 177); the reply names each copy and what it rewrote. Off by default: a project's copy is its own record.",
           ),
         skills: z
           .array(z.string())
@@ -1905,17 +1905,17 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const saved = await saveGlobalAgentProfile(db, input, actor, {
             dataRoot,
           });
-          // Ruling 153: the reply states the defaults a deploy will take.
+          // Ruling 264: the reply states the defaults a deploy will take.
           const defaults =
             ` Template defaults: ${BACKEND_LABEL[saved.profile.backend]}, ` +
             `model ${saved.profile.model || defaultModelFor(saved.profile.backend)}, ` +
             `effort ${saved.profile.effort || defaultEffortFor(saved.profile.backend)}.`;
-          // Ruling 156: the reply is built from the RESULT, not the toast. A
+          // Ruling 177: the reply is built from the RESULT, not the toast. A
           // copy that differs is named with what it lacks and how to update
           // it; a propagation names what each copy gained.
           const verb = args.id ? "updated" : "created";
           const head = `[done] ${saved.profile.name} ${verb}.`;
-          // Ruling 277 (F37-110): a deployment SNAPSHOTS the persona and the
+          // Ruling 177 (F37-110): a deployment SNAPSHOTS the persona and the
           // summary, `propagate` rewrites only the grants, and every arm below
           // is built from `diverged` — which compares grants. So an edit that
           // corrected a persona reported success, and the agents running that
@@ -1925,7 +1925,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // grants", and four runs still mounted the old text. This rides
           // EVERY arm because the two facts are independent: grants can be in
           // step while the text is not, which is exactly the case that misled.
-          // Ruling 467: the doors that now exist for an older copy. Propagate
+          // Ruling 177: the doors that now exist for an older copy. Propagate
           // rewrites a persona only in a call that changes it, and never a
           // summary, so both of the other doors stay named.
           const olderFields = [...new Set(saved.textBehind.flatMap((d) => d.fields))];
@@ -1941,7 +1941,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 `${saved.textBehind.map((d) => d.projectSlug).join(", ")}. A deployment snapshots ` +
                 `that text: ${doors}`
               : "";
-          // Ruling 467: per project, what the persona propagation rewrote.
+          // Ruling 177: per project, what the persona propagation rewrote.
           const personaCopies =
             saved.personaPropagated.length > 0
               ? ` Persona rewritten on ${countLabel(saved.personaPropagated.length, "project copy", "project copies")}: ` +
@@ -1972,7 +1972,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_audit_log",
-      "Read the audit trail with filters (project, action, actor, time range). Org admins only. `action` is a PREFIX: \"task.\" reads every task action, \"task.transition\" narrows, a whole id matches exactly that one. A filter that matches nothing says so and lists the action ids the window DOES contain, because a wrong spelling and a quiet period used to look identical (ruling 279). `actions` on every reply is the vocabulary with a count each, so you never have to know an id before you can ask for it. Rows are retained 90 days.",
+      "Read the audit trail with filters (project, action, actor, time range). Org admins only. `action` is a PREFIX: \"task.\" reads every task action, \"task.transition\" narrows, a whole id matches exactly that one. A filter that matches nothing says so and lists the action ids the window DOES contain, because a wrong spelling and a quiet period used to look identical (ruling 33). `actions` on every reply is the vocabulary with a count each, so you never have to know an id before you can ask for it. Rows are retained 90 days.",
       {
         projectSlug: z.string().optional(),
         action: z
@@ -1996,7 +1996,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           requireOrgAdmin("inspect the audit log");
           const filters: AuditExportFilters = {};
           if (args.projectSlug) filters.projectSlug = args.projectSlug;
-          // Ruling 279 (F37-112): a PREFIX. The headline said "action prefix"
+          // Ruling 33 (F37-112): a PREFIX. The headline said "action prefix"
           // and the parameter said "Exact action id" — two descriptions of one
           // field, contradicting each other, and the behaviour followed the
           // stricter one. Live, the controller filtered `action: "task."`,
@@ -2008,7 +2008,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.until) filters.until = args.until;
           const rows = queryAuditEventsForExport(db, filters);
           const limit = args.limit ?? 50;
-          // Ruling 279: the vocabulary, from the same window MINUS the action
+          // Ruling 33: the vocabulary, from the same window MINUS the action
           // filter — so an empty result can name what IS there instead of
           // leaving the caller to guess an id. It also answers "how many
           // decisions happened" without paging 8,282 rows at 200 a call, which
@@ -2050,7 +2050,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "inspect_run_analytics",
-      "Agent-run analytics. Org admins only, optionally scoped to one project. Ruling 635: run figures are PER BACKEND and never summed across backends, because Claude and Codex do not measure alike: only Claude reports a cost, a Codex token and a Claude token are different models' tokens, and Codex reports no cache write. `runs.<backend>` holds each backend's totals, outcomes, coordination share and breakdowns by run kind, project, model, agent PROFILE and TASK; pass `backend` for one. Each is weighed in its `measure`: `cost` where the backend reported one, else `tokens`. `byProfile` answers which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` answers what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` give the groups the cap dropped, so eight of thirty never reads as thirty. A null cost or token figure means UNKNOWN, never zero. `oversight` (owner clarity, branch and PR traceability, decision waits, time to review, long timelines) is the instance's own record and covers every backend. For ONE task's whole figure across backends, read `get_task`'s `whatItTook`; `list_tasks` with `withWhatItTook: true` carries the run part for each task a run started on, and needs no org admin.",
+      "Agent-run analytics. Org admins only, optionally scoped to one project. Ruling 262: run figures are PER BACKEND and never summed across backends, because Claude and Codex do not measure alike: only Claude reports a cost, a Codex token and a Claude token are different models' tokens, and Codex reports no cache write. `runs.<backend>` holds each backend's totals, outcomes, coordination share and breakdowns by run kind, project, model, agent PROFILE and TASK; pass `backend` for one. Each is weighed in its `measure`: `cost` where the backend reported one, else `tokens`. `byProfile` answers which reviewer earns its runs, which `byKind` cannot because every reviewer is one kind; `byTask` answers what one task cost across its rework rounds, labelled `project/task` unless you scope to a project. Every breakdown is a WINDOW: `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` give the groups the cap dropped, so eight of thirty never reads as thirty. A null cost or token figure means UNKNOWN, never zero. `oversight` (owner clarity, branch and PR traceability, decision waits, time to review, long timelines) is the instance's own record and covers every backend. For ONE task's whole figure across backends, read `get_task`'s `whatItTook`; `list_tasks` with `withWhatItTook: true` carries the run part for each task a run started on, and needs no org admin.",
       {
         projectSlug: z.string().optional(),
         backend: z.enum(["claude", "codex"]).optional(),
@@ -2061,7 +2061,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const now = new Date().toISOString();
         const backends = backendRuns(db, filter);
         // Every backend that ran, unless one was asked for: each its own
-        // figures (ruling 635), so the reply cannot add a Codex token to a
+        // figures (ruling 262), so the reply cannot add a Codex token to a
         // Claude one or read Claude's dollars as the instance's.
         const read = args.backend
           ? [args.backend]
@@ -2079,7 +2079,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 byKind: r.byKind,
                 byProject: r.byProject,
                 byModel: r.byModel,
-                // Ruling 308: the two the controller asked for and could not
+                // Ruling 35: the two the controller asked for and could not
                 // answer — "what did SHOP-27 cost across eleven rework rounds"
                 // and "which reviewer earns its runs".
                 byProfile: r.byProfile,
@@ -2098,7 +2098,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_github_connections",
-      "The instance's GitHub connections, the ones create_project takes a software board's repository from (ruling 463; a board that delivers results needs none, ruling 667). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
+      "The instance's GitHub connections, the ones create_project takes a software board's repository from (ruling 266; a board that delivers results needs none, ruling 224). Per connection: `owner` (what create_project's `owner` takes), whether it is the `default`, the token's kind (classic or fine_grained), its validation (`valid`, `failed` with GitHub's reason, or `unvalidated`) and when it was last checked, its expiry, the required scopes it lacks, and `reach`: which repositories the TOKEN can reach, read from GitHub when the token was last validated, each with whether it is private and whether the token can push to it. `reach.status` is `read`, `unknown` (the read failed, with the reason; never read it as zero) or `not_read` (the connection predates the read; an org admin presses Re-check on it in Instance settings). A fine-grained token reaches exactly the repositories it was granted, so a repository missing from a `read` reach is one this token cannot see. Never carries token material. Open to any signed-in person, the same people the New project dialog shows these connections to.",
       {},
       run(() => {
         const connections = listConnections(db).map((c) => ({
@@ -2134,7 +2134,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (connections.length === 0) {
           return json({
             connections,
-            note: "No GitHub connection exists, so create_project cannot give a board a repository yet: an org admin adds a connection in Instance settings → GitHub connections. Any board can start without one (ruling 672): create it with no `owner` or `repoName`, and connect the repository once a connection exists. A board that delivers results needs none at all (`delivers: \"results\"`).",
+            note: "No GitHub connection exists, so create_project cannot give a board a repository yet: an org admin adds a connection in Instance settings → GitHub connections. Any board can start without one (ruling 224): create it with no `owner` or `repoName`, and connect the repository once a connection exists. A board that delivers results needs none at all (`delivers: \"results\"`).",
           });
         }
         return json({ connections });
@@ -2146,7 +2146,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_project",
-      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Say what the board delivers in `delivers`, which you settled before designing it (ruling 667). `software` (the default): tasks change a repository and ship as pull requests, through a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 463), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 462). A repository GitHub does not confirm refuses and no project is created (ruling 671): none by that name the connection can see, a token GitHub rejects or refuses, GitHub unreachable, or an answer naming no default branch. Relay the sentence; when it is the first and the person wants the repository made, pass `createRepository`. A software board can also start with NO repository (ruling 672): leave `owner` and `repoName` out when the person has none yet or wants to connect it later. Its agents keep repo-write, its tasks come back as files until one is connected, and its operator asks for one the first time a task needs a pull request; connect_project_repository attaches it. `results`: the no-code kind, where a person files a task and the agents hand back files on it. It needs no repository and no GitHub connection, so leave `owner` and `repoName` out; pass both only when the agents must read an existing repository, which they then read and never write. Its agents are deployed with repo-write withheld whatever their templates grant, and the one that makes the result delivers the files it saves on the task. Never ask a person for a repository a results board does not need. The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 464), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
+      "Create a project, optionally with the WHOLE custom shape in one request: stages (entry first, Done-equivalent last), boundary choices, members (existing users by email), description. Open to any signed-in person; the asker becomes the project's admin. Say what the board delivers in `delivers`, which you settled before designing it (ruling 224). `software` (the default): tasks change a repository and ship as pull requests, through a GitHub connection for the repo owner: call list_github_connections FIRST, which names every connection's owner and the repositories its token reaches (ruling 266), so you never guess whether one exists or whether it can see the repository. The repository need not exist yet: `createRepository` has the server create it with the connection's token first (ruling 266). A repository GitHub does not confirm refuses and no project is created (ruling 225): none by that name the connection can see, a token GitHub rejects or refuses, GitHub unreachable, or an answer naming no default branch. Relay the sentence; when it is the first and the person wants the repository made, pass `createRepository`. A software board can also start with NO repository (ruling 224): leave `owner` and `repoName` out when the person has none yet or wants to connect it later. Its agents keep repo-write, its tasks come back as files until one is connected, and its operator asks for one the first time a task needs a pull request; connect_project_repository attaches it. `results`: the no-code kind, where a person files a task and the agents hand back files on it. It needs no repository and no GitHub connection, so leave `owner` and `repoName` out; pass both only when the agents must read an existing repository, which they then read and never write. Its agents are deployed with repo-write withheld whatever their templates grant, and the one that makes the result delivers the files it saves on the task. Never ask a person for a repository a results board does not need. The move into the final stage stays a human decision whatever is asked. When you have designed the project's agents, pass them as `agents` (ruling 266), each with its model and effort: the project then gets the operator plus exactly that roster, not the generic Developer and Reviewer beside it. The reply lists every deployment written. deploy_agent adds one later; remove_agent_deployment takes one off.",
       {
         name: z.string(),
         key: z.string().describe("Task key prefix, 2 to 4 letters."),
@@ -2227,7 +2227,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           )
           .optional()
           .describe(
-            "Ruling 464: the roster you designed. Pass it when you have one: the project is then written with the operator plus EXACTLY these deployments and no generic Developer or Reviewer; leave it out and the base roster (operator, Developer, Reviewer) is written. Every entry is checked before anything is written, the repository included: an unknown template, a model or effort its backend does not offer, or an entry listed twice is refused by name. At least one entry.",
+            "Ruling 266: the roster you designed. Pass it when you have one: the project is then written with the operator plus EXACTLY these deployments and no generic Developer or Reviewer; leave it out and the base roster (operator, Developer, Reviewer) is written. Every entry is checked before anything is written, the repository included: an unknown template, a model or effort its backend does not offer, or an entry listed twice is refused by name. At least one entry.",
           ),
         operator: z
           .strictObject({
@@ -2283,14 +2283,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             dataRoot,
             fetchImpl: ctx.fetchImpl,
           });
-          // Ruling 464: the reply lists what was deployed, read off the write.
+          // Ruling 266: the reply lists what was deployed, read off the write.
           const deployed = created.agents
             .map((a) => `${a.name} (${a.profileId}, ${a.model || "default model"}, effort ${a.effort || "default"})`)
             .join("; ");
           return (
             `[done] Project ${created.name} created at ${created.storePath} (slug ${created.slug}, keys ${created.key}-n). ` +
             `You are its admin.` +
-            // Ruling 672: a software board made with none says so in its own
+            // Ruling 224: a software board made with none says so in its own
             // note, which also says what happens next.
             (created.repo === null && !created.repoNote
               ? " It has no repository: its tasks are delivered as the files their delivering agent saves on them."
@@ -2310,7 +2310,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_project",
-      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 139: read this before update_agent_deployment; a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change, F39-4), epics summary (ruling 503; list_epics and get_epic read them in full), and `rulingsKb`, the knowledge base every run on this project reads (ruling 239), null when none is named; `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 483: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks); `kbCorrections`, the twenty newest corrections agents on its tasks wrote into a knowledge base (ruling 498), each with its id, where it was written and an excerpt of the passage it replaced and of the text it wrote (ruling 677: read_kb_correction reads one whole); and `fileLeases`, which task owns which shared paths until it merges (ruling 245), resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 247); and `gates`, the commands Viberr itself runs on every delivered revision (ruling 482; set with set_project_gates); and `requiredReviewers`, the agent each review stage requires on every task (ruling 178), which never delivers on this project (ruling 556; set_required_reviewers says what that means for a plan). Membership gated.",
+      "One project's live shape: stages with task counts, workflow boundaries, members with roles, deployed agents with their RESOLVED grants (every stored capability id at the mode the runtime applies, model, effort, and the operator's autonomy; ruling 261: read this before update_agent_deployment; a grant carrying `advisory` is PERSONA GUIDANCE, not an authority: nothing enforces it, there is no toggle for it, and `update_agent_deployment` refuses it, so never read one as something the agent may do or as a setting you failed to change, F39-4), epics summary (ruling 273; list_epics and get_epic read them in full), and `rulingsKb`, the knowledge base every run on this project reads (ruling 208(a)), null when none is named; `openProposals`, the knowledge-base corrections agents on its tasks filed under \"Proposed corrections (not binding)\" that nobody has promoted or dismissed yet (ruling 267: each with its id, knowledge base, document, the line it corrects, the correction and the evidence; resolve_kb_proposal closes one when a person asks); `kbCorrections`, the twenty newest corrections agents on its tasks wrote into a knowledge base (ruling 210), each with its id, where it was written and an excerpt of the passage it replaced and of the text it wrote (ruling 262: read_kb_correction reads one whole); and `fileLeases`, which task owns which shared paths until it merges (ruling 60), resolved, so a lease whose holder has finished is NOT listed there but in `spentFileLeases`, which binds nobody and can be cleared (ruling 60); and `gates`, the commands Viberr itself runs on every delivered revision (ruling 104; set with set_project_gates); and `requiredReviewers`, the agent each review stage requires on every task (ruling 89), which never delivers on this project (ruling 89; set_required_reviewers says what that means for a plan). Membership gated.",
       { projectSlug: z.string().optional().describe("Defaults to this conversation's project.") },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -2329,19 +2329,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repo: project.repo,
           archived: project.archived,
           description: project.description,
-          // Ruling 178: the reviewers the project REQUIRES per review stage,
+          // Ruling 89: the reviewers the project REQUIRES per review stage,
           // resolved to the names the acceptance gate prints; set with
           // set_required_reviewers.
           requiredReviewers: resolveRequiredReviewers(fm, dataRoot),
-          // Ruling 239: the one KB every run on this project reads, whether or
+          // Ruling 208(a): the one KB every run on this project reads, whether or
           // not any profile grants it. Null means the project has named none,
           // and a settled rule has nowhere to live but each task's goal.
           rulingsKb: fm.rulingsKb ?? null,
-          // Ruling 245: who owns which shared paths until they merge. Read here
+          // Ruling 60: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
           //
-          // Ruling 256 (pass 37, F37-85): RESOLVED, like the gates read it.
-          // Ruling 247 made a lease whose holder has finished bind nobody, and
+          // Ruling 60 (pass 37, F37-85): RESOLVED, like the gates read it.
+          // Ruling 60 made a lease whose holder has finished bind nobody, and
           // applied that at the push and the canonical anchor — not here, the
           // read the controller actually uses. So this reported spent leases as
           // live, and the controller said so out loud: "I cannot tell you from a
@@ -2351,7 +2351,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // Named, not dropped: the declaration was made and is now spent, and
           // somebody may want to clear the row.
           spentFileLeases: staleFileLeases(slug, dataRoot ? { dataRoot } : {}),
-          // Ruling 482: the commands Viberr itself runs on every delivered
+          // Ruling 104: the commands Viberr itself runs on every delivered
           // revision; set with set_project_gates.
           gates: fm.gates ?? [],
           stages: project.stages.map((s) => ({
@@ -2366,7 +2366,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             name: users.get(m.userId)?.name ?? m.userId,
             email: users.get(m.userId)?.email ?? null,
           })),
-          // Ruling 139: the deployments come from the Agents page's own roster
+          // Ruling 261: the deployments come from the Agents page's own roster
           // (the projection, which every agent writer reprojects before it
           // returns), so the controller reads exactly what the roster renders:
           // an absent `deliver-review-pr` at the project's delivery-gate mode,
@@ -2377,7 +2377,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               name: row.name,
               kind: row.kind,
               backends: row.backends,
-              // Ruling 188 (pass 37, F37-3): the stages this profile may work
+              // Ruling 262 (pass 37, F37-3): the stages this profile may work
               // ON THIS BOARD, resolved through the SAME `resolveDeclaredStages`
               // the Agents page, the task page's run control and the dispatch
               // gate use (ruling R14-1: a declared id absent from this board is
@@ -2393,7 +2393,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               model: row.model,
               modelLabel: row.modelLabel,
               effort: row.effort,
-              // Ruling 156: the grants a run on this project MOUNTS (the
+              // Ruling 177: the grants a run on this project MOUNTS (the
               // deployment's own copy), and how that copy differs from the
               // template it came from (null when it does not).
               resources: row.resources,
@@ -2422,20 +2422,20 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               ? { ...entry, autonomy: row.autonomy ?? "supervised" }
               : entry;
           }),
-          // Ruling 677: the two lists with a narrower read of their own come
+          // Ruling 262: the two lists with a narrower read of their own come
           // last, with the epics: what a too-long reply loses is its end, and
           // the deployments above have no other tool that returns them.
-          // Ruling 483 (F40-59): the knowledge-base corrections agents on this
+          // Ruling 267 (F40-59): the knowledge-base corrections agents on this
           // project's tasks proposed and nobody has promoted or dismissed. Read
           // from the documents themselves, where every run reads them.
           openProposals: listProjectKbProposals(db, slug, dataRoot).map((p) => ({
             ...p,
             rulings: p.kb === (fm.rulingsKb ?? null),
           })),
-          // Ruling 498: what agents on this project's tasks wrote into a
+          // Ruling 210: what agents on this project's tasks wrote into a
           // knowledge base, newest first, each with its id for
           // undo_kb_correction and whether a person already undid it.
-          // Ruling 677: each passage as an excerpt, so twenty of them never
+          // Ruling 262: each passage as an excerpt, so twenty of them never
           // outgrow the reply; read_kb_correction reads one whole.
           kbCorrections: listKbCorrections(db, { projectSlug: slug })
             .slice(0, 20)
@@ -2451,7 +2451,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               at: c.at,
               undone: c.undone,
             })),
-          // Ruling 503: each epic as `list_epics` reads it.
+          // Ruling 273: each epic as `list_epics` reads it.
           epics: listEpics(db, slug).map(epicRow),
         });
       }),
@@ -2462,7 +2462,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_tasks",
-      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 503), and what each waits on (`waitsOn`, ruling 131). Membership gated. Includes Done; archived only when asked. Pass `withWhatItTook: true` to rank a board by what its tasks cost (ruling 693): each task a run started on then carries `whatItTook`, one line with the runs that started, their agent minutes and the dollars they reported (`cost not reported` when no run reported one, which is unknown and never zero), a run still going or cut by a restart is named and adds no minutes, and a task without the key has no run on record. `get_task` has one task's whole figure: its questions, send-backs and wall time. The listing has no pages: a reply too long for a turn is cut and its first line says so, and `stageId` or `epicId` narrows it.",
+      "A project's tasks: key, title, stage, readiness, waiting, owner, priority, the epic each is in (ruling 273), and what each waits on (`waitsOn`, ruling 55). Membership gated. Includes Done; archived only when asked. Pass `withWhatItTook: true` to rank a board by what its tasks cost (ruling 83): each task a run started on then carries `whatItTook`, one line with the runs that started, their agent minutes and the dollars they reported (`cost not reported` when no run reported one, which is unknown and never zero), a run still going or cut by a restart is named and adds no minutes, and a task without the key has no run on record. `get_task` has one task's whole figure: its questions, send-backs and wall time. The listing has no pages: a reply too long for a turn is cut and its first line says so, and `stageId` or `epicId` narrows it.",
       {
         projectSlug: z.string().optional(),
         stageId: z.string().optional().describe("Filter to one stage."),
@@ -2488,11 +2488,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const rows = listProjectTasks(db, slug, listOpts).filter(
           (t) => !args.stageId || t.stage === args.stageId,
         );
-        // Ruling 693: the run part of what each task took, when it is asked
+        // Ruling 83: the run part of what each task took, when it is asked
         // for, from one read of the project's run rows grouped by task. The
         // whole board answers in one reply with no pages, so the figure is
         // one line and only on a task a run started on: as an object on
-        // every row it cut the reply a quarter sooner (ruling 677).
+        // every row it cut the reply a quarter sooner (ruling 260).
         const runsByTask = new Map<string, ProjectTookRunRow[]>();
         if (args.withWhatItTook) {
           for (const run of listTookRowsForProject(db, slug)) {
@@ -2513,7 +2513,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               priority: t.priority,
               archived: t.archived,
               epic: t.epicId ?? null,
-              // Ruling 131: what the task waits on, each entry with its live state.
+              // Ruling 55: what the task waits on, each entry with its live state.
               waitsOn: t.blockedBy.map((e) => `${e.label} (${e.state})`),
             };
             const took = runTotalsLine(runsByTask.get(t.key) ?? []);
@@ -2529,7 +2529,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "get_task",
-      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 153), the files deliveries it kept as each was delivered (`deliveries`, ruling 597), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way. `whatItTook` (ruling 693): what the task cost, derived when read: runs that started and their agent minutes, dollars where runs reported a cost (null means none reported, never zero), rounds a person was asked, times the work was sent back by reviewers and by people, wall time to first delivery and to acceptance with the share agents ran and the share it waited on a person, `byAgent` for who spent it, and `notes` for what the figure misses. The task's Result card prints the same `facts`.",
+      "One task's live state: stage, readiness, goal text, engaged agents, PR state, open packet, its pending schedules (`schedules`, ruling 264), the files deliveries it kept as each was delivered (`deliveries`, ruling 86), plus the newest timeline events. Membership gated. Historical (Done, archived) tasks read the same way. `whatItTook` (ruling 83): what the task cost, derived when read: runs that started and their agent minutes, dollars where runs reported a cost (null means none reported, never zero), rounds a person was asked, times the work was sent back by reviewers and by people, wall time to first delivery and to acceptance with the share agents ran and the share it waited on a person, `byAgent` for who spent it, and `notes` for what the figure misses. The task's Result card prints the same `facts`.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2557,8 +2557,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             type: e.type,
             by: e.actor.kind === "agent" ? `${e.actor.name} (agent)` : e.actor.name,
             title: e.title,
-            // Ruling 292: the cut says it is a cut and names the way out. This
-            // is ruling 285 for the CONTROLLER, which that ruling gave only to
+            // Ruling 262: the cut says it is a cut and names the way out. This
+            // is ruling 117 for the CONTROLLER, which that ruling gave only to
             // the operator — a rule applied to one actor and not its sibling,
             // which is this pass's own defect shape inside this pass's own fix.
             // It is the sharper case of the two: the operator's cut was 1,500,
@@ -2573,7 +2573,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 }
               : { text: e.text }),
           }));
-        // Ruling 153: the pending schedules, read from the task file itself
+        // Ruling 264: the pending schedules, read from the task file itself
         // (the summary mapping carries none), so the controller can name and
         // cancel what it or a person set up.
         const schedules = (
@@ -2589,7 +2589,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             prompt: s.prompt,
             status: s.status,
           }));
-        // Ruling 188 (pass 37, F37-5): `summary.blockReason` is the projected
+        // Ruling 262 (pass 37, F37-5): `summary.blockReason` is the projected
         // `validation_block_reason`, whose own docstring says every consumer
         // "filters rows on `archived = 0` and on the resolved review stage
         // before it ever looks at this column". The board does exactly that
@@ -2610,7 +2610,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             `newest first. Pass events up to ${CONTROLLER_EVENTS_MAX} to widen this ` +
             "window, and read_timeline_entry with an `at` for one in full.";
         }
-        // Ruling 482: the project's gates as Viberr ran them on the revision
+        // Ruling 315: the project's gates as Viberr ran them on the revision
         // under review, in the PR card's own line.
         const gates = projectGatesView(
           readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.gates,
@@ -2618,14 +2618,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             workRevision: null,
           },
         );
-        // Ruling 693: what the task took. A read of what a task cost never
+        // Ruling 83: what the task took. A read of what a task cost never
         // fails the read of the task, so a throw leaves the key out.
         const took: TookNote = {};
         try {
           const figure = whatItTookFor(db, { projectSlug: slug, taskKey: key, dataRoot });
           if (figure) took.whatItTook = figure;
         } catch (error) {
-          logger.warn("ruling 693 what-it-took read failed", {
+          logger.warn("ruling 83 what-it-took read failed", {
             projectSlug: slug,
             taskKey: key,
             err: toError(error),
@@ -2647,18 +2647,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 }
               : null,
           },
-          // Ruling 503: the epic the task is in, by name.
+          // Ruling 273: the epic the task is in, by name.
           epic: summary.epicId
             ? { id: summary.epicId, title: getEpic(db, slug, summary.epicId)?.title ?? null }
             : null,
           schedules,
-          // Ruling 597: the files deliveries, as each was delivered, which
+          // Ruling 86: the files deliveries, as each was delivered, which
           // `read_task_attachment` opens with `delivery`.
           deliveries: listKeptDeliveries(slug, key, dataRoot),
           ...took,
-          // Ruling 302, extended to the sibling it was first written without.
+          // Ruling 117, extended to the sibling it was first written without.
           // It fixed the OPERATOR's window and left this one, which is the
-          // defect shape ruling 292's own comment had already named inside
+          // defect shape ruling 262's own comment had already named inside
           // this pass's own fix. The controller found it the way it finds
           // these: it read "5 of 121 entries on SHOP-36 and 4 of 111 on
           // SHOP-27, and coordinated from them". `eventCount` was there and
@@ -2672,14 +2672,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "get_task",
   );
 
-  // Ruling 293: the EVIDENCE, not only the sentence claiming it. Attachments
+  // Ruling 79: the EVIDENCE, not only the sentence claiming it. Attachments
   // are where every convention on this instance tells an agent to put its
   // proof, and the actor a person asks "did it actually prove that?" could
   // read the claim and never the file.
   add(
     tool(
       "read_task_attachment",
-      "Read ONE of a task's attachments. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (`pdftotext -layout`, a form feed between pages), an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .docx, a zip) is named and refused rather than guessed at. A read returns one page of up to 32,000 bytes (ruling 624); when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 551). With `delivery`, a stamp `get_task` lists under the task's `deliveries`, it reads the file as that delivery held it, not as a rework left it (ruling 597). Read-only, membership gated.",
+      "Read ONE of a task's attachments. Attachments are where agents put the PROOF - a mutation run with both vitest outputs, before/after captures, a cold-stack log, a spec written out in full - and where a person puts the INPUT a task works from: an inventory, a spreadsheet, a screenshot. A timeline entry names them under `attachments:` without carrying their contents. Call it before you tell a person a thing was proved, and before you repeat a report's claim about what its own evidence shows. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (`pdftotext -layout`, a form feed between pages), an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .docx, a zip) is named and refused rather than guessed at. A read returns one page of up to 32,000 bytes (ruling 215); when it says `truncated`, call again with `offset` set to its `nextOffset` for the next part (ruling 117). With `delivery`, a stamp `get_task` lists under the task's `deliveries`, it reads the file as that delivery held it, not as a rework left it (ruling 198). Read-only, membership gated.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -2703,7 +2703,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!read && delivery) return keptDeliveryMiss(slug, key, delivery, args.name, dataRoot);
         if (!read) {
           const have = listTaskAttachments(slug, key, dataRoot).map((a) => a.name);
-          // Ruling 246's shape: say what this reader IS and what it holds,
+          // Ruling 260's shape: say what this reader IS and what it holds,
           // rather than implying the file was deleted.
           return (
             `[noop] ${key} has no attachment \`${args.name}\`. ` +
@@ -2721,7 +2721,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_task_attachment",
   );
 
-  // Ruling 690: the sources a task keeps. The controller is the actor a
+  // Ruling 82: the sources a task keeps. The controller is the actor a
   // person asks "where does that figure come from?", and a result's claims
   // are checked against what its runs kept, not against the page today. The
   // reader every agent's `read_task_source` calls, behind this toolkit's own
@@ -2754,13 +2754,13 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_task_source",
   );
 
-  // Ruling 573: the files a person sends with a message, read the way a
+  // Ruling 258: the files a person sends with a message, read the way a
   // task's attachments are. A screenshot of an error or an inventory handed
   // over in the dock was a name in the prompt and nothing the turn could open.
   add(
     tool(
       "read_message_file",
-      "Read ONE file the person sent with a message in THIS conversation. Their message names each file it carried (\"A file came with this message: ...\"), and the recent exchange lists what earlier messages carried under `[sent with: ...]`. Read a file before you say what it holds or act on it. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (`pdftotext -layout`, a form feed between pages), an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .docx, a zip) is named and refused rather than guessed at. A read returns one page of up to 32,000 bytes (ruling 624); when it says `truncated`, call again with `offset` set to its `nextOffset`. Read-only; this conversation's files only.",
+      "Read ONE file the person sent with a message in THIS conversation. Their message names each file it carried (\"A file came with this message: ...\"), and the recent exchange lists what earlier messages carried under `[sent with: ...]`. Read a file before you say what it holds or act on it. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (`pdftotext -layout`, a form feed between pages), an image (.png .jpg .jpeg .webp .gif) as the picture itself, and any other file whose bytes are text as text, whatever its name (a .tf, a .ps1, a Dockerfile); a binary file (a .docx, a zip) is named and refused rather than guessed at. A read returns one page of up to 32,000 bytes (ruling 215); when it says `truncated`, call again with `offset` set to its `nextOffset`. Read-only; this conversation's files only.",
       {
         name: z.string().describe("The file's name, exactly as the message lists it."),
         offset: z
@@ -2798,7 +2798,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "continue_when_done",
-      "Leave THIS conversation its next step for when a task is accepted (ruling 685). Your turn ends long before an agent's work on a task does. So when a request needs that work first (a template an agent has to make, a study you will set the board up from), file or name the task, then write here what you will do once it is accepted. When the task is accepted (by a person, or by the operator on a board that lets it accept), Viberr starts your next turn in this conversation with that step, as the person you are answering and with their permissions as they stand then: nobody has to come back and ask, and a step that needs an org admin is refused then if they are not one. The step is written on the task, where every member and every run on it reads it, so whoever accepts knows what accepting starts. Tell the person you will continue on your own when the task is accepted. One step a task: calling it again replaces it, and an empty `next` drops it. A turn that was itself started this way leaves no further step: say what is left, and the person asks for it. Any member of the task's project.",
+      "Leave THIS conversation its next step for when a task is accepted (ruling 259). Your turn ends long before an agent's work on a task does. So when a request needs that work first (a template an agent has to make, a study you will set the board up from), file or name the task, then write here what you will do once it is accepted. When the task is accepted (by a person, or by the operator on a board that lets it accept), Viberr starts your next turn in this conversation with that step, as the person you are answering and with their permissions as they stand then: nobody has to come back and ask, and a step that needs an org admin is refused then if they are not one. The step is written on the task, where every member and every run on it reads it, so whoever accepts knows what accepting starts. Tell the person you will continue on your own when the task is accepted. One step a task: calling it again replaces it, and an empty `next` drops it. A turn that was itself started this way leaves no further step: say what is left, and the person asks for it. Any member of the task's project.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("The task you are waiting for. Defaults to this conversation's task."),
@@ -2909,7 +2909,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   );
 
   /**
-   * Ruling 299: the controller reads the default branch, the way the operator
+   * Ruling 265: the controller reads the default branch, the way the operator
    * already could. It writes the architecture, the knowledge bases and the
    * goals every agent is measured against, and it reviews the packets those
    * agents raise -- and it could not open a file in the repository those are
@@ -2932,7 +2932,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .min(1)
           .optional()
           .describe(
-            "Ruling 436: the 1-based line to start at (default 1). A file longer than one read comes in pages of whole lines; each page names its lines and the fromLine that continues it, so read on until it says nothing more.",
+            "Ruling 219(c): the 1-based line to start at (default 1). A file longer than one read comes in pages of whole lines; each page names its lines and the fromLine that continues it, so read on until it says nothing more.",
           ),
       },
       runWith(async (args: { projectSlug?: string; path: string; fromLine?: number }) => {
@@ -2943,10 +2943,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!project.repo) {
           // A project can exist with no remote at all. Saying which fact is
           // missing beats an empty read that reads like "the file is not
-          // there" (ruling 246: existence before type).
+          // there" (ruling 260: existence before type).
           return (
             `[unavailable] ${project.name} has no repository, so it has no default branch to ` +
-            "read. A board that delivers results needs none (ruling 667): its work is the files on " +
+            "read. A board that delivers results needs none (ruling 224): its work is the files on " +
             "its tasks, which `read_task_attachment` opens. A project admin attaches a repository " +
             "in the project's Settings when its agents should read or write one."
           );
@@ -2972,7 +2972,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return `[absent] \`${args.path}\` does NOT exist on \`${project.defaultBranch}\`.`;
         }
         if (read.kind === "unavailable") {
-          // Ruling 251: a refusal that names no way out is the defect. This one
+          // Ruling 263: a refusal that names no way out is the defect. This one
           // says which branch it could not reach and why, so the answer is
           // never "I read something else instead".
           return (
@@ -2985,8 +2985,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           ? `\`${project.defaultBranch}\`, just refreshed from GitHub`
           : `\`${project.defaultBranch}\` as the project's mirror last had it (the refresh from ` +
             "GitHub did not run, so treat it as slightly stale)";
-        // Ruling 285: a cut says it cut, and says where the rest is. Ruling
-        // 436: the rest is the next page, named by the line it starts at.
+        // Ruling 117: a cut says it cut, and says where the rest is. Ruling
+        // 219(c): the rest is the next page, named by the line it starts at.
         const page = defaultBranchPageNote(read);
         return `[found] \`${args.path}\` on ${freshness}${page.range}:\n\n${read.text}${page.note}`;
       }),
@@ -2994,8 +2994,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "read_default_branch_file",
   );
 
-  // Ruling 292: the controller reads a timeline entry whole, exactly as the
-  // operator has since ruling 285. Project-scoped and membership gated like
+  // Ruling 262: the controller reads a timeline entry whole, exactly as the
+  // operator has since ruling 117. Project-scoped and membership gated like
   // every other task read here; `read_run_log` is the RUN's log, which is a
   // different thing from what an agent chose to report on the task.
   add(
@@ -3013,7 +3013,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
-        // Ruling 648: an org admin reads every knowledge base (the Controller
+        // Ruling 211: an org admin reads every knowledge base (the Controller
         // page shows each correction whole), so its corrections read whole.
         return await readTimelineEntry(
           { db, ctx: { dataRoot }, projectSlug: slug, readerKbs: orgAdmin() ? "all" : [] },
@@ -3028,11 +3028,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_task",
-      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 140: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
+      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 50: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
-        // Ruling 492: every door that writes a goal says what a done signal can be.
+        // Ruling 105: every door that writes a goal says what a done signal can be.
         goal: z
           .string()
           .optional()
@@ -3047,11 +3047,11 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         blockedBy: z
           .array(z.string())
           .optional()
-          .describe("Ruling 131: what the new task waits on (task keys like JC-6, in this project). The task is born held and released by Viberr when every entry is done."),
+          .describe("Ruling 55: what the new task waits on (task keys like JC-6, in this project). The task is born held and released by Viberr when every entry is done."),
         epic: z
           .string()
           .optional()
-          .describe("Ruling 503: the epic the new task joins (epic-3, from list_epics). Omit for none."),
+          .describe("Ruling 273: the epic the new task joins (epic-3, from list_epics). Omit for none."),
       },
       runWith(
         async (args: {
@@ -3082,7 +3082,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.dueDate !== undefined) taskInput.dueDate = args.dueDate.trim() || null;
           if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
           if (args.epic?.trim()) taskInput.epic = args.epic.trim();
-          // Ruling 140(a): the owner is resolved BEFORE the write and seated in
+          // Ruling 50: the owner is resolved BEFORE the write and seated in
           // it, so the operator's `create` trigger already reads the right
           // principal. The release word the sibling `set_task_owner` accepts is
           // refused by name here rather than falling through to a misleading
@@ -3115,7 +3115,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "move_task",
-      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation. A move to an EARLIER stage requires `reason` (ruling 381).",
+      "Move a task to another stage. Workflow boundaries and your project role decide; a move into the final Done stage is refused here, because acceptance is decided on the task page with its own confirmation. A move to an EARLIER stage requires `reason` (ruling 47).",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3124,7 +3124,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Required for a move BACKWARD (ruling 381): what should change before the task comes back. It lands on the transition entry and the operator acts on it.",
+            "Required for a move BACKWARD (ruling 47): what should change before the task comes back. It lands on the transition entry and the operator acts on it.",
           ),
       },
       runWith(async (args: { projectSlug?: string; taskKey?: string; toStageId: string; reason?: string }) => {
@@ -3135,7 +3135,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         if (!project) throw new NotVisibleError(notVisible(slug));
         const terminal = project.stages[project.stages.length - 1];
         if (terminal && args.toStageId === terminal.id) {
-          // Ruling 246 (F37-75): name the door AND say whether it is open. The
+          // Ruling 260 (F37-75): name the door AND say whether it is open. The
           // refusal used to point at the task page and stop, so a person sent
           // there on a task still waiting for a reviewer followed a correct
           // pointer to a control that would refuse them. The gate's own sentence
@@ -3164,7 +3164,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           toStageId: args.toStageId,
           manual: true,
         };
-        // Ruling 381: the same sentence the board's dialog collects. The
+        // Ruling 47: the same sentence the board's dialog collects. The
         // controller is a door onto the same act, so it asks the same thing —
         // and `transitionStage` refuses the move without it rather than
         // trusting the caller to have read the schema.
@@ -3179,7 +3179,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "comment_on_task",
-      "Post a controller comment on a task's timeline: publish information for the PEOPLE reading it. @mentions of people notify them. An @mention of an AGENT reaches nobody - a comment starts no run, and the line is stamped saying so (ruling 252); a later run reads it only if it happens to read the timeline. To put something to an agent, use run_agent_on_task.",
+      "Post a controller comment on a task's timeline: publish information for the PEOPLE reading it. @mentions of people notify them. An @mention of an AGENT reaches nobody - a comment starts no run, and the line is stamped saying so (ruling 70); a later run reads it only if it happens to read the timeline. To put something to an agent, use run_agent_on_task.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3261,7 +3261,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_task",
-      "Edit a task's goal text, its metadata (priority, labels, due date), what it waits on (blockedBy, ruling 131: the full list; [] clears it and RELEASES the task) and/or the epic it is in (ruling 503). The same writers the task page uses, behind the same gates: the goal needs maintainer or above; metadata, the wait and the epic need the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 295: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
+      "Edit a task's goal text, its metadata (priority, labels, due date), what it waits on (blockedBy, ruling 55: the full list; [] clears it and RELEASES the task) and/or the epic it is in (ruling 273). The same writers the task page uses, behind the same gates: the goal needs maintainer or above; metadata, the wait and the epic need the project's edit-task-meta grant. Metadata fields you pass are a full replace (an empty labels list clears them; dueDate \"\" clears the date). Ruling 49: `title` is editable too, behind the goal's own gate, because a title and a goal are the same claim at two lengths and the shorter one should not be the harder to correct; the rename is noted with BOTH titles, since the old wording is what every existing reference to this task says. Never edits the stage, owner or engaged agents.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3286,7 +3286,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            'Ruling 503: the epic the task belongs to (epic-3), or "" to take it out of its epic. A task is in at most one epic, so naming another moves it there.',
+            'Ruling 273: the epic the task belongs to (epic-3), or "" to take it out of its epic. A task is in at most one epic, so naming another moves it there.',
           ),
       },
       runWith(
@@ -3327,7 +3327,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const unchanged: string[] = [];
           const refused: string[] = [];
           let firstError: AppError | null = null;
-          // Ruling 295: its own axis, reported on its own, exactly like the
+          // Ruling 49: its own axis, reported on its own, exactly like the
           // goal and the metadata beside it — a title that wrote must not be
           // hidden behind a goal that was refused, or the reverse.
           if (args.title !== undefined) {
@@ -3396,7 +3396,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               refused.push(`${fields.join(", ")}: ${error.userMessage}`);
             }
           }
-          // Ruling 131: the wait has its own writer and its own report line; a
+          // Ruling 55: the wait has its own writer and its own report line; a
           // refusal names the reference and the reason in the validator's words.
           if (hasWait) {
             try {
@@ -3417,7 +3417,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               refused.push(`blocked by: ${error.userMessage}`);
             }
           }
-          // Ruling 503: the epic is its own axis too, through the one writer of
+          // Ruling 273: the epic is its own axis too, through the one writer of
           // a task's `epic`.
           if (hasEpic) {
             const target = args.epic?.trim() || null;
@@ -3484,7 +3484,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .boolean()
           .optional()
           .describe(
-            "Ruling 583: for a deployed agent, true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one. The operator never judges, so it ignores this.",
+            "Ruling 124: for a deployed agent, true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one. The operator never judges, so it ignores this.",
           ),
       },
       runWith(
@@ -3496,7 +3496,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             return "[denied] Running agents needs the maintainer role (or project admin) in this project.";
           }
           const display = userDisplayName(db, user.id);
-          // Ruling 263 (R21-9's law): the directive goes on the record as the
+          // Ruling 152 (R21-9's law): the directive goes on the record as the
           // person's own comment, addressed to the agent it is for.
           const recordDirective = (handle: string, prompt: string) =>
             appendComment(
@@ -3522,7 +3522,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (dataRoot) operatorInput.dataRoot = dataRoot;
             const result = await runOperator(db, operatorInput);
             if (result.refused === "open-packet") {
-              // Ruling 251: a refusal that names no way out is the defect this
+              // Ruling 263: a refusal that names no way out is the defect this
               // pass keeps finding. `list_decisions` reads the packet's own
               // options and the link that opens it.
               return (
@@ -3534,23 +3534,23 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (result.refused === "closed") {
               return `[denied] ${result.refusalReason ?? `${key} is closed`} There is nothing for the operator to coordinate on a closed task.`;
             }
-            // Ruling 272: every OTHER refusal, named rather than fallen
+            // Ruling 310: every OTHER refusal, named rather than fallen
             // through. The two arms above cover the two a manual trigger can
             // produce today; `blocked-by` is refused only for create,
-            // transition and scheduled triggers (ruling 131(d)), so it cannot
+            // transition and scheduled triggers (ruling 115), so it cannot
             // reach here now. A third value added later must not arrive as
             // `[done] Operator run started` — which is exactly the sentence
-            // ruling 263 exists to stop, and the one this arm would print.
+            // ruling 152 exists to stop, and the one this arm would print.
             if (result.refused) {
               return (
                 `[refused] The operator did not start on ${key}: ` +
                 `${result.refusalReason ?? `the run was refused (${result.refused})`}`
               );
             }
-            // Ruling 272 (F37-105): ruling 263 put R21-9's law on the
+            // Ruling 310 (F37-105): ruling 152 put R21-9's law on the
             // SPECIALIST arm and returned above it for the operator, so the
             // one dispatch door that still sent a human's words off the record
-            // was the operator half of the door ruling 263 had just fixed.
+            // was the operator half of the door ruling 152 had just fixed.
             // Measured by the controller three minutes after the deploy, by
             // counting the task's own comments across two reads: "my directive
             // is nowhere in the +1". The task page's Run-operator control has
@@ -3587,18 +3587,18 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             runInput.directive = prose(args.prompt);
             runInput.directiveFrom = display;
           }
-          // Ruling 583, amended: the controller dispatches a run that must not
+          // Ruling 124, amended: the controller dispatches a run that must not
           // judge the way the operator's `run_agent` does. On AWSC-25 it had
           // to ask the operator to do it for it.
           if (args.noVerdict) runInput.withholdVerdict = true;
-          // Ruling 263 (F37-93), second half: R21-9's law applied to the
+          // Ruling 152 (F37-93), second half: R21-9's law applied to the
           // dispatch prompt, on the one door that skipped it. Through the
           // controller the words went into the prompt and NOWHERE else: the
           // timeline showed a run appearing for no stated reason, and the
           // person who asked for it could not see what they had asked for. So
           // `@<agent> <prompt>` is written as that person's own comment,
           // addressed to the agent, as the task page and the operator's
-          // `run_agent` write it. BEFORE the start (ruling 375): ruling 203's
+          // `run_agent` write it. BEFORE the start (ruling 69): ruling 69's
           // redelivery window is "a human comment addressed to this agent,
           // posted after this run started", and this comment used to be
           // written after the start, so every prompted dispatch through the
@@ -3614,9 +3614,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           try {
             started = await startAgentRun(db, runInput, actor, { dataRoot });
           } catch (error) {
-            // Ruling 452: refused because this agent is already running, the
+            // Ruling 152: refused because this agent is already running, the
             // directive recorded above sits inside that run's window, and
-            // ruling 203 delivers it when the run finishes. Said here, where
+            // ruling 69 delivers it when the run finishes. Said here, where
             // "wait for it to finish … before starting another" sent the caller
             // back to deliver the same words a second time.
             if (args.prompt && isAgentBusy(error) && error.busyProfileId === profileId) {
@@ -3631,7 +3631,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 `Your directive is on the timeline and is delivered to ${handle} when that run finishes; do not send it again.`
               );
             }
-            // Ruling 152(c): a hold is not a refusal. The retry is already
+            // Ruling 151: a hold is not a refusal. The retry is already
             // scheduled with the directive on it, and the recorded comment
             // predates that later run too.
             if (args.prompt && !isDispatchHeld(error)) {
@@ -3649,7 +3649,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }
             throw error;
           }
-          // Ruling 263, first half: this tool's own description promises it
+          // Ruling 152, first half: this tool's own description promises it
           // "reports honestly whether a run started". A refused run is a row
           // recording why no process will exist; a queued one is parked behind
           // the concurrency cap. Neither had a sentence of its own.
@@ -3675,7 +3675,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     "run_agent_on_task",
   );
 
-  /** Ruling 153: the `run-agents` tier the task page's schedule form needs. */
+  /** Ruling 264: the `run-agents` tier the task page's schedule form needs. */
   function requireScheduleTier(slug: string, what: string): string | null {
     return mayRunAgents(slug, what)
       ? null
@@ -3685,7 +3685,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "schedule_task_action",
-      "Schedule a future run on a task (ruling 153): an operator re-run, or a deployed agent profile's run with a directive, between 1 minute and 28 days out. Maintainer or above. The entry lands on the task file and fires on the profile deployed when it fires; get_task lists the pending entries and cancel_task_schedule cancels one.",
+      "Schedule a future run on a task (ruling 264): an operator re-run, or a deployed agent profile's run with a directive, between 1 minute and 28 days out. Maintainer or above. The entry lands on the task file and fires on the profile deployed when it fires; get_task lists the pending entries and cancel_task_schedule cancels one.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3720,7 +3720,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const denied = requireScheduleTier(slug, "schedule a run through the controller");
           if (denied) return denied;
           // The task page's bounds and sentences (project.task.tsx
-          // `schedule-action`), shared with the operator's door (ruling 487).
+          // `schedule-action`), shared with the operator's door (ruling 125).
           const dueMs = scheduleDueMs(args);
           const steer = args.prompt ? prose(args.prompt) : "";
           if (steer.length > 4000) {
@@ -3765,7 +3765,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "cancel_task_schedule",
-      "Cancel one pending scheduled run on a task (ruling 153). Maintainer or above. The schedule id comes from get_task or from schedule_task_action's reply.",
+      "Cancel one pending scheduled run on a task (ruling 264). Maintainer or above. The schedule id comes from get_task or from schedule_task_action's reply.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
@@ -3808,7 +3808,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           repo: data.project.repo,
           defaultBranch: data.project.defaultBranch,
           connection: data.connection.status,
-          // Ruling 468: say it, so nobody is asked to push a first commit.
+          // Ruling 227: say it, so nobody is asked to push a first commit.
           // Null when the repository has commits (or its state is unknown).
           // Its dated note (R-repo-2): a token that can only read gets that
           // commit refused, so the line names the token instead.
@@ -3825,7 +3825,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             state: p.state,
             title: p.title,
             checks: p.checks,
-            // Ruling 276 (F37-109): a null `checks` is TWO different facts and
+            // Ruling 237 (F37-109): a null `checks` is TWO different facts and
             // the task file keeps them apart — an absent key is "never read",
             // a present one with `total: 0` is "GitHub reported no check runs".
             // `mapPrChecks` collapses both because a display has nothing to
@@ -3837,8 +3837,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // "No CI is configured" and "we have not looked" ask for opposite
             // next moves.
             checksRead: p.checksRead,
-            // Ruling 360 (F38-14): the THIRD case — the read was made and GitHub
-            // refused it. Ruling 276's own note says the controller learned that
+            // Ruling 237 (F38-14): the THIRD case — the read was made and GitHub
+            // refused it. Ruling 237's own note says the controller learned that
             // this account's Actions were billing-blocked "only from prose an
             // operator had written"; it was never told the read itself failed.
             checksUnread: p.checksUnread ?? null,
@@ -3922,7 +3922,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // changed nothing".
             return `[noop] PR #${number} does not change \`${args.path}\`.`;
           }
-          // Ruling 266: this is the only controller tool that reads OUTSIDE
+          // Ruling 265: this is the only controller tool that reads OUTSIDE
           // the instance on somebody's behalf — the request is made by the
           // server with the project's sealed credential, exactly the class
           // E32-5 made auditable in `viberr_ops`. "Who read which pull request
@@ -3985,7 +3985,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "connect_project_repository",
-      "Connect a GitHub repository to a project that has NONE (ruling 672). Project admin. The same door as Attach in the project's Settings: the repository is checked with its owner's GitHub connection, else the instance default (call list_github_connections first), one GitHub does not confirm is refused with nothing changed, and the project takes its default branch from GitHub and is bound to that connection. Say what it is for in `delivers`: true when the board's tasks will ship as pull requests to it, so the token must be able to push; false when the agents only read it. Connecting one removes the ruling that the board connects no repository, if a person had decided that, and answers every task still asking for one. A project whose tasks carry branch or pull request records from a repository it had before is refused until the person confirms; relay that sentence, then pass `confirmFootprint: true`. It grants nothing: on a board whose agents were deployed with repo-write withheld, switch the delivering agent with update_agent_deployment afterwards (your guide's section on switching a board to pull requests). A project that already has a repository is refused: changing it is a person's, in the project's settings.",
+      "Connect a GitHub repository to a project that has NONE (ruling 224). Project admin. The same door as Attach in the project's Settings: the repository is checked with its owner's GitHub connection, else the instance default (call list_github_connections first), one GitHub does not confirm is refused with nothing changed, and the project takes its default branch from GitHub and is bound to that connection. Say what it is for in `delivers`: true when the board's tasks will ship as pull requests to it, so the token must be able to push; false when the agents only read it. Connecting one removes the ruling that the board connects no repository, if a person had decided that, and answers every task still asking for one. A project whose tasks carry branch or pull request records from a repository it had before is refused until the person confirms; relay that sentence, then pass `confirmFootprint: true`. It grants nothing: on a board whose agents were deployed with repo-write withheld, switch the delivering agent with update_agent_deployment afterwards (your guide's section on switching a board to pull requests). A project that already has a repository is refused: changing it is a person's, in the project's settings.",
       {
         projectSlug: z.string().optional(),
         owner: z.string().describe("GitHub owner of the repository."),
@@ -4058,7 +4058,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_required_reviewers",
-      "Declare the project's REQUIRED reviewers per review stage (ruling 178): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict; get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Ruling 556: the agent a rule names never delivers on this project, because its verdict on its own work would not count, so Viberr refuses to make it any task's deliverer. Work only that agent can do, such as correcting a knowledge base only it is granted, runs it as a supporting agent, and the task closes when a project admin force-accepts it. Write such a task's goal, and what you tell people about it, that way. Project admin (edit-policy).",
+      "Declare the project's REQUIRED reviewers per review stage (ruling 89): the WHOLE list, replacing what project.md holds; `rules: []` clears it. Each rule names a non-terminal stage id and the profile id of a deployed agent that can report a validation verdict; get_project lists both (`stages`, `agents[].capabilities`) and the current rules (`requiredReviewers`). An unknown stage or profile, the terminal stage, or an agent without report-validation-verdict is refused by name with nothing written. While a rule stands, no task is acceptable until that agent holds an approve verdict on the delivered revision, engaged or not: the acceptance gate, the review queue and the operator's get_task read the same rule, so declare it here instead of asking the operator to remember. Ruling 89: the agent a rule names never delivers on this project, because its verdict on its own work would not count, so Viberr refuses to make it any task's deliverer. Work only that agent can do, such as correcting a knowledge base only it is granted, runs it as a supporting agent, and the task closes when a project admin force-accepts it. Write such a task's goal, and what you tell people about it, that way. Project admin (edit-policy).",
       {
         projectSlug: z.string().optional(),
         rules: z
@@ -4085,7 +4085,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_project_rulings_kb",
-      "Name the project's RULINGS knowledge base by store DIRECTORY (ruling 239), or pass dir: null to clear it. Project admin (edit-policy). Unlike a per-profile `kbs` grant, this one KB is injected into EVERY run the project makes (each specialist, the operator, and your own conversation while it is scoped to this project), so nobody can forget it on the one profile that needed it. Use it for rules the project has SETTLED and should not re-litigate: a convention a review established, a shared-surface protocol, an environment fact reviewers keep re-deriving. `list_knowledge_bases` gives the grantKey to pass here; a directory no knowledge base occupies is refused by name with nothing written. Promoting an existing KB into this role is the expected move, and a profile that also grants it explicitly is not charged for it twice.",
+      "Name the project's RULINGS knowledge base by store DIRECTORY (ruling 208(a)), or pass dir: null to clear it. Project admin (edit-policy). Unlike a per-profile `kbs` grant, this one KB is injected into EVERY run the project makes (each specialist, the operator, and your own conversation while it is scoped to this project), so nobody can forget it on the one profile that needed it. Use it for rules the project has SETTLED and should not re-litigate: a convention a review established, a shared-surface protocol, an environment fact reviewers keep re-deriving. `list_knowledge_bases` gives the grantKey to pass here; a directory no knowledge base occupies is refused by name with nothing written. Promoting an existing KB into this role is the expected move, and a profile that also grants it explicitly is not charged for it twice.",
       {
         projectSlug: z.string().optional(),
         dir: z
@@ -4111,7 +4111,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_file_leases",
-      "Ruling 245: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY: another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 353). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass, and operators lease files to their own tasks too (ruling 417), so read `fileLeases` from get_project first and pass every lease you mean to keep. A lease naming a task this project does not have is refused, and so are two leases held by different unfinished tasks whose globs can match one file (ruling 417: each would refuse the other's delivery, so neither could land).",
+      "Ruling 60: declare which TASK owns which shared paths until it merges, or pass an empty list to clear. Project admin (edit-policy). This is the ordering statement `blockedBy` cannot make: `blockedBy` says \"do not START until done\", a lease says \"both may proceed, this one owns `pnpm-lock.yaml` until it lands\". Enforced at DELIVERY: another task whose BRANCH changes a leased path (measured from where it forked off the default branch, so a change pushed before the lease existed still counts) is refused by name, before anything reaches GitHub (ruling 60). The merge itself reads no lease. Globs: `*` matches within one segment, `**` spans segments and covers the directory itself. The whole list is replaced by what you pass, and operators lease files to their own tasks too (ruling 61), so read `fileLeases` from get_project first and pass every lease you mean to keep. A lease naming a task this project does not have is refused, and so are two leases held by different unfinished tasks whose globs can match one file (ruling 61: each would refuse the other's delivery, so neither could land).",
       {
         projectSlug: z.string().optional(),
         leases: z
@@ -4147,7 +4147,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_project_gates",
-      "Ruling 482: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
+      "Ruling 104: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
       {
         projectSlug: z.string().optional(),
         gates: z
@@ -4364,7 +4364,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 139: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 153; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 261: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 264; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -4387,8 +4387,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         const stored = result.applied
           ? ` Runs on ${BACKEND_LABEL[result.applied.backend]} with model ${result.applied.model} at effort ${result.applied.effort}.`
           : "";
-        // Ruling 264 (F37-94): this used to promise "Delivery starts withheld"
-        // on every deploy. Ruling 156 made a library deploy COPY the template's
+        // Ruling 183 (F37-94): this used to promise "Delivery starts withheld"
+        // on every deploy. Ruling 177 made a library deploy COPY the template's
         // grants, so a repo-write template deploys able to deliver and the
         // reply said the opposite — to the one reader whose next decision
         // (engage it as the deliverer, or not) turns on the answer. The fact
@@ -4407,7 +4407,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "update_agent_deployment",
-      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs; every kind, the operator included), or its persona (ruling 467: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 139: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases; never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
+      "Update one deployed agent's project configuration: capability modes (direct, recommend for the operator, human, off), backend, model, effort, eligible stages, operator autonomy, the deployment's own resource grants (skills, mcps, kbs; every kind, the operator included), or its persona (ruling 261: the deployment's own system-prompt text, which a template edit does not reach). Project admin. Merge semantics: only the fields you pass change; an omitted grant list is left alone and [] clears it. Ruling 261: every catalogued value is checked BEFORE anything is written and an unknown or impossible one is refused by name with nothing written: a capability id must be one the deployment's KIND takes (read list_capabilities first; get_project shows the deployment's resolved grants and resources), a specialist takes no recommend, an always-human id takes only human, report-validation-verdict takes only direct or off, matrix-only advisory ids have no toggle, every stage id must be one of the project's stages, and every grant is a grantKey the store answers to (from list_skills, list_mcp_servers, list_knowledge_bases; never an id). The reply lists every field the call changed, old → new; a call that changes nothing says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),
@@ -4428,7 +4428,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           .string()
           .optional()
           .describe(
-            "Ruling 467: the deployment's WHOLE persona (its system prompt), replacing the copy it holds. Omit to keep it; an empty one is refused. Read the current text first (get_project lists the deployment; list_global_agents has the template's). The reply names the length before and after and the first and last changed lines.",
+            "Ruling 261: the deployment's WHOLE persona (its system prompt), replacing the copy it holds. Omit to keep it; an empty one is refused. Read the current text first (get_project lists the deployment; list_global_agents has the template's). The reply names the length before and after and the first and last changed lines.",
           ),
         skills: z
           .array(z.string())
@@ -4466,7 +4466,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "manage this project's agents");
-          // Ruling 467: an empty persona would leave the agent with no system
+          // Ruling 261: an empty persona would leave the agent with no system
           // prompt of its own, and the form writer reads "" as "keep", so an
           // empty one sent here is a request nothing could honour. Refused
           // before anything is read or written.
@@ -4484,7 +4484,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             throw AppError.notFound(`No agent ${args.profileId} is deployed on ${slug}.`);
           }
           const view = effectiveProfileView(deployment, dataRoot, VIEW_WITHOUT_POLICY);
-          // Ruling 139 (pass 34, F34-2): read first, refuse by name, write
+          // Ruling 261 (pass 34, F34-2): read first, refuse by name, write
           // nothing. The capability check is KIND-aware (the operator and a
           // specialist take different ids and modes), which is why it lives
           // here and not in the kind-blind form parser.
@@ -4509,12 +4509,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             );
           }
           // G36-1 (pass 36, owner Q36-7): the deployment's own copy of the
-          // grants (ruling 156) is editable here for EVERY kind, the operator
+          // grants (ruling 177) is editable here for EVERY kind, the operator
           // included — the Agents page renders the picker for all of them,
           // while the controller answered "a system profile I can't give
           // resources to". Keys resolve exactly as save_global_agent's do
           // (F33-8): a recognised id is normalised to its key, an unknown key
-          // is refused by name, and (ruling 139) this runs BEFORE the write.
+          // is refused by name, and (ruling 261) this runs BEFORE the write.
           // An omitted list keeps the deployment's copy; [] clears it.
           const grants = resolveResourceGrants(
             db,
@@ -4533,7 +4533,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // an unrelated patch armed capabilities the deployment had withheld:
           // live in this pass's review, `comment-on-task: off` on the seeded
           // Reviewer stored `execute-code-or-write-repo`, `create-task-branch`
-          // and `open-review-pr` as `direct`. Ruling 139 pairs the read with
+          // and `open-review-pr` as `direct`. Ruling 261 pairs the read with
           // the write; the write must not contradict the read.
           const resolved =
             assembleAgentRoster(db, slug, { dataRoot }).find((r) => r.id === args.profileId) ?? null;
@@ -4543,7 +4543,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           }
           const capsBefore = { ...caps };
           for (const patch of args.capabilities ?? []) caps[patch.capabilityId] = patch.mode;
-          // Ruling 139: effort is settable wherever model is, judged by name
+          // Ruling 261: effort is settable wherever model is, judged by name
           // against the backend the deployment will run on, BEFORE the write.
           // A backend switch with no effort resets to that backend's default
           // and the reply says so; an unchanged backend keeps the stored tier.
@@ -4569,7 +4569,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             backend,
             stages,
             definition: "",
-            // Ruling 467: "" keeps the deployment's persona (the form writer's
+            // Ruling 261: "" keeps the deployment's persona (the form writer's
             // own rule); a persona sent here replaces it whole.
             persona: persona ?? "",
             model: args.model ?? (switched ? defaultModelFor(backend) : view.model),
@@ -4619,7 +4619,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           changed("mcps", view.resources.mcps.join(", "), resources.mcps.join(", "));
           changed("kb", view.resources.kb.join(", "), resources.kb.join(", "));
           if (persona !== undefined) {
-            // Ruling 467: from the record the writer left, not the request.
+            // Ruling 261: from the record the writer left, not the request.
             const written =
               readProjectFile({ projectSlug: slug, dataRoot })?.parsed.frontmatter.agents.find(
                 (a) => a.profileId === args.profileId,
@@ -4638,7 +4638,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "remove_agent_deployment",
-      "Take one specialist's deployment off a project (ruling 464): the same removal as Delete on the project's Agents page, under the same gate (project admin, `manage-agents`) and the same audit row, with your `reason` recorded in it. It edits the project's roster; the global template is untouched and can be deployed again with deploy_agent. Refused by name: the Operator (a system profile, never removable), and a profile that is the delivering or an engaged agent on any open task (the refusal names the tasks; finish, archive or re-engage that work first, so no task is left mid-work with an agent that can no longer deliver). A project left with no specialist at all gets the base Developer and Reviewer back at the next restart, and the reply says so.",
+      "Take one specialist's deployment off a project (ruling 266): the same removal as Delete on the project's Agents page, under the same gate (project admin, `manage-agents`) and the same audit row, with your `reason` recorded in it. It edits the project's roster; the global template is untouched and can be deployed again with deploy_agent. Refused by name: the Operator (a system profile, never removable), and a profile that is the delivering or an engaged agent on any open task (the refusal names the tasks; finish, archive or re-engage that work first, so no task is left mid-work with an agent that can no longer deliver). A project left with no specialist at all gets the base Developer and Reviewer back at the next restart, and the reply says so.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string().describe("The deployment's profile id, as get_project lists it."),
@@ -4683,7 +4683,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_decisions",
-      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 251): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 336): `releases.direct` are the tasks whose LAST wait is this one (they move the moment it completes), and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. `waitingOnAProjectAdmin` lists the repository questions (ruling 672) this person can see and cannot answer: say a project admin answers them, and never count them as this person's. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
+      "Everything on a board that is waiting for a PERSON to decide: open packets with all their options, pending operator recommendations, and completions ready to accept. Read-only, and deliberately so (ruling 263): nothing here answers a decision. It exists so you can brief the person fully and hand them the one link that opens the control. Every packet carries `ownWords` as well as its options: the card always offers a free-text directive as its last choice, so a person is never limited to the options on it - brief that too, especially when none of the options fit. Every entry also carries `releases`, split by WHEN (ruling 263): `releases.direct` are the tasks whose LAST wait is this one (they move the moment it completes), and `releases.downstream` are the rest of the chain, each of which needs one of the direct ones to be built, reviewed and accepted first. Only `direct` is a number about this click: live, one acceptance freed its two direct dependents in two seconds and its one downstream task fifty-three minutes later, after another full cycle. Both count only waits that can actually clear. Read either as what a decision UNBLOCKS, never as what it FINISHES: an acceptance that releases nothing still completes real work and usually needs one click, while a design packet with two direct may be the longer road. `kind` and `notAcceptableReason` carry that other half. `waitingOnAProjectAdmin` lists the repository questions (ruling 65) this person can see and cannot answer: say a project admin answers them, and never count them as this person's. Scoped to the conversation's project by default, or pass `projectSlug`; with neither it reads every project this person can see.",
       {
         projectSlug: z.string().optional().describe("One project. Omit inside a project conversation to use it; omit outside one to read every project this person can see."),
         taskKey: z.string().optional().describe("Just this task. Defaults to the conversation's task when it is anchored to one."),
@@ -4693,7 +4693,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
         // conversation's own anchor, then everything they can see.
         const explicit = args.projectSlug ?? boundSlug;
         if (explicit) requireVisible(explicit, "read this project's decisions");
-        // Ruling 256: the anchor belongs to the project it was anchored IN. A
+        // Ruling 263: the anchor belongs to the project it was anchored IN. A
         // conversation anchored to VIB-1 in one project, asked about another,
         // used to filter that other project's decisions by a task key it does
         // not contain and answer "Nothing is waiting on a person here" — a
@@ -4734,7 +4734,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 // The one thing this tool exists to hand over. Same form the
                 // move refusal uses, so a person meets one shape of link.
                 answerAt: `projects/${ref.projectSlug}/tasks/${ref.taskKey}`,
-                // Ruling 300: what answering this RELEASES, down the chain.
+                // Ruling 263: what answering this RELEASES, down the chain.
                 // The controller had to walk `blockedBy` by hand across two
                 // turns to learn that five tasks sat behind three cards, and
                 // said it plainly: "the one number that should order a
@@ -4763,7 +4763,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                           detail: o.d,
                           recommended: o.rec === true,
                         })),
-                        // Ruling 271 (pass 37, F37-103): the card ALWAYS offers
+                        // Ruling 263 (pass 37, F37-103): the card ALWAYS offers
                         // one more answer than the packet stores — a directive
                         // in the person's own words, composed with the fixed
                         // choices as their last choice (`customOffered =
@@ -4794,7 +4794,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                             "the agent that asked, when one raised it). This is how a person says " +
                             "the options are wrong, or asks for the decision to be put again.",
                         },
-                        // Ruling 138: a decided edit_goal packet still waits,
+                        // Ruling 63: a decided edit_goal packet still waits,
                         // and saying so stops you reporting it as unanswered.
                         awaitingGoalEdit: packet.awaiting === "goal_edit",
                       }
@@ -4808,7 +4808,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                         detail: r.detail,
                       }))
                     : [],
-                // Ruling 188's lesson: report the gate's own verdict, never a
+                // Ruling 262's lesson: report the gate's own verdict, never a
                 // sentence derived somewhere else. Null here means acceptable.
                 notAcceptableReason: acceptanceRefusalFor(
                   { projectSlug: ref.projectSlug, taskKey: ref.taskKey },
@@ -4819,7 +4819,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
         const forYou = render(found.mine);
         const viaOverride = render(found.overrideEligible);
-        // Ruling 672: a repository question this person can see and cannot
+        // Ruling 65: a repository question this person can see and cannot
         // answer. Left out, a maintainer who asked what was waiting was told
         // "nothing" about a packet that `run_agent_on_task` then refused on.
         const forProjectAdmin = render(found.needsProjectAdmin);
@@ -4849,7 +4849,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
 
   // ================================================================ epics
 
-  /** Ruling 503: one epic as the list and the project read report it. */
+  /** Ruling 273: one epic as the list and the project read report it. */
   function epicRow(e: EpicSummary) {
     return {
       id: e.id,
@@ -4895,7 +4895,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "list_epics",
-      "The project's epics (ruling 503). An epic is a named body of work that tasks join and leave one at a time, like a Jira epic or a Linear project. Each with its status, lead, dates and progress counted from its tasks at read time: done of total, started, not started and held. Archived tasks are counted apart: one archived when it was done stays in done and total (`archivedDone` counts those, ruling 651), and one archived unfinished is left out. Membership gated.",
+      "The project's epics (ruling 273). An epic is a named body of work that tasks join and leave one at a time, like a Jira epic or a Linear project. Each with its status, lead, dates and progress counted from its tasks at read time: done of total, started, not started and held. Archived tasks are counted apart: one archived when it was done stays in done and total (`archivedDone` counts those, ruling 274), and one archived unfinished is left out. Membership gated.",
       { projectSlug: z.string().optional() },
       runWith((args: { projectSlug?: string }) => {
         const slug = slugOf(args.projectSlug);
@@ -4943,7 +4943,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_epic",
-      "Create an epic (ruling 503): a named body of work in this project that tasks join and leave one at a time, like a Jira epic or a Linear project. It starts, orders and holds nothing, so say what each task waits on with its own blockedBy. `tasks` puts existing tasks in it as it is created; a task is in at most one epic, so one already in another moves. To plan new work in it, create the epic, then create_task with `epic`. Contributor or above; putting tasks in it needs the project's edit-task-meta grant as well.",
+      "Create an epic (ruling 273): a named body of work in this project that tasks join and leave one at a time, like a Jira epic or a Linear project. It starts, orders and holds nothing, so say what each task waits on with its own blockedBy. `tasks` puts existing tasks in it as it is created; a task is in at most one epic, so one already in another moves. To plan new work in it, create the epic, then create_task with `epic`. Contributor or above; putting tasks in it needs the project's edit-task-meta grant as well.",
       {
         projectSlug: z.string().optional(),
         title: z.string().describe("The epic's name, at most 120 characters."),
@@ -5090,7 +5090,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   const server = createSdkMcpServer({
     name: "viberr_controller",
     version: "1.0.0",
-    // Ruling 297, corrected: the manifest is NOT here. A server's
+    // Ruling 255, corrected: the manifest is NOT here. A server's
     // `instructions` are captured once, when a session starts, so a running
     // conversation kept a stale copy while new tool names arrived beside it.
     // `buildControllerMounts` hands the list to the system prompt instead,

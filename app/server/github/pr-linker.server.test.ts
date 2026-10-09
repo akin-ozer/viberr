@@ -24,7 +24,7 @@ function client(routes: Parameters<typeof fakeGithubFetch>[0]) {
   };
 }
 
-describe("PR state mapping matrix (ruling 12)", () => {
+describe("PR state mapping matrix (ruling 237)", () => {
   it("maps merged / open / draft / closed-unmerged", () => {
     expect(mapPrToCacheState({ state: "closed", merged: true })).toBe("merged");
     expect(
@@ -740,7 +740,7 @@ describe("findPrForBranch approvals (R19-B)", () => {
 });
 
 /**
- * Ruling 236 (owner, 2026-09-14) — the changed-file list behind the review
+ * Ruling 242 (owner, 2026-09-14) — the changed-file list behind the review
  * queue's collision chip, and the head pin that keeps it nearly free.
  *
  * A pull request's file list cannot change without its head moving, so the
@@ -749,7 +749,7 @@ describe("findPrForBranch approvals (R19-B)", () => {
  * calls; without the pin it would be one per open PR per tick, every tick,
  * forever.
  */
-describe("ruling 236: the PR's changed paths", () => {
+describe("ruling 242: the PR's changed paths", () => {
   const routes = (files: { filename: string }[]) => ({
     [`GET ${REPO_PATH}/pulls`]: {
       body: [
@@ -823,12 +823,12 @@ describe("ruling 236: the PR's changed paths", () => {
 });
 
 /**
- * Ruling 360 (pass 38, F38-14). The check-runs read failed on every one of
+ * Ruling 237 (pass 38, F38-14). The check-runs read failed on every one of
  * this instance's 97 PRs (a fine-grained token without Checks: read answers
  * 403), and the linker turned each refusal into `checks: null` — the same
  * value as "never looked". The refusal is now carried beside it.
  */
-describe("ruling 360: a refused check-runs read is a fact, not a blank", () => {
+describe("ruling 237: a refused check-runs read is a fact, not a blank", () => {
   const routes = (checkRuns: { status?: number; body: unknown }) => ({
     [`GET ${REPO_PATH}/pulls`]: {
       body: [

@@ -21,7 +21,7 @@ import { addPickedFiles, filesFromPaste } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 
 /**
- * The OPEN controller dock's regions (ruling 700(e), the large-component split
+ * The OPEN controller dock's regions (ruling 13(b), the large-component split
  * on the task page's recipe, applied to `controller-dock-panel.tsx`): the
  * replies waiting elsewhere, the body's one box (the note where the controller
  * cannot work, the thread list or the transcript) and the composer. Each takes
@@ -29,11 +29,11 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
  * every hook (the transcript's follow and announcer, the file drop, the
  * shortcut hints) and hands their results down, so the markup and every id
  * React derives from the tree are what they were. Loaded with the body, on
- * demand (ruling 457, FL-1).
+ * demand (ruling 11, FL-1).
  */
 
-/** Ruling 314's examples for the scope the dock is open on (shared with the
- *  page, ruling 419(g)). */
+/** Ruling 319's examples for the scope the dock is open on (shared with the
+ *  page, ruling 321). */
 function emptyExamples(view: ControllerDockView): ControllerExample[] {
   return controllerExamples(
     view.scope.kind === "task" && view.scope.taskKey
@@ -55,8 +55,8 @@ function emptyCopy(view: ControllerDockView): string {
 }
 
 /**
- * The dock's "is working…" row (ruling 250's step beside it). Visual only
- * (ruling 476(d)): the announcer beside the dock's button says the turn is
+ * The dock's "is working…" row (ruling 257's step beside it). Visual only
+ * (ruling 320): the announcer beside the dock's button says the turn is
  * working, and the panel's own region says it replied.
  */
 function DockWorkingRow({ name, turn }: { name: string; turn: ConversationTurnState }) {
@@ -64,7 +64,7 @@ function DockWorkingRow({ name, turn }: { name: string; turn: ConversationTurnSt
     <div className="ctl-working">
       <span className="live-dot" />
       <WorkingSentence name={name} />
-      {/* Ruling 250: the dock follows a person onto every page and has no
+      {/* Ruling 257: the dock follows a person onto every page and has no
           live-run panel at all, so this row is the ONLY place the turn's own
           step can reach them here. */}
       <TurnStep turn={turn} />
@@ -117,7 +117,7 @@ export function DockUnseenLine({
  * a view that turns unavailable, updates that element in place, so its node,
  * its scroll offset and the transcript's ref carry over. A component per box
  * would put three types in the slot and mount a fresh box on every toggle
- * (review of the ruling 700(e) split). The first child each box draws straight
+ * (review of the ruling 13(b) split). The first child each box draws straight
  * into it stays inline for the same reason: the loading, no-threads and
  * unavailable notes are one `<p>` React keeps across those changes.
  */
@@ -166,7 +166,7 @@ export function DockBodyBox({
       <section className="dock-body" aria-label="Controller unavailable here">
         <p className="empty sm">
           {current?.signedOut ? (
-            // Ruling 457: the dock's loads answer a signed-out tab 401, never
+            // Ruling 11: the dock's loads answer a signed-out tab 401, never
             // a login redirect; the page's own navigation asks for the sign-in.
             <>
               You're signed out, so the controller can't answer here. Reload
@@ -221,7 +221,7 @@ export function DockBodyBox({
       className="dock-body dock-transcript"
       ref={scrollRef}
       aria-label="Conversation transcript"
-      // Ruling 626: as the page's transcript, a scroller the keyboard reaches.
+      // Ruling 320: as the page's transcript, a scroller the keyboard reaches.
       tabIndex={0}
     >
       {!current ? (
@@ -258,7 +258,7 @@ export function DockBodyBox({
   );
 }
 
-/** A scope with no thread yet: what to ask here, and ruling 314's examples. */
+/** A scope with no thread yet: what to ask here, and ruling 319's examples. */
 function DockEmptyScope({
   view,
   busy,
@@ -273,7 +273,7 @@ function DockEmptyScope({
   return (
     <div className="ctl-empty">
       <p className="empty sm">{emptyCopy(view)}</p>
-      {/* Ruling 625: as on the page, no examples a viewer whose
+      {/* Ruling 319: as on the page, no examples a viewer whose
           Claude is not connected could not send; the note says what
           to do instead. */}
       {view.available && (
@@ -296,9 +296,9 @@ function composerPlaceholder(current: ControllerDockView | null, disabled: boole
         ? "Sign in again to send a message."
         : current.available
           ? "Read-only: only the thread's owner can talk in it."
-          : // Ruling 127: the dock bills the person reading it,
+          : // Ruling 137: the dock bills the person reading it,
             // and says so in the note above the box (U39-10);
-            // ruling 625: the box does not repeat it.
+            // ruling 319: the box does not repeat it.
             undefined
       : "Ask the controller, or tell it what to do here…";
 }
@@ -341,7 +341,7 @@ export function DockComposer({
   sendHint: string;
   queueHint: string;
 }) {
-  // Ruling 527: while a turn holds the thread, a message steers it or queues
+  // Ruling 319: while a turn holds the thread, a message steers it or queues
   // behind it, and the composer offers both.
   const live = (turn?.answering ?? null) !== null;
   const empty = !text.trim() && files.length === 0;
@@ -363,7 +363,7 @@ export function DockComposer({
           value={text}
           onChange={(e) => onText(e.target.value)}
           onPaste={(e) => {
-            // Ruling 573: a bare screenshot goes with the message; copied
+            // Ruling 319: a bare screenshot goes with the message; copied
             // text, cells included, stays text.
             const pasted = filesFromPaste(e.clipboardData, true, files);
             if (!pasted) return;
@@ -373,7 +373,7 @@ export function DockComposer({
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
-              // Ruling 527: ⇧ queues behind a working turn.
+              // Ruling 319: ⇧ queues behind a working turn.
               onSubmit(undefined, live && e.shiftKey ? "queue" : "steer");
             }
           }}

@@ -22,9 +22,9 @@ export interface ToolImage {
   mimeType: string;
 }
 
-/** Ruling 533: a text block, then the picture itself. A coordinator handed a
+/** Ruling 117: a text block, then the picture itself. A coordinator handed a
  *  screenshot a person attached sees it, instead of reasoning from its name.
- *  Ruling 691: or several, so one reply carries a page at both its widths. */
+ *  Ruling 194: or several, so one reply carries a page at both its widths. */
 export function imageResult(text: string, image: ToolImage | readonly ToolImage[]) {
   const images = Array.isArray(image) ? image : [image];
   return {
@@ -60,7 +60,7 @@ type WholeSchemaTool = <Args>(
 const wholeSchemaTool = sdkTool as WholeSchemaTool;
 
 /**
- * Ruling 296: a tool argument Viberr does not know is a REFUSAL, not a silent
+ * Ruling 136: a tool argument Viberr does not know is a REFUSAL, not a silent
  * drop.
  *
  * A plain Zod object strips keys it does not declare, so an agent that
@@ -81,7 +81,7 @@ const wholeSchemaTool = sdkTool as WholeSchemaTool;
  * goal." while the date it was also asked for was never written.
  *
  * A strict object refuses instead, names the key, and never reaches the
- * handler, so nothing is half-applied. Same posture as rulings 288 and 295
+ * handler, so nothing is half-applied. Same posture as rulings 131 and 49
  * one layer down: refuse by name with nothing written.
  *
  * Nested objects are strict at their own call sites, with `z.strictObject`,
@@ -101,7 +101,7 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
     name,
     description,
     z.strictObject(fields, {
-      // Ruling 296, amended: name the arguments that DO exist, not only the
+      // Ruling 136, amended: name the arguments that DO exist, not only the
       // one that does not. The controller took the first version and said it
       // was "the least helpful of the five... it names the rejected key but
       // not the accepted ones", noting that `status` was a near-miss of a real
@@ -116,13 +116,13 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
             " Nothing ran: the call was refused before the tool saw it."
           : undefined,
     }),
-    // Ruling 303: no tool hands the SDK a bare handler.
+    // Ruling 136: no tool hands the SDK a bare handler.
     guarded(name, handler),
   );
 }
 
 /**
- * Ruling 303: an unexpected failure answers in words, on every surface.
+ * Ruling 136: an unexpected failure answers in words, on every surface.
  *
  * Measured, live: four operator tool calls came back to a run as the literal
  * string `database is not open`, from `get_task` and `read_board`, in the six
@@ -144,14 +144,14 @@ export function strictTool<Fields extends Record<string, z.ZodType>>(
  * with the tool's name and answered with a sentence that says what is true:
  * this call produced no answer, so do not report one.
  *
- * Ruling 340 (F37-176) completes it. Converting the leak left the CAUSE
+ * Ruling 163(a) (F37-176) completes it. Converting the leak left the CAUSE
  * unspoken, and "failed unexpectedly … the details are in the server log" reads
  * to a model exactly as the SQLite sentence did: like a hiccup. Measured on the
  * shopify-clone board across the eight runs that met a closed store, every one
  * retried, and what they wrote onto the task was "The store dropped a
  * connection mid-turn. Retrying.", "The dispatch hit a transient store error.
  * Retrying.", "The live state read failed. Let me retry." None of that is what
- * happened, and ruling 338 now points a person at the task record for the
+ * happened, and ruling 166 now points a person at the task record for the
  * account of a restart. Viberr holds the fact — `isDatabaseShuttingDown()`, the
  * same latch `runPersistDrained` reads one layer down — and was not spending it
  * on the one reader whose next move depends on it.
@@ -173,7 +173,7 @@ function guarded(
     try {
       return await handler(args);
     } catch (error) {
-      // Ruling 340: the shutdown arm comes FIRST, including ahead of AppError.
+      // Ruling 163(a): the shutdown arm comes FIRST, including ahead of AppError.
       // Once the store is closed nothing a tool can say about task state is
       // worth saying, and the run's next move is the same whatever threw.
       if (isDatabaseShuttingDown()) {

@@ -2,7 +2,7 @@ import { crc32, deflateRawSync, inflateRawSync } from "node:zlib";
 import { AppError } from "~/server/errors/app-error.server";
 
 /**
- * Ruling 653: the ZIP container a board file travels in, read and written
+ * Ruling 32: the ZIP container a board file travels in, read and written
  * with `node:zlib` alone (the S3 export's SigV4 PUT is the same choice: a
  * small, owned protocol rather than a dependency).
  *

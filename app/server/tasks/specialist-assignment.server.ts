@@ -1,5 +1,5 @@
 /**
- * Engaging specialists on a task (ruling 656): assigning the delivering
+ * Engaging specialists on a task (ruling 13(a)): assigning the delivering
  * specialist or a reviewer, and removing a reviewer.
  */
 
@@ -77,7 +77,7 @@ export async function assignSpecialist(
     existing.parsed.frontmatter.stage,
     projectBoard(ctx, input.projectSlug),
   );
-  // Ruling 556: every door to `delivers: true` passes here, so a reviewer the
+  // Ruling 89: every door to `delivers: true` passes here, so a reviewer the
   // project requires is refused on all of them.
   {
     const reviews = readRequiredReviewers(input.projectSlug, ctx).filter(
@@ -383,10 +383,10 @@ export async function removeReviewer(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
 
-  // F33-10 / ruling 118 (owner, 2026-09-02): a task at the terminal stage is
+  // F33-10 / ruling 50 (owner, 2026-09-02): a task at the terminal stage is
   // CLOSED — every runtime control on its page says so (G9) — and the roster's
   // authority (delivery, review, acceptance) has nothing left to act on. Ruling
-  // 118 froze the OWNER seat there for exactly that reason; the ENGAGEMENT seat
+  // 50 froze the OWNER seat there for exactly that reason; the ENGAGEMENT seat
   // earns the freeze harder, because releasing it REWRITES the record rather
   // than merely re-labelling it: `validation` is derived from the required-
   // reviewer set, so dropping the approving reviewer of a merged, accepted task
@@ -396,7 +396,7 @@ export async function removeReviewer(
   // was accepted on a healthy verdict. The approving verdict survives in
   // `verdicts[]` — it is DISCONNECTED, which is worse than deleted.
   //
-  // So this freeze has NO admin escape, where ruling 118's owner seat has one:
+  // So this freeze has NO admin escape, where ruling 50's owner seat has one:
   // the owner seat carries no derived consequence, so an admin reassignment
   // there is a bookkeeping entry, while here the same click silently restates
   // history. Archived seats are frozen the same way (D32-16), and a task moved

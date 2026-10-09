@@ -29,7 +29,7 @@ import {
  * The knowledge-base / MCP-server / skill editors for the Agent-resources tab.
  * Split out of `resources-panel.tsx` (pass 16, pure structural refactor —
  * no behaviour or copy change). The agent-template editor is the odd one out
- * and lives in `agent-template-modal.tsx`. Ruling 700(e) split the MCP editor
+ * and lives in `agent-template-modal.tsx`. Ruling 13(b) split the MCP editor
  * along the task-page recipe: its write-tool draft lives in
  * `resource-modals-draft.ts` (a hook), what it reads off the row in
  * `resource-modals-derive.ts`, its fields in `mcp-modal-fields.tsx` and its
@@ -55,7 +55,7 @@ export function KBModal({
   // create is identical — the mode only changes where the human ends up.
   const [mode, setMode] = useState<"empty" | "files">("empty");
   const filesMode = !initial && mode === "files";
-  // Ruling 459: a save plays the modal's exit (`done`). The files-mode hand-off
+  // Ruling 287: a save plays the modal's exit (`done`). The files-mode hand-off
   // stays instant on purpose: it opens the store browser's own dialog, and a
   // modal still fading under it would restore the page's scroll on unmount.
   const [done, setDone] = useState(false);
@@ -114,7 +114,7 @@ export function KBModal({
       {!initial && (
         <div className="field">
           <span className="flabel">Content</span>
-          {/* Ruling 458(f), UI-58: a `role="radiogroup"` of plain buttons
+          {/* Ruling 297, UI-58: a `role="radiogroup"` of plain buttons
               promises arrow keys it never wires and makes each radio its own
               tab stop. `RadioSeg` carries the same roles with the roving keys
               (one tab stop, ←/→, Home/End), and a choice commits on
@@ -203,21 +203,21 @@ export function McpModal({
   // P13-KM-06: blank means "keep the stored secret", so removing one needs an
   // explicit intent — without it a repointed server kept sending the old token.
   const [clearCred, setClearCred] = useState(false);
-  // Ruling 486(c): what the next OAuth sign-in asks for, as stored.
+  // Ruling 192: what the next OAuth sign-in asks for, as stored.
   const [scopes, setScopes] = useState(opened.scopes);
   const tools = useMcpWriteTools(initial);
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const { action, err, errField, setErr } = useModalAction(() => setDone(true));
-  // Ruling 514: a refusal about the credential (too short, or pasted over a
+  // Ruling 288: a refusal about the credential (too short, or pasted over a
   // live sign-in this editor had not seen yet) is said at that field.
   const credErr = credentialError(err, errField);
-  // Ruling 469(e): while signed in, the credential field gives way to a
-  // sentence, and (ruling 514) what it held goes with it. A draft typed, or
+  // Ruling 192: while signed in, the credential field gives way to a
+  // sentence, and (ruling 192) what it held goes with it. A draft typed, or
   // filled in by the browser, before the sign-in landed used to ride the next
   // save unseen, where the server refused it as a pasted credential over the
   // live sign-in. Dropped while rendering, so no save sends it and a sign-out
-  // brings the field back empty. Ruling 469: the sign-in is read live from the
+  // brings the field back empty. Ruling 192: the sign-in is read live from the
   // row, which the panel keeps current.
   const credReplaced = credentialReplaced(initial, transport, target);
   if (credReplaced && (cred !== "" || clearCred || credErr !== null)) {
@@ -254,7 +254,7 @@ export function McpModal({
         // discovers still arrive as a suggestion.
         if (tools.reviewed || tools.toolChoices.length > 0)
           fields.writeTools = JSON.stringify(tools.marked);
-        // Ruling 486(c): only an HTTP server signs in, so only it asks for scopes.
+        // Ruling 192: only an HTTP server signs in, so only it asks for scopes.
         if (transport === "HTTP") fields.requestedScopes = scopes.trim();
         action.submit(fields);
       }}
@@ -311,7 +311,7 @@ function SkillContentField({
   return (
     <div className="field">
       <span className="flabel">Content</span>
-      {/* Ruling 458(f): on `RadioSeg` for the same reason as KBModal's. */}
+      {/* Ruling 297: on `RadioSeg` for the same reason as KBModal's. */}
       <RadioSeg
         className="mode-radios"
         label="How the skill gets its content"
@@ -417,7 +417,7 @@ export function SkillModal({
   // New document). Edit mode keeps the classic editor only.
   const [mode, setMode] = useState<"write" | "files">("write");
   const filesMode = !initial && mode === "files";
-  // Ruling 459: as the knowledge-base modal, a save plays the exit and the
+  // Ruling 287: as the knowledge-base modal, a save plays the exit and the
   // files-mode hand-off to the store browser stays instant.
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => {
@@ -456,7 +456,7 @@ export function SkillModal({
         fields.body = filesMode ? "" : body;
         fields.contentMode = filesMode ? "files" : "write";
         // P13-KM-18: an empty body means "keep what's on disk" (the editor
-        // only round-trips a truncated read for very large files). Ruling 183
+        // only round-trips a truncated read for very large files). Ruling 186
         // retired the `clearBody` escape hatch that let this form blank a
         // SKILL.md: an empty SKILL.md is not a skill and the writer refuses an
         // empty body, so emptying the editor keeps the file.

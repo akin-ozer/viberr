@@ -42,7 +42,7 @@ describe("parseAgentProfileContent — schema drift detection", () => {
   });
 
   it("a junk effort value degrades to absent, never failing the whole profile", () => {
-    // Ruling 106 review D2: the pre-schema decoder read "absent or non-string
+    // Ruling 270 review D2: the pre-schema decoder read "absent or non-string
     // as ''". A strict schema field turned `effort:` (YAML null) or
     // `effort: 3` into parsed:null — the controller config then reported
     // "profile missing from the store" over one hand-edited line, and
@@ -58,12 +58,12 @@ describe("parseAgentProfileContent — schema drift detection", () => {
 });
 
 /**
- * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 176 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." The operator's file carries no role; every other
  * kind still needs one. A store copy from before the ruling still says
  * `role: Task coordinator`, and no reader may show it.
  */
-describe("parseAgentProfileContent — ruling 518: the operator alone has no role", () => {
+describe("parseAgentProfileContent — ruling 176: the operator alone has no role", () => {
   it("an operator file that still carries a role parses without it and flags it as drift", () => {
     // CANARY: stop dropping `role` from an operator's frontmatter, or stop
     // listing it among the drifted fields.

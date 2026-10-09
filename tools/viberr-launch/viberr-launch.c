@@ -1,7 +1,7 @@
 /*
- * viberr-launch — run an agent process as its person's own OS user (ruling 460).
+ * viberr-launch — run an agent process as its person's own OS user (ruling 139).
  *
- * The server runs as `node`. Before ruling 460 every agent CLI it spawned ran
+ * The server runs as `node`. Before ruling 139 every agent CLI it spawned ran
  * as `node` too, so a run's shell could read the server's /proc/<pid>/environ
  * (the secret-encryption key, the session secret), the projection database and
  * every other person's sign-in. This binary is the one privileged step that

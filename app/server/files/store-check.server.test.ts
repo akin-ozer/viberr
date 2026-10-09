@@ -169,13 +169,13 @@ describe("checkStore", () => {
   });
 
   /**
-   * Ruling 99 added a THIRD canonical file class, the goal; ruling 503
+   * Ruling 273 added a THIRD canonical file class, the goal; ruling 17
    * replaced it with the epic. A rescan counts a broken epic file as an error
    * (the parse returns null, unlike the tolerant task parser), so the human
    * is told a number and, without the doctor walking epics, nothing names the
    * file.
    */
-  it("names a broken epic file, the class ruling 503 introduced", () => {
+  it("names a broken epic file, the class ruling 17 introduced", () => {
     // CANARY: drop the epics walk from `checkStore`.
     const store = setupTestStore(ctx);
     writeRawEpic(store.dataRoot, store.slug, "epic-7", BROKEN_EPIC);
@@ -201,7 +201,7 @@ describe("checkStore", () => {
   });
 
   /**
-   * Ruling 700(a): a project.md `repo` GitHub could not name reads as no
+   * Ruling 225: a project.md `repo` GitHub could not name reads as no
    * repository. The file stays trusted, so the error diagnostic is what tells
    * an admin why the repository went, and the degraded listing is where they
    * read it.

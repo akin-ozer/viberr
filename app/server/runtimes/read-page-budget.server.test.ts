@@ -8,7 +8,7 @@ import { pageEnd, READ_PAGE_BYTES } from "./read-page-budget.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 
 /**
- * Ruling 624: one page of any agent read reaches a Codex code-mode run whole.
+ * Ruling 215: one page of any agent read reaches a Codex code-mode run whole.
  * codex-cli 0.156 cuts what a code-mode `exec` call prints to 10,000 tokens,
  * counted as UTF-8 bytes / 4, from the middle; an agent usually prints a
  * tool's result as JSON. Live on AWSC-77 a 48,000-character knowledge-base page
@@ -30,7 +30,7 @@ function mixedText(chars: number): string {
   return row.repeat(Math.ceil(chars / row.length)).slice(0, chars);
 }
 
-describe("ruling 624: pageEnd", () => {
+describe("ruling 215: pageEnd", () => {
   it("fills the byte budget, never splits a character, and pages back into the whole", () => {
     // CANARY: count characters instead of bytes and the multibyte pages
     // overrun the budget.
@@ -54,7 +54,7 @@ describe("ruling 624: pageEnd", () => {
   });
 });
 
-describe("ruling 624: one page of every agent read fits a Codex code-mode tool output", () => {
+describe("ruling 215: one page of every agent read fits a Codex code-mode tool output", () => {
   it("a knowledge-base page, printed as its tool result", () => {
     // CANARY: put KB pages back at 48,000 characters.
     const dataRoot = temp.make("viberr-623-");

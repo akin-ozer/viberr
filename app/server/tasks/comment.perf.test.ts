@@ -6,7 +6,7 @@ import { expectWithinBudget } from "../../../test-support/perf-ratchet";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
- * Ruling 457: what one comment costs the shared server (findings CS-4, CS-5),
+ * Ruling 11: what one comment costs the shared server (findings CS-4, CS-5),
  * measured on `commentToAgent` — the function the task page's comment action
  * calls — on the demo seed's VIB-142. Authentication is the route's and is not
  * counted here. The clock is pinned (`pinPerfClock`): VIB-142's newest demo
@@ -30,7 +30,7 @@ afterAll(() => {
   app.cleanup();
 });
 
-describe("comment write cost (ruling 457)", () => {
+describe("comment write cost (ruling 11)", () => {
   it("CS-5: a comment with no @ skips the mention machinery", async () => {
     const { commentToAgent } = await import("./task-comments.server");
     const sql = countSql(app.db);

@@ -50,7 +50,7 @@ interface ConvertedEdgeSlot {
 }
 
 /**
- * Ruling 519, once at boot: a board created from the Standard template before
+ * Ruling 91, once at boot: a board created from the Standard template before
  * the ruling still asks a person to confirm the move into Review. Its edge
  * becomes the template's edge now, `auto` with the template's words, so the
  * operator moves the task there itself. Each change is a
@@ -107,7 +107,7 @@ export async function convertTemplateReviewEntry(
     }
   }
   if (converted.length > 0) {
-    logger.info("made the move into Review automatic (ruling 519)", { projects: converted });
+    logger.info("made the move into Review automatic (ruling 91)", { projects: converted });
   }
   return converted;
 }

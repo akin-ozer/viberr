@@ -1,5 +1,5 @@
 /**
- * An agent's reply on its task (ruling 654): the canonical anchor a run is
+ * An agent's reply on its task (ruling 13(a)): the canonical anchor a run is
  * handed (`canonicalTaskAnchor`, D-3) and the reply directive that goes with
  * it, and the one construction of a reply's timeline event
  * (`prepareAgentReplyEvent`) that `postAgentReplyComment` and agent completion
@@ -30,7 +30,7 @@ import {
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import type { ProjectGate } from "~/schemas/project-file.schema";
-// Ruling 482: the gates' view and refusal, one pure home for every surface.
+// Ruling 315: the gates' view and refusal, one pure home for every surface.
 import {
   gateOutcomeText,
   gateWallTime,
@@ -58,8 +58,8 @@ const ANCHOR_GOAL_MAX_CHARS = 1500;
 const ANCHOR_EVENT_MAX_CHARS = 220;
 const ANCHOR_EVENT_COUNT = 5;
 /**
- * Ruling 392 (F39-19): how much of a standing verdict's reason the anchor
- * carries. Generous on purpose — ruling 292 already clips a stored reason at
+ * Ruling 201 (F39-19): how much of a standing verdict's reason the anchor
+ * carries. Generous on purpose — ruling 262 already clips a stored reason at
  * 2,000 characters, so this is the WHOLE of what viberr kept, and it is the one
  * thing a rework run cannot proceed without.
  */
@@ -115,19 +115,19 @@ function anchorClamp(text: string, max: number): string {
  * Pure + exported for the directive-content test.
  */
 export function canonicalTaskAnchor(input: {
-  /** Ruling 245: the project's file leases, so a run learns what it may not
+  /** Ruling 60: the project's file leases, so a run learns what it may not
    *  touch from STATE rather than re-deriving it from convention prose every
    *  turn. Only leases held by OTHER tasks are rendered — a holder needs no
    *  warning about the file it was given to own. */
   fileLeases: readonly FileLease[];
-  /** Ruling 482: the project's declared gates, so a run reads what Viberr
+  /** Ruling 315: the project's declared gates, so a run reads what Viberr
    *  itself ran on the revision under review. */
   gates: readonly ProjectGate[];
   parsed: ParsedTaskFile;
   /** Display name of the CURRENT stage (falls back to the stage id). */
   stageName: string;
   events?: number;
-  /** Ruling 596: the run holds `read_board` and `read_timeline_entry`, so the
+  /** Ruling 213: the run holds `read_board` and `read_timeline_entry`, so the
    *  entries past the window are named with the tools that read them. */
   boardReader?: boolean;
 }): string {
@@ -153,13 +153,13 @@ export function canonicalTaskAnchor(input: {
   lines.push(`${fm.key}: "${fm.title}"`);
   lines.push(refs.join(" · "));
   lines.push("");
-  // Ruling 245: what another task owns right now. High in the anchor, because a
+  // Ruling 60: what another task owns right now. High in the anchor, because a
   // run that learns this after it has edited the file has already done the
   // thing the lease exists to stop, and the delivery refusal is then a wasted
   // turn rather than a guard.
   const foreign = input.fileLeases.filter((l) => l.taskKey !== fm.key);
   if (foreign.length > 0) {
-    lines.push("### Files another task owns right now (ruling 245)");
+    lines.push("### Files another task owns right now (ruling 60)");
     lines.push(
       "Do NOT change these. They are leased until their holder merges, and a delivery " +
         "that touches one is refused before it reaches GitHub.",
@@ -181,7 +181,7 @@ export function canonicalTaskAnchor(input: {
     );
   }
   /**
-   * Ruling 392 (F39-19): the verdicts that STAND, with their reasons whole.
+   * Ruling 201 (F39-19): the verdicts that STAND, with their reasons whole.
    *
    * Live on ax-clone AX-12 the operator wrote "@Developer … read the Reviewer's
    * request-changes findings in the timeline" — and no agent can. `read_board`
@@ -218,7 +218,7 @@ export function canonicalTaskAnchor(input: {
     }
   }
   /**
-   * Ruling 482 (F40-52): the project's gates, as Viberr ran them. On WEB-1 the
+   * Ruling 315 (F40-52): the project's gates, as Viberr ran them. On WEB-1 the
    * deliverer, the Site Reviewer and the Fact Checker each ran the same four
    * gates by hand and reported the exit codes in prose, because nothing told
    * them the server had a record. The reviewer reads the record here instead
@@ -247,7 +247,7 @@ export function canonicalTaskAnchor(input: {
     lines.push("");
     lines.push("### Recent timeline (newest first)");
     for (const e of recent) {
-      // Ruling 563: a clipped entry names its stamp, the address
+      // Ruling 213(b): a clipped entry names its stamp, the address
       // `read_timeline_entry` takes, so the rest is one call away. Live on
       // AWSC-4 a person's four-item answer reached a retried run as "1=Shared
       // … 2=RDS for SQL Server 2…", and the agent had to ask for it again.
@@ -257,7 +257,7 @@ export function canonicalTaskAnchor(input: {
           (clipped ? ` (clipped; the whole entry is at \`${e.occurredAt}\`)` : ""),
       );
     }
-    // Ruling 596: the window says it is a window (ruling 302's rule for the
+    // Ruling 213: the window says it is a window (ruling 117's rule for the
     // operator). Live on AWSC-36 the Estimate Judge, re-reviewing, wrote that
     // the first verdict's breakdown was "not present in the accessible AWSC-36
     // files or timeline entries"; eighteen entries were newer than it.
@@ -292,7 +292,7 @@ export function specialistReplyDirective(input: {
    *  directive is the ENTIRE prompt a resumed specialist gets, so without it
    *  the agent re-anchors on nothing. */
   anchor?: string;
-  /** Ruling 667: false on a project with no repository, where the work is
+  /** Ruling 199: false on a project with no repository, where the work is
    *  the files saved on the task and there is nothing to push. */
   repository?: boolean;
 }): string {
@@ -347,7 +347,7 @@ type PreparedReply =
       duplicatedText: string | null;
     };
 
-/** `text` without the dispatch-completion `cc @…` bookkeeping lines (ruling 98).
+/** `text` without the dispatch-completion `cc @…` bookkeeping lines (ruling 124).
  *
  *  The pipeline appends that line to the reply BEFORE the reply is compared to
  *  anything, and its content varies with the DISPATCH SOURCE rather than with
@@ -371,7 +371,7 @@ export function stripCcLine(text: string | null): string | null {
  *
  *  Returns the matched comment's text (not a bare bool) so the caller can notify
  *  only the @tags the reply ADDS over it: the dispatch-completion cc line
- *  (ruling 98 / R20-9) is appended to the final reply alone, so a report that
+ *  (ruling 124 / R20-9) is appended to the final reply alone, so a report that
  *  otherwise duplicates a mid-run comment still carries a guaranteed ping the
  *  comment never delivered — dropping the whole reply used to swallow it.
  *
@@ -409,7 +409,7 @@ function duplicatedOwnCommentText(
 }
 
 /**
- * Ruling 543: the files agents OTHER than `reviewerProfileId` saved on this
+ * Ruling 101: the files agents OTHER than `reviewerProfileId` saved on this
  * task, as the timeline claims them. A task holding them has something a
  * verification of the default branch cannot stand for: on a board that
  * delivers results, the result a supporting agent made before anyone handed it
@@ -423,7 +423,7 @@ export function filesSavedByOtherAgents(
   for (const e of timeline) {
     if (e.actor.kind !== "agent" || e.actor.profileId === reviewerProfileId) continue;
     // A relay's comment carried its files here from another task: nobody on
-    // this task made them (ruling 538).
+    // this task made them (ruling 71).
     if (isRelayComment(e)) continue;
     const names = (e.attachments ?? []).filter((n) => !isGateLogName(n));
     if (names.length === 0) continue;
@@ -436,7 +436,7 @@ export function filesSavedByOtherAgents(
 }
 
 /**
- * Ruling 388 (F39-15): record a DELIVERER's saved files as this task's
+ * Ruling 84 (F39-15): record a DELIVERER's saved files as this task's
  * non-commit delivery, and therefore as what a review of it binds to.
  *
  * Only the delivering engagement moves it. A reviewer's own captures are
@@ -444,21 +444,21 @@ export function filesSavedByOtherAgents(
  * those would make the subject move under the verdict and stale it on the way
  * in. Same division `workRevision` already draws: the deliverer mints, everyone
  * else judges. A person's upload never reaches here: its note claims its name,
- * and a run's window leaves out what a person claimed (ruling 533).
+ * and a run's window leaves out what a person claimed (ruling 76).
  *
- * Ruling 555: and only a run DISPATCHED to deliver. A review run whose profile
+ * Ruling 87: and only a run DISPATCHED to deliver. A review run whose profile
  * was handed delivery while it worked still saved evidence for a review, and
  * the roster at completion does not turn that into the delivery.
  *
- * Ruling 601: and only a run that FINISHED. A run that stopped (an error, a
+ * Ruling 85: and only a run that FINISHED. A run that stopped (an error, a
  * Stop, a restart) posts its saved files under its name through
  * `postAgentReplyComment`, which never reaches here: they are its work in
  * progress. Live on AWSC-54 a restart cut the Calculator Builder mid-estimate,
- * ruling 567 recorded its interim exports as the task's first delivery, and
+ * ruling 163(b) recorded its interim exports as the task's first delivery, and
  * the Estimate Judge failed the run for an interim link "delivered" before the
  * headline ask.
  *
- * Ruling 609: and only a run that ended with a report, not a question. A
+ * Ruling 85: and only a run that ended with a report, not a question. A
  * deliverer that stops to ask a person (the Calculator Builder's headline ask,
  * which rulings §4 C3 puts before the delivered link) has saved drafts, and the
  * completion write posts them under its name without calling here. Live on
@@ -466,10 +466,10 @@ export function filesSavedByOtherAgents(
  * delivered link was pending; on a first delivery that draft is the score of
  * record (J1). The delivery is the deliverer's next report once it is answered.
  *
- * Ruling 570: and never the browser's working files alone. The `page-….yml`
- * snapshots and `console-….log` dumps are tool transport (ruling 105), pruned
+ * Ruling 85: and never the browser's working files alone. The `page-….yml`
+ * snapshots and `console-….log` dumps are tool transport (ruling 78), pruned
  * from a finished run and kept on an interrupted one as its diagnostics, so a
- * deliverer cut off mid-browse (ruling 567) had its snapshots recorded as the
+ * deliverer cut off mid-browse (ruling 163(b)) had its snapshots recorded as the
  * delivery. Live on AWSC-8 a restart cut the Workflow Researcher while it
  * reproduced a calculator form, and `deliveredAt` moved off its report, the
  * `improvements.md` it had saved, onto twelve page snapshots.
@@ -485,7 +485,7 @@ export function stampNonCommitDelivery(
   if (!attachments || attachments.every(isBrowserWorkingArtifact)) return;
   if (actorRef.kind !== "agent") return;
   if (!dispatchedToDeliver) {
-    // Ruling 587: a file the delivery already holds, saved again by a run not
+    // Ruling 85: a file the delivery already holds, saved again by a run not
     // dispatched to deliver, changed what the review binds to.
     if (fm.deliveredAt && attachments.some((name) => delivered.has(name))) fm.deliveredAt = at;
     return;
@@ -496,14 +496,14 @@ export function stampNonCommitDelivery(
 }
 
 /**
- * Ruling 699: who makes what a files delivery holds: its deliverer, and every
+ * Ruling 81: who makes what a files delivery holds: its deliverer, and every
  * supporting agent engaged on the task that holds no verdict.
  *
- * Ruling 587 counted the deliverer's files alone, and "a file of its own moves
+ * Ruling 85 counted the deliverer's files alone, and "a file of its own moves
  * nothing" was written for a reviewer's notes: a reviewer that saves its
  * evidence must not move the subject its verdict is about to bind to. A
  * supporting agent with no verdict is not that. It makes a part of the result
- * (ruling 610: a results board's deliverable is several agents' files), such
+ * (ruling 81: a results board's deliverable is several agents' files), such
  * as the picture a piece shows. Read before it shipped, the rework of such a
  * picture replaced `cover.png` under its own name and moved nothing: the kept
  * delivery still held the old picture, Viberr's pictures of the page still
@@ -541,11 +541,11 @@ export function filesClaimedBy(timeline: readonly TaskFileEvent[], profileIds: R
 }
 
 /**
- * The files the task's deliverer itself saved: ruling 587's first set, which
- * two readers still need apart from the makers' files ruling 699 added. The
+ * The files the task's deliverer itself saved: ruling 85's first set, which
+ * two readers still need apart from the makers' files ruling 81 added. The
  * page order puts the deliverer's own pages first, and a picture's drawing
  * must not go ahead of the piece; and beside another specialist run a maker
- * may claim its own earlier file but never the deliverer's (ruling 627).
+ * may claim its own earlier file but never the deliverer's (ruling 85).
  */
 export function deliverersOwnFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
   const deliverer = deliveringEngagement(fm);
@@ -554,19 +554,19 @@ export function deliverersOwnFileNames(fm: TaskFrontmatter, timeline: readonly T
 }
 
 /**
- * Ruling 587: the files the task's delivery holds: those the delivering
- * engagement's runs saved, and (ruling 699) those a supporting agent that
+ * Ruling 85: the files the task's delivery holds: those the delivering
+ * engagement's runs saved, and (ruling 81) those a supporting agent that
  * holds no verdict saved, as the timeline claims them, less the browser's
- * working files (ruling 570) and what a relay carried in (ruling 538).
+ * working files (ruling 85) and what a relay carried in (ruling 71).
  *
  * A delivery that is not a commit is reviewed as `files:<deliveredAt>` (ruling
- * 388), and only the deliverer's saves moved it. Live on AWSC-28 the Estimate
+ * 84), and only the deliverer's saves moved it. Live on AWSC-28 the Estimate
  * Judge asked for one line in `assumptions.md`, the operator sent the fix to
  * the Cloud Solutions Architect at Mapping, and the Architect rewrote the
  * delivered file. The subject stayed where it was, so the Judge's second
  * verdict landed on the same revision as its first: had it objected again,
  * that would have counted as a second consecutive objection to unchanged
- * work (ruling 237), and an approval made before such an edit would have gone
+ * work (ruling 94), and an approval made before such an edit would have gone
  * on vouching for content its reviewer never read.
  */
 export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskFileEvent[]): Set<string> {
@@ -576,11 +576,11 @@ export function deliveredFileNames(fm: TaskFrontmatter, timeline: readonly TaskF
 }
 
 /**
- * Ruling 703: the task's files as they stand now set against the kept delivery
+ * Ruling 81: the task's files as they stand now set against the kept delivery
  * `judged`, the one reviewer `profileId`'s newest verdict was on, or null when
  * that delivery was not kept.
  *
- * "The task's files" are what a kept delivery holds (ruling 610: every file
+ * "The task's files" are what a kept delivery holds (ruling 81: every file
  * on the task, less the browser's working files and Viberr's own page
  * pictures), less the files this reviewer's own entries name and nobody
  * else's do: a reviewer keeps its evidence on the task AFTER the delivery it
@@ -619,24 +619,24 @@ export function changesSinceJudged(
 }
 
 /**
- * Ruling 597: once a write that stamped the delivery has landed, keep its
+ * Ruling 86: once a write that stamped the delivery has landed, keep its
  * files as they stand, so every later reader can open the delivery a verdict
  * bound to after a rework saves the same names again. A failed copy is
  * logged; the delivery stands without it.
  *
- * Ruling 610: every file on the task, not only the deliverer's. A results
+ * Ruling 81: every file on the task, not only the deliverer's. A results
  * board's deliverable is several agents' files (the Architect's `mapping.md`,
  * the Analyst's `inventory.md`, the Builder's estimate), and a snapshot of the
  * deliverer's alone read as a delivery missing its mapping: live on AWSC-52
  * the Estimate Judge's J4 audit found no `mapping.md` in the first delivery and
  * called its Deliverable 10/10 unsupported. The browser's working files stay
- * out, as they stay out of the delivery (ruling 570).
+ * out, as they stay out of the delivery (ruling 85).
  *
- * Ruling 690: the sources the task holds are recorded with it, as ids, not
+ * Ruling 82: the sources the task holds are recorded with it, as ids, not
  * as copies: a kept source is never overwritten, so the delivery only needs
  * to say which ones were there.
  *
- * Ruling 691: so do Viberr's own page pictures. At the moment a delivery is
+ * Ruling 86: so do Viberr's own page pictures. At the moment a delivery is
  * stamped they picture the one before it; this delivery's are made from the
  * kept copy and added to it by the render. Returns the stamp it kept, which
  * is the delivery the caller asks to be pictured, or null when none was.
@@ -663,7 +663,7 @@ export function keepStampedDelivery(
   } catch (error) {
     logger.warn("a files delivery could not be kept", { projectSlug, taskKey, stamp, err: toError(error) });
   }
-  // Ruling 690: and what it rested on. The sources the task holds at this
+  // Ruling 82: and what it rested on. The sources the task holds at this
   // instant are recorded on the sources' own index, so a source a reviewer
   // keeps afterwards is on the task and not on this delivery. A line that
   // cannot be written is logged and the delivery stands; readers then take
@@ -697,7 +697,7 @@ export async function prepareAgentReplyEvent(
   // (the full transcript stays in the agent logs). Both per-project toggles.
   const { guardrailOn, isMeaninglessComment, separateEvidence, repairDoubledNewlines } =
     await import("./comment-guardrails.server");
-  // Ruling 383: FIRST — before the fence scan, the duplicate compare and the
+  // Ruling 20: FIRST — before the fence scan, the duplicate compare and the
   // mention source are taken from it. This path is the one that took 27KB of
   // markdown onto AX-12 as a single line. Not a guardrail toggle: a body whose
   // breaks are double-escaped is damaged however the project is configured.
@@ -809,7 +809,7 @@ export async function postAgentReplyComment(
     replyText: string | null;
     /** Files this run saved into the task's attachments/ dir — stamped onto
      *  the reply so the producing message names its own files (an interrupted
-     *  run may still have captured screenshots). Ruling 601: they are the
+     *  run may still have captured screenshots). Ruling 85: they are the
      *  run's work in progress, posted under its name, and never the delivery:
      *  only a run that finished reports one. */
     attachments?: string[] | null;
@@ -904,7 +904,7 @@ export async function postAgentReplyComment(
     // handle inside a fence that evidence-separation cut away still notifies.
     // The producing-note fallback keeps its own text (a suppressed duplicate's
     // mentions were already delivered by the mid-run comment it repeats).
-    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    // Ruling 20: and the event records who it reached, so compaction keeps it.
     await stampNotifiedRecipients(
       db,
       taskRef(ctx, input.projectSlug, input.taskKey),

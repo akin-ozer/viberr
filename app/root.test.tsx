@@ -147,7 +147,7 @@ describe("root ErrorBoundary (route error responses)", () => {
 });
 
 /**
- * Ruling 458(d): the error page shows the id of the request that failed, so a
+ * Ruling 43: the error page shows the id of the request that failed, so a
  * person can quote it and the server's log line can be found. Root's data
  * carries the DOCUMENT request's id, which belongs to the error only when that
  * error came with the document: its server render and the hydration of that
@@ -156,7 +156,7 @@ describe("root ErrorBoundary (route error responses)", () => {
  * The server render itself, with root's real loader and without its data, is
  * `entry.server.test.ts`'s, through React Router's own handler.
  */
-describe("root ErrorBoundary request id (ruling 458(d))", () => {
+describe("root ErrorBoundary request id (ruling 43)", () => {
   const documentData = {
     theme: "system",
     csrf: null,

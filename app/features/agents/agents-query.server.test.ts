@@ -572,13 +572,13 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
   });
 
   /**
-   * Ruling 153 (pass 35, G35-2): the template's default `effort` is not a
+   * Ruling 264 (pass 35, G35-2): the template's default `effort` is not a
    * display nicety. `effectiveProfileView(...).effort` flows through
    * `toResolved` into a run's `runInput.effort`, and the seeded roster rows
    * carry no `definition`, so a template default decides what those runs spend.
    * Canary: revert the view to `def?.effort ?? ""`.
    */
-  it("ruling 153: a definition-less deployment takes the template's effort; a definition's own wins", () => {
+  it("ruling 264: a definition-less deployment takes the template's effort; a definition's own wins", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const file = join(dataRoot, "agents", "profiles", "developer.md");
@@ -604,12 +604,12 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
   });
 
   /**
-   * Ruling 156 (pass 35, F35-7): the grants signal beside the identity one.
+   * Ruling 177 (pass 35, F35-7): the grants signal beside the identity one.
    * A copy whose lists differ from the template's carries the exact drift;
    * `customized` stays an identity signal. Canary: hard-code
    * `templateDrift: null` in the view.
    */
-  it("ruling 156: a copy whose grants differ carries the drift; a definition-less or equal copy carries none", () => {
+  it("ruling 177: a copy whose grants differ carries the drift; a definition-less or equal copy carries none", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const drifted = view(
@@ -634,12 +634,12 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
   });
 
   /**
-   * Ruling 479(g) (F40-42): the editor said "Saving forks this profile" for
+   * Ruling 177 (F40-42): the editor said "Saving forks this profile" for
    * every template-sourced profile, while on akinozer.com all seven
    * deployments already carried a full snapshot that no template edit
    * reaches. Canary: return `template !== null` from `tracksTemplateLive`.
    */
-  it("ruling 479(g): only a copy that still resolves template fields live tracks the template", () => {
+  it("ruling 177: only a copy that still resolves template fields live tracks the template", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     // The seeded shape: no definition, everything resolves live.
@@ -713,13 +713,13 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
 });
 
 /**
- * Ruling 518 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
+ * Ruling 106 (owner, 2026-09-27): "It's a unqiue agent called Operator that's
  * it. NO other roles needed." Before it, the operator's editor asked for a name
  * and a role, and a save stored both on the project's deployment beside the
  * template's scope line, so a stored copy could rename the operator, give it a
  * role, or keep a scope line the template no longer has.
  */
-describe("ruling 518: an operator deployment resolves to one agent, called Operator", () => {
+describe("ruling 106: an operator deployment resolves to one agent, called Operator", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
 

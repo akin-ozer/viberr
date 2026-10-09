@@ -145,7 +145,7 @@ export function updateUser(
     throw AppError.conflict("Cannot demote or disable the last active admin.");
   }
 
-  // Ruling 154: a handle is unique among ENABLED accounts, and the holder
+  // Ruling 29: a handle is unique among ENABLED accounts, and the holder
   // lookup ignores disabled rows (as the verdict reader does). So enabling a
   // row whose handle was linked elsewhere in the meantime is the third way to
   // make `resolveGithubHandle` answer `ambiguous` forever. Refuse and name the

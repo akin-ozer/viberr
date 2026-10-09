@@ -31,7 +31,7 @@ import {
 import { listMcpServers, saveMcpServer, testMcpServer } from "./resources.server";
 
 /**
- * Ruling 469: an HTTP MCP connection signs in with OAuth, end to end against
+ * Ruling 192: an HTTP MCP connection signs in with OAuth, end to end against
  * an in-test authorization server + protected resource (the shape of
  * `https://mcp.cloudflare.com/mcp`): discovery, dynamic registration, the
  * authorization-code request with PKCE, the callback exchange that seals the
@@ -103,7 +103,7 @@ async function callWhoami(): Promise<string> {
   }
 }
 
-describe("sign-in: discovery, registration and the authorization request (ruling 469)", () => {
+describe("sign-in: discovery, registration and the authorization request (ruling 192)", () => {
   it("registers Viberr with the redirect URI and builds an S256 PKCE request with a state and the resource", async () => {
     await startServer();
     const started = await startMcpOAuthSignIn(db, {
@@ -148,7 +148,7 @@ describe("sign-in: discovery, registration and the authorization request (ruling
   });
 });
 
-describe("the callback: exchange and seal (ruling 469)", () => {
+describe("the callback: exchange and seal (ruling 192)", () => {
   it("exchanges the code with the verifier, seals the tokens and drops a pasted credential", async () => {
     await startServer();
     db.prepare(`UPDATE org_mcp_servers SET cred_ref = ? WHERE id = ?`).run(sealSecret("pasted-static-token"), MCP_ID);
@@ -229,7 +229,7 @@ describe("the callback: exchange and seal (ruling 469)", () => {
   });
 });
 
-describe("the token upstream: use, renew, expire (ruling 469)", () => {
+describe("the token upstream: use, renew, expire (ruling 192)", () => {
   it("renews an access token that has run out before sending it, and re-seals the new pair", async () => {
     await startServer({ accessTokenTtlSec: 5 });
     await signIn();
@@ -291,7 +291,7 @@ describe("the token upstream: use, renew, expire (ruling 469)", () => {
   });
 });
 
-describe("health, runs and sign-out (ruling 469)", () => {
+describe("health, runs and sign-out (ruling 192)", () => {
   it("a probe with no credential reads 'needs sign-in', and a signed-in probe is up with its tools", async () => {
     await startServer();
     const saved = await saveMcpServer(
@@ -360,7 +360,7 @@ describe("health, runs and sign-out (ruling 469)", () => {
     const base = { id: MCP_ID, name: "cloudflare-api", transport: "HTTP", target: server.url };
     await expect(saveMcpServer(db, { ...base, cred: "a-pasted-token-123" }, ADMIN.actor)).rejects.toMatchObject({
       message: "cloudflare-api is signed in with OAuth. Sign it out first to use a pasted credential instead.",
-      // Ruling 514: about the credential, so the editor says it at that field.
+      // Ruling 288: about the credential, so the editor says it at that field.
       // CANARY: refuse without naming it and the editor says it at its foot.
       field: "cred",
     });
@@ -529,12 +529,12 @@ describe("a pasted credential and what is left of a sign-in (R-oauth-2)", () => 
   });
 });
 
-describe("what a sign-in was granted, and what it asks for (ruling 486)", () => {
+describe("what a sign-in was granted, and what it asks for (ruling 192)", () => {
   /** The stored public half, as far as these tests read it. `scope` may be
    *  missing, which is what a canary that drops it produces. */
   const publicHalf = z.object({ status: z.string(), scope: z.string().nullable().optional() });
 
-  /** The public half as a row written before ruling 486 held it: every field
+  /** The public half as a row written before ruling 192 held it: every field
    *  but `scope` (zod drops the key it does not name). */
   const publicWithoutScope = z.object({
     status: z.string(),
@@ -580,7 +580,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     expect(mcpRow()?.oauth?.scope).toBeNull();
   });
 
-  it("a sign-in stored before ruling 486 learns its grant at boot from the sealed token scope, once", async () => {
+  it("a sign-in stored before ruling 192 learns its grant at boot from the sealed token scope, once", async () => {
     // Live 2026-09-25: the owner's cloudflare-api sign-in predates the public
     // scope, so every surface would name no grant until a refresh repeated it.
     await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
@@ -623,7 +623,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     await expect(saveMcpServer(db, { ...base, requestedScopes: 'zone.read "x"' }, ADMIN.actor)).rejects.toThrow(
       'The requested scope "x" is not one OAuth allows',
     );
-    // Empty: the resource's advertised scopes, as before ruling 486.
+    // Empty: the resource's advertised scopes, as before ruling 192.
     await signIn();
     expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("mcp.read mcp.write");
     // A token reply that names no scope granted what was asked (RFC 6749 §5.1).
@@ -697,7 +697,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
     expect(unknown).not.toContain("viberr_connection_grant");
   });
 
-  it("ruling 506: the grant lines read in the names' code-point order, like the names above them", () => {
+  it("ruling 169: the grant lines read in the names' code-point order, like the names above them", () => {
     // The section is in the specialist's and the controller's cached prefix.
     // `localeCompare` put `Sentry` last under an English locale, after the
     // names line had put it first, and may order it differently elsewhere.
@@ -718,7 +718,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 486)", () => 
   });
 });
 
-describe("no token material leaves the server (ruling 469)", () => {
+describe("no token material leaves the server (ruling 192)", () => {
   it("not in an audit row, a log line or a view, across sign-in, renewal, expiry and sign-out", async () => {
     const lines: string[] = [];
     const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {

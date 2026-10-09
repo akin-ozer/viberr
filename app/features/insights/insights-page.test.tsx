@@ -25,7 +25,7 @@ function quotaNote(container: Element): string {
   return container.querySelector(".usage-limits > p.fine")?.textContent ?? "";
 }
 
-/** One figure of a band, by its label (ruling 642). */
+/** One figure of a band, by its label (ruling 324). */
 function metric(container: Element, label: string): Element {
   const found = [...container.querySelectorAll(".metric")].find(
     (m) => m.querySelector(".metric-label")?.textContent === label,
@@ -67,7 +67,7 @@ const breakdown = (rows: (Omit<Row, "name"> & { name?: string })[]): RunAnalytic
   hiddenTokens: null,
 });
 
-/** Ruling 635: Claude's runs, the page's view of one backend. */
+/** Ruling 35: Claude's runs, the page's view of one backend. */
 const CLAUDE: RunAnalytics = {
   backend: "claude",
   measure: "cost",
@@ -89,7 +89,7 @@ const CLAUDE: RunAnalytics = {
     reached: { delivery: 3, coordination: 2 },
     silent: { delivery: 0, coordination: 0 },
   },
-  // Ruling 369: the prompt-cache record.
+  // Ruling 36: the prompt-cache record.
   cache: {
     byKind: [
       {
@@ -104,7 +104,7 @@ const CLAUDE: RunAnalytics = {
         writeReadRatio: 0.02,
         largeFirstWrites: 1,
         ttl: { fiveMinute: 0, oneHour: 18, mixed: 0 },
-        // Ruling 505: PLAN.md's baseline columns.
+        // Ruling 172: PLAN.md's baseline columns.
         avgFirstCallWrite: 14_000,
         readPerRun: 95_000_000 / 18,
         peakPrompt: { median: 108_000, p90: 226_000, max: 482_000 },
@@ -146,7 +146,7 @@ const CLAUDE: RunAnalytics = {
     ],
     reportsWrites: true,
     largeWriteTokens: 100_000,
-    // Ruling 505: resumes by idle time, the edges being every TTL assumed.
+    // Ruling 172: resumes by idle time, the edges being every TTL assumed.
     resumes: {
       edgesMs: [5 * 60_000, 10 * 60_000, 60 * 60_000, 24 * 60 * 60_000],
       freshContextTokens: 150_000,
@@ -165,7 +165,7 @@ const CLAUDE: RunAnalytics = {
         },
       ],
     },
-    // Ruling 505: the operator bursts, counted before any gate is built.
+    // Ruling 172: the operator bursts, counted before any gate is built.
     operatorBursts: {
       starts: 141,
       inBursts: 12,
@@ -185,7 +185,7 @@ const CLAUDE: RunAnalytics = {
     queued: 0,
     successRate: 30 / 40,
   },
-  // Ruling 308: a breakdown is its rows PLUS what the window left out.
+  // Ruling 35: a breakdown is its rows PLUS what the window left out.
   byKind: breakdown([
     { label: "primary", name: "Delivering", runs: 20, cost: 2.0, tokens: 1_500_000 },
     { label: "reviewer", name: "Supporting", runs: 15, cost: 1.0, tokens: 800_000 },
@@ -228,7 +228,7 @@ const CLAUDE: RunAnalytics = {
   windowDays: 30,
 };
 
-/** Ruling 635: Codex's runs. No cost, no cache write: weighed in tokens. */
+/** Ruling 35: Codex's runs. No cost, no cache write: weighed in tokens. */
 const CODEX: RunAnalytics = {
   ...CLAUDE,
   backend: "codex",
@@ -407,7 +407,7 @@ describe("InsightsPage", () => {
 
   it("renders the breakdown bars and the daily chart", () => {
     const { container } = renderPage(FULL, "?by=kind");
-    // Ruling 642: one table under a switch, its columns named once.
+    // Ruling 324: one table under a switch, its columns named once.
     const table = container.querySelector(".breakdown-table")!;
     expect([...table.querySelectorAll("thead th")].map((th) => th.textContent)).toEqual(["Kind", "Runs", "Cost"]);
     // Each row prints its name and keeps its key in the title.
@@ -433,7 +433,7 @@ describe("InsightsPage", () => {
     expect(chart.querySelectorAll('[role="listitem"]')).toHaveLength(30);
     const last = chart.querySelectorAll(".daily-col")[29]!;
     expect(last.querySelector(".vh")?.textContent).toBe("2026-07-30: 5 runs, $1.20");
-    // Ruling 642: the base names its first, middle and last days, and the head
+    // Ruling 324: the base names its first, middle and last days, and the head
     // totals the window.
     expect([...chart.querySelectorAll(".daily-tick")].map((t) => t.textContent)).toEqual(["Jul 1", "Jul 15", "Jul 30"]);
     expect(container.querySelector(".daily-panel .panel-head .right")?.textContent).toBe(
@@ -465,11 +465,11 @@ describe("InsightsPage", () => {
     expect(getByText("operator and controller runs, $0.60 of $1.20")).toBeTruthy();
   });
 
-  // Ruling 190 (F37-12, live): a delivery side that reported no cost left the
+  // Ruling 36 (F37-12, live): a delivery side that reported no cost left the
   // controller's turns as the ENTIRE denominator, and the card answered "100%"
   // to a question the data cannot answer. A null share must not read as a
   // measured extreme — it must read as the gap it is.
-  it("ruling 190: a share with nothing but coordination in it reads as a gap, not as 100%", () => {
+  it("ruling 36: a share with nothing but coordination in it reads as a gap, not as 100%", () => {
     const { getByText, container } = renderPage({
       ...withRuns({
         coordination: {
@@ -504,7 +504,7 @@ describe("InsightsPage", () => {
   });
 
   /**
-   * Ruling 635 on ruling 608: a reading lists every window it knows, and the
+   * Ruling 35 on ruling 161(b): a reading lists every window it knows, and the
    * card draws each one. The binding window used to be the only row, so on the
    * evening the weekly window bound, Codex's five-hour window — the one that
    * stalled a round twice — was nowhere on the page.
@@ -533,7 +533,7 @@ describe("InsightsPage", () => {
     );
     // CANARY: draw the binding reading alone and the five-hour row is gone.
     const rows = [...container.querySelectorAll("[data-quota-window]")];
-    // Ruling 642: a window by the name a person reads, its id in the title.
+    // Ruling 324: a window by the name a person reads, its id in the title.
     expect(rows.map((r) => r.querySelector(".quota-name")?.textContent)).toEqual([
       "5-hour",
       "Weekly",
@@ -635,7 +635,7 @@ describe("InsightsPage", () => {
     expect(getByText("Usage limit reached")).toBeTruthy();
     // Honest about its provenance: this is not a utilization reading.
     expect(getByText(/^from a refused run/)).toBeTruthy();
-    // D32-2 (ruling 4): the refusal's hover title dates the run with the app's
+    // D32-2 (ruling 293): the refusal's hover title dates the run with the app's
     // ONE formatter ("<day> · <clock>"), never the server locale's
     // toLocaleString ("9/1/2026, 9:00:00 AM") — and with no stray "$" before
     // the date (a template-literal slip the first D32-2 edit shipped).
@@ -807,12 +807,12 @@ describe("InsightsPage", () => {
 });
 
 /**
- * Ruling 635 (owner, 2026-10-03: "since claude and codex parity on numbers
+ * Ruling 35 (owner, 2026-10-03: "since claude and codex parity on numbers
  * can't be achieved, let's just have a selector on backends on the token data
  * etc. viberr data itself is global"). The delivery oversight is the instance's
  * own record and comes first; the agent runs below it are one backend's.
  */
-describe("ruling 635: one backend's runs under a switch", () => {
+describe("ruling 35: one backend's runs under a switch", () => {
   it("names each backend with its run count, under the instance's own record, and switches on a click", async () => {
     const { container, getByRole } = renderPage(FULL);
     // The oversight first, the switch on the section it scopes.
@@ -889,7 +889,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
     expect(cost.querySelector(".metric-val")?.textContent).toBe("Not reported");
     expect(cost.querySelector(".metric-val")?.classList.contains("na")).toBe(true);
     expect(cost.querySelector(".metric-sub")?.textContent).toBe("none of the 14 Codex runs reported one");
-    // Ruling 635: "3864.3M" read as a typo. Ruling 642: "33.0M" is 33M.
+    // Ruling 324: "3864.3M" read as a typo. Ruling 324: "33.0M" is 33M.
     const tokens = metric(container, "Tokens");
     expect(tokens.querySelector(".metric-val")?.textContent).toBe("3.86B");
     expect(tokens.querySelector(".metric-sub")?.textContent).toBe("3.83B in, 96% cached · 33M out");
@@ -905,7 +905,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
     expect(last.querySelector(".daily-tip-row.plain")?.textContent).toBe("Tokens 2.4B");
     expect(last.querySelector(".vh")?.textContent).toBe("2026-07-30: 5 runs, 2.4B tokens");
     cleanup();
-    // Ruling 308: the window says what it left out, in the backend's unit.
+    // Ruling 35: the window says what it left out, in the backend's unit.
     const tasks = renderPage(FULL, "?backend=codex&by=task");
     expect(tasks.container.querySelector(".breakdown .fine.dim")?.textContent).toBe(
       "3 more not shown · 11 runs · 3.3K tokens",
@@ -913,7 +913,7 @@ describe("ruling 635: one backend's runs under a switch", () => {
   });
 });
 
-describe("ruling 635: the task breakdown", () => {
+describe("ruling 324: the task breakdown", () => {
   it("links each task to its page, by its key alone when every row is one project's", () => {
     const one = renderPage(FULL, "?by=task");
     expect(one.getByRole("link", { name: "VIB-1" }).getAttribute("href")).toBe("/projects/viberr-core/tasks/VIB-1");
@@ -930,9 +930,9 @@ describe("ruling 635: the task breakdown", () => {
   });
 });
 
-/** Ruling 130(d): a refused or exhausted row says whose account, and the
+/** Ruling 160(a): a refused or exhausted row says whose account, and the
  *  reading row names the hour. Canary: drop the label interpolation. */
-describe("ruling 130(d): whose account, and the hour", () => {
+describe("ruling 160(a): whose account, and the hour", () => {
   it("an exhausted row names the account it billed; a reading row names the hour", () => {
     const exhausted = renderPage(
       withQuota({
@@ -971,14 +971,14 @@ describe("ruling 130(d): whose account, and the hour", () => {
   });
 
   /**
-   * Ruling 481(d) (F40-50): a window that has reset is history. The row keeps
+   * Ruling 161(c) (F40-50): a window that has reset is history. The row keeps
    * it, in the past tense, with no percentage and no bar; it used to read "92%
    * of five hour · resets 03:30" hours after 03:30.
    *
    * Canary: drop `w.reset` from the `pct` line (the bar fills to 92% and the
    * percentage returns), or from the reset clause (present tense returns).
    */
-  it("a window that has reset draws no bar and says 'reset' (ruling 481)", async () => {
+  it("a window that has reset draws no bar and says 'reset' (ruling 161)", async () => {
     const resetsAt = Date.parse("2026-08-23T03:30:00.000Z") / 1000;
     const { getByText, queryByText } = renderPage(
       withQuota(
@@ -1049,12 +1049,12 @@ describe("Completion rate names restart-stopped and never-started runs", () => {
 });
 
 /**
- * Ruling 369: the prompt-cache panel — the warm-start rate over the runs that
+ * Ruling 36: the prompt-cache panel — the warm-start rate over the runs that
  * have a first call, the write/read ratio, the large first writes and the TTL
  * lifetimes, by run kind and by credential kind, every figure on a `data-`
  * attribute; a group with no first call prints "n/a", never 0%.
  */
-describe("the prompt-cache panel (ruling 369)", () => {
+describe("the prompt-cache panel (ruling 36)", () => {
   it("renders both groupings with their figures", () => {
     const { container } = renderPage(FULL);
     const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
@@ -1079,14 +1079,14 @@ describe("the prompt-cache panel (ruling 369)", () => {
     expect(panel.querySelector('[data-cache-row="by credential kind:login"]')).not.toBeNull();
     // The line the large-write column counts against is named.
     expect(panel.querySelector("thead")?.textContent).toContain("first writes > 100K");
-    // Ruling 642: the panel's one line, over every run, with the tables folded
+    // Ruling 324: the panel's one line, over every run, with the tables folded
     // under it.
     expect(panel.querySelector(".panel-head .right")?.textContent).toBe("28% warm starts · 95M read · 1.9M written");
     expect(panel.querySelector("details.cache-more")?.hasAttribute("open")).toBe(false);
   });
 
   it("scrolls the table in its own keyboard-reachable box, not the page (layo-21)", () => {
-    // The nowrap columns (eight then, ~690px; eleven since ruling 505) are
+    // The nowrap columns (eight then, ~690px; eleven since ruling 172) are
     // wider than a phone: without the wrap, /insights scrolled sideways at
     // phone width and at 200% zoom.
     const { getByRole } = renderPage(FULL);
@@ -1098,14 +1098,14 @@ describe("the prompt-cache panel (ruling 369)", () => {
 });
 
 /**
- * Ruling 395 (F39-22): a figure the provider never reports is not a zero. Live
+ * Ruling 36 (F39-22): a figure the provider never reports is not a zero. Live
  * the write column read `WRITTEN 0 · READ 45.0M · 0.000` for 21 Codex runs,
  * because Codex declares `cache_write_input_tokens` and answers 0 for it every
- * single time. Ruling 635: once the panel is one backend's, a backend that
+ * single time. Ruling 35: once the panel is one backend's, a backend that
  * reports no write has no write column at all, rather than five columns of
  * "not reported".
  */
-describe("the prompt-cache panel: a backend that reports no write (rulings 395 and 635)", () => {
+describe("the prompt-cache panel: a backend that reports no write (rulings 36 and 35)", () => {
   it("leaves the write columns out whole and says why, keeping the reads", () => {
     const { container } = renderPage(FULL, "?backend=codex");
     const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
@@ -1153,14 +1153,14 @@ describe("the prompt-cache panel: a backend that reports no write (rulings 395 a
 });
 
 /**
- * Ruling 505: what the prompt-cache plan asked the page
+ * Ruling 172: what the prompt-cache plan asked the page
  * for. PR 1's acceptance was that the page reproduce the plan's baseline table
  * (the mean first write, reads per run, the peak prompt's spread, Codex on its
  * own rows); PR 6 asked whether a Codex resume idle past ten minutes ever reads
  * its prefix back; PR 5 asked for the operator bursts to be counted before a
  * gate is built.
  */
-describe("the prompt-cache panel: PLAN.md's baseline columns (ruling 505)", () => {
+describe("the prompt-cache panel: PLAN.md's baseline columns (ruling 172)", () => {
   it("draws the mean first write, reads per run and the peak prompt's spread", () => {
     const { container } = renderPage(FULL);
     const panel = container.querySelector('[data-comment-anchor="prompt-cache"]')!;
@@ -1190,7 +1190,7 @@ describe("the prompt-cache panel: PLAN.md's baseline columns (ruling 505)", () =
   });
 });
 
-describe("the prompt-cache panel: resumes by idle time (ruling 505)", () => {
+describe("the prompt-cache panel: resumes by idle time (ruling 172)", () => {
   const cell = (row: Element, i: number) => row.querySelector(`[data-bucket="${i}"]`)!;
 
   it("sorts each row's resumes into idle buckets, marking the ones past its assumed TTL", () => {
@@ -1251,7 +1251,7 @@ describe("the prompt-cache panel: resumes by idle time (ruling 505)", () => {
   });
 });
 
-describe("the prompt-cache panel: operator bursts (ruling 505)", () => {
+describe("the prompt-cache panel: operator bursts (ruling 172)", () => {
   it("counts the starts close behind another and what the cold ones wrote", () => {
     const { container } = renderPage(FULL);
     const note = container.querySelector("[data-operator-bursts]")!;

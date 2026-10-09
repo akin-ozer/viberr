@@ -7,7 +7,7 @@ import { rowsMatching, tallyServerReads } from "../../test-support/perf-counters
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 457, journeys `task-open` / `board-live` / `server`: what the
+ * Ruling 11, journeys `task-open` / `board-live` / `server`: what the
  * workspace's loaders SHIP. React Router re-runs root + the workspace layout +
  * the page's own loader on every live event the page hears, so every byte the
  * layout carries for one page is paid again on every page and every event.
@@ -55,7 +55,7 @@ function bytesOf<T>(value: T): number {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
-describe("workspace payloads (ruling 457)", () => {
+describe("workspace payloads (ruling 11)", () => {
   it("FL-4 / SRV-6 / BOARD-6: a task page's layout carries no board and no bell list", async () => {
     const { root, layout } = await layoutModules();
     const task = await import("~/routes/project.task");
@@ -91,7 +91,7 @@ describe("workspace payloads (ruling 457)", () => {
   });
 });
 
-describe("board payload on 40 tasks (ruling 457)", () => {
+describe("board payload on 40 tasks (ruling 11)", () => {
   beforeAll(async () => {
     // Thirty clones of the demo's own task files under new keys, so the board
     // carries 40 cards with the demo's real variety of fields.

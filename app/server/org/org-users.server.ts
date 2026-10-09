@@ -83,8 +83,8 @@ export interface OrgUserView {
   /** Password-reset pending (local; distinct from initial "invited"). */
   pwreset: boolean;
   disabled: boolean;
-  /** Ruling 154: the GitHub login whose PR approval counts as this person's
-   *  review verdict (ruling 68). Synced from the provider for a GitHub
+  /** Ruling 29: the GitHub login whose PR approval counts as this person's
+   *  review verdict (ruling 245). Synced from the provider for a GitHub
    *  account; linked by an org admin for a local or Google one. */
   githubHandle: string | null;
 }
@@ -237,7 +237,7 @@ export interface UpdateOrgUserInput {
   name: string;
   email: string;
   role: UserRole;
-  /** Ruling 154: the GitHub handle to link. Omitted leaves the stored handle
+  /** Ruling 29: the GitHub handle to link. Omitted leaves the stored handle
    *  alone (the controller's `update_user` never sends one); blank or null
    *  clears it; a value is normalized and must be free among enabled users. A
    *  GitHub-signed-in account refuses a value, since its handle syncs from the
@@ -246,7 +246,7 @@ export interface UpdateOrgUserInput {
 }
 
 /**
- * Ruling 154: who else, still enabled, carries this handle. The verdict path
+ * Ruling 29: who else, still enabled, carries this handle. The verdict path
  * (`resolveGithubHandle`) fails closed on a duplicate, so the writer refuses
  * to create one; a disabled account's handle is not counted, mirroring the
  * `disabled = 0` filter the reader applies.
@@ -260,10 +260,10 @@ function otherHandleHolder(
 }
 
 /**
- * Ruling 154: the org admin's door to `users.github_handle`. Before it the
+ * Ruling 29: the org admin's door to `users.github_handle`. Before it the
  * column had one writer, GitHub OAuth sign-in, so on a deployment without
  * GitHub sign-in a member's PR approval could only ever land as
- * `unlinked_handle` and ruling 68 was unreachable. Checks first, so a refused
+ * `unlinked_handle` and ruling 245 was unreachable. Checks first, so a refused
  * handle writes nothing; the returned closure performs the write and audit
  * once the rest of the edit has passed its own guards. `null` = no change.
  */
@@ -309,7 +309,7 @@ function planGithubHandle(
 /**
  * EditUserModal save: local accounts may change name/email; idp accounts
  * sync identity from the provider (role only). Last-admin guard lives in
- * the phase-2 updateUser. Ruling 154: a local or Google account may also
+ * the phase-2 updateUser. Ruling 29: a local or Google account may also
  * carry an admin-linked GitHub handle.
  */
 export function updateOrgUser(
@@ -490,7 +490,7 @@ export async function deleteOrgUser(
   actor: AuditActor,
   ctx: {
     dataRoot?: string;
-    /** Ruling 127: the vendor binaries, when the caller already holds them.
+    /** Ruling 137: the vendor binaries, when the caller already holds them.
      *  Omitted, `retireUserBackends` resolves them itself; a test hands fakes
      *  so removing an account never spawns a real `claude auth logout`. */
     binaries?: BackendBinaries;
@@ -508,7 +508,7 @@ export async function deleteOrgUser(
   // UI-29: prune BEFORE the identity/user rows go, so a failure here leaves the
   // account intact rather than half-deleted with live memberships.
   const projectsPruned = await pruneUserFromProjects(db, userId, actor, ctx);
-  // Ruling 127: the `user_backend_credentials` rows cascade with the account,
+  // Ruling 137: the `user_backend_credentials` rows cascade with the account,
   // but the vendor's own sign-in FILE in this person's runtime home does not —
   // and nothing else on any path would ever remove it. Retire the accounts
   // first (vendor logout, then the credential file, then the row), or removing
@@ -567,7 +567,7 @@ export async function deleteOrgUser(
       email: existing.email,
       name: existing.name,
       projectsPruned,
-      // Ruling 127: which agent accounts were retired with this one, so the
+      // Ruling 137: which agent accounts were retired with this one, so the
       // revocation is auditable rather than silent.
       backendsRetired,
       // …and the GitHub side of the same cascade, on the same principle.
@@ -576,7 +576,7 @@ export async function deleteOrgUser(
       projectsUnbound: projectsUnboundSlugs,
     },
   });
-  // Ruling 540: an unbound project has no credential now, so its board stops
+  // Ruling 223: an unbound project has no credential now, so its board stops
   // describing the token that went with this person. No GitHub call is needed.
   for (const slug of projectsUnboundSlugs) await refreshRepoAccess(db, slug);
   const extras = [

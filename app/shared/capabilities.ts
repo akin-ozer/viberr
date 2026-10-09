@@ -75,16 +75,16 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // (updateBranchGate) — the capability postdates every deployment.
   cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist; on
-  // Codex they are advisory since ruling 185 removed the OS sandbox — the
+  // Codex they are advisory since ruling 183 removed the OS sandbox — the
   // prompt and the server-owned delivery gate carry them, disclosed by
   // codexRepoWriteAdvisory).
-  // Ruling 176: withholding the headline grant also denies the org MCP tools an
+  // Ruling 188: withholding the headline grant also denies the org MCP tools an
   // admin marked as write tools (Claude by name, Codex as `disabled_tools`).
-  // Ruling 692(d): the label says what withholding it takes away. It read
+  // Ruling 183: the label says what withholding it takes away. It read
   // "Execute code or write to the repo", and no backend ever took a run's shell
   // with it: on Claude it removes the file tools and `git commit`, on Codex it
-  // is advisory (ruling 185). On a board made to deliver results every agent
-  // has it withheld (ruling 667), and live a writer that read the old label in
+  // is advisory (ruling 183). On a board made to deliver results every agent
+  // has it withheld (ruling 199), and live a writer that read the old label in
   // a refusal stopped running commands, and its operator reported the commands
   // it had run as done without the grant. The id is unchanged.
   cap("execute-code-or-write-repo", "Write to the repository", ["agent"], "Repository & execution"),
@@ -269,7 +269,7 @@ const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
 
 /** Specialist tool-denial capabilities enforced by Claude but advisory on Codex.
  *
- * Ruling 185 (owner, 2026-09-12): `execute-code-or-write-repo` is BACK in this
+ * Ruling 183 (owner, 2026-09-12): `execute-code-or-write-repo` is BACK in this
  * set. Viberr no longer confines a Codex run with the CLI's OS sandbox — the
  * sandbox cost two whole classes of dead run (F36-1's bubblewrap namespace
  * refusal under Docker, F36-11's `EPERM` on every synchronous child process
@@ -279,7 +279,7 @@ const ENFORCED_CAPABILITY_IDS: ReadonlySet<string> = new Set([
  * pushes; `codexRepoWriteAdvisory` renders that wherever the enforcement is
  * shown. (History: P13-RT-02 enforced it via the sandbox, R22 removed the
  * sandbox and made it claude-only, the 2026-08-31 parity ruling restored the
- * sandbox for withheld runs, ruling 185 removed it for good.)
+ * sandbox for withheld runs, ruling 183 removed it for good.)
  *
  * The SCOPED delivery commands below were always claude-only at the tool
  * layer, for the same reason: on Codex the real boundary is that agents hold

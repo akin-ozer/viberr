@@ -25,7 +25,7 @@ in §4.
 
 ## 1. Secrets (generated when unset)
 
-Neither has to be set (ruling 504). When the environment leaves one unset, `getEnv()`
+Neither has to be set (ruling 38). When the environment leaves one unset, `getEnv()`
 takes it from `<data root>/state/instance-secrets.json`, which the first process to need
 it creates holding both (0600, in the server-only `state/`;
 `app/server/config/instance-secrets.server.ts`). A value set here wins, key by key. A
@@ -35,12 +35,12 @@ unchanged ([deployment.md](deployment.md#secrets--configuration)).
 | Variable | Rule | Purpose |
 |---|---|---|
 | `VIBERR_SESSION_SECRET` | ≥ 32 characters | Signs the session cookie (`viberr.session_token`) and the CSRF double-submit token (`app/server/auth/csrf.server.ts`), and is better-auth's secret unless `BETTER_AUTH_SECRET` is set. Generate with `openssl rand -base64 48`. |
-| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite (`SEALED_STORES` in `app/server/secrets/key-rotation.server.ts`): GitHub PATs, MCP server credentials, sign-in provider (OAuth) client secrets, the S3 audit-export secret, and each person's pasted agent-backend key or token (ruling 127). Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` (§3) and `npm run keys`. |
+| `VIBERR_SECRET_ENCRYPTION_KEY` | base64 decoding to exactly 32 bytes | AES-256-GCM key for every sealed secret in SQLite (`SEALED_STORES` in `app/server/secrets/key-rotation.server.ts`): GitHub PATs, MCP server credentials, sign-in provider (OAuth) client secrets, the S3 audit-export secret, and each person's pasted agent-backend key or token (ruling 137). Generate with `openssl rand -base64 32`. Losing it makes every stored secret unreadable; rotate it with `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS` (§3) and `npm run keys`. |
 
 ## 2. Validated optional variables (the schema)
 
 Every name in this section, and the two in §1, is Viberr's own configuration: the server
-reads it, and **none of it reaches a process the server spawns** (ruling 142).
+reads it, and **none of it reaches a process the server spawns** (ruling 141(a)).
 `filteredSpawnEnv` strips every name the schema declares from the base env that agent
 runs, stdio MCP servers and the hosted sign-in driver start from, so an agent working in a
 project's repository never inherits this server's `NODE_ENV`, `PORT` or data root. §3
@@ -56,10 +56,10 @@ deployment environment and restart.
 |---|---|---|
 | `NODE_ENV` | `development` | `development \| production \| test`. The image sets `production` and compose forces it. Also read raw by the logger (default level) and the SSE broker (no signal handlers under `test`). |
 | `PORT` | `5173` | Dev server and `react-router-serve`. The image sets `3000`; compose publishes `${PORT:-3000}` on both sides. `vite.config.ts` reads it raw for the dev server (`strictPort`). |
-| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it (the named volume `viberr-data`, ruling 460); `.env.example` sets `./docker-data`, the host dev server's own store — since ruling 460 no longer the container's, whose volume the host cannot open. Relative paths resolve against the working directory. The agent launcher is compiled against the image's value (the Dockerfile's global `VIBERR_DATA_ROOT` ARG) and refuses a home outside `<that root>/runtimes/users/`. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
+| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it (the named volume `viberr-data`, ruling 38); `.env.example` sets `./docker-data`, the host dev server's own store — since ruling 38 no longer the container's, whose volume the host cannot open. Relative paths resolve against the working directory. The agent launcher is compiled against the image's value (the Dockerfile's global `VIBERR_DATA_ROOT` ARG) and refuses a home outside `<that root>/runtimes/users/`. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
 | `VIBERR_FORCE_DATA_ROOT_LOCK` | unset | `1`, `true` or `yes` for ONE boot (or one CLI run) to take over a `state/writer.lock` whose holder cannot be judged, typically one left by a process on another host (`forceDataRootTakeover` in `app/server/db/data-root-lock.server.ts`). See the single-writer lock in the [runbook](runbook.md#the-single-writer-lock-and-cli-refusals). |
-| `VIBERR_RUN_TMP_ROOT` | `viberr-runs` under the server's temp directory (the container's `/tmp` in the image) | Where each agent run's own temporary directory is made, `<root>/<runId>` (ruling 636, `app/server/runtimes/run-tmp.server.ts`). The run's processes get it as `TMPDIR`, `TMP` and `TEMP`; it is removed as the run's person a grace after the run settles, and boot removes any a stopped server left. The root is the server's own, `0710` in the agent group, so an agent enters its run's directory and lists no other; a root that is a link or another user's is refused, and each run then starts without one, saying so on its console. |
-| `BETTER_AUTH_URL` | unset | Absolute public origin. Optional in dev (inferred per request). **Required behind a reverse proxy**: better-auth derives OAuth callback URLs, `trustedOrigins` and the cookie `Secure` attribute from it, and its origin is the one the app's origin check (`assertTrustedOrigin`) accepts sign-ins and form posts from besides the request's own, so unset behind the proxy every sign-in and form post answers 403 (ruling 687). `publicOrigin()` (its origin, else the request's) gives the callback the Sign-in & SSO card shows and the Google probe sends, and the redirect URI an MCP OAuth sign-in registers and sends, `<origin>/resources/mcp-oauth/callback` (rulings 469 and 687). `appOrigin()` uses it for the back-links in PR bodies (no link at all when unset). Boot warns when an OAuth client id is configured without it, and when it is an `http://` non-loopback origin under `NODE_ENV=production` (`insecureAuthOriginWarning`). |
+| `VIBERR_RUN_TMP_ROOT` | `viberr-runs` under the server's temp directory (the container's `/tmp` in the image) | Where each agent run's own temporary directory is made, `<root>/<runId>` (ruling 141(c), `app/server/runtimes/run-tmp.server.ts`). The run's processes get it as `TMPDIR`, `TMP` and `TEMP`; it is removed as the run's person a grace after the run settles, and boot removes any a stopped server left. The root is the server's own, `0710` in the agent group, so an agent enters its run's directory and lists no other; a root that is a link or another user's is refused, and each run then starts without one, saying so on its console. |
+| `BETTER_AUTH_URL` | unset | Absolute public origin. Optional in dev (inferred per request). **Required behind a reverse proxy**: better-auth derives OAuth callback URLs, `trustedOrigins` and the cookie `Secure` attribute from it, and its origin is the one the app's origin check (`assertTrustedOrigin`) accepts sign-ins and form posts from besides the request's own, so unset behind the proxy every sign-in and form post answers 403 (ruling 28). `publicOrigin()` (its origin, else the request's) gives the callback the Sign-in & SSO card shows and the Google probe sends, and the redirect URI an MCP OAuth sign-in registers and sends, `<origin>/resources/mcp-oauth/callback` (rulings 192 and 28). `appOrigin()` uses it for the back-links in PR bodies (no link at all when unset). Boot warns when an OAuth client id is configured without it, and when it is an `http://` non-loopback origin under `NODE_ENV=production` (`insecureAuthOriginWarning`). |
 | `BETTER_AUTH_SECRET` | falls back to `VIBERR_SESSION_SECRET` | ≥ 32 chars. Set only to rotate the auth secret independently. |
 | `VIBERR_TRUST_PROXY` | unset (trust none) | Number of trusted reverse proxies, read raw. Only when it is a positive integer does the login throttle read `X-Forwarded-For`, taking the Nth hop from the right; otherwise (or when the chain is shorter than N) the ip half of the `email\|ip` key is `local` (`clientIpOf` in `app/server/auth/rate-limit.server.ts`). |
 
@@ -67,17 +67,17 @@ deployment environment and restart.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | unset | GitHub OAuth app (callback `/api/auth/callback/github`). A row in the `oauth_providers` table, managed on the org settings Sign-in & SSO tab, **overrides** these (ruling 72). |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | unset | GitHub OAuth app (callback `/api/auth/callback/github`). A row in the `oauth_providers` table, managed on the org settings Sign-in & SSO tab, **overrides** these (ruling 28(b)). |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Google OAuth web client (callback `/api/auth/callback/google`). Same override rule. |
 | `VIBERR_SEED_ADMIN_EMAIL` | `admin@viberr.dev` (`DEFAULT_SEED_ADMIN_EMAIL`) | Bootstrap admin, created only while the `users` table is empty (boot and `npm run seed` both call `seedInitialAdmin`). |
 | `VIBERR_SEED_ADMIN_PASSWORD` | boot: random one-time password printed once as `VIBERR BOOTSTRAP ADMIN`; seed CLIs: `SEED_DEFAULT_PASSWORD` (`viberr-dev-2828`) | ≥ 8 characters. The boot-generated password forces a reset at first sign-in (`pwreset_required`). `npm run seed:demo` uses it for `arda@viberr.dev`. |
 
 ### Agent backends: none
 
-There are no agent-backend environment variables (ruling 127). Claude and Codex are
+There are no agent-backend environment variables (ruling 137). Claude and Codex are
 connected **per person** on Profile → Agent accounts, and each run is built from the
 credential of the one person it bills; see §4 and
-[deployment.md](deployment.md#agent-accounts-are-per-person-ruling-127). The names
+[deployment.md](deployment.md#agent-accounts-are-per-person-ruling-137). The names
 `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `VIBERR_CLAUDE_USE_CLI_AUTH`,
 `CLAUDE_CONFIG_DIR`, `CODEX_ACCESS_TOKEN`, `CODEX_API_KEY`, `OPENAI_API_KEY`, `CODEX_HOME`
 and `VIBERR_CODEX_USE_CLI_AUTH` are not in the schema (`env.server.test.ts` asserts it),
@@ -90,7 +90,7 @@ adapters spawn on, so an ambient value never reaches an agent process. The only
 credential env a child sees is its principal's, added by `runCredentialFor` for that one
 run (§3).
 
-### Runtime tuning (ruling 458(j))
+### Runtime tuning (ruling 39)
 
 Parsed by the schema, which owns their coercion and defaults, as it does for the knobs
 in the next section; each call site reads the typed value through `getEnv()`. The
@@ -102,12 +102,12 @@ A value that does not parse fails boot with "Invalid environment configuration".
 |---|---|---|
 | `VIBERR_CLAUDE_MAX_TURNS` | `2000` | Runaway turn cap for a Claude run; hitting it ends the run as `run·error·max_turns` (`resolveMaxTurns`, `claude-runtime.server.ts`, via `getEnv()`). |
 | `VIBERR_CLAUDE_IDLE_TIMEOUT_MS` | `900000` (15 min) | Idle window before a Claude run is treated as hung and interrupted (`claudeIdleTimeoutMs`, `claude-runtime.server.ts`, via `getEnv()`). |
-| `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex (`codexIdleTimeoutMs`, `codex-runtime.server.ts`, via `getEnv()`), counted from the later of the last stream event and the last write to the run's rollout (ruling 595). |
+| `VIBERR_CODEX_IDLE_TIMEOUT_MS` | `900000` (15 min) | Same guard for Codex (`codexIdleTimeoutMs`, `codex-runtime.server.ts`, via `getEnv()`), counted from the later of the last stream event and the last write to the run's rollout (ruling 158(a)). |
 | `VIBERR_GIT_CLONE_TIMEOUT_MS` | `900000` (15 min) | Ceiling on one `git clone` / mirror fetch (`cloneTimeoutMs`, `git-clone-auth.server.ts`, via `getEnv()`); the schedule claim lease is sized against it. |
 | `VIBERR_TRANSCRIPT_RETENTION_DAYS` | `30` | Age at which `runtimes/<backend>/<runId>.jsonl` is pruned (`transcript-retention.server.ts`, via `getEnv()`). `0` keeps forever. Aligned with the 30-day `run_log_lines` window. |
 | `VIBERR_SESSION_HOME_RETENTION_DAYS` | `30` | Same window and rules for the per-person provider session files (`runtimes/users/*/claude-home/projects/**`, `runtimes/users/*/codex-home/sessions/**`). `*.jsonl` only, so a sign-in file is never pruned. |
 
-### Maintenance, disk space and the write probe (rulings 458(c) and 458(i))
+### Maintenance, disk space and the write probe (ruling 39)
 
 Parsed by the schema, which owns their coercion and defaults; each module reads the
 typed value through `getEnv()`. The numbers take `Number()` coercion (so `1.5` and `1e3`
@@ -124,20 +124,20 @@ per process: restart to apply a change.
 | `VIBERR_DISK_CHECK_INTERVAL_SECONDS` | `300` (5 min) | Cadence of the free-space check on the data root, in seconds (`maintenance.server.ts`). |
 | `VIBERR_DISK_LOW_FREE_MB` | `2048` | Free-space threshold below which the data root reads `low` (`diskThresholds`, `app/server/ops/disk-space.server.ts`). |
 | `VIBERR_DISK_CRITICAL_FREE_MB` | `512` | Threshold for `critical`. Either state marks health `degraded` and triggers an out-of-band maintenance pass at most every 30 minutes (`MIN_PRESSURE_PASS_GAP_MS`). |
-| `VIBERR_HOST_DISK_PATH` | unset; `compose.yml` sets `/host-disk` | A directory on the host disk under the data root, measured beside it; when it has less room, it is the reading, with `source: host` (ruling 603, `measureDataRootSpace`). Compose mounts `./.host-disk` there read-only, because Docker Desktop's named volume reports its disk image's virtual size, not the host's free space. On a Linux host whose Docker storage is on another disk than the checkout, set it empty in `.env` to measure the data root alone. |
+| `VIBERR_HOST_DISK_PATH` | unset; `compose.yml` sets `/host-disk` | A directory on the host disk under the data root, measured beside it; when it has less room, it is the reading, with `source: host` (ruling 40, `measureDataRootSpace`). Compose mounts `./.host-disk` there read-only, because Docker Desktop's named volume reports its disk image's virtual size, not the host's free space. On a Linux host whose Docker storage is on another disk than the checkout, set it empty in `.env` to measure the data root alone. |
 | `VIBERR_GITHUB_WRITE_PROBE` | off | `1`, `true` or `yes` opts the PAT validator into an empty-payload write probe; `0`, `false` or `no` leaves it off, and any other spelling fails boot. Off, write access is proved read-only from the repo `permissions` block (`writeProbeEnabled`, `pat-validator.server.ts`). |
 
 ### Governed browser
 
 | Variable | Default | Notes |
 |---|---|---|
-| `VIBERR_BROWSER_EXECUTABLE` | unset; the image sets `/usr/bin/chromium` | Absolute path of the browser the `use-browser` capability's Playwright MCP server drives (ruling 75, `specialist-browser-mcp.server.ts`). When set, the server passes `--executable-path <path> --no-sandbox` to that MCP server (chromium's user-namespace sandbox cannot start under Docker's default seccomp profile as a non-root user). A set path that is not on disk makes health's `browser` read `unavailable`. Unset on a dev host, Playwright's own browser resolution applies. It also decides whether delivered pages are pictured (ruling 691, `page-capture.server.ts`): set, the renderer drives this browser for each files delivery and for `capture_page`; set to a path that is not on disk, every delivered page records that as the reason it has no picture; unset, nothing is pictured, no agent is offered `capture_page`, and no task says anything about it. |
+| `VIBERR_BROWSER_EXECUTABLE` | unset; the image sets `/usr/bin/chromium` | Absolute path of the browser the `use-browser` capability's Playwright MCP server drives (ruling 193, `specialist-browser-mcp.server.ts`). When set, the server passes `--executable-path <path> --no-sandbox` to that MCP server (chromium's user-namespace sandbox cannot start under Docker's default seccomp profile as a non-root user). A set path that is not on disk makes health's `browser` read `unavailable`. Unset on a dev host, Playwright's own browser resolution applies. It also decides whether delivered pages are pictured (ruling 86, `page-capture.server.ts`): set, the renderer drives this browser for each files delivery and for `capture_page`; set to a path that is not on disk, every delivered page records that as the reason it has no picture; unset, nothing is pictured, no agent is offered `capture_page`, and no task says anything about it. |
 
 ### MCP gateway
 
 | Variable | Default | Notes |
 |---|---|---|
-| `VIBERR_MCP_PROXY_PORT` | `0` (a free port picked at boot) | Port of the loopback MCP gateway (ruling 461, `app/server/mcp-proxy/gateway.server.ts`), always bound to `127.0.0.1` and never reachable from outside the host or container. A run reaches every org MCP server that has a stored credential through it with a run-scoped token, so the credential never enters an agent process. `0` reads the chosen port back after listening; set a number only when something on the host needs it fixed. A port that cannot be bound leaves credentialed servers unmountable (each run's prompt says why) and health reports `mcpProxy.listening: false`; boot carries on. Integer `0`–`65535`, anything else fails boot. |
+| `VIBERR_MCP_PROXY_PORT` | `0` (a free port picked at boot) | Port of the loopback MCP gateway (ruling 191, `app/server/mcp-proxy/gateway.server.ts`), always bound to `127.0.0.1` and never reachable from outside the host or container. A run reaches every org MCP server that has a stored credential through it with a run-scoped token, so the credential never enters an agent process. `0` reads the chosen port back after listening; set a number only when something on the host needs it fixed. A port that cannot be bound leaves credentialed servers unmountable (each run's prompt says why) and health reports `mcpProxy.listening: false`; boot carries on. Integer `0`–`65535`, anything else fails boot. |
 
 ### Build identity
 
@@ -154,7 +154,7 @@ unstamped build reports `null`.
 
 The `Dockerfile` declares all three as `ARG` and re-exports them as `ENV`, and
 `compose.yml` passes each through as a build arg interpolated with an empty default
-(ruling 345). `npm run deploy` fills them from git; a bare `docker compose build` leaves
+(ruling 41). `npm run deploy` fills them from git; a bare `docker compose build` leaves
 them empty and the image reports `version` from `package.json` with a `null` revision
 (`.dockerignore` excludes `.git`, so env is the only source a container has). The manual
 equivalent of the deploy script's stamp:
@@ -165,7 +165,7 @@ docker compose build \
   --build-arg VIBERR_BUILD_TIME=$(date -u +%FT%TZ)
 ```
 
-### Controller configuration locks (ruling 108)
+### Controller configuration locks (ruling 270)
 
 | Variable | Default | Notes |
 |---|---|---|
@@ -224,7 +224,7 @@ every persisted log line. `scripts/deploy.ts` and `scripts/e2e.ts` hand their en
 to `docker compose` / Playwright.
 
 **What a spawned process gets.** The runtime never inherits its own configuration into
-the processes it spawns (ruling 142). Agent runs, spawned stdio MCP servers, the hosted
+the processes it spawns (ruling 141(a)). Agent runs, spawned stdio MCP servers, the hosted
 sign-in driver and the vendor sign-out all start from `filteredSpawnEnv`
 (`app/server/runtimes/runtime-registry.server.ts`), which drops:
 
@@ -237,15 +237,15 @@ sign-in driver and the vendor sign-out all start from `filteredSpawnEnv`
   `AUTH`);
 - `DATABASE_URL`, `REDIS_URL`, `SSH_AUTH_SOCK`, `GPG_AGENT_INFO`;
 - the vendor homes `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `CODEX_SQLITE_HOME`
-  (`RUNTIME_HOME_ENV_RE`, rulings 127 and 181);
+  (`RUNTIME_HOME_ENV_RE`, rulings 137 and 141);
 - the Claude CLI's prompt-cache switches `DISABLE_PROMPT_CACHING` (and its per-model
   variants), `ENABLE_PROMPT_CACHING_1H` (and `_BEDROCK`), `FORCE_PROMPT_CACHING_5M`,
   `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
-  (`PROMPT_CACHE_ENV_RE`, ruling 506), so one on the host cannot turn caching off or
+  (`PROMPT_CACHE_ENV_RE`, ruling 169), so one on the host cannot turn caching off or
   force a lifetime for every run;
 - the Claude CLI's compaction switches `CLAUDE_CODE_AUTO_COMPACT_WINDOW`,
   `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` and `DISABLE_COMPACT`
-  (`COMPACTION_ENV`, ruling 506), which a server started from inside a Claude Code
+  (`COMPACTION_ENV`, ruling 169), which a server started from inside a Claude Code
   session inherits, so one cannot move, stop or refuse any run's compaction.
 
 **A name the schema does not declare passes through**: `PATH`, `HOME`, locale, proxy
@@ -267,29 +267,29 @@ pins the set by name:
   `CODEX_ACCESS_TOKEN` (a ChatGPT workspace token) (`runCredentialFor`,
   `backend-credentials.server.ts`). The Codex adapter then points `CODEX_HOME` at the run's
   private fork `<codex-home>/runs/<runId>/` and sets `CODEX_SQLITE_HOME` to the shared home
-  (ruling 181);
+  (ruling 145);
 - `GIT_CEILING_DIRECTORIES=<task directory>` for a run in a task workspace, so git
   discovery cannot climb above it;
-- `VIBERR_RUN_ID=<runId>` (ruling 174). It is not a knob and is not in the schema; the run
+- `VIBERR_RUN_ID=<runId>` (ruling 142). It is not a knob and is not in the schema; the run
   service sets it last, and nothing reads it but the settle sweep, which finds the run's
   leftover processes by it (`app/server/runtimes/run-processes.server.ts`, 5 s grace,
   `RUN_REAP_GRACE_MS`). There is no environment variable for the sweep.
 
-No context window rides a run's child env (ruling 376): every `AUTO_COMPACT_WINDOW` entry
+No context window rides a run's child env (ruling 174): every `AUTO_COMPACT_WINDOW` entry
 in `app/server/runtimes/context-policy.server.ts` is null,
 so the CLI compacts at its model's own limit, and a session above
 `COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead (not
-after an interrupt, not after a run its provider refused, ruling 599, and never an
-operator's session, ruling 701). A compaction that gives no answer within
+after an interrupt, not after a run its provider refused, ruling 174, and never an
+operator's session, ruling 175). A compaction that gives no answer within
 `COMPLETION_COMPACT_DEADLINE_MS` (10 minutes, same file) is given up, and its session
 keeps its size. The key
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` would be set by the run service from that table if an
 entry were ever non-null again, and Codex would take its window through `config.toml`
 (§2.5 of `agents-and-runtime.md`). It is not a deployment knob, and one in the server's own
-environment is stripped before it reaches a child (ruling 506). No cache-TTL variable is
-set on any run (ruling 374: `CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M`
+environment is stripped before it reaches a child (ruling 169). No cache-TTL variable is
+set on any run (ruling 171: `CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M`
 stay unset; the CLI's automatic choice stands), and one in the server's own environment
-is stripped before it reaches a child (ruling 506).
+is stripped before it reaches a child (ruling 169).
 
 The server's own git (clone, mirror fetch, delivery push) never puts a token in argv, a
 URL or a config file: `createGitHubAskpassEnv` / `createGitHubClonePlan`
@@ -303,16 +303,16 @@ the script removed when the git process exits. Agents hold no GitHub credential.
 
 | Setting | Where it lives | Who edits it |
 |---|---|---|
-| Run concurrency cap (`maxConcurrentRuns`, `0` = unlimited, ceiling 64 (`MAX_CONCURRENT_RUNS_CEILING`); a positive cap carries a coordination lane of `max(1, ceil(cap / 4))` extra slots for operator and controller turns, ruling 152(b)) | `instance_settings` table | Org admin, Instance settings, the run-concurrency control below the tabs (`set-concurrency` intent) |
-| Spending cap per Claude run (`maxRunSpendUsd`, USD above zero with at most two decimals, none by default; ruling 175). Claude only: the SDK's `maxBudgetUsd`; Codex has no budget option | `instance_settings` | Org admin, Instance settings, the spending-cap row under run concurrency (`set-run-spend-cap` intent; audited as `org.run_spend_cap.changed`) |
-| Backend quota observations (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>`, `backendCredentialRefused.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes and from classified refusals (ruling 130(d): each names the account the run billed); read by `/insights`, `instance_health`, the person's Profile card and the dispatch hold (`backendDispatchHold`, ruling 152(c)); the unauthenticated health body strips the person (`stripQuotaPrincipals`) |
+| Run concurrency cap (`maxConcurrentRuns`, `0` = unlimited, ceiling 64 (`MAX_CONCURRENT_RUNS_CEILING`); a positive cap carries a coordination lane of `max(1, ceil(cap / 4))` extra slots for operator and controller turns, ruling 150) | `instance_settings` table | Org admin, Instance settings, the run-concurrency control below the tabs (`set-concurrency` intent) |
+| Spending cap per Claude run (`maxRunSpendUsd`, USD above zero with at most two decimals, none by default; ruling 31). Claude only: the SDK's `maxBudgetUsd`; Codex has no budget option | `instance_settings` | Org admin, Instance settings, the spending-cap row under run concurrency (`set-run-spend-cap` intent; audited as `org.run_spend_cap.changed`) |
+| Backend quota observations (`backendRateLimit.<backend>`, `backendQuotaExhausted.<backend>`, `backendCredentialRefused.<backend>`) | `instance_settings` | Written by the run sink from Claude `rate_limit_event` envelopes and from classified refusals (ruling 160(a): each names the account the run billed); read by `/insights`, `instance_health`, the person's Profile card and the dispatch hold (`backendDispatchHold`, ruling 151); the unauthenticated health body strips the person (`stripQuotaPrincipals`) |
 | OAuth sign-in providers | `oauth_providers` table (sealed client secret) | Org admin, Sign-in & SSO tab; overrides the env pair per provider |
 | S3 audit export target | `s3_audit_config` table (sealed secret key) | Org admin, Audit panel |
 | Controller model, effort, grants, instructions | `agents/profiles/controller.md` + `agents/definitions/controller.md` in the data root | Org admin, Controller tab; grant sections and instructions locked unless unlocked by env (§2) |
 | Per-project workflow, members, agent deployments, guardrails, credential policy | `projects/<slug>/project.md` | Project admins through Policy / Settings / Agents |
 | Per-user theme, notification routing, timeline default, pins | `users.theme` + cookie `viberr_theme`; `user_prefs` table | The user, Profile overlay |
-| Home's setup checklist closed for the session (ruling 621) | cookie `viberr_setup_hidden`: the sign-in's session id, HttpOnly, no expiry, so it ends with the browser's session and matches no later sign-in | The person, the checklist's close (`hide-setup` intent), offered once they can see a project |
-| Personal backend credentials (ruling 127), several accounts per backend (ruling 507) | `user_backend_credentials`, one row per account (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in that account's home, `runtimes/users/<id>/{claude-home,codex-home}/accounts/<accountId>` | The person, Profile → Agent accounts: connect, switch, rename, disconnect |
+| Home's setup checklist closed for the session (ruling 322) | cookie `viberr_setup_hidden`: the sign-in's session id, HttpOnly, no expiry, so it ends with the browser's session and matches no later sign-in | The person, the checklist's close (`hide-setup` intent), offered once they can see a project |
+| Personal backend credentials (ruling 137), several accounts per backend (ruling 138) | `user_backend_credentials`, one row per account (sealed `secret_box` for a pasted key or token; a `login` row holds no secret) + the vendor's own file in that account's home, `runtimes/users/<id>/{claude-home,codex-home}/accounts/<accountId>` | The person, Profile → Agent accounts: connect, switch, rename, disconnect |
 | Which account a run bills (the credential principal) | derived per run and persisted as `agent_runs.credential_user_id`, and which of that person's accounts as `agent_runs.credential_account_id` | Nobody sets the person: task runs take the task owner, controller turns the asker (`run-principal.server.ts`); the account is the one that person has in use, which they choose on Profile → Agent accounts |
 
 ## 5. What the container image bakes in
@@ -321,13 +321,13 @@ From the `Dockerfile` runtime stage: `NODE_ENV=production`, `VIBERR_DATA_ROOT=/d
 `UV_CACHE_DIR=/data/runtimes/uv-cache`, `UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python`,
 `PORT=3000`, `VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`, and the three
 `VIBERR_BUILD_*` build args re-exported as `ENV` (empty unless stamped). Everything else
-comes from `.env` via compose `env_file`, which is optional (ruling 504). One `.env`
+comes from `.env` via compose `env_file`, which is optional (ruling 38). One `.env`
 variable is Compose's rather than the app's: `VIBERR_CPUS` sets the container's CPU ceiling
 (unset, none). Compose additionally forces `NODE_ENV=production`
 and `VIBERR_DATA_ROOT=/data` even when `.env` carries the dev values, passes the four
 controller unlock flags with `disabled` as the default, pins `hostname: viberr` (so a
 recreated container can reclaim its own writer lock), runs with `init: true` and mounts
-the named volume `viberr-data` at `/data` (ruling 460).
+the named volume `viberr-data` at `/data` (ruling 38).
 
 The image bakes **no** backend credential and **no** runtime home, and it declares no
 `ENTRYPOINT`: the CMD runs `node` on `react-router-serve` directly as pid 1 (so a
@@ -335,9 +335,9 @@ The image bakes **no** backend credential and **no** runtime home, and it declar
 the writer lock), and compose's `init: true` reaps orphans. Each person's home is created
 on demand at `/data/runtimes/users/<userId>/{claude-home,codex-home}` by
 `ensureUserBackendHome`, each of their accounts' homes inside it by
-`ensureBackendAccountHome` (ruling 507), and all of it is handed to that person's agent uid.
+`ensureBackendAccountHome` (ruling 138), and all of it is handed to that person's agent uid.
 
-Ruling 460's image pieces are build arguments, not environment variables: the Dockerfile's
+Ruling 139's image pieces are build arguments, not environment variables: the Dockerfile's
 global `ARG VIBERR_AGENT_UID_FLOOR=20001`, `VIBERR_AGENT_UID_MAX=59999`,
 `VIBERR_AGENT_GID=20000` and `VIBERR_DATA_ROOT=/data` are compiled into the setuid launcher
 `/usr/local/libexec/viberr-launch` (root:node 4750), which reads none of them from its
@@ -354,7 +354,7 @@ they are process plumbing, not configuration, and nothing reads them from `.env`
 `.claude/launch.json` defines two launchers: `viberr-dev` exports
 `VIBERR_DATA_ROOT=<repo>/docker-data` on port 5173 and **refuses to start while the
 `viberr-app-1` container is running** (two writers on one data root corrupt the
-SQLite WAL — true while the container still ran on that directory; since ruling 460 it
+SQLite WAL — true while the container still ran on that directory; since ruling 38 it
 runs on the named volume, and the host dev server's `./docker-data` is its own store);
 `viberr-dev-hermetic` uses `<repo>/data` on port 5174. The host dev server has no agent
 launcher, so its runs spawn as your own user and its health says `agentIsolation: off`.

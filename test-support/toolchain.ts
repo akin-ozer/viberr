@@ -1,7 +1,7 @@
 import type { Toolchain } from "~/server/ops/toolchain.server";
 
 /**
- * The suite's hermetic toolchain reading (ruling 182, narrowed by ruling 185).
+ * The suite's hermetic toolchain reading (ruling 9, narrowed by ruling 144).
  *
  * `cachedToolchain()` spawns `npm`, `git`, `python3`, `go`, `make`, `docker`,
  * `pnpm`, `yarn` and `curl` once per process for their versions. A unit test
@@ -23,7 +23,7 @@ export const HERMETIC_TOOLCHAIN: Toolchain = {
   git: "2.50.0-test",
   python3: null,
   go: null,
-  // Ruling 191: the suite's host is the real one from pass 37 — node, npm and
+  // Ruling 148: the suite's host is the real one from pass 37 — node, npm and
   // git and nothing else — so a prompt assertion reads the same absences the
   // live instance had.
   make: null,

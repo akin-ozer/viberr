@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapTaskEventRow, type TaskEventRow } from "./task-event.server";
 
 /**
- * Ruling 493: the timeline receives a gate run's note as its rows, and draws
+ * Ruling 313: the timeline receives a gate run's note as its rows, and draws
  * each log once, in the row that ran it.
  */
 const LOG_1 = "gate-a95c337-01-install-20260925T100001Z.log";
@@ -31,7 +31,7 @@ function row(over: Partial<TaskEventRow> = {}): TaskEventRow {
   };
 }
 
-describe("mapTaskEventRow — a gate run's note (ruling 493)", () => {
+describe("mapTaskEventRow — a gate run's note (ruling 313)", () => {
   it("carries the run as rows, and neither its evidence nor its logs a second time", () => {
     // CANARY: return the mapped event before reading the gates.
     const event = mapTaskEventRow(row());

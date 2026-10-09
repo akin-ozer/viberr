@@ -13,7 +13,7 @@ import {
 } from "./controller-requests.server";
 
 /**
- * Ruling 390 (F39-17) — the controller's standing ask for a resource it cannot
+ * Ruling 271 (F39-17) — the controller's standing ask for a resource it cannot
  * grant itself.
  *
  * Live in pass 39 the owner's instance-wide model rule was broken on a new
@@ -44,7 +44,7 @@ const ASK = {
   askedByLabel: "arda@viberr.dev · via controller",
 };
 
-describe("ruling 390: a grant request the controller cannot answer itself", () => {
+describe("ruling 271: a grant request the controller cannot answer itself", () => {
   it("has nothing to say on a store that has never had one", () => {
     const root = makeRoot();
     expect(readResourceRequests(root)).toEqual([]);
@@ -57,7 +57,7 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
     const { request, created } = raiseResourceRequest(ASK, root);
     expect(created).toBe(true);
     expect(request.status).toBe("open");
-    // The profile is what the controller is read BY and ruling 108 locks it;
+    // The profile is what the controller is read BY and ruling 270 locks it;
     // this record is about the controller, so it lives next door.
     const file = path.join(root, "agents", "controller-requests.md");
     const raw = readFileSync(file, "utf8");
@@ -119,7 +119,7 @@ describe("ruling 390: a grant request the controller cannot answer itself", () =
   });
 
   it("the remedy names the variable, the value and the restart, never a button", () => {
-    // Ruling 108 put these grants outside the app, so a surface that offered a
+    // Ruling 270 put these grants outside the app, so a surface that offered a
     // Grant control would promise what no code here can do.
     const remedy = resourceRequestRemedy("kb");
     expect(remedy).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");

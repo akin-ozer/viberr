@@ -60,7 +60,7 @@ function deployOperator(
 }
 
 describe("resolveAcceptanceAuthority", () => {
-  // Ruling 518: the operator is always called Operator. A project with no file
+  // Ruling 106: the operator is always called Operator. A project with no file
   // to read takes the strict boundary, never a claimed exception (`null` row).
   it.each<
     [string, Parameters<typeof deployOperator>[1] | null, ReturnType<typeof resolveAcceptanceAuthority>]

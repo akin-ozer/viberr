@@ -1,6 +1,6 @@
 /**
  * Revision drift — the ONE description of "what changed on the PR head after
- * the reviewed revision" (ruling 132, pass 34 F34-14). Client-safe.
+ * the reviewed revision" (ruling 239, pass 34 F34-14). Client-safe.
  *
  * R17-1 measured drift as GitHub's `compare(reviewedSha...head).ahead_by`,
  * which counts every commit reachable from the head and not from the reviewed
@@ -41,7 +41,7 @@ export interface RevisionDriftDescription {
 
 /** "1 merge commit" / "2 merge commits". This module reaches the closed
  *  controller dock's static closure (through `sse-event.schema` and
- *  `task-file.schema`), which ruling 457 (FL-1) budgets by module count, so
+ *  `task-file.schema`), which ruling 11 (FL-1) budgets by module count, so
  *  it keeps this one-liner rather than importing `countLabel`
  *  (`~/shared/text/plural`) and adding a module to every page. */
 const plural = (n: number, noun: string): string =>
@@ -139,7 +139,7 @@ export interface ClassifyDriftInput {
 }
 
 /**
- * Ruling 132 (pass 34, F34-14): classify the commits since the reviewed
+ * Ruling 239 (pass 34, F34-14): classify the commits since the reviewed
  * revision. A commit not among the branch's own commits (it is reachable from
  * the base) is a base commit; a two-parent commit Viberr itself recorded in
  * `baseRefreshes` is a clean merge; anything else is AUTHORED, including a
@@ -186,7 +186,7 @@ export interface RefreshLink {
   commits: number;
 }
 
-/** Where a head leads through Viberr's own base refreshes (ruling 439). */
+/** Where a head leads through Viberr's own base refreshes (ruling 239). */
 export interface RefreshChain {
   /** Each refresh merge the chain reaches, oldest first, with the base
    *  commits it brought in. The last one is where the chain ends. */
@@ -194,14 +194,14 @@ export interface RefreshChain {
 }
 
 /**
- * Ruling 439 (pass 39, F39-62): the heads a revision reaches through Viberr's
+ * Ruling 239 (pass 39, F39-62): the heads a revision reaches through Viberr's
  * own base refreshes alone.
  *
  * `update_branch_from_base` merges the base onto the branch head with
  * `--no-ff` and records the head it merged onto (`onto`). A refresh made onto
  * the revision's head, then one made onto THAT merge, and so on, carries the
  * revision's deliverable on a newer base and nothing else, which is ruling
- * 238's premise that a refresh does not change what was delivered. A refresh
+ * 239's premise that a refresh does not change what was delivered. A refresh
  * made onto any other commit sits on authored work nobody has reviewed, so it
  * is not on the chain.
  *
@@ -227,7 +227,7 @@ function refreshChainFrom(
 }
 
 /**
- * Ruling 439: the drift `headSha` carries when the reviewed revision reaches it
+ * Ruling 239: the drift `headSha` carries when the reviewed revision reaches it
  * through Viberr's own refreshes alone: no authored commits, and the merges and
  * base commits of the refreshes along the way. Null when the chain does not
  * reach it. It needs no GitHub read, because every commit on the way is one
@@ -249,7 +249,7 @@ export function refreshOnlyDrift(
   };
 }
 
-/** Ruling 439: is `headSha` the revision's own head, or one it reaches through
+/** Ruling 239: is `headSha` the revision's own head, or one it reaches through
  *  Viberr's base refreshes alone? */
 export function headCarriesRevision(
   revisionHeadSha: string,
@@ -261,7 +261,7 @@ export function headCarriesRevision(
 }
 
 /** The commit a re-review should read, and why it is not always the reviewed
- *  one (ruling 238). Client-safe: every field is a fact already on the task. */
+ *  one (ruling 239). Client-safe: every field is a fact already on the task. */
 export interface ReviewSubject {
   /** The sha to check the reviewer's tree out at. */
   sha: string;
@@ -274,9 +274,9 @@ export interface ReviewSubject {
 }
 
 /**
- * Ruling 238 (pass 37, F37-58): which commit a re-review reads.
+ * Ruling 239 (pass 37, F37-58): which commit a re-review reads.
  *
- * Ruling 179 pins a supporting checkout at the revision under review, so a
+ * Ruling 240 pins a supporting checkout at the revision under review, so a
  * reviewer judges what it was asked to judge and never a head that moved under
  * it. That is right whenever the head moved because someone AUTHORED something.
  *
@@ -294,20 +294,20 @@ export interface ReviewSubject {
  * So the subject moves to the refreshed head when the drift is base-refresh
  * ONLY, and the disclosure says it did. One authored commit anywhere in the
  * drift keeps the pin: that is unreviewed work, and reading it unasked is the
- * failure ruling 179 exists to prevent.
+ * failure ruling 240 exists to prevent.
  *
  * The drift must have been measured AT the head being offered — a measurement
  * against an older head says nothing about this one, and acting on it would
  * re-pin onto commits nobody has classified.
  */
 export function reviewSubjectSha(input: {
-  /** The reviewed revision's head — what ruling 179 pins to. */
+  /** The reviewed revision's head — what ruling 240 pins to. */
   reviewedSha: string | null;
   /** The pull request's live head, or null when there is no PR. */
   prHeadSha: string | null;
   /** The drift the reconciler last measured. */
   drift: RevisionDrift | null | undefined;
-  /** Ruling 439: the base refreshes Viberr recorded on the task. */
+  /** Ruling 239: the base refreshes Viberr recorded on the task. */
   refreshes: readonly RefreshLink[];
 }): ReviewSubject | null {
   const { reviewedSha, prHeadSha, drift } = input;
@@ -320,7 +320,7 @@ export function reviewSubjectSha(input: {
     if (refresh.merges === 0 && refresh.commits === 0) return stand;
     return { sha: prHeadSha, rePinned: { reviewedSha, baseRefresh: refresh } };
   }
-  // Ruling 439 (pass 39, F39-62): with no measurement at the head being
+  // Ruling 239 (pass 39, F39-62): with no measurement at the head being
   // offered, the refreshes Viberr itself recorded still say what a head is.
   // Live on ax-clone AX-29 the operator refreshed the branch onto the reviewed
   // revision and dispatched the reviewer before any PR existed, so there was

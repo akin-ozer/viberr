@@ -1,12 +1,12 @@
 import { inflateRawSync } from "node:zlib";
 
 /**
- * Ruling 533: a spreadsheet read back as text, each sheet as CSV.
+ * Ruling 117: a spreadsheet read back as text, each sheet as CSV.
  *
  * The inventories people hand a board that delivers results are spreadsheets
  * far more often than anything else (an RVTools export, an Azure Migrate
  * assessment, a CMDB dump), and viberr stores only what it can show or read
- * back (ruling 379). An `.xlsx` is a zip of XML parts, and reading its cell
+ * back (ruling 76). An `.xlsx` is a zip of XML parts, and reading its cell
  * values needs nothing beyond the zip container and those parts: the shared
  * string table, the workbook's sheet list and each sheet's cells. Formatting,
  * formulas and charts are not read; a formula's cached value is.

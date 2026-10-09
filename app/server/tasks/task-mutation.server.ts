@@ -60,7 +60,7 @@ import { toError } from "~/shared/errors";
  * These three helpers depend only on leaf modules (files/, projections/,
  * errors/, logging/), so hosting them here severs the cycle at its root rather
  * than deferring it. `task-actions.server.ts` re-exported all of them until
- * ruling 654 split it, so the many existing importers were unaffected; modules
+ * ruling 13(a) split it, so the many existing importers were unaffected; modules
  * that would otherwise close the cycle (`agent-toolkit`) import from HERE.
  *
  * Beside them sit the small reads the write paths share — a stage's display
@@ -84,7 +84,7 @@ export interface TaskMutationContext {
     backend: RealBackend;
     autonomy: "supervised" | "full";
     reactDepth: number;
-    /** Ruling 489(d): react hops since a person last acted, which a reply
+    /** Ruling 119: react hops since a person last acted, which a reply
      *  that moved the head does NOT restart (see OPERATOR_REACT_HOP_CEILING).
      *  Optional: absent reads as 0, a chain a person just started. */
     reactHops?: number;
@@ -92,13 +92,13 @@ export interface TaskMutationContext {
      *  OPERATOR_TRANSITION_CHAIN_CAP). Optional: only the operator drive sets
      *  it; absent reads as 0. */
     transitionDepth?: number;
-    /** Ruling 152(a): the stage this drive's OWN latest transition landed on.
+    /** Ruling 120: the stage this drive's OWN latest transition landed on.
      *  `transitionStage` stamps it when it skips the operator re-trigger for a
      *  live run, so the settle-time stranded backstop judges the stage the
      *  drive left the task at instead of treating the move as "owned by a
      *  re-trigger" that no longer fires. */
     movedToStageId?: string;
-    /** Ruling 202: this drive DELIVERED — it entered `performDelivery`, which
+    /** Ruling 121: this drive DELIVERED — it entered `performDelivery`, which
      *  pushes the branch and opens or updates the review PR. Progress, exactly
      *  as a transition is, and stamped on ENTRY rather than on the GitHub
      *  answer: the push and the PR call can land after the run row is already
@@ -107,14 +107,14 @@ export interface TaskMutationContext {
      *  deliberate hold 111ms before its own PR event reached the timeline. */
     delivered?: boolean;
     /**
-     * Ruling 228 (F37-47): EVERY action this drive planned was refused, so the
+     * Ruling 120 (F37-47): EVERY action this drive planned was refused, so the
      * drive did nothing at all. Not the same as an operator that decided to
      * wait — it decided to act and was stopped — and the difference is what
      * the settle-time backstop needs to tell them apart.
      */
     planWhollyRefused?: boolean;
     /**
-     * Ruling 399: this drive IS ruling 228's plan-refused nudge, so the drive
+     * Ruling 121: this drive IS ruling 120's plan-refused nudge, so the drive
      * before it planned only steps Viberr refused. Stamped at drive start from
      * `RunOperatorInput.planRefusedNudge`, because the settle judges this
      * drive with nothing else about the one before it: its hold note says the
@@ -124,16 +124,16 @@ export interface TaskMutationContext {
      */
     planRefusedNudge?: boolean;
     /**
-     * Ruling 406 (F39-33): this drive CARRIED OUT at least one action (an
-     * `outcome: "done"`, or a packet it opened, ruling 443), whatever effect it
+     * Ruling 121 (F39-33): this drive CARRIED OUT at least one action (an
+     * `outcome: "done"`, or a packet it opened, ruling 118), whatever effect it
      * had: a Codex plan step or a Claude tool call alike, both stamped by
-     * `noteCarriedOutAction` (ruling 705).
+     * `noteCarriedOutAction` (ruling 121).
      *
      * The settle-time "deliberate hold" verdict used to be reached by
      * enumerating effects, and the list kept turning out to be short: ruling
-     * 152(a) added a transition that landed elsewhere, ruling 202 added
+     * 120 added a transition that landed elsewhere, ruling 121 added
      * delivery ("a drive whose single action was `deliver_for_review` was
-     * called a deliberate hold"), ruling 228 added the wholly-refused plan.
+     * called a deliberate hold"), ruling 120 added the wholly-refused plan.
      * Live on ax-clone AX-18 it happened a fourth time, and this time Viberr
      * was punishing an operator for following Viberr's own instruction: the
      * transition was refused with "Open the conflict packet
@@ -160,18 +160,18 @@ export interface TaskMutationContext {
      */
     refreshed?: boolean;
     /**
-     * Ruling 400 (F39-27): the refusal sentences themselves, so the one
+     * Ruling 121 (F39-27): the refusal sentences themselves, so the one
      * automatic retry can CARRY them instead of telling the operator to go
      * and read them.
      *
-     * Ruling 392 settled this shape for agents — an instruction that delegates
+     * Ruling 201 settled this shape for agents — an instruction that delegates
      * reading costs a run — and the plan-refused nudge was committing it a
      * level up, against a reader whose own timeline window clamps entries and
      * whose attention is the thing being spent.
      */
     refusedPlanSteps?: { tool: string; message: string }[];
     /**
-     * Ruling 399 on Claude (ruling 705): each governed call of a CLAUDE drive
+     * Ruling 121 on Claude (ruling 121): each governed call of a CLAUDE drive
      * that Viberr refused (`planRefusalOf`), in order, recorded by
      * `noteRefusedCall` from the toolkit's reply. Its one reader is the
      * settle's hold note: a nudged drive that carried out nothing and was
@@ -179,22 +179,22 @@ export interface TaskMutationContext {
      * note narrates a Claude drive's refusals.
      *
      * A field of its own, not `refusedPlanSteps` with `planWhollyRefused`.
-     * Those keep their Codex meaning: ruling 228's premise is a plan whose
+     * Those keep their Codex meaning: ruling 120's premise is a plan whose
      * refusals arrive after its turn has ended, where nobody reads them, which
-     * is what pays for the plan-refused nudge and its quote (ruling 400). A
+     * is what pays for the plan-refused nudge and its quote (ruling 121). A
      * Claude drive read each refusal in-run and chose to end its turn, so its
      * refusals arm no nudge, and kept apart they cannot reach one.
      */
     refusedCalls?: { tool: string; message: string }[];
     /**
-     * Ruling 357 (pass 38, F38-11): this drive's own delivery opened the review
+     * Ruling 127 (pass 38, F38-11): this drive's own delivery opened the review
      * PR or moved its head under full autonomy — the event that used to queue
      * a `delivered` operator turn behind this very drive's lease. The drive
      * continues on its own turn, so the follow-up is owed only if it stops
      * without acting on the delivery; the lease release reads both stamps.
      */
     deliveredHeadMoved?: boolean;
-    /** Ruling 357: a transition or a dispatch this drive made AFTER its
+    /** Ruling 127: a transition or a dispatch this drive made AFTER its
      *  delivery — the drive acted on it, and no follow-up turn is owed. */
     actedAfterDelivery?: boolean;
   };
@@ -212,10 +212,10 @@ export interface ProjectContext {
   /** Archived projects are read-only (owner ruling R6-3): every governed
    *  mutation is refused until the project is restored. */
   archived: boolean;
-  /** Ruling 178: the project's declared required reviewers, resolved to the
+  /** Ruling 89: the project's declared required reviewers, resolved to the
    *  names the acceptance gate prints. Empty when the project declares none. */
   requiredReviewers: RequiredReviewerView[];
-  /** Ruling 482: the gates Viberr runs on every delivered revision; the
+  /** Ruling 104: the gates Viberr runs on every delivered revision; the
    *  acceptance gate refuses until they pass on the revision under review. */
   gates: ProjectGate[];
 }
@@ -326,18 +326,18 @@ export const OPERATOR_NOTIFY_FROM: ActorRender = { kind: "agent", name: "Operato
 /** The policy engine as a notification sender: the `ActorRender` of the
  *  `system:policy-engine` timeline actor. GitHub divergence alerts (R8-6), the
  *  reconcile poller's notices, scope violations and the review-deadlock
- *  escalation (ruling 237) all send as it. */
+ *  escalation (ruling 94) all send as it. */
 export const POLICY_ENGINE_NOTIFY_FROM: ActorRender = { kind: "system", name: "Policy engine" };
 
 /**
- * Ruling 497: the one thing a task notice is about, so its row opens there and
+ * Ruling 75: the one thing a task notice is about, so its row opens there and
  * not at the top of a page the person then has to search.
  */
 export type NoticeSubject =
   /** The timeline event written at this time (its `occurredAt`). */
   | { event: string }
   /** The task's open decision packet (an operator's, or an agent's question),
-   *  by its id: ruling 547 moves the row to the event that closes it. */
+   *  by its id: ruling 75 moves the row to the event that closes it. */
   | { decision: string | undefined }
   /** The task's pending recommendation cards. */
   | "recommendations";
@@ -357,14 +357,14 @@ export interface TaskWatcherNotice {
   ptype?: "input" | "blocked" | null;
   title?: string | null;
   text: string;
-  /** Ruling 361 (pass 38, F38-15): the actor the timeline names for the same
+  /** Ruling 74 (pass 38, F38-15): the actor the timeline names for the same
    *  event — REQUIRED. There is no default: for a year the writer stamped
    *  "Operator" on any notice that named nobody, and 816 notifications on this
    *  instance (every reviewer verdict, every dependency release) told the inbox
    *  the Operator had done what the reviewer or the release engine did. */
   from: ActorRender;
   occurredAt?: string;
-  /** Ruling 497: what the notice is about, which is where its row opens.
+  /** Ruling 75: what the notice is about, which is where its row opens.
    *  Omitted or null (the writer found nothing to point at), it opens the task. */
   about?: NoticeSubject | null;
   /** Skip this user (e.g. the human who triggered the event). */
@@ -376,14 +376,14 @@ export interface TaskWatcherNotice {
   exceptUserIds?: readonly string[];
 }
 
-/** Ruling 140(b): why the owner seat changed hands, in the words the row uses. */
+/** Ruling 50: why the owner seat changed hands, in the words the row uses. */
 export type OwnerSeatChange =
   | { kind: "handed_off"; taskKey: string }
   | { kind: "seated_at_creation"; taskKey: string }
   | { kind: "taken_over"; taskKey: string }
   | { kind: "admin_released"; taskKey: string };
 
-/** Ruling 140(b): what became of the one row this notifier tries to write —
+/** Ruling 50: what became of the one row this notifier tries to write —
  *  recorded on the audit row so a silenced preference and a broken store never
  *  read the same. */
 export type OwnerSeatNotified =
@@ -425,8 +425,8 @@ function ownerSeatText(change: OwnerSeatChange, actorName: string): OwnerSeatRow
 }
 
 /**
- * Ruling 140(b) (pass 34, U34-11): tell the person whose owner seat changed.
- * Under ruling 127 the seat is the credential principal and the acceptance
+ * Ruling 50 (pass 34, U34-11): tell the person whose owner seat changed.
+ * Under ruling 137 the seat is the credential principal and the acceptance
  * authority, so a seat that changes hands silently is a bill and a duty
  * someone learns about from the first failure packet.
  *
@@ -443,7 +443,7 @@ export function notifyOwnerSeatChange(
     actor: TaskActor;
     actorName: string;
     change: OwnerSeatChange;
-    /** Ruling 497: when the timeline's `assign` event for this change was
+    /** Ruling 75: when the timeline's `assign` event for this change was
      *  written, so the row opens on it. */
     eventAt: string;
   },
@@ -548,7 +548,7 @@ export function notifyTaskWatchers(
   return notified;
 }
 
-// ------------------------------------------- acceptance offers (ruling 137)
+// ------------------------------------------- acceptance offers (ruling 99)
 
 /** Why an acceptance offer was withdrawn — the three events that invalidate
  *  it (pass 34, F34-15). */
@@ -566,7 +566,7 @@ export interface OfferWithdrawal {
 }
 
 /**
- * Ruling 137: the terminal (Done-equivalent) stage id of a project, read from
+ * Ruling 99: the terminal (Done-equivalent) stage id of a project, read from
  * its file, for the writers without a loaded project context: the packet
  * writers that withdraw acceptance offers, and the operator's transition
  * routing. Resolved from the workflow graph like every other role lookup
@@ -600,7 +600,7 @@ function withdrawalCauseText(cause: OfferWithdrawalCause): string {
 }
 
 /**
- * Ruling 137 (pass 34, F34-15): remove the acceptance offers a task carries
+ * Ruling 99 (pass 34, F34-15): remove the acceptance offers a task carries
  * that no longer hold, INSIDE the task file's own lock (the caller is a
  * `updateTaskFile` mutator). `accept_completion` cards go on every cause; a
  * `transition` card targeting the terminal stage is an acceptance too (F19-3)
@@ -706,15 +706,15 @@ export function recordRecommendationWithdrawal(
   }
 }
 
-// ------------------------------- acceptance packets (ruling 475, F40-55 (b))
+// ------------------------------- acceptance packets (ruling 244, F40-55 (b))
 
 /**
- * Ruling 475 (F40-55 (b)): an open decision packet that offers
+ * Ruling 244 (F40-55 (b)): an open decision packet that offers
  * `accept_completion` stops holding the moment the review PR conflicts with its
  * base, because the acceptance gate refuses the very click it invites. Live on
  * WEB-2 the packet said "the PR is mergeable" for 26 minutes after WEB-4's
  * merge had put it in conflict, and the owner learned so only when Accept was
- * refused. Ruling 162(d) already withdrew the `accept_completion`
+ * refused. Ruling 95 already withdrew the `accept_completion`
  * RECOMMENDATIONS on that flip; the packet offering the same click survived.
  *
  * Runs INSIDE the task file's lock (the caller is an `updateTaskFile` mutator)
@@ -749,7 +749,7 @@ export function withdrawAcceptancePacket(
 /** What {@link withdrawAcceptancePacket} withdrew. */
 export interface AcceptancePacketWithdrawal {
   title: string;
-  /** Ruling 547: the packet, and the note that records its withdrawal. */
+  /** Ruling 75: the packet, and the note that records its withdrawal. */
   closed: ClosedDecision;
 }
 
@@ -762,7 +762,7 @@ export interface AcceptancePacketWithdrawalSlot {
 
 /** The database half of {@link withdrawAcceptancePacket}: the audit row, the
  *  packet's bell marked read for everyone it reached, and its rows sent to the
- *  note that says why it went (ruling 547). */
+ *  note that says why it went (ruling 75). */
 export function recordAcceptancePacketWithdrawal(
   db: DatabaseSync,
   input: {

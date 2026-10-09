@@ -1,7 +1,7 @@
 /**
- * Knowledge-base documents as rulings 378 and 483 left them: settled text, then
+ * Knowledge-base documents as ruling 210 left them: settled text, then
  * a "## Proposed corrections (not binding)" section of agents' proposals
- * (docs/architecture/file-formats.md §7). Ruling 498 ended the filing; stores
+ * (docs/architecture/file-formats.md §7). Ruling 210 ended the filing; stores
  * still hold such sections until someone closes them, so the reader, the
  * Controller page and the controller's tools are tested against documents
  * built here, byte for byte the way the filing wrote them.
@@ -11,7 +11,7 @@ export interface LegacyProposalInput {
   taskKey: string;
   /** `YYYY-MM-DD`; 2026-09-25 when omitted. */
   filedOn?: string;
-  /** The filer; null writes ruling 378's stamp, which named none. */
+  /** The filer; null writes ruling 210's stamp, which named none. */
   filedBy?: string | null;
   /** The settled line it corrects; omitted when it added something. */
   line?: string | null;
@@ -19,7 +19,7 @@ export interface LegacyProposalInput {
   evidence: string;
 }
 
-/** The sentence ruling 483 wrote under a new heading. */
+/** The sentence ruling 210 wrote under a new heading. */
 const LEGACY_INTRO =
   "Raised by agents from evidence on a task. **Nothing here is binding.** A person, or the " +
   "controller when a person asks it, promotes an entry into the settled text above or " +

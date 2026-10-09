@@ -179,7 +179,7 @@ describe("projectEnvelope — Claude stream-json", () => {
       rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: "high" },
     });
     expect(partial.facts.rateLimit?.utilization).toBeNull();
-    // Ruling 130(a): the placeholder says what is missing instead of `?`.
+    // Ruling 155(a): the placeholder says what is missing instead of `?`.
     expect(partial.display?.text).toContain("utilization not reported");
   });
 });
@@ -207,7 +207,7 @@ describe("projectEnvelope — Codex JSONL", () => {
     ).toBe("diff");
   });
 
-  it("ruling 499: a completed todo_list carries its steps, done or waiting, and says how far it got", () => {
+  it("ruling 168: a completed todo_list carries its steps, done or waiting, and says how far it got", () => {
     // CANARY: drop `todos` from the line and the console draws the empty row
     // it drew before.
     const { display } = projectEnvelope("codex", {
@@ -331,12 +331,12 @@ describe("projectEnvelope — Codex JSONL", () => {
 });
 
 /**
- * Ruling 130(a) / U34-1 (pass 34): the provider's structured refusal facts
+ * Ruling 155(a) / U34-1 (pass 34): the provider's structured refusal facts
  * are projected, never lost. Canaries: delete the `if (e.error)` branch (the
  * banner projects as reply text); drop `api_error_status`/`terminal_reason`
  * from the schema; restore `${e.subtype || "error"}` in the result text.
  */
-describe("ruling 130(a): structured refusal facts", () => {
+describe("ruling 155(a): structured refusal facts", () => {
   it("an assistant envelope carrying `error` projects as an err line, never as reply text", () => {
     const { display, facts } = projectEnvelope("claude", {
       type: "assistant",
@@ -383,12 +383,12 @@ describe("ruling 130(a): structured refusal facts", () => {
 });
 
 /**
- * Ruling 175: a Claude result's tokens and cost come from `modelUsage`, which
+ * Ruling 159: a Claude result's tokens and cost come from `modelUsage`, which
  * covers every call the query made (subagents, sidechains, compaction), with
  * `usage` — the main loop only — as the fallback. Column semantics do not move:
  * input is the whole prompt, cached its cache-read subset.
  */
-describe("ruling 175: the result fold reads modelUsage", () => {
+describe("ruling 159: the result fold reads modelUsage", () => {
   const RESULT = {
     type: "result",
     subtype: "success",
@@ -464,11 +464,11 @@ describe("ruling 175: the result fold reads modelUsage", () => {
 });
 
 /**
- * Ruling 366: the heartbeat line and the arguments line. Canary: drop the
+ * Ruling 168: the heartbeat line and the arguments line. Canary: drop the
  * `tool_progress` case and the first test's `ev` is still "meta" but `progress`
  * is gone and the text is the raw JSON.
  */
-describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
+describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
   it("tool_progress → a meta heartbeat naming the tool, its call and the provider's figure", () => {
     const { display, facts } = projectEnvelope(
       "claude",
@@ -585,11 +585,11 @@ describe("projectEnvelope — ruling 366: heartbeats and MCP arguments", () => {
 });
 
 /**
- * Ruling 367: a tool result reads as its content, never as its envelope.
+ * Ruling 168(b): a tool result reads as its content, never as its envelope.
  * Canary: send `content` through `wireText` again and the first text below
  * starts with `[{"type"`.
  */
-describe("projectEnvelope — ruling 367: MCP result blocks", () => {
+describe("projectEnvelope — ruling 168(b): MCP result blocks", () => {
   /** A `tool_result`'s `content` as the SDK sends it: a string, nothing, or
    *  content blocks (with one deliberately malformed slot for the last case). */
   type WireResultContent =
@@ -640,12 +640,12 @@ describe("projectEnvelope — ruling 367: MCP result blocks", () => {
 });
 
 /**
- * Ruling 369: the prompt-cache figures are read ONCE, at the wire boundary,
+ * Ruling 172: the prompt-cache figures are read ONCE, at the wire boundary,
  * and ride `facts.cache`; a compaction rides `facts.compaction`. The sink folds
  * both onto the run row and the console prints them, so what this boundary
  * misses no surface can show.
  */
-describe("projectEnvelope — ruling 369: cache facts and compactions", () => {
+describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   interface Usage {
     input_tokens: number;
     cache_creation_input_tokens: number;

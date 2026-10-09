@@ -21,7 +21,7 @@ import {
  *    and the marker keeps only a count, so folding a person's prose deletes it
  *    from the source of truth permanently, to save noise the person did not
  *    make. Machine prose is regenerable and cheap to lose; a person's is not.
- *  - Ruling 257: neither is a CONTROLLER comment, for the same reason. It is a
+ *  - Ruling 73: neither is a CONTROLLER comment, for the same reason. It is a
  *    person publishing through an instrument, not a machine narrating; the
  *    actor kind records the instrument, and reading it as authorship deleted
  *    eleven of the owner's own comments from the live board.
@@ -35,7 +35,7 @@ import {
  *    the reply before the CURRENT run, which lives in the untouched recent
  *    window.)
  *
- * Ruling 206: the folding is no longer ADJACENCY-based. It used to collapse
+ * Ruling 73: the folding is no longer ADJACENCY-based. It used to collapse
  * each run of CONSECUTIVE routine comments, which on viberr's own event stream
  * is almost never longer than one: a typed `agent`, `quality`, `github` or
  * `transition` event lands between every pair of agent replies, and an operator
@@ -96,7 +96,7 @@ export function compactTimelineEvents(
     e.type === "comment" &&
     // never fold an existing marker into another marker (idempotent)
     e.title !== COMPACTION_TITLE &&
-    // Ruling 317: a verdict's justification is the one comment a STORED record
+    // Ruling 88: a verdict's justification is the one comment a STORED record
     // points at. `clipVerdictReason` keeps 2,000 characters of it and appends
     // "Its full report is on this task's timeline, whole" — so folding it turns
     // a live pointer into a dangling one and the reviewer's reasoning is
@@ -113,8 +113,8 @@ export function compactTimelineEvents(
     !e.toAgent &&
     // B-FD9: a person's prose is never deleted from canonical task.md.
     e.actor.kind !== "human" &&
-    // Ruling 257 (pass 37, F37-87): a CONTROLLER comment is a person's prose
-    // too. Ruling 99(b) deliberately made the controller a different actor kind
+    // Ruling 73 (pass 37, F37-87): a CONTROLLER comment is a person's prose
+    // too. Ruling 247 deliberately made the controller a different actor kind
     // — the person is the authority, the controller is the instrument — and
     // every other seam honours that: the audit row reads
     // "arda@viberr.dev · via controller", the comment is signed "Posted by the
@@ -132,16 +132,16 @@ export function compactTimelineEvents(
     // "human comments are never compacted", so nobody who noticed the gap would
     // even look.
     e.actor.kind !== "controller" &&
-    // Ruling 382 (F39-9): viberr TOLD somebody this comment was here. Live on
+    // Ruling 20 (F39-9): viberr TOLD somebody this comment was here. Live on
     // ax-clone AX-9 the folded one was the operator answering Arda by name
     // about a correction they had just filed — their question survived (human
     // prose), the answer did not, and canonical task.md, which the next agent
     // anchors on, read as a person correcting the record and nobody replying.
     // The notification row still quotes it and still offers a button to the
     // task, so following it lands on a page the text is no longer on: the same
-    // dangling pointer ruling 317 closed for a verdict's justification.
+    // dangling pointer ruling 88 closed for a verdict's justification.
     (e.notified === undefined || e.notified.length === 0) &&
-    // Ruling 209: a comment carrying EVIDENCE is not prose — it is the pointer
+    // Ruling 73: a comment carrying EVIDENCE is not prose — it is the pointer
     // to files the evidence-separation guardrail moved out of the timeline and
     // onto disk. Folding it keeps a count and drops the reference, orphaning
     // an attachment that is still there and still the proof behind a verdict.
@@ -149,7 +149,7 @@ export function compactTimelineEvents(
     // "1 attachment: …" rows is agent-authored, not `toAgent`, and matched
     // every other clause here.
     (e.evidence === null || e.evidence.length === 0) &&
-    // Ruling 211(e): `attachments` is a SECOND, separate pointer list on the
+    // Ruling 73: `attachments` is a SECOND, separate pointer list on the
     // same event (browser captures the run saved into `attachments/`), and 209
     // excluded only `evidence`. The files survive in the directory either way,
     // but folding deletes the chips AND the prose that says what each capture

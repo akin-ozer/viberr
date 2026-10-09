@@ -33,7 +33,7 @@ function breaksAnIndexLine(ch: string): boolean {
 }
 
 /**
- * Ruling 678: what stops `name` from standing in a knowledge base's folder, as
+ * Ruling 267: what stops `name` from standing in a knowledge base's folder, as
  * the sentence that refuses it, or null. The store keeps a name's first 200
  * characters and a disk 255 bytes of one, so a longer name would land under a
  * name the reply never said, or fail the write. And the name is printed in
@@ -58,7 +58,7 @@ function unfitName(name: string): string | null {
 }
 
 /**
- * Ruling 684: what a file copied into a knowledge base is kept as.
+ * Ruling 267: what a file copied into a knowledge base is kept as.
  *
  * - `template`: later results are filled into it, so it holds none of any
  *   task's content, only `[[what goes here]]` placeholders where content goes.
@@ -137,7 +137,7 @@ function shownText(text: string): string {
 }
 
 /**
- * Ruling 684: how many placeholders a template's text holds. A tripwire for
+ * Ruling 267: how many placeholders a template's text holds. A tripwire for
  * the one mistake it exists for, a finished result copied as it stands, and
  * no proof that a file is free of a task's content: a result with one
  * placeholder left unfilled passes it, and so does one whose own text writes
@@ -149,7 +149,7 @@ function countPlaceholders(name: string, text: string): number {
   return read.match(TEMPLATE_PLACEHOLDER)?.length ?? 0;
 }
 
-/** Ruling 684: the name a sample is kept under: it says what it is and whose. */
+/** Ruling 267: the name a sample is kept under: it says what it is and whose. */
 function sampleName(taskKey: string, name: string): string {
   const prefix = `sample-${taskKey.toLowerCase()}-`;
   return name.toLowerCase().startsWith(prefix) ? name : `${prefix}${name}`;
@@ -158,7 +158,7 @@ function sampleName(taskKey: string, name: string): string {
 export interface CopyTaskFileToKbInput {
   /** The knowledge base's id. */
   kbId: string;
-  /** What the copy is kept as (ruling 684). */
+  /** What the copy is kept as (ruling 267). */
   kind: KeptFileKind;
   projectSlug: string;
   taskKey: string;
@@ -185,14 +185,14 @@ export type CopyTaskFileToKbResult =
       replaced: boolean;
       /** It is a document: indexed with its sections, read with the knowledge tool. */
       document: boolean;
-      /** Ruling 684: a template's placeholders, counted in its text; null for
+      /** Ruling 267: a template's placeholders, counted in its text; null for
        *  any other kind, and for a template no reader takes as text. */
       placeholders: number | null;
     }
   | { ok: false; message: string };
 
 /**
- * Ruling 678: a file a task holds, copied into a knowledge base's folder.
+ * Ruling 267: a file a task holds, copied into a knowledge base's folder.
  *
  * Asked live, on the AWS calculator board, to make the report AWSC-117
  * delivered the template for every later estimate, the controller had nowhere
@@ -211,7 +211,7 @@ export type CopyTaskFileToKbResult =
  * own doors check what they replace; and a file that is not a document for a
  * private knowledge base, where no run could open it.
  *
- * Ruling 684: the copy says what it is kept as. The first template the
+ * Ruling 267: the copy says what it is kept as. The first template the
  * controller made was the report itself, one customer's figures and sentences
  * in the folder every run reads, and the next customer's proposal came back
  * with one of them. So a `template` whose text holds no `[[placeholder]]` is
@@ -258,7 +258,7 @@ export function copyTaskFileToKnowledgeBase(
     return refuse(isAppError(error) ? error.userMessage : `\`${wanted}\` cannot be copied.`);
   }
   if ("tooLarge" in read) return refuse(`\`${wanted}\` cannot be copied.`);
-  // Ruling 675: a file the folder holds under the same name in the other
+  // Ruling 76: a file the folder holds under the same name in the other
   // Unicode form is the one this would replace, so that file's spelling is
   // the name written, and the one the checks below are about.
   const into = resolveStoredSegment(target.rootAbs, name);
@@ -272,7 +272,7 @@ export function copyTaskFileToKnowledgeBase(
         `so no run could open \`${stored}\` there. Copy it into an open knowledge base.`,
     );
   }
-  // Ruling 684: a template is read whole, as a reader takes it (a PDF's text
+  // Ruling 267: a template is read whole, as a reader takes it (a PDF's text
   // layer, a page with its embedded pictures left out). Text with nowhere for
   // content to go is a finished result.
   let placeholders: number | null = null;

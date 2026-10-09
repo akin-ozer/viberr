@@ -11,7 +11,7 @@ import {
 } from "~/server/provenance/provenance-query.server";
 
 /**
- * Ruling 457, journey `task-open`: the GitHub freshness facts the task loader
+ * Ruling 11, journey `task-open`: the GitHub freshness facts the task loader
  * reads on every load (and the reconciler on every per-task tick) filter
  * `audit_events` and `provenance` by several equality columns. Both tables
  * grow with time: the per-tick `github.reconcile.task` audit row alone adds
@@ -31,7 +31,7 @@ function boundColumns(detail: string): number {
   return m ? (m[1]!.match(/=\?/g) ?? []).length : 0;
 }
 
-describe("task freshness reads (ruling 457)", () => {
+describe("task freshness reads (ruling 11)", () => {
   it("bind every filtered column through an index", async () => {
     const db = ctx.makeDb();
     const path = taskProvenancePath("viberr-core", "VIB-142");

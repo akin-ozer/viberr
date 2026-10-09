@@ -6,7 +6,7 @@ that alters behaviour corrects the pages it touches in the same pull request, so
 code first, then a page's dated header, then anything undated.
 
 Schema changes edit one baseline migration rather than adding to a chain, and file formats
-carry no back-compat promise (ruling 683):
+carry no back-compat promise (ruling 5):
 [development/contributing.md §4](development/contributing.md#4-data-and-schema-changes) says
 what that means for a change.
 
@@ -28,8 +28,8 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 2. [architecture/overview.md](architecture/overview.md): stack, layers, request and boot
    lifecycles, background services, security posture.
 3. [architecture/decisions.md](architecture/decisions.md): the binding rulings (numbered,
-   stable, cited by code as "ruling N"). Superseded rulings are kept and marked, never
-   deleted; read the dated notes.
+   stable, cited by code as "ruling N"), each stated as it holds today and grouped by
+   topic; its Contents list is the way in.
 4. The domain page for whatever you are touching (below).
 5. [development/contributing.md](development/contributing.md): where code goes, the gates
    and the definition of done.
@@ -60,7 +60,7 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 | [architecture/data-model.md](architecture/data-model.md) | Data-root layout including the per-person runtime homes, every SQLite table (primary vs derived vs config), indexes, retention, ids |
 | [architecture/file-formats.md](architecture/file-formats.md) | The canonical `project.md`, `task.md`, epic and agent-profile formats; timeline grammar; packet YAML (the `## Packet` section is pinned by a test) |
 | [architecture/projections-and-events.md](architecture/projections-and-events.md) | Writers, watcher, tolerant parsing and diagnostics, rebuilder, rescan/rebuild, SSE broker and client |
-| [architecture/decisions.md](architecture/decisions.md) | Conventions, the 706 numbered owner rulings in numeric order (117 records a number that was never used), each carrying a dated pointer when a later ruling changed it; the unnumbered owner decisions of 2026-08-20 → 2026-09-01; the route map |
+| [architecture/decisions.md](architecture/decisions.md) | The conventions (layout, data and naming, behavior rules, UI rules), then the numbered owner rulings grouped by topic, each stated as it holds today |
 
 ### Domain
 
@@ -68,8 +68,8 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 |---|---|
 | [domain/task-lifecycle.md](domain/task-lifecycle.md) | Governed mutation shape, RBAC matrix, creation, stages and boundaries, transitions, readiness/waiting/validation, ownership, engagements, packets, recommendations, schedules, delivery, the acceptance endings, archive, timeline, notifications, file leases |
 | [domain/operator.md](domain/operator.md) | The Operator, the one agent on every task: authority and gates, triggers and the settle-time backstop, the turn and its snapshot, the `viberr` tools, packets, guardrails |
-| [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 127), models, a run's life (persistence, admission, streaming, failure kinds, resume), the run console's rows, specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
-| [domain/controller-and-epics.md](domain/controller-and-epics.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read, the asker's own Claude account, the `viberr_controller` toolkit and the `viberr_ops` diagnostics, deployment locks and grant requests, knowledge-base corrections and their undo; and epics (ruling 503): the epic file, task membership, progress, the Epics pages, the agents' epic tools |
+| [domain/agents-and-runtime.md](domain/agents-and-runtime.md) | Backends, the credential principal and per-person runtime homes (ruling 137), models, a run's life (persistence, admission, streaming, failure kinds, resume), the run console's rows, specialist dispatch and tools, capability catalog and enforcement, context mounting, workspaces and git, boot recovery, seeded catalog |
+| [domain/controller-and-epics.md](domain/controller-and-epics.md) | The instance controller: the dock on every surface, conversation scopes and the per-turn context read, the asker's own Claude account, the `viberr_controller` toolkit and the `viberr_ops` diagnostics, deployment locks and grant requests, knowledge-base corrections and their undo; and epics (ruling 272): the epic file, task membership, progress, the Epics pages, the agents' epic tools |
 | [domain/github-delivery.md](domain/github-delivery.md) | PATs and connections, repo attach, the delivery pipeline, base refreshes, PR adoption and collisions, revisions and verdicts, the reconciler, scope violations |
 | [domain/auth-and-rbac.md](domain/auth-and-rbac.md) | better-auth setup, CSRF, OAuth whitelist, org and project roles, enforcement, Instance settings, audit, insights, profile (incl. Agent accounts) |
 
@@ -88,7 +88,7 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
 | [development/contributing.md](development/contributing.md) | Setup, gates, where code goes, invariants, schema changes, pinned docs, definition of done |
 | [development/testing.md](development/testing.md) | Vitest config and harnesses, how state is built, doc-pinning tests, lint rules, the e2e flow and spec table, CI |
 | [development/scripts.md](development/scripts.md) | Every npm script and CLI, which ones take the writer lock, seed/backup/restore internals |
-| [development/performance.md](development/performance.md) | The journeys, the deterministic metrics, the ratchet that only moves down (ruling 457), the measuring harnesses |
+| [development/performance.md](development/performance.md) | The journeys, the deterministic metrics, the ratchet that only moves down (ruling 11), the measuring harnesses |
 
 ### UI
 
@@ -110,9 +110,11 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
   are product prompts, not documentation, and are pinned by the seed tests.
 - History: the original architecture and UX specifications, the HTML mock the UI was ported
   from, the discovery-pass ledgers, QA evidence and the documentation-sweep ledgers left
-  the tree before launch (ruling 682). They are in git history; `d423716` is the last
+  the tree before launch (ruling 3). They are in git history; `d423716` is the last
   commit that holds them. A pass or finding id a code comment cites (`F18-14`,
-  `P13-D-34`) resolves there.
+  `P13-D-34`) resolves there. `decisions.md` was compacted on 2026-10-09 from 706
+  additive rulings into its current set and renumbered; the earlier edition, whose numbers
+  older commits and pull requests cite, is at `f4ea3f3`.
 
 ## Keeping this set honest
 
@@ -120,14 +122,16 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
   page's body in the same PR, in present tense, and move the commit reference forward; do
   not stack dated "Updated for ruling N" notes on the header (the git history keeps that
   record).
-- `decisions.md` is the exception: a ruling's text is never rewritten. A later change is a
-  dated note inside the earlier ruling's block, naming the later ruling, and ruling
-  numbers are stable because code comments cite them.
+- `decisions.md` follows the same rule: a decision that changes is rewritten in place, in
+  present tense, with no dated note. Ruling numbers stay stable because code comments cite
+  them, and `ruling-citations.test.ts` fails on a citation of a number the file does not
+  define (ruling 1).
 - The pinned files are listed in
   [development/contributing.md §5](development/contributing.md#5-docs-that-tests-pin);
   everything else relies on re-reading the docs a change touches before it closes
-  (ruling 44).
+  (ruling 2).
 - An owner decision that lives only in a code comment or a pull request is not recorded.
-  Promote it to the next ruling number.
-- Planning notes, ledgers and QA evidence stay out of the tree (ruling 682): put the
+  Write it into `decisions.md`: the next ruling number in its topic's section, or a rewrite
+  of the ruling it changes.
+- Planning notes, ledgers and QA evidence stay out of the tree (ruling 3): put the
   outcome in the code, a page here or a ruling, and the working notes in the pull request.

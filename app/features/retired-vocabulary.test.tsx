@@ -114,7 +114,7 @@ describe("F19-12 residuals: the retired 'primary specialist' vocabulary", () => 
  * an operator or specialist is running on a task…") and the stat label
  * ("specialists in a working state"). The gate above could not catch them — its
  * regex is `/primary specialist/i`, so the bare noun walked through — which is
- * exactly rulings 54/57: a claim that lives in a comment is a claim nobody
+ * exactly rulings 176/207: a claim that lives in a comment is a claim nobody
  * re-derives.
  *
  * These render the two components and read the HTML, for the same reason every
@@ -223,9 +223,9 @@ describe("U12: the Agents page's rendered 'specialist' nouns", () => {
     expect(html).toContain("What differs between the two runtimes");
     expect(html).toContain("An agent profile running on");
     expect(html).toContain("gets the persona alone");
-    // V11-1 (pass 32), then ruling 185: the intro states that the write family
+    // V11-1 (pass 32), then ruling 183: the intro states that the write family
     // binds on Claude only — Codex runs are not OS-confined, so it is advisory
-    // there. "Codex runs a read-only sandbox" was ruling 101's copy, true until
+    // there. "Codex runs a read-only sandbox" was ruling 183's copy, true until
     // the sandbox was removed; "not process-sandboxed" was pre-parity copy.
     expect(html).toContain("Codex runs are not OS-confined");
     expect(html).toContain("advisory on Codex");

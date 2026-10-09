@@ -6,7 +6,7 @@ import { tallyServerReads } from "../../test-support/perf-counters";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 457, journey `controller`: the dock's two data routes run on every
+ * Ruling 11, journey `controller`: the dock's two data routes run on every
  * page (the unseen check on every navigation and revalidation, the view when
  * the panel is open), so what they read to answer yes/no questions is paid
  * everywhere.
@@ -44,7 +44,7 @@ afterAll(() => {
   app.cleanup();
 });
 
-describe("controller dock routes (ruling 457)", () => {
+describe("controller dock routes (ruling 11)", () => {
   it("the unseen check stays within its server-read budgets", async () => {
     const { loader } = await import("~/routes/resources.controller-unseen");
     const { cookie } = await app.cookieFor(arda);
@@ -53,7 +53,7 @@ describe("controller dock routes (ruling 457)", () => {
     await call();
     const { result, tally } = await tallyServerReads(app.dataRoot, call);
     // Every call here is signed in, so each loader answers its own data; only
-    // a caller who is not gets the 401 `data()` wraps (ruling 457).
+    // a caller who is not gets the 401 `data()` wraps (ruling 11).
     if (!("unseen" in result)) throw new Error(`expected the status, got ${JSON.stringify(result)}`);
     expect(result.unseen).toHaveLength(UNSEEN_REPLIES);
     expectWithinBudget("server-read:controller-unseen.store-reads", tally.storeReads.length);

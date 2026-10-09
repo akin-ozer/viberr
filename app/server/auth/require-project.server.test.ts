@@ -15,7 +15,7 @@ import { writeProject } from "../../../test-support/test-store";
  * controller, the task-attachment route and the two run-artifact resource
  * routes call before serving a byte.
  *
- * Ruling 25 (R15-4) makes projects MEMBERS-ONLY, and the docs state the
+ * Ruling 27 (R15-4) makes projects MEMBERS-ONLY, and the docs state the
  * consequence sharply: a probe cannot learn a project exists. That is a claim
  * about BYTES, not about status codes. F19-28 was exactly this guard answering
  * a non-member with `assertProjectAction`'s own 403 ("Only project members can
@@ -30,7 +30,7 @@ import { writeProject } from "../../../test-support/test-store";
  * answer, the positional (not substring) slug echo, the archived-read
  * exemption, and the audit rows that keep the real reason after the client has
  * been told nothing — could be deleted with every gate staying green. Ruling
- * 65: "an owner ruling whose guard cannot go red is a ruling that gets
+ * 27: "an owner ruling whose guard cannot go red is a ruling that gets
  * reverted in silence."
  *
  * These cases drive the guard DIRECTLY with real signed requests, because a
@@ -48,7 +48,7 @@ interface Probe {
 interface Probes {
   /** VIEWER on viberr-core — the LOWEST membership tier, which must pass. */
   elif: Probe;
-  /** Registered, a member of nothing — the ruling-25 probe. */
+  /** Registered, a member of nothing — the ruling-27 probe. */
   deniz: Probe;
   /** ORG admin, a member of nothing — the D2 emergency-override subject. */
   orgAdmin: Probe;
@@ -72,7 +72,7 @@ const FROZEN = "frozen-core";
 const COLLIDING = "resources";
 /** A slug that has no project.md at all. */
 const GHOST = "ghost-project";
-/** The one refusal ruling 25 allows on a slug-addressed surface. */
+/** The one refusal ruling 27 allows on a slug-addressed surface. */
 const UNKNOWN_SLUG_404 = `No project at projects/${SLUG}.`;
 /** The guard's own copy fragment, as project.policy.tsx passes it. */
 const WHAT = "view this project's policy";
@@ -199,7 +199,7 @@ async function callGuard(
   }
 }
 
-describe("ruling 25 — a probe cannot learn a project exists", () => {
+describe("ruling 27 — a probe cannot learn a project exists", () => {
   /**
    * The gate is `"any-member"`, not a role tier: a VIEWER, the lowest project
    * role there is, reaches every config surface. Tightening this (e.g. to

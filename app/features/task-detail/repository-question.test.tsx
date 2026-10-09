@@ -5,7 +5,7 @@ import type { PacketRender } from "~/shared/mapping/task.server";
 import { DecisionPacket } from "./decision-packet";
 
 /**
- * Ruling 672: the operator's repository question on the task page. Its two
+ * Ruling 224: the operator's repository question on the task page. Its two
  * answers decide the board, so they take the board's tier, and connecting one
  * takes the repository as the person's typed answer.
  */
@@ -65,7 +65,7 @@ const confirmButton = (container: HTMLElement) =>
 const box = (container: HTMLElement) => container.querySelector<HTMLTextAreaElement>("#pkt-note")!;
 const boxLabel = (container: HTMLElement) => container.querySelector('label[for="pkt-note"]')!.textContent!;
 
-describe("ruling 672: the repository question's card", () => {
+describe("ruling 224: the repository question's card", () => {
   it("asks for the repository in the box, opened with the one the operator named, and sends what the person typed", () => {
     // CANARY: leave the box "Note for the operator · optional" and nothing
     // says where the repository goes; send the note state and Confirm
@@ -111,7 +111,7 @@ describe("ruling 672: the repository question's card", () => {
 
   it("is a project admin's to answer: both answers are inert for anyone else, and the card says who answers once", () => {
     // CANARY: drop either row from PACKET_TIER_GATES (decision-packet-derive.ts)
-    // and a maintainer is handed a Confirm the server refuses. Ruling 673: put a clause or a
+    // and a maintainer is handed a Confirm the server refuses. Ruling 312(d): put a clause or a
     // hover title back on each answer, or print the selected one's refusal
     // beside the note, and the card names a project admin again and again;
     // drop `aria-describedby` and a screen reader on a dimmed answer hears no
@@ -129,7 +129,7 @@ describe("ruling 672: the repository question's card", () => {
       "Both answers decide the board, so a project admin gives one.",
     );
     expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
-    // Ruling 674: and no box asks them for the repository. CANARY: show it
+    // Ruling 312(d): and no box asks them for the repository. CANARY: show it
     // under an answer the person cannot give and a maintainer is asked for a
     // required value that nothing will read.
     expect(container.querySelector("#pkt-note")).toBeNull();
@@ -203,7 +203,7 @@ describe("ruling 672: the repository question's card", () => {
       "You can\u2019t answer this decision: both answers decide the board, so a project admin gives one. You can still comment or ask the operator below.",
     );
     expect(note).not.toContain("owner can");
-    // Ruling 673: said once here too, and each answer is described by it.
+    // Ruling 312(d): said once here too, and each answer is described by it.
     expect(container.textContent!.match(/project admin/g)).toHaveLength(1);
     expect(container.querySelector("#pkt-block-reason")!.textContent).toContain("so a project admin gives one");
     for (const answer of radios(container)) {

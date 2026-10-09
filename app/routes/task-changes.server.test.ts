@@ -4,7 +4,7 @@ import type { SeedUserIds } from "../../test-support/demo-data";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 484 (pass 40, F40-54): the two doors the Changes panel uses, as real
+ * Ruling 315 (pass 40, F40-54): the two doors the Changes panel uses, as real
  * requests against the routes: its read (`task-changes.ts`, member-only, a 401
  * rather than a login redirect because a fetcher loads it) and the notes'
  * post (`review-notes` on the task route, the comment door). The GitHub read
@@ -60,7 +60,7 @@ const actionResult = z.union([
   z.object({ data: z.object({ ok: z.literal(false), error: z.string() }), init: z.object({ status: z.number() }) }),
 ]);
 
-describe("ruling 484: the Changes panel's read", () => {
+describe("ruling 315: the Changes panel's read", () => {
   it("answers a signed-out fetch 401 and a non-member the unknown-project 404", async () => {
     expect(await refusedStatus(readChanges("VIB-142", null))).toBe(401);
     expect(await refusedStatus(readChanges("VIB-142", ids.deniz))).toBe(404);
@@ -76,11 +76,11 @@ describe("ruling 484: the Changes panel's read", () => {
   });
 });
 
-describe("ruling 484: the review-notes intent", () => {
+describe("ruling 246: the review-notes intent", () => {
   const notes = JSON.stringify([
     { path: "app/server/github/reconcile.ts", line: 42, side: "new", body: "Name the refusal here." },
     { path: "app/server/github/reconcile.ts", line: 7, side: "old", body: "Keep this guard." },
-    // Ruling 509: a note on several lines.
+    // Ruling 246: a note on several lines.
     { path: "app/server/github/reconcile.ts", line: 60, side: "new", startLine: 51, startSide: "new", body: "Split this loop." },
   ]);
 

@@ -19,7 +19,7 @@ import {
 } from "./review-notes.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): the ONE comment both review doors post (the
+ * Ruling 246 (pass 40, F40-54): the ONE comment both review doors post (the
  * Changes panel's line notes and the reconciler's GitHub relay): addressed to
  * the deliverer, quoting each note's file:line, one list item a note.
  */
@@ -93,7 +93,7 @@ const line = (path: string, n: number, body: string, side: "new" | "old" = "new"
   body,
 });
 
-describe("ruling 484: reviewNotesDirective", () => {
+describe("ruling 246: reviewNotesDirective", () => {
   it("addresses the deliverer once and quotes each note's file:line", () => {
     const text = reviewNotesDirective({
       handle: "content-writer",
@@ -150,7 +150,7 @@ describe("ruling 484: reviewNotesDirective", () => {
     expect(text).not.toContain("x".repeat(4_001));
   });
 
-  it("ruling 509: quotes a range on one side as path:start-end, and one across sides by both ends", () => {
+  it("ruling 246: quotes a range on one side as path:start-end, and one across sides by both ends", () => {
     const range = (startLine: number, startSide: "new" | "old", end: number, side: "new" | "old"): ReviewNote => ({
       path: "notes/one.md",
       line: end,
@@ -181,14 +181,14 @@ describe("ruling 484: reviewNotesDirective", () => {
   });
 });
 
-describe("ruling 484: the panel's notes, parsed and bound", () => {
+describe("ruling 246: the panel's notes, parsed and bound", () => {
   const notesJson = JSON.stringify([{ path: "notes/one.md", line: 12, side: "new", body: " Tighten. " }]);
 
   it("parses the intent's notes and refuses anything else with one sentence", () => {
     expect(parsePanelReviewNotes(notesJson)).toEqual([
       { path: "notes/one.md", line: 12, side: "new", body: "Tighten.", startLine: null, startSide: null },
     ]);
-    // Ruling 509: a note on several lines names its first line and that
+    // Ruling 246: a note on several lines names its first line and that
     // line's side.
     expect(
       parsePanelReviewNotes(

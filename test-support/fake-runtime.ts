@@ -19,7 +19,7 @@ import type { AdapterSet, RealBackend } from "~/server/runtimes/runtime-registry
 
 export interface FakeRun {
   lines: LogLine[];
-  /** Ruling 376: facts a test wants on a line beyond what its `usage` or
+  /** Ruling 174: facts a test wants on a line beyond what its `usage` or
    *  `stats` imply (a `cache` fact that sets the run's last prompt, say),
    *  merged into the line at the same index. */
   extraFacts?: (EmittedLine["facts"] | undefined)[];
@@ -61,7 +61,7 @@ interface QueuedCompactions {
   claude: QueuedCompaction[];
   codex: QueuedCompaction[];
 }
-/** Ruling 376: what the fake answers a completion compaction with, per
+/** Ruling 174: what the fake answers a completion compaction with, per
  *  backend, consumed oldest-first; nothing queued means "not compacted". */
 const queuedCompactions: QueuedCompactions = { claude: [], codex: [] };
 const compactedSpecs: { spec: RunSpec; sessionId: string; signal?: AbortSignal }[] = [];
@@ -77,7 +77,7 @@ export function queueFakeCompaction(
 }
 
 /** The compactions the fake was asked for, oldest first, each with the signal
- *  the run service aborts when it stops waiting (ruling 701). */
+ *  the run service aborts when it stops waiting (ruling 175). */
 export function compactedRunSpecs(): readonly { spec: RunSpec; sessionId: string; signal?: AbortSignal }[] {
   return compactedSpecs;
 }
@@ -223,7 +223,7 @@ function createFakeAdapter(backend: RealBackend): RuntimeAdapter {
       // Codex adapter emits NOTHING on success, because the app-server's reply
       // carries no sizes and the run service reads the compaction off the
       // rollout instead; a fake that emitted here would note it a second time
-      // (ruling 414).
+      // (ruling 172).
       if (outcome.compacted && backend === "claude") {
         cb.onLine({
           raw: JSON.stringify({ type: "test", backend, compaction: outcome }),

@@ -13,7 +13,7 @@ import {
 } from "./instance-secrets.server";
 
 /**
- * Ruling 504: a starter's `docker compose up` needs no `.env`, so the two
+ * Ruling 38: a starter's `docker compose up` needs no `.env`, so the two
  * secrets the app cannot run without are generated into the data root when the
  * environment leaves them unset, and every process reads the same ones back.
  */
@@ -30,7 +30,7 @@ function thrownBy(run: () => void): string {
   return "";
 }
 
-describe("generated instance secrets (ruling 504)", () => {
+describe("generated instance secrets (ruling 38)", () => {
   it("generates both once, for the server only, and every later reader gets the same ones", () => {
     const dataRoot = temp.make("viberr-secrets-");
     const first = withInstanceSecrets({}, dataRoot);

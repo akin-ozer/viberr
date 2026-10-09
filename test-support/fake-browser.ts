@@ -3,7 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 
 /**
- * An executable stand-in for Chromium, for the page capture (ruling 691).
+ * An executable stand-in for Chromium, for the page capture (ruling 194).
  *
  * The renderer child's whole job is to drive a REAL browser process over its
  * `--remote-debugging-pipe`: start it with flags that leave it no way out,

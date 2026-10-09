@@ -44,7 +44,7 @@ export interface TaskFileReadResult {
 }
 
 /** Reads + tolerantly parses a task file. Returns null when absent, and for a
- *  key that is not one folder under the project's tasks (ruling 696): a read
+ *  key that is not one folder under the project's tasks (ruling 15(b)): a read
  *  finds no task there, as it finds none under a key nobody has used. */
 export function readTaskFile(ref: TaskFileRef): TaskFileReadResult | null {
   let absPath: string;
@@ -136,7 +136,7 @@ function assertTaskFileTrusted(
 /**
  * Locked read-modify-write cycle. `mutate` edits the parsed file in place
  * (or returns a replacement); `updatedAt` is bumped automatically, except for
- * a write that changes no fact of the task (`stamp: false`, ruling 639: a
+ * a write that changes no fact of the task (`stamp: false`, ruling 16: a
  * restoration of words an earlier write cut).
  * Returns the parsed file as written.
  */

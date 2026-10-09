@@ -15,12 +15,12 @@
  * already takes a `RepoAccessResult`: the GitHub page's cached probe, project
  * creation's own probe, a repository change's probe, the reconcile poller's
  * re-check of a failing reading, and the reading a credential or token change
- * takes (`refreshRepoAccess`, ruling 540). So the board and the home card read
+ * takes (`refreshRepoAccess`, ruling 223). So the board and the home card read
  * a row instead of calling GitHub on a hot render path. That constraint is the
  * whole design: a board that phones GitHub on every render would be a worse
  * defect than the one being fixed.
  *
- * Ruling 517: a reading is OF a repository, and a failing one is taken again.
+ * Ruling 223: a reading is OF a repository, and a failing one is taken again.
  * Live on 2026-09-27 a board kept saying "akin-ozer/akin-website · repo not
  * found", a repository the owner's account does not have. The row is keyed by
  * project and only the first two writers above wrote it, so changing the
@@ -60,9 +60,9 @@ const storedResultSchema = z.discriminatedUnion("status", [
     repo: z.string(),
     remoteDefaultBranch: z.string().nullable(),
     private: z.boolean(),
-    // Ruling 468: optional, so a row recorded before it still parses.
+    // Ruling 227: optional, so a row recorded before it still parses.
     empty: z.boolean().optional(),
-    // R-repo-2 (ruling 468's dated note): the same, for a token that can only read.
+    // R-repo-2 (ruling 227's dated note): the same, for a token that can only read.
     readOnly: z.boolean().optional(),
   }),
   z.object({ status: z.literal("no_repo_configured") }),
@@ -134,7 +134,7 @@ export function readRepoHealth(
 }
 
 /**
- * Ruling 517: whether a reading was taken of `repo`, the repository the project
+ * Ruling 223: whether a reading was taken of `repo`, the repository the project
  * points at now. GitHub compares repository names without case, and so does
  * this. A renamed repository's `connected` reading carries GitHub's new name and
  * so reads as no reading, which every surface draws the way it draws
@@ -150,7 +150,7 @@ function readingIsOf(result: RepoAccessResult, repo: string | null): boolean {
  * The remembered probes for a set of projects, in one query — the home page
  * renders every project the viewer can see, and one round trip per card is the
  * shape this table exists to avoid. A project whose reading was taken of
- * another repository (ruling 517) is left out, as one nobody probed is.
+ * another repository (ruling 223) is left out, as one nobody probed is.
  */
 export function readRepoHealthMany(
   db: DatabaseSync,
@@ -207,7 +207,7 @@ export function readRepoHealthMany(
  * It is written a third time here rather than moved beside `connectionPill`
  * for all three to share, because that module sits in a chunk every page
  * loads: moved there, it cost Home 14 B, the board 36 B and the task page
- * 27 B gzip, and those ceilings only move down (ruling 457).
+ * 27 B gzip, and those ceilings only move down (ruling 11).
  */
 function shownUnreachable(result: RepoAccessResult): boolean {
   const { kind } = connectionPill(result);
@@ -215,7 +215,7 @@ function shownUnreachable(result: RepoAccessResult): boolean {
 }
 
 /**
- * Ruling 517: take every failing reading again, from the reconcile poller's
+ * Ruling 223: take every failing reading again, from the reconcile poller's
  * tick (every five minutes, and once at boot).
  *
  * Only a reading the surfaces show as unreachable is taken again: a healthy

@@ -8,7 +8,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { withTransaction } from "~/server/db/transaction.server";
 
 /**
- * Controller conversation store (ruling 99; scope extended by ruling 121).
+ * Controller conversation store (ruling 249; scope extended by ruling 249).
  *
  * App-owned SQLite, the notifications/sessions family (file-formats §5): a
  * transcript is single-writer app collaboration state, not board truth, so it
@@ -17,7 +17,7 @@ import { withTransaction } from "~/server/db/transaction.server";
  * `agent_runs` row + NDJSON exactly like every other run; these tables hold
  * what a human reads back — the messages.
  *
- * SCOPE (ruling 121): a conversation is bound, at creation and forever, to
+ * SCOPE (ruling 249): a conversation is bound, at creation and forever, to
  * one of three places — the instance (`projectSlug` and `taskKey` both null),
  * one board (`projectSlug` alone) or one task (`projectSlug` + `taskKey`).
  * The binding is what the toolkit defaults to and what the server reads into
@@ -37,7 +37,7 @@ export interface ControllerConversation {
   userLabel: string;
   /** Null = instance scope; a slug binds board-scope context. */
   projectSlug: string | null;
-  /** Ruling 121: with `projectSlug`, anchors the conversation to ONE task. */
+  /** Ruling 249: with `projectSlug`, anchors the conversation to ONE task. */
   taskKey: string | null;
   title: string;
   createdAt: string;
@@ -115,22 +115,22 @@ export interface ControllerMessage {
   userId: string | null;
   text: string;
   runId: string | null;
-  /** Ruling 121: the page a USER message was sent from (pathname + query);
+  /** Ruling 249: the page a USER message was sent from (pathname + query);
    *  null on controller rows and on messages that predate the dock. */
   surface: string | null;
-  /** Ruling 465: on a controller row, the user message it answers; null on
+  /** Ruling 252: on a controller row, the user message it answers; null on
    *  user rows and on a note that answers no message. */
   replyTo: string | null;
-  /** Ruling 527: on a user message a running turn read at one of its steps,
+  /** Ruling 251: on a user message a running turn read at one of its steps,
    *  the user message that turn answered; null on every other row. */
   steeredInto: string | null;
   createdAt: string;
-  /** Ruling 573: the files a person sent with this USER message, by name and
+  /** Ruling 258: the files a person sent with this USER message, by name and
    *  size (never the bytes); absent when there are none. */
   files?: readonly MessageFile[];
 }
 
-/** Ruling 573: one file sent with a controller message, as a transcript and a
+/** Ruling 258: one file sent with a controller message, as a transcript and a
  *  turn read it. The bytes stay in the row until the serving route or the
  *  controller's reader asks for them. */
 export interface MessageFile {
@@ -179,13 +179,13 @@ const messageRowSchema = z
     text: z.string(),
     run_id: z.string().nullable(),
     surface: z.string().nullable(),
-    // Ruling 465: optional at the boundary so a root the healer has not
+    // Ruling 252: optional at the boundary so a root the healer has not
     // reached yet still reads (as "not linked").
     reply_to: z.string().nullable().optional(),
-    // Ruling 527: optional for the same reason.
+    // Ruling 251: optional for the same reason.
     steered_into: z.string().nullable().optional(),
     created_at: z.string(),
-    // Ruling 573: the message's files, as a JSON array a read that names
+    // Ruling 258: the message's files, as a JSON array a read that names
     // `MESSAGE_FILES_COLUMN` adds; absent from a read that does not.
     files_json: z.string().optional(),
   })
@@ -209,7 +209,7 @@ const messageRowSchema = z
   });
 
 /**
- * Ruling 573: a message's files in the same statement as the message (`m`),
+ * Ruling 258: a message's files in the same statement as the message (`m`),
  * as a JSON array of their names and sizes, so the transcript's reads cost
  * no statement more than they did. Never the bytes.
  */
@@ -240,7 +240,7 @@ export function canAccessConversation(
  *  transcript is scoped to what ITS user was entitled to hear.
  *
  *  It lives beside `canAccessConversation` rather than in the run engine
- *  (ruling 107): the run-log route, the session export and the controller's own
+ *  (ruling 269): the run-log route, the session export and the controller's own
  *  `viberr_ops` diagnostics all ask it, and importing the engine to answer a
  *  conversation-access question made a cycle out of a lookup. */
 export function canReadControllerRunLog(
@@ -286,7 +286,7 @@ export interface ControllerRunRoute {
 }
 
 /**
- * Ruling 99: a controller turn has no task scope (`project_slug = ''`), so its
+ * Ruling 249: a controller turn has no task scope (`project_slug = ''`), so its
  * console lines and lifecycle flips cannot ride the task-routed run stream.
  * They route to the conversation's owner instead: the one person whose page
  * is tailing them (a supervising org admin reads the same console off the
@@ -329,7 +329,7 @@ export function requireConversation(
   return conversation;
 }
 
-/** The three shapes a conversation can be bound to (ruling 121). */
+/** The three shapes a conversation can be bound to (ruling 249). */
 export type ConversationScope = "instance" | "board" | "task";
 
 export function conversationScopeOf(binding: {
@@ -345,7 +345,7 @@ export interface CreateConversationInput {
   userId: string;
   userLabel: string;
   projectSlug?: string | null;
-  /** Ruling 121: anchors the conversation to one task of `projectSlug`. */
+  /** Ruling 249: anchors the conversation to one task of `projectSlug`. */
   taskKey?: string | null;
 }
 
@@ -380,7 +380,7 @@ export interface ListConversationsInput {
   /** Scope filter: undefined = all scopes; null = instance-only; slug = that
    *  project's conversations (board AND task ones, unless `taskKey` narrows). */
   projectSlug?: string | null;
-  /** Ruling 121: undefined = any binding under `projectSlug`; null = the
+  /** Ruling 249: undefined = any binding under `projectSlug`; null = the
    *  board's own threads only; a key = that task's threads only. */
   taskKey?: string | null;
   limit?: number;
@@ -413,7 +413,7 @@ export function listConversations(
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
   const rows = db
     .prepare(
-      // Ruling 121 hangs "the newest thread of this scope" on rows[0], and
+      // Ruling 256 hangs "the newest thread of this scope" on rows[0], and
       // `created_at` has millisecond resolution: two threads made in the same
       // millisecond tie, and the sort index then breaks the tie by insertion
       // order ASCENDING — returning the OLDER one first. `rowid DESC` is the
@@ -442,7 +442,7 @@ export function listMessages(
 }
 
 /**
- * Ruling 465 (F40-10): the newest `limit` messages of the conversation AS IT
+ * Ruling 252 (F40-10): the newest `limit` messages of the conversation AS IT
  * STOOD for the user message `answered`, in `seq` order. The digest a turn
  * carries used to be the newest rows with no bound at all, so a message queued
  * BEHIND the running turn was in that turn's prompt, clipped to 600
@@ -453,7 +453,7 @@ export function listMessages(
  * message up to and including it, every reply to one of those (a reply to an
  * earlier message can land after `answered` was queued), and every unlinked
  * note written before it. A later message, and a refusal a later message got,
- * are not in it. Ruling 527: a message that steered one of those turns is in
+ * are not in it. Ruling 251: a message that steered one of those turns is in
  * it too, whatever its own `seq`: it was part of that turn.
  */
 export function messagesUpTo(
@@ -494,7 +494,7 @@ export function messagesUpTo(
 /** The longest surface string a message keeps (a pathname plus a query). */
 const MESSAGE_SURFACE_MAX_CHARS = 400;
 
-/** Ruling 121: a surface is an in-app path (`/…`) and nothing else — a stray
+/** Ruling 249: a surface is an in-app path (`/…`) and nothing else — a stray
  *  absolute URL, a protocol-relative one or control characters never reach
  *  the row or the prompt. */
 export function normalizeSurface(raw: string | null | undefined): string | null {
@@ -516,10 +516,10 @@ export interface AppendMessageInput {
   runId?: string | null;
   /** Stored on USER rows only; a controller row never carries one. */
   surface?: string | null;
-  /** Ruling 465: on a CONTROLLER row, the user message it answers. Every
+  /** Ruling 252: on a CONTROLLER row, the user message it answers. Every
    *  writer of a reply, refusal or note that answers a message passes it. */
   replyTo?: string | null;
-  /** Ruling 573: the files a person sent with a USER message, already checked
+  /** Ruling 258: the files a person sent with a USER message, already checked
    *  by the upload's rules (`checkAttachmentBatch`). They are stored with the
    *  message or not at all, under names unique in the conversation. */
   files?: readonly { name: string; data: Uint8Array }[];
@@ -553,7 +553,7 @@ export function appendMessage(
   const surface =
     input.author === "user" ? normalizeSurface(input.surface) : null;
   const replyTo = input.author === "controller" ? (input.replyTo ?? null) : null;
-  // Ruling 573: a first message of files alone is titled by their names.
+  // Ruling 258: a first message of files alone is titled by their names.
   const title =
     conversation.title ||
     (input.author === "user"
@@ -598,7 +598,7 @@ export function appendMessage(
        WHERE id = ?`,
     ).run(now, now, title, input.conversationId);
   };
-  // Ruling 573: a message and its files commit together, inside the caller's
+  // Ruling 258: a message and its files commit together, inside the caller's
   // transaction when there is one.
   if (db.isTransaction) write();
   else withTransaction(db, write);
@@ -609,7 +609,7 @@ export function appendMessage(
   );
 }
 
-/** Ruling 573: a user message's files, each under a name no other file of the
+/** Ruling 258: a user message's files, each under a name no other file of the
  *  conversation holds (case-folded), as a task's attachments name a relayed
  *  file: `screenshot.png`, then `screenshot-2.png`. */
 function storeMessageFiles(
@@ -623,7 +623,7 @@ function storeMessageFiles(
   const taken = new Set(
     (db.prepare(`SELECT name FROM controller_message_files WHERE conversation_id = ?`).all(conversationId) as {
       name: string;
-      // Ruling 675: by composed name, so a file sent before names were stored
+      // Ruling 258: by composed name, so a file sent before names were stored
       // composed and one sent now never read as the same name twice.
     }[]).map((f) => storedFileName(f.name).toLowerCase()),
   );
@@ -638,7 +638,7 @@ function storeMessageFiles(
   }
 }
 
-/** Ruling 573: one file sent in a conversation, with its bytes, for the
+/** Ruling 258: one file sent in a conversation, with its bytes, for the
  *  serving route and the controller's reader. Null when the conversation has
  *  no such file. */
 export interface StoredMessageFile {
@@ -667,7 +667,7 @@ const storedFileSchema = z
     }),
   );
 
-/** Ruling 573: a file by its id, for the serving route (which then asks
+/** Ruling 258: a file by its id, for the serving route (which then asks
  *  whether the viewer may read its conversation). */
 export function getMessageFile(db: DatabaseSync, fileId: string): StoredMessageFile | null {
   const row = db
@@ -676,7 +676,7 @@ export function getMessageFile(db: DatabaseSync, fileId: string): StoredMessageF
   return row ? storedFileSchema.parse(row) : null;
 }
 
-/** Ruling 573: a conversation's file by its name, for the controller's
+/** Ruling 258: a conversation's file by its name, for the controller's
  *  reader. */
 export function findMessageFile(
   db: DatabaseSync,
@@ -693,7 +693,7 @@ export function findMessageFile(
   const wanted = name.trim();
   let row = named(wanted);
   if (!row) {
-    // Ruling 675: a file sent before names were stored composed is found by
+    // Ruling 258: a file sent before names were stored composed is found by
     // the name as a reader types it.
     const stored = storedNameAmong(listConversationFileNames(db, conversationId), wanted);
     if (stored !== null) row = named(stored);
@@ -701,7 +701,7 @@ export function findMessageFile(
   return row ? storedFileSchema.parse(row) : null;
 }
 
-/** Ruling 573: every file name a conversation holds, oldest first, for a
+/** Ruling 258: every file name a conversation holds, oldest first, for a
  *  reader asked for one it does not hold. */
 export function listConversationFileNames(db: DatabaseSync, conversationId: string): string[] {
   // SAFETY: `name` is the TEXT NOT NULL column of the table this selects.
@@ -713,7 +713,7 @@ export function listConversationFileNames(db: DatabaseSync, conversationId: stri
 }
 
 /**
- * Ruling 527: these user messages were read by the running turn that answers
+ * Ruling 251: these user messages were read by the running turn that answers
  * `into`, at one of its steps. They get no reply of their own; the turn's
  * reply answers them with it, and the transcript shows them in that turn.
  */
@@ -732,7 +732,7 @@ export function markSteered(
 }
 
 /**
- * Ruling 527: take back a user message nothing has read yet. The engine calls
+ * Ruling 251: take back a user message nothing has read yet. The engine calls
  * this only for a message its lease still holds (queued behind the turn, or
  * waiting for the turn's next step), which no reply names and no turn has
  * read. The row goes: nothing answered or acted on it, and the person gets its
@@ -758,7 +758,7 @@ export function retractMessage(
 }
 
 /**
- * Ruling 274 (pass 37, F37-107): a deleted project releases its conversations
+ * Ruling 249 (pass 37, F37-107): a deleted project releases its conversations
  * instead of leaving them bound to a slug that no longer exists.
  *
  * `controller_conversations` is app-owned state with no FK cascade, the same
@@ -774,10 +774,10 @@ export function retractMessage(
  *
  * Released, not deleted: the transcript is the record of what somebody asked
  * and what the controller did, and this product does not destroy records
- * (ruling 17's posture, and an epic's: a done or cancelled epic stays
- * readable, ruling 503). The conversation becomes instance-scoped, which is a real
+ * (ruling 233's posture, and an epic's: a done or cancelled epic stays
+ * readable, ruling 272). The conversation becomes instance-scoped, which is a real
  * scope, and carries a message saying why so its author is not left wondering
- * where the board went. Ruling 525 lets a PERSON delete a conversation (its
+ * where the board went. Ruling 250 lets a PERSON delete a conversation (its
  * starter, an org admin, or a project admin one about their project); deleting a
  * project is nobody's decision about anyone's conversation, so it still releases.
  */

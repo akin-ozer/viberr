@@ -31,7 +31,7 @@ import { appendPolicyNote, loadProjectContext, reprojectTask, taskRef } from "./
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**
- * Ruling 488 (F40-67): work on one task reaches another task in the same
+ * Ruling 71 (F40-67): work on one task reaches another task in the same
  * project, on the record.
  *
  * Live on WEB-9 the goal the controller wrote told the task to post its
@@ -51,14 +51,14 @@ import type { TaskActionContext } from "./task-action-core.server";
 /** How many relay entries one specialist outcome may carry. */
 export const RELAY_MAX_ENTRIES = 2;
 
-/** Ruling 538: how many files one relay may carry. */
+/** Ruling 71: how many files one relay may carry. */
 const RELAY_MAX_FILES = 10;
 
 /** One relay a specialist asks for in its outcome. */
 export interface RelayEntry {
   taskKey: string;
   text: string;
-  /** Ruling 538: the names of this task's attachments to put on that task. */
+  /** Ruling 71: the names of this task's attachments to put on that task. */
   files?: string[];
 }
 
@@ -79,7 +79,7 @@ export interface RelayRequest {
   fromTaskKey: string;
   toTaskKey: string;
   text: string;
-  /** Ruling 538: names of the source task's attachments to copy onto the
+  /** Ruling 71: names of the source task's attachments to copy onto the
    *  target, where its agents read them as that task's own files. */
   files?: readonly string[];
   author: RelayAuthor;
@@ -106,7 +106,7 @@ function relayHeader(fromTaskKey: string, by: string): string {
   return `**From ${fromTaskKey} (${by}):**`;
 }
 
-/** Ruling 538: a relay's own comment, told by the header only
+/** Ruling 71: a relay's own comment, told by the header only
  *  {@link relayToTask} writes. Its files were carried, never a run's work.
  *  The author's name may itself hold parentheses ("Reviewer (Opus)"), so the
  *  header is the whole first line, closed by `):**`. */
@@ -157,7 +157,7 @@ function projectHoldingKey(
  * Refused, with the sentence the relayer reads: an empty text, the source
  * task itself, a task that does not exist, a task in another project, a
  * closed target (Done or archived: its operator refuses every trigger, ruling
- * 177, so a relay there would wake nobody and read as delivered to finished
+ * 52, so a relay there would wake nobody and read as delivered to finished
  * work), and an archived project. The text takes a comment's limits: none on
  * length (the record keeps a comment whole and the timeline clamps it, owner
  * ruling 2026-08-31), and none of the operator's guardrails, which would drop
@@ -213,7 +213,7 @@ export async function relayToTask(
         `Nothing was relayed: a closed task's operator starts no run, so the text would reach nobody.`,
     };
   }
-  // Ruling 538: every file is checked before anything is written, so a relay
+  // Ruling 71: every file is checked before anything is written, so a relay
   // lands whole or not at all.
   const staged = stageRelayFiles(req.projectSlug, from, to, req.files ?? [], ctx.dataRoot);
   if ("refused" in staged) {
@@ -240,8 +240,8 @@ export async function relayToTask(
     toAgent: true,
     evidence: null,
   };
-  // Ruling 538: the comment claims what it carried, so the files render on it
-  // and no run in flight on the target is ever credited with them. Ruling 558:
+  // Ruling 71: the comment claims what it carried, so the files render on it
+  // and no run in flight on the target is ever credited with them. Ruling 77:
   // the names are held from before the files land until the comment is down,
   // and a comment that cannot be written takes the files back up.
   if (carried.length > 0) comment.attachments = carried;
@@ -310,7 +310,7 @@ export async function relayToTask(
   };
 }
 
-/** Ruling 557: a take, asked for by the task that needs the files. */
+/** Ruling 135: a take, asked for by the task that needs the files. */
 export interface TakeRequest {
   projectSlug: string;
   /** The task the files are taken onto: the one the operator works. */
@@ -324,7 +324,7 @@ export interface TakeRequest {
 }
 
 /**
- * Ruling 557: the other direction. A task that waits on another works from
+ * Ruling 135: the other direction. A task that waits on another works from
  * what that one made, and only the maker's side could hand it over:
  * `relay_to_task` pushes, from a task whose operator is running. Live when
  * AWSC-3 (the benchmark design) was accepted, its operator had relayed
@@ -335,10 +335,10 @@ export interface TakeRequest {
  * So the task that needs the files takes them. Named attachments of another
  * task in this project are copied onto this one under a relay's own header
  * ("From AWSC-3 (operator):"), so the files render on that comment and no run
- * on this task is credited with them (ruling 538), and the source task records
+ * on this task is credited with them (ruling 71), and the source task records
  * what was taken. The source may be closed: its work is done, and its files are
  * what it made. Every file passes the relay's checks (named, present, no link,
- * an upload's kinds and size, at most ten, never an overwrite), all or none.
+ * within the upload's size limits, at most ten, never an overwrite), all or none.
  */
 export async function takeFromTask(
   db: DatabaseSync,
@@ -420,7 +420,7 @@ export async function takeFromTask(
     evidence: null,
     attachments: carried,
   };
-  // Ruling 558: the names are held from before the files land until the
+  // Ruling 77: the names are held from before the files land until the
   // claiming comment is down, and a comment that cannot be written takes the
   // files back up.
   await landCarriedFiles(ctx, req.projectSlug, to, staged.files, comment);
@@ -466,7 +466,7 @@ export async function takeFromTask(
 }
 
 /**
- * Ruling 558: put a relay's or a take's files on the target and write the
+ * Ruling 77: put a relay's or a take's files on the target and write the
  * comment that claims them, as one step. The names are held until the comment
  * is down; if it cannot be written, the files that landed are taken back up,
  * so none is left on the target unclaimed for a completion to credit.
@@ -544,9 +544,9 @@ interface StagedRelayFile {
 }
 
 /**
- * Ruling 538: read and check every file a relay names, writing nothing. A
- * name the source task does not hold, a kind the target could neither show
- * nor read back (the upload's own rules), and more than
+ * Ruling 71: read and check every file a relay names, writing nothing. A
+ * name the source task does not hold, a file past the upload's size limits,
+ * and more than
  * {@link RELAY_MAX_FILES} are refused by name. A target that already holds
  * the same bytes under the name keeps its file; one that holds other bytes
  * gets the relayed file under the next free name, never an overwrite.
@@ -571,7 +571,7 @@ function stageRelayFiles(
     } catch {
       return { refused: `\`${name}\` is not a file name ${from} can hold.` };
     }
-    // Ruling 552: through no link, and no bigger than an upload, checked
+    // Ruling 19: through no link, and no bigger than an upload, checked
     // before a byte is read. A link an agent planted here would otherwise copy
     // a file only the server may read onto another task, as an ordinary file.
     const read = readAttachmentBytes(abs, MAX_UPLOAD_BYTES);
@@ -590,7 +590,7 @@ function stageRelayFiles(
     }
     if ("tooLarge" in read) return { refused: `\`${name}\` cannot be relayed.` };
     const data = read.bytes;
-    // Ruling 675: the name it lands under is the composed one the store
+    // Ruling 76: the name it lands under is the composed one the store
     // writes, so the comment that claims it names the file that is there.
     let as = storedFileName(name);
     let reused = false;
@@ -626,7 +626,7 @@ function relayFilesSentence(files: readonly StagedRelayFile[]): string {
 }
 
 /**
- * Ruling 488: a specialist's `relay` entries, posted when its run completes.
+ * Ruling 202: a specialist's `relay` entries, posted when its run completes.
  *
  * The specialist gets no post tool of its own: its reported outcome carries
  * the entries and this posts each through {@link relayToTask}, the operator's

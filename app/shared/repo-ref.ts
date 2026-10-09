@@ -1,5 +1,5 @@
 /**
- * Ruling 700(a): the one shape a project's repository takes, `owner/name` as
+ * Ruling 225: the one shape a project's repository takes, `owner/name` as
  * GitHub allows it. The owner is letters, digits and single hyphens, neither
  * first nor last, up to 39 characters; the name is letters, digits, `.`, `_`
  * and `-`, up to 100, and never `.` or `..`. Every checkout path is
@@ -16,7 +16,7 @@ export const REPO_SLUG_RE =
  * URL (with or without the scheme, `www.` or a trailing `.git`). Null for
  * anything that is not one. One reading for the settings door that changes a
  * project's repository and for the operator's repository question (ruling
- * 672), so the same text is a repository to both.
+ * 224), so the same text is a repository to both.
  *
  * Client-safe: no server import.
  */

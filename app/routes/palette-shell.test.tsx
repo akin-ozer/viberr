@@ -6,7 +6,7 @@ import { ToastProvider } from "~/ui/toast";
 import PaletteShell from "./palette-shell";
 
 /**
- * Ruling 145 — the layout that puts the app header on the standalone pages.
+ * Ruling 294 — the layout that puts the app header on the standalone pages.
  *
  * The loader decides WHAT the header shows (`palette-shell.server.test.ts`);
  * this is the other half: the header is on the page routes and absent from the
@@ -19,7 +19,7 @@ import PaletteShell from "./palette-shell";
 afterEach(cleanup);
 
 /** The header as the layout's loader answers it, so the fixture cannot drift
- *  from what a page route is handed (ruling 457 took the bell's list out). */
+ *  from what a page route is handed (ruling 300 took the bell's list out). */
 type ShellHeader = NonNullable<Parameters<typeof PaletteShell>[0]["loaderData"]["header"]>;
 
 const HEADER: ShellHeader = {
@@ -70,7 +70,7 @@ function renderShell(
   return render(<Stub initialEntries={[path]} />);
 }
 
-describe("the standalone-page layout mounts the header (ruling 145)", () => {
+describe("the standalone-page layout mounts the header (ruling 294)", () => {
   it("renders it on a page route, above the page", () => {
     const { container, getByRole, getByTestId } = renderShell(
       "/org/settings",

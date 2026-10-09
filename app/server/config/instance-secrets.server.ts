@@ -13,7 +13,7 @@ import path from "node:path";
 import { z } from "zod";
 
 /**
- * Ruling 504: a starter's `docker compose up` needs no `.env`.
+ * Ruling 38: a starter's `docker compose up` needs no `.env`.
  *
  * The two secrets the app cannot run without, VIBERR_SESSION_SECRET and
  * VIBERR_SECRET_ENCRYPTION_KEY, are generated when the environment leaves them
@@ -24,7 +24,7 @@ import { z } from "zod";
  * key, and an environment that sets both reads and writes nothing here.
  *
  * The file is the server's: 0600, inside the `state/` that boot holds at 0700
- * (`enforceStoreLayout`), so no agent uid can open it (ruling 460). A backup
+ * (`enforceStoreLayout`), so no agent uid can open it (ruling 15). A backup
  * carries it (`backup.server.ts`). It is never regenerated: a file that cannot
  * be read stops the process, because a new key would leave every secret sealed
  * under the old one unreadable.
@@ -59,7 +59,7 @@ export function instanceSecretsPath(dataRoot: string): string {
 function unreadable(file: string, why: string): Error {
   return new Error(
     `${file} holds the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this ` +
-      `instance generated for itself (ruling 504), and it ${why}. It is never ` +
+      `instance generated for itself (ruling 38), and it ${why}. It is never ` +
       "regenerated, because a new key would leave every sealed secret unreadable: " +
       "restore it from a backup, or set both variables in the environment.",
   );

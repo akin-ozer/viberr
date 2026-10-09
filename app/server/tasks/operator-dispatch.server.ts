@@ -1,5 +1,5 @@
 /**
- * The operator running an agent (ruling 656): dispatching an agent on a task
+ * The operator running an agent (ruling 13(a)): dispatching an agent on a task
  * now (`operatorDispatchAgent`, with the selection it records) or on a
  * schedule, and cancelling a schedule.
  */
@@ -163,7 +163,7 @@ function recordAgentSelectionTrace(
     const candidates = listDeployedSpecialists(input.projectSlug, ctx).map(
       (s) => ({
         profileId: s.id,
-        // Ruling 133: may it RUN here (declared, or the engaged deliverer).
+        // Ruling 181: may it RUN here (declared, or the engaged deliverer).
         eligibleForStage: stage
           ? runEligibilityFor(s, engagements, s.id, stage, board).ok
           : false,
@@ -224,7 +224,7 @@ function resolveDeliversIntent(
   const delivering = deliveringEngagement(fm);
   if (delivering?.profileId === agent.id) return true;
   if (fm.engagements.some((e) => e.profileId === agent.id)) return false;
-  // Ruling 556: a reviewer the project requires is run to review, never
+  // Ruling 89: a reviewer the project requires is run to review, never
   // handed delivery by default, whatever its grants.
   if (readRequiredReviewers(projectSlug, ctx).some((rule) => rule.profileId === agent.id)) return false;
   return delivering === null && agent.capabilities.delivery;
@@ -259,10 +259,10 @@ export async function operatorDispatchAgent(
     delivers?: boolean;
     /** The operator's stated reason, when it gave one. */
     reason?: string;
-    /** Ruling 421: this run puts ruling 410's completeness question, so the
+    /** Ruling 93: this run puts ruling 93's completeness question, so the
      *  verdict it returns is recorded as the reviewer's complete set. */
     completeness?: boolean;
-    /** Ruling 583: this run must not judge, so its verdict tool is withheld
+    /** Ruling 124: this run must not judge, so its verdict tool is withheld
      *  and nothing it writes is read as a verdict. */
     noVerdict?: boolean;
   },
@@ -288,7 +288,7 @@ export async function operatorDispatchAgent(
   // (1) `delivers: true` for a profile with no repo-write grant — the dispatch
   // refuses it at both engage doors; filing a card for it would strand a
   // maintainer's Apply on that refusal.
-  // Ruling 535: an agent that can post files on the task can own a results
+  // Ruling 128: an agent that can post files on the task can own a results
   // task's delivery without a repo-write grant.
   if (input.delivers === true && !canOwnDelivery(agent, input.delivers)) {
     return { outcome: "noop", message: cannotOwnDeliverySentence(agent.name) };
@@ -319,7 +319,7 @@ export async function operatorDispatchAgent(
     agent,
     input.delivers,
   );
-  // Ruling 556: nor to a reviewer the project requires. The engage refuses it
+  // Ruling 128: nor to a reviewer the project requires. The engage refuses it
   // (`assignSpecialist`), and a card for it would strand Apply on that refusal.
   if (delivers && currentDeliverer !== input.profileId) {
     const reviews = readRequiredReviewers(input.projectSlug, ctx).filter(
@@ -373,8 +373,8 @@ export async function operatorDispatchAgent(
   };
   if (input.reason) selection.reason = input.reason;
   recordAgentSelectionTrace(db, ctx, selection);
-  // Ruling 665: only a deliverer that writes the repository owns a branch. One
-  // whose delivery is the files it saves on the task (ruling 535) never puts a
+  // Ruling 228: only a deliverer that writes the repository owns a branch. One
+  // whose delivery is the files it saves on the task (ruling 128) never puts a
   // commit on one: live, the AWS board left 91 branches on its repository,
   // none of them ahead of `main`.
   if (delivers && agent.capabilities.delivery) {
@@ -382,7 +382,7 @@ export async function operatorDispatchAgent(
     // task-key branch exists on GitHub. Best-effort, degrades cleanly.
     await ensureTaskBranchBestEffort(db, ctx, input.projectSlug, input.taskKey);
   }
-  // Ruling 152(c) (pass 35, G35-4): a HOLD is the task's state ruling the
+  // Ruling 151 (pass 35, G35-4): a HOLD is the task's state ruling the
   // dispatch out for now, which is exactly what `noop` means — never a
   // failure. The plan says so and the Codex operator makes it load-bearing:
   // its plan executor ABORTS every remaining action on a thrown one and writes
@@ -392,8 +392,8 @@ export async function operatorDispatchAgent(
   // The retry is already on the task's schedule, so the message ends the
   // subject rather than inviting a packet.
   const heldNoop = (error: DispatchHeldError): OperatorActionResult => {
-    // Ruling 207(h): the hold is scoped to (backend, TASK OWNER) — every run on
-    // this task bills that one person (ruling 127) — so "pick a <other>
+    // Ruling 124: the hold is scoped to (backend, TASK OWNER) — every run on
+    // this task bills that one person (ruling 137) — so "pick a <other>
     // profile" only helps when the OWNER has the other backend connected. When
     // they do not, the operator follows the advice, the dispatch is refused on
     // the owner's credential, and the failure opens the very packet this
@@ -436,7 +436,7 @@ export async function operatorDispatchAgent(
       if (isDispatchHeld(error)) return heldNoop(error);
       throw error;
     }
-    // Ruling 263 (F37-93): "and started its run" was said for a run that was
+    // Ruling 152 (F37-93): "and started its run" was said for a run that was
     // refused before any process existed, and for one parked behind the cap.
     // The operator plans its next move on this sentence.
     if (prompted.outcome === "refused") {
@@ -499,7 +499,7 @@ export async function operatorDispatchAgent(
   };
 }
 
-/** Ruling 487: the refusal both schedule verbs give an operator whose
+/** Ruling 125: the refusal both schedule verbs give an operator whose
  *  `dispatch-agents` grant is not `direct`, or null when it is. */
 function scheduleGrantRefusal(authority: OperatorAuthority): OperatorActionResult | null {
   const g = dispatchGate(authority);
@@ -516,9 +516,9 @@ function scheduleGrantRefusal(authority: OperatorAuthority): OperatorActionResul
 }
 
 /**
- * Ruling 487: why this agent could not be dispatched on the task NOW, or null.
+ * Ruling 125: why this agent could not be dispatched on the task NOW, or null.
  * The same gates its immediate `run_agent` meets at the dispatcher: a
- * dependency hold (ruling 186) and the stage the task stands at (ruling 133:
+ * dependency hold (ruling 56) and the stage the task stands at (ruling 181:
  * the engaged deliverer runs at every stage, anyone else at the stages it
  * declares). A schedule is that dispatch with a date on it, so it may not
  * reach what the dispatch could not.
@@ -547,9 +547,9 @@ function dispatchRefusalNow(
 }
 
 /**
- * Ruling 487 (F40-65): the operator schedules a future run on its OWN task:
+ * Ruling 125 (F40-65): the operator schedules a future run on its OWN task:
  * its own re-run, or a deployed agent's run with a directive, 1 minute to 28
- * days out. It is the controller's `schedule_task_action` (ruling 153) at the
+ * days out. It is the controller's `schedule_task_action` (ruling 264) at the
  * operator's door: the same `schedules[]` entry, the same firing path (the
  * profile deployed when it fires), the same `task.schedule.created` row and
  * "Scheduled:" line, attributed to the operator.
@@ -627,7 +627,7 @@ export async function operatorScheduleRun(
   try {
     scheduled = await scheduleTaskAction(db, schedInput, OPERATOR_AUDIT_ACTOR, opCtx(ctx));
   } catch (error) {
-    // A closed task refuses with the closure sentence (ruling 177): the
+    // A closed task refuses with the closure sentence (ruling 52): the
     // task's state, not the policy.
     if (error instanceof AppError && error.status === 400) {
       return { outcome: "noop", message: error.userMessage };
@@ -645,7 +645,7 @@ export async function operatorScheduleRun(
 }
 
 /**
- * Ruling 487: cancel a pending run the operator scheduled on its OWN task. The
+ * Ruling 125: cancel a pending run the operator scheduled on its OWN task. The
  * task is the one this toolkit is bound to, so another task's entry is simply
  * not there; a person's entry (the task page, the controller) is theirs to
  * cancel, never the operator's.

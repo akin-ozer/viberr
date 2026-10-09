@@ -47,7 +47,7 @@ describe("resolveStoreSegment — traversal containment (F10-18)", () => {
   });
 });
 
-describe("ruling 675: a typed name finds the file in whichever Unicode form it was stored", () => {
+describe("ruling 76: a typed name finds the file in whichever Unicode form it was stored", () => {
   // The name a Mac's browser sends: every accented letter as a base letter
   // and a combining mark.
   const composed = "Aidea _ İçerik ve Eğitim Üretim _ AWS Maliyet Teklifi.pdf";

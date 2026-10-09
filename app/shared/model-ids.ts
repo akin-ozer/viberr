@@ -1,7 +1,7 @@
 /**
  * The STATIC half of the server's `isKnownModel` acceptance rule for Claude
  * model ids, shared so the client-side model pickers can ask the same
- * question (ruling 106 review, D1). The server's full check additionally
+ * question (ruling 270 review, D1). The server's full check additionally
  * consults the live `supportedModels()` cache; that part is process-local by
  * nature, but live ids are dated ids in practice, so this predicate covers
  * everything a picker must not treat as "unknown".

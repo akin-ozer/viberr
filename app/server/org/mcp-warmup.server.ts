@@ -120,7 +120,7 @@ export function startMcpWarmup(
            WHERE id = ? AND target = ?`,
           // R20-4: the warm-up finishing is this server's first-ever success —
           // stamp it (idempotently) so a later cold probe is never mistaken for
-          // a fresh first run. Ruling 176: and its tool names reach the editor.
+          // a fresh first run. Ruling 188: and its tool names reach the editor.
         ).run(disc.tools, now, now, JSON.stringify(disc.toolNames), now, input.id, input.target);
         logger.info("mcp background install finished; server answered", {
           mcp: input.name,

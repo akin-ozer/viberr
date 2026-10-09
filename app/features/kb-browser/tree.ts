@@ -8,7 +8,7 @@
  *
  * Exported for org-settings rows per the spec: countKbFiles (`prettySize`
  * moved to `~/shared/text/byte-size`, which the composers' file trays share)
- * (the folder glyph is `Icon`'s `folder`, ruling 458(f)).
+ * (the folder glyph is `Icon`'s `folder`, ruling 297).
  */
 
 export type StoreNode =

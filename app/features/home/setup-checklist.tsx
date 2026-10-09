@@ -5,20 +5,20 @@ import { Icon } from "~/ui/icon";
 import type { HomeSetupStep } from "./home-query.server";
 
 /**
- * Ruling 532: Home's setup checklist. A numbered row per step, the steps the
+ * Ruling 322: Home's setup checklist. A numbered row per step, the steps the
  * viewer still owes open and the rest checked, until every one is done and the
  * card leaves Home (the loader sends null). The first step the viewer can take
  * leads: its sentence shows and its action is the primary one. Every other
  * open step keeps its own action in reach, so the order is advice, not a gate.
- * Ruling 667: no step waits on another, since a board that delivers results
+ * Ruling 322: no step waits on another, since a board that delivers results
  * needs no GitHub connection.
  *
  * Each action opens the place the thing is done: GitHub and the new account in
  * Instance settings with their dialog already open, Claude or Codex on the
- * person's own Agent accounts (ruling 127: the only place either is connected),
+ * person's own Agent accounts (ruling 137: the only place either is connected),
  * and the first project in Home's own dialog.
  *
- * Ruling 621: the close in the head hides the card for the rest of the
+ * Ruling 322: the close in the head hides the card for the rest of the
  * session, and it is back with the next one while a step is still open. It
  * comes with the first project: on a Home with no project the card is the
  * page's only way to start one, and the loader keeps it there.
@@ -163,7 +163,7 @@ function stepView(
             : null,
         action: (
           // `AGENT_ACCOUNTS_ANCHOR` (shared/page-anchors.ts), spelled here as
-          // ruling 457 lets a closure with no room spell a label: importing it
+          // ruling 11 lets a closure with no room spell a label: importing it
           // put that module on Home as a chunk of its own and split the one
           // the task page and the controller share. The Home and Profile
           // tests hold the two ends to one spelling.

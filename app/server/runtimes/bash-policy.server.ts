@@ -1,5 +1,5 @@
 /**
- * Ruling 101(e), amended 2026-09-11 (Option D PR 5): argument-level denies
+ * Ruling 219(a), amended 2026-09-11 (Option D PR 5): argument-level denies
  * carry a model-visible reason and cover wrapped command shapes; the denylist
  * remains the fence.
  *
@@ -13,7 +13,7 @@
  *
  * It is coverage, not containment: a script that pushes, or a binary copied
  * under another name, still runs, and the container plus the server-owned
- * delivery gate stay the boundary (ruling 93).
+ * delivery gate stay the boundary (ruling 144).
  */
 
 /** The command prefixes a run's denylist names as `Bash(<prefix>:*)`. */

@@ -20,7 +20,7 @@ import {
 } from "./template-propagation.server";
 
 /**
- * Ruling 156 (pass 35, F35-7): a library deploy COPIES the template's grants
+ * Ruling 177 (pass 35, F35-7): a library deploy COPIES the template's grants
  * onto `project.md`, a run mounts that copy, and a template edit never reached
  * it. This module is the one writer of a copy's grants from its template.
  */
@@ -222,7 +222,7 @@ describe("propagateTemplateResources", () => {
   });
 
   /**
-   * Ruling 479(c) (F40-38): the Agents page offers "Use the template's grants"
+   * Ruling 177 (F40-38): the Agents page offers "Use the template's grants"
    * on the Operator too (its drift is computed like any profile's), and every
    * press answered "No such agent profile." about the profile on screen,
    * because this writer took specialist templates only. Canary: restore the
@@ -289,7 +289,7 @@ describe("propagateTemplateResources", () => {
   });
 });
 
-describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
+describe("saveGlobalAgentProfile reports and propagates (ruling 177)", () => {
   it("names the diverged copy after a template edit, and rewrites it with propagate: true", async () => {
     const store = await storeWithDeployedDeveloper();
     const edited = await grantOnTemplate(store, ["github"]);
@@ -299,7 +299,7 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
       drift: { missing: { mcps: ["github"] } },
     });
     expect(edited.propagated).toEqual([]);
-    // Ruling 277: the same edit also left this copy's SUMMARY behind — a
+    // Ruling 177: the same edit also left this copy's SUMMARY behind — a
     // deployment snapshots it and `propagate` rewrites only the grants. This
     // fixture always had that drift; nothing said so until now.
     expect(edited.toast).toBe(
@@ -325,12 +325,12 @@ describe("saveGlobalAgentProfile reports and propagates (ruling 156)", () => {
 });
 
 /**
- * Ruling 467 (pass 40, F40-11): the org door's `propagate` also carries a
+ * Ruling 177 (pass 40, F40-11): the org door's `propagate` also carries a
  * persona the save CHANGED, and the toast names the copies it rewrote; the
  * summary is never propagated, and a save that leaves the persona alone
  * rewrites none.
  */
-describe("saveGlobalAgentProfile propagates a changed persona (ruling 467)", () => {
+describe("saveGlobalAgentProfile propagates a changed persona (ruling 177)", () => {
   async function savePersona(store: TestStore, persona: string, propagate: boolean) {
     return saveGlobalAgentProfile(
       store.db,

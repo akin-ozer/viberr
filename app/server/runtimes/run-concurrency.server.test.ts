@@ -46,7 +46,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: every run here bills VIB-1's owner, so he has to have the
+  // Ruling 137: every run here bills VIB-1's owner, so he has to have the
   // backend connected or the cap would never be reached — each run would be
   // refused before it took a slot.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
@@ -111,7 +111,7 @@ describe("run concurrency cap", () => {
   });
 
   /**
-   * Ruling 207(g) (claim audit). The interrupt note said "The thread stays
+   * Ruling 154 (claim audit). The interrupt note said "The thread stays
    * resumable; re-run the agent to continue" for every run. A QUEUED run — and
    * a running row in the minutes-long window `reserveRun` opens before any
    * provider process exists, which is the window a person actually presses Stop
@@ -119,7 +119,7 @@ describe("run concurrency cap", () => {
    * person who stopped a long run believed its reasoning survived and got a
    * fresh agent that re-derived the work and re-spent the budget.
    */
-  it("ruling 207(g): interrupting a run with NO provider session says so instead of promising a resume", async () => {
+  it("ruling 154: interrupting a run with NO provider session says so instead of promising a resume", async () => {
     setMaxConcurrentRuns(store.db, 1);
     await startHeldRun("r0");
     const queued = await startHeldRun("r1");
@@ -145,7 +145,7 @@ describe("run concurrency cap", () => {
     expect(note!.text).not.toContain("stays resumable");
   });
 
-  /** The timeline note saying `runId` got its slot (ruling 311, the other half). */
+  /** The timeline note saying `runId` got its slot (ruling 166, the other half). */
   function startedNote(runId: string) {
     return readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
       .parsed.timeline.find((e) => e.text.includes(runId) && e.text.includes("got a slot and started"));
@@ -158,7 +158,7 @@ describe("run concurrency cap", () => {
     await settle();
     expect(getRun(store.db, a)?.state).toBe("running");
     expect(getRun(store.db, b)?.state).toBe("queued");
-    // Ruling 311, the other half: while b waits, nothing on the record says it started.
+    // Ruling 166, the other half: while b waits, nothing on the record says it started.
     expect(startedNote(b)).toBeUndefined();
 
     // Interrupt a → its slot frees → b promotes and launches.
@@ -472,7 +472,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
 });
 
 /**
- * Ruling 152(b) (pass 35, G35-5): under a cap the coordination turns have their
+ * Ruling 150 (pass 35, G35-5): under a cap the coordination turns have their
  * own lane. Live, fourteen operator turns waited ten minutes behind six
  * four-minute builds because `admitRun` and `drainRunQueue` were one FIFO with
  * no idea of kind. Now an operator or controller turn is admitted up to
@@ -480,7 +480,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
  * one) and the drain promotes the coordination queue before the delivery one.
  * A delivery run still only ever competes for the cap itself.
  */
-describe("run concurrency cap — the coordination lane (ruling 152)", () => {
+describe("run concurrency cap — the coordination lane (ruling 150)", () => {
   /** An operator turn that stays live until interrupted — the coordination
    *  kind. Operator rows carry no single-flight index, so several coexist on
    *  one task under distinct thread ids. */

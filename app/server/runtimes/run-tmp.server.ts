@@ -17,10 +17,10 @@ import { RUN_REAP_GRACE_MS } from "./run-processes.server";
 import { assertPathSafeRunId } from "./user-homes.server";
 
 /**
- * Ruling 636: every run has a temporary directory of its own, and it goes when
+ * Ruling 141(c): every run has a temporary directory of its own, and it goes when
  * the run settles.
  *
- * Ruling 460 runs each agent as its person's own uid, and every run of one
+ * Ruling 141 runs each agent as its person's own uid, and every run of one
  * person is that one uid, so all of them shared `/tmp`: what a run wrote there
  * stayed until the container went, and every later run of the person could
  * list it and read it. Live on AWSC-86 (2026-10-02) the Cloud Solutions
@@ -36,8 +36,8 @@ import { assertPathSafeRunId } from "./user-homes.server";
  * the path it is given and cannot list the others. The run's directory is the
  * server's, 2770 in the agent group like a workspace, so whatever the agent
  * writes in it stays removable. It is made when the run launches (a queued run
- * has none), removed as the run's person (ruling 485) once the settle is done
- * and the sweep has had its grace (ruling 174), and boot removes whatever a
+ * has none), removed as the run's person (ruling 140) once the settle is done
+ * and the sweep has had its grace (ruling 142), and boot removes whatever a
  * stopped server or a failed removal left. The shell inventory every prompt
  * carries says to keep temporary files there.
  *

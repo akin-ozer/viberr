@@ -21,12 +21,12 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 
 /**
  * The new-project dialog (home spec §4.9) and its fields: name + task key,
- * what the board delivers (ruling 667), GitHub connection, repository (those
- * in `project-fields.tsx`, which the board import dialog shares, ruling 653),
+ * what the board delivers (ruling 224), GitHub connection, repository (those
+ * in `project-fields.tsx`, which the board import dialog shares, ruling 32),
  * workflow, policy preset, footer. Split out of `home-page.tsx` (pass 16, pure structural refactor — no
  * behaviour or copy change); the name ↔ repo autocomplete and the create
  * submit stay together here in `NewProjectModal`, which owns all of the
- * dialog's state. Ruling 700(e): what the fields resolve to (the key, the
+ * dialog's state. Ruling 13(b): what the fields resolve to (the key, the
  * repository, the first unmet requirement) is `resolveNewProject` in
  * `new-project-modal-derive.ts`, and a made project's landing is
  * `useLandInNewProject` below.
@@ -54,7 +54,7 @@ function useLandInNewProject(data: CreateProjectReply | undefined, onClose: () =
   useEffect(() => {
     if (data?.ok && !closedRef.current) {
       closedRef.current = true;
-      // Ruling 462: a requested repository says what became of it (created,
+      // Ruling 225: a requested repository says what became of it (created,
       // or an existing one used as it is) in the same success toast.
       push(
         data.key +
@@ -65,7 +65,7 @@ function useLandInNewProject(data: CreateProjectReply | undefined, onClose: () =
       // UI-09: the repo probe's outcome, when it wasn't clean. Creation used to
       // report unqualified success even for a repo GitHub has never heard of.
       if (data.repoWarning) push(data.repoWarning, "error");
-      // Instant on purpose (ruling 459): the page navigates to the new board,
+      // Instant on purpose (ruling 287): the page navigates to the new board,
       // so there is nothing for an exit to leave toward.
       onClose();
       // F15-04: land IN the project you just made. Creation used to drop the
@@ -76,7 +76,7 @@ function useLandInNewProject(data: CreateProjectReply | undefined, onClose: () =
 }
 
 /**
- * P13-AP-04 / owner ruling 2: the "Lightweight · 3 stages" preset was DELETED —
+ * P13-AP-04 / P13 owner decision 2: the "Lightweight · 3 stages" preset was DELETED —
  * it created a `todo`/`doing`/`done` board while the preinstalled roster's
  * eligible stages are the governed ids, so no specialist was ever assignable
  * (LV-01, live-proven). With one template left there is nothing to pick, so the
@@ -176,7 +176,7 @@ function NewProjectFooter({
   onClose: () => void;
   submit: () => void;
 }) {
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(attempted);
   return (
     <div className="modal-foot">
@@ -255,13 +255,13 @@ export function NewProjectModal({
     "balanced",
   );
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
-  // Ruling 667: what the board delivers. An instance with no GitHub
+  // Ruling 224: what the board delivers. An instance with no GitHub
   // connection opens on the kind it can create.
   const [delivers, setDelivers] = useState<BoardDelivers>(() =>
     connections.length > 0 ? "software" : "results",
   );
   const [attachRepo, setAttachRepo] = useState(false);
-  // Ruling 672: a software board may start with no repository.
+  // Ruling 224: a software board may start with no repository.
   const [repoLater, setRepoLater] = useState(false);
   // Which field is flagged: only after a submit was refused (the dialog must
   // not open with a red field, the same rule as the new-task title). Counted,

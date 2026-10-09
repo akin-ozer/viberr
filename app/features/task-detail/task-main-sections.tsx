@@ -41,7 +41,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * click merged an unreviewed head into main) moved the apply path up into
  * `task-detail-page.tsx`, because the click has to reach the page's confirm
  * state — a section that owns its own fetcher structurally CANNOT ask first.
- * The page owns the fetcher (`useRecommendationActions`, ruling 700(d)) and
+ * The page owns the fetcher (`useRecommendationActions`, ruling 13(b)) and
  * the ceremony, and routes Apply through `AcceptConfirm` (mode
  * `apply-recommendation`); `TaskMainColumn` renders `OperatorRecommendations`
  * with the page's handlers and owns nothing. Do not re-add a local wrapper
@@ -127,21 +127,21 @@ export function TaskHero({
   pendingGoalDraft?: string | null;
   /** U39-31: the other tasks the goal names, key to path. */
   taskLinks?: TaskLinks;
-  /** Ruling 503: the epic the task belongs to, when it is in one. */
+  /** Ruling 325: the epic the task belongs to, when it is in one. */
   epic?: EpicChipView | null;
 }) {
   const goalFetcher = useFetcher<ActionResult>();
   const csrf = useCsrfToken();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.goal);
-  // Ruling 147: Save goal stays enabled until the request starts, and a draft
+  // Ruling 288: Save goal stays enabled until the request starts, and a draft
   // under the floor is REFUSED here instead of leaving the button dead. The
   // counter (not a boolean) re-inserts the sentence on every refused attempt,
   // because readers announce an insertion, not a role flip on unchanged text.
   // It is reset wherever the editor opens or closes, so a re-opened editor is
   // pristine and never accused.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const goalRef = useRef<HTMLTextAreaElement>(null);
   const short = draft.trim().length < 3;
@@ -193,7 +193,7 @@ export function TaskHero({
     task.displayReadiness === "accepted" ||
     task.displayReadiness === "merged";
 
-  // Ruling 147: the click AND a keyboard submit both route through the
+  // Ruling 288: the click AND a keyboard submit both route through the
   // refusal, so a short draft can never become a request.
   const submitGoal = (e: FormEvent<HTMLFormElement>) => {
     if (goalBusy) {
@@ -246,11 +246,11 @@ export function TaskHero({
 }
 
 /*
- * Ruling 700(e): the hero's parts, each the markup of one slot of `TaskHero`.
+ * Ruling 13(b): the hero's parts, each the markup of one slot of `TaskHero`.
  * The hero keeps every hook and every state change; these draw. Plain
  * functions rather than components, as the side column's panel parts are:
  * none calls a hook, and a component each would add a render per part to
- * every revalidation (ruling 457).
+ * every revalidation (ruling 11).
  */
 
 /** The hero's fields: stage, status, validation, epic, waits and the file. */
@@ -275,7 +275,7 @@ function heroMeta({
           archived
         </Pill>
       )}
-      {/* Ruling 169 (owner, 2026-09-09): the stage and the status are FIELDS,
+      {/* Ruling 308 (owner, 2026-09-09): the stage and the status are FIELDS,
           each under the key the Current state panel gives it. The default
           workflow's second stage is called Ready, so the bare stage pill read
           as a status word — "Ready · blocked · awaiting verdict" was read as
@@ -305,7 +305,7 @@ function heroMeta({
           `deriveDisplayReadiness` — so this surface renders the value and
           does not re-decide it.
 
-          Ruling 169: ONE status word. Readiness and validation are different
+          Ruling 308: ONE status word. Readiness and validation are different
           questions, but the hero drew both as peers, and "blocked" beside
           "awaiting verdict" read as a contradiction (a held task is not up
           for a verdict yet). The readiness value is the status; the one
@@ -314,7 +314,7 @@ function heroMeta({
           and so said nothing about what for (and, beside the Ready stage,
           said "ready" twice). The other quiet values — healthy, none —
           describe and stay off the hero, as they do on the card (ruling
-          168(b)); a failing validation is a problem and keeps its own pill
+          306); a failing validation is a problem and keeps its own pill
           below. */}
       {!archived && (
         <span className="hero-field">
@@ -330,15 +330,15 @@ function heroMeta({
       )}
       {/* C2 (⇄ N20-14/UXO-1): the validation pill is a live obligation and is
           withdrawn on every terminal task, not just archived ones — see the
-          `terminal` note in `TaskHero`. Ruling 169: and it renders here only
+          `terminal` note in `TaskHero`. Ruling 308: and it renders here only
           as a PROBLEM (the fill tier — "validation failing"); see the status
           slot's note for where "awaiting verdict" went. */}
       {!terminal && !validationQuiet(task.validation) && (
         <ValidationPill value={task.validation} />
       )}
-      {/* Ruling 503: the epic is a FIELD, like the stage beside it: the
+      {/* Ruling 325: the epic is a FIELD, like the stage beside it: the
           body of work this task belongs to, opening the epic's page, where
-          its other tasks and its progress are. It replaced ruling 99's goal
+          its other tasks and its progress are. It replaced ruling 273's goal
           chip, which named one link of a chain. */}
       {epic && (
         <span className="hero-field">
@@ -346,7 +346,7 @@ function heroMeta({
           <EpicChip epic={epic} to={epicHref(task.projectSlug, epic.id)} />
         </span>
       )}
-      {/* Ruling 131(a): what this task waits on, each entry a link to the
+      {/* Ruling 55: what this task waits on, each entry a link to the
           task it names, with its resolved state when it is not simply open.
           A key the project does not answer to links nowhere. */}
       {task.blockedBy.map((entry) =>
@@ -376,7 +376,7 @@ function heroMeta({
       )}
       <span className="hero-file">
         <Icon name="file" />
-        {/* Ruling 625: one box per segment, its slash included, so a
+        {/* Ruling 280: one box per segment, its slash included, so a
             narrow line breaks after a slash and never inside the key
             ("tasks/VIB-" | "151/task.md"). */}
         <span>
@@ -425,7 +425,7 @@ function heroGoal({
   onDraft: (draft: string) => void;
   /** The draft is under the 3-character floor. */
   short: boolean;
-  /** Ruling 147: how many submits the floor has refused since the editor opened. */
+  /** Ruling 288: how many submits the floor has refused since the editor opened. */
   refused: number;
   refusalShake: RefusalShake;
   goalBusy: boolean;
@@ -505,7 +505,7 @@ function heroGoal({
   );
 }
 
-/** The 3-character floor's sentence under the goal editor. Ruling 147: after
+/** The 3-character floor's sentence under the goal editor. Ruling 288: after
  *  a refused submit the same sentence becomes the alert, a fresh element per
  *  attempt. */
 function goalFloorNote(id: string, refused: number, refusalShake: RefusalShake) {
@@ -556,7 +556,7 @@ export function ExecutionSection({
   /** F37-65: whether acceptance actually resolves to `direct` for this
    *  operator. The caption below used to infer it from autonomy alone. */
   operatorAcceptsDirectly?: boolean;
-  /** Ruling 127: the task owner's accounts, which every run here bills
+  /** Ruling 137: the task owner's accounts, which every run here bills
    *  (null = unowned). */
   runPrincipal: TaskRunPrincipalView | null;
   canRunAgents: boolean;
@@ -578,7 +578,7 @@ export function ExecutionSection({
   useActionToast(cancelFetcher);
   const agentBusy = agentFetcher.state !== "idle";
   const operatorBusy = operatorFetcher.state !== "idle";
-  // Ruling 368: a run control shows which request it sent — a run now or a
+  // Ruling 286: a run control shows which request it sent — a run now or a
   // scheduled one — read off its fetcher, because the control resets its
   // picker to Now on the click.
   const runKind = (intent: string | null): RunInFlight =>

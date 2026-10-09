@@ -25,7 +25,7 @@ import {
   type TaskRunPrincipalView,
 } from "./run-principal-view";
 import { useRefusalShake } from "~/ui/use-refusal-shake";
-// Ruling 457: backend labels come through `backendLabelOf`, not through
+// Ruling 11: backend labels come through `backendLabelOf`, not through
 // `BACKEND_LABEL` (why: shared/text/backend-label.ts).
 
 /**
@@ -80,7 +80,7 @@ export interface DeployedSpecialistView {
    *  stages this profile may be newly engaged at, empty when `spanAll`. */
   stages: string[];
   spanAll: boolean;
-  /** Ruling 556: the project names it a required reviewer, so a dispatch never
+  /** Ruling 89: the project names it a required reviewer, so a dispatch never
    *  makes it the deliverer, whatever it may write. Sent only when true. */
   requiredReviewer?: true;
 }
@@ -113,7 +113,7 @@ export type OwnerAction = "take" | "assign" | "release";
 /**
  * UX19-12 — an engagement whose profile is no longer deployed. The name is the
  * Agents live table's own wording, used verbatim so one state does not read two
- * ways on two surfaces; the note states the consequence R15-7 (ruling 26)
+ * ways on two surfaces; the note states the consequence R15-7 (ruling 182)
  * imposes on such a run.
  */
 const GHOST_NAME = "profile no longer here";
@@ -157,7 +157,7 @@ function OwnerControl({
     // the control is withheld like every other runtime action on it. E32-9:
     // a CLOSED task's seat is frozen the same way.
     const closed = isClosedForWork(task, task.archived);
-    // Ruling 118: an admin may still reassign a CLOSED (not archived) seat for
+    // Ruling 50: an admin may still reassign a CLOSED (not archived) seat for
     // the record — the same tier that releases any owner.
     const adminSeat = !task.archived && roleCan(asProjectRole(myRole), "release-any-ownership");
     return canOwn && (!closed || adminSeat) ? (
@@ -221,7 +221,7 @@ function DelayPicker({
 }
 
 /**
- * Ruling 368: what a run control's own request is doing while it is in
+ * Ruling 286: what a run control's own request is doing while it is in
  * flight: starting a run now, or scheduling one. Null while it is idle. The
  * control shows it on its button (busy, the loader spinning, "Starting…" or
  * "Scheduling…"), because the picker resets to Now on the click, so the
@@ -252,7 +252,7 @@ function PendingSchedules({
   agentNameOf: (profileId: string) => string | undefined;
   canCancel: boolean;
   busy: boolean;
-  /** Ruling 177: the task is CLOSED, so every entry here will be skipped when
+  /** Ruling 52: the task is CLOSED, so every entry here will be skipped when
    *  it comes due (`skipped-done` / `skipped-archived`) — never run. Live
    *  (2026-09-12, HLC-19) the controller read two pending entries on a shipped
    *  task and could not tell from the page whether they would fire; the
@@ -290,7 +290,7 @@ function PendingSchedules({
             {s.createdByLabel ? ` · by ${s.createdByLabel}` : ""}
           </div>
           {canCancel ? (
-            /* Ruling 149: cancelling a pending run takes the run away, so the
+            /* Ruling 278: cancelling a pending run takes the run away, so the
                trigger wears the danger label its confirm already commits with
                (`.btn.ghost.danger` — red label, neutral face). The wording
                stays "Cancel" so it does not collide with the dialog's own
@@ -404,13 +404,13 @@ function OperatorRunControl({
   /** The operator-run fetcher's request, if one is in flight. */
   inFlight: RunInFlight;
   /** Task is closed (terminal stage) — the control withdraws to its reason
-   *  (G9, ruling 625). */
+   *  (G9, ruling 310). */
   disabled?: boolean;
   /** F20-5 (R20-1): a non-structural reason the manual run is refused — an open
    *  decision packet pauses coordination. Rendered copy (a `title` never opens
    *  on a disabled control). */
   blockedReason?: string;
-  /** Ruling 131(d): the task waits on other work. Rendered as `sub` copy with
+  /** Ruling 115: the task waits on other work. Rendered as `sub` copy with
    *  the button left ENABLED: a manual run still answers a person, but the
    *  operator will neither advance the task nor dispatch delivery while it
    *  waits. An open packet's `blockedReason` keeps precedence. */
@@ -425,7 +425,7 @@ function OperatorRunControl({
    *  `gate()` holds it at `recommend` whatever the autonomy unless the grant
    *  says direct (owner ruling Q1), so autonomy alone cannot answer it. */
   acceptsDirectly?: boolean;
-  /** P11-41, now per-person (ruling 127): why a run on the operator's backend
+  /** P11-41, now per-person (ruling 137): why a run on the operator's backend
    *  would refuse, or null when it would start. An operator drive bills the
    *  task OWNER, so this sentence names them; it disables Run and renders,
    *  instead of the run failing fast after the click. */
@@ -441,10 +441,10 @@ function OperatorRunControl({
   const busy = inFlight !== null;
   const backendLabel = backendLabelOf(defaultBackend);
   if (disabled) {
-    // Ruling 625 on ruling 37: a closed task WITHDRAWS the operator's run
+    // Ruling 310 on ruling 95: a closed task WITHDRAWS the operator's run
     // control, as the run-an-agent cell beside it does, rather than drawing a
     // dead steer field, a dead when-picker and a dead button (under a backend
-    // warning that cannot matter any more). Ruling 177 (pass 36): every door
+    // warning that cannot matter any more). Ruling 52 (pass 36): every door
     // refuses a closed task — the button, an @operator comment, a schedule, an
     // agent's completion — and the sentence says so; N20-17's "mentioning
     // @operator still runs it" disclosure described the F36-4 hole and is gone
@@ -466,7 +466,7 @@ function OperatorRunControl({
   }
   // Hunt 2026-08-29: two different kinds of "off". `busy` kills the whole
   // control (a closed task withdrew it above); the open-packet refusal (F20-5)
-  // and a backend the owner cannot run (P11-41, ruling 127) refuse a run NOW —
+  // and a backend the owner cannot run (P11-41, ruling 137) refuse a run NOW —
   // but scheduleTaskAction refuses neither (the packet resolves, the owner
   // connects the backend or the seat changes hands, and the fired run resolves
   // the live profile and the live owner anyway), so a picked delay keeps the
@@ -513,7 +513,7 @@ function OperatorRunControl({
         onClick={run}
         title={operatorRunTitle(blockedReason, delay)}
       >
-        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+        {/* Ruling 284 over ruling 286: the resting mark trades for the clock
             when the when-picker leaves Now, and that whole cell trades for
             the spinning loader while this control's own request is in flight
             (GlyphSwap's `busy`). */}
@@ -522,7 +522,7 @@ function OperatorRunControl({
       </button>
       {runRefusal && (
         // P11-41's honesty without a picker: the run would fail fast, so say
-        // it here, where the fix is one hop away. Ruling 127 changed WHOSE fix
+        // it here, where the fix is one hop away. Ruling 137 changed WHOSE fix
         // it is — an operator drive bills the task owner's own account, so
         // there is no instance credential to configure and the sentence names
         // the person (`run-principal-view.ts`, the UI voice of the server's
@@ -591,19 +591,19 @@ function AgentRunControl({
   onCancelSchedule,
 }: {
   agents: DeployedSpecialistView[];
-  /** Ruling 186 (pass 37): the task key and what it waits on, so a dispatch
+  /** Ruling 310 (pass 37): the task key and what it waits on, so a dispatch
    *  onto a HELD task is refused before the click with the server's own
    *  sentence — `holdRefusal` is shared and client-safe for exactly this. */
   taskKey: string;
   blockedBy: readonly DependencyRender[];
   /** U36-10 (pass 36): the task's stage and the board it sits on, so a
    *  stage-ineligible pick is refused BEFORE the click with the server's
-   *  own sentence (ruling 133), and never promises a delivering posture. */
+   *  own sentence (ruling 181), and never promises a delivering posture. */
   stage: string;
   stages: { id: string; name: string }[];
   workflow: { from: string; to: string }[];
   activeProfileIds: string[];
-  /** Ruling 127: whose accounts a dispatch would bill (null = unowned task).
+  /** Ruling 137: whose accounts a dispatch would bill (null = unowned task).
    *  A profile pinned to a backend the owner has not connected is still
    *  pickable — the roster is not a lie — but Run refuses before it is spent
    *  and the row and the control both say why. */
@@ -631,10 +631,10 @@ function AgentRunControl({
   const [prompt, setPrompt] = useState("");
   const [delay, setDelay] = useState<RunDelay>("now");
   const busy = inFlight !== null;
-  // Ruling 147: counted, not boolean — each refused start re-inserts the alert,
+  // Ruling 288: counted, not boolean — each refused start re-inserts the alert,
   // because readers announce an insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const pickRef = useRef<HTMLInputElement>(null);
   const pickErrId = useId();
@@ -684,7 +684,7 @@ function AgentRunControl({
   }
 
   const selected = agents.find((a) => a.id === selectedId) ?? null;
-  // The pick's refusal, availability (ruling 147(a)), posture and title, from
+  // The pick's refusal, availability (ruling 288), posture and title, from
   // the same facts the dispatch gate answers (`execution-profile-derive.ts`).
   const { runRefusal, off, posture, title } = agentDispatch({
     selected,
@@ -753,7 +753,7 @@ function AgentRunControl({
         onClick={run}
         title={title}
       >
-        {/* Ruling 459 over ruling 368: the resting mark trades for the clock
+        {/* Ruling 284 over ruling 286: the resting mark trades for the clock
             when the when-picker leaves Now, and that whole cell trades for
             the spinning loader while this control's own request is in flight
             (GlyphSwap's `busy`). */}
@@ -761,7 +761,7 @@ function AgentRunControl({
         {runButtonLabel(inFlight, delay, "Run")}
       </button>
       {pickRefused && (
-        // Ruling 147: the start stays ENABLED with nothing picked and answers
+        // Ruling 288: the start stays ENABLED with nothing picked and answers
         // the click here. A new element per refusal (the key) so a second
         // attempt is announced again; it shares the `.sub` slot the refusal and
         // posture lines already use.
@@ -777,7 +777,7 @@ function AgentRunControl({
       )}
       {runRefusal && (
         // P14: a `title` never opens on a disabled control, so the reason a
-        // dispatch is dead is rendered copy. Ruling 127 makes it the OWNER's
+        // dispatch is dead is rendered copy. Ruling 137 makes it the OWNER's
         // refusal, named — the run would bill their account, not this
         // deployment's (which no longer has one).
         <span className="sub">{runRefusal}</span>
@@ -902,7 +902,7 @@ function EngagedAgents({
                 refuses the release at the terminal stage, and every other
                 runtime control on this panel is already off. The ✕ was the one
                 exception: enabled, titled "Release this agent from the task",
-                and refused on click. Ruling 37's precedent settles which way to
+                and refused on click. Ruling 95's precedent settles which way to
                 fix it — a WITHDRAWN affordance is honest, a disabled one just
                 invites the support question — so the button is simply not
                 rendered. The panel head's "task closed" pill and the run cell's
@@ -972,7 +972,7 @@ export function ExecutionProfile({
   /** F37-65: threaded down to the caption, which must not infer acceptance
    *  authority from autonomy alone. */
   acceptsDirectly?: boolean;
-  /** Ruling 127: whose accounts this task's runs bill, and what those accounts
+  /** Ruling 137: whose accounts this task's runs bill, and what those accounts
    *  can run. `null` = no owner (or a seat pointing at a disabled/deleted
    *  account), so nothing can run here at all. P11-41's fail-fast honesty, now
    *  answered per person instead of per deployment. */
@@ -984,7 +984,7 @@ export function ExecutionProfile({
   /** A LIVE operator run (queued/running) exists — the only state honest
    * enough for the "operator active" pill (F7-UI1: attachment ≠ activity). */
   operatorRunActive: boolean;
-  /** Ruling 368: the run-agent fetcher's request, if one is in flight. */
+  /** Ruling 286: the run-agent fetcher's request, if one is in flight. */
   runInFlight: RunInFlight;
   onRunAgent: (
     profileId: string,
@@ -994,7 +994,7 @@ export function ExecutionProfile({
   /** The release-agent fetcher is in flight. */
   releaseBusy: boolean;
   onReleaseAgent: (profileId: string) => void;
-  /** Ruling 368: the operator-run fetcher's request, if one is in flight. */
+  /** Ruling 286: the operator-run fetcher's request, if one is in flight. */
   operatorInFlight: RunInFlight;
   /** Run (or schedule) the operator; the optional steer becomes the run's
    *  human directive. */
@@ -1015,7 +1015,7 @@ export function ExecutionProfile({
   // controls are disabled so a closed task doesn't advertise live controls.
   // F15-11: an ARCHIVED task is out of the flow too.
   const closed = isClosedForWork(task, task.archived);
-  // F20-5 / ruling 131(d): an open packet refuses the operator's manual run, a
+  // F20-5 / ruling 115: an open packet refuses the operator's manual run, a
   // hold only notes it (`operatorRunHold`).
   const operatorHold = operatorRunHold(task, closed);
   const operatorSchedules = schedules.filter((s) => s.action !== "run-agent");
@@ -1047,13 +1047,13 @@ export function ExecutionProfile({
           <div className="lbl">Operator</div>
           <div className="val op-val">
             <div className="op-id">
-              {/* i-dark #13 (ruling 625): the Operator's one tile, as the
+              {/* i-dark #13 (ruling 280): the Operator's one tile, as the
                   agent-log picker draws it, not a violet specialist's. */}
               <span className="agent-glyph op">
                 <Icon name="shield" />
               </span>
               <span>
-                {/* Ruling 518: the cell's kicker names the agent, Operator, and
+                {/* Ruling 106: the cell's kicker names the agent, Operator, and
                     nothing here gives it a second name or a role. */}
                 {task.operator && <div className="sub">{task.operator.sinceLabel}</div>}
                 <div className="sub xs dim">

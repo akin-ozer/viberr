@@ -21,7 +21,7 @@ import {
 } from "../../../test-support/revalidation-harness";
 
 /**
- * Ruling 457, journeys `board-live`, `compose-send`, `task-open` and
+ * Ruling 11, journeys `board-live`, `compose-send`, `task-open` and
  * `live-run`: how many loaders one trigger re-runs in a tab, counted on the
  * harness in `test-support/revalidation-harness.tsx` (React Router with single
  * fetch's revalidation choice, the real broker in-process, the workspace's
@@ -33,7 +33,7 @@ const TASK_PAGE = `/projects/${SLUG}/tasks/${TASK}`;
 
 harnessLifecycle();
 
-describe("loaders re-run per trigger (ruling 457)", () => {
+describe("loaders re-run per trigger (ruling 11)", () => {
   it("BOARD-1 / RF-3: five keystrokes in the board filter", async () => {
     const harness = await tab({ path: BOARD });
     for (const value of ["l", "lo", "log", "logi", "login"]) {
@@ -114,7 +114,7 @@ describe("loaders re-run per trigger (ruling 457)", () => {
     expectWithinBudget("revalidation:task.loader-runs-per-60s-healthy-stream", harness.total());
   });
 
-  it("RF-1 / ruling 301: a hidden tab comes back and nothing was published meanwhile", async () => {
+  it("RF-1 / ruling 25: a hidden tab comes back and nothing was published meanwhile", async () => {
     const visibility = { current: "visible" };
     Object.defineProperty(document, "visibilityState", {
       configurable: true,

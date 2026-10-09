@@ -1,5 +1,5 @@
 #!/bin/sh
-# Ruling 460's in-image check: an agent process runs as its person's own OS
+# Ruling 139's in-image check: an agent process runs as its person's own OS
 # user and reaches nothing of the server's and nothing of another person's.
 #
 # Run INSIDE the production image, as the server user (`node`), against a store
@@ -61,7 +61,7 @@ cleanup() {
   for pid in $helpers; do kill -KILL "$pid" 2>/dev/null; done
   "$LAUNCH" --reap KILL "run_${TAG}_reap" >/dev/null 2>&1
   [ -d "$WS/repo" ] && as_agent "$UID_A" "rm -rf '$WS/repo'" >/dev/null 2>&1
-  # Ruling 485's tree, if its check stopped half-way: each uid removes its own.
+  # Ruling 140's tree, if its check stopped half-way: each uid removes its own.
   for agent in "$UID_B" "$UID_A"; do
     [ -d "$WS/support" ] && as_agent "$agent" "chmod -R u+rwX,g+rwX '$WS/support' 2>/dev/null; rm -rf '$WS/support' '$WS/deliver'" >/dev/null 2>&1
   done
@@ -69,7 +69,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "agent isolation check (ruling 460) as $(id -un) on $DATA"
+echo "agent isolation check (ruling 139) as $(id -un) on $DATA"
 
 # A volume no server has booted on yet: the two directories the checks need,
 # made the way the server's boot makes them (enforceStoreLayout).
@@ -266,7 +266,7 @@ rm -rf "$STAGE"
 # The checkout is its agent's alone now, so its agent removes it.
 as_agent "$UID_A" "rm -rf '$REPO'"
 
-# --- an agent-written tree is removed as its person (ruling 485) -------------
+# --- an agent-written tree is removed as its person (ruling 140) -------------
 # F40-62, live on WEB-5: wrangler left 0700 `mkdtemp` directories in a
 # supporting checkout, the server's own recursive remove deleted what the group
 # could (`.git` first) and died on the rest, and every later review ran with no
@@ -315,7 +315,7 @@ else
 fi
 as_agent "$UID_A" "rm -rf '$WS/support' '$DELIVER'"
 
-# --- what the server wrote in an agent tree (ruling 495) --------------------
+# --- what the server wrote in an agent tree (ruling 140) --------------------
 # F40-71, live on deploy 10: the skill mount copied each granted skill into a
 # run's plugin as the server with `cpSync`, which keeps the store folder's
 # modes, so the plugin's files sat in 0755 folders the person could not write
@@ -410,7 +410,7 @@ OLD="$TASK_WS/.viberr-plugins/run_before-495"
   && echo "# Sourced content" > "$OLD/skills/sourced-content/SKILL.md")
 as_agent "$UID_A" "rm -rf '$OLD'" 2>/dev/null
 if [ -f "$OLD/skills/sourced-content/SKILL.md" ]; then
-  pass "the person alone cannot remove a plugin the mount wrote before ruling 495 (F40-71)"
+  pass "the person alone cannot remove a plugin the mount wrote before ruling 140 (F40-71)"
 else
   fail "the person removed the old plugin alone (this check proves nothing)"
 fi

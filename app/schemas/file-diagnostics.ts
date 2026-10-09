@@ -112,7 +112,7 @@ export interface TolerantFieldOptions {
 }
 
 /**
- * Ruling 458(h): a field that falls back names the value it fell back to, in
+ * Ruling 16(a): a field that falls back names the value it fell back to, in
  * `project.md` and `task.md` alike — both read through the helpers below, on
  * the task file's wording ("; using <fallback>.").
  */

@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
 
 /**
- * THE shared rich-text micro-format renderer (orchestrator ruling 14,
+ * THE shared rich-text micro-format renderer (orchestrator ruling 297,
  * contracts §1.4). Inline-only — NOT a markdown library:
  *
  *   **text**  → <strong>
@@ -31,7 +31,7 @@ export function RichText({
   let key = 0;
 
   /** U39-31: plain prose, with the resolved task keys in it as links (same
-   *  tab, like the markdown renderer's). Ruling 560: drawn as the key chip the
+   *  tab, like the markdown renderer's). Ruling 325: drawn as the key chip the
    *  activity and notification feeds link a task with; outside `.md-body` a
    *  bare link took the browser's own blue, and its purple once visited. */
   const pushLinked = (chunk: string) => {

@@ -59,7 +59,7 @@ import {
 import type { RealBackend } from "./runtime-registry.server";
 
 /**
- * Ruling 127: a person's own agent accounts. Every seam here is real — a
+ * Ruling 137: a person's own agent accounts. Every seam here is real — a
  * migrated SQLite file, a temp data root, the actual secret box, and the shared
  * fake VENDOR BINARIES (`test-support/fake-vendor-binary.ts`, the same pair the
  * sign-in driver's tests drive), which are real executable scripts, so the
@@ -212,7 +212,7 @@ interface SignedInAccount {
 }
 
 /**
- * What a confirmed hosted sign-in leaves (ruling 507): the account the driver
+ * What a confirmed hosted sign-in leaves (ruling 138): the account the driver
  * minted before the vendor ran, recorded as a `login` row, and — unless
  * `file` is false — the vendor's own sign-in file in that account's home,
  * where the binary wrote it. `file: false` keeps the home: that reads as a
@@ -360,7 +360,7 @@ describe("setBackendApiKey", () => {
   });
 
 
-  it("ADDS an account beside a sign-in (ruling 507): nothing is logged out, and the key is the one in use", async () => {
+  it("ADDS an account beside a sign-in (ruling 138): nothing is logged out, and the key is the one in use", async () => {
     const signedIn = signIn("claude", "claudeai", { email: "work@example.com" });
 
     const row = await setBackendApiKey(db, actor, "claude", "api_key", CLAUDE_KEY, {
@@ -445,7 +445,7 @@ describe("recordBackendLogin", () => {
     });
   });
 
-  it("adds a sign-in beside a pasted key (ruling 507), and the sign-in is the one in use", async () => {
+  it("adds a sign-in beside a pasted key (ruling 138), and the sign-in is the one in use", async () => {
     const key = await pasteKey("codex");
     const { row } = signIn("codex", "device");
     const rows = listBackendAccounts(db, actor.userId, "codex");
@@ -510,7 +510,7 @@ describe("recordBackendLogin", () => {
 
 // ------------------------------------------------ several accounts (507)
 
-describe("switching accounts (ruling 507)", () => {
+describe("switching accounts (ruling 138)", () => {
   it("makes another account the one runs bill, with no vendor process and no file moved", () => {
     // Both sign-ins and the switch land in one millisecond: the account
     // selected last wins on its stamp, never on the order of the random ids.
@@ -595,7 +595,7 @@ describe("switching accounts (ruling 507)", () => {
   });
 });
 
-describe("naming accounts (ruling 507)", () => {
+describe("naming accounts (ruling 138)", () => {
   it("names an account, clears the name, and refuses one too long to be a name", async () => {
     const key = await pasteKey("claude");
     expect(backendAccountName(key)).toBe("API key ending in abcd");
@@ -710,7 +710,7 @@ describe("disconnectBackendAccount", () => {
     ).toEqual({ backend: "claude", kind: "api_key", wasActive: true });
   });
 
-  it("hands runs back to the account used before, and leaves the others alone (ruling 507)", async () => {
+  it("hands runs back to the account used before, and leaves the others alone (ruling 138)", async () => {
     const work = signIn("claude", "claudeai", { email: "work@example.com" });
     const key = await pasteKey("claude");
     const personal = signIn("claude", "claudeai", { email: "personal@example.com" });
@@ -757,7 +757,7 @@ describe("disconnectBackendAccount", () => {
 
 // ------------------------------------------- an account from before 507
 
-describe("an account connected before ruling 507 (legacy_home)", () => {
+describe("an account connected before ruling 138 (legacy_home)", () => {
   /** The row the boot rebuild carries forward: its sign-in sits in the
    *  backend home itself, where the one-account build had the vendor write. */
   function legacySignIn(backend: RealBackend): SignedInAccount {
@@ -859,7 +859,7 @@ describe("userBackendHealth", () => {
     expect(healed.detail).toBeNull();
   });
 
-  it("says a working account is one switch away when the one in use cannot run (ruling 507)", async () => {
+  it("says a working account is one switch away when the one in use cannot run (ruling 138)", async () => {
     await pasteKey("claude");
     const wiped = signIn("claude", "claudeai", { email: "wiped@example.com" }, { file: false });
     // A wiped volume takes the account's home with it, so no platform can
@@ -976,7 +976,7 @@ describe("runCredentialFor", () => {
     });
     expect(cred.secrets).toEqual([CLAUDE_KEY]);
     // The launch hands the account's home, and the shared transcripts it
-    // links to, to the person's agent user (ruling 460).
+    // links to, to the person's agent user (ruling 139).
     expect(cred.ownDirs).toEqual([
       cred.accountHome,
       path.join(cred.homeDir, "projects"),
@@ -1055,12 +1055,12 @@ describe("no reader hands out a box", () => {
 // ------------------------------------------- refusals on the previous account
 
 /**
- * Ruling 165: a credential change retires the refusal Viberr observed on the
+ * Ruling 160(b): a credential change retires the refusal Viberr observed on the
  * credential it replaces. Live (2026-09-07) the Claude card kept "usage window
  * spent · reopens 21:30" after its owner signed the backend into another
  * account: the runs went through and the notice contradicted them, because a
  * completed run was the record's only retirement short of the instant the OLD
- * account had named. Ruling 507 keeps the rule for every change of the account
+ * account had named. Ruling 160 keeps the rule for every change of the account
  * that bills the next run — a connect, a switch, the active account's removal —
  * and not for a change that leaves it alone. Driven through the real writers,
  * so what is asserted is the seam each of them shares, not the store function
@@ -1070,7 +1070,7 @@ describe("no reader hands out a box", () => {
  * `recordBackendLogin`, `switchBackendAccount` or `disconnectBackendAccount`
  * and the matching case fails.
  */
-describe("a change of the account in use retires the refusal observed on the previous one (ruling 165)", () => {
+describe("a change of the account in use retires the refusal observed on the previous one (ruling 160(b))", () => {
   function spentWindow(userId: string, label = "Arda Test"): BackendQuotaExhaustion {
     return {
       credentialUserId: userId,
@@ -1125,7 +1125,7 @@ describe("a change of the account in use retires the refusal observed on the pre
     expect(observed("codex")).toMatchObject({ exhausted: null, credentialRefused: null });
   });
 
-  it("switching to another account retires them: the spent window was the other account's (ruling 507)", async () => {
+  it("switching to another account retires them: the spent window was the other account's (ruling 160)", async () => {
     const spare = await pasteKey("claude");
     signIn("claude", "claudeai");
     recordBackendQuotaExhaustion(db, "claude", spentWindow(actor.userId));
@@ -1151,7 +1151,7 @@ describe("a change of the account in use retires the refusal observed on the pre
     expect(getBackendCredential(db, actor.userId, "codex")).toBeNull();
   });
 
-  it("ruling 146: another person's record, and one naming nobody, survive this person's change", () => {
+  it("ruling 160: another person's record, and one naming nobody, survive this person's change", () => {
     const murat = insertUser(db, {
       id: "u_murat",
       email: "murat@viberr.dev",

@@ -253,8 +253,8 @@ describe("StoreBrowser", () => {
     expect(
       getByText("The file is removed from the store. Agents lose it on their next context load."),
     ).toBeTruthy();
-    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
-    // over the browser. Ruling 458(k): described by its body, which the
+    // Ruling 297: the shared ConfirmDialog, named by its title and stacked
+    // over the browser. Ruling 287(d): described by its body, which the
     // hand-written card pointed at an id nothing carried.
     const confirm = getByRole("alertdialog", { name: "Delete “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Store deletion dialog");
@@ -403,7 +403,7 @@ describe("StoreBrowser document editor", () => {
     expect(notes.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("ruling 149: the file name rides the shared .field chrome, and the raw text the card's (ruling 614)", () => {
+  it("ruling 278: the file name rides the shared .field chrome, and the raw text the card's (ruling 317)", () => {
     // Canary: unwrap the name and it paints in UA chrome inside a card whose
     // every other control wears the sheet's — the class this closes. Drop
     // `.doc-src` and the raw text does too, with no ring on the card around it.
@@ -438,7 +438,7 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("ruling 614: a markdown doc opens rendered, and Raw is its real text to edit", async () => {
+  it("ruling 317: a markdown doc opens rendered, and Raw is its real text to edit", async () => {
     const { getByLabelText, getByRole, getByText, queryByLabelText, findByRole } =
       renderBrowser({
         respond: (intent) =>
@@ -463,7 +463,7 @@ describe("StoreBrowser document editor", () => {
     expect(getByRole("button", { name: "Preview" }).getAttribute("aria-pressed")).toBe("true");
     // The name is the file's own — the editor edits it, it does not re-create it.
     expect(getByText("overview.md", { selector: ".doc-path .dp-name" })).toBeTruthy();
-    // Ruling 147(d): nothing has changed, so there is nothing to save yet.
+    // Ruling 288: nothing has changed, so there is nothing to save yet.
     const save = getByText("Save document").closest("button")!;
     expect(save.disabled).toBe(true);
     expect(getByText("Close")).toBeTruthy();
@@ -479,7 +479,7 @@ describe("StoreBrowser document editor", () => {
     expect(getByText("EDITED")).toBeTruthy();
 
     fireEvent.click(save);
-    // Ruling 663: the save names the version the read returned, so the server
+    // Ruling 18(c): the save names the version the read returned, so the server
     // can refuse it once the file has changed. CANARY: stop sending it, and a
     // correction an agent merged while this editor was open is wiped.
     await waitFor(() =>
@@ -493,7 +493,7 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("ruling 614: a doc that is not markdown opens on its raw text, with no Preview", async () => {
+  it("ruling 317: a doc that is not markdown opens on its raw text, with no Preview", async () => {
     const { getByLabelText, queryByRole } = renderBrowser({
       tree: [{ type: "file", name: "limits.yaml", sizeBytes: 9, mtime: new Date().toISOString() }],
       respond: (intent) =>
@@ -507,7 +507,7 @@ describe("StoreBrowser document editor", () => {
     expect(queryByRole("group", { name: "Document view" })).toBeNull();
   });
 
-  it("ruling 614: a new document opens on its text, and Preview renders the draft", () => {
+  it("ruling 317: a new document opens on its text, and Preview renders the draft", () => {
     // Nothing exists to render yet, so it opens raw. CANARY: open it on
     // `preview` and the text box this types into is not there.
     const { getByText, getByLabelText, getByRole } = renderBrowser();
@@ -538,8 +538,8 @@ describe("StoreBrowser document editor", () => {
     // overwrote with the same "saved" toast.
     expect(lastForm).toBeNull();
     expect(getByText("Replace “overview.md”?")).toBeTruthy();
-    // Ruling 458(f): the shared ConfirmDialog, named by its title and stacked
-    // over the browser. Ruling 458(k): the overwrite warning still describes
+    // Ruling 297: the shared ConfirmDialog, named by its title and stacked
+    // over the browser. Ruling 287(d): the overwrite warning still describes
     // it, as the hand-written card's `aria-describedby` did.
     const confirm = getByRole("alertdialog", { name: "Replace “overview.md”?" });
     expect(confirm.getAttribute("data-screen-label")).toBe("Replace document dialog");
@@ -742,10 +742,10 @@ describe("StoreBrowser document editor", () => {
     await after(view, read);
   });
 
-  // Ruling 147: an empty file name no longer kills the primary. Save stays
+  // Ruling 288: an empty file name no longer kills the primary. Save stays
   // enabled, the click is refused with the sentence `writeStoreDoc` throws, and
   // nothing is submitted.
-  it("ruling 147: a nameless draft is refused, not blocked", async () => {
+  it("ruling 288: a nameless draft is refused, not blocked", async () => {
     const { getByText, getByLabelText, getByPlaceholderText, queryByRole } =
       renderBrowser();
     fireEvent.click(getByText("New document"));
@@ -785,7 +785,7 @@ describe("StoreBrowser document editor", () => {
     );
   });
 
-  it("ruling 147: a re-opened draft is pristine, never still accused", () => {
+  it("ruling 288: a re-opened draft is pristine, never still accused", () => {
     const { getByText, queryByRole, getByPlaceholderText } = renderBrowser();
     fireEvent.click(getByText("New document"));
     fireEvent.click(getByText("Save document").closest("button")!);

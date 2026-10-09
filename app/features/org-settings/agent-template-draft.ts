@@ -13,7 +13,7 @@ import {
 import { kbDirsOf, kbLegacyOf } from "./kb-grants";
 
 /**
- * The global agent-template editor's draft (ruling 700(e), the split of
+ * The global agent-template editor's draft (ruling 13(b), the split of
  * `agent-template-modal.tsx`): the profile's own fields, its eligible stages
  * with the Custom stages list's order and page, and its context grants. The
  * editor calls the three in the order its state always registered, so the two
@@ -57,7 +57,7 @@ export function useProfileFields(initial: GagentView | null) {
 }
 
 /** The eligible stages, the stored ones no board offers, and the Custom
- *  stages list (ruling 618) with its page and the ids its groups are labelled
+ *  stages list (ruling 326) with its page and the ids its groups are labelled
  *  by. */
 export function useStageEligibility(
   initial: GagentView | null,
@@ -69,12 +69,12 @@ export function useStageEligibility(
   const [selStages, setSelStages] = useState<string[]>(
     initial ? initial.stages : defaultStage ? [defaultStage] : [],
   );
-  // Ruling 479(h): held from the open, so a chip pressed off stays on screen
+  // Ruling 184: held from the open, so a chip pressed off stays on screen
   // to be pressed back on.
   const [storedOnlyStages] = useState<string[]>(() =>
     storedOnlyStagesOf(initial, workStages, projectStages),
   );
-  // Ruling 618: ordered once, at the open, so a press never moves a row to
+  // Ruling 326: ordered once, at the open, so a press never moves a row to
   // another page.
   const [projects] = useState<ProjectCustomStages[]>(() =>
     projectsNamedFirst(initial, projectStages),

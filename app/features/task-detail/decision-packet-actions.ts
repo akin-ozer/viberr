@@ -18,7 +18,7 @@ import {
 } from "./decision-packet-derive";
 
 /**
- * The decision packet card's choice (ruling 700(e), the split of
+ * The decision packet card's choice (ruling 13(b), the split of
  * `decision-packet.tsx` along the task-page recipe): what the person chose and
  * typed, the refusals a Confirm meets, the ask-first ceremony it opens, and
  * the re-seed when the packet is replaced. `DecisionPacket` calls the one hook
@@ -34,7 +34,7 @@ type PacketOption = PacketRender["options"][number];
 export interface PacketChoice extends PacketChoiceView {
   sel: number;
   /** Every choice goes through here, and a change drops a standing refusal:
-   *  a pristine directive is never accused (ruling 147). The checked choice
+   *  a pristine directive is never accused (ruling 288). The checked choice
    *  chosen again is no change, so its refusal stands. */
   selectOption: (i: number) => void;
   /** An arrow key's step through the choices, past an inert one (UI-44). */
@@ -67,20 +67,20 @@ export function usePacketChoice(
   const noteRef = useRef<HTMLTextAreaElement>(null);
   // P11-71: optional free-text so a human can supply the input an option asks
   // for (e.g. "specify the expected behavior") instead of resolving with an
-  // unstated reading. Recorded on the decision event. Ruling 478(e): required
+  // unstated reading. Recorded on the decision event. Ruling 68: required
   // when the chosen option is one the asking agent marked `reply`.
   const [note, setNote] = useState("");
-  // Ruling 672: the repository a `connect_repository` answer attaches is the
+  // Ruling 224: the repository a `connect_repository` answer attaches is the
   // person's typed answer, kept apart from the note so choosing the other
   // answer does not carry a repository name into its record. It opens with
   // the repository the operator could name.
   const [repository, setRepository] = useState(() => initialRepository(p));
   const [customText, setCustomText] = useState("");
-  // Ruling 147: Confirm stays enabled with the directive still empty, and the
+  // Ruling 288: Confirm stays enabled with the directive still empty, and the
   // click is refused here. Counted, so a repeated press inserts a fresh alert;
   // reset by every choice change, so returning to the directive is pristine.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const customRef = useRef<HTMLTextAreaElement>(null);
   const selectOption = (i: number) => {
@@ -97,8 +97,8 @@ export function usePacketChoice(
   // the person chose or typed belongs to the packet it was seeded from, so a
   // new id re-seeds it all (the refusal's shake follows `refused` back to
   // none). In place, not by a key: a remount would take the `completion`
-  // slot with it, the inline reader and its unsent notes (rulings 484(b),
-  // 521(d)), and drop the person's focus to <body>. A packet written before
+  // slot with it, the inline reader and its unsent notes (rulings 246,
+  // 316), and drop the person's focus to <body>. A packet written before
   // ids has none, so it is never re-seeded.
   const [seededFrom, setSeededFrom] = useState(p.id);
   if (p.id !== seededFrom) {
@@ -139,7 +139,7 @@ export function usePacketChoice(
   const commitConfirm = () => {
     if (pendingConfirm === null) return;
     // No setPendingConfirm(null): the dialog plays its exit, then
-    // cancelConfirm clears it (ruling 459).
+    // cancelConfirm clears it (ruling 287).
     onResolve(pendingConfirm, answer);
   };
 
@@ -154,7 +154,7 @@ export function usePacketChoice(
     // more than once, which would schedule the frame twice. `sel` is current
     // here (this only runs from a keydown handler), matching the click path at
     // the option buttons (`PacketOptions`).
-    // Ruling 478(e): with nothing chosen, an arrow moves from the choice that
+    // Ruling 68: with nothing chosen, an arrow moves from the choice that
     // has focus (the group's tab stop), or enters the list at its nearest end.
     const from =
       sel >= 0 ? sel : optionRefs.current.findIndex((el) => el === document.activeElement);
@@ -162,7 +162,7 @@ export function usePacketChoice(
     // (a disabled radio in the APG radio group), and with every choice inert
     // it does nothing at all. With none but the checked one reachable it
     // lands on that one again, which `selectOption` counts as no change, so
-    // a standing refusal stays (ruling 147).
+    // a standing refusal stays (ruling 288).
     const { blockedOptions } = view;
     let next = from < 0 ? (delta > 0 ? -1 : choiceCount) : from;
     for (let tried = 0; tried < choiceCount; tried++) {
@@ -182,14 +182,14 @@ export function usePacketChoice(
       if (customText.trim()) {
         onResolveCustom(customText);
       } else {
-        // Ruling 147: refuse in place, name the field, and never
+        // Ruling 288: refuse in place, name the field, and never
         // let the attempt become a request.
         setRefused((n) => n + 1);
         customRef.current?.focus();
       }
       return;
     }
-    // Ruling 478(e) under ruling 147: nothing chosen, or a choice
+    // Ruling 68 under ruling 288: nothing chosen, or a choice
     // the asking agent marked as needing a typed answer with the
     // box still empty, is refused in place: the alert names it and
     // focus lands where the person must act. Never a request.
@@ -203,7 +203,7 @@ export function usePacketChoice(
       noteRef.current?.focus();
       return;
     }
-    // The packet's one-way halves ask first (rulings 20/53), each
+    // The packet's one-way halves ask first (ruling 97), each
     // through its own ceremony (decision-packet-ceremonies.tsx). They used
     // to commit from this generic "Confirm decision" while the *reversible*
     // Archive button beside them asked.

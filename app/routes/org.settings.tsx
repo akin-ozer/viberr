@@ -146,12 +146,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     // callback URL the card tells an admin to register is identical in the SSR
     // markup and after hydration. It is BETTER_AUTH_URL's origin when set,
     // the one better-auth sends; behind the TLS proxy the request's own origin
-    // is the proxy's plain-HTTP upstream (ruling 687).
+    // is the proxy's plain-HTTP upstream (ruling 28).
     callbackOrigin: publicOrigin(request),
     // Instance run-concurrency: the configured cap and the live/queued counts,
     // for the admin control below StorageLine.
     runConcurrency: runConcurrencySnapshot(getDb()),
-    // Ruling 175: the instance's spending cap per Claude run (null = none).
+    // Ruling 31: the instance's spending cap per Claude run (null = none).
     runSpendCapUsd: getMaxRunSpendUsd(getDb()),
     // The S3 audit-export target (never carries the secret key).
     s3Audit: getS3AuditConfigView(getDb()),
@@ -159,20 +159,20 @@ export async function loader({ request }: Route.LoaderArgs) {
     // to READ org/instance-scoped events (sign-ins, PAT changes, user admin) in
     // the app; the project Activity page is project-scoped and the export is a file.
     auditEvents: listRecentAuditEvents(getDb()),
-    // Ruling 234: the org-scoped view is its OWN window, fetched here so the
+    // Ruling 33: the org-scoped view is its OWN window, fetched here so the
     // toggle stays instant (no round trip, and the text filter keeps working
     // over whichever list is showing). Filtering the list above client-side is
     // what made the toggle unable to reach the very class it exists for: a
     // poller heartbeat filled the unscoped window and the sign-ins fell out.
     auditEventsOrgScoped: listRecentAuditEvents(getDb(), { orgOnly: true }),
-    // Ruling 99: the controller configuration the admin tab edits.
+    // Ruling 247: the controller configuration the admin tab edits.
     controllerConfig: resolveControllerConfig(),
-    // Ruling 108: which of its sections this DEPLOYMENT allows editing.
+    // Ruling 270: which of its sections this DEPLOYMENT allows editing.
     controllerLocks: controllerSectionLocks(),
-    // Ruling 390: grants the controller asked for and cannot make itself. The
+    // Ruling 271: grants the controller asked for and cannot make itself. The
     // remedy sentence is computed HERE so the panel and the controller's own
     // turn context print the identical words.
-    // Ruling 653: every board, for the Import & export tab's Export list.
+    // Ruling 32: every board, for the Import & export tab's Export list.
     boards: listBoardExports(getDb()),
     controllerRequests: openResourceRequests().map((r) => ({
       id: r.id,
@@ -205,17 +205,17 @@ type SettingsOk = {
   /** `store-read-doc`: the document body and whether the read was cut short. */
   text?: string;
   truncated?: boolean;
-  /** `store-read-doc` (ruling 663): the version read, which the save sends back. */
+  /** `store-read-doc` (ruling 18(c)): the version read, which the save sends back. */
   version?: string;
   /** `store-import-github`: the store-relative folder the snapshot landed in. */
   folder?: string;
-  /** `mcp-oauth-start` (ruling 469): where the admin's browser signs in, and
+  /** `mcp-oauth-start` (ruling 192): where the admin's browser signs in, and
    *  the authorization server's host the editor names. */
   authorizeUrl?: string;
   issuer?: string;
-  /** `board-import-preview` (ruling 653): what importing the file would do. */
+  /** `board-import-preview` (ruling 32): what importing the file would do. */
   boardImport?: BoardImportPreview;
-  /** `board-import` (ruling 653): the new project, and what its repository
+  /** `board-import` (ruling 32): the new project, and what its repository
    *  probe found, as the New project dialog reports them. */
   slug?: string;
   repoWarning?: string;
@@ -255,7 +255,7 @@ const storePath = z
   .transform((segments) => segments.filter((seg) => seg !== null))
   .catch([]);
 
-/** Ruling 176: the MCP editor's write-tool list, a JSON array of names. */
+/** Ruling 188: the MCP editor's write-tool list, a JSON array of names. */
 const writeToolNames = z.array(z.string());
 
 /** The list, or undefined when the form carries no "Write tools" section. A
@@ -271,7 +271,7 @@ function parseWriteTools(raw: FormDataEntryValue | null): string[] | undefined {
   throw AppError.validation("The write-tool list did not arrive as a list of tool names.");
 }
 
-/** Ruling 653: the board file a form carries under `file`. */
+/** Ruling 32: the board file a form carries under `file`. */
 async function boardFileFrom(formData: FormData): Promise<BoardFileUpload> {
   const file = formData.get("file");
   if (!(file instanceof File) || file.size === 0) {
@@ -285,7 +285,7 @@ async function boardFileFrom(formData: FormData): Promise<BoardFileUpload> {
   return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) };
 }
 
-/** Ruling 653: the import dialog's choice per resource this instance holds
+/** Ruling 32: the import dialog's choice per resource this instance holds
  *  differently, a JSON object of `<kind>:<key>` → `copy` | `existing`. */
 const boardImportChoices = z.record(z.string(), z.enum(["copy", "existing"]));
 
@@ -345,7 +345,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast);
       }
       case "connection-recheck": {
-        // Ruling 463: validate the stored token again and re-read its reach.
+        // Ruling 222: validate the stored token again and re-read its reach.
         const result = await recheckConnection(db, field("connectionId"), actor);
         if (result.status === "not_found") return fail(result.message, 404);
         if (result.status === "refused") return fail(result.message);
@@ -384,7 +384,7 @@ export async function action({ request }: Route.ActionArgs) {
       }
       // ------------------------------------------------- run spending cap
       case "set-run-spend-cap": {
-        // Ruling 175: blank clears the cap; otherwise dollars above zero with
+        // Ruling 31: blank clears the cap; otherwise dollars above zero with
         // at most two decimals. Read as text first, so "1e3" or "0x10" is an
         // amount nobody typed rather than one `Number` made up.
         const raw = field("maxRunSpendUsd").trim();
@@ -501,7 +501,7 @@ export async function action({ request }: Route.ActionArgs) {
             name: field("name"),
             email: field("email"),
             role,
-            // Ruling 154: the modal sends the handle for a local or Google
+            // Ruling 29: the modal sends the handle for a local or Google
             // account; blank clears it. A GitHub account's modal sends none.
             githubHandle: field("githubHandle"),
           },
@@ -583,7 +583,7 @@ export async function action({ request }: Route.ActionArgs) {
 
       // ------------------------------------------------- agent resources
       case "controller-save": {
-        // Ruling 99: only org admins modify the controller itself (this whole
+        // Ruling 247: only org admins modify the controller itself (this whole
         // action is admin-gated above).
         const splitNames = (raw: string) =>
           raw
@@ -602,7 +602,7 @@ export async function action({ request }: Route.ActionArgs) {
           },
           actor,
         );
-        // Ruling 390 (amended 2026-09-23): a save that leaves a requested
+        // Ruling 271 (amended 2026-09-23): a save that leaves a requested
         // resource granted answers that request. Name it, so the admin knows
         // why the request left the list.
         const answered = saved.answeredRequests.map((r) => `“${r.name}”`);
@@ -613,7 +613,7 @@ export async function action({ request }: Route.ActionArgs) {
         );
       }
       case "controller-request-decline": {
-        // Ruling 390 (amended 2026-09-23): an org admin's explicit "no" to a
+        // Ruling 271 (amended 2026-09-23): an org admin's explicit "no" to a
         // grant the controller asked for. It declines the ask and changes no
         // grant, so no deployment lock applies to it.
         const declined = declineResourceRequest(db, field("requestId"), actor);
@@ -647,7 +647,7 @@ export async function action({ request }: Route.ActionArgs) {
         // Absent keeps the stored marks; only the editor sends the section.
         const writeTools = parseWriteTools(formData.get("writeTools"));
         if (writeTools !== undefined) input.writeTools = writeTools;
-        // Ruling 486(c): absent keeps what the next sign-in asks for; the
+        // Ruling 192: absent keeps what the next sign-in asks for; the
         // editor sends the field for an HTTP server only.
         if (formData.has("requestedScopes")) input.requestedScopes = field("requestedScopes");
         const result = await saveMcpServer(db, input, actor);
@@ -722,7 +722,7 @@ export async function action({ request }: Route.ActionArgs) {
         deleteOAuthProvider(db, provider, actor);
         return ok(`${providerLabel(provider)} configuration removed.`);
       }
-      // ---- Ruling 469: an HTTP MCP connection's OAuth sign-in ----
+      // ---- Ruling 192: an HTTP MCP connection's OAuth sign-in ----
       case "mcp-oauth-start": {
         const started = await startMcpOAuthSignIn(db, {
           mcpId: field("mcpId"),
@@ -771,7 +771,7 @@ export async function action({ request }: Route.ActionArgs) {
             skills: parseJsonStringArray(field("skills")),
             mcps: parseJsonStringArray(field("mcps")),
             kbs: parseJsonStringArray(field("kbs")),
-            // Ruling 156: the modal's "copy these grants" box; this route is
+            // Ruling 177: the modal's "copy these grants" box; this route is
             // org-admin only, so the propagation stays an org admin's act.
             propagate: field("propagate") === "1",
           },
@@ -833,7 +833,7 @@ export async function action({ request }: Route.ActionArgs) {
       case "store-write-doc": {
         const target = resolveStoreTarget(db, field("kind"), field("id"));
         if (!target) return fail("That resource no longer exists.", 404);
-        // Ruling 663: a document the editor opened is saved against the
+        // Ruling 18(c): a document the editor opened is saved against the
         // version it read, so a write made meanwhile is not wiped.
         const writeOpts: NonNullable<Parameters<typeof writeStoreDoc>[6]> = {
           overwrite: field("overwrite") === "1",
@@ -907,7 +907,7 @@ export async function action({ request }: Route.ActionArgs) {
         return ok(result.toast, { folder: result.folder });
       }
 
-      // ------------------------------------------------- boards (ruling 653)
+      // ------------------------------------------------- boards (ruling 32)
       case "board-import-preview": {
         const file = await boardFileFrom(formData);
         return ok(undefined, { boardImport: previewBoardImport(db, file) });
@@ -921,7 +921,7 @@ export async function action({ request }: Route.ActionArgs) {
           repoName: field("repoName"),
           choices: parseBoardImportChoices(formData.get("choices")),
         };
-        // Ruling 462, as the New project dialog posts it.
+        // Ruling 225, as the New project dialog posts it.
         const createRepository = formData.get("createRepository");
         if (createRepository === "private" || createRepository === "public") {
           input.createRepository = { private: createRepository === "private" };
@@ -960,5 +960,5 @@ export default function OrgSettings({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/org.settings");

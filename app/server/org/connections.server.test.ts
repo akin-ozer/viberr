@@ -87,7 +87,7 @@ function validTransport(owner = "akin-ozer") {
       },
     },
     [`GET /users/${owner}`]: { body: { public_repos: 7 } },
-    // Ruling 463: what the token reaches, one of them private.
+    // Ruling 222: what the token reaches, one of them private.
     "GET /user/repos": {
       body: [
         { full_name: `${owner}/site`, private: false, permissions: { push: true } },
@@ -163,7 +163,7 @@ describe("createConnection", () => {
       tokenKind: "classic",
       reach: { status: "read", total: 2, privateCount: 1, capped: false },
     });
-    // Ruling 463: the account's public count is no longer a field anyone reads.
+    // Ruling 222: the account's public count is no longer a field anyone reads.
     expect(conn).not.toHaveProperty("repos");
     expect(conn!.expiresAt).toBeTruthy();
     if (result.status === "saved") {
@@ -173,7 +173,7 @@ describe("createConnection", () => {
     expect(JSON.stringify(conn)).not.toContain("ghp_valid_token_42af");
   });
 
-  it("ruling 144(a): the workflow-scope advisory rides the connection record from the token's header", async () => {
+  it("ruling 221(a): the workflow-scope advisory rides the connection record from the token's header", async () => {
     // Canary: return `[]` for `advisories` in the record builder.
     const db = makeDbWithUser();
     const withWorkflow = await connectValid(db);
@@ -427,13 +427,13 @@ describe("stale connection revalidation", () => {
 });
 
 /**
- * Ruling 463 (pass 40, F40-6): a connection records which repositories its
+ * Ruling 222 (pass 40, F40-6): a connection records which repositories its
  * TOKEN reaches. The card read "PAT ····k3ui · 3 public repos", the ACCOUNT's
  * public count, while the fine-grained token behind it was granted a private
  * repository that count could never show; and the controller could not tell
  * whether a token reached the repository it was asked to build on.
  */
-describe("ruling 463: what the token reaches", () => {
+describe("ruling 222: what the token reaches", () => {
   const DAY = 24 * 60 * 60 * 1000;
   const TOKEN = "github_pat_reach_test_token_0000000000";
 
@@ -647,7 +647,7 @@ describe("ruling 463: what the token reaches", () => {
   it("Re-check reads the reach of a connection saved before the read existed, and audits it", async () => {
     const db = makeDbWithUser();
     await connectValid(db);
-    // A root that predates ruling 463: the column is NULL.
+    // A root that predates ruling 222: the column is NULL.
     db.prepare(`UPDATE github_connections SET reach_json = NULL`).run();
     expect(listConnections(db)[0]!.reach).toBeNull();
 
@@ -698,13 +698,13 @@ describe("ruling 463: what the token reaches", () => {
 });
 
 /**
- * Ruling 480 (F40-43), the live sequence: a fine-grained token is attached to
+ * Ruling 220 (F40-43), the live sequence: a fine-grained token is attached to
  * a project (GitHub's permission block proves `repo` on that repository), then
  * an admin presses Re-check on Instance settings. The Re-check asks about no
  * repository, and used to overwrite the one cached validation the project card
  * read, so the project's proven `repo` went back to "unproven".
  */
-describe("ruling 480: a connection Re-check never unproves a repository", () => {
+describe("ruling 220: a connection Re-check never unproves a repository", () => {
   const TOKEN = "github_pat_ruling480_token_00000000k3ui";
   const REPO = "akin-ozer/website";
 
@@ -782,13 +782,13 @@ describe("ruling 480: a connection Re-check never unproves a repository", () => 
 });
 
 /**
- * Ruling 540: every project bound to a connection's token checks its repository
+ * Ruling 223: every project bound to a connection's token checks its repository
  * with that token, so Update token, Re-check and removal each take a new reading
  * for those projects' boards (U33-2). Before, none of them touched a project's
  * remembered check, and "token expired" stayed on every bound board after the
  * token was replaced, until someone opened the project's GitHub page.
  */
-describe("ruling 540: a connection change takes a new reading for every project bound to its token", () => {
+describe("ruling 223: a connection change takes a new reading for every project bound to its token", () => {
   const REPO = "akin-ozer/viberr"; // the projected store's project
 
   function github(repoAnswer: FakeResponder) {

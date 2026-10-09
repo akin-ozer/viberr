@@ -137,7 +137,7 @@ export function writeProject(
 
 /**
  * The Standard board with a person approving the move into Review: the
- * template before ruling 519, and a strict board still. For a suite whose
+ * template before ruling 91, and a strict board still. For a suite whose
  * contract needs an `approval` boundary to cross, or a work stage the operator
  * does not leave on its own (so the settle-time backstop stays quiet there).
  */
@@ -160,7 +160,7 @@ export function approveReviewEntry(store: Pick<TestStore, "dataRoot" | "slug">):
 
 /**
  * The k9s clone's board (pass 35): a Merge stage past Review, whose step to
- * Done is the person's. Rulings 162 and 163 (acceptance and rework at a stage
+ * Done is the person's. Rulings 95 and 90 (acceptance and rework at a stage
  * past review) run on it.
  */
 export const MERGE_STAGE_BOARD = {

@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Ruling 121 — the controller dock, end to end on the production image:
+ * Ruling 256 — the controller dock, end to end on the production image:
  *
  *  - the trigger names the place the person is standing (the board, then the
  *    task) and opens a non-modal panel whose context line says what the
@@ -10,7 +10,7 @@ import { expect, test } from "@playwright/test";
  *  - the two full controller pages carry no dock;
  *  - under the rail's breakpoint the panel is a bottom sheet and nothing
  *    scrolls sideways;
- *  - ruling 459's deferred dock half: a dock the tab remembers open comes
+ *  - ruling 285's deferred dock half: a dock the tab remembers open comes
  *    back in place after a reload (F24), and a click on the trigger while the
  *    panel leaves turns it back open (F20).
  */
@@ -107,7 +107,7 @@ test("a dock the tab remembers open comes back in place after a reload, without 
   // The person's own open is not a restore.
   await expect(page.locator(".dock")).not.toHaveAttribute("data-restored");
 
-  // Ruling 459 (F24): the per-tab memory reopens it after the reload. It was
+  // Ruling 285 (F24): the per-tab memory reopens it after the reload. It was
   // already open, so it is simply there: nothing runs on it at first paint
   // (the .18s entrance would still be playing), and the restored rule leaves
   // it no transition to run at all.
@@ -130,7 +130,7 @@ test("a click on the trigger while the dock closes turns it back open", async ({
   // The entrance has finished.
   await expect.poll(() => panel.evaluate((el) => el.getAnimations({ subtree: false }).length)).toBe(0);
 
-  // Ruling 459 (F20): close, and click again before the exit ends. Both clicks
+  // Ruling 287 (F20): close, and click again before the exit ends. Both clicks
   // run in the page two frames apart, so the test's own round trips add
   // nothing. The exit is stretched to 1s on the panel's inline style (it beats
   // the .12s closing rule, and the closing effect reads it, so its fallback

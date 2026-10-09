@@ -7,7 +7,7 @@ import { mergeCollisions, openPrDiffPaths, type PrOverlap } from "~/shared/pr-ov
 const openPrRows = z.array(z.object({ task_key: z.string(), pr_json: z.string().nullable() }));
 
 /**
- * Ruling 475 (F40-55 (c)): for the task page's accept dialog, the other open
+ * Ruling 244 (F40-55 (c)): for the task page's accept dialog, the other open
  * review PRs of the project that merging this task's PR would likely put in
  * conflict (they change a path it changes).
  *

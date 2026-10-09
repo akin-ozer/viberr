@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readZip, writeZip, type ZipFileInput } from "./zip.server";
 
 /**
- * Ruling 653: the zip a board file travels in is read from an upload, so the
+ * Ruling 32: the zip a board file travels in is read from an upload, so the
  * reader is a trust boundary. These pin what it refuses; the board suites
  * (`board-import.server.test.ts`) pin that a real zip, Finder's, reads.
  */
@@ -29,7 +29,7 @@ function patched(file: ZipFileInput, patch: (zip: Buffer, header: number) => voi
 
 const TEXT: ZipFileInput = { path: "board/board.md", data: Buffer.from("a".repeat(400)) };
 
-describe("ruling 653: readZip", () => {
+describe("ruling 32: readZip", () => {
   it("reads back what writeZip wrote: UTF-8 names, empty files and binary bytes", () => {
     // CANARY: drop the UTF-8 flag or the STORE path and a Turkish file name,
     // an empty file or a PDF comes back changed.

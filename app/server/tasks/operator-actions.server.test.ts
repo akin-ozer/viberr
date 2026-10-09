@@ -189,7 +189,7 @@ function seedTask(stage: string, key = "VIB-1"): void {
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 }
 
-/** Ruling 384: a delivered, reviewed, approved task with a live review PR —
+/** Ruling 99: a delivered, reviewed, approved task with a live review PR —
  *  the shape an acceptance card's merge clause is true for. */
 function seedAcceptable(stage: string): void {
   const sha = "a".repeat(40);
@@ -231,18 +231,18 @@ beforeEach(async () => {
     "~/server/runtimes/operator-run.server"
   );
   resetOperatorLeasesForTests();
-  // Ruling 127: an agent run bills the TASK OWNER's accounts, so a dispatch
+  // Ruling 137: an agent run bills the TASK OWNER's accounts, so a dispatch
   // only reaches an adapter when the owner has that backend connected. Arda
-  // owns VIB-1 in `seedTask`. Ruling 263 is why this is here: seventeen tests
+  // owns VIB-1 in `seedTask`. Ruling 152 is why this is here: seventeen tests
   // in this file named "and starts its run" were asserting the sentence
-  // "Started a Claude run for Dev" on a dispatch that ruling 127 had already
+  // "Started a Claude run for Dev" on a dispatch that ruling 137 had already
   // refused for the missing credential, because every ending of a dispatch
   // reported the same "started". The owner having an account is the ordinary
   // state of somebody using the product; nothing here tests the refusal.
   const { connectFakeBackend } = await import(
     "../../../test-support/backend-credentials"
   );
-  // CLAUDE only: ruling 207(h)'s test asserts the "no Codex fallback either"
+  // CLAUDE only: ruling 124's test asserts the "no Codex fallback either"
   // half on this same fixture, and connects Codex itself when it wants the
   // other arm.
   await connectFakeBackend(store.db, store.users.arda.id, "claude");
@@ -488,7 +488,7 @@ describe("operatorSetGoal — draft the goal at the triage gate", () => {
   });
 });
 
-describe("operatorSetDependencies (ruling 131(b))", () => {
+describe("operatorSetDependencies (ruling 55)", () => {
   it("done on a new list, noop on an unchanged one, noop with the VALIDATOR's own sentence on a bad reference, denied only when generate-packets is withheld", async () => {
     // Canary: return `denied` for the validator's error (the LV-03 misblame
     // rule: a state refusal must never accuse the project's policy).
@@ -528,7 +528,7 @@ describe("operatorSetDependencies (ruling 131(b))", () => {
     expect(task().frontmatter.blockedBy).toEqual(["VIB-9"]);
   });
 
-  it("ruling 620: a list left with only done entries says the sweep releases it, not that Viberr holds it", async () => {
+  it("ruling 57: a list left with only done entries says the sweep releases it, not that Viberr holds it", async () => {
     // CANARY: keep the held sentence for a satisfied list.
     deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     seedTask("impl");
@@ -573,7 +573,7 @@ describe("operatorDispatchAgent", () => {
     await interruptRunningRuns("VIB-1");
   });
 
-  it("ruling 152(c): a dispatch into a held backend is a NOOP naming the hold, never a throw", async () => {
+  it("ruling 151: a dispatch into a held backend is a NOOP naming the hold, never a throw", async () => {
     // The plan's own shape for this door. It matters most on the Codex
     // operator: its plan executor catches a throw from any governed action,
     // ABORTS every remaining step and writes "Coordination stopped" on the
@@ -584,7 +584,7 @@ describe("operatorDispatchAgent", () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     // The hold is read for the account the run would bill, so the owner has to
-    // have one connected (ruling 127); without it the dispatch is refused for
+    // have one connected (ruling 137); without it the dispatch is refused for
     // the credential before quota is anyone's question.
     const { connectFakeBackend } = await import(
       "../../../test-support/backend-credentials"
@@ -611,9 +611,9 @@ describe("operatorDispatchAgent", () => {
     );
     expect(bare.outcome).toBe("noop");
     expect(bare.message).toContain("Claude is out of quota until");
-    // Ruling 207(h): this fixture's owner has ONLY Claude connected — which is
+    // Ruling 124: this fixture's owner has ONLY Claude connected — which is
     // the shape the advice used to ignore. The hold is scoped to (backend,
-    // owner) because every run bills the owner (ruling 127), so telling the
+    // owner) because every run bills the owner (ruling 137), so telling the
     // operator to "pick a Codex profile" would send it into a dispatch that is
     // refused on the owner's credential, and THAT failure opens the very packet
     // this sentence forbids.
@@ -623,7 +623,7 @@ describe("operatorDispatchAgent", () => {
       "there is no Codex fallback either. This task's runs bill its owner, who has no Codex account connected",
     );
     // …and with the other backend actually reachable for the owner, the
-    // fallback is real and is offered. Both arms of ruling 207(h) in one test,
+    // fallback is real and is offered. Both arms of ruling 124 in one test,
     // because the sentence is only honest when it tracks this fact.
     await connectFakeBackend(store.db, store.users.arda.id, "codex");
     const withFallback = await operatorDispatchAgent(
@@ -761,7 +761,7 @@ describe("operatorDispatchAgent", () => {
     expect(
       d.candidates.find((c) => c.profileId === "developer")?.eligibleForStage,
     ).toBe(true);
-    // Ruling 133 (A19): the trace records the posture the dispatch will TAKE.
+    // Ruling 181 (A19): the trace records the posture the dispatch will TAKE.
     // This is a FIRST dispatch (auto-engage): not yet engaged, delivering at
     // selection. Canary: derive `deliveringAtSelection` from the pre-dispatch
     // file for the chosen profile (it reads false here).
@@ -772,7 +772,7 @@ describe("operatorDispatchAgent", () => {
     await interruptRunningRuns("VIB-1");
   });
 
-  it("ruling 133 (A19): the snapshot and the trace judge eligibility as 'may RUN here': the engaged deliverer is eligible at a stage it does not declare, with engagedAsDeliverer beside it", async () => {
+  it("ruling 181 (A19): the snapshot and the trace judge eligibility as 'may RUN here': the engaged deliverer is eligible at a stage it does not declare, with engagedAsDeliverer beside it", async () => {
     // Canary: map `eligibleForCurrentStage` back to `specialistEligibleForStage`.
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
     writeProject(store.dataRoot, {
@@ -815,7 +815,7 @@ describe("operatorDispatchAgent", () => {
     await interruptRunningRuns("VIB-1");
   });
 
-  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy after ruling 133", async () => {
+  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy after ruling 181", async () => {
     // The regression guard for the owner's answer: it fails the moment
     // somebody re-gates the hand-off with a refusal or a card.
     deployRoster(DEFAULT_POLICY);
@@ -926,7 +926,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     expect(deliveringEngagement(task().frontmatter)?.profileId).toBe("developer");
   });
 
-  it("ruling 556: refuses a hand-off to the project's required reviewer before any card", async () => {
+  it("ruling 128: refuses a hand-off to the project's required reviewer before any card", async () => {
     // The engage refuses it (`assignSpecialist`), so a card for it would
     // strand a maintainer's Apply on that refusal. CANARY: drop the operator's
     // pre-check and recommend mode files a `run_agent` card nobody can apply.
@@ -948,7 +948,7 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     expect(task().frontmatter.recommendations).toEqual([]);
   });
 
-  it("ruling 556: offers the project's required reviewer as a reviewer, even when it could deliver", async () => {
+  it("ruling 89: offers the project's required reviewer as a reviewer, even when it could deliver", async () => {
     // CANARY: drop the required-reviewer term from `resolveDeliversIntent` and
     // the dispatch reads as a hand-off of delivery, which the pre-check above
     // refuses: no card offers the reviewer at all.
@@ -974,9 +974,9 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     expect(offered.message).not.toContain("the delivering agent");
   });
 
-  it("ruling 535: an explicit hand-off to an agent that posts files but cannot write the repo makes it the deliverer", async () => {
+  it("ruling 128: an explicit hand-off to an agent that posts files but cannot write the repo makes it the deliverer", async () => {
     // On a board that delivers results, the agent that makes the result must
-    // deliver the task (ruling 388: its saved files are the delivery and what
+    // deliver the task (ruling 84: its saved files are the delivery and what
     // a review binds to), and it must never write the repository. Live on
     // AWSC-1 the operator's hand-off was refused for want of a repo-write
     // grant, the researcher ran as a supporting agent, and nothing it saved
@@ -1005,8 +1005,8 @@ describe("operatorDispatchAgent — explicit delivers posture (P11-22 successor)
     expect(deliveringEngagement(task("VIB-2").frontmatter)).toBeNull();
   });
 
-  it("ruling 665: a deliverer that cannot write the repository gets no branch on it", async () => {
-    // Ruling 535's deliverer never commits: its delivery is the files it saves
+  it("ruling 228: a deliverer that cannot write the repository gets no branch on it", async () => {
+    // Ruling 128's deliverer never commits: its delivery is the files it saves
     // on the task. The dispatch made its task branch on GitHub all the same,
     // and live the AWS board left 91 branches on its repository, none of them
     // ahead of `main`.
@@ -1312,14 +1312,14 @@ describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", 
 });
 
 /**
- * Ruling 421 (F39-43). Ruling 410 has the operator ask a reviewer that keeps
+ * Ruling 93 (F39-43). Ruling 93 has the operator ask a reviewer that keeps
  * objecting for everything it would still block on, and on ax-clone every
  * operator folded that question into the review of a fresh rework. Nothing
  * recorded that it had, so three deadlock packets in 25 minutes (AX-20, AX-22,
  * AX-24) recommended asking again the question their own verdict had answered.
  * The dispatch that puts the question now stamps the engagement with its run.
  */
-describe("ruling 421: a dispatch that puts the completeness question says so", () => {
+describe("ruling 93: a dispatch that puts the completeness question says so", () => {
   it("stamps the reviewer's engagement with THIS run's id; a plain dispatch stamps nothing", async () => {
     // CANARY: drop the stamp in `dispatchAgentRun` (or stop threading
     // `completeness` through `operatorDispatchAgent`) and `question` stays empty.
@@ -1415,13 +1415,13 @@ describe("ruling 421: a dispatch that puts the completeness question says so", (
 });
 
 /**
- * Ruling 583. On AWSC-19 the operator told the Estimate Judge "Record no
+ * Ruling 124. On AWSC-19 the operator told the Estimate Judge "Record no
  * verdict" in its directive, the Judge kept to it, and Viberr read one into its
  * report all the same: a heading, "Not done or not checked", matched the prose
  * fallback. A directive is a request; `noVerdict` withholds the verdict the way
- * ruling 313 does for the deadlock question, which ruling 316 honours.
+ * ruling 87 does for the deadlock question, which ruling 66 honours.
  */
-describe("ruling 583: a dispatch that must not judge withholds the verdict", () => {
+describe("ruling 124: a dispatch that must not judge withholds the verdict", () => {
   const newestReviewerWithheld = () => {
     const newest = listRunsForTask(store.db, store.slug, "VIB-1")
       .filter((r) => r.kind === "reviewer")
@@ -1976,7 +1976,7 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.waiting).toBe("human");
   });
 
-  it("ruling 519: on the Standard board the operator moves the task into Review itself and says why on the move", async () => {
+  it("ruling 91: on the Standard board the operator moves the task into Review itself and says why on the move", async () => {
     // CANARY: put the template's In Progress → Review edge back to `approval`
     // and this files a card a person has to apply; drop the quote from the
     // operator's transition event and its reason reaches nobody.
@@ -2005,7 +2005,7 @@ describe("operatorTransitionStage", () => {
     });
   });
 
-  it("ruling 655: a move to the stage the task already stands at moves nothing and files no card", async () => {
+  it("ruling 111: a move to the stage the task already stands at moves nothing and files no card", async () => {
     // CANARY: drop the same-stage return in operatorTransitionStage and the
     // supervised operator files "Move the task to Review" on a task at Review.
     deployRoster(DEFAULT_POLICY); // supervised, `stage-transitions: recommend`
@@ -2021,7 +2021,7 @@ describe("operatorTransitionStage", () => {
     expect(task().timeline).toEqual([]);
   });
 
-  it("ruling 655: a jump whose every step is automatic files no card, and the reply names the first step", async () => {
+  it("ruling 111: a jump whose every step is automatic files no card, and the reply names the first step", async () => {
     // CANARY: drop the `automaticStepsTo` return and the supervised operator
     // files "Move the task to Review" from Ready; drop its `auto` check and the
     // jump over the approval below is refused too, where it still files a card.
@@ -2046,7 +2046,7 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.recommendations.map((x) => x.label)).toEqual(["Move the task to Review"]);
   });
 
-  it("ruling 151: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
+  it("ruling 111: full autonomy RECOMMENDS an approval boundary instead of crossing it", async () => {
     // Pass 35, F35-2 (owner Q35-1): the boundary always wins. This case used to
     // assert the opposite ("full autonomy moves the task across an approval
     // boundary as the operator"). Canary: delete the `boundary === "approval"`
@@ -2071,7 +2071,7 @@ describe("operatorTransitionStage", () => {
     ).toHaveLength(0);
   });
 
-  it("ruling 151: an EXPLICIT `stage-transitions: direct` grant under supervised autonomy still recommends an approval boundary", async () => {
+  it("ruling 111: an EXPLICIT `stage-transitions: direct` grant under supervised autonomy still recommends an approval boundary", async () => {
     // The live KNC-1 shape: the controller set the grant to `direct` and the
     // operator crossed Review to Merge alone (audit `boundary: approval, by:
     // operator`) while every surface said a human approves it.
@@ -2101,7 +2101,7 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.stage).toBe("impl");
   });
 
-  it("ruling 151: a declared `human` boundary before the terminal stage is refused with a sentence", async () => {
+  it("ruling 111: a declared `human` boundary before the terminal stage is refused with a sentence", async () => {
     deployRoster([
       ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "stage-transitions"),
       { capabilityId: "stage-transitions", mode: "direct" },
@@ -2136,7 +2136,7 @@ describe("operatorTransitionStage", () => {
     expect(task().frontmatter.recommendations).toHaveLength(0);
   });
 
-  it("ruling 152(a): the done reply names the NEXT boundary so one turn walks consecutive auto stages", async () => {
+  it("ruling 120: the done reply names the NEXT boundary so one turn walks consecutive auto stages", async () => {
     // Canary: return the bare "Moved …" sentence again. A person approves the
     // move into Review on this board, so the second reply names that arm.
     deployRoster(DEFAULT_POLICY);
@@ -2315,7 +2315,7 @@ describe("operatorTransitionStage", () => {
    */
   it("F19-26: a supervised transition to the TERMINAL stage produces an ACCEPTANCE card, not a disguised move", async () => {
     deployRoster(DEFAULT_POLICY);
-    // Ruling 384: a task that HAS a reviewed pull request, so the merge clause
+    // Ruling 99: a task that HAS a reviewed pull request, so the merge clause
     // the case is about is a true one. The no-PR and no-verdict shapes are
     // their own cases below — this fixture used to be neither, and the card
     // promised a merge for a task with nothing to merge (R19-8, regressed).
@@ -2337,7 +2337,7 @@ describe("operatorTransitionStage", () => {
     expect(recs[0]!.label).toContain("Done");
     expect(recs[0]!.detail).toMatch(/Accepting completion moves/i);
     expect(recs[0]!.detail).toMatch(/merges the review PR/i);
-    // Ruling 384: and it OPENS by naming the approval it rests on.
+    // Ruling 99: and it OPENS by naming the approval it rests on.
     expect(recs[0]!.detail).toMatch(/approved `[0-9a-f]{7}`/);
     // The pre-fix harm, gone from every string the human reads: a bland move
     // that never says "accept" or "merge" over an irreversible merge.
@@ -2351,7 +2351,7 @@ describe("operatorTransitionStage", () => {
   });
 
   /**
-   * Ruling 384 (F39-12), live on ax-clone AX-12. The deliverer wrote a report,
+   * Ruling 99 (F39-12), live on ax-clone AX-12. The deliverer wrote a report,
    * committed nothing and opened no PR. The operator moved the task Design →
    * Build → Verify → Review in three minutes, its own plan reasoning saying
    * "advance to Review **for the required reviewer verdict**" — and then, on
@@ -2361,7 +2361,7 @@ describe("operatorTransitionStage", () => {
    * ever engaged, and there was no pull request to merge. Both halves of the
    * sentence were fixed prose over state the file already held.
    */
-  it("ruling 384: the card does not claim a review nobody gave, or a merge with no PR", async () => {
+  it("ruling 99: the card does not claim a review nobody gave, or a merge with no PR", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("review");
     const r = await operatorTransitionStage(
@@ -2838,7 +2838,7 @@ describe("operatorAcceptCompletion", () => {
     expect("deleteBranch" in packet.options[0]!).toBe(false);
   });
 
-  it("ruling 586: the operator's decision entry carries its card: body, observations and options", async () => {
+  it("ruling 68: the operator's decision entry carries its card: body, observations and options", async () => {
     // CANARY: write the one-line entry again and the question is on no record
     // once a person answers it.
     deployRoster([
@@ -2914,7 +2914,7 @@ describe("operatorAcceptCompletion", () => {
   });
 
   /**
-   * Ruling 492 (review, 2026-09-26): the doctrine has the operator offer a
+   * Ruling 130 (review, 2026-09-26): the doctrine has the operator offer a
    * post-merge proof's read as a `create_task` option before the task goes up
    * for acceptance, and an acceptance withdraws the open decision it does not
    * answer (F32-11; the operator's own answers none). The first doctrine said
@@ -2922,7 +2922,7 @@ describe("operatorAcceptCompletion", () => {
    * option and accepted in the same turn buried the read, and a supervised
    * operator's card stood beside it for a person to apply first.
    */
-  describe("ruling 492: an open create_task whose new task waits on this one holds the operator's acceptance", () => {
+  describe("ruling 130: an open create_task whose new task waits on this one holds the operator's acceptance", () => {
     const DECISION = "VIB-1's cron result can only be read after the merge";
     const READ_TITLE = "Read VIB-1's first cron run on the deployed build";
 
@@ -3026,7 +3026,7 @@ describe("operatorAcceptCompletion", () => {
 
     it("a decision already answered another way holds nothing: its create_task can no longer be chosen", async () => {
       // The person chose the goal edit, so the packet only waits for the
-      // edited goal and the read will not come from it (ruling 471 lets a
+      // edited goal and the read will not come from it (ruling 100 lets a
       // decided packet take no second answer). CANARY: drop the `awaiting`
       // check and this acceptance is refused for an option nobody can pick.
       acceptanceRoster("direct");
@@ -3106,7 +3106,7 @@ describe("operatorAcceptCompletion", () => {
       expect((await accept("full", callCtx)).outcome).toBe("done");
       expect(task().frontmatter.stage).toBe("done");
       expect(task().frontmatter.pr?.state).toBe("accepted");
-      // The acceptance's own sweep (ruling 131(e)) releases the read, and the
+      // The acceptance's own sweep (ruling 55) releases the read, and the
       // release hands the read task to its operator last.
       await waitFor(
         () =>
@@ -3178,7 +3178,7 @@ describe("operatorAcceptCompletion", () => {
     // `human` and `off` are distinct modes (schema: withheld entirely vs.
     // reserved for a human to perform) and both mean "not the operator's to
     // do". A card is not a neutral note — applying one IS the acceptance
-    // (ruling 22) — so `human` gets the same hard refuse with its own sentence,
+    // (ruling 50) — so `human` gets the same hard refuse with its own sentence,
     // matching the Claude toolkit, which builds the `accept_completion` tool for
     // neither mode.
     deployRoster([
@@ -3200,7 +3200,7 @@ describe("operatorAcceptCompletion", () => {
     ).toHaveLength(0);
   });
 
-  describe("ruling 521: the operator's offer waits for its completion packet", () => {
+  describe("ruling 130: the operator's offer waits for its completion packet", () => {
     /** The operator's own call inside a drive, as `runOperator` sets it. */
     const drive = () => ({
       dataRoot: store.dataRoot,
@@ -3222,14 +3222,14 @@ describe("operatorAcceptCompletion", () => {
       );
 
     it("refuses the offer until the packet is written, and the snapshot says so", async () => {
-      // CANARY: drop the ruling 521 check from operatorAcceptCompletion and
+      // CANARY: drop the ruling 130 check from operatorAcceptCompletion and
       // the first offer files a card whose work nobody summarized.
       deployRoster(DEFAULT_POLICY);
       seedAcceptable("review");
       const refused = await offer();
       expect(refused.outcome).toBe("noop");
       expect(refused.message).toBe(
-        "Write the completion packet for revision `aaaaaaa` first (write_completion_packet), then offer VIB-1 for acceptance: the person who accepts it reads your summary, the screenshots you pick and the change beside each reviewer's verdict (ruling 521).",
+        "Write the completion packet for revision `aaaaaaa` first (write_completion_packet), then offer VIB-1 for acceptance: the person who accepts it reads your summary, the screenshots you pick and the change beside each reviewer's verdict (ruling 130).",
       );
       expect(task().frontmatter.recommendations).toHaveLength(0);
       const snapshot = operatorSnapshot(store.db, drive(), store.slug, "VIB-1", authority("supervised"));
@@ -3309,8 +3309,8 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
       listNotifications(store.db, userId).filter((n) => n.kind === "packet");
     expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
     expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
-    // Ruling 497: the row opens the packet, where it is decided. CANARY: drop
-    // `about` from the notice and the row opens the task's top. Ruling 547:
+    // Ruling 75: the row opens the packet, where it is decided. CANARY: drop
+    // `about` from the notice and the row opens the task's top. Ruling 75:
     // the link names the packet, so the row can follow it once it closes.
     expect(packets(store.users.murat.id)[0]!.href).toBe(
       `/projects/${store.slug}/tasks/VIB-1#decision-${p.id}`,
@@ -3324,7 +3324,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
   /**
    * Owner ruling (pass 32): `accept_completion` is only coherent AT the
    * acceptance boundary with a healthy verdict — anywhere else the gate refuses
-   * the decision the option offers (rulings 20/62). Live (VIB-3): a triage
+   * the decision the option offers (rulings 97/101). Live (VIB-3): a triage
    * packet offered "Accept as complete now" on a task at Triage with no
    * verdict. Authoring refuses it and names the verbs that fit.
    */
@@ -3539,7 +3539,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     );
     expect(refused.outcome).toBe("noop");
     expect(refused.message).toContain("resolve_remote_collision");
-    // Ruling 161: the refusal names the REAL reason (the unowned PR), not
+    // Ruling 234: the refusal names the REAL reason (the unowned PR), not
     // "has a delivered revision".
     expect(refused.message).toContain("unowned PR #232 stands on the branch name `vib-1`");
     expect(refused.message).not.toContain("has a delivered revision");
@@ -3569,7 +3569,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
   });
 
   /**
-   * Ruling 161 (pass 35, G35-6): KNC-21's revision was registered by the
+   * Ruling 234 (pass 35, G35-6): KNC-21's revision was registered by the
    * agent's completion report at 18:56Z, the push was refused at 19:10Z, and
    * the operator's `discard_branch` was refused at 19:3xZ because "a revision
    * exists". The gate keys on whether the revision LEFT the workspace.
@@ -3595,7 +3595,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     recommended: true,
   };
 
-  it("ruling 161: discard_branch is accepted on a reported, never-pushed revision with no PR on the branch", async () => {
+  it("ruling 234: discard_branch is accepted on a reported, never-pushed revision with no PR on the branch", async () => {
     // Canary: restore `hasDeliveredWork = fm.workRevision !== null` and this
     // authoring is refused ("has a delivered revision").
     deployRoster([
@@ -3632,7 +3632,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet!.options[0]!.kind).toBe("discard_branch");
   });
 
-  it("ruling 161: discard_branch is refused once the delivery push published the head, naming the push", async () => {
+  it("ruling 234: discard_branch is refused once the delivery push published the head, naming the push", async () => {
     // Canary: drop the `pushed` arm of `revisionLeftWorkspace` and a pushed
     // revision is offered for a local discard that cannot remove it.
     deployRoster([
@@ -3665,19 +3665,19 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
       authority("supervised"),
     );
     expect(refused.outcome).toBe("noop");
-    expect(refused.message).toContain("ruling 161");
+    expect(refused.message).toContain("ruling 234");
     expect(refused.message).toContain("`8c463b7` was pushed to origin at 2026-09-06T19:10:35.000Z");
     expect(refused.message).toContain("archive_task with deleteBranch");
     expect(task().packet).toBeNull();
   });
 
   /**
-   * Ruling 164 (pass 35, F35-14) — an option title is a promise the resolution
+   * Ruling 131 (pass 35, F35-14) — an option title is a promise the resolution
    * keeps, checked where the option is AUTHORED (the one door both operator
    * backends reach). The two live titles are the cases; the third is the
    * profile surgery KNC-20's packet offered, which no kind can perform.
    */
-  it("ruling 164: refuses a send-back option that promises a force-accept, a stage move, or a profile edit", async () => {
+  it("ruling 131: refuses a send-back option that promises a force-accept, a stage move, or a profile edit", async () => {
     deployRoster([
       { capabilityId: "generate-packets", mode: "direct" },
       { capabilityId: "append-typed-events", mode: "direct" },
@@ -3739,7 +3739,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet!.options[0]!.kind).toBe("redirect");
   });
 
-  it("ruling 650: a send-back option can require the person's words, and an empty confirm is refused", async () => {
+  it("ruling 132: a send-back option can require the person's words, and an empty confirm is refused", async () => {
     // Live on AWSC-100 "Ask the Estimate Judge to revise the inputs first:
     // write what to change" sat over a box marked optional, so an empty
     // confirm would have re-run the Judge with nothing to change. CANARIES:
@@ -3787,7 +3787,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(task().packet).toBeNull();
   });
 
-  it("ruling 164: a move_stage option names a stage the resolution can move to, and only that kind carries one", async () => {
+  it("ruling 131: a move_stage option names a stage the resolution can move to, and only that kind carries one", async () => {
     deployRoster([
       { capabilityId: "generate-packets", mode: "direct" },
       { capabilityId: "append-typed-events", mode: "direct" },
@@ -3898,7 +3898,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
 });
 
 /**
- * Ruling 547: a decision's row opens the packet while it is open and, once it
+ * Ruling 75: a decision's row opens the packet while it is open and, once it
  * has closed, the timeline entry that records how. The task page shows a packet
  * only while it is open, so a row about a question already answered used to
  * open nothing at all (live on AWSC-2, 2026-09-28). The row names its packet
@@ -3906,7 +3906,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
  * the entry it wrote (`#event-<occurredAt>`). One row per door: each calls
  * `followClosedDecision` itself, and a door that forgets strands its rows.
  */
-describe("ruling 547: a decision's row follows it to the entry that closed it", () => {
+describe("ruling 75: a decision's row follows it to the entry that closed it", () => {
   const OPTIONS: OperatorPacketOptionInput[] = [
     { kind: "hold_runtime_debug", title: "Hold for runtime debugging", recommended: true },
     { kind: "edit_goal", title: "Narrow the goal to the API" },
@@ -4134,7 +4134,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     // …a contributor and a viewer do not (not task supervisors).
     expect(approvals(store.users.selin.id)).toHaveLength(0);
     expect(approvals(store.users.elif.id)).toHaveLength(0);
-    // Ruling 497: the row opens the card, where it is applied. CANARY: drop
+    // Ruling 75: the row opens the card, where it is applied. CANARY: drop
     // `about` from the notice and the row opens the task's top.
     expect(approvals(store.users.murat.id)[0]!.href).toBe(
       `/projects/${store.slug}/tasks/VIB-1#recommendations`,
@@ -4177,10 +4177,10 @@ describe("applyRecommendation / dismissRecommendation", () => {
   }
 
   /**
-   * Ruling 302 (pass 37, F37-137): the operator's timeline WINDOW says it is a
+   * Ruling 117 (pass 37, F37-137): the operator's timeline WINDOW says it is a
    * window.
    *
-   * Ruling 285 fixed the per-ENTRY cut in this very function: a clipped entry
+   * Ruling 117 fixed the per-ENTRY cut in this very function: a clipped entry
    * now carries a `clipped` note and the `occurredAt` that reads it whole,
    * because "an entry that ends mid-sentence with a '…' and no way to ask for
    * the rest is how a coordinator states half a report as the whole of it,
@@ -4188,7 +4188,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
    * stayed silent, and the controller's own `get_task` has taken an `events`
    * count all along while the operator's took no arguments at all.
    */
-  it("ruling 302: says how many entries exist, how to widen the window, and stays silent when nothing is hidden", async () => {
+  it("ruling 117: says how many entries exist, how to widen the window, and stays silent when nothing is hidden", async () => {
     seedTask("impl");
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
@@ -4224,7 +4224,7 @@ describe("applyRecommendation / dismissRecommendation", () => {
     expect(wide.timelineOlder).toBeUndefined();
   });
 
-  it("ruling 131(d): the snapshot carries blockedBy with resolved states", async () => {
+  it("ruling 115: the snapshot carries blockedBy with resolved states", async () => {
     // Canary: omit `blockedBy` from `operatorSnapshot`'s return object.
     writeTask(store.dataRoot, store.slug, { frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl" }) });
     rebuildAll(store.db, { dataRoot: store.dataRoot });
@@ -4398,13 +4398,13 @@ describe("auto-invoke on task creation", () => {
 });
 
 /**
- * Ruling 417 (owner, 2026-09-23): the operator leases files to its OWN task,
+ * Ruling 61 (owner, 2026-09-23): the operator leases files to its OWN task,
  * first come first served. On ax-clone AX-20 and AX-21 collided on
  * `internal/sandbox/local.go`, which cost an agent run, a decision packet and
- * the owner's answer: the operator saw the collision (ruling 413) and had no
+ * the owner's answer: the operator saw the collision (ruling 116) and had no
  * move to make about it.
  */
-describe("operatorLeaseFiles (ruling 417)", () => {
+describe("operatorLeaseFiles (ruling 61)", () => {
   const prAt = (number: number, changed: string[]) => ({
     number,
     state: "review" as const,
@@ -4485,12 +4485,12 @@ describe("operatorLeaseFiles (ruling 417)", () => {
   });
 
   /**
-   * Ruling 426 (pass 39): live on ax-clone AX-22's operator leased
+   * Ruling 61 (pass 39): live on ax-clone AX-22's operator leased
    * `internal/controller/task.go`, which AX-20's open PR already changed, and
    * AX-21, AX-5 and goal-6 waited on AX-20. AX-20's operator then made AX-20
    * wait on AX-22, and the critical path sat behind AX-22's ninth review round.
    */
-  it("ruling 426: refuses a lease that would hold work other tasks wait on, and names who waits", async () => {
+  it("ruling 61: refuses a lease that would hold work other tasks wait on, and names who waits", async () => {
     seedBoard();
     // VIB-4 and VIB-5 wait on VIB-2, whose open PR #13 changes the sandbox file.
     for (const key of ["VIB-4", "VIB-5"]) {
@@ -4507,7 +4507,7 @@ describe("operatorLeaseFiles (ruling 417)", () => {
     expect(r.message).toBe(
       "`internal/sandbox/local.go` is changed by VIB-2's open PR #13, and VIB-4 and VIB-5 wait on VIB-2: " +
         "leasing it to VIB-1 would hold all of them behind VIB-1. Which of the two lands first is a person's " +
-        "call (ruling 426). Open a decision packet that names both tasks and what waits on each, keep VIB-1's " +
+        "call (ruling 61). Open a decision packet that names both tasks and what waits on each, keep VIB-1's " +
         "work off those paths, or wait for VIB-2 to merge (set_dependencies). Nothing was leased.",
     );
     expect(leases() ?? []).toEqual([]);
@@ -4517,7 +4517,7 @@ describe("operatorLeaseFiles (ruling 417)", () => {
     expect(docs.outcome).toBe("done");
   });
 
-  it("ruling 426: refuses a lease that would make the leaser and the other task wait on each other", async () => {
+  it("ruling 61: refuses a lease that would make the leaser and the other task wait on each other", async () => {
     seedBoard();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", branch: "vib-1", blockedBy: ["VIB-2"] }),
@@ -4547,11 +4547,11 @@ describe("operatorLeaseFiles (ruling 417)", () => {
   });
 });
 
-describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
+describe("operatorCorrectKnowledgeDoc (ruling 210)", () => {
   /**
    * F39-1/F39-7 (pass 39): the operator could write a correction into the
-   * project's settled rulings as a proposal (ruling 378); ruling 483 (F40-53)
-   * widened it to every knowledge base a run on the task was given. Ruling 498
+   * project's settled rulings as a proposal (ruling 210); ruling 210 (F40-53)
+   * widened it to every knowledge base a run on the task was given. Ruling 210
    * (owner, 2026-09-26: "No human can approve all of these while inspecting
    * them thoroughly") writes it into the document, and a person undoes it.
    */
@@ -4657,7 +4657,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toMatch(/^Corrected `ax-rulings\/environment-and-gates.md` as `kc-[0-9a-f]{10}`:/);
     expect(top.text).toContain("- **Was:** ~~- Every test must pass under `go test -race ./...`.~~");
     expect(top.text).toContain("- **Now:** - Every test must pass under `go test ./...`");
-    // Ruling 645. CANARY: leave the evidence off and the entry reads as a claim
+    // Ruling 211. CANARY: leave the evidence off and the entry reads as a claim
     // nobody proved.
     expect(top.text).toContain("- **Evidence:** `CGO_ENABLED=1 go test -race ./...` exited 127; no cc, gcc or clang on PATH.");
     expect(top.text).not.toContain("binding");
@@ -4697,7 +4697,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
       evidence: "`npx wrangler --version` printed 4.139.0 on WEB-1 at 22:21Z.",
     });
     // CANARY: allow only `authority.kb` (the operator's own grants) and this
-    // is refused, which is ruling 378's reach: the dossier stays wrong.
+    // is refused, which is ruling 210's reach: the dossier stays wrong.
     expect(r.outcome).toBe("done");
     const body = readFileSync(
       path.join(store.dataRoot, "kb", dossier, "06-platform-facts.md"),
@@ -4711,7 +4711,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(top.text).toContain(`${dossier}/06-platform-facts.md`);
   });
 
-  it("ruling 568: a correction to a knowledge base some deployed agents are not given quotes none of it, and neither does its undo", async () => {
+  it("ruling 211: a correction to a knowledge base some deployed agents are not given quotes none of it, and neither does its undo", async () => {
     // Live on AWSC-4 the Estimate Judge found an error in its own golden-set
     // entry, a knowledge base granted to it alone, and could not correct it:
     // the entry would have put the expected answers in front of the agents
@@ -4739,8 +4739,8 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
       `Corrected \`${keys}/sample-01.md\` as \`${id}\`. The passage is not quoted here: ` +
         `\`${keys}\` is not given to Rev, who read this task. The project's Controller page shows the correction whole.`,
     );
-    // Ruling 645: the whole reading quotes no more than the entry does, the
-    // evidence included. CANARY: return the record without the ruling 568
+    // Ruling 211: the whole reading quotes no more than the entry does, the
+    // evidence included. CANARY: return the record without the ruling 211
     // check and the expected total reaches Rev.
     const whole = await readTimelineEntry(
       { db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug },
@@ -4750,7 +4750,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(whole).toContain("is not given to Rev");
     expect(whole).not.toContain("5,614.00");
     expect(whole).not.toContain("384 MBps");
-    // Ruling 648: a reader given the knowledge base reads it whole, which it
+    // Ruling 211: a reader given the knowledge base reads it whole, which it
     // can read in the document anyway. CANARY: ignore `readerKbs` and the
     // reader who holds the answer keys is told they are not quoted.
     const given = await readTimelineEntry(
@@ -4778,7 +4778,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(undoEntry.text).toContain("is not given to Rev");
   });
 
-  it("ruling 568: a correction to a knowledge base every deployed agent is given keeps its quote", async () => {
+  it("ruling 211: a correction to a knowledge base every deployed agent is given keeps its quote", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     const shared = await seedKb("shared-mapping", "mapping.md", "# Mapping\n\n- SAN: FSx for ONTAP.\n");
@@ -4802,7 +4802,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(task().timeline[0]!.text).toContain("- **Was:** ~~- SAN: FSx for ONTAP.~~");
   });
 
-  it("ruling 645: read_timeline_entry reads a correction whole, its evidence and its undo included", async () => {
+  it("ruling 211: read_timeline_entry reads a correction whole, its evidence and its undo included", async () => {
     // Live on AWSC-97 the Estimate Judge, whose board requires a correction
     // that narrows a VERIFIED entry to cite its re-test, read two corrections'
     // entries (each side clipped to a line, no evidence, \`truncated: false\`)
@@ -4869,7 +4869,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     expect(task().timeline.some((e) => e.type === "kb_correction")).toBe(false);
   });
 
-  it("ruling 466: the audit row counts the written text in UTF-8 bytes", async () => {
+  it("ruling 18(b): the audit row counts the written text in UTF-8 bytes", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     await seedRulingsKb("# Kurallar\n\n- Her kapı çalışır.\n");
@@ -4887,7 +4887,7 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
     const root = await seedRulingsKb("# Gates\n\n- Run every gate.\n");
     const race = "- The race gate needs cgo: `for p in $$(go list ./...); do go test -race $$p; done`, keeping `$&` and `$'` literal.";
     expect((await correct({ replaces: "- Run every gate.", text: race, evidence: "exited 2" })).outcome).toBe("done");
-    // Ruling 418: a missing convention, with nothing to replace.
+    // Ruling 210(a): a missing convention, with nothing to replace.
     const convention = "- Pass `--` before any git argument a person supplies.";
     expect((await correct({ text: convention, evidence: "Review verdict on VIB-1: request changes (AX-19)." })).outcome).toBe("done");
     const body = readFileSync(path.join(root, "environment-and-gates.md"), "utf8");
@@ -5010,7 +5010,7 @@ describe("operatorPostComment", () => {
   });
 
   /**
-   * Ruling 214 (F37-34). Live on SHOP-10 the operator followed ruling 210's own
+   * Ruling 133 (F37-34). Live on SHOP-10 the operator followed ruling 201's own
    * words — "ask the reviewer, in ONE comment" — and posted "@Code Reviewer,
    * name everything you would still block on across your owned surface, now."
    * `post_comment` starts no run, so the reviewer never read it; the stranded
@@ -5020,7 +5020,7 @@ describe("operatorPostComment", () => {
    * for when the tag happens anyway. Same reasoning as S5-G3 above: a visible
    * non-delivery beats a silent one.
    */
-  it("an operator comment that @tags an AGENT says the agent was not reached (ruling 214)", async () => {
+  it("an operator comment that @tags an AGENT says the agent was not reached (ruling 133)", async () => {
     deployRoster(DEFAULT_POLICY);
     seedTask("impl");
     await operatorPostComment(
@@ -5095,7 +5095,7 @@ describe("A4 — an UNDEPLOYED operator has no authority at all", () => {
     expect(res.message).toContain("not permitted");
   });
 
-  it("ruling 160: a closed_by_human delivery answers the operator with the refusal and the packet path, never a retry", async () => {
+  it("ruling 232: a closed_by_human delivery answers the operator with the refusal and the packet path, never a retry", async () => {
     // Canary: fold `closed_by_human` into the generic "Delivery did not
     // complete" arm.
     deployRoster(DEFAULT_POLICY);
@@ -5454,12 +5454,12 @@ describe("operatorPostComment honest outcome (G1/B-FD8)", () => {
   });
 
   /**
-   * Ruling 104: the operator-brevity guardrail is gone — narration reaches the
+   * Ruling 134: the operator-brevity guardrail is gone — narration reaches the
    * canonical record UNTRUNCATED (the timeline collapses it view-side). This
    * locks the WRITE PATH, not just the pure helper: a cap re-introduced
    * anywhere in writeOperatorComment fails here.
    */
-  it("stores a long operator narration verbatim on the timeline (ruling 104)", async () => {
+  it("stores a long operator narration verbatim on the timeline (ruling 134)", async () => {
     deployWithGuardrails([
       "meaningful-comment",
       "evidence-separation",
@@ -5727,7 +5727,7 @@ describe("operatorSnapshot — two capability scopes, both labelled (F21-16)", (
     });
   });
 
-  it("ruling 132: get_task carries the WHOLE drift record and the canonical sentence, so its read and the ceremony agree", () => {
+  it("ruling 239: get_task carries the WHOLE drift record and the canonical sentence, so its read and the ceremony agree", () => {
     // Canary: emit the old `{aheadBy, headSha}` object (or an empty sentence).
     deployScopedRoster();
     seedTask("review");
@@ -5861,7 +5861,7 @@ describe("supporting-dispatch copy branches on verdict authority (F21-6)", () =>
 });
 
 /**
- * R20-9 / ruling 84 — the delegated-ask disclosure was PROMPT-ONLY.
+ * R20-9 / ruling 114 — the delegated-ask disclosure was PROMPT-ONLY.
  *
  * When the operator consults an agent and then brings the question to a human
  * itself, the timeline otherwise reads as if that agent never held the ask. A
@@ -5926,7 +5926,7 @@ describe("delegated-ask disclosure is mechanical, not just prose (R20-9)", () =>
     await interruptRunningRuns("VIB-1");
   });
 
-  it("ruling 672: the repository question, asked after prompting an agent, carries the disclosure too", async () => {
+  it("ruling 107: the repository question, asked after prompting an agent, carries the disclosure too", async () => {
     // CANARY: open it through the plain packet writer and the one packet that
     // decides the whole board reaches a person with nothing said about the
     // agent the operator asked first.
@@ -6045,7 +6045,7 @@ describe("get_task exposes the rework license the operator was never told about"
 });
 
 /**
- * Ruling 702, live on BLOG-8: a task reached a later stage with no delivering
+ * Ruling 112, live on BLOG-8: a task reached a later stage with no delivering
  * agent, the agent that could take it was declared for earlier stages only,
  * `reworkStages` was empty because no review was failing, and the operator
  * parked the task on a person for a stage move. The snapshot now offers the
@@ -6054,13 +6054,13 @@ describe("get_task exposes the rework license the operator was never told about"
  * move is refused. Which tasks are offered them is `engageStagesFor`'s to
  * say, and its cases are in `engage-stages.test.ts`.
  */
-describe("ruling 702: get_task offers the way back to an agent the task can be delivered by", () => {
+describe("ruling 112: get_task offers the way back to an agent the task can be delivered by", () => {
   const snapshot = () =>
     operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("supervised"));
 
   /** The developer is declared for the work stage only, as the writer was.
    *  So is the reviewer, which the project requires there: it is never an
-   *  agent to hand delivery to (ruling 556), so no entry may name it. */
+   *  agent to hand delivery to (ruling 89), so no entry may name it. */
   const scopeDeveloper = () => {
     deployRoster([...DEFAULT_POLICY, { capabilityId: "generate-packets", mode: "direct" }]);
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -6149,7 +6149,7 @@ describe("ruling 702: get_task offers the way back to an agent the task can be d
   });
 
   it("a task that has delivered and waits to be accepted is offered nothing", () => {
-    // The verification-only shape (ruling 62): nobody delivered it, a reviewer
+    // The verification-only shape (ruling 101): nobody delivered it, a reviewer
     // approved it, and an acceptance offer stands. A move back would withdraw
     // the offer. Canary: read `engagements` alone in `engageStagesFor`.
     scopeDeveloper();
@@ -6228,13 +6228,13 @@ describe("ruling 702: get_task offers the way back to an agent the task can be d
 });
 
 /**
- * Ruling 135: `get_task` carries the PR head, the CURRENT unpushed record and
+ * Ruling 243: `get_task` carries the PR head, the CURRENT unpushed record and
  * the acceptance gate's own sentence, so the operator's read and the ceremony
  * never disagree and the persona's "call `deliver_for_review` when `get_task`
  * shows `pr.unpushedRevision`" has something to read. Canary: emit `null` for
  * the record regardless of the file.
  */
-describe("ruling 135: the operator snapshot and the unpushed revision", () => {
+describe("ruling 243: the operator snapshot and the unpushed revision", () => {
   it("carries the record, the head and the sentence; a stale record reads as nothing", () => {
     seedTask("review");
     const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
@@ -6272,11 +6272,11 @@ describe("ruling 135: the operator snapshot and the unpushed revision", () => {
 });
 
 /**
- * Ruling 137 (pass 34, F34-15): an acceptance offer is bound to the revision
+ * Ruling 99 (pass 34, F34-15): an acceptance offer is bound to the revision
  * it was made for and withdrawn, on the record, when a packet opens or the
  * revision is replaced.
  */
-describe("ruling 137: acceptance offers are bound to a revision and withdrawn on the record", () => {
+describe("ruling 99: acceptance offers are bound to a revision and withdrawn on the record", () => {
   function revision(headSha: string): WorkRevision {
     return {
       id: `rev_${headSha.slice(0, 4)}`,
@@ -6384,10 +6384,10 @@ describe("ruling 137: acceptance offers are bound to a revision and withdrawn on
 });
 
 /**
- * Ruling 138 (pass 34, U34-10): an `edit_goal` option carries `goalDraft`, the
+ * Ruling 63 (pass 34, U34-10): an `edit_goal` option carries `goalDraft`, the
  * proposed goal text itself; it is refused on any other kind.
  */
-describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
+describe("ruling 63: edit_goal options carry an explicit goalDraft", () => {
   const packetsRoster = () =>
     deployRoster([
       ...DEFAULT_POLICY.filter((c) => c.capabilityId !== "generate-packets"),
@@ -6420,11 +6420,11 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 288 (pass 37, F37-123) REVERSES this test, which used to assert the
+   * Ruling 131 (pass 37, F37-123) REVERSES this test, which used to assert the
    * cap "instead of refusing it".
    *
    * A `goalDraft` and a `newTask.goal` both become a task's CONTRACT — the one
-   * document every future run on it re-anchors on (ruling 189) — and both were
+   * document every future run on it re-anchors on (ruling 64) — and both were
    * a bare `.slice`. Live on SHOP-29: a person's decision asked the operator to
    * write the REASONING into a corrected acceptance criterion, exactly so a
    * later reader would not undo it. The draft came back 4,000 characters long
@@ -6433,7 +6433,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
    * the characters showed it. By then the operator's words were unrecoverable,
    * because the slice ran at write time and what it cut was never stored.
    */
-  it("ruling 288: refuses an over-long goalDraft by name and writes nothing", async () => {
+  it("ruling 131: refuses an over-long goalDraft by name and writes nothing", async () => {
     // Canary: restore the `.slice(0, GOAL_DRAFT_MAX_CHARS)` and a contract that
     // stops mid-sentence is committed with nothing saying it was cut.
     packetsRoster();
@@ -6460,7 +6460,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
-  it("ruling 288: refuses an over-long newTask.goal too — the same contract, the other field", async () => {
+  it("ruling 131: refuses an over-long newTask.goal too — the same contract, the other field", async () => {
     // Canary: check only `goalDraft` in the refusal and a created task's whole
     // contract goes back to being silently cut.
     packetsRoster();
@@ -6492,7 +6492,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
   });
 
-  it("ruling 288: a goal exactly AT the limit is accepted whole", async () => {
+  it("ruling 131: a goal exactly AT the limit is accepted whole", async () => {
     // The boundary is the thing worth pinning: an off-by-one here either
     // refuses a legitimate goal or lets one character through the guard.
     packetsRoster();
@@ -6568,9 +6568,9 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 244 (pass 37, F37-73). `resolve_remote_collision` clears a FOREIGN
-   * remote — ruling 122's case. With no collision recorded, the resolution
-   * takes ruling 136(b)'s `own_pr_open` arm and answers "no collision to
+   * Ruling 131 (pass 37, F37-73). `resolve_remote_collision` clears a FOREIGN
+   * remote — ruling 233's case. With no collision recorded, the resolution
+   * takes ruling 233's `own_pr_open` arm and answers "no collision to
    * clear", leaving the block untouched.
    *
    * Live on SHOP-11: a rebase diverged the branch from its OWN PR #15, the
@@ -6580,7 +6580,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
    * was spent and the packet was gone. The sibling `accept_completion` arm
    * refuses exactly this shape, for exactly this reason.
    */
-  it("ruling 244: refuses resolve_remote_collision when no FOREIGN collision is recorded", async () => {
+  it("ruling 131: refuses resolve_remote_collision when no FOREIGN collision is recorded", async () => {
     packetsRoster();
     seedTask("review");
     // The task's own PR on its own branch, and no unowned PR: the SHOP-11 shape.
@@ -6607,7 +6607,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
       },
       authority("full"),
     );
-    // CANARY: delete the ruling 244 arm and the packet opens, promising a
+    // CANARY: delete the ruling 131 arm and the packet opens, promising a
     // deletion the resolution will refuse after spending the decision.
     expect(refused.outcome).toBe("noop");
     expect(refused.message).toContain("only fits a FOREIGN remote");
@@ -6615,7 +6615,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet).toBeNull();
 
     // With a real collision recorded, the same option is authored. CANARY:
-    // refuse on the option kind alone and ruling 122's actual case dies.
+    // refuse on the option kind alone and ruling 233's actual case dies.
     await updateTaskFile(
       { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot },
       (parsed) => {
@@ -6645,12 +6645,12 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 489 (F40-68): `deliver_for_review` promises a delivery, so it is
+   * Ruling 62 (F40-68): `deliver_for_review` promises a delivery, so it is
    * authored only over a head that has one owed. Over a head PR #15 already
    * carries, the confirm would push nothing and answer with a noop after the
-   * decision was spent: ruling 244's false premise.
+   * decision was spent: ruling 131's false premise.
    */
-  it("ruling 489: refuses deliver_for_review unless the task's head is committed and undelivered", async () => {
+  it("ruling 62: refuses deliver_for_review unless the task's head is committed and undelivered", async () => {
     packetsRoster();
     seedTask("review");
     const offer = () =>
@@ -6698,7 +6698,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     const none = await offer();
     expect(none.outcome).toBe("noop");
     expect(none.message).toContain("has no committed head on record");
-    // A head PR #15 already carries. CANARY: delete the ruling 489 arm and
+    // A head PR #15 already carries. CANARY: delete the ruling 62 arm and
     // this packet opens, promising a push the resolution would not make.
     await setHead("a".repeat(40));
     const delivered = await offer();
@@ -6713,7 +6713,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
     expect(task().packet?.options[0]?.kind).toBe("deliver_for_review");
   });
 
-  it("ruling 237: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
+  it("ruling 94: refuses a question_reviewer that names no reviewer, or names one this task does not have", async () => {
     // The option's whole promise is "ask THIS agent". Unchecked, the resolution
     // would dispatch nobody, or dispatch the deliverer with a prompt telling it
     // not to review — either way the card said something that did not happen.
@@ -6761,7 +6761,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   it("refuses a hold that names nothing to wait on, and blockedBy on any other kind", async () => {
-    // Ruling 230: a block_on_dependencies with no entries resolves into a hold
+    // Ruling 66: a block_on_dependencies with no entries resolves into a hold
     // that releases on nothing — no dependencies, no run, no owner. Canary:
     // remove either stray refusal.
     packetsRoster();
@@ -6806,7 +6806,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 269 (pass 37, F37-101): "this belongs in its own task" — the most
+   * Ruling 67 (pass 37, F37-101): "this belongs in its own task" — the most
    * common structural remedy on a multi-service board, and the only one whose
    * recommended option had to end with an instruction to the reader. Live on
    * SHOP-26 the operator wrote, verbatim: "You create the task — no option
@@ -6855,15 +6855,15 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 270 (pass 37, F37-102): through the TOOL, which is the surface an
-   * operator actually authors from. Rulings 230 and 224 each added a kind with
+   * Ruling 132 (pass 37, F37-102): through the TOOL, which is the surface an
+   * operator actually authors from. Rulings 66 and 157 each added a kind with
    * a payload, wrote its two authoring refusals, and never added the field to
    * `open_decision_packet` — so the operator could name `block_on_dependencies`
    * and be told "needs the work it waits on" with no way to say. Both rulings'
    * tests called `operatorOpenPacket` directly, which accepts the field, so the
    * door was never exercised and the kind was dead in the product.
    */
-  it("ruling 270: block_on_dependencies and wait_for_window are authorable THROUGH the tool", async () => {
+  it("ruling 132: block_on_dependencies and wait_for_window are authorable THROUGH the tool", async () => {
     packetsRoster();
     seedTask("impl");
     const { buildOperatorToolkit } = await import("./operator-toolkit.server");
@@ -6958,16 +6958,16 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   /**
-   * Ruling 273 (pass 37, F37-106): a retry onto a backend the instance already
+   * Ruling 131 (pass 37, F37-106): a retry onto a backend the instance already
    * knows is spent. Live on SHOP-37 the operator recommended "Re-run the
    * Integration Verifier on the Codex backend" six hours after Codex was
    * recorded exhausted for the owner's credential; a person confirmed it and
    * the answer was "The retry could not start: Held: Codex is out of quota
    * until Sep 19… scheduled for then." Nothing lied and nothing was lost — the
-   * hold is ruling 152(c) working — but the decision was spent on a four-day
+   * hold is ruling 151 working — but the decision was spent on a four-day
    * park that was knowable when the option was written.
    */
-  it("ruling 273: refuses a retry onto a backend already recorded out of quota for the owner", async () => {
+  it("ruling 131: refuses a retry onto a backend already recorded out of quota for the owner", async () => {
     packetsRoster();
     seedTask("impl");
     const { recordBackendQuotaExhaustion } = await import(
@@ -7036,7 +7036,7 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
   });
 
   it("refuses to let the operator offer the head-check override at all", async () => {
-    // Ruling 226: the waiver is granted against a (PR, revision, live head)
+    // Ruling 243: the waiver is granted against a (PR, revision, live head)
     // triple the ACCEPTANCE GATE read at the moment it refused. An operator
     // offering it from a board snapshot would be waiving a check over facts it
     // never read — and the thing waived is the last guard between a review and
@@ -7065,12 +7065,12 @@ describe("ruling 138: edit_goal options carry an explicit goalDraft", () => {
 });
 
 /**
- * Pass 35 S15: rulings 162 and 163 (F35-12, F35-13). Live (KNC-6, KNC-20) the
+ * Pass 35 S15: rulings 95 and 90 (F35-12, F35-13). Live (KNC-6, KNC-20) the
  * operator moved tasks to Merge and recommended acceptance on PRs whose
  * `mergeable: conflicting` was already on the file; after a conflict rework
  * at Merge it found no route back to a stage where a reviewer could run.
  */
-describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and the rework route (ruling 163)", () => {
+describe("pass 35 S15: the acceptance gate read by the operator (ruling 95) and the rework route (ruling 90)", () => {
   const HEAD = "a".repeat(40);
   function seedReviewedWithPr(stage: string, mergeable: "clean" | "conflicting"): void {
     writeTask(store.dataRoot, store.slug, {
@@ -7115,7 +7115,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     }));
   }
 
-  it("ruling 162 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
+  it("ruling 95 (a): the snapshot carries `pr.mergeable` and the gate's `notAcceptableReason`; a clean PR carries null", () => {
     // Canary: drop `notAcceptableReason` from `operatorSnapshot`.
     deployRoster(DEFAULT_POLICY);
     seedReviewedWithPr("review", "conflicting");
@@ -7129,7 +7129,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(clean.notAcceptableReason).toBeNull();
   });
 
-  it("ruling 162 (a): accept_completion refuses with the gate's sentence on a conflicting PR and files no card", async () => {
+  it("ruling 95 (a): accept_completion refuses with the gate's sentence on a conflicting PR and files no card", async () => {
     deployRoster(DEFAULT_POLICY);
     seedReviewedWithPr("review", "conflicting");
     const r = await operatorAcceptCompletion(
@@ -7144,9 +7144,9 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(listAuditEvents(store.db, { action: "task.operator.recommended_completion" })).toHaveLength(0);
   });
 
-  it("ruling 162 (b): the move INTO the acceptance stage is refused with the same sentence while the PR conflicts", async () => {
+  it("ruling 95 (b): the move INTO the acceptance stage is refused with the same sentence while the PR conflicts", async () => {
     // Canary: drop the `mergeStageEntryRefusal` read in operatorTransitionStage:
-    // the operator moves the task into Review (an `auto` boundary, ruling 519).
+    // the operator moves the task into Review (an `auto` boundary, ruling 91).
     deployRoster(DEFAULT_POLICY);
     seedReviewedWithPr("impl", "conflicting");
     const r = await operatorTransitionStage(
@@ -7161,7 +7161,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(r.outcome).toBe("noop");
     expect(r.message).toContain("VIB-1's review PR #7 conflicts with the base branch");
     expect(r.message).toContain("VIB-1 stays at In Progress");
-    expect(r.message).toContain("Call update_branch_from_base, which routes the conflict (ruling 475)");
+    expect(r.message).toContain("Call update_branch_from_base, which routes the conflict (ruling 129)");
     expect(task().frontmatter.stage).toBe("impl");
     expect(task().frontmatter.recommendations).toEqual([]);
     // A clean PR crosses the same boundary — the operator moves the task, the
@@ -7183,7 +7183,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(task().frontmatter.stage).toBe("review");
   });
 
-  it("ruling 163 (a): Merge to Review is a rework move on `validation: changed`; Merge to In Progress is not offered", async () => {
+  it("ruling 90 (a): Merge to Review is a rework move on `validation: changed`; Merge to In Progress is not offered", async () => {
     // Canary: require `failing` again in the operator's `isReworkMove`.
     deployRoster(DEFAULT_POLICY);
     withMergeBoard();
@@ -7208,7 +7208,7 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
     expect(task().frontmatter.previousStageId).toBe("merge");
   });
 
-  it("ruling 163 (d): the acceptance refusal past the review stage names the rework move and the person's stage picker", async () => {
+  it("ruling 90 (d): the acceptance refusal past the review stage names the rework move and the person's stage picker", async () => {
     deployRoster(DEFAULT_POLICY);
     withMergeBoard();
     seedReviewedWithPr("merge", "clean");
@@ -7232,12 +7232,12 @@ describe("pass 35 S15: the acceptance gate read by the operator (ruling 162) and
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the project's declared required reviewers ride
+ * Ruling 89 (pass 36, G36-3): the project's declared required reviewers ride
  * the snapshot, resolved to the stage and agent names the acceptance gate
  * prints, so the operator engages them instead of learning the rule from a
  * refusal at the boundary.
  */
-describe("ruling 178: the snapshot carries the project's required reviewers", () => {
+describe("ruling 89: the snapshot carries the project's required reviewers", () => {
   it("lists each rule with its stage and agent names; an empty rule set is an empty list", async () => {
     // Canary: drop `requiredReviewers` from `operatorSnapshot`'s return.
     deployRoster(DEFAULT_POLICY);
@@ -7312,13 +7312,13 @@ describe("F37-11: the operator snapshot carries the base compare", () => {
 });
 
 /**
- * Ruling 424 (pass 39): the operator planned `update_branch_from_base` at the
+ * Ruling 116 (pass 39): the operator planned `update_branch_from_base` at the
  * acceptance stage fifteen times across seven ax-clone tasks, each refused and
  * each a "plan was not carried out in full" note. The doctrine said never; the
  * snapshot said `baseBehindBy: 7`. The refusal itself is now a snapshot fact,
  * read from the function the tool refuses with.
  */
-describe("ruling 424: the operator snapshot carries the branch-refresh refusal", () => {
+describe("ruling 116: the operator snapshot carries the branch-refresh refusal", () => {
   function seedAt(stage: string, mergeable: "clean" | "conflicting"): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -7348,7 +7348,7 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
     expect(snapOf().notRefreshableReason).toBeNull();
   });
 
-  it("ruling 429: is null while the work is still in its review loop, and set once it is approved", () => {
+  it("ruling 241: is null while the work is still in its review loop, and set once it is approved", () => {
     // CANARY: drop the `failing`/`changed` arm from `acceptanceBoundaryRefusal`.
     for (const [validation, refused] of [
       ["failing", false],
@@ -7368,14 +7368,14 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
     }
   });
 
-  it("ruling 435: a conflict measured on an older head is neither shown to the operator nor lifts the boundary", () => {
+  it("ruling 242: a conflict measured on an older head is neither shown to the operator nor lifts the boundary", () => {
     /**
      * Live on AX-21: the refresh pushed `5241ef1` at 01:57:47 with the base
      * merged in cleanly. GitHub was still computing, so the file kept the
      * `conflicting` measured on the previous head, and at 01:58:49 the
      * operator told the reviewer to "note whether the PR's current conflicting
      * mergeability status prevents acceptance". The gate had already read the
-     * pin (ruling 405); the snapshot read the raw field.
+     * pin (ruling 315); the snapshot read the raw field.
      *
      * CANARY: read `fm.pr.mergeable` raw in either place.
      */
@@ -7408,11 +7408,11 @@ describe("ruling 424: the operator snapshot carries the branch-refresh refusal",
 });
 
 /**
- * Ruling 437 (pass 39, F39-60): the snapshot says who raised the open packet,
+ * Ruling 131 (pass 39, F39-60): the snapshot says who raised the open packet,
  * with the refusal's own predicate, so the operator can tell a packet it may
  * withdraw from one only a person answers.
  */
-describe("ruling 437: the operator snapshot names who raised the open packet", () => {
+describe("ruling 131: the operator snapshot names who raised the open packet", () => {
   it("an operator's packet is yours, an agent's question and the policy engine's are not", () => {
     // CANARY: answer `yours: true` for every packet.
     const seed = (packet: TaskPacket) => {
@@ -7442,11 +7442,11 @@ describe("ruling 437: the operator snapshot names who raised the open packet", (
 });
 
 /**
- * Ruling 431 (pass 39): the operator reads the leases that bind now. Live on
+ * Ruling 116 (pass 39): the operator reads the leases that bind now. Live on
  * AX-21 it quoted a lease the owner had removed twenty minutes earlier, from a
  * timeline note, to the agent that needed the leased file.
  */
-describe("ruling 431: the operator snapshot carries the live file leases", () => {
+describe("ruling 116: the operator snapshot carries the live file leases", () => {
   function snapOf(): ReturnType<typeof operatorSnapshot> {
     return operatorSnapshot(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", authority("full"));
   }
@@ -7475,7 +7475,7 @@ describe("ruling 431: the operator snapshot carries the live file leases", () =>
 });
 
 /**
- * Ruling 193 (F37-14, live): a required reviewer chartered to bring a Docker
+ * Ruling 93 (F37-14, live): a required reviewer chartered to bring a Docker
  * stack up ran on a host with no `make` and no Docker. It said so in its own
  * words — "an environment/repository-baseline blocker, not a discovered
  * document-scope defect" — and the turn doctrine had exactly one answer to a
@@ -7483,7 +7483,7 @@ describe("ruling 431: the operator snapshot carries the live file leases", () =>
  * round after round over a wall no revision could move. The snapshot showed
  * only the CURRENT revision's verdict, so every round looked like the first.
  */
-describe("ruling 193: the snapshot counts a reviewer's successive request_changes", () => {
+describe("ruling 93: the snapshot counts a reviewer's successive request_changes", () => {
   const head = "a".repeat(40);
 
   function writeVerdicts(
@@ -7491,7 +7491,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
       revisionId: string;
       result: "approve" | "request_changes";
       at: string;
-      /** Ruling 204: blocking rounds this reviewer spent on THIS revision. */
+      /** Ruling 92: blocking rounds this reviewer spent on THIS revision. */
       rounds?: number;
     }[],
   ): void {
@@ -7540,7 +7540,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
   });
 
   /**
-   * Ruling 204 REVERSES this case, which ruling 193 decided the other way
+   * Ruling 92 REVERSES this case, which ruling 93 decided the other way
    * ("counts the REVISIONS, so a re-run on the same revision is still one
    * objection"). Live on SHOP-9 that reading was exactly backwards: the
    * Integration Verifier blocked on a stack another task owns, the deliverer
@@ -7551,8 +7551,8 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
    * The counter was keyed on the one signal that stops moving when the work
    * gets stuck. Rounds, recorded on the verdict as it is overwritten, move.
    */
-  it("ruling 204: a reviewer that blocks the SAME revision twice has objected twice", () => {
-    // CANARY: sum 1 per verdict row (or count revision ids, ruling 193's
+  it("ruling 92: a reviewer that blocks the SAME revision twice has objected twice", () => {
+    // CANARY: sum 1 per verdict row (or count revision ids, ruling 93's
     // reading) and this reads 1 — the deadlock stays invisible.
     writeVerdicts([
       { revisionId: "rev_1", result: "request_changes", at: "2026-09-13T09:20:00.000Z", rounds: 2 },
@@ -7587,7 +7587,7 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
 });
 
 /**
- * Ruling 397 (F39-24): a report a failed run left standing.
+ * Ruling 116 (F39-24): a report a failed run left standing.
  *
  * Live on ax-clone AX-2, 24 milliseconds apart:
  *   08:33:08.181  comment  agent  "Done on branch `ax-2`, commit `3e0396ab` …
@@ -7595,10 +7595,10 @@ describe("ruling 193: the snapshot counts a reviewer's successive request_change
  *   08:33:08.205  blocked  agent  "The Implementation agent run did not complete …
  *                                  Nothing was delivered to a pull request."
  * 1,531 committed lines sat in the workspace and the recommended recovery was
- * to build them again. Ruling 394 stops the common cause; this is what the
+ * to build them again. Ruling 155(d) stops the common cause; this is what the
  * operator is told when it happens anyway.
  */
-describe("ruling 397: the snapshot names a report a failed run left standing", () => {
+describe("ruling 116: the snapshot names a report a failed run left standing", () => {
   const AGENT = { kind: "agent" as const, backend: "codex" as const, profileId: "dev", roleHint: "Implementation" };
   const REPORT = {
     occurredAt: "2026-09-22T08:33:08.181Z",
@@ -7718,11 +7718,11 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
   });
 
   /**
-   * Ruling 408 (F39-35), live on ax-clone AX-18.
+   * Ruling 116 (F39-35), live on ax-clone AX-18.
    *
    * The operator planned `[deliver_for_review, transition_stage]`. The delivery
    * RAN -- it pushed `d44e874` to PR #16 -- and the transition was refused, so
-   * `refused.length !== plan.actions.length` and ruling 400's carry (which
+   * `refused.length !== plan.actions.length` and ruling 121's carry (which
    * records only a WHOLLY refused plan) stored nothing. Fourteen seconds later
    * the next drive planned `transition_stage` again and was refused with a
    * byte-identical message, and the two of them tripped the two-in-a-row hold.
@@ -7748,7 +7748,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     evidence: null,
   });
 
-  it("ruling 408: a PARTIALLY refused plan is carried, not just a wholly refused one", () => {
+  it("ruling 116: a PARTIALLY refused plan is carried, not just a wholly refused one", () => {
     // CANARY: drop `findUnansweredRefusal` from the snapshot and this is
     // undefined — the state in which AX-18's next drive re-planned the step
     // Viberr had just refused.
@@ -7758,15 +7758,15 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     });
   });
 
-  it("ruling 408: says nothing once the operator has moved the task since", () => {
+  it("ruling 116: says nothing once the operator has moved the task since", () => {
     expect(snapWith([moved("2026-09-22T17:17:02.144Z"), REFUSAL]).unansweredRefusal).toBeUndefined();
   });
 
   /**
-   * Ruling 413 (improvement point, pass 39): the operator sees the collision
+   * Ruling 116 (improvement point, pass 39): the operator sees the collision
    * viberr already computes.
    *
-   * Ruling 236 has intersected the open review PRs' diffs since pass 37 and
+   * Ruling 242 has intersected the open review PRs' diffs since pass 37 and
    * rendered the answer on ONE surface, the human's review queue. The operator
    * decides what to dispatch, when to deliver and whether to refresh a branch,
    * and `get_task` was single-task -- which the ax-clone controller named as
@@ -7775,7 +7775,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
    * AX-20 and AX-21 spent a run, a packet and a human answer on a collision in
    * `internal/sandbox/local.go`.
    */
-  it("ruling 413: the snapshot names the other open PRs this task's diff collides with", () => {
+  it("ruling 116: the snapshot names the other open PRs this task's diff collides with", () => {
     const prAt = (number: number, changed: string[]) => ({
       number,
       state: "review" as const,
@@ -7821,7 +7821,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
     ]);
   });
 
-  it("ruling 408: says nothing once something has been dispatched since", () => {
+  it("ruling 116: says nothing once something has been dispatched since", () => {
     expect(
       snapWith([dispatched("2026-09-22T17:09:00.000Z"), REFUSAL]).unansweredRefusal,
     ).toBeUndefined();
@@ -7829,10 +7829,10 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
 });
 
 /**
- * Ruling 415 (F39-41), live on ax-clone AX-19.
+ * Ruling 116 (F39-41), live on ax-clone AX-19.
  *
  * The owner answered round five in their own words: "I am changing what may
- * block rather than asking again". Ruling 284 keeps typed words out of the
+ * block rather than asking again". Ruling 64 keeps typed words out of the
  * goal, so the words reached the operator once, as the note on the turn they
  * summoned. That turn dispatched the rework, the provider refused it for quota,
  * and the next turn (a scheduled resume, forty minutes on) read a six-entry
@@ -7840,7 +7840,7 @@ describe("ruling 397: the snapshot names a report a failed run left standing", (
  * is a Codex plan, which "cannot call tools", so the window's own advice to
  * widen it with `get_task` pointed somewhere it could not go.
  */
-describe("ruling 415: a person's decisions never fall out of the operator's view", () => {
+describe("ruling 116: a person's decisions never fall out of the operator's view", () => {
   const PERSON = { kind: "human" as const, userId: "u_arda", nameHint: "Arda" };
   const decided = (at: string, text: string) => ({
     occurredAt: at,
@@ -7922,7 +7922,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
     const withTools = snap([WAIT, long]).humanDecisions![1]!;
     expect(withTools.words!.length).toBe(1500);
     expect(withTools.clipped).toContain("read_timeline_entry");
-    // Ruling 440: one that cannot is handed the words whole.
+    // Ruling 117: one that cannot is handed the words whole.
     // CANARY: cut a tool-less operator's older decisions at 1,500 again and
     // the rest of the person's words is out of its reach.
     const toolless = snap([WAIT, long], { toolless: true }).humanDecisions![1]!;
@@ -7963,7 +7963,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
     // point at read_timeline_entry, which a Codex plan cannot call.
     expect(snap([failure, report], { toolless: true }).unfinishedReport?.text).toBe(report.text);
     expect(snap([failure, report]).unfinishedReport?.text).toBeUndefined();
-    // Ruling 644: the failure is often written in the report's own millisecond
+    // Ruling 117: the failure is often written in the report's own millisecond
     // (17 such pairs on the live AWS board), first in the file. CANARY: look
     // the report up by its stamp alone and the operator is handed the failure
     // notice as the report.
@@ -7972,14 +7972,14 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
   });
 
   /**
-   * Ruling 440 (F39-67). Live on ax-clone AX-5 a deploy restarted the server
+   * Ruling 117 (F39-67). Live on ax-clone AX-5 a deploy restarted the server
    * while a Codex operator was reacting to the reviewer's second report.
    * Recovery re-invoked it with no report in hand (`trigger: "manual"`), so
    * the report reached it only as a window entry, cut at 1,500 characters,
    * partway into finding 3 of 4. The owner got a packet asking to "confirm
    * the full report", and its follow-up task left out finding 4.
    */
-  describe("ruling 440: a tool-less operator is handed what it cannot fetch", () => {
+  describe("ruling 117: a tool-less operator is handed what it cannot fetch", () => {
     const REVIEWER = { kind: "agent" as const, backend: "codex" as const, profileId: "reviewer", role: "Review & validation" };
     const finding = (n: number, head: string) =>
       `${n}. **${head}.** ${"The evidence for this finding, with file and line. ".repeat(9).trim()}`;
@@ -8020,7 +8020,7 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
       const row = rowOf(snap([restart, report], { toolless: true }));
       expect(row.text).toBe(REPORT_TEXT);
       expect(row.clipped).toBeUndefined();
-      // An operator with tools keeps ruling 285's cut and the address.
+      // An operator with tools keeps ruling 117's cut and the address.
       const withTools = rowOf(snap([restart, report]));
       expect(withTools.text).not.toContain("Bare command names");
       expect(withTools.text.length).toBe(1498);
@@ -8060,12 +8060,12 @@ describe("ruling 415: a person's decisions never fall out of the operator's view
 });
 
 /**
- * Ruling 584 (owner, 2026-09-29): "operator decides if it's own comments needs
+ * Ruling 133 (owner, 2026-09-29): "operator decides if it's own comments needs
  * deleting or editing. Don't expose this to the end user, fixes the problem
  * silently". On AWSC-19 the Estimate Judge's report named expected rows in
  * words and the operator said a comment was not something it could remove.
  */
-describe("ruling 584: the operator edits or deletes an agent's comment, silently", () => {
+describe("ruling 133: the operator edits or deletes an agent's comment, silently", () => {
   const AT = "2026-09-29T03:34:51.668Z";
   const PERSON_AT = "2026-09-29T03:40:00.000Z";
   const JUDGE = { kind: "agent", backend: "claude", profileId: "estimate-judge", roleHint: "Estimate Judge" } as const;

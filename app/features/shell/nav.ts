@@ -21,10 +21,10 @@ export interface WorkspaceNavItem {
 
 export const WORKSPACE_NAV: readonly WorkspaceNavItem[] = [
   { id: "board", label: "Board", icon: "board" },
-  // Ruling 503: the project's epics, beside the board whose tasks they hold.
+  // Ruling 325: the project's epics, beside the board whose tasks they hold.
   { id: "epics", label: "Epics", icon: "epic" },
   { id: "review", label: "Review queue", icon: "inbox" },
-  // Ruling 99: the instance controller, addressed inside this project.
+  // Ruling 247: the instance controller, addressed inside this project.
   { id: "controller", label: "Controller", icon: "cpu" },
   { id: "agents", label: "Agents", icon: "agents" },
   { id: "policy", label: "Policy", icon: "shield" },
@@ -77,7 +77,7 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
 
 /**
  * The standalone pages — the instance-level surfaces that render outside the
- * workspace layout and carry the shared app header (ruling 145). Path → the
+ * workspace layout and carry the shared app header (ruling 294). Path → the
  * name the header's current crumb shows.
  *
  * A route is on this list when it is a PAGE. `/profile` and `/notifications`
@@ -86,7 +86,7 @@ export function workspaceViewLabel(view: WorkspaceNavItem["id"]): string {
  * be a dimmed sliver, not a header. `/controller` was absent too, for its own
  * identity header and full-height layout, and that left the one instance page
  * people work in all day with no search, no bell and no account menu (ruling
- * 623). Its identity header stays under this one, and its band fills the
+ * 321). Its identity header stays under this one, and its band fills the
  * height this one leaves (app.css).
  */
 const STANDALONE_PAGES: readonly { path: string; label: string }[] = [

@@ -1,5 +1,5 @@
 /**
- * Ruling 521: the completion packet's rules, shared by the operator's writer
+ * Ruling 103: the completion packet's rules, shared by the operator's writer
  * (`completion-packet.server.ts`) and the task page that shows it, so the two
  * never disagree about when a change is small enough to show whole.
  *
@@ -22,15 +22,15 @@ export const COMPLETION_CHANGES_MAX = 4000;
 export const COMPLETION_SCREENSHOTS_MAX = 6;
 /** One screenshot's or one result file's caption, in characters. */
 export const COMPLETION_CAPTION_MAX = 200;
-/** Ruling 668: one of the packet's notes (what to weigh, what was assumed,
+/** Ruling 103: one of the packet's notes (what to weigh, what was assumed,
  *  what is missing), in characters. */
 export const COMPLETION_NOTE_MAX = 2000;
-/** Ruling 668: how many result files one packet may name. */
+/** Ruling 103: how many result files one packet may name. */
 export const COMPLETION_FILES_MAX = 12;
-/** Ruling 668: how many of a merged change's paths the result card lists. */
+/** Ruling 103: how many of a merged change's paths the result card lists. */
 export const RESULT_PATHS_SHOWN = 40;
 
-/** Ruling 668: the packet's notes, in the order every surface prints them. */
+/** Ruling 103: the packet's notes, in the order every surface prints them. */
 export const COMPLETION_NOTES = [
   { key: "considerations", label: "Considerations" },
   { key: "assumptions", label: "Assumptions" },

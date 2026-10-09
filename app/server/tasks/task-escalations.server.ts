@@ -1,5 +1,5 @@
 /**
- * The packets a task opens on itself when its work stops moving (ruling 654):
+ * The packets a task opens on itself when its work stops moving (ruling 13(a)):
  * the stuck-loop packet a react or transition chain ends with, the
  * review-deadlock escalation and its retry, and the withdrawal of a stuck or
  * delivery packet that a later event has superseded.
@@ -69,7 +69,7 @@ type StuckLoopEscalation =
  * The general recovery options every stall packet can offer: re-prompt the
  * specialist with a corrected directive (recommended when nothing better is
  * known), or send it back for another attempt. `openStuckLoopPacket` appends
- * the hold. Ruling 489's depth-capped packet keeps them, unrecommended, beside
+ * the hold. Ruling 119's depth-capped packet keeps them, unrecommended, beside
  * the delivery it recommends.
  */
 export const STOCK_STALL_OPTIONS: readonly OperatorPacketOptionInput[] = [
@@ -94,11 +94,11 @@ export async function openStuckLoopPacket(
     taskKey: string;
     agentHandle: string;
     reason: string;
-    /** Ruling 130(b) (pass 34): the person's own move, written after the
+    /** Ruling 156(a) (pass 34): the person's own move, written after the
      *  reason ("Arda can wait until the window reopens (…), or connect a
      *  different Claude account or an API key on Profile → Agent accounts."). */
     remedy?: string;
-    /** Ruling 130(b): a classified backend failure supplies its own option set
+    /** Ruling 156(a): a classified backend failure supplies its own option set
      *  from `describeRunFailure` (retry on the other backend when the owner has
      *  it, else "send the agent back to continue"; redirect present and NOT
      *  recommended, the agent did nothing wrong). Absent, the stock set
@@ -110,10 +110,10 @@ export async function openStuckLoopPacket(
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
     providerText?: string;
-    /** Ruling 315: the account-level cause, when this failure is one. Packets
+    /** Ruling 63: the account-level cause, when this failure is one. Packets
      *  sharing it are resolved together — see `taskPacketSchema.cause`. */
     cause?: string;
-    /** Ruling 489: where the work stands (the last report, the head and its
+    /** Ruling 119: where the work stands (the last report, the head and its
      *  delivery state, the last gate result), written into the body after the
      *  reason. The depth-capped react loop supplies it. */
     standings?: string;
@@ -154,18 +154,18 @@ export async function openStuckLoopPacket(
         "Coordination is paused until a human chooses how to proceed.",
       observations,
       options,
-      // Ruling 432: a stall is the one premise a later successful run can
+      // Ruling 123: a stall is the one premise a later successful run can
       // disprove, so this marker is what `withdrawSupersededStuckPacket` reads.
-      // The ruling 326 fallback below spreads `open`, and keeps it.
+      // The ruling 123 fallback below spreads `open`, and keeps it.
       stalled: true,
     };
-    // Ruling 315: when the failure belongs to an ACCOUNT rather than this task,
+    // Ruling 63: when the failure belongs to an ACCOUNT rather than this task,
     // the packet carries that, so the N identical siblings one quota or
     // credential failure raises can be answered once.
     if (input.cause) open.cause = input.cause;
     let result = await operatorOpenPacket(db, ctx, open, authority);
     /**
-     * Ruling 326: an escalation the server composed for ITSELF must not be
+     * Ruling 123: an escalation the server composed for ITSELF must not be
      * abandoned because a guard written to coach a model rejected one option.
      *
      * `operatorOpenPacket`'s authoring guards exist for the operator, which
@@ -236,7 +236,7 @@ export async function openStuckLoopPacket(
  * its packet — so a task that has stopped making progress never sits waiting on
  * a human with nothing on the timeline explaining why. Guarded: never throws.
  *
- * Ruling 325 — and it has to say WHY, because that was the whole point.
+ * Ruling 122 — and it has to say WHY, because that was the whole point.
  *
  * Both callers hold the reason. One has `operatorOpenPacket`'s own refusal
  * message, the other has a thrown `Error`. Both LOG it and neither passed it,
@@ -251,7 +251,7 @@ export async function openStuckLoopPacket(
  * already open), and a THROW is a fault. Telling them apart is most of the
  * help.
  *
- * Same shape as ruling 317(b), one file over: a fixed sentence standing where
+ * Same shape as ruling 164, one file over: a fixed sentence standing where
  * the system had the specific fact.
  */
 async function noteStuckLoopEscalationFailed(
@@ -290,7 +290,7 @@ async function noteStuckLoopEscalationFailed(
  * Withdraw a matching stale STALL packet after successful agent work (owner
  * ruling 2026-07-18).
  *
- * Ruling 432: only a packet `openStuckLoopPacket` raised (`stalled: true`). This
+ * Ruling 123: only a packet `openStuckLoopPacket` raised (`stalled: true`). This
  * used to take any blocked packet without an acceptance option, and on AX-21 at
  * 01:24 it took the one saying "`ax-21` conflicts with `main`". The Surface
  * Developer had been dispatched onto that conflict, found it, changed nothing
@@ -358,8 +358,8 @@ export async function withdrawSupersededStuckPacket(
     markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
     followClosedDecision(db, input.projectSlug, input.taskKey, withdrawn);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
-    // Ruling 328: the automatic clear. The verdict that just landed was written
-    // while this packet stood, so ruling 237's escalation was skipped; seconds
+    // Ruling 94: the automatic clear. The verdict that just landed was written
+    // while this packet stood, so ruling 94's escalation was skipped; seconds
     // later the same run's success withdraws the packet, and the escalation
     // would be gone with nothing having decided it should be. This path has
     // never fired on a real board — the live misses came through the human
@@ -477,7 +477,7 @@ export async function withdrawSupersededDeliveryPacket(
 }
 
 /**
- * Ruling 237 (F37-57): display names for the escalation card, read from the
+ * Ruling 94 (F37-57): display names for the escalation card, read from the
  * project file so a handle is a NAME even on a project whose run history was
  * pruned. Empty when the project cannot be read — the card then falls back to
  * the role, which is worse copy but never a crash inside a locked write.
@@ -491,16 +491,16 @@ export function deadlockAgentNames(
 }
 
 /**
- * Ruling 328 — the deadlock escalation is retried when the packet that blocked
+ * Ruling 94 — the deadlock escalation is retried when the packet that blocked
  * it clears.
  *
- * Ruling 237 raises the "N times running" packet from inside the locked write
+ * Ruling 94 raises the "N times running" packet from inside the locked write
  * that records the verdict, and skips it when a packet is already open — which
  * it must, since a task holds one packet. What nothing did was come back.
  *
  * The escalation was attempted EXACTLY ONCE, at the instant the objection was
  * written, and any unrelated packet standing at that instant killed it for good.
- * Ruling 326 established what those packets usually are: a quota or credential
+ * Ruling 156 established what those packets usually are: a quota or credential
  * failure, raised in bursts across several tasks at once and nothing to do with
  * the review.
  *
@@ -553,13 +553,13 @@ export async function retryReviewDeadlockEscalation(
      * spot: the reviewer is still at N consecutive objections the instant the
      * card closes. That is the loop the owner called out on SHOP-76 — "that
      * shop-76 constantly bringing up ask what else would block on packet" —
-     * and ruling 313 is the whole file about not rebuilding it.
+     * and ruling 87 is the whole file about not rebuilding it.
      *
      * The packet's own title carries the round count, and raising it writes
      * that title onto the timeline ("**Decision packet:** …"). So a timeline
      * that already names this reviewer at this count has had its escalation;
      * silence there is what makes one owed. A LATER objection raises the count
-     * and is a new escalation, which is ruling 237's own rule.
+     * and is a new escalation, which is ruling 94's own rule.
      */
     const alreadyEscalated = existing.parsed.timeline.some((e) =>
       (e.text ?? "").includes(`requested changes ${deadlock.rounds} times running`),
@@ -597,7 +597,7 @@ export async function retryReviewDeadlockEscalation(
     if (!raised) return;
     reprojectTask(db, ctx, projectSlug, taskKey);
     /**
-     * Everything ruling 237's own raise does after its lock, because a packet
+     * Everything ruling 94's own raise does after its lock, because a packet
      * that arrives with nobody told is not an escalation.
      *
      * The first draft of this retry wrote the packet and stopped there: no
@@ -605,7 +605,7 @@ export async function retryReviewDeadlockEscalation(
      * person to find it, which is a quieter version of the defect it exists to
      * fix — the escalation reaching nobody. `notifyTaskWatchers` stamps the
      * OPERATOR as the sender on any notice that names none, so the policy
-     * engine names itself here exactly as ruling 237 does: this is not the
+     * engine names itself here exactly as ruling 94 does: this is not the
      * operator's judgement.
      */
     recordAudit(db, {
@@ -626,7 +626,7 @@ export async function retryReviewDeadlockEscalation(
         ptype: "input",
         title: `Decision needed: ${packet.title}`,
         text: packet.body,
-        // Ruling 497: the row opens the packet, where it is decided.
+        // Ruling 75: the row opens the packet, where it is decided.
         about: { decision: packet.id },
         from: POLICY_ENGINE_NOTIFY_FROM,
       },

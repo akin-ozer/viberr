@@ -21,7 +21,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
  */
 
 /**
- * Ruling 480 (F40-44): a resource row's "when", hydration-safe. The rows built
+ * Ruling 293 (F40-44): a resource row's "when", hydration-safe. The rows built
  * these as strings with `formatRelative`, which reads NOW and the host zone
  * ("yesterday" is a local-day fact), so the server's UTC render and the
  * viewer's hydration disagreed around either midnight and on any minute
@@ -45,7 +45,7 @@ export function UpdatedStamp({ iso }: { iso: string | null }) {
   );
 }
 
-/** Ruling 480 (F40-44): a signed-in MCP sign-in's phrase says when its token
+/** Ruling 293 (F40-44): a signed-in MCP sign-in's phrase says when its token
  *  runs out ("expires in 52 minutes"), which reads the clock, so the first
  *  pass says only what the row holds and the expiry arrives with hydration. */
 function signInPhrase(oauth: McpView["oauth"], hydrated: boolean): string | null {
@@ -53,14 +53,14 @@ function signInPhrase(oauth: McpView["oauth"], hydrated: boolean): string | null
   return oauth.renews ? "signed in (renews itself)" : "signed in";
 }
 
-/** Ruling 486: ", read-only · 194 scopes" after the sign-in, or nothing when
+/** Ruling 192: ", read-only · 194 scopes" after the sign-in, or nothing when
  *  the server did not say what it granted. */
 function grantPhrase(scope: string | null): string {
   const phrase = mcpGrantPhrase(scope);
   return phrase ? `, ${phrase}` : "";
 }
 
-/** A row's icon action (ruling 657): the tip says what it does, and its
+/** A row's icon action (ruling 12): the tip says what it does, and its
  *  accessible name says which row too, as A11Y-2 has the add buttons do. */
 function RowAction({
   icon,
@@ -130,7 +130,7 @@ export function KbPanel({
               {/* The two lines read as one sentence split across them —
                   "…docs agents read" / "read live" — which said "read" twice
                   and left the live-folder promise dangling. One clause each. */}
-              {/* Ruling 625: the store path is code, the rest of the line is
+              {/* Ruling 280: the store path is code, the rest of the line is
                   prose in the body face. */}
               <span className="sub">
                 <code className="mono">store://kb/{kb.dir}/</code> ·{" "}
@@ -138,7 +138,7 @@ export function KbPanel({
                   <>
                     {kb.injectableCount} doc
                     {kb.injectableCount === 1 ? "" : "s"} ·{" "}
-                    {/* Ruling 578: a private folder is closed to every shell. */}
+                    {/* Ruling 267: a private folder is closed to every shell. */}
                     {kb.private
                       ? "private: only the runs it is granted read it"
                       : "agents read the live folder"}
@@ -174,7 +174,7 @@ export function KbPanel({
                 label={"Browse files in " + kb.name}
                 onClick={() => onBrowse(kb)}
               />
-              {/* Ruling 368: the probe in flight shows itself here — busy, the
+              {/* Ruling 286: the probe in flight shows itself here — busy, the
                   loader spinning, a name that says the work — and a second
                   press cannot re-submit it. */}
               <button
@@ -218,7 +218,7 @@ export function KbPanel({
 
 
 /**
- * Ruling 220 (F37-40): one sentence about where a server stands on write tools,
+ * Ruling 188 (F37-40): one sentence about where a server stands on write tools,
  * for every server rather than only the gated ones.
  *
  * The three cases are the controller's three (ruling 188), said to the human:
@@ -259,7 +259,7 @@ export function McpPanel({
   onEdit: (m: McpView) => void;
   onDelete: (m: McpView) => void;
 }) {
-  // Ruling 480 (F40-44): "stale" reads the clock too, so it waits for
+  // Ruling 293 (F40-44): "stale" reads the clock too, so it waits for
   // hydration like the stamp beside it; the first pass depends on the row alone.
   const hydrated = useHydrated();
   return (
@@ -283,7 +283,7 @@ export function McpPanel({
               // outranks the stored `up` — that value is the verdict of the
               // probe this install was started BY.
               const warming = m.warmingSince !== null;
-              // Ruling 469: a server that needs a sign-in it does not have is
+              // Ruling 192: a server that needs a sign-in it does not have is
               // not mounted on any run, whatever its last probe said.
               const signedOut = m.oauth != null && m.oauth.status !== "signed_in";
               return (
@@ -332,7 +332,7 @@ export function McpPanel({
                 {m.warmingSince !== null ? (
                   "first run, installing in the background"
                 ) : m.oauth != null && m.oauth.status !== "signed_in" ? (
-                  // Ruling 469: "needs sign-in" / "sign-in expired: …",
+                  // Ruling 192: "needs sign-in" / "sign-in expired: …",
                   // said as itself rather than as "unreachable".
                   <>
                     {mcpSignInPhrase(m.oauth)} · checked{" "}
@@ -365,14 +365,14 @@ export function McpPanel({
                 {m.hasCred
                   ? m.credUnreadable
                     ? " · auth: unreadable (rotate the encryption key or re-enter the credential)"
-                    : // Ruling 461: the credential stays in Viberr; runs on
+                    : // Ruling 191: the credential stays in Viberr; runs on
                       // both backends reach this server through Viberr's
                       // gateway (F-P3's "Claude runs only" caveat went with
                       // the Codex limitation it described).
                       " · auth: configured (held by Viberr; runs connect through its gateway)"
                   : m.oauth?.status === "signed_in"
-                    ? // Ruling 469: the sign-in's tokens take the same road.
-                      // Ruling 486: and the row says what the sign-in may do.
+                    ? // Ruling 192: the sign-in's tokens take the same road.
+                      // Ruling 192: and the row says what the sign-in may do.
                       ` · auth: OAuth, ${signInPhrase(m.oauth, hydrated)}${grantPhrase(m.oauth.scope)}; held by Viberr, runs connect through its gateway`
                     : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
@@ -382,9 +382,9 @@ export function McpPanel({
                 {usedBy(m.name) > 0
                   ? " · " + countLabel(usedBy(m.name), "template")
                   : ""}
-                {/* Ruling 176: how many of its tools are withheld from agents
+                {/* Ruling 188: how many of its tools are withheld from agents
                     that may not write, so the row says the server is gated.
-                    Ruling 220 (F37-40): and the row says so for the other two
+                    Ruling 188 (F37-40): and the row says so for the other two
                     cases too. It used to render NOTHING unless a server was
                     gated, so the one state worth seeing — tools that look like
                     writes, nobody has reviewed them, so nothing is withheld —
@@ -409,14 +409,14 @@ export function McpPanel({
               {m.up === false && m.lastError && m.warmingSince === null && (
                 <span className="rsrc-err mono">{m.lastError}</span>
               )}
-              {/* Ruling 469: why a sign-in expired, in the authorization
+              {/* Ruling 192: why a sign-in expired, in the authorization
                   server's words (scrubbed of every token before it was kept). */}
               {m.oauth?.status === "expired" && m.oauth.reason && (
                 <span className="rsrc-err mono">{m.oauth.reason}</span>
               )}
             </span>
             <span className="rsrc-acts">
-              {/* Ruling 368: same shape as the KB re-scan above. */}
+              {/* Ruling 286: same shape as the KB re-scan above. */}
               <button
                 type="button"
                 className="stg-x"
@@ -573,7 +573,7 @@ export function AgentPanel({
       <div className="rsrc-list">
         {gagents.map((a) => {
           const res = a.skills.length + a.mcps.length + a.kbs.length;
-          // Ruling 479(h): a stored id the default workflow lacks says so.
+          // Ruling 184: a stored id the default workflow lacks says so.
           const stageNames = a.stages
             .map((id) => storedStageLabel(id, stages))
             .join(" · ");

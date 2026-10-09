@@ -12,7 +12,7 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
  * Review queue — the human acceptance boundary as a read-only triage list.
  *
  * Zero mutations here: rows link to task detail (where packet
- * resolution lives, Phase 5), the policy chip links to Policy (ruling 477(c):
+ * resolution lives, Phase 5), the policy chip links to Policy (ruling 304:
  * real links, so a row opens in a new tab and says where it goes). The split is
  * member-scoped by acceptance authority (R8-3): "your acceptance" lists only the
  * human-waiting tasks THIS viewer can accept; a human-waiting task someone else
@@ -52,7 +52,7 @@ const ACCEPTANCE_CAP_LABEL =
   "Accept completion into Done";
 
 /**
- * Ruling 236 — the collision chip. Names the tasks, not the count alone: "two
+ * Ruling 242 — the collision chip. Names the tasks, not the count alone: "two
  * others" tells a person there is a problem and nothing about which merge to
  * do first, which is the whole question.
  *
@@ -94,19 +94,19 @@ function OverlapChip({ overlaps }: { overlaps: PrOverlap[] }) {
 }
 
 /**
- * A row's PR chip (ruling 700(e), the split of `RQRow`: hook-free, in the slot
+ * A row's PR chip (ruling 13(b), the split of `RQRow`: hook-free, in the slot
  * the row's `t.pr &&` held). Nothing without a PR.
  *
  * UXA-2: this queue carried its OWN pr-state colour map, so a closed-unmerged
  * (rejected) PR rendered neutral grey here while the canonical `prStatePill`
- * (ruling 12) renders it `risk` on the board, task detail and the GitHub page —
+ * (ruling 237) renders it `risk` on the board, task detail and the GitHub page —
  * and `closed` is a first-class row state in this very queue, with rose-toned
  * rework/archive copy in its subline. Same defect UI-36 fixed on task detail.
  * Use the one map.
  *
  * F19-32: the label rides along for every state the pill's colour alone cannot
  * carry — `closed` (rejected) and `accepted` ("merge pending", R16-6/ruling
- * 40, which the projection used to coerce to "review" before it ever reached
+ * 244, which the projection used to coerce to "review" before it ever reached
  * this map). `merged` and `review` stay bare: the subline says both in words
  * one line above, and the queue's density rule is the board card's (only
  * ACTIONABLE state earns a second label).
@@ -133,11 +133,11 @@ function RQPrPill({ pr }: { pr: ReviewRowView["pr"] }) {
 }
 
 /**
- * A row's wait tag (ruling 700(e), the split of `RQRow`: hook-free, in the
+ * A row's wait tag (ruling 13(b), the split of `RQRow`: hook-free, in the
  * slot the row's ternary held).
  *
  * writ-3: the board's test (card-status.ts): human-waiting AND `waitingOnMe`.
- * `ready` already implies both. Ruling 625: the board card's status chip
+ * `ready` already implies both. Ruling 306: the board card's status chip
  * (`.chip.st`), so a task reads the same in the queue as on the board one
  * click away.
  *
@@ -181,7 +181,7 @@ function RQWaitTag({
     );
   }
   if (waiting === "schedule") {
-    // Ruling 225: resting on a clock. Not a person, and not a run.
+    // Ruling 45: resting on a clock. Not a person, and not a run.
     return (
       <span className="chip st scheduled">
         <Icon name="clock" />
@@ -225,7 +225,7 @@ function RQRow({
     <Link
       className="rq-row"
       to={href}
-      // Ruling 477(c) (F40-29): a LINK, because the row goes to a page. It was
+      // Ruling 304 (F40-29): a LINK, because the row goes to a page. It was
       // a <button> calling navigate(), so the queue built for triaging many
       // tasks at once could not Cmd- or middle-click rows into tabs or copy a
       // row's address, a screen reader announced "button" for page navigation,
@@ -249,21 +249,21 @@ function RQRow({
           neither. */}
       <div className="rq-main">
         <div className="ttl">{t.title}</div>
-        {/* Ruling 625: two lines, clamped; the whole sentence on hover. */}
+        {/* Ruling 304: two lines, clamped; the whole sentence on hover. */}
         <div className="sub" title={sub}>
           {sub}
         </div>
       </div>
       <span className="rq-meta">
         <RQPrPill pr={t.pr} />
-        {/* Ruling 236 (owner, 2026-09-14): which OTHER open PRs this one's diff
+        {/* Ruling 242 (owner, 2026-09-14): which OTHER open PRs this one's diff
             collides with. Read-only and quiet by design: it orders nothing and
             blocks nothing, it only stops the queue presenting collisions as
             independent rows. Live cause: merging SHOP-2 put four of six open
             PRs into CONFLICTING inside a minute, all on the same two shared
             files, and a person discovered each one by pressing Accept. */}
         <OverlapChip overlaps={t.pr?.overlaps ?? []} />
-        {/* Ruling 625: a failing (or bypassed) validation is the board card's
+        {/* Ruling 306: a failing (or bypassed) validation is the board card's
             problem chip, outlined in red ink; the quiet values stay the quiet
             pill, the acceptance boundary's "awaiting verdict" among them. */}
         {validationQuiet(t.validation) ? (
@@ -378,7 +378,7 @@ export function ReviewQueuePage({
           {/* UI-27 residual: this was a <button> wearing `hero-file`, visually
               identical to the non-interactive `hero-file` spans elsewhere — no
               affordance that it navigates. It reads as the link it is now.
-              Ruling 477(c): and it IS one, like the rows below. */}
+              Ruling 304: and it IS one, like the rows below. */}
           {/* P13-D-9: the chip claimed "human only" on EVERY project. On a
               full-autonomy project whose operator ALSO holds an explicit
               `completion-for-acceptance: direct` grant, that operator closes

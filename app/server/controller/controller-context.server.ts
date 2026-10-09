@@ -36,7 +36,7 @@ import {
 } from "~/server/org/kb-proposals.server";
 
 /**
- * The controller's per-turn CONTEXT READ (ruling 121).
+ * The controller's per-turn CONTEXT READ (ruling 253).
  *
  * "The controller gets context wherever it is" means the SERVER gathers the
  * state of the place the conversation is bound to at the start of every turn
@@ -150,7 +150,7 @@ export function clipTaskFile(content: string, budget: number): string {
  * `requireVisible` makes for every board tool: missing and forbidden are one
  * answer, archived projects stay readable, org admins pass by the audited
  * override, and the refusal is audited. A pass returns what the gate resolved
- * (ruling 309): the asker's role, from the project file the gate itself read.
+ * (ruling 254): the asker's role, from the project file the gate itself read.
  */
 function projectVisibleTo(
   db: DatabaseSync,
@@ -193,7 +193,7 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
     task.title,
     `stage ${stageName(stages, task.stage)}`,
     task.readiness,
-    // Ruling 225: `waiting schedule` alone would read as a state the controller
+    // Ruling 45: `waiting schedule` alone would read as a state the controller
     // has to do something about. It is the opposite — the task moves on its
     // own — so the line carries the instant and says nothing else is needed.
     task.waiting === "schedule" && task.resumesAt
@@ -205,15 +205,15 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
   if (task.dueDate) bits.push(`due ${task.dueDate}`);
   if (task.labels.length > 0) bits.push(`[${task.labels.join(", ")}]`);
   if (task.pr) bits.push(`PR #${task.pr.number} ${task.pr.state}`);
-  // Ruling 131: a held row says so at a glance; the task header names entries.
+  // Ruling 55: a held row says so at a glance; the task header names entries.
   if (task.blockedBy.length > 0) bits.push(`waits on ${task.blockedBy.length}`);
   return `- ${bits.join(" · ")}`;
 }
 
 /**
- * Ruling 309: the asking person's live role on the bound project.
+ * Ruling 254: the asking person's live role on the bound project.
  *
- * `instanceContext` has named it per project since ruling 307 and the two
+ * `instanceContext` has named it per project since ruling 253 and the two
  * bound scopes — the ones a person is actually standing in when they ask for
  * something — named nothing. The controller is told "their live permissions are
  * the ceiling for everything you do here" and then given their ORG role, which
@@ -286,7 +286,7 @@ function taskContext(
     `branch: ${summary.branch ?? "none"} · ${summary.pr ? `PR #${summary.pr.number} ${summary.pr.state}` : "no PR"}`,
     `open packet: ${summary.packet ? `"${summary.packet.title}"` : "none"}${summary.epicId ? ` · epic ${summary.epicId}` : ""}`,
   ];
-  // Ruling 131: what the task waits on, each entry with its live state, so
+  // Ruling 55: what the task waits on, each entry with its live state, so
   // the controller never has to infer a hold from a packet that is not there.
   if (summary.blockedBy.length > 0) {
     header.push(`waits on: ${summary.blockedBy.map((e) => `${e.label} (${e.state})`).join(", ")}`);
@@ -352,7 +352,7 @@ function boardContext(
       ? `, and ${roster.length - shownMembers.length} more; get_project lists them`
       : "");
   const waitingHuman = open.filter((t) => t.waiting === "human").length;
-  // Ruling 225: counted apart from the human wait, and named, so the controller
+  // Ruling 45: counted apart from the human wait, and named, so the controller
   // neither treats a clock rest as work it must unblock nor re-dispatches a
   // task that is already coming back on its own.
   const waitingSchedule = open.filter((t) => t.waiting === "schedule").length;
@@ -372,7 +372,7 @@ function boardContext(
   if (listed < open.length) {
     lines.push(`- ... ${open.length - listed} more open tasks; list_tasks reads them`);
   }
-  // Ruling 503: the open epics, with how far each has got. A closed one
+  // Ruling 273: the open epics, with how far each has got. A closed one
   // (done, cancelled) is history the board no longer works in.
   const allEpics = listEpics(db, slug).filter((e) => isEpicOpen(e.status));
   const epics = allEpics
@@ -387,7 +387,7 @@ function boardContext(
   const description = project.description.trim();
   return (
     `## Board ${project.name} (slug ${slug})${project.archived ? " · ARCHIVED (read-only)" : ""}\n` +
-    // Ruling 292: the excerpt names its reader, exactly as the epics line
+    // Ruling 262: the excerpt names its reader, exactly as the epics line
     // above already does ("list_epics reads them"). `get_project`
     // carries the description whole; without the pointer this
     // ellipsis was a cut with nowhere to go, on the one text a board's owner
@@ -410,7 +410,7 @@ function boardContext(
 }
 
 /**
- * Ruling 307: one project's two lines for the instance context — its identity,
+ * Ruling 253: one project's two lines for the instance context — its identity,
  * and its STATE.
  *
  * Every number here was already computed by `listHomeProjectsForUser` for the
@@ -476,7 +476,7 @@ function instanceContext(
   );
 }
 
-/** Ruling 483: proposals named per turn before the rest are left to get_project. */
+/** Ruling 267: proposals named per turn before the rest are left to get_project. */
 const CONTEXT_PROPOSALS = 10;
 
 /** One proposal, one line: enough to raise it and to act on it by id. */
@@ -492,11 +492,11 @@ function proposalLine(p: KbProposal, rulingsKb: string | null): string {
 }
 
 /**
- * Ruling 483 (F40-59): the bound project's open knowledge-base proposals, in
+ * Ruling 267 (F40-59): the bound project's open knowledge-base proposals, in
  * the turn context, so the next conversation knows they wait and raises them.
  * Live on WEB-1 two proposals were never promoted: nothing brought them back
  * after they scrolled off the timeline, and the controller only runs when a
- * person talks to it. Since ruling 498 an agent's correction is written as it
+ * person talks to it. Since ruling 210 an agent's correction is written as it
  * is made, so these are only the ones filed before, which documents still hold.
  */
 function projectProposalsContextLine(
@@ -514,7 +514,7 @@ function projectProposalsContextLine(
   return (
     `\n## Open knowledge-base proposals on this project (${open.length})\n` +
     `Agents filed these from this project's tasks under "Proposed corrections (not binding)" in the ` +
-    `document each corrects, before corrections were written straight into the document (ruling 498). ` +
+    `document each corrects, before corrections were written straight into the document (ruling 210). ` +
     `Every run that reads the document reads them beside the line, and none binds until a person ` +
     `promotes it. If the person has not heard about them in this conversation, tell them they are ` +
     `waiting. Promote or dismiss one with resolve_kb_proposal only when the person asks (their ` +
@@ -522,7 +522,7 @@ function projectProposalsContextLine(
   );
 }
 
-/** Ruling 483: the instance scope's count per visible project. */
+/** Ruling 267: the instance scope's count per visible project. */
 function instanceProposalsContextLine(
   db: DatabaseSync,
   user: ControllerContextInput["user"],
@@ -603,10 +603,10 @@ export function gatherControllerContext(
       askerRole(db, grant, input.user.id),
     );
   }
-  // Ruling 390 (F39-17): an ask the controller raised and nobody has answered
+  // Ruling 271 (F39-17): an ask the controller raised and nobody has answered
   // comes back every turn, in every scope. The whole failure it closes is a
   // standing fact that lived only in a conversation that ended.
-  // Ruling 483 (F40-59): the knowledge-base proposals agents filed come back
+  // Ruling 267 (F40-59): the knowledge-base proposals agents filed come back
   // the same way. The controller runs only when a person speaks to it, so this
   // is where it learns a proposal is waiting and raises it.
   const pending =

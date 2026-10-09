@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { NumberTicker } from "./number-ticker";
 
-/** Ruling 366(f): the frame loop runs on the fake clock, sixteen ms a frame. */
+/** Ruling 284(e): the frame loop runs on the fake clock, sixteen ms a frame. */
 const CLOCK = [
   "requestAnimationFrame",
   "cancelAnimationFrame",

@@ -38,11 +38,11 @@ import {
 
 /**
  * Profile overlay read model (Phase 9C, profile.md). The session user is
- * the single source of `me` (ruling 6) — this module only widens the
+ * the single source of `me` (ruling 26(a)) — this module only widens the
  * session id into the display facts the panels need. Credential hashes never
  * leaves the server; only the derived `hasPassword` boolean ships.
  *
- * `githubConnected` is DERIVED from users.idp (ruling 13 dropped the
+ * `githubConnected` is DERIVED from users.idp (ruling 30 dropped the
  * mock's `ghConnected` pref) — connected means this account currently
  * signs in through the GitHub OAuth whitelist flow.
  */
@@ -50,7 +50,7 @@ import {
 export type TimelineDefault = "all" | "typed" | "comment";
 
 /** Decoder for the scalar pref key — a stored value outside the vocabulary
- *  reads as null from `getPref`, i.e. as the default. (Ruling 148(c): the
+ *  reads as null from `getPref`, i.e. as the default. (Ruling 30: the
  *  `motion` key and its decoder are gone with the in-app setting.) */
 const timelineDefaultSchema = z.enum(["all", "typed", "comment"]);
 
@@ -65,7 +65,7 @@ export interface ProfileMembership {
 }
 
 /**
- * One backend card on Profile → Agent accounts (ruling 127).
+ * One backend card on Profile → Agent accounts (ruling 137).
  *
  * `health` is the SAME per-person answer every other surface reads
  * (`userBackendHealth`), never a second opinion computed here; `login` is the
@@ -74,7 +74,7 @@ export interface ProfileMembership {
  * vendor supports instead of a hardcoded pair.
  */
 /**
- * Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
+ * Ruling 160(a) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
  * person's OWN account, for their Agent-accounts card. Live, every run on an
  * account was refused with a 403 while the card said "connected · verified".
  * A completed run on the backend by anyone retires the record, so the absence
@@ -98,11 +98,11 @@ export interface ProfileBackendRefusal {
 }
 
 /**
- * Ruling 294: what this backend last told Viberr about THIS person's window.
+ * Ruling 161: what this backend last told Viberr about THIS person's window.
  *
  * An observation, never a probe: this is whatever the last run billed to this
  * person reported. A Claude run asks its own CLI for the account's plan windows
- * when it starts (ruling 611), and a Codex run reads its rollout (ruling 604);
+ * when it starts (ruling 161(a)), and a Codex run reads its rollout (ruling 161(b));
  * nothing asks between runs. That is why it carries `observedAt` and why the card
  * renders the age beside the number: a percentage with no age reads as current
  * when it may be hours old, and the honest failure here is a person deciding
@@ -120,7 +120,7 @@ export interface ProfileBackendUsage {
   isUsingOverage: boolean;
   /** ISO instant of the run line this reading was read off. */
   observedAt: string;
-  /** Ruling 481(d): `resetsAt` has passed, so the window this reading
+  /** Ruling 161(c): `resetsAt` has passed, so the window this reading
    *  describes is over and no run has reported on the new one
    *  (`readingWindowReset`). The card words it in the past tense and drops
    *  the percentage. */
@@ -128,7 +128,7 @@ export interface ProfileBackendUsage {
 }
 
 /**
- * Ruling 507: one of the viewer's accounts on a backend, as the card lists it.
+ * Ruling 138: one of the viewer's accounts on a backend, as the card lists it.
  * `health` is that account's own answer (`backendAccountHealth`), so an
  * inactive sign-in whose file went missing reads as such before anyone
  * switches to it.
@@ -154,41 +154,41 @@ export interface ProfileBackend {
     signIn: LoginMethod[];
     paste: PastedKind[];
   };
-  /** Ruling 507: every account the viewer holds on this backend, the active
+  /** Ruling 138: every account the viewer holds on this backend, the active
    *  one first. */
   accounts: ProfileBackendAccount[];
-  /** Ruling 507: the store's own limits, so the card offers what the store
+  /** Ruling 138: the store's own limits, so the card offers what the store
    *  accepts. */
   limits: { maxAccounts: number; maxLabelLength: number };
   /** The viewer's own last observed refusal on this backend, or null. */
   lastRefusal: ProfileBackendRefusal | null;
-  /** Ruling 294: the viewer's OWN last reading on this backend, or null. */
+  /** Ruling 161: the viewer's OWN last reading on this backend, or null. */
   usage: ProfileBackendUsage | null;
 }
 
 /**
- * Ruling 294: the viewer's OWN reading, or null.
+ * Ruling 161: the viewer's OWN reading, or null.
  *
  * The store keeps ONE reading per backend for the whole instance (`KEY_PREFIX`
  * in backend-quota.server), written with the principal of whichever run
  * reported it. Rendering that unscoped on a personal card would put a
  * colleague's "91% of seven day" under the viewer's own name, on the one page
  * whose entire premise is that it is YOUR account. That is the defect ruling
- * 130(d) fixed for refusals, one field over, so this takes the same line
+ * 160(a) fixed for refusals, one field over, so this takes the same line
  * `ownRefusal` does — including for a record that names NOBODY, which predates
  * principals and is therefore not evidence about this account either.
  */
 function ownReading(
   row: BackendQuotaRow | undefined,
   userId: string,
-  /** When the account now in use became the active one (ruling 507: connected,
+  /** When the account now in use became the active one (ruling 160: connected,
    *  or switched to), or null when nothing is connected. A reading OLDER than
    *  that describes the account that was in use before it. */
   connectedAt: string | null,
 ): ProfileBackendUsage | null {
   const reading = row?.reading;
   if (!reading || reading.credentialUserId !== userId) return null;
-  // Ruling 294, the second gate, and it is belt to `retireBackendRecordsFor`'s
+  // Ruling 161, the second gate, and it is belt to `retireBackendRecordsFor`'s
   // braces rather than a duplicate of it. That function deletes the reading
   // when the credential changes, which closes the case at the source; this
   // catches a reading that outlived a connection some OTHER path replaced, and
@@ -205,14 +205,14 @@ function ownReading(
     resetsAt: reading.resetsAt === null ? null : new Date(reading.resetsAt * 1000).toISOString(),
     isUsingOverage: reading.isUsingOverage,
     observedAt: reading.observedAt,
-    // Ruling 481(d): aged in `latestBackendRateLimits`, the one home Insights
+    // Ruling 161(c): aged in `latestBackendRateLimits`, the one home Insights
     // reads too.
     windowReset: row?.readingWindowReset ?? false,
   };
 }
 
 /** The record is this person's only when the run it was read off billed them
- *  (`credentialUserId`, ruling 127): another person's refusal, or a record
+ *  (`credentialUserId`, ruling 137): another person's refusal, or a record
  *  written before principals were stored, is never shown on this card. */
 function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBackendRefusal | null {
   const refused = row?.credentialRefused;
@@ -227,7 +227,7 @@ function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBa
     };
   }
   const spent = row?.exhausted;
-  // Ruling 294: a READING observed after an exhaustion record supersedes it,
+  // Ruling 161: a READING observed after an exhaustion record supersedes it,
   // the rule /insights has applied since pass 31 (V4) and this projection never
   // had. It was invisible while the card showed no usage; the moment it does,
   // the same card would carry "12% of seven day, observed 14:02" beside "usage
@@ -261,12 +261,12 @@ function getProfileBackends(
   db: DatabaseSync,
   userId: string,
 ): ProfileBackend[] {
-  // One read of the quota store for both cards (ruling 130(d)).
+  // One read of the quota store for both cards (ruling 160(a)).
   const limits = new Map(latestBackendRateLimits(db).map((row) => [row.backend, row]));
   return PROFILE_BACKENDS.map((backend) => {
     const health = userBackendHealth(db, userId, backend);
     const accounts = listBackendAccounts(db, userId, backend);
-    // Ruling 507: a reading is about the account that was ACTIVE when it was
+    // Ruling 160: a reading is about the account that was ACTIVE when it was
     // observed, so the gate is when the account now in use became active —
     // connected, or switched back to — not when it was first connected.
     const active = accounts[0];
@@ -312,7 +312,7 @@ export interface ProfileView {
     hasPassword: boolean;
     githubConnected: boolean;
     /** GitHub login captured at OAuth sign-in (Phase 10) or linked by an org
-     *  admin under Users & access (ruling 154); null until either. */
+     *  admin under Users & access (ruling 29); null until either. */
     githubHandle: string | null;
   };
   /** All project memberships, most-active project first. */
@@ -327,7 +327,7 @@ export interface ProfileView {
    * instead of warn scope chips + a doomed Connect button (mirrors R17-4).
    */
   githubConfigured: boolean;
-  /** Ruling 127: the viewer's own Claude and Codex accounts, one entry per
+  /** Ruling 137: the viewer's own Claude and Codex accounts, one entry per
    *  backend. Runs on tasks they own, and their controller turns, bill these. */
   backends: ProfileBackend[];
   prefs: {

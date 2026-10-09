@@ -1,7 +1,7 @@
 /**
- * Ruling 642: a usage-limit window as a person reads it. The id is the
+ * Ruling 324: a usage-limit window as a person reads it. The id is the
  * provider's (`five_hour`, `seven_day`, and `seven_day_<model>` for a plan's
- * model-scoped week, ruling 608); Insights printed it with its underscores
+ * model-scoped week, ruling 161(b)); Insights printed it with its underscores
  * swapped for spaces ("seven day fable").
  */
 export function quotaWindowLabel(rateLimitType: string): string {

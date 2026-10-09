@@ -7,7 +7,7 @@ import type { AcceptCeremony, AcceptCeremonyMode, AcceptConfirmTask } from "./ac
 
 /**
  * What the acceptance ceremony reads off its props before it draws (ruling
- * 700(e), the split of `accept-confirm.tsx` along the task-page recipe): which
+ * 13(b), the split of `accept-confirm.tsx` along the task-page recipe): which
  * writer is asking, what the click jumps, what merges, what it refreshes, and
  * the sentences its heading, footer and confirm say. Pure functions of the
  * props, no React; `AcceptConfirm` calls each once per render.
@@ -38,7 +38,7 @@ function subjectKeyFor(mode: AcceptCeremonyMode): string | undefined {
   switch (mode) {
     case "apply-recommendation":
       return "Applying";
-    // Ruling 164 (pass 35, F35-14): force-accepting is an indirect path now
+    // Ruling 131 (pass 35, F35-14): force-accepting is an indirect path now
     // too. The task page's own button passes no label, so the row still does
     // not render for it; a `force_accept` packet option passes its title.
     case "force":
@@ -68,7 +68,7 @@ export interface CeremonyFacts {
   alreadyMerged: boolean;
   /** The branch this click brings up to date with its base, or null. */
   refreshedBranch: string | null;
-  /** Ruling 449's handler, where the dialog offers it, or null. */
+  /** Ruling 97's handler, where the dialog offers it, or null. */
   refreshFirst: (() => void) | null;
   disclosure: AcceptanceDisclosure;
   /** The glyph the head and the confirm both draw. */
@@ -96,7 +96,7 @@ export function ceremonyFacts({
 }): CeremonyFacts {
   const mode = ceremony.mode;
   const force = mode === "force";
-  // Ruling 162's interlock, and only where the quoted refusal is the one the
+  // Ruling 95's interlock, and only where the quoted refusal is the one the
   // server will re-decide (see `blockedReasonAuthoritative`).
   const interlocked = blockedReason !== null && blockedReasonAuthoritative;
   const mergeOnly = mode === "complete-merge";
@@ -174,26 +174,26 @@ export function ceremonyFacts({
     subjectKey: subjectKeyFor(mode),
     skipsStages,
     skippedStages,
-    // Ruling 132: the one canonical sentence for what moved on the PR head.
+    // Ruling 239: the one canonical sentence for what moved on the PR head.
     drift: describeRevisionDrift(pr?.revisionDrift),
     // F19-14: the raw internal token ("accepted", "review") leaked into this
     // dialog while every other surface renders the canonical label through the one
-    // PR-state map (ruling 12). "PR #12 accepted" and "PR #12 merge pending" are
+    // PR-state map (ruling 237). "PR #12 accepted" and "PR #12 merge pending" are
     // the same fact under two vocabularies, on the screen that decides the merge.
     prPill: pr ? prStatePill(pr.state) : null,
     alreadyMerged,
-    // Ruling 162 / G35-5(d): the branch the ceremony's base refresh writes to,
+    // Ruling 95 / G35-5(d): the branch the ceremony's base refresh writes to,
     // which the Branch row names (its slot in `AcceptConfirm` says why);
     // never on `complete-merge`, whose path refreshes nothing.
     refreshedBranch: !mergeOnly && task.branch && refreshedPr ? task.branch : null,
-    // Ruling 449 (O39-c): offered only where the caller passes it (the task
+    // Ruling 97 (O39-c): offered only where the caller passes it (the task
     // page's direct Accept), never on force or the merge-only path, and only
     // while the branch is behind its base.
     refreshFirst:
       onRefreshFirst && !force && !mergeOnly && baseBehindBy !== null && baseBehindBy > 0
         ? onRefreshFirst
         : null,
-    // Ruling 88 (F21-2): exactly what three of the dialog's rows state — the
+    // Ruling 97 (F21-2): exactly what three of the dialog's rows state — the
     // PR behind the "Merges" pill, the sha on the "Revision" row, the value the
     // "Verdict" pill renders. Built here, from the rendered props, so the
     // acknowledgment the server verifies is the disclosure the human actually
@@ -227,7 +227,7 @@ export function footHint(
   pr: PrRef | null,
 ): string {
   return facts.force
-    ? // Ruling 638: the count the Bypassing row above lists.
+    ? // Ruling 316: the count the Bypassing row above lists.
       blockedGates.length > 1
       ? "Admin override. The bypassed gates are recorded to the audit log."
       : "Admin override. The bypassed gate is recorded to the audit log."

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { claudeMcpToolName, looksLikeWriteTool, MCP_TOOL_NAME_RE, toolIdentity } from "./mcp-tools";
 
-describe("the write-tool suggestion (ruling 176)", () => {
+describe("the write-tool suggestion (ruling 188)", () => {
   it("matches a write verb as a WORD, in snake, kebab, dotted and camel case", () => {
     for (const name of [
       "create_pull_request",
@@ -57,7 +57,7 @@ describe("the write-tool suggestion (ruling 176)", () => {
   });
 });
 
-describe("MCP tool names (ruling 176)", () => {
+describe("MCP tool names (ruling 188)", () => {
   it("accepts the MCP spec's alphabet and refuses anything a deny rule could not match", () => {
     expect(MCP_TOOL_NAME_RE.test("create_pull_request")).toBe(true);
     expect(MCP_TOOL_NAME_RE.test("repo.merge-v2")).toBe(true);
@@ -76,7 +76,7 @@ describe("MCP tool names (ruling 176)", () => {
   });
 });
 
-describe("toolIdentity (ruling 366)", () => {
+describe("toolIdentity (ruling 168)", () => {
   it("reads Claude's mcp__server__tool back and knows the product's own servers", () => {
     expect(toolIdentity("mcp__viberr__run_agent")).toEqual({
       kind: "viberr",

@@ -16,7 +16,7 @@ const overlayReturnState = z
  * Full-page modal built on native <dialog> via useDialog (focus trap, initial
  * focus, Escape, backdrop-click close, scroll lock, focus restore — come from
  * showModal() + the hook; the old hand-rolled trap and scrim div are gone).
- * Closing goes back where the shell opened it from (ruling 657: the overlay
+ * Closing goes back where the shell opened it from (ruling 12: the overlay
  * routes each kept a copy of that close).
  */
 export function PageOverlay({ label, children }: { label: string; children: ReactNode }) {

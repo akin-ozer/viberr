@@ -4,7 +4,7 @@ import type { RefusalShake } from "~/ui/use-refusal-shake";
 import { lineCount, type DocDraft } from "./store-browser-derive";
 
 /**
- * The open document card's regions (ruling 700(e), the split of
+ * The open document card's regions (ruling 13(b), the split of
  * `store-browser.tsx`): its body (the loading or failed read, the rendered
  * document, or the raw text), the notes slot a refused or failed save speaks
  * in, and the foot. Each takes the slot its markup held in `DocumentCard` and
@@ -14,7 +14,7 @@ import { lineCount, type DocDraft } from "./store-browser-derive";
  */
 
 /** The card's body: the read in flight or failed, the rendered document, or
- *  the raw text (ruling 614). */
+ *  the raw text (ruling 317). */
 export function DocumentBody({
   doc,
   view,
@@ -87,13 +87,13 @@ export function DocumentBody({
 }
 
 /** One box, never two: a refused save speaks in the same slot the server's
- *  own sentence uses (ruling 147). */
+ *  own sentence uses (ruling 288). */
 export function DocumentNotes({
   nameInvalid,
   err,
   refusal,
 }: {
-  /** Ruling 147: a refused save of a nameless draft marks the name field. */
+  /** Ruling 288: a refused save of a nameless draft marks the name field. */
   nameInvalid: boolean;
   err: string | null;
   /** The refusal counter the alert is keyed on, and its one shake (451(g)). */
@@ -134,7 +134,7 @@ export function DocumentFoot({
   onSave,
 }: {
   doc: DocDraft;
-  /** Ruling 147(d): an opened document saves only once its text changed. */
+  /** Ruling 288: an opened document saves only once its text changed. */
   changed: boolean;
   unread: boolean;
   meta: string;
@@ -160,7 +160,7 @@ export function DocumentFoot({
       <button
         type="button"
         className="btn sm primary"
-        // Ruling 147: the in-flight states, the truncated hard block (a
+        // Ruling 288: the in-flight states, the truncated hard block (a
         // data-safety refusal whose reason is rendered above) and, for an
         // opened document, nothing changed (147(d)) disable this; a
         // nameless draft is refused instead.

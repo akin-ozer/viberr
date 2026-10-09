@@ -9,7 +9,7 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
- * An agent account card's poll of its running sign-in (ruling 700(e), the
+ * An agent account card's poll of its running sign-in (ruling 13(b), the
  * split of `agent-accounts-panel.tsx` along the task page's recipe). The card
  * calls it where its poll fetcher always registered, so the fetcher keeps its
  * key. No component lives here, so the module is not a Fast Refresh boundary.
@@ -37,7 +37,7 @@ export interface SignInPoll {
  * The poll fetcher is the card's OWN: `/resources/backend-login` answers for
  * the signed-in caller only, and loading it on the panel's action fetcher
  * would overwrite the intent result the toast settles on. Once this tab is
- * signed out it answers a refusal (a 401, ruling 457), and a poll that fails
+ * signed out it answers a refusal (a 401, ruling 11), and a poll that fails
  * answers null (the route's `clientLoader`); neither names a session, so
  * neither matches the loader's below. `onConnected` runs once per session the
  * vendor confirms.

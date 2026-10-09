@@ -3,7 +3,7 @@ import { z } from "zod";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 121 — the controller dock's resource route.
+ * Ruling 256 — the controller dock's resource route.
  *
  * GET answers the scope the person is standing in, with the members-only 404
  * (byte-identical to the layout's) for a project they cannot see and the task
@@ -128,7 +128,7 @@ describe("GET /resources/controller", () => {
   });
 
   /**
-   * Ruling 457, test audit L14-29. The open dock loads this through a
+   * Ruling 11, test audit L14-29. The open dock loads this through a
    * root-owned fetcher, and `requireAuth` answered a missing session with a
    * login redirect whose returnTo was this route and the scope's query: a
    * stale tab's open went to /login and, once signed in, to a page of raw
@@ -246,11 +246,11 @@ describe("POST /resources/controller", () => {
   });
 
   /**
-   * Ruling 457, test audit L14-29. The dock's send is a fetcher submit, and
+   * Ruling 11, test audit L14-29. The dock's send is a fetcher submit, and
    * `requireAuth` answered a missing session with a login redirect naming this
    * route, so signing in again opened a page of raw JSON. No session, or a
    * forced password reset pending, answers 401 with the sentence the dock
-   * toasts; the message stays in its composer (ruling 259).
+   * toasts; the message stays in its composer (ruling 319).
    */
   it("answers a signed-out send 401 with a sentence, never a login redirect", async () => {
     const { cookie, sessionId } = await app.cookieFor(deniz);
@@ -272,7 +272,7 @@ describe("POST /resources/controller", () => {
 
   /**
    * U35-4 (pass 35): the dock disables its composer for a person with no
-   * Claude connected (ruling 127), and this door used to answer 200 `{ ok }`
+   * Claude connected (ruling 137), and this door used to answer 200 `{ ok }`
    * anyway, creating a thread whose only reply was the refusal. The hermetic
    * root has no credential, so this is exactly arda's state here. Canary:
    * restore `{ ok: true }` for a refused turn (or drop the availability check
@@ -429,7 +429,7 @@ describe("POST /resources/controller", () => {
     expect(nonMember.data.error).toBe("That project or task is not open to you.");
   });
 
-  it("ruling 527: a send queues when its form says so, and Retract answers at this door", async () => {
+  it("ruling 251: a send queues when its form says so, and Retract answers at this door", async () => {
     // CANARY: drop `mode: sendModeOf(formData)` from this route's send and the
     // second message steers; drop its `waitingMessageAction` branch and
     // Retract is an unknown action.
@@ -483,12 +483,12 @@ describe("POST /resources/controller", () => {
 });
 
 /**
- * Ruling 573: a message carries files. They are checked before any thread is
+ * Ruling 258: a message carries files. They are checked before any thread is
  * made, stored with the message, named to the turn, served to the thread's
  * owner alone from `/resources/controller-file/:id`, and a retracted message
  * takes them with it.
  */
-describe("ruling 573: files sent with a controller message", () => {
+describe("ruling 258: files sent with a controller message", () => {
   async function serve(fileId: string, userId: string) {
     const { loader } = await import("~/routes/resources.controller-file");
     const request = app.request(`/resources/controller-file/${fileId}`, {

@@ -59,7 +59,7 @@ const createPrRequest = z.object({
   body: z.string(),
 });
 
-/** Ruling 474's `pr.bodyWritten.sha256` as the file records it: the SHA-256 of
+/** Ruling 231(c)'s `pr.bodyWritten.sha256` as the file records it: the SHA-256 of
  *  the body Viberr sent, in hex. */
 function sha256Hex(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
@@ -413,7 +413,7 @@ describe("openTaskPr", () => {
     expect(res.status).toBe("ok");
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     expect(sent.body).toContain("## Evidence");
-    // Ruling 526: a check says how it ended in words, since a PR body has no
+    // Ruling 231: a check says how it ended in words, since a PR body has no
     // marks; a reference is its label and result alone.
     expect(sent.body).toContain("- **Passed:** unit/policy_gate_test · 6 passed\n");
     expect(sent.body).toContain("- **Failed:** README.md:23 against the Output contract · contradicts it\n");
@@ -579,7 +579,7 @@ describe("openTaskPr", () => {
       status: "refused",
       quote: "base is invalid",
     },
-  ])("ruling 128: $name", async ({ body, status, quote }) => {
+  ])("ruling 227: $name", async ({ body, status, quote }) => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
@@ -591,7 +591,7 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
-  it("ruling 128: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
+  it("ruling 227: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
     // Canary: remove `field`/`code` from `ghValidationBodySchema` and this
     // reads `refused` (the residual), not the typed base outcome.
     const store = setupWithBranch();
@@ -749,7 +749,7 @@ describe("openTaskPr", () => {
     expect(gh.callsTo(`POST ${REPO_PATH}/pulls`)).toHaveLength(0);
   });
 
-  /** Ruling 160 (pass 35, F35-11): a closed-unmerged cache, with an unanswered
+  /** Ruling 232 (pass 35, F35-11): a closed-unmerged cache, with an unanswered
    *  closure record or none. The two tests below share this seed. */
   function seedClosedCache(closure: NonNullable<PrRef["closure"]> | null) {
     const pr: NonNullable<TaskFrontmatter["pr"]> = {
@@ -761,7 +761,7 @@ describe("openTaskPr", () => {
     return setupWithBranch("VIB-201", { pr });
   }
 
-  it("ruling 160: a cached closed-unmerged PR with no answered closure refuses a fresh PR (closed_by_human)", async () => {
+  it("ruling 232: a cached closed-unmerged PR with no answered closure refuses a fresh PR (closed_by_human)", async () => {
     // Canary: restore the "a TERMINAL cached PR clears the way" arm for
     // `closed` and the POST below fires.
     const store = seedClosedCache({ at: "2026-09-06T19:33:19.000Z", by: "akin-ozer", answered: null });
@@ -781,7 +781,7 @@ describe("openTaskPr", () => {
     expect(fm.pr).toMatchObject({ number: 7, state: "closed" });
   });
 
-  it("ruling 160: a closed cache with NO closure record is repaired before it refuses, so the closure can be answered", async () => {
+  it("ruling 232: a closed cache with NO closure record is repaired before it refuses, so the closure can be answered", async () => {
     // The KNC-23 shape. `pr.state: closed` has a second writer: `performDelivery`
     // runs `reconcileWorkspaceDelivery` (a `gh pr view` in the agent's clone)
     // one step BEFORE this door, and that path writes `closed` with no closure
@@ -835,7 +835,7 @@ describe("openTaskPr", () => {
     expect(divergence()).toHaveLength(1);
   });
 
-  it("ruling 160: a cached 'review' PR that GitHub reports CLOSED unmerged is a person's decision: recorded through the reconciler, surfaced once, no fresh PR", async () => {
+  it("ruling 232: a cached 'review' PR that GitHub reports CLOSED unmerged is a person's decision: recorded through the reconciler, surfaced once, no fresh PR", async () => {
     // F35-11 live: the owner closed PR #10 at 19:33:19Z, the operator's base
     // refresh moved the branch, and the delivery at 19:33:44Z opened PR #26
     // over it; no event, notification or packet ever named the closure.
@@ -1018,12 +1018,12 @@ describe("openTaskPr", () => {
 });
 
 /**
- * Ruling 135: the delivery door writes the PR head it read. A reuse of the
+ * Ruling 243: the delivery door writes the PR head it read. A reuse of the
  * SAME PR carries the head forward and clears a satisfied record; a DIFFERENT
  * PR never inherits the old head. Canary: carry `existingPr.headSha`
  * unconditionally (spread `existingPr` even when the number differs).
  */
-describe("ruling 135: writePrToTask and the PR head", () => {
+describe("ruling 243: writePrToTask and the PR head", () => {
   it("reusing the SAME PR writes the live head and clears a satisfied unpushed record", async () => {
     const store = setupWithBranch("VIB-201", {
       workRevision: { id: "rev_1", headSha: "9".repeat(40), treeSha: null, branch: BRANCH, createdAt: "2026-09-04T00:00:00.000Z", sourceProfileId: "developer" },
@@ -1043,9 +1043,9 @@ describe("ruling 135: writePrToTask and the PR head", () => {
     expect(fm.pr).toEqual({ number: 42, state: "review", title: "new title", headSha: "9".repeat(40) });
   });
 
-  it("a DIFFERENT PR inherits nothing from the old record: head, closure, checks or review (rulings 135, 160; P13-D-28)", async () => {
+  it("a DIFFERENT PR inherits nothing from the old record: head, closure, checks or review (rulings 243, 232; P13-D-28)", async () => {
     const store = setupWithBranch("VIB-201", {
-      // Ruling 160: a closed cache clears the way only once a person has
+      // Ruling 232: a closed cache clears the way only once a person has
       // answered the closure. The fresh PR inherits none of the old record:
       // not the head, the closure, or the reconciler-owned checks and review.
       pr: {
@@ -1068,7 +1068,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
     const res = await openPr(store, gh);
     expect(res).toMatchObject({ status: "ok", prNumber: 43, created: true });
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-201", dataRoot: store.dataRoot })!.parsed.frontmatter;
-    // Ruling 474: it records the body it was opened with (no revision: the
+    // Ruling 231(c): it records the body it was opened with (no revision: the
     // task delivered none and GitHub named no head), and nothing it did not.
     const sent = createPrRequest.parse(gh.callsTo(`POST ${REPO_PATH}/pulls`)[0]!.body);
     expect(fm.pr).toEqual({
@@ -1080,7 +1080,7 @@ describe("ruling 135: writePrToTask and the PR head", () => {
   });
 });
 
-describe("ruling 474: a reused PR's body follows the delivery it describes", () => {
+describe("ruling 231(c): a reused PR's body follows the delivery it describes", () => {
   useAppOrigin("https://viberr.example");
   // The live shape (akin-ozer/website PR #2, WEB-4): opened on revision
   // 7cf1edc with 3 commits and +814/−15; the rework pushed cc9aa30, 5 commits,

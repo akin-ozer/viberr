@@ -24,8 +24,8 @@ export interface UnseenReplyView {
 }
 
 /**
- * Ruling 457 (CTL-2): one of the viewer's own conversations with a turn
- * working right now, and what it is doing (ruling 250's phase and step). The
+ * Ruling 11 (CTL-2): one of the viewer's own conversations with a turn
+ * working right now, and what it is doing (ruling 257's phase and step). The
  * dock's working dot and its step line read this, polled every 5 s while a
  * turn works, instead of reloading the whole transcript to move one line.
  */
@@ -42,13 +42,13 @@ export interface DockStatus {
   working: LiveTurnView[];
 }
 
-/** Ruling 457: the dock loads this itself; a page revalidation never reloads
+/** Ruling 11: the dock loads this itself; a page revalidation never reloads
  *  it (see `dockResourceShouldRevalidate`). */
 export const shouldRevalidate = dockResourceShouldRevalidate;
 
 /**
  * The dock's status on every page: O39-d's replies the viewer has not seen,
- * and (ruling 457) the viewer's turns working right now.
+ * and (ruling 11) the viewer's turns working right now.
  *
  * O39-d: a turn runs one to five minutes, and its answer reached only the
  * surfaces still open on it: a person who had moved on learned nothing until
@@ -57,7 +57,7 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * project the viewer can still open are listed, so every link leads somewhere.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457 (test audit L14-29): a 401, never `requireAuth`'s login
+  // Ruling 11 (test audit L14-29): a 401, never `requireAuth`'s login
   // redirect, which named THIS route as the returnTo. The dock loads it on
   // every page, on each `controller.updated` and every 5 s while a turn works,
   // all through a root-owned fetcher, and a fetcher follows a redirect as a
@@ -114,7 +114,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 457: a failed load is the dock's, never the page's. React Router
+ * Ruling 11: a failed load is the dock's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, and root owns the dock's, so a restart, a 5xx or a dead network
  * under a `controller.updated` or the working poll replaced the whole page

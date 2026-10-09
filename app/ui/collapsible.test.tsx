@@ -29,7 +29,7 @@ const rows = (n: number) =>
 const toggle = (container: HTMLElement) => container.querySelector<HTMLButtonElement>(".md-collapse-toggle");
 const body = (container: HTMLElement) => container.querySelector<HTMLElement>(".attach-list")!;
 
-describe("Collapsible: the comment fold, shared (ruling 510)", () => {
+describe("Collapsible: the comment fold, shared (ruling 314)", () => {
   it("renders short content whole, with no toggle", () => {
     contentHeight(() => 200);
     const { container } = render(
@@ -139,7 +139,7 @@ describe("Collapsible: the comment fold, shared (ruling 510)", () => {
 });
 
 /** A fold whose state its owner holds, as a comment holds it for the pictures
- *  under its card (ruling 522). */
+ *  under its card (ruling 314). */
 function Shared({ more }: { more: Hidden | null }) {
   const [open, setOpen] = useState(false);
   return (
@@ -149,7 +149,7 @@ function Shared({ more }: { more: Hidden | null }) {
   );
 }
 
-describe("Collapsible: a fold that also hides pictures outside its box (ruling 522)", () => {
+describe("Collapsible: a fold that also hides pictures outside its box (ruling 314)", () => {
   it("counts them, and shows its toggle for them when the box itself is short", () => {
     // CANARY: render the toggle for `overflowing` alone and a short comment
     // with ten screenshots has nothing that shows the six past its first row.

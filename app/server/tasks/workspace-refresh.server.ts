@@ -20,7 +20,7 @@ const execFileAsync = promisify(execFile);
 const FETCH_TIMEOUT_MS = 60_000;
 
 /**
- * Ruling 129 (pass 34, Q34-5 / F34-6): a reused checkout is refreshed from
+ * Ruling 195 (pass 34, Q34-5 / F34-6): a reused checkout is refreshed from
  * the project mirror on every dispatch.
  *
  * Live (JC-2 to JC-5): the task workspaces were cloned once, by the operators'
@@ -35,7 +35,7 @@ const FETCH_TIMEOUT_MS = 60_000;
  * the mirror cannot be built), (2) fetch its heads into the checkout's
  * `origin/*`, (3) with `fastForward`, move a checkout that is unborn (on the
  * default branch, or never committed to and on a name that is no task's:
- * ruling 670) or sits
+ * ruling 195) or sits
  * clean on the default branch to `origin/<default>`; a task branch, a dirty
  * tree and a detached HEAD are never touched (`update_branch_from_base` owns a
  * diverged task branch); a branch sharing NO history with the default branch
@@ -67,7 +67,7 @@ export type WorkspaceRefreshHead =
   /** A fetch-only refresh (supporting checkouts). */
   | "not_requested";
 
-/** Where a task branch stands against `origin/<branch>` (ruling 179). */
+/** Where a task branch stands against `origin/<branch>` (ruling 240). */
 export interface TaskBranchStanding {
   name: string;
   /** `unpushed`: origin has no such branch yet. `ahead`: origin's copy is an
@@ -87,7 +87,7 @@ export type WorkspaceRefreshResult =
       status: "fetched";
       head: WorkspaceRefreshHead;
       mirrorRefreshed: boolean;
-      /** Ruling 179: where the TASK branch stands against origin's copy, when
+      /** Ruling 240: where the TASK branch stands against origin's copy, when
        *  the caller named the branch. Absent for every other head, and for a
        *  caller that passed no `taskBranch` (the disclosure then stays
        *  generic). Live (2026-09-12): the one sentence said "a diverged task
@@ -110,7 +110,7 @@ export interface WorkspaceRefreshInput {
   fastForward: boolean;
   /** Create the mirror when it is missing (a delivering dispatch pays it). */
   createMirror?: boolean;
-  /** Ruling 179 (pass 36): the task's own branch. A clean checkout ON it that
+  /** Ruling 240 (pass 36): the task's own branch. A clean checkout ON it that
    *  is strictly behind `origin/<taskBranch>` — commits Viberr did not deliver
    *  joined the branch, the external revision under review — is fast-forwarded
    *  to it, so a rework starts from the head the reviewers judge. A diverged
@@ -244,7 +244,7 @@ export async function refreshWorkspaceFromMirror(
 
   try {
     if (!born) {
-      // Ruling 670: a checkout that never had a commit on any branch, and
+      // Ruling 195: a checkout that never had a commit on any branch, and
       // whose unborn HEAD is on a name that is no task's, still stands on the
       // name the clone was given while the repository had nothing. When the
       // project has since taken the repository's own default branch that name
@@ -265,7 +265,7 @@ export async function refreshWorkspaceFromMirror(
     const related = await gitOk(input.dir, ["merge-base", "HEAD", base]);
     if (!related) return { status: "fetched", head: "unrelated", mirrorRefreshed };
     if (!onDefault) {
-      // Ruling 179: the task branch follows origin's copy when it is strictly
+      // Ruling 240: the task branch follows origin's copy when it is strictly
       // behind it. Live (HLC-18, 19:54Z): after an observer commit became the
       // external revision under review, the rework started from the old local
       // head, and its delivery was refused as non-fast-forward with "delete or
@@ -341,14 +341,14 @@ export function describeWorkspaceRefresh(
       return result.from === "unborn"
         ? `fast-forwarded the unborn checkout to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`
         : result.from === "behind_task_branch"
-          ? `fast-forwarded the task branch to origin's copy at \`${result.head.slice(0, 7)}\`; commits Viberr did not deliver joined it (ruling 179)${stale(result)}`
+          ? `fast-forwarded the task branch to origin's copy at \`${result.head.slice(0, 7)}\`; commits Viberr did not deliver joined it (ruling 240)${stale(result)}`
           : `fast-forwarded \`${defaultBranch}\` to \`origin/${defaultBranch}\` at \`${result.head.slice(0, 7)}\`${stale(result)}`;
     case "fetched":
       switch (result.head) {
         case "current":
           return `origin/* refreshed; the checkout was already at \`origin/${defaultBranch}\`${stale(result)}`;
         case "task_branch": {
-          // Ruling 179: the one sentence used to call EVERY task branch
+          // Ruling 240: the one sentence used to call EVERY task branch
           // diverged — including one that matched origin's copy exactly (live
           // 2026-09-12, HLC-18 after its rework landed). Say which it is.
           const standing = result.taskBranch;

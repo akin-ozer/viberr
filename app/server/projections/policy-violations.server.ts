@@ -11,7 +11,7 @@ import { scopeIsAdvisory } from "~/shared/credential-scopes";
 
 /**
  * Scope-violation records (Phase 7 — replaces the phase-4 policy-event
- * derivation, orchestrator ruling 5).
+ * derivation, orchestrator ruling 221).
  *
  * One row per violation with its own open/resolved lifecycle; the row
  * carries the task the policy engine flagged (`taskKey`, soft ref). The
@@ -78,9 +78,9 @@ export function countOpenPolicyViolations(
   db: DatabaseSync,
   projectSlug: string,
 ): number {
-  // Ruling 386 (F39-13): an ADVISORY scope is not a violation, and this badge
-  // is the third surface to learn it. Ruling 360 settled that `checks:read` is
-  // not required and that keeping its record is still worth it; ruling 380(b)
+  // Ruling 221(b) (F39-13): an ADVISORY scope is not a violation, and this badge
+  // is the third surface to learn it. Ruling 237 settled that `checks:read` is
+  // not required and that keeping its record is still worth it; ruling 221(b)
   // made the timeline event and the credential card say so from one list. The
   // row stayed `open` either way, so this count kept rendering it in
   // `.count.violations` — bold `--danger` on the Settings row — and on the live
@@ -157,7 +157,7 @@ export function findOpenScopeViolation(
 
 export interface OpenScopeViolationInput {
   projectSlug: string;
-  /** Task the violation is flagged on (ruling 5: rows carry their task). */
+  /** Task the violation is flagged on (ruling 221: rows carry their task). */
   taskKey?: string | null;
   scope: string;
   /** Secret-free, human-readable description (RichText micro-format ok). */
@@ -223,7 +223,7 @@ export function openScopeViolation(
     details: { scope: record.scope },
   };
   // A project-wide violation carries no task ref at all — the audit row must not
-  // claim one (ruling 5: rows carry their task, and only when they have one).
+  // claim one (ruling 221: rows carry their task, and only when they have one).
   if (record.taskKey) opened.taskKey = record.taskKey;
   recordAudit(db, opened);
   emitProjectionEvent({

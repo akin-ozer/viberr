@@ -11,13 +11,13 @@ import { kbDirsOf, kbLegacyOf } from "./kb-grants";
 import { useOrgAction } from "./use-org-action";
 
 /**
- * Ruling 99: the org-admin surface that modifies the CONTROLLER ITSELF —
+ * Ruling 247: the org-admin surface that modifies the CONTROLLER ITSELF —
  * its model, its resource grants (skills, knowledge bases, MCP servers) and
  * its instructions. This page is admin-gated as a whole; talking TO the
  * controller is a different thing entirely and lives at /controller, open to
  * every signed-in user within their own permissions.
  *
- * Ruling 106: this panel speaks the agent-editor language, not its own — the
+ * Ruling 270: this panel speaks the agent-editor language, not its own — the
  * same model/effort catalog pickers as the profile modal (ModelEffortFields +
  * useModelCatalog, so an admin picks a real model instead of free-typing one
  * the runtime would silently substitute), the same pick-chip resource grants
@@ -27,7 +27,7 @@ import { useOrgAction } from "./use-org-action";
  * (its authority is the asking user's own permission level), so those editor
  * sections rightly have no counterpart here.
  *
- * Ruling 108: the grant sections and the instructions are LOCKED by default,
+ * Ruling 270: the grant sections and the instructions are LOCKED by default,
  * org admins included — a deployment decision, unlocked per section by an
  * environment variable and a restart. A locked section renders read-only
  * here and `saveControllerConfig` refuses a change to it server-side, so the
@@ -56,7 +56,7 @@ export interface ControllerKbOption {
   uri: string;
 }
 
-// Ruling 108: the lock vocabulary (sections, unlock variables, the unlock
+// Ruling 270: the lock vocabulary (sections, unlock variables, the unlock
 // value) is shared with the server through `~/shared/controller-locks`
 // (P07-G, pass 32) — the panel used to carry hand-copied mirrors with a drift
 // test standing between them.
@@ -71,7 +71,7 @@ import {
 } from "~/shared/controller-locks";
 
 /** A resource the controller mounts by construction, shown so an admin can see
- *  what is attached. Ruling 107: it is NOT a control, because there is no
+ *  what is attached. Ruling 269: it is NOT a control, because there is no
  *  grant row behind it and nothing to toggle. */
 export interface PinnedChip {
   display: string;
@@ -79,7 +79,7 @@ export interface PinnedChip {
   title: string;
 }
 
-/** Which "none" line a grant group closes on, if any (ruling 700(e): read off
+/** Which "none" line a grant group closes on, if any (ruling 13(b): read off
  *  the group as a pure function). A group with a pinned or a missing chip
  *  shows something already; otherwise a locked group with nothing granted
  *  says "none granted", and an open group with nothing to offer "none
@@ -114,8 +114,8 @@ function GrantChips({
   onToggle: (id: string) => void;
   mono?: boolean;
   pinned?: PinnedChip;
-  /** Ruling 108: the section is deployment-locked — every chip renders as a
-   *  non-interactive span (the ruling-107 pinned treatment: a disabled button
+  /** Ruling 270: the section is deployment-locked — every chip renders as a
+   *  non-interactive span (the ruling-269 pinned treatment: a disabled button
    *  would be a toggle that does nothing and its title would never open), and
    *  the lock note above the groups says how to unlock. */
   locked?: boolean;
@@ -180,7 +180,7 @@ function GrantChips({
               {...(o.title ? { title: o.title } : {})}
               onClick={() => onToggle(o.id)}
             >
-              {/* Ruling 459: always drawn, faded in on `.on`, so the chip
+              {/* Ruling 284: always drawn, faded in on `.on`, so the chip
                   keeps its width as it toggles. */}
               <Icon name="check" className="pc-check" />
               {o.display}
@@ -212,7 +212,7 @@ function GrantChips({
   );
 }
 
-/** Ruling 390: one open grant request, as the panel renders it. The remedy
+/** Ruling 271: one open grant request, as the panel renders it. The remedy
  *  sentence is computed on the server so the page and the controller's own
  *  context read the identical words. */
 export interface ControllerGrantRequestView {
@@ -237,7 +237,7 @@ function GrantRequestRow({ request: r }: { request: ControllerGrantRequestView }
       <code className="mono">{r.name}</code> ({CONTROLLER_SECTION_LABEL[r.kind]}):{" "}
       {r.reason || "no reason given"}
       <br />
-      {/* Ruling 480 (F40-47): the stored ISO string ("2026-09-24T20:25:54.327Z")
+      {/* Ruling 271 (F40-47): the stored ISO string ("2026-09-24T20:25:54.327Z")
           used to print as is, in UTC with milliseconds, hours off from every
           other time on the page. It renders like the audit rows below. */}
       <span className="sub">
@@ -269,13 +269,13 @@ export function ControllerAdminPanel({
   requests,
 }: {
   config: ControllerConfigView;
-  /** Ruling 108: which sections this deployment allows editing. */
+  /** Ruling 270: which sections this deployment allows editing. */
   locks: ControllerSectionLocks;
   /** The org resource catalogs the grant pickers offer. */
   kbs: ControllerKbOption[];
   skills: string[];
   mcps: string[];
-  /** Ruling 390: open grant requests the controller raised for itself. */
+  /** Ruling 271: open grant requests the controller raised for itself. */
   requests: ControllerGrantRequestView[];
 }) {
   const action = useOrgAction();
@@ -328,7 +328,7 @@ export function ControllerAdminPanel({
       // A model without effort tiers submits none — the same rule the profile
       // editor's payload applies.
       effort: modelCatalog.showEffort ? effort : "",
-      // Ruling 108: a locked section posts BLANK, which the server reads as
+      // Ruling 270: a locked section posts BLANK, which the server reads as
       // "keep the stored value". This is what makes a model/effort-only save
       // succeed under a lock, and it means a stale grant/doctrine copy the
       // panel is still holding can never be posted back as a change.
@@ -386,7 +386,7 @@ export function ControllerAdminPanel({
             </strong>
             . Model and effort stay editable. To unlock a section, set its
             variable in the app environment and restart:{" "}
-            {/* Ruling 625: an env var is code — set in mono, one token each,
+            {/* Ruling 280: an env var is code — set in mono, one token each,
                 as the grant-request rows print theirs. */}
             {lockedSections.map(([section], i) => (
               <Fragment key={section}>
@@ -404,9 +404,9 @@ export function ControllerAdminPanel({
       )}
       {requests.length > 0 && (
         /**
-         * Ruling 390 (F39-17): grants the controller asked for and cannot make.
+         * Ruling 271 (F39-17): grants the controller asked for and cannot make.
          *
-         * There is no Grant button, deliberately: ruling 108 put these grants
+         * There is no Grant button, deliberately: ruling 270 put these grants
          * outside the app, so one here would promise something no code on this
          * page can do. Each row prints the variable, the value and the restart,
          * which is the real answer, and the save below that leaves the resource
@@ -462,7 +462,7 @@ export function ControllerAdminPanel({
             granted={grantMcps}
             onToggle={(id) => toggle(grantMcps, setGrantMcps, id)}
             mono
-            // Ruling 107: the controller's own diagnostics server. It is part
+            // Ruling 269: the controller's own diagnostics server. It is part
             // of the controller, mounted with no config read, so it is
             // disclosed here rather than offered as a grant nobody can change.
             pinned={{

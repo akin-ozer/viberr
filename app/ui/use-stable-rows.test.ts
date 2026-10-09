@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { useStableRows, useStableValue } from "./use-stable-rows";
 
 /**
- * Ruling 457: structural sharing must never hand a page stale data. A row is
+ * Ruling 11: structural sharing must never hand a page stale data. A row is
  * kept only when its content is equal in full, at any depth; anything else is
  * the new row, and the array is kept only when every row was.
  */
@@ -32,7 +32,7 @@ function afterRevalidation(prev: Row[], decoded: Row[]): Row[] {
   return view.result.current;
 }
 
-describe("useStableRows (ruling 457)", () => {
+describe("useStableRows (ruling 11)", () => {
   it("keeps every object, and the array, when a fresh decode changed nothing", () => {
     const prev = [row("A"), row("B"), row("C")];
     expect(afterRevalidation(prev, structuredClone(prev))).toBe(prev);
@@ -94,7 +94,7 @@ function held<T>(first: T, next: T): T {
   return view.result.current;
 }
 
-describe("useStableValue compares loader data by content (ruling 457)", () => {
+describe("useStableValue compares loader data by content (ruling 11)", () => {
   it("holds an equal value, however deep, and takes any difference", () => {
     const first = { a: [1, { b: "x" }], c: null };
     expect(held(first, { a: [1, { b: "x" }], c: null })).toBe(first);
@@ -113,7 +113,7 @@ interface Directory {
   users: string[];
 }
 
-describe("useStableValue (ruling 457)", () => {
+describe("useStableValue (ruling 11)", () => {
   it("keeps the object it holds while the content is the same, takes a changed one", () => {
     const first: Directory = { agents: [{ handle: "dev" }], users: [] };
     const view = renderHook(({ value }) => useStableValue(value), {

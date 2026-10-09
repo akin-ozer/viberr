@@ -1,7 +1,7 @@
 import { countLabel } from "~/shared/text/plural";
 
 /**
- * Ruling 469: where an HTTP MCP connection stands on its OAuth sign-in, as
+ * Ruling 192: where an HTTP MCP connection stands on its OAuth sign-in, as
  * every surface shows it: the Settings row and editor, the probe's toast, the
  * controller's `list_mcp_servers`. One home for the words, so the row and the
  * controller never describe the same sign-in differently.
@@ -27,7 +27,7 @@ export interface McpOAuthView {
   /** Why the sign-in expired, in the authorization server's words. */
   reason: string | null;
   /**
-   * Ruling 486: the scope the authorization server granted, space-joined as
+   * Ruling 192: the scope the authorization server granted, space-joined as
    * it returned it (or, when its token reply named none, the scope Viberr
    * asked for, which RFC 6749 §5.1 says it then granted). Null while no
    * sign-in is held, or when neither side named one. Not a secret.
@@ -35,7 +35,7 @@ export interface McpOAuthView {
   scope: string | null;
 }
 
-// ------------------------------------------------------------ the grant (ruling 486)
+// ------------------------------------------------------------ the grant (ruling 192)
 
 /**
  * The action words that only read. A scope is named `<resource>.<action>`
@@ -87,7 +87,7 @@ export function mcpGrantPhrase(scope: string | null | undefined): string | null 
 }
 
 /**
- * Ruling 486(d): the sentence a gateway-relayed authorization refusal gains
+ * Ruling 192: the sentence a gateway-relayed authorization refusal gains
  * on a connection whose sign-in granted only reads. Null when the connection
  * is not signed in, its grant is unknown, or the grant holds a write.
  */
@@ -101,7 +101,7 @@ export function mcpReadOnlyRefusal(view: McpOAuthView | null | undefined): strin
 /** RFC 6749 §3.3: a scope token is printable ASCII without space, `"` or `\`. */
 const SCOPE_TOKEN = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
 
-/** Ruling 486(c): "Requested scopes" read for the authorization request. */
+/** Ruling 192: "Requested scopes" read for the authorization request. */
 export interface RequestedScopes {
   /** Space-joined, each scope once; null when none was typed. */
   scope: string | null;
@@ -110,7 +110,7 @@ export interface RequestedScopes {
 }
 
 /**
- * Ruling 486(c): the editor's "Requested scopes" as the authorization request
+ * Ruling 192: the editor's "Requested scopes" as the authorization request
  * sends them: split on spaces, commas and newlines, each once, space-joined;
  * null when empty. `invalid` names every token RFC 6749 does not allow.
  */
@@ -172,7 +172,7 @@ export function mcpSignInNote(view: McpOAuthView | null | undefined): string | n
   return `${sentence(mcpSignInPhrase(view) ?? "signed in")} with OAuth${view.issuer ? ` at ${view.issuer}` : ""}. Viberr holds the tokens; runs reach the server through Viberr's MCP gateway and never see them. ${grantSentence(view.scope)}`;
 }
 
-/** Ruling 486: what the sign-in may do, as the controller relays it. */
+/** Ruling 192: what the sign-in may do, as the controller relays it. */
 function grantSentence(scope: string | null): string {
   const grant = summarizeMcpGrant(scope);
   if (!grant) return "The server did not say which scopes it granted.";

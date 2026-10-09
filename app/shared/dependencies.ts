@@ -1,6 +1,6 @@
 /**
  * Task dependencies — the vocabulary of `task.md`'s `blockedBy:` list
- * (ruling 131, pass 34 Q34-11). Client-safe: the board card, the task page
+ * (ruling 55, pass 34 Q34-11). Client-safe: the board card, the task page
  * and the Details editor render and parse the same spelling the server
  * validates.
  *
@@ -9,7 +9,7 @@
  *
  *   JC-6               a task in the same project
  *
- * Ruling 503 retired the second one, `goal-1 link 3`: goal chains became
+ * Ruling 55 retired the second one, `goal-1 link 3`: goal chains became
  * epics, every task an epic holds exists from the moment it joins, so what a
  * task waits on is always another task. The boot conversion rewrote each
  * stored goal-link entry to the key of the task that carried the link.
@@ -20,7 +20,7 @@
  *
  * The parser is in `task-refs.ts`, re-exported here: the task schema
  * canonicalizes every entry with it, and that schema ships to every page
- * (ruling 457, FL-1), so it must not import this module.
+ * (ruling 11, FL-1), so it must not import this module.
  */
 
 export {
@@ -32,11 +32,11 @@ export {
 
 /** The state a reference resolves to at read time. `failed` is a task
  *  archived before it was done, a wait that can never complete (one archived
- *  at the terminal stage is `done`, ruling 651); `missing` is a reference
+ *  at the terminal stage is `done`, ruling 55); `missing` is a reference
  *  nothing in the project answers to.
  *
  *  F37-63's `cancelled` state (a link on a cancelled goal that could never
- *  acquire a task) left with the goal links it described (ruling 503). */
+ *  acquire a task) left with the goal links it described (ruling 55). */
 export type DependencyState = "open" | "done" | "failed" | "missing";
 
 /** One entry as a surface renders it. */
@@ -54,10 +54,10 @@ export const DEPENDENCY_GRAMMAR_HINT = "a task key like JC-6";
 
 /**
  * The one task-key prefix a project may not take. An epic's id is
- * `epic-<n>` (ruling 503), so a project keyed `EPIC` would have tasks whose
+ * `epic-<n>` (ruling 55), so a project keyed `EPIC` would have tasks whose
  * keys read as epic ids everywhere a person or an agent reads them: on a
  * card, in a wait, in the controller's replies. Every writer of `taskPrefix`
- * refuses it by name. (Before ruling 503 the reserved prefix was `GOAL`,
+ * refuses it by name. (Before ruling 55 the reserved prefix was `GOAL`,
  * because `GOAL-1` read as a goal-link reference missing its link.)
  */
 const RESERVED_TASK_PREFIX = "EPIC";
@@ -82,7 +82,7 @@ export function splitDependencyText(text: string): string[] {
 }
 
 /**
- * Ruling 131(e): what the `dependencies-released` operator trigger carries —
+ * Ruling 55: what the `dependencies-released` operator trigger carries —
  * the entries the task waited on, and the person who cleared the list by hand
  * when it was not the engine (null for an engine release).
  */
@@ -95,10 +95,10 @@ export interface DependencyReleasePayload {
 }
 
 /**
- * Ruling 186 (pass 37, F37-2): ONE spelling of "this task is held".
+ * Ruling 56 (pass 37, F37-2): ONE spelling of "this task is held".
  *
  * A task with a non-empty `blockedBy` refuses every agent dispatch, the same
- * way ruling 177's closure refuses one — and for the same reason. Before this,
+ * way ruling 52's closure refuses one — and for the same reason. Before this,
  * the hold was enforced by ASKING the model: `runOperator` refused three
  * triggers (`create`, `transition`, `scheduled`) and every reactive trigger ran
  * on with a prompt paragraph telling it not to "dispatch delivery work", while
@@ -119,13 +119,13 @@ export function holdRefusal(
   entries: readonly DependencyRender[],
   verb: string,
 ): string {
-  // Ruling 355: the entries that can never complete, by label.
+  // Ruling 58: the entries that can never complete, by label.
   const dead = deadDependencyLabels(entries);
-  // Ruling 356: the entries already done, as done.
+  // Ruling 58: the entries already done, as done.
   const head =
     `${taskKey} waits on ${holdEntriesSentence(entries)} and Viberr is holding it, ` +
     `so ${verb} is refused. `;
-  // Ruling 355 (pass 38, F38-9): "Viberr releases it when every entry is done"
+  // Ruling 58 (pass 38, F38-9): "Viberr releases it when every entry is done"
   // is a promise `dependenciesSatisfied` can never keep for a failed or missing
   // entry — the release engine writes "can never complete … edit
   // what it waits on" on the same task, and this sentence stood beside it
@@ -140,12 +140,12 @@ export function holdRefusal(
   return head + `Viberr releases it when every entry is done; to release it sooner, change what it waits on.`;
 }
 
-/** Ruling 355: the states an entry cannot leave on its own. */
+/** Ruling 58: the states an entry cannot leave on its own. */
 export function isDeadDependencyState(state: DependencyState): boolean {
   return state === "failed" || state === "missing";
 }
 
-/** Ruling 355: the labels of the entries that can never complete. */
+/** Ruling 58: the labels of the entries that can never complete. */
 function deadDependencyLabels(entries: readonly DependencyRender[]): string[] {
   return entries.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
 }
@@ -158,7 +158,7 @@ export function joinDependencyEntries(entries: readonly string[]): string {
 }
 
 /**
- * Ruling 356 (pass 38, F38-10): the hold list as a sentence reads it — what
+ * Ruling 58 (pass 38, F38-10): the hold list as a sentence reads it — what
  * still holds the task, then the entries already done, as done.
  *
  * A hold releases as a whole (`dependenciesSatisfied` is `every(done)`), so

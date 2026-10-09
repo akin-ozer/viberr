@@ -203,7 +203,7 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     // It was declared twice: the Roobert-first stack in the token block at the
     // top, and an overriding `:root { --font-display: "Manrope" }` 2600 lines
     // down. Manrope won, so the token block — the first place anyone looks —
-    // gave the wrong answer. Ruling 365: Inter is the one UI face, so the
+    // gave the wrong answer. Ruling 280: Inter is the one UI face, so the
     // display token and the body token name the same family.
     const declarations = [...CODE.matchAll(/--font-display\s*:/g)];
     expect(declarations.length).toBe(1);
@@ -263,7 +263,7 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     expect(hover![1]).toMatch(/color:\s*var\(--fg\)/);
     // The destructive treatment is opt-in: by position where the row's remove
     // IS its last control, and by name (`.destructive`) where it is not —
-    // ruling 150(c): ruling 149's Disable sits before the user row's Remove.
+    // ruling 278: ruling 278's Disable sits before the user row's Remove.
     expect(CODE).toMatch(/\.rsrc-acts \.stg-x:last-child:not\(\.off\):hover/);
     expect(CODE).toMatch(/\.member-row \.stg-x:last-child:not\(\.off\):hover/);
     expect(CODE).toMatch(/\.stg-x\.destructive:not\(\.off\):hover/);
@@ -324,7 +324,7 @@ describe("app.css select treatment (P16-UI-05)", () => {
     expect([variant.has("border"), variant.has("background")]).toEqual([false, false]);
   });
 
-  it("ruling 640: under base-select a select is the app's dropdown, its glyphs inked by tokens", () => {
+  it("ruling 289(a): under base-select a select is the app's dropdown, its glyphs inked by tokens", () => {
     // The arrow stayed native because a drawn one meant a colour shipped in an
     // image. CANARY: draw the chevron as a background image with a stroke colour
     // and it keeps one ink in both themes.
@@ -602,10 +602,10 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
   });
 });
 
-/* ---------------------------- ruling 166: headless yes, utility classes no --- */
+/* ---------------------------- ruling 275: headless yes, utility classes no --- */
 
 /**
- * Ruling 166 lets an UNSTYLED primitive package (`@base-ui/react`, `radix-ui`)
+ * Ruling 275 lets an UNSTYLED primitive package (`@base-ui/react`, `radix-ui`)
  * into `app/` on the condition that every element it renders wears a class
  * `app.css` already defines. The orphan-class gate above already fails a
  * Tailwind class that reaches a `className` — but only once someone ships one,
@@ -619,7 +619,7 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
  * a Tailwind toolchain in `package.json` is the thing that would make every
  * other check here negotiable.
  */
-describe("ruling 166: primitives may ship behaviour, never appearance", () => {
+describe("ruling 14: primitives may ship behaviour, never appearance", () => {
   // SAFETY: the file read is the repo's own `package.json`, which npm itself
   // requires to be a JSON object; only the two dependency maps are read, and
   // both are declared optional here, so a manifest without them still types.
@@ -628,7 +628,7 @@ describe("ruling 166: primitives may ship behaviour, never appearance", () => {
   ) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   const deps = { ...PKG.dependencies, ...PKG.devDependencies };
 
-  /** The packages ruling 166 names as the skin, not the behaviour. */
+  /** The packages ruling 14 names as the skin, not the behaviour. */
   const FORBIDDEN = [
     "tailwindcss",
     "@tailwindcss/vite",
@@ -642,7 +642,7 @@ describe("ruling 166: primitives may ship behaviour, never appearance", () => {
     "shadcn-ui",
   ];
 
-  /** Unstyled primitives ruling 166 permits behind an `app/ui/*` boundary. */
+  /** Unstyled primitives ruling 14 permits behind an `app/ui/*` boundary. */
   const PRIMITIVES = ["@base-ui/react", "@base-ui-components/react", "radix-ui", "@radix-ui/"];
 
   /** `bg-primary`, `px-1.5`, `min-w-5`, `size-(--x)`, `rounded-sm` — a utility
@@ -657,7 +657,7 @@ describe("ruling 166: primitives may ship behaviour, never appearance", () => {
     const present = FORBIDDEN.filter((name) => name in deps);
     expect(
       present,
-      "ruling 166 permits behaviour packages only — these are the skin",
+      "ruling 14 permits behaviour packages only — these are the skin",
     ).toEqual([]);
   });
 
@@ -810,7 +810,7 @@ describe("app.css search field vs palette trigger (P16-F6)", () => {
 const BREAKPOINTS = {
   "max-width: 1400px": "board columns tighten before any layout reflows",
   "max-width: 1100px": "THE TWO-COLUMN COLLAPSE — every 2-up layout goes 1-up",
-  "width > 1100px": "the collapse's exact complement: the controller's full-height band (ruling 524(a))",
+  "width > 1100px": "the collapse's exact complement: the controller's full-height band (ruling 321)",
   "max-width: 1080px": "topbar tier 1 — brand wordmark, root crumb, shortcut chip",
   "max-width: 1000px": "settings tab rail goes horizontal",
   "max-width: 900px": "home topbar collapses to the palette; project-row stats drop",
@@ -849,7 +849,7 @@ describe("app.css breakpoints (P16-F8)", () => {
   });
 
   it("a complement starts exactly where the breakpoint it names ends", () => {
-    // Ruling 524(a): the controller's band is `(width > 1100px)`, the
+    // Ruling 321: the controller's band is `(width > 1100px)`, the
     // collapse's complement, so no zoomed width falls between the two blocks
     // (a `min-width: 1101px` left 1100.5px in neither). A complement is the
     // one breakpoint whose number another one owns, so it must move with it.
@@ -867,7 +867,7 @@ describe("app.css breakpoints (P16-F8)", () => {
     expect(unused).toEqual([]);
   });
 
-  it("ruling 651: the Epics row's narrow columns outrank its base rule, which comes later in the sheet", () => {
+  it("ruling 325: the Epics row's narrow columns outrank its base rule, which comes later in the sheet", () => {
     // At equal specificity the base rule's five desktop columns won at every
     // width: at 467px an epic's name was 22px wide beside its status. CANARY:
     // write the narrow rule as plain `.epic-row` again.
@@ -892,7 +892,7 @@ describe("app.css breakpoints (P16-F8)", () => {
       ".activity-cols",
       ".profile-cols",
       ".rq-row",
-      // ruling 625: the row drops "· quiet" now, and keeps "N waiting on you".
+      // ruling 280: the row drops "· quiet" now, and keeps "N waiting on you".
       ".pj-row .pj-stats .pj-quiet",
     ]) {
       expect(block![1], `${selector} must still collapse at 1100px`).toContain(selector);
@@ -927,7 +927,7 @@ describe("app.css breakpoints (P16-F8)", () => {
    * packet is its own region right after the head — on desktop it opens the
    * MAIN column (row 2, column 1) while main auto-places under the packet or,
    * without one, into row 2. A head-wide packet had pushed Current state
-   * under the packet instead. Owner, 2026-09-09 (ruling 170): the head is the
+   * under the packet instead. Owner, 2026-09-09 (ruling 308): the head is the
    * main column's first row and the side column spans rows 1–3, so the
    * GitHub trace that leads it sits beside the goal, in a cell that used to
    * be empty, and the main column's rows are sized by the main column alone.
@@ -976,7 +976,7 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
     expect(narrow![1]).toMatch(/\.home-top \.top-search > \.ico\s*\{[^}]*pointer-events:\s*none/);
   });
 
-  it("takes the trigger's LABEL with it when the box collapses (ruling 145)", () => {
+  it("takes the trigger's LABEL with it when the box collapses (ruling 294)", () => {
     // The standalone-page header puts a palette BUTTON in `.home-top`'s search
     // box, where Home has an input. The 900 tier squares that box off at 36px,
     // and the 720 tier is where `.top-search-label` normally goes — so between
@@ -988,7 +988,7 @@ describe("app.css palette reachability on touch (P16-G3)", () => {
   });
 
   it("gives the collapsed triggers a finger-sized target", () => {
-    // WCAG 2.5.8 (24×24 minimum). ruling 625: both match the bell's 38px
+    // WCAG 2.5.8 (24×24 minimum). ruling 290: both match the bell's 38px
     // square beside them, as `.rail-toggle` does (they were 36 and 34).
     const narrow = CODE.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/);
     const homeBox = narrow![1].match(/\.home-top \.top-search\s*\{([^}]*)\}/);
@@ -1221,7 +1221,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
   const sites = inlineStyleSites();
 
   it("scanned the tree, not an empty list", () => {
-    // Ruling 364 moved the fifteen stage-colour sites into the sheet (a
+    // Ruling 279 moved the fifteen stage-colour sites into the sheet (a
     // stage's colour is a NAME the markup carries now), so the floor sits
     // under what is left: the dynamic bar sizes, tree depths and positions.
     expect(sites.length).toBeGreaterThan(5);
@@ -1257,7 +1257,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
     // Raised 23 → 24 (pass 30) for the board list row's read-only stage dot:
     // the STAGE's own colour, the exact dynamic-value case already exempted
     // for the task page's identical `.stage-static` dot.
-    // Ruling 364: 24 → 12 once the stage colours stopped being inline styles.
+    // Ruling 279: 24 → 12 once the stage colours stopped being inline styles.
     expect(sites.length).toBeLessThanOrEqual(12);
   });
 });
@@ -1272,7 +1272,7 @@ describe("app.css owns static styling, not the JSX (P16-F3)", () => {
  * write as `className="right sub fine"`. Nothing rendered differently, which is
  * the point: the copies drifted instead (the sibling note const sat at .8rem in
  * settings, .9rem in github-view and .85rem in the sheet), and a theme or
- * density pass reaches none of them. Ruling 14 — one shared implementation, no
+ * density pass reaches none of them. Ruling 297 — one shared implementation, no
  * per-surface forks.
  */
 describe("app.css lets a container-sized button wrap (F19-42)", () => {
@@ -1620,15 +1620,15 @@ const RENDERED_INSIDE = new Map(Object.entries({
   },
   "lw-glyph": {
     container: ".console",
-    why: "ruling 459: a wait row's orb-and-clock cell sits in a `.log-line`'s `.lx` inside `div.console` (runs-panels.tsx), so its clock is measured on the console's fixed dark fill.",
+    why: "ruling 284: a wait row's orb-and-clock cell sits in a `.log-line`'s `.lx` inside `div.console` (runs-panels.tsx), so its clock is measured on the console's fixed dark fill.",
   },
   "log-orb": {
     container: ".console",
-    why: "ruling 499: the wait row's CSS orb is drawn in that same `.lw-glyph` cell inside `div.console` (console-blocks.tsx), so its dots' ink is measured on the console's fixed dark fill, never on the page's --bg.",
+    why: "ruling 277: the wait row's CSS orb is drawn in that same `.lw-glyph` cell inside `div.console` (console-blocks.tsx), so its dots' ink is measured on the console's fixed dark fill, never on the page's --bg.",
   },
   "log-think": {
     container: ".console",
-    why: "ruling 499: the thinking block's summary button is the `.lx` of a `.log-line.think` row inside `div.console` (runs-panels.tsx), the same fixed near-black fill every console row is measured against.",
+    why: "ruling 277: the thinking block's summary button is the `.lx` of a `.log-line.think` row inside `div.console` (runs-panels.tsx), the same fixed near-black fill every console row is measured against.",
   },
 }));
 
@@ -1636,8 +1636,8 @@ const RENDERED_INSIDE = new Map(Object.entries({
  *  meaningful non-text element, not 1.4.3's 4.5:1 — checked, at the right bar. */
 const GLYPH_NOT_TEXT = new Map(Object.entries({
   ".stage-menu-pop .sm-check": "a 14×14 check mark marking the current stage in the stage menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
-  ".prop-menu .menu-item .prop-check": "ruling 501: the same 14×14 check, marking the current priority in the Details panel's priority menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
-  ".acct-menu .acct-check": "ruling 616: the same 14×14 check, marking the account in use in Profile's account picker; the row's selected state is also carried by `aria-checked` on the menuitemradio, and its line says \"in use\".",
+  ".prop-menu .menu-item .prop-check": "ruling 309: the same 14×14 check, marking the current priority in the Details panel's priority menu; the row's selected state is also carried by `aria-checked` on the menuitemradio.",
+  ".acct-menu .acct-check": "ruling 323: the same 14×14 check, marking the account in use in Profile's account picker; the row's selected state is also carried by `aria-checked` on the menuitemradio, and its line says \"in use\".",
 }));
 
 /**
@@ -1718,7 +1718,7 @@ function sweep(): Sweep {
       if (!colour || /^(inherit|currentcolor|unset|initial)$/i.test(colour.trim())) continue;
       // An overlay copy of an element's own words, whose ink IS its background
       // (a `::before`/`::after` drawing `attr(…)` with `color: transparent` and
-      // `background-clip: text`: ruling 451(a)'s shimmer band), is no
+      // `background-clip: text`: ruling 284's shimmer band), is no
       // text-on-backdrop pair. It lays a band over words the element already
       // draws, and those words are measured on the element itself. Real text
       // painted this way (not a pseudo copy of attr()) is still swept.
@@ -2129,7 +2129,7 @@ const HIDDEN_BY_DESIGN = {
  *  that are already there. */
 const VIEWPORT_READS = {
   "app/ui/stage-menu.tsx": "clamps the stage popover's left edge into the window with an 8px gutter after `getBoundingClientRect()`, and (interface review 2026-09-24, layo-8) flips it above its trigger or caps its height when the room below runs out. It positions an element that is already open and already rendered — no branch of the tree depends on the number.",
-  "app/features/profile/agent-account-picker.tsx": "ruling 616: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
+  "app/features/profile/agent-account-picker.tsx": "ruling 323: the account picker clips the box its menu shows in (the overlay's scrolling body) to the window, then opens the menu above its trigger or caps its height when the room below runs out, as the stage menu does. It positions a menu that is already open and already rendered — no branch of the tree depends on the number.",
 } satisfies Record<string, string>;
 
 type Hidden = {
@@ -2208,7 +2208,7 @@ describe("app.css hides no control at any width (R19-12)", () => {
     // P13-D-37 note quotes `<div>` and `<span class="cur">` inside a comment,
     // and an unbalanced phantom `<div>` corrupts every chain after it. The
     // canary rides the ⌘K chip, which lives in the shared trigger component
-    // (ruling 145) — inside the button whose tag is what scopes the 1080 tier.
+    // (ruling 294) — inside the button whose tag is what scopes the 1080 tier.
     const trigger = ELEMENTS.filter((el) =>
       el.file.endsWith("shell/palette-trigger.tsx"),
     );
@@ -2237,7 +2237,7 @@ describe("app.css hides no control at any width (R19-12)", () => {
     // and home-sections.tsx's <button className="kbd"> — the only other caller
     // of `onOpenPalette` — is NOT matched by it. The tier used to hide `.kbd`
     // unscoped, and a 1000px window lost Home's palette and the palette's own
-    // "esc" hint to a rule about breadcrumb room. Ruling 145 scopes it to
+    // "esc" hint to a rule about breadcrumb room. Ruling 294 scopes it to
     // `button.top-search` rather than `.topbar >`: the trigger is one shared
     // component (`palette-trigger.tsx`) rendered by the workspace topbar AND the
     // standalone-page header, and a chip inside a button-trigger is a HINT.
@@ -2336,7 +2336,7 @@ describe("app/ gates no rendering on the viewport (R19-12)", () => {
     // listener that keeps `system` live, `theme-preference.ts`, the board's
     // drop animation asking for reduced motion before it flies a card
     // (board-page.tsx, 2026-09-08), and the dock sheet's release asking the
-    // same before it springs (use-sheet-drag.ts, ruling 454). The sheet knows
+    // same before it springs (use-sheet-drag.ts, ruling 285). The sheet knows
     // it IS a sheet from the `--sheet-draggable` flag the 720px block sets,
     // never from a width query.
     expect(queries.length, "the scan must find the five preference reads").toBe(5);
@@ -2451,7 +2451,7 @@ describe("app.css type scale (recut 2026-09-08)", () => {
   });
 
   it("declares only weights the loaded fonts ship", () => {
-    // root.tsx loads Inter by weight (ruling 365: the one UI face) and
+    // root.tsx loads Inter by weight (ruling 280: the one UI face) and
     // JetBrains Mono 400/500/600. Declared weights above a family's ceiling
     // silently render one step down (and flash heavier in font fallback), so
     // the sheet declares only real ones; 800 is legal only where the display
@@ -2659,7 +2659,7 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
       expect(decls(selector), selector).toMatch(/padding:[^;]*var\(--dock-clear\)/);
     }
     expect(decls(".board.list")).toMatch(/padding-block:\s*0 var\(--dock-clear\)/);
-    // Ruling 661: a board lane takes it only while its cards overflow it (the
+    // Ruling 307: a board lane takes it only while its cards overflow it (the
     // board marks it `.overflows`), and reads that overflow by the lane's foot
     // matching its top. CANARY: make the reserve `.col-body`'s foot again, and
     // a lane whose cards fit with under 80px to spare scrolls by the
@@ -2671,7 +2671,7 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
     expect(lane.get("padding-bottom") ?? foot).toBe(top);
   });
 
-  it("overlays the stage-move control in the card's bottom-right corner (ruling 365)", () => {
+  it("overlays the stage-move control in the card's bottom-right corner (ruling 306)", () => {
     // The control used to sit top-right and the head row reserved 36px for
     // it; it is a bare 20px chevron in the corner the property row leaves
     // free now, absolute, so no row reserves anything.
@@ -2725,9 +2725,9 @@ describe("interface review 2026-09-06: the rules the fixes rest on", () => {
   });
 });
 
-/* ------------------------------------------------- ruling 148: profile pass */
+/* ------------------------------------------------- ruling 323: profile pass */
 
-describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
+describe("app.css ruling 323 (profile pass, 2026-09-06)", () => {
   it("(a) the 2-up settings grids stretch their rows; the feed page does not", () => {
     // `align-items: start` was what let the two profile columns end at
     // different heights. Grid items stretch by default, and the stacked
@@ -2735,10 +2735,10 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     expect(CODE).toMatch(/\.profile-cols\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(CODE).not.toMatch(/\.profile-cols\s*\{[^}]*align-items:\s*start/);
     expect(CODE).not.toMatch(/\.policy-cols\s*\{[^}]*align-items:\s*start/);
-    // ruling 625: Settings > Agent resources is one column now — its four
+    // ruling 281: Settings > Agent resources is one column now — its four
     // panels are not peers in length, so pairing them stretched a 2-row card to
     // an 8-row neighbour (the exemption below, in another shape). The ruling
-    // 625 describe at the foot of this file pins the single column.
+    // 281 describe at the foot of this file pins the single column.
     expect(CODE).not.toMatch(/\.rsrc-grid\s*\{[^}]*grid-template-columns:\s*1fr 1fr/);
     expect(CODE).toMatch(/\.profile-col > :last-child\s*\{[^}]*flex:\s*1 0 auto/);
     // A feed beside a short panel is the exemption: stretching the panel to the
@@ -2776,7 +2776,7 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
         : [],
     );
     const selectors = looping.map((l) => l.selector);
-    // Ruling 457 moved the `pulse-a` loop onto each dot's `::after`, where it
+    // Ruling 11 moved the `pulse-a` loop onto each dot's `::after`, where it
     // scales and fades a copy of the dot instead of animating box-shadow.
     expect(selectors).toEqual(
       expect.arrayContaining([".chip .working::after", ".rdot.running::after", ".lcaret"]),
@@ -2815,7 +2815,7 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
     );
   });
 
-  it("ruling 149: the two release ✕ controls hover on the danger pair, not the error pair", () => {
+  it("ruling 278: the two release ✕ controls hover on the danger pair, not the error pair", () => {
     // `.rev-x` (release an engagement) and `.own-x` (release the owner) are
     // remove controls whose ceremonies commit in red, but they still hovered
     // on --coral-dark / --rose-light: the ERROR vocabulary, which reads brown
@@ -2834,7 +2834,7 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
   });
 
   it("(150b) the board's attention notices take the amber pair, faults keep coral", () => {
-    // Ruling 150(b): `.board-orphans` carried four tones through one class.
+    // Ruling 278: `.board-orphans` carried four tones through one class.
     // The archived-filter caption and the "no stages yet" empty
     // state are attention, not faults, so they take 148(d)'s recipe through a
     // modifier — amber on the icon, the border and the fill, the sentence
@@ -2882,9 +2882,9 @@ describe("app.css ruling 148 (profile pass, 2026-09-06)", () => {
   });
 });
 
-/* -------------------------- ruling 149: the fields that had no chrome ---- */
+/* -------------------------- ruling 278: the fields that had no chrome ---- */
 
-describe("app.css ruling 149: every typing control wears the sheet's chrome", () => {
+describe("app.css ruling 278: every typing control wears the sheet's chrome", () => {
   const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
 
   it("the guardrail threshold field is boxed", () => {
@@ -2919,9 +2919,9 @@ describe("app.css ruling 149: every typing control wears the sheet's chrome", ()
   });
 });
 
-/* ------------------- ruling 149: GitHub's danger button, pinned by value --- */
+/* ------------------- ruling 278: GitHub's danger button, pinned by value --- */
 
-describe("app.css ruling 149: the destructive control is GitHub's danger button", () => {
+describe("app.css ruling 278: the destructive control is GitHub's danger button", () => {
   it("the pair is defined in both palettes at the owner's values", () => {
     // Nothing pinned the headline of the pass: reverting `.btn.danger` to the
     // tinted-pink face it replaced (`--coral-dark` on a `--coral-light` wash)
@@ -2977,7 +2977,7 @@ describe("app.css ruling 149: the destructive control is GitHub's danger button"
   });
 
   it("(150a) error boxes print their sentence in --fg on dark", () => {
-    // Ruling 150(a): 148(d)'s split, applied to the pair ruling 149 keeps for
+    // Ruling 278: 148(d)'s split, applied to the pair ruling 278 keeps for
     // errors — the box holds its coral border, fill and icon, and only the
     // SENTENCE moves, and only on dark, where `--coral-dark` is #ff9e9e: a
     // tint doing a paragraph's work. Light keeps GitHub's near-black red,
@@ -3059,14 +3059,14 @@ describe("app.css: the quiet tier reaches every surface (design pass 2026-09-08)
   });
 });
 
-/* Ruling 363: the code reader's syntax palette is small text on --bg (the
+/* Ruling 317: the code reader's syntax palette is small text on --bg (the
    reader's ground) inside a dialog on --surface — both must clear AA, in both
    themes, for every scope family the highlighter can colour.
-   Ruling 508: the families are read off the reader's own theme, through the
+   Ruling 317: the families are read off the reader's own theme, through the
    reader's own token-to-class map. A hand-written list of eight left out the
    three a diff's lines and a log's levels resolve to, so both rendered in the
    plain foreground. Punctuation is the one family that stays --fg. */
-describe("app.css code reader palette meets WCAG AA (ruling 363)", () => {
+describe("app.css code reader palette meets WCAG AA (ruling 317)", () => {
   const AA_SMALL_TEXT = 4.5;
   const FOREGROUND_FAMILIES = ["punctuation"];
   const EMITTED_FAMILIES = [
@@ -3116,11 +3116,11 @@ describe("app.css code reader palette meets WCAG AA (ruling 363)", () => {
   });
 });
 
-/* Ruling 364: a stage colour is a preset NAME; these rules are the one place it
+/* Ruling 279: a stage colour is a preset NAME; these rules are the one place it
    becomes paint. Every preset needs a token in both theme blocks that clears
    WCAG 1.4.11's 3:1 on the surfaces the dots and the home meter sit on, and
    the attribute rule that carries the name to `--stage`. */
-describe("app.css stage colour presets (ruling 364)", () => {
+describe("app.css stage colour presets (ruling 279)", () => {
   const NON_TEXT_CONTRAST = 3;
   const THEMES = { light: LIGHT_ROOT, dark: DARK_ROOT };
   for (const [theme, root] of Object.entries(THEMES)) {
@@ -3154,12 +3154,12 @@ describe("app.css stage colour presets (ruling 364)", () => {
 });
 
 /**
- * Ruling 419(b): the controller page's rail scrolls itself and the conversation
+ * Ruling 321: the controller page's rail scrolls itself and the conversation
  * stays a capped scroller at every width. jsdom has no layout, so the rules that
  * produce the layout are pinned here; the live measurements are in the ruling
  * (rail 4,539px scrolling with the page, a 12,625px phone transcript).
  */
-describe("app.css controller layout (ruling 419)", () => {
+describe("app.css controller layout (ruling 321)", () => {
   const ruleBody = (css: string, selector: string): string => {
     const m = css.match(new RegExp(`(?:^|\\n|\\})\\s*${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`));
     expect(m, `${selector} must have a rule`).toBeTruthy();
@@ -3168,7 +3168,7 @@ describe("app.css controller layout (ruling 419)", () => {
   const collapse = () => CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
 
   it("keeps the rail its own scroller, a column of the band beside the conversation", () => {
-    // Ruling 524(a): the rail no longer pins a short card over empty page; the
+    // Ruling 321: the rail no longer pins a short card over empty page; the
     // band's one row gives it the conversation's height and it scrolls inside
     // that. CANARY: drop `overflow-y: auto` from `.ctl-side`, or the band's
     // row, and the rail scrolls with the page and stretches it again.
@@ -3187,14 +3187,14 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
   });
 
-  it("ruling 419(j): the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
+  it("ruling 321: the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
     // Measured live at 375×812: the sheet's top at y=172 and the perched button
     // at 169-203, across the header's pop-out and Close buttons. The travel
     // must count the dock's own bottom inset and the scaled button's
     // half-height. CANARY: restore `- 56px`.
     const collapse720 = CODE.match(/\.dock\[data-open="true"\] \.dock-fab \{([^}]*)\}/);
     expect(collapse720, "the perch rule must exist").toBeTruthy();
-    // Ruling 454 adds the sheet's drag to the travel, so the button rides a
+    // Ruling 285 adds the sheet's drag to the travel, so the button rides a
     // pulled sheet; at rest the term is 0px.
     expect(collapse720![1]).toContain(
       "calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px) + var(--sheet-drag, 0px))",
@@ -3241,19 +3241,19 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(CODE, ".dock-title")).toMatch(/flex:\s*0 0 auto;\s*max-width:\s*45%/);
   });
 
-  it("ruling 419(i): inline code in markdown may break a long token rather than overflow", () => {
+  it("ruling 321: inline code in markdown may break a long token rather than overflow", () => {
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
-  it("ruling 476(a): a link in markdown may break a long URL rather than push the transcript sideways", () => {
+  it("ruling 320: a link in markdown may break a long URL rather than push the transcript sideways", () => {
     // Measured live (F40-21): the dock's transcript scrolled 702px in 388,
     // with 142 of 228 links past its edge; /controller at 375px 693px in 315.
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body a`.
     expect(ruleBody(CODE, ".md-body a")).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
-  it("ruling 476(i): markdown prose may break any long token, and code blocks and tables keep their scrollers", () => {
+  it("ruling 320: markdown prose may break any long token, and code blocks and tables keep their scrollers", () => {
     // Measured live after the 476(a) fix: "Added/Changed/Deprecated/Removed/
     // Fixed/Security." in a list item scrolled /controller's transcript at
     // 375px 433px in 315, and the dock's 442 in 388.
@@ -3264,7 +3264,7 @@ describe("app.css controller layout (ruling 419)", () => {
     for (const scroller of [".md-body pre", ".md-table-wrap"]) expect(wrap(scroller), scroller).toBe("normal");
   });
 
-  it("ruling 476(e): in one column the thread switcher takes a row of its own", () => {
+  it("ruling 320: in one column the thread switcher takes a row of its own", () => {
     // Measured at 375px (F40-25): 97px beside New and Home, reading "Hi. I'm s".
     // CANARY: restore `flex: 1 1 0` on the picker, or drop the row's wrap.
     const narrow = collapse();
@@ -3272,7 +3272,7 @@ describe("app.css controller layout (ruling 419)", () => {
     expect(ruleBody(narrow, ".ctl-wrap .ctl-picker")).toMatch(/flex:\s*1 1 100%/);
   });
 
-  it("ruling 419(e): a packet's code observation keeps its line breaks", () => {
+  it("ruling 321: a packet's code observation keeps its line breaks", () => {
     // CANARY: drop `white-space: pre-wrap` from `.obs code`.
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
   });
@@ -3287,21 +3287,21 @@ describe("app.css controller layout (ruling 419)", () => {
 
   it("U39-27: on a touch screen the rail's small links are tall enough for a finger", () => {
     // Measured at 375px: 15-16px tall. CANARY: drop the padding rule. (The
-    // goal chains' own controls it also listed left with them, ruling 503.)
+    // goal chains' own controls it also listed left with them, ruling 273.)
     const coarse = CODE.match(/@media \(pointer: coarse\)\s*\{([\s\S]*?)\n\}/)![1];
     expect(coarse).toMatch(/\.ctl-all-toggle \.linkish\s*\{\s*padding-block:\s*\.3rem;\s*\}/);
   });
 });
 
 /**
- * Ruling 524 (owner, 2026-09-27: "it show lots of empty space everywhere"). The
+ * Ruling 321 (owner, 2026-09-27: "it show lots of empty space everywhere"). The
  * controller page was a 1200px column centred on a 1920px screen, its console
  * a 320px box under the composer, and the rail and the transcript each ended
  * at a height of their own over empty page. jsdom has no layout, so the rules
  * the band rests on are pinned here; the before and after screenshots are on
  * the ruling's PR.
  */
-describe("app.css controller band (ruling 524)", () => {
+describe("app.css controller band (ruling 321)", () => {
   const band = RULES.filter((r) => r.at.some((a) => a === "@media (width > 1100px)"));
   const split = band.filter((r) => r.at.some((a) => a.startsWith("@container ctl")));
   const wide = band.filter((r) => !split.includes(r));
@@ -3327,7 +3327,7 @@ describe("app.css controller band (ruling 524)", () => {
     expect(requiredDecls(plain, ".ctl-wrap.standalone").get("max-width")).toBe("1920px");
   });
 
-  it("ruling 623: the standalone page fills what the app header leaves", () => {
+  it("ruling 321: the standalone page fills what the app header leaves", () => {
     // /controller sits in Home's page shell (`.home`, a flex column) under the
     // app header. The shell is the screen's height and the page flexes into
     // the rest, which is the band's height to fill.
@@ -3391,11 +3391,11 @@ describe("app.css controller band (ruling 524)", () => {
 });
 
 /**
- * Ruling 451 (owner, 2026-09-23): seven places move, drawn from transitions.dev.
+ * Ruling 284 (owner, 2026-09-23): seven places move, drawn from transitions.dev.
  * jsdom runs no animation, so the rules the motion rests on are pinned here;
  * the components' own suites pin the keys and attributes that trigger it.
  */
-describe("app.css ruling 451: motion from transitions.dev", () => {
+describe("app.css ruling 284: motion from transitions.dev", () => {
   const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
   const declared = new Set([...CODE.matchAll(/@keyframes\s+([-\w]+)/g)].map((m) => m[1]!));
   /** The keyframes names an `animation` value plays, one per layer. */
@@ -3420,7 +3420,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     const played = RULES.flatMap((r) =>
       animationNames(r.decls.get("animation") ?? r.decls.get("animation-name") ?? "").map((n) => `${r.selector} → ${n}`),
     );
-    // A floor against a vacuous scan (it counts rules, and ruling 457 folded
+    // A floor against a vacuous scan (it counts rules, and ruling 11 folded
     // the five `pulse-a` rules into one).
     expect(played.length).toBeGreaterThan(35);
     expect(played.filter((p) => !declared.has(p.split(" → ")[1]!))).toEqual([]);
@@ -3429,7 +3429,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
 
   it("(a) a status line's new words rise in, and the working sentence carries a band over its own words", () => {
     // CANARY: drop `.ctl-working-step[data-fresh]` from the swap-in rule.
-    // Ruling 459: only a line that replaced the first words carries
+    // Ruling 284: only a line that replaced the first words carries
     // `data-fresh`, so the line on screen at first paint stands still.
     for (const selector of [".run-phase .ph[data-fresh]", ".run-phase .step[data-fresh]", ".ctl-working-step[data-fresh]"]) {
       expect(requiredDecls(plain, selector).get("animation"), selector).toMatch(/^swap-in \.15s var\(--ease-out\)$/);
@@ -3503,7 +3503,7 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     /** Every JSX opening tag in a source, braces, strings and comments skipped.
      *  A line comment inside an attribute's braces is skipped too: read as code,
      *  the apostrophe in "the project's epics" (task-details-panel.tsx, ruling
-     *  548's review) opened a string that ran the Epic row's tag on for 333
+     *  59's review) opened a string that ran the Epic row's tag on for 333
      *  lines, into the wait editor's alert below it. */
     const openingTags = (src: string): { tag: string; line: number }[] => {
       const out: { tag: string; line: number }[] = [];
@@ -3557,9 +3557,9 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
     }
     expect(problems).toEqual([]);
     // Nineteen boxes keyed on a refusal counter, and the login page's two.
-    // Ruling 478(e) added the packet's "Choose an answer" and "Write your
-    // answer" refusals; ruling 507 the agent account's over-long name; ruling
-    // 653 the board import dialog's blocker, the New project footer's twin.
+    // Ruling 68 added the packet's "Choose an answer" and "Write your
+    // answer" refusals; ruling 138 the agent account's over-long name; ruling
+    // 32 the board import dialog's blocker, the New project footer's twin.
     expect(carriers).toHaveLength(22);
   });
 
@@ -3578,13 +3578,13 @@ describe("app.css ruling 451: motion from transitions.dev", () => {
 });
 
 /**
- * Ruling 457 (CSS-6): the console lays out only the rows near its viewport. A
+ * Ruling 11 (CSS-6): the console lays out only the rows near its viewport. A
  * 400-row console showed about 14 and styled, laid out and painted all 400 on
  * every pass (mount, a thread switch, load older, the width query). The rows
  * keep their real height once seen (`auto`), which the console's follow-tail
  * and load-older anchoring read back through `scrollHeight`.
  */
-describe("app.css console rows skip off-screen work (ruling 457, CSS-6)", () => {
+describe("app.css console rows skip off-screen work (ruling 11, CSS-6)", () => {
   it("declares content-visibility and a remembered intrinsic size on the console's rows", () => {
     // CANARY: drop the `.console > .log-line` rule.
     const row = RULES.find((r) => r.at.length === 0 && r.selector === ".console > .log-line");
@@ -3593,7 +3593,7 @@ describe("app.css console rows skip off-screen work (ruling 457, CSS-6)", () => 
   });
 });
 
-describe("app.css ruling 453: the Apple design pass", () => {
+describe("app.css ruling 283: the Apple design pass", () => {
 
   it("(a) every transform transition answers a press on the sheet's ease-out, never plain `ease`", () => {
     // CANARY: put `.btn` back on `transform .15s ease`. Plain `ease` starts
@@ -3624,7 +3624,7 @@ describe("app.css ruling 453: the Apple design pass", () => {
     const NOT_RUNNING_TEXT = {
       ".avatar.xl": "two initials centred in a 56px disc; tracking would push them off centre.",
       ".login-brand .mark": "the one-letter product mark in its tile.",
-      // ruling 625: the same Inter glyph as the card's now, not a mono one.
+      // ruling 280: the same Inter glyph as the card's now, not a mono one.
       ".login-aside-mark": "the same one-letter product mark, shown beside the card in place of the card's own.",
     } satisfies Record<string, string>;
     const TRACK = new Map([
@@ -3677,8 +3677,8 @@ describe("app.css ruling 453: the Apple design pass", () => {
     // pinLivePose switches the entrance off inline and releases it once
     // data-closing lands, so the closing rule has to keep it off. Dialogs
     // outrank their own reduced-motion fade-in by weight. Amended by ruling
-    // 459's deferred dock half: the dock's entrance is a transition, so it is
-    // not pinned ("app.css ruling 459: the dock's deferred half").
+    // 285's deferred dock half: the dock's entrance is a transition, so it is
+    // not pinned ("app.css ruling 285: the dock's deferred half").
     // CANARY: drop `animation: none` from `dialog[data-closing]`.
     expect(requiredDecls(plain, "dialog[data-closing]").get("animation")).toBe("none");
   });
@@ -3706,7 +3706,7 @@ describe("app.css ruling 453: the Apple design pass", () => {
   });
 });
 
-describe("app.css ruling 454: the dock sheet under a finger", () => {
+describe("app.css ruling 285: the dock sheet under a finger", () => {
   const sheetWidth = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
 
   it("marks the panel a sheet only at sheet width — the flag the script reads instead of the viewport", () => {
@@ -3721,7 +3721,7 @@ describe("app.css ruling 454: the dock sheet under a finger", () => {
     // rubber-banded pull, lifts the sheet off the bottom edge. Or list it
     // second: the first shadow paints on top, and the pop shadow's blur then
     // draws a dark seam across the extension (seen live).
-    // ruling 625: the extension is the panel's own --surface-float, the floating layers' ground.
+    // ruling 281: the extension is the panel's own --surface-float, the floating layers' ground.
     expect(requiredDecls(sheetWidth, ".dock .dock-panel").get("box-shadow")).toBe(
       "0 calc(min(80dvh, 640px) - var(--radius-panel)) 0 var(--surface-float), var(--shadow-pop)",
     );
@@ -3749,7 +3749,7 @@ describe("app.css ruling 454: the dock sheet under a finger", () => {
   it("moves the sheet and its perched button on one value, with no transition behind the script's clock", () => {
     // CANARY: drop `transition: none` from `.dock[data-sheet-drag] .dock-fab`
     // and the perched button trails the finger. The held sheet is ruling
-    // 459's dock-half table (F20, "a sheet caught mid-entrance").
+    // 285's dock-half table (F20, "a sheet caught mid-entrance").
     expect(requiredDecls(plain, ".dock").get("--sheet-drag")).toBe("0px");
     expect(requiredDecls(plain, ".dock[data-sheet-drag] .dock-fab").get("transition")).toBe("none");
     for (const perch of ['.dock[data-open="true"] .dock-fab', '.dock[data-open="true"] .dock-fab:active']) {
@@ -3813,7 +3813,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   it("acce-13: the closed drawer is hidden, so its links leave the tab order", () => {
     const rail = requiredDecls(mobile, ".rail");
     expect(rail.get("visibility")).toBe("hidden");
-    // The hide waits out the close's slide; ruling 459's F25 holds that timing.
+    // The hide waits out the close's slide; ruling 287's F25 holds that timing.
     const open = requiredDecls(mobile, '.app[data-rail-open="true"] .rail');
     expect(open.get("visibility")).toBe("visible");
     expect(open.get("transition-delay")).toBe("0s");
@@ -3821,7 +3821,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
 
   it("ui-1: every entrance that rises has a later reduced-motion answer that does not", () => {
     // The reduce block is an allow-list, and `.login-aside` was missing from it.
-    // Ruling 459 split the aside's rise across its chunks (`.login-aside > *`,
+    // Ruling 283 split the aside's rise across its chunks (`.login-aside > *`,
     // staggered), so the chunks are the riser that needs the answer now.
     // CANARY: drop `.login-aside > *` from the closing reduced-motion list.
     const risers = RULES.flatMap((rule, index) =>
@@ -3862,7 +3862,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
     for (const selector of [".fchip.on", ".seg button.on", ".cal-day.sel"]) {
       expect(requiredDecls(forced, selector).get("background"), selector).toBe("SelectedItem");
     }
-    // Ruling 459's hover on the selected segment sets its ink and outranks
+    // Ruling 283's hover on the selected segment sets its ink and outranks
     // `.seg button.on`, so the forced rule names the hovered state as well.
     for (const selector of [".fchip.on:hover:not(:disabled)", ".seg button.on:hover:not(:disabled)"]) {
       expect(requiredDecls(forced, selector).get("color"), selector).toBe("SelectedItemText");
@@ -3932,7 +3932,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   it("acce-10: a long token may break rather than widen the page or run under a row's controls", () => {
     for (const selector of [
       ".conn-main .sub.mono", ".rsrc-main .sub.mono", ".rsrc-main b.mono-b", ".pol-note", ".hero-file",
-      // Ruling 515, the same flaw as the owner's clipped address: a Google
+      // Ruling 323, the same flaw as the owner's clipped address: a Google
       // client ID ran under the SSO row's pills, and at 320px an address ran
       // out of the account in use's green line and past "Disconnect <address>?".
       ".conn-main", ".cred-ok > span:not(.warn-acts)", ".cred-warn > span:not(.warn-acts)",
@@ -3953,14 +3953,14 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   it("layo-19 / acce-12: the stacked tables and the stacked Agents page can be scrolled to", () => {
     // `.live-table` clips (overflow: hidden rounds its head band), so a row
     // min-width only cut the columns off. CANARY: put it back on the rows.
-    // Ruling 625: 30rem, not 34rem — the three-track branch rows need ~29rem,
+    // Ruling 280: 30rem, not 34rem — the three-track branch rows need ~29rem,
     // and 34rem left 38px of empty sideways scroll at 820px.
     expect(requiredDecls(collapse, ".gh-table .live-table").get("min-width")).toBe("30rem");
     expect(requiredDecls(collapse, ".live-wrap .live-table").get("min-width")).toBe("42rem");
     expect(collapse.some((r) => selectorParts(r).includes(".gh-table .live-row") && r.decls.has("min-width"))).toBe(false);
     const block = CODE.match(/@media \(max-width: 1100px\)\s*\{([\s\S]*?)\n\}/)![1]!;
     expect(block).toMatch(/\.board-wrap:has\(> \.agents-layout, > \.live-wrap\)\s*\{\s*overflow-y:\s*auto/);
-    // The standalone controller is in Home's page shell (ruling 623), which is
+    // The standalone controller is in Home's page shell (ruling 321), which is
     // opted out of the clipped body. CANARY: drop `body:has(.home)` and at
     // 320px the controller's composer and rail cannot be scrolled to.
     expect(requiredDecls(plain, "body:has(.home)").get("overflow")).toBe("auto");
@@ -3990,7 +3990,7 @@ describe("interface review 2026-09-24: the rules the fixes rest on", () => {
   });
 
   it("layo-8: a flipped stage menu has its own reduced-motion answer", () => {
-    // ui-3's closing dock button is ruling 454's reduced-motion test.
+    // ui-3's closing dock button is ruling 285's reduced-motion test.
     expect(requiredDecls(plain, '.stage-menu-pop[data-side="top"]').get("animation-name")).toBe("menu-in-up");
     expect(requiredDecls(plain, ".stage-menu-pop").get("overflow-y")).toBe("auto");
     // The data-side rule outranks `.stage-menu-pop`, so it needs its own entry.
@@ -4069,7 +4069,7 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
     const beside = requiredDecls(wide, ".login-aside");
     expect(beside.get("order")).toBe("0");
     // Stacked it has no entrance of its own (beside the card its chunks rise,
-    // ruling 459's F28).
+    // ruling 283's F28).
     expect(aside.has("animation")).toBe(false);
     expect(requiredDecls(wide, ".login-aside-mark").get("display")).toBe("inline-grid");
     const wrap = requiredDecls(plain, ".login-wrap");
@@ -4109,13 +4109,13 @@ describe("interface review 2026-09-24: the MEDIUM fixes", () => {
 
 /**
  * Better-ui review 2026-09-24, five small leftovers it filed. Two were already
- * fixed by the interface review (ruling 455): the locked policy row's stacked
+ * fixed by the interface review (ruling 299): the locked policy row's stacked
  * opacity is pinned by colo-4 above, and the GitHub bar's neutral pill is
  * pinned here, because the sweep only sees that pair while its rule exists.
  * The move-back glyph and the markup halves of the other two are pinned by
  * the task-disposition, execution-profile and top-bell suites.
  */
-describe("app.css ruling 478: the task page at phone width", () => {
+describe("app.css ruling 313: the task page at phone width", () => {
   const PHONE = "@media (max-width: 720px)";
   /** The declarations `selector` gets from its own rules in `at` (plain when empty). */
   const declsAt = (selector: string, at: string[]) =>
@@ -4169,9 +4169,9 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
     }
   });
 
-  it("ruling 511: the PR card's status marks keep the pills' tones, under the bar", () => {
+  it("ruling 315: the PR card's status marks keep the pills' tones, under the bar", () => {
     // CANARY: drop the done mark's fill, and a passing gate run reads grey
-    // (ruling 491: a pass is green); or give the section after the bar its
+    // (ruling 315: a pass is green); or give the section after the bar its
     // hairline back, a grey rule drawn against the black.
     expect(requiredDecls(plain, ".pr-card > .gh-bar + *").get("border-top")).toBe("0");
     expect(requiredDecls(plain, '.pr-sig[data-kind="done"] > .ico').get("color")).toBe("var(--success-dark)");
@@ -4199,7 +4199,7 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
   it("a run control's start holds the width of its widest label", () => {
     // CANARY: drop the min-width, and the when-picker slides 21px (operator)
     // or 32px (dispatch) under the pointer that just switched it to Schedule,
-    // and the row shifts again when the start reads "Scheduling…" (ruling 368).
+    // and the row shifts again when the start reads "Scheduling…" (ruling 286).
     // One floor serves both starts: "Scheduling…" is the widest label on each.
     expect(requiredDecls(plain, ".op-run > .run-go").get("min-width")).toBe("7.4rem");
     // The widths were measured at these metrics; a change here re-opens them.
@@ -4221,7 +4221,7 @@ describe("better-ui review 2026-09-24: the small leftovers", () => {
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — concentric radius", () => {
+describe("app.css ruling 276: the better-ui pass — concentric radius", () => {
   // Outer radius = inner radius + the inset between them (better-ui,
   // surfaces.md), wherever the layers share a visible, even inset. The scale
   // is locked, so the answer is the nearest step or a changed inset, and the
@@ -4375,7 +4375,7 @@ describe("app.css ruling 459: the better-ui pass — concentric radius", () => {
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
+describe("app.css ruling 282: the better-ui pass — optical alignment", () => {
   // better-ui: when geometric centring looks off, align optically. A glyph on
   // the 24 grid carries its own blank bearing, so the side it sits on takes
   // the text side less 2px (surfaces.md); a glyph drawn off the centre of its
@@ -4550,7 +4550,7 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
   };
 
   it("(c) every glyph in the icon set is drawn on the centre of its 24px box", () => {
-    // Measured off the icon set itself, as ruling 451(f) measures the check.
+    // Measured off the icon set itself, as ruling 284 measures the check.
     // CANARY: put the mock's sparkle back (`M12 3l1.8 5.2L19 10…`), 2 units
     // high in every round agent badge on the board.
     const src = readFileSync(fileURLToPath(new URL("./ui/icon.tsx", import.meta.url)), "utf8");
@@ -4582,7 +4582,7 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
       const glyph = decls(`${hint} > .ico:first-child`);
       for (const p of ["width", "height", "flex", "margin-top"]) expect(glyph.get(p), `${hint} ${p}`).toBe(noteGlyph.get(p));
     }
-    // The ruling 144(a) advisory is 16px body text: its glyph stays the 16px
+    // The ruling 221(a) advisory is 16px body text: its glyph stays the 16px
     // svg.ico default (1em) and only takes the row and the nudge.
     const advisory = decls(".cred-card > .sub:has(> .ico:first-child)");
     expect(advisory.get("display")).toBe("flex");
@@ -4624,12 +4624,12 @@ describe("app.css ruling 459: the better-ui pass — optical alignment", () => {
     const firstLine = ".cred-ok:not(:has(> .modal-close))";
     expect(decls(firstLine).get("align-items")).toBe(warn.get("align-items"));
     expect(decls(`${firstLine} > .ico`).get("margin-top")).toBe(decls(".cred-warn .ico").get("margin-top"));
-    // The notice with the ruling 148 close keeps its centred row.
+    // The notice with the ruling 287 close keeps its centred row.
     expect(ok.get("align-items")).toBe("center");
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image outlines", () => {
+describe("app.css ruling 281: the better-ui pass — surfaces, shadows and image outlines", () => {
   // Shadows for elevation, borders for structure; images wear a neutral
   // 1px outline, pure black at 10% on light and pure white at 10% on dark
   // (better-ui, surfaces.md). The values are the skill's, exactly.
@@ -4694,7 +4694,7 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
     expect(requiredDecls(plain, ".rail").get("border-right")).toBe("1px solid var(--hairline)");
   });
 
-  it("(a) increased contrast still reaches the ring, now the floating surfaces' only edge (ruling 453(d))", () => {
+  it("(a) increased contrast still reaches the ring, now the floating surfaces' only edge (ruling 277)", () => {
     // CANARY: delete `--shadow-ring` from the `prefers-contrast: more` block —
     // every modal, menu and the dock is left with a 6-8% ring there.
     expect(requiredDecls(more, ":root[data-theme]").get("--shadow-ring")).toBe("0 0 0 1px var(--border-control)");
@@ -4707,7 +4707,7 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
   });
 
   // Every rule that targets an emitted <img>: the markdown embed, the
-  // lightbox picture, the two attachment tiles, and (ruling 573) a picture
+  // lightbox picture, the two attachment tiles, and (ruling 258) a picture
   // in a composer's tray and in a controller message.
   const IMAGES = [
     ".md-body img",
@@ -4726,7 +4726,7 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
 
   it("(b) no other rule targets an image without the edge", () => {
     // `.md-img-btn` is only ever emitted inside a `.md-body`, so `.md-body img`
-    // reaches its picture. Ruling 691: a page capture's picture is the
+    // reaches its picture. Ruling 86: a page capture's picture is the
     // lightbox's own `.lightbox-img` inside a scroller, where a second rule
     // only lifts its height cap. Anything else aimed at an <img> must be listed.
     const COVERED_BY = {
@@ -4824,7 +4824,7 @@ describe("app.css ruling 459: the better-ui pass — surfaces, shadows and image
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — press and hover feedback", () => {
+describe("app.css ruling 283: the better-ui pass — press and hover feedback", () => {
   // Scale on press: always .96 for a control (the sheet's .99 for a surface),
   // never below .95, and a CSS transition so a release mid-press eases back.
   // High-frequency hovers change colour, not position (better-ui, SKILL.md and
@@ -4930,7 +4930,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
       '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/task-detail/attachments-panel.tsx holds <input>':
         "the attach button is a <label> wrapping its own hidden file input: pressing the label is pressing that input, one control.",
       '.btn:active:not(:disabled, [aria-disabled="true"]) → <label> app/features/board/filed-files.tsx holds <input>':
-        "the New task dialog's Attach files button (ruling 533) is the same <label> around its own hidden file input, one control.",
+        "the New task dialog's Attach files button (ruling 76) is the same <label> around its own hidden file input, one control.",
     } satisfies Record<string, string>;
     // A component that renders exactly one control and passes the class to it
     // is that control (the scan cannot see through a component boundary).
@@ -5011,7 +5011,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     expect(refused.get("cursor")).toBe("not-allowed");
     expect(refused.get("transform")).toBe("none");
     // A refused option dims; the decided record's options (natively disabled,
-    // ruling 138) stay at full ink and only drop the pointer.
+    // ruling 63) stay at full ink and only drop the pointer.
     expect(declsFor(plain, `.opt:hover:where(${refusedToo})`).get("border-color")).toBe("var(--border)");
     expect(declsFor(plain, '.opt[aria-disabled="true"]:not(:disabled)').get("opacity")).toBe(".45");
     expect(declsFor(plain, ".opt:disabled").get("opacity")).toBeUndefined();
@@ -5068,7 +5068,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
     ] as const) {
       expect(declsFor(plain, hover).get(prop), hover).toBeTruthy();
     }
-    // ruling 625: the face is GitHub's --chrome, which light resolves to the .btn hover border itself.
+    // ruling 281: the face is GitHub's --chrome, which light resolves to the .btn hover border itself.
     expect(declsFor(plain, ".btn.provider.github").get("border-color")).toBe("var(--chrome)");
     expect(requiredDecls(plain, ":root").get("--chrome")).toBe(declsFor(plain, ".btn:hover:not(:disabled, [aria-disabled=\"true\"])").get("border-color"));
     // The row's chevron brightens in place, on a colour transition.
@@ -5093,7 +5093,7 @@ describe("app.css ruling 459: the better-ui pass — press and hover feedback", 
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
+describe("app.css ruling 287: the better-ui pass — enter and exit", () => {
   // Enter and exit (better-ui, enter-exit.md and animations.md): a small fixed
   // translate, exits softer and shorter than enters, every veil fades, what is
   // already on screen at first paint moves only on a later change, and UI the
@@ -5143,7 +5143,7 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
     // The drawer: out in .15s, in over .2s, both on --ease-out. The open rule
     // names only a duration, so reduced motion's `transition: none` keeps the
     // slide off in both directions. The visibility step that takes the closed
-    // drawer's links out of the tab order (ruling 455, acce-13) waits out the
+    // drawer's links out of the tab order (ruling 299, acce-13) waits out the
     // same .15s slide.
     expect(declsFor(phone, ".rail").get("transition")).toBe(
       "transform .15s var(--ease-out), visibility 0s linear .15s",
@@ -5228,7 +5228,7 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
   it("(F64) the status line on screen at first paint stands still", () => {
     // CANARY: put `swap-in` back on the bare `.run-phase .step` (opening a
     // task mid-run made its current step rise as if it had just changed).
-    // Ruling 451(a) holds the `[data-fresh]` line's rise and its answer.
+    // Ruling 284 holds the `[data-fresh]` line's rise and its answer.
     for (const selector of [".run-phase .ph", ".run-phase .step", ".ctl-working-step"]) {
       expect(declsFor(plain, selector).has("animation"), selector).toBe(false);
       expect(declsFor(reduced, selector).has("animation"), selector).toBe(false);
@@ -5236,7 +5236,7 @@ describe("app.css ruling 459: the better-ui pass — enter and exit", () => {
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — icons", () => {
+describe("app.css ruling 282: the better-ui pass — icons", () => {
   // better-ui icons.md: a glyph carries its label's weight; one icon library
   // per surface, so no typed letter, font arrow or CSS-border caret stands in
   // for a glyph; one SVG recoloured per state, never by an unrelated rule; and
@@ -5252,7 +5252,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
   });
   const source = (file: string) => readFileSync(fileURLToPath(new URL(file, import.meta.url)), "utf8");
   /** Every `<Icon … />` in the markup, with its name and className expressions. */
-  /** A `<GlyphSwap rest="a" alt="b" … spinAlt />` (ruling 459) draws both of
+  /** A `<GlyphSwap rest="a" alt="b" … spinAlt />` (ruling 284) draws both of
    *  its glyphs where it is written, the alternate spinning under `spinAlt`,
    *  so it counts as those two Icons there; the component's own two
    *  prop-named Icons are counted at every call site instead. */
@@ -5299,7 +5299,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".menu-item .ico": ".menu-item",
       ".toast .ico": ".toast",
       ".deny-note .ico": ".deny-note",
-      // ruling 625: a quiet pill takes .pill's 700, so `.pill .ico` draws its glyph.
+      // ruling 282: a quiet pill takes .pill's 700, so `.pill .ico` draws its glyph.
       ".sched-when .ico": ".sched-when",
       ".stage-menu-btn .sm-caret": ".stage-menu-btn",
       ".epic-status-select .epic-status-chev": ".epic-status-select select",
@@ -5321,7 +5321,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       ".trans-lock .ico": ".trans-lock",
       ".trans-path .ico": ".trans-path",
       ".guard-name .ico": ".guard-name",
-      // ruling 625: the card head's own glyph only — an agent tile there keeps its 1.7.
+      // ruling 282: the card head's own glyph only — an agent tile there keeps its 1.7.
       ".cred-top > .ico": ".cred-name",
       ".org-tile .lbl .ico": ".org-tile .lbl",
       ".cap-col-head .ico": ".cap-col-head",
@@ -5356,7 +5356,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     // The .kv-row value glyph sits beside 400 mono text and keeps the set's 1.7.
     expect(weight(".kv-row .v .mono")).toBe(400);
     // A bold label inside a medium one ties at equal specificity, so the
-    // heavier group comes later. ruling 625: a .btn is 500 now (its old tie
+    // heavier group comes later. ruling 282: a .btn is 500 now (its old tie
     // inside .deny-note is gone); a 700 pill inside a medium row still ties.
     const at = (selector: string) => RULES.findIndex((r) => r.decls.has("stroke-width") && selectorParts(r).includes(selector));
     expect(at(".pill .ico")).toBeGreaterThan(at(".menu-item .ico"));
@@ -5385,7 +5385,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     expect(answer).toBeGreaterThan(base);
     // The advisory's shield keeps its 13px and its colour; the caret takes the
     // summary's, so it follows the hover. (The goal chains' own caret colour
-    // left with the Goals panel, ruling 503.)
+    // left with the Goals panel, ruling 273.)
     expect(declsFor(plain, ".cap-advisory > summary > .ico:not(.disc-chev)").get("width")).toBe("13px");
     // Every <summary> in the app carries the chevron, once.
     const summaries: string[] = [];
@@ -5398,13 +5398,13 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    // Four, and since ruling 463 a GitHub connection's reach, and since ruling
-    // 479(a) the capability matrix's "Advisory only" list, and since ruling 484
-    // a changed file in the task's Changes panel, and since ruling 486 the
-    // scopes an MCP server's OAuth sign-in was granted, and since ruling 498 a
-    // knowledge-base correction's evidence. Ruling 503 took the goal chains'
+    // Four, and since ruling 222 a GitHub connection's reach, and since ruling
+    // 184 the capability matrix's "Advisory only" list, and since ruling 246
+    // a changed file in the task's Changes panel, and since ruling 192 the
+    // scopes an MCP server's OAuth sign-in was granted, and since ruling 321 a
+    // knowledge-base correction's evidence. Ruling 273 took the goal chains'
     // three (a chain, a link's waits, "About this chain") and added an epic's
-    // archived tasks, and ruling 642 the prompt cache's details on Insights.
+    // archived tasks, and ruling 324 the prompt cache's details on Insights.
     expect(summaries).toHaveLength(8);
     expect(bare).toEqual([]);
   });
@@ -5431,7 +5431,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
     expect(loaders.length).toBeGreaterThanOrEqual(8);
     // The control whose arrow IS the meaning and already its glyph at rest,
     // so busy swaps nothing: the board's re-scan. Home's re-scan, re-index and
-    // test connection spun their own arrow too until ruling 368's 2026-09-24
+    // test connection spun their own arrow too until ruling 286's 2026-09-24
     // extension put the loader in place of every in-flight starter's icon.
     expect(arrows.sort()).toEqual([path.join("features", "board", "board-page.tsx")]);
   });
@@ -5482,10 +5482,10 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
 
   it("(F52) the Agents page's running count carries the house's working dot", () => {
     // CANARY: put the pulse back on `.ag-running .working` itself. The pulse
-    // is the house's compositor copy of the dot on ::after (ruling 457), so
+    // is the house's compositor copy of the dot on ::after (ruling 11), so
     // the dot matches the house's box and its ::after the house's ring; ruling
-    // 148(c)'s sweep holds the ring still under reduced motion.
-    // Ruling 625: the review queue's `.wait-tag` is gone, so Current state's
+    // 283's sweep holds the ring still under reduced motion.
+    // Ruling 280: the review queue's `.wait-tag` is gone, so Current state's
     // working fact is the house dot these copy.
     const house = declsFor(plain, ".prop-fact .working");
     const houseRing = declsFor(plain, ".prop-fact .working::after");
@@ -5512,7 +5512,7 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
       (r) => r.decls.has("content") && !/^(?:""|attr\([^)]*\)(?: \/ "")?|counter\([^)]*\))$/.test(r.decls.get("content")!),
     ).map((r) => `${r.selector}: ${r.decls.get("content")}`);
     expect(typed).toEqual([]);
-    // Stacked under the card (ruling 455, acce-27) or beside it, the same
+    // Stacked under the card (ruling 299, acce-27) or beside it, the same
     // points: the rules sit outside the 900px query, which adds nothing.
     const li = declsFor(plain, ".login-aside-points li");
     expect(li.get("display")).toBe("flex");
@@ -5533,10 +5533,10 @@ describe("app.css ruling 459: the better-ui pass — icons", () => {
   });
 });
 
-describe("app.css ruling 459: the better-ui pass — contextual icon motion", () => {
+describe("app.css ruling 284: the better-ui pass — contextual icon motion", () => {
   // better-ui icon-transitions.md: an icon that changes with state keeps both
   // glyphs in the DOM and cross-fades them with opacity, scale and blur. Every
-  // swap here takes ruling 451(c)'s trim of the recipe for a 13-20px glyph:
+  // swap here takes ruling 284's trim of the recipe for a 13-20px glyph:
   // scale .25, a 2px blur, .2s on the sheet's --ease-out.
   const isReduced = (r: CssRule) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a));
   const reduced = RULES.filter(isReduced);
@@ -5671,12 +5671,12 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "routes/login.tsx: github → loader (spins)",
         "routes/login.tsx: google → loader (spins)",
         "ui/copy-glyph.tsx: copy → check",
-        // Ruling 651: Archive tasks, and an epic task row's Archive and
+        // Ruling 274: Archive tasks, and an epic task row's Archive and
         // Restore, trade their mark for the loader while their request runs.
         "features/epics/epic-parts.tsx: archive → loader (spins)",
         "features/epics/epic-page-regions.tsx: archive → loader (spins)",
         "features/epics/epic-page-regions.tsx: refresh → loader (spins)",
-        // Ruling 368's 2026-09-24 extension: every in-flight starter's loader
+        // Ruling 286's 2026-09-24 extension: every in-flight starter's loader
         // takes its icon's place, and through the cell it trades rather than
         // replacing it in one frame. Home's re-scan, Interrupt, Retry, Force
         // accept, Deliver, Complete merge, Accept, Re-check scopes (GitHub
@@ -5701,28 +5701,28 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
         "features/org-settings/users-panel.tsx: lock → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
         "features/org-settings/resource-rows.tsx: refresh → loader (spins)",
-        // Ruling 469: the MCP editor's Sign in and Sign out.
+        // Ruling 192: the MCP editor's Sign in and Sign out.
         "features/org-settings/mcp-sign-in.tsx: user → loader (spins)",
         "features/org-settings/mcp-sign-in.tsx: x → loader (spins)",
         "features/task-detail/decision-packet-regions.tsx: message → loader (spins)",
         "features/policy/policy-page.tsx: x → loader (spins)",
-        // Ruling 463: a GitHub connection's Re-check.
+        // Ruling 222: a GitHub connection's Re-check.
         "features/org-settings/connections-panel.tsx: refresh → loader (spins)",
-        // Ruling 482: the PR card's Run gates, an in-flight starter like the
+        // Ruling 104: the PR card's Run gates, an in-flight starter like the
         // ones above.
         "features/task-detail/task-side-panels.tsx: refresh → loader (spins)",
 
-        // Ruling 484: the Changes panel's toggle (while its reader loads), its
+        // Ruling 246: the Changes panel's toggle (while its reader loads), its
         // Try again, a file's Load this file, and Send to the deliverer.
         "features/task-detail/changes-slot.tsx: chevron → loader (spins)",
         "features/task-detail/changes-panel.tsx: refresh → loader (spins)",
         "features/task-detail/changes-panel.tsx: file → loader (spins)",
         "features/task-detail/changes-panel.tsx: send → loader (spins)",
-        // Ruling 503: an epic task row's Remove.
+        // Ruling 325: an epic task row's Remove.
         "features/epics/epic-page-regions.tsx: x → loader (spins)",
-        // Ruling 638: a library row's Add while its deploy is in flight.
+        // Ruling 326: a library row's Add while its deploy is in flight.
         "features/agents/agents-page.tsx: plus → loader (spins)",
-        // Ruling 653: the board file's drop while the server reads it, a
+        // Ruling 32: the board file's drop while the server reads it, a
         // board's Export while its zip downloads, and Import board.
         "features/org-settings/boards-panel.tsx: upload → loader (spins)",
         "features/org-settings/boards-panel.tsx: download → loader (spins)",
@@ -5731,7 +5731,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
     );
     // The cell centres both marks, whatever their box, in one grid area: drop
     // `grid-area: 1 / 1` and the check draws beside the copy mark (ruling
-    // 451(c)). The "Copied" word rises in as a status line's new words do.
+    // 284). The "Copied" word rises in as a status line's new words do.
     const cell = declsFor(plain, ".copy-glyph");
     expect(cell.get("display")).toBe("inline-grid");
     expect(cell.get("place-items")).toBe("center");
@@ -5757,7 +5757,7 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
 
   it("(F42) the wait row's orb and clock share one 20px cell, and the orb stops drawing once hidden", () => {
     // CANARY: set `.lw-glyph` to 14px, or drop the paused rule (a hidden orb
-    // keeps its dots animating on every row seen live). Ruling 499: the orb is
+    // keeps its dots animating on every row seen live). Ruling 168: the orb is
     // AICSS's CSS lattice now, not a canvas, so its size and its pause are the
     // sheet's.
     const cell = declsFor(plain, ".lw-glyph");
@@ -5779,11 +5779,11 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
   });
 });
 
-/* ------------------------------------- ruling 459: the dock's deferred half */
+/* ------------------------------------- ruling 285: the dock's deferred half */
 
 /**
- * Ruling 459 deferred two dock findings until they could be built on ruling
- * 454's sheet (owner, 2026-09-24: "do the two dock fixes now").
+ * Ruling 285 deferred two dock findings until they could be built on ruling
+ * 285's sheet (owner, 2026-09-24: "do the two dock fixes now").
  *
  *   F20 — the dock's open and close could not be turned around. The entrance
  *     was a keyframe, which restarts instead of retargeting, and Chrome starts
@@ -5796,11 +5796,11 @@ describe("app.css ruling 459: the better-ui pass — contextual icon motion", ()
  *
  * What the panel and its trigger do is decided across four places (the 720px
  * block, the base dock section after it, the reduced-motion block and the
- * appended ruling-454 section), so these checks resolve the real cascade
+ * appended ruling-285 section), so these checks resolve the real cascade
  * (weight, then source order, then the `transition` shorthand against its
  * longhands) for each state, instead of reading one rule.
  */
-describe("app.css ruling 459: the dock's deferred half", () => {
+describe("app.css ruling 285: the dock's deferred half", () => {
   type Ctx = { phone: boolean; reduced: boolean; starting?: boolean };
   const CONTEXTS: Ctx[] = [
     { phone: false, reduced: false },
@@ -5936,7 +5936,7 @@ describe("app.css ruling 459: the dock's deferred half", () => {
     expect(onPanel).toEqual([...new Set([...CLOSING, ...RESTORED, ...HELD])].sort());
   });
 
-  it("(F20) the panel enters on a transition from @starting-style, at ruling 121(e)'s values", () => {
+  it("(F20) the panel enters on a transition from @starting-style, at ruling 318's values", () => {
     // CANARY: put `animation: dock-in .18s var(--ease-out)` back on
     // `.dock-panel` in place of the transition, or drop either @starting-style.
     const desktop = { phone: false, reduced: false };
@@ -6014,7 +6014,7 @@ describe("app.css ruling 459: the dock's deferred half", () => {
   });
 
   it("(F20) a sheet caught mid-entrance is held where the finger took it, under either preference", () => {
-    // CANARY: drop `transition: none` from the ruling-454 drag rule: the
+    // CANARY: drop `transition: none` from the ruling-285 drag rule: the
     // entrance transition then carries on under the finger.
     for (const ctx of CONTEXTS.filter((c) => c.phone)) {
       expect(transition(HELD, ctx), name(ctx)).toBe("none");
@@ -6085,12 +6085,12 @@ describe("app.css ruling 459: the dock's deferred half", () => {
 });
 
 /**
- * Ruling 500 (AICSS's AI Agent Input, Approval Card, Data Table and Code
+ * Ruling 312 (AICSS's AI Agent Input, Approval Card, Data Table and Code
  * Block on the task page): the task's composer takes the controller
  * composer's frame, the packet's tone is its head's tile, and a comment's
  * table and fenced block are one card each.
  */
-describe("app.css ruling 500: the task page's agent components", () => {
+describe("app.css ruling 312: the task page's agent components", () => {
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("frames the task composer as the controller's: the card radius and the 4px ring", () => {
@@ -6119,7 +6119,7 @@ describe("app.css ruling 500: the task page's agent components", () => {
   });
 });
 
-describe("app.css ruling 501: the Details panel's properties", () => {
+describe("app.css ruling 309: the Details panel's properties", () => {
   const reduced = RULES.filter((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
   const decl = (rules: CssRule[], selector: string, prop: string) => declsFor(rules, selector).get(prop);
 
@@ -6138,7 +6138,7 @@ describe("app.css ruling 501: the Details panel's properties", () => {
     expect(decl(plain, '.prop-btn:hover:where(:not([aria-busy="true"]))', "background")).toBe("var(--tint-hover)");
     expect(decl(plain, '.prop-btn[aria-expanded="true"]', "border-color")).toBe("var(--blue)");
     // Its padding and border run past the value column's left edge (ruling
-    // 520), so the value it holds starts where the text values start.
+    // 309(a)), so the value it holds starts where the text values start.
     expect(decl(plain, ".prop-btn", "margin-left")).toBe("calc(-.375rem - 1px)");
     expect(decl(plain, ".prop-btn", "padding")).toBe(".25rem .375rem");
   });
@@ -6155,13 +6155,13 @@ describe("app.css ruling 501: the Details panel's properties", () => {
 
   it("rings a wait's entry by its state, and paints one that can never complete as a problem", () => {
     expect(decl(plain, '.wait-chip[data-wait-state="done"] .ico', "color")).toBe("var(--success-dark)");
-    // Ruling 503 retired the `cancelled` state with the goal links it named.
+    // Ruling 55 retired the `cancelled` state with the goal links it named.
     const dead = '.wait-chip:is([data-wait-state="failed"], [data-wait-state="missing"])';
     expect(RULES.some((r) => r.selector.includes(dead) && r.decls.get("color") === "var(--danger)")).toBe(true);
   });
 });
 
-describe("app.css ruling 510: a task's attachment list folds like a long comment", () => {
+describe("app.css ruling 314: a task's attachment list folds like a long comment", () => {
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("clips and fades any fold's box, and fades it where the keyboard check says plain sight ends", () => {
@@ -6186,7 +6186,7 @@ describe("app.css ruling 510: a task's attachment list folds like a long comment
   });
 });
 
-describe("app.css ruling 522: a timeline entry's pictures fold to their first row", () => {
+describe("app.css ruling 314: a timeline entry's pictures fold to their first row", () => {
   const decl = (selector: string, prop: string) => requiredDecls(plain, selector).get(prop);
 
   it("gives every tile of the strip one width, which the first row's count reads off the first tile", () => {
@@ -6200,7 +6200,7 @@ describe("app.css ruling 522: a timeline entry's pictures fold to their first ro
   });
 });
 
-describe("app.css ruling 515: an account's name never runs under its buttons", () => {
+describe("app.css ruling 323: an account's name never runs under its buttons", () => {
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("stacks an account row, its name and facts over its buttons, and keeps the name on one line", () => {
@@ -6216,7 +6216,7 @@ describe("app.css ruling 515: an account's name never runs under its buttons", (
   });
 });
 
-describe("app.css ruling 520: Current state on the property grid", () => {
+describe("app.css ruling 309(a): Current state on the property grid", () => {
   const decl = (selector: string, prop: string) => declsFor(plain, selector).get(prop);
 
   it("sets the side column's facts on one grid: one label column, one value edge, no rule between rows", () => {
@@ -6272,8 +6272,8 @@ describe("app.css ruling 520: Current state on the property grid", () => {
     for (const who of [".by-human", ".by-agent"]) expect(decl(who, "color"), who).toBeUndefined();
     expect(decl(".prop-fact.by-human > .ico", "color")).toBe("var(--blue-pressed)");
     expect(decl(".prop-fact.by-agent > .ico", "color")).toBe("var(--agent-dark)");
-    // The board card's pulse (ruling 365(b)), on its ::after (ruling 457).
-    // Ruling 625: `.wait-tag` is gone; the Agents page's running dot is the
+    // The board card's pulse (ruling 306), on its ::after (ruling 11).
+    // Ruling 280: `.wait-tag` is gone; the Agents page's running dot is the
     // other copy of the house dot.
     const house = declsFor(plain, ".ag-active .working");
     const dot = declsFor(plain, ".prop-fact .working");
@@ -6284,10 +6284,10 @@ describe("app.css ruling 520: Current state on the property grid", () => {
   });
 });
 
-describe("app.css ruling 525: deleting a controller conversation from the rail", () => {
+describe("app.css ruling 278: deleting a controller conversation from the rail", () => {
   it("draws a sealed row in the box a conversation row draws, with none of its hover or press", () => {
     // Somebody else's thread, listed to a project admin to delete, is a <div>,
-    // so it cannot be a `.ctl-conv` (that presses, and ruling 459's F31 finds
+    // so it cannot be a `.ctl-conv` (that presses, and ruling 283's F31 finds
     // a press on a div). CANARY: set `.ctl-conv-sealed`'s padding to `.5rem`
     // and it sits out of line with the rows above and below it.
     const row = requiredDecls(plain, ".ctl-conv");
@@ -6306,11 +6306,11 @@ describe("app.css ruling 525: deleting a controller conversation from the rail",
 });
 
 /**
- * Ruling 572, after the shadcn chatbot template: the controller transcript
+ * Ruling 320, after the shadcn chatbot template: the controller transcript
  * reads as one column (b), and its jump back to the newest message takes no
  * room in the box it scrolls (a).
  */
-describe("app.css ruling 572: the controller transcript reads as one column", () => {
+describe("app.css ruling 320: the controller transcript reads as one column", () => {
   it("(b) centres one 48rem column, keeps the person's bubble and frames no reply", () => {
     // CANARY: put the agent-tinted border and padding back on
     // `.ctl-msg.from-controller`, and a reply is a card inside the
@@ -6340,7 +6340,7 @@ describe("app.css ruling 572: the controller transcript reads as one column", ()
   });
 });
 
-describe("app.css ruling 625: foundations — dark elevation, veil, weights, leading", () => {
+describe("app.css ruling 280: foundations — dark elevation, veil, weights, leading", () => {
   const phone = RULES.filter((r) => r.at.some((a) => /max-width:\s*720px/.test(a)));
   const paint = (tokens: Map<string, string>, value: string) => resolveColor(value, tokens)!.rgb;
   const lum = (rgb: [number, number, number]) => luminance(asHex(rgb));
@@ -6451,7 +6451,7 @@ describe("app.css ruling 625: foundations — dark elevation, veil, weights, lea
   });
 });
 
-describe("app.css ruling 625: Home, login, notifications and the palette", () => {
+describe("app.css ruling 280: Home, login, notifications and the palette", () => {
   const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
 
   it("sizes the login's card track to the card, and shows one brand mark beside it", () => {
@@ -6487,7 +6487,7 @@ describe("app.css ruling 625: Home, login, notifications and the palette", () =>
     expect(requiredDecls(plain, ".org-tile .sub > span").get("white-space")).toBe("nowrap");
   });
 
-  it("keeps the code face to repository paths and one-time codes on these surfaces (ruling 365)", () => {
+  it("keeps the code face to repository paths and one-time codes on these surfaces (ruling 280)", () => {
     // A third of Home's text was JetBrains Mono: counts, times, keys, the
     // bell's meta line, "Mark read". CANARY: put `font-family:
     // var(--font-mono)` back on `.pj-stats` or `.ntf-item-main .mt`.
@@ -6524,13 +6524,13 @@ describe("app.css ruling 625: Home, login, notifications and the palette", () =>
 
 
 /**
- * Ruling 625 (the 2026-10-01 design pass), the board and the review queue:
+ * Ruling 280 (the 2026-10-01 design pass), the board and the review queue:
  * lane 1 on the page's gutter at every width, lanes one head tall and only as
  * tall as their cards at rest, the first card's ring inside its scroller, one
  * field box in the New task modal, and a task drawn in the queue the way the
  * board card draws it.
  */
-describe("app.css ruling 625: the board and the review queue", () => {
+describe("app.css ruling 280: the board and the review queue", () => {
   const sides = (value: string) => {
     const p = value.trim().split(/\s+/);
     return [p[0], p[1] ?? p[0], p[2] ?? p[0], p[3] ?? p[1] ?? p[0]] as const;
@@ -6624,7 +6624,7 @@ describe("app.css ruling 625: the board and the review queue", () => {
   });
 });
 
-describe("app.css ruling 625: the task page", () => {
+describe("app.css ruling 280: the task page", () => {
   const decl = (selector: string, prop: string) => requiredDecls(plain, selector).get(prop);
   const rem = (value: string | undefined) => Number(/^(-?[\d.]+)rem$/.exec(value ?? "")?.[1]);
   const px = (value: string | undefined) => Number(/^(-?[\d.]+)px$/.exec(value ?? "")?.[1]);
@@ -6639,14 +6639,14 @@ describe("app.css ruling 625: the task page", () => {
     const inline = (padding: string | undefined) => padding?.split(/\s+/)[1];
     for (const s of [".packet-top", ".packet-body"]) expect(inline(decl(s, "padding")), s).toBe(inline(decl(".panel", "padding")));
     for (const s of [".packet-lede", ".opt .ot", ".opt .od"]) expect(decl(s, "font-size"), s).toBe(decl(".tl-text", "font-size"));
-    // The only boxes in the card are the options (ruling 500): the completion
+    // The only boxes in the card are the options (ruling 312): the completion
     // report it carries is evidence, behind the evidence's thin rule, not a
-    // fourth box the width of the options (re-rules ruling 521's inset box).
+    // fourth box the width of the options (re-rules ruling 316's inset box).
     expect(decl(".cmp", "border")).toBeUndefined();
     expect(decl(".cmp", "border-left")).toBe(decl(".packet-body .packet-obs", "border-left"));
   });
 
-  it("(b) starts every side-column value's words on one edge, at the values' size (ruling 520)", () => {
+  it("(b) starts every side-column value's words on one edge, at the values' size (ruling 309(a))", () => {
     // CANARY: drop `.prop-empty .ico`'s margin-inline ("Normal", "Add labels"
     // start 4px left of "In Progress"), or the no-glyph padding ("None",
     // "Nothing", "Unowned" start 24px left of it).
@@ -6691,13 +6691,13 @@ describe("app.css ruling 625: the task page", () => {
 
 
 /**
- * Ruling 625 (the 2026-10-01 design pass), the controller, the dock, Agents
+ * Ruling 280 (the 2026-10-01 design pass), the controller, the dock, Agents
  * and Policy: the RBAC grid keeps its words wide and its screen-reader text
  * inside its scroller, the controller's head is its rail siblings' head, the
  * dock draws one rule per edge, the matrix's "off" mark reads, and Agents'
  * badges and wells stop stretching.
  */
-describe("app.css ruling 625: the controller, the dock, Agents and Policy", () => {
+describe("app.css ruling 280: the controller, the dock, Agents and Policy", () => {
   const collapse = () => RULES.filter((r) => r.at.some((q) => q.includes("max-width: 1100px")));
 
   it("(a) the RBAC grid: its .vh cells lay out inside the scroller, and no header floors a column past its cap", () => {
@@ -6771,7 +6771,7 @@ describe("app.css ruling 625: the controller, the dock, Agents and Policy", () =
   });
 });
 
-describe("app.css ruling 625: org settings, Profile and Insights", () => {
+describe("app.css ruling 280: org settings, Profile and Insights", () => {
 
   it("lays Agent resources out one panel to a row, and a row's actions wrap before its text squeezes", () => {
     // CANARY: put `.rsrc-grid` back on `1fr 1fr`, and the two-row Agent
@@ -6784,7 +6784,7 @@ describe("app.css ruling 625: org settings, Profile and Insights", () => {
 
   it("gives both standalone pages one header at the page-title step", () => {
     // CANARY: put `.set-head h1` back on 1.75rem (Instance settings 8px over
-    // its sibling Insights). Ruling 642 sets Insights' figures above it on
+    // its sibling Insights). Ruling 324 sets Insights' figures above it on
     // purpose: a dashboard's numbers are its content.
     const title = requiredDecls(plain, ".set-head h1");
     expect([title.get("font-size"), title.get("letter-spacing")]).toEqual(["1.25rem", "var(--track-section)"]);
@@ -6818,7 +6818,7 @@ describe("app.css ruling 625: org settings, Profile and Insights", () => {
     expect(requiredDecls(plain, ".audit-s3 .kv-row .v").get("margin-right")).toBe("auto");
   });
 
-  it("keeps the code face off addresses, chips and labels on these surfaces (ruling 365)", () => {
+  it("keeps the code face off addresses, chips and labels on these surfaces (ruling 280)", () => {
     // CANARY: put `font-family: var(--font-mono)` back on `.member-main .em`.
     for (const selector of [".member-main .em", ".idp-chip", ".bd-name", ".metric-names .linkish", ".cache-table td:first-child"]) {
       expect(requiredDecls(plain, selector).get("font-family"), selector).toBeUndefined();
@@ -6826,12 +6826,12 @@ describe("app.css ruling 625: org settings, Profile and Insights", () => {
   });
 });
 
-describe("app.css ruling 625: project settings, GitHub and Activity", () => {
+describe("app.css ruling 280: project settings, GitHub and Activity", () => {
   const within = (query: RegExp) => RULES.filter((r) => r.at.some((a) => query.test(a)));
   const rem = (value: string | undefined) => parseFloat(value ?? "NaN");
 
   it("sets counts and times in the body face with tabular figures, and the danger zone's consequences at reading size", () => {
-    // Ruling 365: mono is for code. "11:12" and "2 tasks" were JetBrains Mono,
+    // Ruling 280: mono is for code. "11:12" and "2 tasks" were JetBrains Mono,
     // the org audit list's same times were Inter. CANARY: put
     // `font-family: var(--font-mono)` back on `.pev-t`.
     for (const selector of [".pev-t", ".stg-count", ".act-toggle", ".you-tag"]) {
@@ -6895,12 +6895,12 @@ describe("app.css ruling 625: project settings, GitHub and Activity", () => {
 });
 
 /**
- * Ruling 626: the run console and the conversation transcripts are tab stops,
+ * Ruling 320: the run console and the conversation transcripts are tab stops,
  * so the keyboard scrolls them (axe's scrollable-region-focusable, WCAG 2.1.1).
  * A tab stop is no use unseen: each keeps the app's ring, drawn inside its edge
  * as the other scrollers draw theirs.
  */
-describe("app.css ruling 626: scrollers the keyboard reaches", () => {
+describe("app.css ruling 320: scrollers the keyboard reaches", () => {
   type Scroller = { name: string; tag: string; classes: string[]; attrs: Record<string, string> };
   /** The scrollers as they render. */
   const SCROLLERS: Scroller[] = [
@@ -6979,7 +6979,7 @@ describe("app.css ruling 626: scrollers the keyboard reaches", () => {
     /^transparent(\s|$)/.test(decls.get("outline-color") ?? "");
 
   it("no rule at any width takes the ring off a focused scroller", () => {
-    // CANARY: widen ruling 532's rule back to `.panel:focus-visible:not([data-targeted])`,
+    // CANARY: widen ruling 322's rule back to `.panel:focus-visible:not([data-targeted])`,
     // which took the ring off the page's transcript, a .panel, once it became a tab stop.
     const found = SCROLLERS.flatMap((el) =>
       RULES.filter((r) => erases(r.decls)).flatMap((r) =>
@@ -6992,7 +6992,7 @@ describe("app.css ruling 626: scrollers the keyboard reaches", () => {
   });
 
   it("draws the ring inside each scroller's edge", () => {
-    // CANARY: drop the ruling 626 offset, and the dock's panel cuts the ring
+    // CANARY: drop the ruling 320 offset, and the dock's panel cuts the ring
     // its transcript paints outside itself.
     for (const selector of [".console:focus-visible", ".ctl-transcript:focus-visible", ".dock-transcript:focus-visible"]) {
       expect(requiredDecls(plain, selector).get("outline-offset"), selector).toBe("-2px");

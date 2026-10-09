@@ -4,7 +4,7 @@ import type { PerfBudgetTable } from "../perf-verdict";
 const TAB =
   "jsdom: test-support/revalidation-harness.tsx (React Router with single fetch's revalidation choice, the real broker in-process, root > routes/project > board | task, every loader counting a fresh object), streams connected and the first load settled";
 
-/** Ruling 457 ratchet ceilings: loaders re-run per navigation, action and live event. */
+/** Ruling 11 ratchet ceilings: loaders re-run per navigation, action and live event. */
 export const REVALIDATION_BUDGETS: PerfBudgetTable = {
   // BOARD-1 / RF-3: 15 (root, layout and board on every keystroke); no loader
   // reads the filter, and each declares the search params it does read.
@@ -79,7 +79,7 @@ export const REVALIDATION_BUDGETS: PerfBudgetTable = {
     journey: "live-run",
     fixture: `${TAB}; the task page showing an active run (the F22 safety net armed), 60 s with no event`,
   },
-  // RF-1 / ruling 301: 3 (a returning tab pulled every loader whether or not
+  // RF-1 / ruling 25: 3 (a returning tab pulled every loader whether or not
   // anything happened while it was away); the broker replays what it missed.
   "revalidation:task.loader-runs-per-quiet-return": {
     ceiling: 0,

@@ -11,7 +11,7 @@ import { FakeEventSource } from "../../../test-support/fake-event-source";
 import "./controller-dock-panel";
 
 /**
- * Ruling 457, the controller journey: what the dock costs the page under it.
+ * Ruling 11, the controller journey: what the dock costs the page under it.
  * Every figure is a count of requests (the dock's view, its unseen list, the
  * page's own loaders) on the routed stub every dock test uses, so it moves
  * only when the code does.
@@ -110,7 +110,7 @@ function dockRequests(m: { loads: URL[]; unseenLoads: URL[] }): number {
 }
 
 /** Opens the dock with its body on screen. The open panel's body is its own
- *  chunk (ruling 457, FL-1): act() awaits the import the click starts and
+ *  chunk (ruling 11, FL-1): act() awaits the import the click starts and
  *  commits the body once it resolves, so no deadline races the host (inside
  *  act, React reveals a resolved boundary at once, with no 300 ms throttle).
  *  Polled against findBy's one-second deadline while the chunk compiled, the
@@ -136,7 +136,7 @@ async function closeDock() {
   await settle();
 }
 
-describe("the closed dock's cost to every page (ruling 457, RF-8 / CTL-3)", () => {
+describe("the closed dock's cost to every page (ruling 11, RF-8 / CTL-3)", () => {
   it("adds no request to a client navigation", async () => {
     const m = mountDock({ path: "/projects/viberr/board", view: viewFor });
     await screen.findByText("board page");
@@ -164,7 +164,7 @@ describe("the closed dock's cost to every page (ruling 457, RF-8 / CTL-3)", () =
   });
 });
 
-describe("one dock send (ruling 457, CTL-4)", () => {
+describe("one dock send (ruling 11, CTL-4)", () => {
   it("loads the thread once and leaves the page's loaders alone", async () => {
     const m = mountDock({
       path: "/projects/viberr/board",
@@ -187,7 +187,7 @@ describe("one dock send (ruling 457, CTL-4)", () => {
   });
 });
 
-describe("a controller event on a page that shows no conversation (ruling 457, CTL-4)", () => {
+describe("a controller event on a page that shows no conversation (ruling 11, CTL-4)", () => {
   it("refreshes the dock, not the page", async () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     FakeEventSource.instances = [];
@@ -209,7 +209,7 @@ describe("a controller event on a page that shows no conversation (ruling 457, C
   });
 });
 
-describe("a working turn (ruling 457, CTL-2)", () => {
+describe("a working turn (ruling 11, CTL-2)", () => {
   it("polls without re-fetching the transcript", async () => {
     // The turn starts once the page has settled: the poll's clock is armed by
     // the answer that says a turn works, so the fake clock goes in first and

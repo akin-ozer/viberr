@@ -4,7 +4,7 @@ import type { BlockedField } from "./project-fields";
 import { keyFromName } from "./project-name";
 
 /**
- * What the New project dialog's fields resolve to (ruling 700(e), the
+ * What the New project dialog's fields resolve to (ruling 13(b), the
  * large-component split of `NewProjectModal` in `new-project-modal.tsx`): the
  * task key, repository and owner a create posts, whether the board takes a
  * repository, whether the key is another project's, and the first requirement
@@ -36,9 +36,9 @@ export function resolveNewProject(entries: NewProjectEntries, keyPool: string[])
   const slug = slugify(name);
   // The effective repo owner: a picked connection. A board that delivers
   // software delivers through GitHub, so it takes a repository, and with it a
-  // PAT connection, unless the person connects it later (ruling 672: the
+  // PAT connection, unless the person connects it later (ruling 224: the
   // operator asks for one when a task needs it, so a board without is no dead
-  // end). Ruling 667: a board that delivers results needs none, and takes one
+  // end). Ruling 224: a board that delivers results needs none, and takes one
   // only when the person attaches it.
   const effOwner = connOwner;
   const needsRepo = delivers === "software" ? !repoLater : attachRepo;

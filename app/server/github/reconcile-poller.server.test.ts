@@ -86,15 +86,15 @@ describe("pollGithubReconcile (P11-14)", () => {
   });
 
   /**
-   * Ruling 207(l) (claim audit). The merge-pending nudge asserted "PR #N is
+   * Ruling 237 (claim audit). The merge-pending nudge asserted "PR #N is
    * still open on GitHub" — a live fact — out of `task_projections.pr_json`,
    * which is a CACHE. What kept that cache honest was the 5-minute reconcile
-   * poll, and ruling 177 excludes terminal-stage tasks from every budgeted
+   * poll, and ruling 52 excludes terminal-stage tasks from every budgeted
    * pass: an accepted task IS terminal, so the exact rows this nudge describes
    * are the rows nothing refreshes. The number is still worth sending; it has
    * to say whose reading it is.
    */
-  it("ruling 207(l): the merge-pending nudge reports its own last reading, not live GitHub state", async () => {
+  it("ruling 237: the merge-pending nudge reports its own last reading, not live GitHub state", async () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -134,7 +134,7 @@ describe("pollGithubReconcile (P11-14)", () => {
     expect(summary.projects).toBe(0); // archived → not polled
   });
 
-  it("ruling 667: skips a project with no repository, whatever branches its tasks recorded before it gave one up", async () => {
+  it("ruling 224: skips a project with no repository, whatever branches its tasks recorded before it gave one up", async () => {
     // CANARY: drop `p.repo IS NOT NULL` from `projectsToPoll` and each tick
     // answers `no_repo_configured` for this project, which the failure streak
     // counts: three ticks later its admins are told GitHub sync is failing on
@@ -239,13 +239,13 @@ describe("pollGithubReconcile (P11-14)", () => {
 });
 
 /**
- * Ruling 517. The board's banner and Home's pill read the last repository
+ * Ruling 223. The board's banner and Home's pill read the last repository
  * reading, and only the GitHub page and project creation took one, so creating
  * the repository on GitHub, or giving the token access to it, left "repo not
  * found" on the board until someone opened the GitHub page. A project whose
  * clone fails has no branched task, so the reconcile pass never reached it.
  */
-describe("ruling 517: the poller takes a failing repository reading again", () => {
+describe("ruling 223: the poller takes a failing repository reading again", () => {
   function failingProject(): TestStore {
     const store = setupProjectedStore(ctx);
     const actor = { userId: store.users.arda.id, label: "arda@viberr.test" };
@@ -357,7 +357,7 @@ describe("C7: a persistent reconcile failure alerts the people who can fix it", 
     expect(alerted.map((r) => r.userId).sort()).toEqual(
       [store.users.arda.id, store.users.murat.id].sort(),
     );
-    // Ruling 497: the credential is fixed on the project's GitHub page, so the
+    // Ruling 75: the credential is fixed on the project's GitHub page, so the
     // row opens there, not on the board. CANARY: drop `href` from the alert.
     expect(alerted[0]!.href).toBe(`/projects/${store.slug}/github`);
 

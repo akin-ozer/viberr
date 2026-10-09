@@ -13,7 +13,7 @@ import { reachesAcceptance } from "./reaches-acceptance";
 import type { OpenCeremony } from "./task-detail-actions";
 
 /**
- * What the task page reads off its props before it draws (ruling 700(d), the
+ * What the task page reads off its props before it draws (ruling 13(b), the
  * pilot split of `task-detail-page.tsx`): the viewer's authority on this task,
  * whether it is closed for work, where the completion packet stands and which
  * surface carries the delivered changes, and the GitHub panel's doors. Pure
@@ -21,7 +21,7 @@ import type { OpenCeremony } from "./task-detail-actions";
  * calls each at most once per render.
  */
 
-/** Ruling 503: the task's epic, read from the project's list the loader
+/** Ruling 325: the task's epic, read from the project's list the loader
  *  ships (one statement); a stale id no epic answers to draws no field. */
 export function epicOf(task: TaskDetail, epics: EpicOption[]): EpicOption | null {
   return task.epicId ? (epics.find((e) => e.id === task.epicId) ?? null) : null;
@@ -45,9 +45,9 @@ export function isClosedForWork(task: TaskSummary, archived: boolean): boolean {
 }
 
 /**
- * Ruling 665: a task whose deliverer cannot write the repository is
+ * Ruling 228: a task whose deliverer cannot write the repository is
  * delivered as files and has no branch, before the delivery as after it.
- * Ruling 667: and so is every task of a project with no repository, before
+ * Ruling 199: and so is every task of a project with no repository, before
  * anyone is engaged on it.
  */
 export function filesDeliveryOf(
@@ -77,13 +77,13 @@ export interface TaskPermissions {
   canDecideOwned: boolean;
   /** The `archive_task` (and `discard_branch`, `move_stage`) option's tier. */
   canArchiveViaPacket: boolean;
-  /** Ruling 164: the `force_accept` option's tier. */
+  /** Ruling 131: the `force_accept` option's tier. */
   canForceAcceptViaPacket: boolean;
-  /** Ruling 672: the repository question's tier. */
+  /** Ruling 65: the repository question's tier. */
   canEditPolicy: boolean;
-  /** F20-18 / ruling 672: hand the decision up instead of being stranded. */
+  /** F20-18 / ruling 65: hand the decision up instead of being stranded. */
   canEscalatePacket: boolean;
-  /** F39-6 / ruling 573: attach a file; an archived task takes no edits. */
+  /** F39-6 / ruling 76: attach a file; an archived task takes no edits. */
   canAttach: boolean;
   canRemoveFromRecord: boolean;
 }
@@ -127,7 +127,7 @@ export function taskPermissions(
   // card blocks it with the reason instead of 403ing on click (same treatment
   // as edit_goal / accept_completion).
   const canArchiveViaPacket = roleCan(role, "approve-transition");
-  // Ruling 164 (pass 35, F35-14): a `force_accept` packet option performs the
+  // Ruling 131 (pass 35, F35-14): a `force_accept` packet option performs the
   // admin override itself, whose tier is `force-accept-completion` (admin) —
   // NOT the packet-resolver set and not the archive tier. Same treatment as its
   // siblings: the card blocks the option with the reason instead of letting a
@@ -139,7 +139,7 @@ export function taskPermissions(
   // instead of stranding them. The server (requestPacketMaintainerDecision)
   // refuses when the caller already holds `resolve-packet`, so this is wired
   // only for the owner-who-cannot-resolve-directly case.
-  // Ruling 672: the repository question is a project admin's, so a maintainer
+  // Ruling 65: the repository question is a project admin's, so a maintainer
   // is stranded on it too, and sends it up the same way.
   const packetOptions = task.packet?.options ?? [];
   const boardDecision =
@@ -165,21 +165,21 @@ export function taskPermissions(
   };
 }
 
-/** Ruling 521: where the completion packet stands on the page. */
+/** Ruling 316: where the completion packet stands on the page. */
 export interface CompletionPlacement {
   /** The open packet offers the acceptance, so the card rides inside it. */
   acceptanceDecision: boolean;
-  /** Ruling 668: the accepted task's card, shown as its result. */
+  /** Ruling 103: the accepted task's card, shown as its result. */
   resultShown: boolean;
   /** The completion while its card shows, else null. */
   card: CompletionView | null;
 }
 
 /**
- * Ruling 521: the completion packet stands where the task is offered for
+ * Ruling 316: the completion packet stands where the task is offered for
  * acceptance: inside the decision whose option offers it, else on its own
  * card at the top of the main column while an acceptance card waits below
- * or the task stands at the boundary with a packet written. Ruling 668: and
+ * or the task stands at the boundary with a packet written. Ruling 103: and
  * on an accepted task it stays there as the result, archived or not.
  */
 export function completionPlacement(
@@ -226,10 +226,10 @@ export function completionReader(
 }
 
 /**
- * Ruling 484 (F40-54): the delivered revision's files and patches, with a
+ * Ruling 315 (F40-54): the delivered revision's files and patches, with a
  * note on any line going to the deliverer as one comment. Only while the
  * review PR is open and carries a delivered revision; the reader is its own
- * chunk, loaded when the panel opens. Ruling 521: not while the completion
+ * chunk, loaded when the panel opens. Ruling 316: not while the completion
  * packet carries the same reader.
  */
 export function changesPanelReader(
@@ -250,7 +250,7 @@ export function changesPanelReader(
     : null;
 }
 
-/** Ruling 668: the completion card as the accepted task's result. */
+/** Ruling 103: the completion card as the accepted task's result. */
 export function acceptedResult(task: TaskDetail, githubHost: string): CompletionResult {
   return {
     pr: task.pr
@@ -287,7 +287,7 @@ export function packetArchiveDisclosure(
       task.pr && (task.pr.state === "review" || task.pr.state === "accepted")
         ? task.pr.number
         : null,
-    // Ruling 161 (U35-8): what origin's branch holds when it is not
+    // Ruling 234 (U35-8): what origin's branch holds when it is not
     // this task's work, so the delete-branch row says so.
     foreignHead: task.foreignHead,
   };
@@ -304,7 +304,7 @@ export interface GithubTraceDoors {
 /**
  * The GitHub panel's doors. Complete merge and Force accept open the one
  * acceptance ceremony (F19-24: the panel never holds the submit itself); Run
- * gates (ruling 482) and Deliver (R15-2 safety net (b)) post straight away,
+ * gates (ruling 104) and Deliver (R15-2 safety net (b)) post straight away,
  * for a viewer who may deliver while the task is open.
  */
 export function githubTraceDoors(inputs: {
@@ -324,7 +324,7 @@ export function githubTraceDoors(inputs: {
   }
   if (inputs.canForceAccept) doors.onForceAccept = () => openCeremony({ mode: "force" });
   if (inputs.canDeliver && !inputs.taskClosed) doors.onRunGates = inputs.onRunGates;
-  // Ruling 647: a delivery that is files has no branch to push.
+  // Ruling 102: a delivery that is files has no branch to push.
   if (inputs.canDeliver && !inputs.taskClosed && !inputs.filesDeliveredAt) {
     doors.onDeliver = inputs.onDeliver;
   }

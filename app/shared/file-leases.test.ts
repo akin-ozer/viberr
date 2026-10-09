@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { globsOverlap, leaseConflictFor, leaseRefusal, matchesGlob, type FileLease } from "./file-leases";
 
 /**
- * Ruling 245 (pass 37, F37-74). A lease decides whether a delivery is refused,
+ * Ruling 60 (pass 37, F37-74). A lease decides whether a delivery is refused,
  * so the matcher is the part that has to be boring and exact. Two wildcards and
  * no more, chosen because a surprising match on a shared file is worse than a
  * missing feature.
@@ -71,7 +71,7 @@ const LEASES: FileLease[] = [
 ];
 
 /**
- * Ruling 417: two leases whose globs overlap refuse each other's deliveries, so
+ * Ruling 61: two leases whose globs overlap refuse each other's deliveries, so
  * neither holder can ever land. The exact-duplicate check this replaces caught
  * `internal/**` twice and missed every real case.
  */

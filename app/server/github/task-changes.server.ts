@@ -7,10 +7,10 @@ import type { GithubContextOptions } from "./github-context.server";
 import { readPullRequestDiff, type PrDiffFile } from "./pr-diff.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): what the task page's Changes panel reads.
+ * Ruling 246 (pass 40, F40-54): what the task page's Changes panel reads.
  *
  * A person reviewing delivered work saw `Diff N files · +a −d` and the commit
- * subjects; the only reader of a patch was the controller's tool (ruling 266).
+ * subjects; the only reader of a patch was the controller's tool (ruling 265).
  * This is the same read (`readPullRequestDiff`), for a person, BOUND to the
  * delivered revision: the pull request's live head must be the revision's head,
  * because the notes a person writes against these lines are addressed to the

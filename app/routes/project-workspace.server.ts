@@ -14,7 +14,7 @@ import type { ProjectRole } from "~/shared/rbac";
 import { isArchived } from "~/features/board/board-filters";
 
 /**
- * Ruling 457 (BOARD-6): the project read the workspace layout and the board
+ * Ruling 11 (BOARD-6): the project read the workspace layout and the board
  * share. The board's columns used to live in the layout loader, so the task
  * page and every other project page computed and shipped the whole board on
  * every revalidation for nothing. They are the board route's own loader now,
@@ -87,7 +87,7 @@ function readUncached(
   if (memberRole === null && !orgAdminOverride) {
     throw data(`No project at projects/${slug}.`, { status: 404 });
   }
-  // Ruling 457: from the board's own rows — archived ones dropped by the ONE
+  // Ruling 11: from the board's own rows — archived ones dropped by the ONE
   // predicate (F19-9), which is exactly the `archived = 0` list the queue would
   // otherwise map a second time.
   const reviewQueue = getReviewQueue(db, slug, {

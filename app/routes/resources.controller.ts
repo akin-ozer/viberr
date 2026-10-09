@@ -31,21 +31,21 @@ import { assertProjectAction } from "~/server/auth/project-authority.server";
 import { taskExists } from "~/server/projections/task-query.server";
 import { dockResourceShouldRevalidate } from "~/features/controller/controller-dock-context";
 
-/** Ruling 457: the dock loads its view itself; a page revalidation never
+/** Ruling 11: the dock loads its view itself; a page revalidation never
  *  reloads it (see `dockResourceShouldRevalidate`). */
 export const shouldRevalidate = dockResourceShouldRevalidate;
 
 /**
- * /resources/controller — the controller DOCK's data route (ruling 121), a
+ * /resources/controller — the controller DOCK's data route (ruling 256), a
  * fetcher target with no UI (the `notifications/read` family).
  *
  *   GET  ?project=&task=&c=   → { view } for the scope the person is standing in
  *   POST intent=send          → records the message, runs the turn, answers
  *                               { ok, conversationId }; a refused turn (no
- *                               Claude connected for the asker, ruling 127)
+ *                               Claude connected for the asker, ruling 137)
  *                               answers 409 { ok:false, error } and creates no
  *                               thread for a new conversation (U35-4)
- *   POST intent=send-now|retract → ruling 527's moves on a message still
+ *   POST intent=send-now|retract → ruling 251's moves on a message still
  *                               waiting in the person's own conversation
  *
  * The scope is authorized HERE, in the route, through the same chokepoint the
@@ -57,14 +57,14 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * root-owned fetcher, so a thrown response — a 404 as much as the 403 UI-32
  * already caught — replaced the whole page with the root error page. The
  * `clientLoader` and `clientAction` below now keep the page from any failure
- * (ruling 457), but a failure reaches the dock only as a view not loaded or
+ * (ruling 11), but a failure reaches the dock only as a view not loaded or
  * the send's generic toast, which say nothing about why. So a GET for a scope
  * the person cannot reach answers the benign `unavailable` view (one shape
  * for "no such project" and "not yours", so it is no more of an oracle than
  * the 404 was), and a POST answers `{ ok:false, error }`. The full pages keep
  * their own 404s; this route serves a panel, not a page.
  *
- * NOR DOES EITHER REDIRECT (ruling 457, test audit L14-29). A caller who is
+ * NOR DOES EITHER REDIRECT (ruling 11, test audit L14-29). A caller who is
  * not signed in (no session, or a forced password reset pending) gets a 401:
  * the signed-out view for a GET, `{ ok:false, error }` for a POST.
  * `requireAuth`'s login redirect named this route and the scope's query as
@@ -136,7 +136,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const auth = await authenticate(request);
   if (!auth || auth.pwresetRequired) {
-    // The message is still in the dock's composer (ruling 259), and a reload
+    // The message is still in the dock's composer (ruling 319), and a reload
     // empties it.
     return data(
       {
@@ -152,7 +152,7 @@ export async function action({ request }: Route.ActionArgs) {
   const csrfFailure = await csrfError(request, auth.sessionId, formData);
   if (csrfFailure) return csrfFailure;
   const intent = String(formData.get("intent") ?? "");
-  // Ruling 527: the conversation's owner is the whole authority for these
+  // Ruling 251: the conversation's owner is the whole authority for these
   // (the engine checks it); they create nothing in the scope the dock is on.
   try {
     const waiting = waitingMessageAction(db, intent, formData, {
@@ -180,13 +180,13 @@ export async function action({ request }: Route.ActionArgs) {
     const surface = textField.parse(formData.get("surface")) || null;
     // U39-24: the reader's zone; normalized by the engine.
     const timeZone = textField.parse(formData.get("timeZone")) || null;
-    // Ruling 573: the files it carries, checked before any thread is made for
+    // Ruling 258: the files it carries, checked before any thread is made for
     // it (U35-4's rule for a refusal).
     const files = checkMessageFiles(await formFiles(formData));
     let conversationId = textField.parse(formData.get("conversationId")).trim();
     if (!conversationId || conversationId === NEW_CONVERSATION_PARAM) {
       // U35-4 (pass 35): the dock disables its composer for a person with no
-      // Claude connected (ruling 127), and this door used to answer 200 anyway,
+      // Claude connected (ruling 137), and this door used to answer 200 anyway,
       // creating a thread whose only reply was the refusal. Refuse here, with
       // the same sentence, before any thread exists.
       //
@@ -232,7 +232,7 @@ export async function action({ request }: Route.ActionArgs) {
       },
       surface,
       timeZone,
-      // Ruling 527: steer the working turn (the default) or queue behind it.
+      // Ruling 251: steer the working turn (the default) or queue behind it.
       mode: sendModeOf(formData),
     });
     if (result.state === "refused") {
@@ -250,7 +250,7 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 /**
- * Ruling 457: a failed load is the dock's, never the page's. React Router
+ * Ruling 11: a failed load is the dock's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, and root owns the dock's, so a restart, a 5xx or a dead network
  * under an open, a thread pick or a `controller.updated` replaced the whole
@@ -269,10 +269,10 @@ export async function clientLoader({ serverLoader }: Route.ClientLoaderArgs) {
 }
 
 /**
- * Ruling 457: a send that gets no answer (a restart, a 5xx, a dead network)
+ * Ruling 11: a send that gets no answer (a restart, a 5xx, a dead network)
  * is the dock's to report, never the page's to lose. It answers as a refused
  * send does, so the dock toasts "The controller could not take that. Try
- * again." and the message stays in the composer (ruling 259).
+ * again." and the message stays in the composer (ruling 319).
  */
 export async function clientAction({ serverAction }: Route.ClientActionArgs) {
   try {

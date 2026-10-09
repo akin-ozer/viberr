@@ -23,10 +23,10 @@ import { createTestDbContext } from "../../../test-support/test-db";
 import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
- * Ruling 502: every operator run and every controller turn writes under the
+ * Ruling 187: every operator run and every controller turn writes under the
  * vendored Humanizer skill, and no surface a person uses names it. The
  * controller's prompt half is in `controller-run.server.test.ts`, beside its
- * app harness. Ruling 689 gives the same guide to every specialist run, the
+ * app harness. Ruling 187 gives the same guide to every specialist run, the
  * agents that write a task's result and the agents that review it.
  */
 
@@ -45,7 +45,7 @@ const skillFrontmatterSchema = z.object({
   metadata: z.object({ version: z.string() }),
 });
 
-describe("ruling 502: the vendored Humanizer skill", () => {
+describe("ruling 187: the vendored Humanizer skill", () => {
   it("is upstream's SKILL.md, byte for byte, at the pinned commit", () => {
     // CANARY: edit one word of humanizer/SKILL.md and this fails until the
     // file is re-vendored from upstream and the pin moves with it.
@@ -81,7 +81,7 @@ describe("ruling 502: the vendored Humanizer skill", () => {
   });
 });
 
-describe("ruling 502: the prompt section", () => {
+describe("ruling 187: the prompt section", () => {
   it("frames the guide, then carries the skill's whole body without its frontmatter", () => {
     expect(HUMANIZER_PROMPT_SECTION.startsWith("\n\n---\n# How you write\n\n")).toBe(true);
     expect(HUMANIZER_PROMPT_SECTION.endsWith(`\n\n${BODY}`)).toBe(true);
@@ -102,7 +102,7 @@ describe("ruling 502: the prompt section", () => {
   });
 });
 
-describe("ruling 502: every operator drive carries it, and its disclosure never names it", () => {
+describe("ruling 187: every operator drive carries it, and its disclosure never names it", () => {
   function authority(overrides: Partial<OperatorAuthority> = {}): OperatorAuthority {
     return operatorAuthority({ "transition-to-done": "human" }, overrides);
   }
@@ -160,12 +160,12 @@ describe("ruling 502: every operator drive carries it, and its disclosure never 
       injected: ["house-rules"],
     });
     expect(build.inputs.unresolvedResources).toEqual([]);
-    // Its size is the prompt the run was sent (ruling 344), the guide included.
+    // Its size is the prompt the run was sent (ruling 167), the guide included.
     expect(build.inputs.personaChars).toBe(build.prompt.length);
   });
 });
 
-describe("ruling 689: every specialist run carries it, framed for writing and for reviewing", () => {
+describe("ruling 187: every specialist run carries it, framed for writing and for reviewing", () => {
   const FRAMING = HUMANIZER_SPECIALIST_SECTION.slice(0, HUMANIZER_SPECIALIST_SECTION.indexOf(BODY));
 
   it("frames the same guide for a result, for a person's own voice and for a review", () => {

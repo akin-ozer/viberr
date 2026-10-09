@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { formatDuration } from "./figures";
 
 describe("formatDuration", () => {
-  it("ruling 693: prints a span from two days up in days and hours, and a shorter one as Insights always has", () => {
+  it("ruling 316: prints a span from two days up in days and hours, and a shorter one as Insights always has", () => {
     // CANARY: drop the days arm and a task that waited a week on a person
     // reads "168h 0m" on its card and on Insights.
     const MIN = 60_000;

@@ -12,7 +12,7 @@ import { SignInSteps } from "./agent-sign-in-steps";
 import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.server";
 
 /**
- * An agent account card's regions (ruling 700(e), the split of
+ * An agent account card's regions (ruling 13(b), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe): the failed and the
  * running sign-in, the card with no account yet, and the controls every
  * account carries. Each takes the slot its markup held in the card and calls
@@ -21,10 +21,10 @@ import type { ProfileBackend, ProfileBackendAccount } from "./profile-query.serv
  */
 
 /**
- * What a card's regions act through (ruling 700(e)). The card owns every
- * piece of state here (ruling 507: the account a Disconnect is asking about,
+ * What a card's regions act through (ruling 13(b)). The card owns every
+ * piece of state here (ruling 138: the account a Disconnect is asking about,
  * the account whose name is being edited, whether "Add another account" is
- * open; ruling 616: and whether the other accounts' management is) and hands
+ * open; ruling 323: and whether the other accounts' management is) and hands
  * it down with its posts and the request in flight.
  */
 export interface CardControls {
@@ -35,7 +35,7 @@ export interface CardControls {
   request: CardRequest;
   submit: (fields: Record<string, string>) => void;
   /** Start a sign-in: into a new account, or (`account`) into that existing
-   *  sign-in again (ruling 507). */
+   *  sign-in again (ruling 138). */
   startSignIn: (method: LoginMethod, account: string) => void;
   paste: "api_key" | "access_token" | null;
   setPaste: Dispatch<SetStateAction<"api_key" | "access_token" | null>>;
@@ -48,7 +48,7 @@ export interface CardControls {
   setAdding: Dispatch<SetStateAction<boolean>>;
   managing: boolean;
   setManaging: Dispatch<SetStateAction<boolean>>;
-  /** Ruling 616: where closing what the picker's menu opened hands the focus. */
+  /** Ruling 323: where closing what the picker's menu opened hands the focus. */
   picker: RefObject<HTMLButtonElement | null>;
   addingBox: RefObject<HTMLDivElement | null>;
   managingBox: RefObject<HTMLDivElement | null>;
@@ -64,7 +64,7 @@ export function FailedSignIn({
   login: NonNullable<ProfileBackend["login"]>;
   card: CardControls;
 }) {
-  // Ruling 507: again into the same account the failed flow was for; a new
+  // Ruling 138: again into the same account the failed flow was for; a new
   // account's attempt starts a new one.
   const account = login.existingAccount ? login.accountId : "";
   const starting = card.request.starting(login.method, account);
@@ -105,7 +105,7 @@ export function SignInUnderWay({
   const forAccount = loginAccount(login, accounts);
   return (
     <>
-      {/* Ruling 507: which account the sign-in is for, when the card
+      {/* Ruling 138: which account the sign-in is for, when the card
           already has one — the steps below look the same either way. */}
       {accounts.length > 0 ? (
         <p className="fine spaced">
@@ -234,12 +234,12 @@ export function ManageButtons({
       </button>
       <button
         type="button"
-        // Ruling 149: dropping the stored credential is destructive.
+        // Ruling 278: dropping the stored credential is destructive.
         className="btn ghost sm danger"
         disabled={request.busy}
         aria-busy={request.accountBusy("backend-disconnect", account.id) || undefined}
-        // Ruling 481(b) (F40-49): it asks first, like every other one-way
-        // control (ruling 458(f)). One tap used to sign the vendor session
+        // Ruling 323 (F40-49): it asks first, like every other one-way
+        // control (ruling 297). One tap used to sign the vendor session
         // out, with no undo short of a fresh sign-in.
         onClick={() => card.setConfirmDisconnect(account.id)}
       >

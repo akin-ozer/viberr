@@ -105,7 +105,7 @@ describe("CommandPalette", () => {
     }
   });
 
-  it("ruling 503: an epic hit sits in its own group after the projects and opens the epic", async () => {
+  it("ruling 325: an epic hit sits in its own group after the projects and opens the epic", async () => {
     // CANARY: drop `epic` from GROUP_LABEL, and the run renders with no heading.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
@@ -252,7 +252,7 @@ describe("CommandPalette: the combobox/listbox contract", () => {
   });
 
   /**
-   * Ruling 457: a search the server can't answer (a restart, a 5xx, a dead
+   * Ruling 11: a search the server can't answer (a restart, a 5xx, a dead
    * network) is the palette's, never the page's. React Router sent it to the
    * error boundary of the route that owns the palette, which replaced the
    * page. The route's `clientLoader` now answers null, which the palette reads

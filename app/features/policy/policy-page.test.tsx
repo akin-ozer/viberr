@@ -102,7 +102,7 @@ describe("HumanAccess", () => {
     expect(getByText("Human access · RBAC")).toBeTruthy();
     expect(getByText("4 members")).toBeTruthy();
     expect(container.querySelectorAll(".member-row")).toHaveLength(4);
-    // Header counts derive live from the same member array. Ruling 625: the
+    // Header counts derive live from the same member array. Ruling 280: the
     // count sits under the role (`.rbac-n`), so the header can wrap.
     const heads = [...container.querySelectorAll(".rbac-table thead th")].map((th) => th.textContent);
     expect(heads.slice(0, 3)).toEqual(["Action", "Admin 2", "Maintainer 1"]);
@@ -113,7 +113,7 @@ describe("HumanAccess", () => {
     );
     expect(getByText("Release any task owner")).toBeTruthy();
     expect(getByText("Edit task priority, labels & due date")).toBeTruthy();
-    // Ruling 309(a): two grants gate more than their name says. The name stays
+    // Ruling 26(b): two grants gate more than their name says. The name stays
     // short because sentences elsewhere on this page read it inline ("needs the
     // Edit workflow & policy grant"), so the SCOPE lives in the table — which is
     // the surface a person opens to learn what a role can do. Without it, "who
@@ -125,7 +125,7 @@ describe("HumanAccess", () => {
       getByText("the epic a task is in, and what it waits on, which releases it when cleared"),
     ).toBeTruthy();
     expect(getByText("and archiving or restoring the project itself")).toBeTruthy();
-    // Ruling 503: the epic row says what editing an epic covers.
+    // Ruling 26: the epic row says what editing an epic covers.
     expect(getByText("Create & edit epics")).toBeTruthy();
     expect(getByText("their status, lead and dates")).toBeTruthy();
     expect(getByText("Create tasks")).toBeTruthy();
@@ -145,7 +145,7 @@ describe("HumanAccess", () => {
       (r) => r.querySelector(".act")!.textContent === "View board, tasks & timelines",
     )!;
     expect(viewRow.querySelectorAll(".rbac-yes")).toHaveLength(4);
-    // Ruling 148: the same words as the profile page's "Your access" list —
+    // Ruling 291: the same words as the profile page's "Your access" list —
     // the check is aria-hidden, so a glyph-only cell was silent.
     expect(container.querySelector(".rbac-yes")!.textContent).toContain("yes");
     expect(container.querySelector(".rbac-no")!.textContent).toBe("no");
@@ -196,7 +196,7 @@ describe("HumanAccess", () => {
       outcome: "refused",
     },
     {
-      // Ruling 705: nor is a disabled admin ever the last one, so the server
+      // Ruling 26: nor is a disabled admin ever the last one, so the server
       // lets its demotion go, and the page sends it.
       // CANARY: drop the target's own sign-in check from `setRole` and Elif's
       // demotion is refused "Viberr Core needs at least one admin".
@@ -228,7 +228,7 @@ describe("HumanAccess", () => {
   /* U33-4 (owner, 2026-09-03): this used to assert the sixteen role buttons
      were `disabled` — and it would have kept passing forever once they were
      gone, because `[].every()` is true. It now pins the shape the owner ruled
-     (ruling 65's withdrawn-not-disabled precedent): no picker at all for a
+     (ruling 27's withdrawn-not-disabled precedent): no picker at all for a
      reader, the member's role as a value, and the grant still named. */
   it("withdraws the role picker for a reader and renders the role as a value (U33-4)", () => {
     const { container, getAllByText, queryByText } = render(
@@ -249,7 +249,7 @@ describe("HumanAccess", () => {
       (v) => v.textContent,
     );
     expect(values).toEqual(["Admin", "Admin", "Maintainer", "Contributor"]);
-    // The role words are the VALUES; the table headers (ruling 625: the role
+    // The role words are the VALUES; the table headers (ruling 280: the role
     // over its count) are not what this counts.
     expect(getAllByText("Admin", { ignore: "th" })).toHaveLength(2);
     expect(queryByText("Viewer", { ignore: "th" })).toBeNull(); // no member holds it → no dead chip
@@ -317,7 +317,7 @@ describe("AgentCapability", () => {
     // collapsed `dispatch-agents` grant took its slot pair down to one row).
     expect(getAllByText("4 acts directly")).toHaveLength(2);
     expect(getAllByText("3 human-only")).toHaveLength(2); // operator + developer
-    // Always-human list comes from the server invariant catalog (ruling 2).
+    // Always-human list comes from the server invariant catalog (ruling 26(a)).
     expect(getByText("Merge a pull request")).toBeTruthy();
     expect(getByText("Transition a task to Done")).toBeTruthy();
     expect(getByText("Change project policy")).toBeTruthy();
@@ -586,7 +586,7 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
     });
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("On this project:");
-    // Ruling 518: the operator is one agent, so the sentence names no second
+    // Ruling 106: the operator is one agent, so the sentence names no second
     // "(Operator)" beside it. CANARY: put the parenthetical back.
     expect(note.textContent).toContain("On this project: the operator runs at full autonomy");
     expect(note.textContent).toContain("is active");
@@ -615,10 +615,10 @@ describe("WorkflowRules — states the project's operator autonomy (F20-19)", ()
     expect(note.textContent).toContain("not active");
   });
 
-  // Ruling 151 (pass 35): the closing sentence used to tell every reader that a
+  // Ruling 111 (pass 35): the closing sentence used to tell every reader that a
   // Direct-grant operator crosses the approval and human boundaries itself. The
   // engine refuses that now, so the note has to say the shipped rule.
-  it("says the boundaries bind the operator too (ruling 151)", () => {
+  it("says the boundaries bind the operator too (ruling 111)", () => {
     const { container } = renderWith(NO_OPERATOR);
     const note = container.querySelector(".pol-note.after")!;
     expect(note.textContent).toContain("bind every actor, the operator included");
@@ -684,7 +684,7 @@ describe("operatorAutonomyState (F20-19)", () => {
    opt into by name, and that github-view.tsx and settings-page.tsx each kept
    their own copy of. app.css.test.ts holds the structural gate (no style
    object, hoisted or inline, may restate a utility rule); these assert what
-   this surface actually renders. Ruling 14: never fork per surface. */
+   this surface actually renders. Ruling 297: never fork per surface. */
 describe("policy panel heads take their count styling from the sheet (F19-33)", () => {
   const expectSheetStyledCount = (container: HTMLElement) => {
     const count = container.querySelector(".panel-head .right")!;
@@ -749,11 +749,11 @@ describe("Guardrails card (E32-6, pass 32)", () => {
         .join(" | "),
     );
 
-  // Ruling 368: the request shows on the button that sent it. Apply claimed
+  // Ruling 286: the request shows on the button that sent it. Apply claimed
   // `aria-busy` for ANY policy request (every row's Apply at once) and the
   // stale row's Remove went to the .45 refused step with its resting label.
   // Canary: put `aria-busy={busy}` back on Apply in policy-page.tsx.
-  it("ruling 368: a removal in flight reads Removing… on its row; Apply claims nothing", () => {
+  it("ruling 286: a removal in flight reads Removing… on its row; Apply claims nothing", () => {
     const { getByText } = render(
       <Guardrails
         guardrails={rows}
@@ -772,7 +772,7 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     expect(apply.hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("ruling 368: a value in flight reads Applying… on its own row", () => {
+  it("ruling 286: a value in flight reads Applying… on its own row", () => {
     const { getByText } = render(
       <Guardrails
         guardrails={rows}
@@ -805,7 +805,7 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     // SAFETY: the unit-carrying row renders an <input type="number"> with this label.
     const value = getByLabelText("Compression threshold value (events)") as HTMLInputElement;
     expect(value.value).toBe("40");
-    // Ruling 147(d): Apply is inert only until the draft DIFFERS. Validity is
+    // Ruling 288: Apply is inert only until the draft DIFFERS. Validity is
     // refused on the click (below), never folded into this gate.
     const apply = getByText("Apply").closest("button")!;
     expect(apply.disabled).toBe(true);
@@ -825,10 +825,10 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     expect(container.querySelectorAll(".guard-row.inert")).toHaveLength(2);
   });
 
-  // Ruling 147: a changed-but-unusable threshold ("0", "-3", "2.5", or an
+  // Ruling 288: a changed-but-unusable threshold ("0", "-3", "2.5", or an
   // emptied box) used to leave Apply dead with no explanation. Apply now stays
   // enabled and the click is refused with the sentence the server throws.
-  it("ruling 147: an unusable guardrail draft is refused on the click, not by a dead Apply", () => {
+  it("ruling 288: an unusable guardrail draft is refused on the click, not by a dead Apply", () => {
     const onSet = vi.fn();
     const { container, getByText, getByLabelText } = render(
       <Guardrails guardrails={rows} canManage busy={false} onSet={onSet} />,
@@ -865,7 +865,7 @@ describe("Guardrails card (E32-6, pass 32)", () => {
     expect(onSet).toHaveBeenCalledWith("compression-threshold", "value", 60);
   });
 
-  it("ruling 147: an emptied threshold is refused, never written as a change", () => {
+  it("ruling 288: an emptied threshold is refused, never written as a change", () => {
     const onSet = vi.fn();
     const { container, getByText, getByLabelText } = render(
       <Guardrails guardrails={rows} canManage busy={false} onSet={onSet} />,
@@ -935,11 +935,11 @@ describe("Guardrails card (E32-6, pass 32)", () => {
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the Policy page READS the project's required
+ * Ruling 89 (pass 36, G36-3): the Policy page READS the project's required
  * reviewers (stage → agent) beside the other acceptance rules; the list is
  * edited on Settings, where the stage and agent pickers live.
  */
-describe("Required reviewers card (ruling 178)", () => {
+describe("Required reviewers card (ruling 89)", () => {
   const rules: RequiredReviewerView[] = [
     { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
     { stageId: "qa", stageName: "QA", profileId: "qa-bot", agentName: "QA Bot" },

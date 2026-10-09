@@ -77,7 +77,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
   it("a deduped report still delivers the dispatch cc's ADDED @tag (bug-sweep #7)", async () => {
     // A dispatched run whose final report REPEATS its mid-run comment verbatim
     // (F22-12) is deduped and not re-posted — but the dispatch-completion cc line
-    // (ruling 98) tags the dispatcher, a mention that comment never carried.
+    // (ruling 124) tags the dispatcher, a mention that comment never carried.
     // stripCcLine equalised the two, the reply was dropped, and the guaranteed
     // ping — fanned out only when the reply POSTED — never fired.
     const store = setupTestStore(ctx);
@@ -210,7 +210,7 @@ describe("recordAgentCompletion notifies the humans the report @tags (P13-RT-01)
     const rows = notifications(store).filter((r) => r.kind === "mention");
     expect(rows).toHaveLength(1);
     expect(rows[0]!.user_id).toBe(store.users.arda.id);
-    // Ruling 497: the verdict's row opens the verdict ("Approval noted…",
+    // Ruling 75: the verdict's row opens the verdict ("Approval noted…",
     // "Review passed", "Changes requested"), and the mention's row opens the
     // report that tagged the person. CANARY: drop `verdictAt` from the
     // verdict notice and its rows open the task's top.

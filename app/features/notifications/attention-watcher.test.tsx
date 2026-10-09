@@ -7,7 +7,7 @@ import { AttentionWatcher } from "./attention-watcher";
 import type { AttentionItem, AttentionSnapshot } from "./desktop-alerts";
 
 /**
- * Ruling 481(c) (F40-51): a decision only the owner can take reached him only
+ * Ruling 74 (F40-51): a decision only the owner can take reached him only
  * if a Viberr tab was in front of him. The watcher puts the count of unread
  * decisions in the tab's title, and (opted in) shows a desktop notification
  * for a new one while no Viberr tab has the person's attention.
@@ -85,7 +85,7 @@ function renderWatcher() {
   return router;
 }
 
-/** Ruling 481(c): a tab without the person's attention reads every 60 s.
+/** Ruling 74: a tab without the person's attention reads every 60 s.
  *  CANARY: read on any other interval and a hidden tab below reads twice in
  *  one poll, or not at all. */
 const POLL_MS = 60_000;
@@ -131,7 +131,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("AttentionWatcher (ruling 481)", () => {
+describe("AttentionWatcher (ruling 74)", () => {
   /**
    * Canary: return early from `useCountedTitle` (or drop the observer) and
    * the title never carries the count, or loses it when the page retitles.

@@ -8,7 +8,7 @@ import { launchEnv, type AgentLaunch } from "./agent-isolation.server";
 import { errorMessage } from "../../shared/errors";
 
 /**
- * Ruling 376: compact a Codex thread on demand through the CLI's app-server.
+ * Ruling 174: compact a Codex thread on demand through the CLI's app-server.
  *
  * `codex exec` and the SDK have no compaction command (verified against
  * 0.153.4: `exec --help`, the SDK's types and the config reference), but the
@@ -68,7 +68,7 @@ export interface CompactThreadInput {
   env?: Record<string, string>;
   /** Injected for tests; the real one spawns the vendored binary. */
   spawn?: SpawnAppServer;
-  /** Ruling 460: run the app-server as the person's own OS user, through the
+  /** Ruling 139: run the app-server as the person's own OS user, through the
    *  launcher — the compaction writes into their home like the run did. */
   launch?: AgentLaunch | null;
   /** How long the whole exchange may take before it is a failure (a 175k
@@ -94,7 +94,7 @@ const PLATFORM_PACKAGES = new Map<string, PlatformPackage>([
 
 /** The vendored `codex` binary and the helper directories the SDK puts on the
  *  child's PATH when it resolves the binary itself (`codex-path/`, which holds
- *  `rg`). A caller that overrides the binary (`codexPathOverride`, ruling 460)
+ *  `rg`). A caller that overrides the binary (`codexPathOverride`, ruling 139)
  *  must prepend them itself: the SDK adds none for an override. */
 export interface CodexVendor {
   binary: string;
@@ -152,7 +152,7 @@ const compactedItemSchema = z.object({
 /** A turn's error as the app-server reports it (`TurnError`). */
 const turnErrorSchema = z.object({ message: z.string().catch("") }).nullish();
 
-/** Ruling 599: the two notifications that end a compaction turn that failed:
+/** Ruling 174: the two notifications that end a compaction turn that failed:
  *  `error` (with whether the CLI retries it itself) and `turn/completed`
  *  (whose turn carries its status and, when it failed, its error). */
 const turnFailureSchema = z.object({
@@ -263,7 +263,7 @@ export function compactCodexThread(input: CompactThreadInput): Promise<CompactOu
           }
           continue;
         }
-        // Ruling 599: a compaction turn that failed ends the exchange with the
+        // Ruling 174: a compaction turn that failed ends the exchange with the
         // CLI's reason. Live, eight compactions the Codex usage limit refused
         // each waited out the whole deadline: the CLI said so, and nothing
         // here listened for anything but success.

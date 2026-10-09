@@ -43,7 +43,7 @@ import { useLiveUpdates } from "~/features/live-updates/use-live-updates";
 import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/event-types";
 
 /**
- * The controller DOCK (ruling 121): one floating Controller button on every
+ * The controller DOCK (ruling 256): one floating Controller button on every
  * signed-in surface, opening a docked, NON-MODAL panel bound to the place the
  * person is standing — the instance, one board, or one task. Mounted once in
  * root; the scope follows the matched routes (`controller-dock-context.ts`).
@@ -51,11 +51,11 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * Same controller, same authority: sending here is the same turn the full
  * page sends, through `/resources/controller`. The panel keeps the page
  * usable (no scrim, no focus trap, no scroll lock), opens on the newest thread
- * of the current scope every time (ruling 528), keeps a thread the person
+ * of the current scope every time (ruling 256), keeps a thread the person
  * picks only while it stays open, remembers its open/closed state for the
  * life of the tab, and shows one line naming what the controller knows here.
  *
- * Live (ruling 457): the dock's two resources, the open panel's view and the
+ * Live (ruling 11): the dock's two resources, the open panel's view and the
  * status every page's button reads (unseen replies, turns working), ride no
  * page revalidation. The dock loads them on the moments that change them: its
  * own opening, selection and sends, a `controller.updated` that the page's
@@ -63,14 +63,14 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * works, a 5 s poll of the small status. While open, the dock also holds its
  * own stream for the surfaces that have none.
  *
- * Ruling 457 (FL-1): this module is the CLOSED dock - the button, the panel's
+ * Ruling 11 (FL-1): this module is the CLOSED dock - the button, the panel's
  * frame and header, and all of the dock's state - and root puts it in every
  * route's first download. What the open panel draws (the transcript through
  * the markdown pipeline, the thread list, the composer) is
  * `controller-dock-panel.tsx`, loaded on the first open and preloaded when a
  * pointer or focus reaches the button.
  *
- * Ruling 700(e) (the large-component split, on the task page's recipe):
+ * Ruling 13(b) (the large-component split, on the task page's recipe):
  * `DockShell` is composition. Its state and effects are hooks, called so that
  * every fetcher keeps its key and every effect its turn: the panel's frame and
  * its per-tab restore (`useDockFrame`), the selection and the view, the small
@@ -78,19 +78,19 @@ import { CONTROLLER_UPDATED_EVENT, sseScopes } from "~/features/live-updates/eve
  * carries, the close and the focus rules. The header, the trigger and its announcer are hook-free
  * components (`DockHead`, `DockTrigger`, `DockAnnouncer`). All of it stays in
  * this one module: root ships it, and a sibling would add a module to the
- * closed dock's ruling-457 budget (controller-dock-closure.perf.test.ts).
+ * closed dock's ruling-11 budget (controller-dock-closure.perf.test.ts).
  */
 
 const OPEN_KEY = "viberr.dock.open";
 const WORKING_POLL_MS = 5_000;
 /** The dock's `c` value that means "start with no conversation": the same
  *  `"new"` as `NEW_CONVERSATION_PARAM` (conversation-param.ts), spelled here
- *  because importing that leaf adds a module to the closed dock's ruling-457
+ *  because importing that leaf adds a module to the closed dock's ruling-11
  *  budget (controller-dock-closure.perf.test.ts). */
 const NEW_THREAD = "new";
 const USER_SCOPES = [sseScopes.user()];
 
-/** The open panel's body, on demand (ruling 457, FL-1). */
+/** The open panel's body, on demand (ruling 11, FL-1). */
 const loadPanelBody = () => import("./controller-dock-panel");
 const DockPanelBody = lazy(() =>
   loadPanelBody().then((m) => ({ default: m.DockPanelBody })),
@@ -184,7 +184,7 @@ type DockSendFetcher = ReturnType<typeof useFetcher<SendResult>>;
 type DockStatusFetcher = ReturnType<typeof useFetcher<DockStatus | null>>;
 
 /**
- * The panel's frame (ruling 700(e)): whether it is open or on its way out,
+ * The panel's frame (ruling 13(b)): whether it is open or on its way out,
  * whether the tab's restore reopened it, whether the person opened it, and the
  * elements the close, the pull and focus move between. `useDockFrame` owns it
  * and the per-tab memory of whether it is open; the close and the focus rules
@@ -208,7 +208,7 @@ interface DockFrame {
 function useDockFrame(): DockFrame {
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
-  // Ruling 459 (F24), "skip animation on page load": a panel the per-tab
+  // Ruling 285 (F24), "skip animation on page load": a panel the per-tab
   // restore reopens (a reload, or a return from a page the dock is hidden on)
   // was already open, so it appears in place and a phone's trigger lands on
   // its perch instead of flying there (`data-restored`, app.css). Only the
@@ -274,7 +274,7 @@ function useDockFrame(): DockFrame {
   };
 }
 
-/** The thread the person picked (ruling 528) and the view the panel shows. */
+/** The thread the person picked (ruling 256) and the view the panel shows. */
 interface DockViewRead {
   selected: Record<string, string>;
   setSelected: Dispatch<SetStateAction<Record<string, string>>>;
@@ -288,14 +288,14 @@ interface DockViewRead {
 /** The open panel's view: the selection it asks for, the URL it loads and the
  *  payload that answers the scope the person stands in. */
 function useDockView(view: DockViewFetcher, context: DockContext, open: boolean): DockViewRead {
-  // Ruling 528: per scope, the thread the person picked, started with New or
+  // Ruling 256: per scope, the thread the person picked, started with New or
   // sent in, held while the panel stays open. Every open starts with none,
   // which asks for the scope's newest thread wherever it was written: kept per
   // tab, it hid a conversation started on the full page or on another device.
   const [selected, setSelected] = useState<Record<string, string>>({});
   const selectedId = selected[context.key] ?? null;
   // O39-d: `seen` only while the panel is open: the view is loaded only then
-  // (ruling 457), and every such load reads the transcript it shows.
+  // (ruling 11), and every such load reads the transcript it shows.
   const url = dockViewUrl(context, selectedId, open);
   const load = view.load;
   // Load whenever the panel is open and the target changes: a new scope
@@ -349,7 +349,7 @@ function useDockStatus(
 ): DockStatusRead {
   // O39-d: replies the viewer has not seen, whatever scope they were asked
   // in. A turn runs one to five minutes, and a person who moved to another
-  // page learned nothing when its answer landed. Ruling 457: the same small
+  // page learned nothing when its answer landed. Ruling 11: the same small
   // status also names the viewer's turns working right now, which is what the
   // button's announcer and the open panel's step line read.
   //
@@ -373,7 +373,7 @@ function useDockStatus(
   // says so, and the status is polled until it settles.
   const working = liveTurns.some((t) => dockScopeKey(t) === context.key);
   // The open panel's working row: the view says whether the shown thread's
-  // turn works; the status moves its step (ruling 250) between view loads.
+  // turn works; the status moves its step (ruling 257) between view loads.
   const liveShown = liveTurns.find((t) => t.id === shownId) ?? null;
   const shownTurn = current
     ? liveShown && current.turn.working
@@ -383,7 +383,7 @@ function useDockStatus(
   return { fetcher: status, shownId, unseen, working, liveShown, shownTurn };
 }
 
-/** Ruling 457 (CTL-4, CTL-2): the loads that keep the button and the open
+/** Ruling 11 (CTL-4, CTL-2): the loads that keep the button and the open
  *  transcript current without the page revalidating. */
 function useDockRefresh(
   view: DockViewFetcher,
@@ -395,7 +395,7 @@ function useDockRefresh(
   const load = view.load;
   const loadStatus = status.fetcher.load;
   const { shownId, working, liveShown } = status;
-  // Ruling 457 (CTL-4): a conversation changed somewhere (the page's stream
+  // Ruling 11 (CTL-4): a conversation changed somewhere (the page's stream
   // says so). Refresh the button, and the transcript when it is on screen.
   const viewUrl = useRef(url);
   useEffect(() => {
@@ -412,7 +412,7 @@ function useDockRefresh(
 
   // Poll while a turn is working — open or not, so the settle a paused stream
   // missed still lands, and with it the button's unread dot after the panel
-  // is closed. Ruling 457 (CTL-2): the poll reads the small
+  // is closed. Ruling 11 (CTL-2): the poll reads the small
   // status, not the whole transcript: the step line moves from it, and the
   // view is reloaded only when the status and the view disagree about whether
   // the shown turn works (it started elsewhere, or it settled).
@@ -449,12 +449,12 @@ function useDockRefresh(
 interface DockSend {
   text: string;
   setText: Dispatch<SetStateAction<string>>;
-  /** Ruling 573: the files going with the next message. */
+  /** Ruling 258: the files going with the next message. */
   files: File[];
   setFiles: Dispatch<SetStateAction<File[]>>;
   /** A send is out. */
   busy: boolean;
-  /** Sends the box, or the example the person clicked (ruling 314). */
+  /** Sends the box, or the example the person clicked (ruling 319). */
   submit: (override?: string, mode?: SendMode) => void;
 }
 
@@ -472,7 +472,7 @@ function useDockSend(
 ): DockSend {
   const push = useToast();
   const [text, setText] = useState("");
-  // Ruling 573: the files going with the next message. Held by the shell with
+  // Ruling 258: the files going with the next message. Held by the shell with
   // the text so a close keeps both; the panel's lazy module does the picking.
   const [files, setFiles] = useState<File[]>([]);
   const { selected, setSelected, selectedId, url, current } = selection;
@@ -481,7 +481,7 @@ function useDockSend(
   // A send's result: an error is a toast (the transport failed; refusals are
   // in the transcript); a success selects the thread it landed in and reloads.
   const sentUnder = useRef(context.key);
-  /** Ruling 259: what was submitted, held until the server answers. */
+  /** Ruling 319: what was submitted, held until the server answers. */
   const pending = useRef<string | null>(null);
   const pendingFiles = useRef<readonly File[]>([]);
   useFetcherResult(send, (result) => {
@@ -493,7 +493,7 @@ function useDockSend(
       pendingFiles.current = [];
       return;
     }
-    // Ruling 259: cleared HERE, and only if the box still holds what went out —
+    // Ruling 319: cleared HERE, and only if the box still holds what went out —
     // somebody who started typing the next message while this one was in
     // flight keeps it. What went out is the TRIMMED text, so the box is
     // compared trimmed too: a message sent with a trailing space or newline
@@ -502,14 +502,14 @@ function useDockSend(
     const sent = pending.current;
     const sentFiles = pendingFiles.current;
     setText((cur) => (cur.trim() === sent ? "" : cur));
-    // Ruling 573: the files the same way, each one that went out.
+    // Ruling 319: the files the same way, each one that went out.
     setFiles((cur) => cur.filter((f) => !sentFiles.includes(f)));
     pending.current = null;
     pendingFiles.current = [];
     const key = sentUnder.current;
     // A thread the selection does not name yet (a new one, or the scope's
     // newest with nothing selected) is selected, and the load effect above
-    // fetches it. Ruling 457 (CTL-4): that is the ONE load, so the thread
+    // fetches it. Ruling 11 (CTL-4): that is the ONE load, so the thread
     // already selected is reloaded here only when nothing else will. Only
     // while the panel is open and still stands where the send was made: the
     // context is the CURRENT one, so after a navigation this would ask for a
@@ -524,21 +524,21 @@ function useDockSend(
   });
 
   /**
-   * Ruling 314: `override` is the example the person clicked. It is a parameter
+   * Ruling 319: `override` is the example the person clicked. It is a parameter
    * rather than `setText` + `submit()` because React has not re-rendered inside
    * the click — reading `text` there would post the EMPTY box, which is exactly
    * the failure `pending.current` exists to make impossible for typed messages.
    */
   const submit = (override?: string, mode: SendMode = "steer") => {
     const value = (override ?? text).trim();
-    // Ruling 573: files alone are a message.
+    // Ruling 258: files alone are a message.
     if ((!value && files.length === 0) || busy || disabled || !current) return;
     const body = new FormData();
     for (const file of files) body.append("files", file);
     body.set("_csrf", csrf);
     body.set("intent", "send");
     body.set("text", value);
-    // Ruling 527: steer a working turn, or queue behind it.
+    // Ruling 319: steer a working turn, or queue behind it.
     body.set("mode", mode);
     body.set("surface", context.surface);
     // U39-24: the controller quotes times in the zone this page prints them in.
@@ -555,7 +555,7 @@ function useDockSend(
         : (current.conversation?.id ?? "");
     body.set("conversationId", target);
     sentUnder.current = context.key;
-    // Ruling 259 (pass 37, F37-90): the box keeps the words until the server
+    // Ruling 319 (pass 37, F37-90): the box keeps the words until the server
     // takes them. `setText("")` used to run here, optimistically, and nothing
     // anywhere held the string — so an expired CSRF token, a 404 on a scope
     // that is not open, or any transport failure destroyed what the person had
@@ -564,10 +564,10 @@ function useDockSend(
     // characters, typed into a two-row textarea.
     pending.current = value;
     pendingFiles.current = files;
-    // Ruling 457 (CTL-4): a send changes the conversation and nothing the page
+    // Ruling 11 (CTL-4): a send changes the conversation and nothing the page
     // under the dock renders, so it does not re-run the page's loaders; what
     // the turn then does to a board or a task arrives on that page's stream.
-    // Ruling 573: a message with files goes as a multipart form.
+    // Ruling 258: a message with files goes as a multipart form.
     send.submit(body, {
       method: "post",
       action: "/resources/controller",
@@ -592,9 +592,9 @@ function useDockClose(frame: DockFrame): DockClose {
   // transitionend (the useDialog recipe); Escape closes instantly, because a
   // keyboard-initiated action never animates.
   //
-  // Ruling 459 (F20): the entrance is a transition too (from @starting-style),
+  // Ruling 285 (F20): the entrance is a transition too (from @starting-style),
   // so `data-closing` retargets the panel from wherever it is, mid-entrance
-  // included. Nothing is pinned: ruling 453(b)'s live pose is for surfaces
+  // included. Nothing is pinned: ruling 287's live pose is for surfaces
   // that still enter on a keyframe, which Chrome will not transition out of.
   const closeDock = useCallback(
     (instant: boolean) => {
@@ -649,7 +649,7 @@ function useDockClose(frame: DockFrame): DockClose {
       if (fallback !== null) clearTimeout(fallback);
     };
   }, [closing, panelRef, setClosing, setOpen]);
-  // Ruling 454: at sheet width a finger pulls the dock down to dismiss it.
+  // Ruling 285: at sheet width a finger pulls the dock down to dismiss it.
   // The gesture has already carried the sheet out of sight when it calls
   // back, so the unmount is the instant one.
   //
@@ -657,7 +657,7 @@ function useDockClose(frame: DockFrame): DockClose {
   // closed layout effect stops a return spring, a dismiss spring or a
   // reduced-motion fade and clears the host in the close's own commit (the
   // closing rules never read `--sheet-drag`, so the exit looks the same).
-  // Left running, a trigger click that takes the close back (ruling 459,
+  // Left running, a trigger click that takes the close back (ruling 285,
   // F20) would drop [data-closing] under a live `data-sheet-drag`, whose
   // `transition: none` snaps the sheet and its perched trigger onto the
   // spring's offset instead of retargeting, and a dismiss spring would then
@@ -674,7 +674,7 @@ function useDockClose(frame: DockFrame): DockClose {
   // finding 8). An outside press still never closes the dock.
   //
   // Interface review 2026-09-24 (acce-14): one exception. With no focus trap
-  // (ruling 121), Tab walks onto page controls the panel covers, and at 320px
+  // (ruling 318), Tab walks onto page controls the panel covers, and at 320px
   // or 200% zoom the sheet covers most of the page. Escape with focus on such a
   // control closes the dock and uncovers it, leaving focus where it is (WCAG
   // 2.4.11). Everything finding 8 protects still leaves the dock alone: an
@@ -744,7 +744,7 @@ function useDockFocus(frame: DockFrame, disabled: boolean, threadsOpen: boolean)
     }
     wasOpen.current = open;
   }, [open, focusInside, openedByUser, hadFocusInside, fabRef]);
-  // Ruling 457 (FL-1): the body can land after the open that asked for it (its
+  // Ruling 11 (FL-1): the body can land after the open that asked for it (its
   // module loads on demand), and the open above could then only focus the
   // panel itself. Move in once it is there, only while focus still rests on
   // the panel - the same rule the re-aim below keeps.
@@ -788,7 +788,7 @@ function fullPageHref(current: ControllerDockView | null, context: DockContext):
   return (
     (current?.scope.pageHref ??
       (context.projectSlug ? `/projects/${context.projectSlug}/controller` : "/controller")) +
-    // Ruling 121 + pass 33: the page now opens this scope's NEWEST thread when
+    // Ruling 256 + pass 33: the page now opens this scope's NEWEST thread when
     // no `?c=` is given (U33-8), so a dock sitting on a fresh, unsent thread must
     // say so explicitly — a bare link would hand the person an older
     // conversation instead of the blank composer they were looking at. `?c=new`
@@ -801,8 +801,8 @@ function fullPageHref(current: ControllerDockView | null, context: DockContext):
 
 function DockShell({ context }: { context: DockContext }) {
   const csrf = useCsrfToken();
-  // Ruling 457: a failed load answers null (the route's `clientLoader`), read
-  // like the time before the first answer. Ruling 700(e): the two fetchers
+  // Ruling 11: a failed load answers null (the route's `clientLoader`), read
+  // like the time before the first answer. Ruling 13(b): the two fetchers
   // come first, so their effects keep running ahead of the restore's.
   const view = useFetcher<DockPayload | null>({ key: "controller-dock" });
   const send = useFetcher<SendResult>({ key: "controller-dock-send" });
@@ -835,7 +835,7 @@ function DockShell({ context }: { context: DockContext }) {
   };
 
   const onTrigger = () => {
-    // Ruling 459 (F20): a click while the panel leaves takes the close
+    // Ruling 285 (F20): a click while the panel leaves takes the close
     // back. Dropping `data-closing` retargets the exit transition to
     // the open pose from wherever it has got to, and the closing
     // effect's cleanup drops its listener and timer. It is an open the
@@ -866,7 +866,7 @@ function DockShell({ context }: { context: DockContext }) {
     }
     openedByUser.current = true;
     setRestoredOpen(false);
-    // Ruling 528: a fresh open asks for the scope's newest thread; what
+    // Ruling 256: a fresh open asks for the scope's newest thread; what
     // was picked while the panel was last open stayed with that open.
     setSelected({});
     setOpen(true);
@@ -902,7 +902,7 @@ function DockShell({ context }: { context: DockContext }) {
             closeDock(true);
           }}
         >
-          {/* Ruling 454: at sheet width the grabber and the header are the
+          {/* Ruling 285: at sheet width the grabber and the header are the
               sheet's drag handles (useSheetDrag); the grabber only says so.
               Close stays the named way out. */}
           <div className="dock-grabber" data-sheet-handle aria-hidden="true" />
@@ -1051,7 +1051,7 @@ function DockTrigger({
       // decided this in command-palette.tsx and create-profile-modal.tsx):
       // the panel only exists while open.
       aria-controls={open ? "controller-dock-panel" : undefined}
-      // Ruling 457 (FL-1): the open panel's body loads on demand; a pointer
+      // Ruling 11 (FL-1): the open panel's body loads on demand; a pointer
       // or focus on the button is the moment to fetch it, so a click finds
       // it there.
       onPointerEnter={preloadPanelBody}
@@ -1059,7 +1059,7 @@ function DockTrigger({
       onClick={onClick}
     >
       <Icon name="cpu" />
-      {/* Ruling 528: the one dot is a reply the viewer has not read. A
+      {/* Ruling 291: the one dot is a reply the viewer has not read. A
           working turn shows in the open panel, never as a dot here. */}
       {unseenCount > 0 && <span className="unseen-dot" aria-hidden="true" />}
     </button>
@@ -1067,10 +1067,10 @@ function DockTrigger({
 }
 
 /**
- * The button carries no working dot (ruling 528), and the panel's working row
+ * The button carries no working dot (ruling 291), and the panel's working row
  * is visual only and unmounted while the dock is closed — so the one
  * programmatic form of "a turn is running" lives here, outside the panel
- * (review finding 26, ruling 476(d)).
+ * (review finding 26, ruling 320).
  */
 function DockAnnouncer({
   current,

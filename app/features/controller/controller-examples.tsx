@@ -1,7 +1,7 @@
 import { Icon, type IconName } from "~/ui/icon";
 
 /**
- * Ruling 314: three things to ask, scoped to where the person is standing.
+ * Ruling 319: three things to ask, scoped to where the person is standing.
  *
  * The empty dock said what the controller KNOWS ("the controller already has
  * its task file") and nothing about what it can DO, so a person who had never
@@ -13,11 +13,11 @@ import { Icon, type IconName } from "~/ui/icon";
  * third is deliberately a DO rather than an ask — the dock's own composer says
  * "or tell it what to do here", and nothing demonstrated that half.
  *
- * Ruling 419(g): one module for both composers. The dock offered these and the
+ * Ruling 321: one module for both composers. The dock offered these and the
  * full controller page, the surface a person opens on purpose to start
  * something, offered a paragraph and an empty box.
  *
- * Ruling 516: each carries the app's own glyph for what it is about (the
+ * Ruling 256: each carries the app's own glyph for what it is about (the
  * board's "waiting on you" hand and blocked mark, the Insights pulse, the
  * pencil of a draft), and the list is drawn here, once, for both composers.
  */
@@ -55,11 +55,11 @@ export function controllerExamples(scope: ControllerExampleScope): ControllerExa
 }
 
 /**
- * Ruling 314: clicking one SENDS it. An example that only filled the box would
+ * Ruling 319: clicking one SENDS it. An example that only filled the box would
  * teach the same lesson and then ask the person to find the button, which is
  * the thing they were already unsure about.
  *
- * Ruling 516: a row, not a box — the glyph of what it is about, the sentence,
+ * Ruling 291: a row, not a box — the glyph of what it is about, the sentence,
  * and an arrow that says the click goes somewhere. The glyph and the arrow are
  * drawn, never read: the button's name is the sentence it sends.
  */

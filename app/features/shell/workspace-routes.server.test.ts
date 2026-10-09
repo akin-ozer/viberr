@@ -152,7 +152,7 @@ describe("workspace layout loader (seeded)", () => {
       );
     });
 
-    it("ruling 457: the board's own loader refuses a non-member the same way", async () => {
+    it("ruling 11: the board's own loader refuses a non-member the same way", async () => {
       // Single fetch honors `?_routes=`, so the board loader can run without
       // the layout's (F19-28): it carries the layout's refusal, byte for byte.
       const { loader } = await import("~/routes/project.board");
@@ -294,7 +294,7 @@ describe("workspace layout loader (seeded)", () => {
       import("~/routes/project.board"),
     ]);
     const { cookie } = await app.cookieFor(seedIds.arda);
-    // One board request: the layout and the board's own loader (ruling 457,
+    // One board request: the layout and the board's own loader (ruling 11,
     // BOARD-6) on one Request.
     const args = loaderArgs(
       "/projects/viberr-core/board",
@@ -326,7 +326,7 @@ describe("workspace layout loader (seeded)", () => {
     expect(result.reviewCount).toBe(3);
     expect(result.violations).toBe(1); // seeded VIB-142 PAT-scope violation
     expect(result.myRole).toBe("admin");
-    // Ruling 457 (owner, 2026-09-24): the bell's counts, not its list.
+    // Ruling 300 (owner, 2026-09-24): the bell's counts, not its list.
     expect(result.unread).toBe(6);
     expect(result.orphanUnread).toBe(0);
     expect(result).not.toHaveProperty("notifications");
@@ -444,7 +444,7 @@ describe("home loader (seeded)", () => {
     expect(core.dist.review).toBe(2);
     expect(core.dist.done).toBe(2);
     expect(core.members.length).toBe(4);
-    // Custom 3-stage board fixture carries its OWN stage list (ruling 15).
+    // Custom 3-stage board fixture carries its OWN stage list (ruling 47).
     const billing = result.projects.find((p) => p.slug === "billing-service")!;
     expect(billing.stages.map((s) => s.id)).toEqual(["todo", "doing", "done"]);
     // Seeded pins mirror the mock's starred flags.
@@ -561,7 +561,7 @@ describe("create-project action (home)", () => {
         owner: "akin-ozer",
         repoName: "payments-gateway",
         // P13-AP-04: no `template` field any more — the "Lightweight ·
-        // 3 stages" preset was deleted (owner ruling 2), so creation always
+        // 3 stages" preset was deleted (P13 owner decision 2), so creation always
         // produces the Standard 5-stage board.
         policy: "strict",
       }),
@@ -608,7 +608,7 @@ describe("create-project action (home)", () => {
     expect(result.error).toContain("already exists");
   });
 
-  it("rulings 667 and 672: the form creates a project with no repository, as the board it says it is; half a repository is refused", async () => {
+  it("ruling 224: the form creates a project with no repository, as the board it says it is; half a repository is refused", async () => {
     // CANARY: stop reading `delivers` in the route and "Results · no code"
     // is written as a software board, its Developer able to write a
     // repository the board will never have; require a repository of a
@@ -690,7 +690,7 @@ describe("create-project action (home)", () => {
     expect(row?.role).toBe("admin");
   });
 
-  it("ruling 462: the modal's createRepository choice reaches createProject with its visibility", async () => {
+  it("ruling 225: the modal's createRepository choice reaches createProject with its visibility", async () => {
     // CANARY: stop reading `createRepository` off the form and no create is
     // asked of GitHub; read "public" as private and the body says so.
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");

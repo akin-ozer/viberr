@@ -11,7 +11,7 @@ import {
 } from "./runtime-types";
 
 /**
- * Ruling 457 (LIVE-2 / TASK-1 / LIVE-3): the run-log console's line buffer,
+ * Ruling 11 (LIVE-2 / TASK-1 / LIVE-3): the run-log console's line buffer,
  * held OUTSIDE React state.
  *
  * The buffer used to be the task page's own state (`useRunLogStream` ran in
@@ -70,7 +70,7 @@ export interface ThreadView {
   /**
    * The stored lines that EXIST for the thread (the console's "N events"),
    * UI-53 boundaries excluded: the window's `totalLines` plus every line the
-   * tail appended since. Ruling 457 (LIVE-1): the page no longer revalidates
+   * tail appended since. Ruling 11 (LIVE-1): the page no longer revalidates
    * per line, so the count follows the tail rather than the loader.
    */
   total: number;
@@ -116,7 +116,7 @@ export interface RunLogStore {
   subscribe(listener: () => void): () => void;
   /** The thread, or null when the store does not know it (yet). */
   thread(threadId: string): ThreadView | null;
-  /** A run's live facts as its newest tail read them (ruling 457, LIVE-1). */
+  /** A run's live facts as its newest tail read them (ruling 11, LIVE-1). */
   facts(runId: string): RunLiveFacts | null;
   /** UI-03/UI-30: why the live tail stopped, or null while it follows. */
   streamError(): string | null;
@@ -274,7 +274,7 @@ export interface LiveRunLogStore extends RunLogStore {
   poll(runId: string): Promise<string | null>;
   /** Aborts every request in flight (unmount). React can go on using a
    *  disposed store, so a window load it cuts short is asked again the next
-   *  time its thread is shown (ruling 524(e)). */
+   *  time its thread is shown (ruling 153). */
   dispose(): void;
 }
 
@@ -333,7 +333,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
   };
 
   /**
-   * Ruling 457 (CON-7): the NEWEST read of a run's facts wins, not the last
+   * Ruling 11 (CON-7): the NEWEST read of a run's facts wins, not the last
    * to arrive. A revalidation's projection and a tail read race, and taking
    * whichever landed last stepped the strip's turns back (5, 4, 5), or left a
    * settled run on a late pre-finalization tail answer for good. Each read is
@@ -416,7 +416,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
   };
 
   /**
-   * Ruling 457 (CON-2): a thread the tail fell more than one window behind
+   * Ruling 11 (CON-2): a thread the tail fell more than one window behind
    * (a tab back from hidden, a resync, a revalidation after a long gap) is
    * re-windowed, the bounded read a fresh load makes, instead of reading every
    * missed line forward in one request and holding them all. A shown console
@@ -472,7 +472,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
   };
 
   /**
-   * Ruling 457 (CON-1): the Live run strip reads a run's facts from this
+   * Ruling 11 (CON-1): the Live run strip reads a run's facts from this
    * store, and only a `ready` thread tails, so a running agent whose console
    * was never shown (the strip's picker is its own, and a hard load carries
    * one group's lines) kept the loader's phase, step, turns and tokens for
@@ -514,7 +514,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
       t.replacing = false;
       update(t, { status: "failed", loadError });
     };
-    // Ruling 524(e): a request `dispose` aborted is not a failure, and the
+    // Ruling 153: a request `dispose` aborted is not a failure, and the
     // thread is no longer this request's (`dispose` handed it back).
     const { signal } = abort;
     try {
@@ -530,7 +530,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
       const seeded = keyedLines(lines, lineKeys, []);
       t.runIds = logWindow.runIds;
       t.page = seedPageCursor(logWindow);
-      // Ruling 457 (CON-5): the window answers for the group's representative
+      // Ruling 11 (CON-5): the window answers for the group's representative
       // NOW, which may be a newer run than the page projected (a resume
       // before the state-change revalidation landed). Follow that run: kept on
       // the old one, the tail re-read its lines past a stale cursor and
@@ -564,7 +564,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
    * holds without one, a backward page per run (`before` its newest missing
    * seq, as many as it misses, at most 500 at a time).
    *
-   * Ruling 457 (CON-8): lines can arrive without their envelope after the
+   * Ruling 300 (CON-8): lines can arrive without their envelope after the
    * view opened (a `raw=0` tail read or an older page already in flight at
    * the toggle). Those appends ask for a fill too, and one asked for while a
    * fill is in flight runs once it ends, so no row reads "loading the stored
@@ -772,7 +772,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
         const fresh = fromInput(input);
         if (held?.shown) {
           fresh.shown = true;
-          // Ruling 457 (CON-3): a revalidation carries no lines, and swapping
+          // Ruling 11 (CON-3): a revalidation carries no lines, and swapping
           // in the empty thread blanked a console the reader was looking at
           // ("loading this console…") for the window's round trip. It keeps
           // drawing what it holds until the new run's window replaces it.
@@ -820,7 +820,7 @@ export function createLiveRunLogStore(threads: readonly ConsoleThreadInput[]): L
     dispose() {
       abort.abort();
       abort = new AbortController();
-      // Ruling 524(e): under StrictMode, React's development build (the dev
+      // Ruling 153: under StrictMode, React's development build (the dev
       // server) rehearses every mount: the console shows its thread, the
       // page's cleanup disposes the store, and the console shows it again.
       // The aborted window load read as "the request failed" until the

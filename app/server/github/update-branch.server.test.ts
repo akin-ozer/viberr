@@ -59,7 +59,7 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
-/** Ruling 134(c): what origin's copy of the task branch looks like. */
+/** Ruling 229: what origin's copy of the task branch looks like. */
 type FakeRemote =
   | { kind: "current" }
   | { kind: "behind"; ahead: number }
@@ -88,12 +88,12 @@ function fakeGit(opts: {
   pushStderr?: string;
   /** Origin's copy of the task branch (default: current). */
   remote?: FakeRemote;
-  /** Ruling 132: `rev-parse HEAD` after the merge answers nothing. */
+  /** Ruling 239: `rev-parse HEAD` after the merge answers nothing. */
   mergeShaUnreadable?: boolean;
-  /** Ruling 159(b): the store-layout paths HEAD's tree carries, as
+  /** Ruling 229: the store-layout paths HEAD's tree carries, as
    *  `git ls-tree -r -z` reports them (NUL-terminated, unquoted). */
   storeLayoutFiles?: string[];
-  /** Ruling 428: the files the branch changes since it forked from the base,
+  /** Ruling 241: the files the branch changes since it forked from the base,
    *  as the lease gate reads them (`merge-base`, then `log --name-only`). */
   branchFiles?: string[];
 } = {}) {
@@ -211,7 +211,7 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
       commits: 3,
       mergeSha: MERGE_SHA,
       baseSha: BASE_SHA,
-      // Ruling 439: the head the merge was made on. Canary: drop `onto: preSha`.
+      // Ruling 239: the head the merge was made on. Canary: drop `onto: preSha`.
       onto: PRE_SHA,
       remoteBefore: { kind: "current", headSha: PRE_SHA },
       remote: { kind: "current", headSha: MERGE_SHA },
@@ -252,7 +252,7 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     expect(flat).not.toMatch(/rebase/);
     expect(flat).not.toMatch(/--force|-f\b/);
     // The PUSH refspec is never forced. (The FETCH of origin's copy of the
-    // branch, ruling 134(c), force-updates the local tracking ref with a `+`,
+    // branch, ruling 229, force-updates the local tracking ref with a `+`,
     // which touches nothing on the remote.)
     for (const push of git.calls.filter((c) => c.includes("push"))) {
       expect(push.join(" ")).not.toMatch(/\+refs\/heads\/vib-1/);
@@ -296,7 +296,7 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     expect(filesAt).toBeLessThan(abortAt);
   });
 
-  it("ruling 144(c): a workflow-scope refusal is named, not dropped in the generic bucket", async () => {
+  it("ruling 221(a): a workflow-scope refusal is named, not dropped in the generic bucket", async () => {
     // The DELIVERY push classifies this and names the remedy; the operator's
     // base-refresh push — the sibling — never did, so a branch that touches
     // `.github/workflows/` failed with "pushing the updated branch returned
@@ -396,12 +396,12 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
 });
 
 /**
- * Ruling 134(c) (pass 34, F34-11): the update reports origin's copy of the
+ * Ruling 229 (pass 34, F34-11): the update reports origin's copy of the
  * TASK branch beside its base answer, derived locally from the fetched remote
  * ref. Canary: drop the branch fetch (`readRemoteBranchState` returns
  * `unknown`) and every state below reads `unknown`.
  */
-describe("ruling 134(c): origin's copy of the task branch", () => {
+describe("ruling 229: origin's copy of the task branch", () => {
   it("`already_current` carries `behind` with the count when origin lags the workspace", async () => {
     bindPat();
     const git = fakeGit({ behind: 0, remote: { kind: "behind", ahead: 2 } });
@@ -445,11 +445,11 @@ describe("ruling 134(c): origin's copy of the task branch", () => {
 });
 
 /**
- * Ruling 132 (pass 34, F34-14): an updated branch names its merge commit and
+ * Ruling 239 (pass 34, F34-14): an updated branch names its merge commit and
  * the base tip, read BEFORE the push; a refresh that cannot be recorded is
  * rolled back and never published. Canary: return the old four-field result.
  */
-describe("ruling 132: the refresh is recorded before it is published", () => {
+describe("ruling 239: the refresh is recorded before it is published", () => {
   it("an updated branch names its merge commit and the base tip, and merges with --no-ff", async () => {
     bindPat();
     const git = fakeGit({ behind: 2 });
@@ -475,14 +475,14 @@ describe("ruling 132: the refresh is recorded before it is published", () => {
 });
 
 /**
- * Ruling 159(b), pass 35 review: the delivery push is not the only door that
+ * Ruling 229, pass 35 review: the delivery push is not the only door that
  * publishes the branch. This one pushes the whole workspace HEAD, so the stray
  * store-layout folder a refused delivery left committed on the local branch
  * would reach origin the moment an acceptance (or the operator's
  * `update_branch_from_base`) refreshed it. Canary: drop the tree read and the
  * push runs.
  */
-describe("ruling 159: the base refresh will not publish the store layout either", () => {
+describe("ruling 229: the base refresh will not publish the store layout either", () => {
   const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/résumé.png`;
 
   it("refuses a branch whose tree carries the store layout, merging and pushing nothing", async () => {
@@ -501,12 +501,12 @@ describe("ruling 159: the base refresh will not publish the store layout either"
 });
 
 /**
- * Ruling 428 (pass 39): the base refresh is a door that publishes the branch,
- * and ruling 245's lease gate stood only at the delivery push. Live on
+ * Ruling 241 (pass 39): the base refresh is a door that publishes the branch,
+ * and ruling 60's lease gate stood only at the delivery push. Live on
  * ax-clone at 00:11, AX-22's refresh published its rework commit while AX-20
  * held `internal/controller/task.go`, which AX-22's branch changes.
  */
-describe("ruling 428: the base refresh honours file leases", () => {
+describe("ruling 241: the base refresh honours file leases", () => {
   function leaseTo(holder: string, paths: string[]): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter(holder, { stage: "review", branch: holder.toLowerCase() }),
@@ -535,7 +535,7 @@ describe("ruling 428: the base refresh honours file leases", () => {
     leaseTo("VIB-2", ["internal/controller/task.go"]);
     const clear = fakeGit({ behind: 2, branchFiles: ["internal/controller/gateway.go"] });
     expect(await run(clear.exec)).toMatchObject({ status: "updated" });
-    // Ruling 245(b): the holder merged, so the lease is spent.
+    // Ruling 60: the holder merged, so the lease is spent.
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { stage: "done", branch: "vib-2" }),
     });

@@ -1,5 +1,5 @@
 /**
- * Ruling 245 (pass 37, F37-74): per-file LEASES — which task owns a path until
+ * Ruling 60 (pass 37, F37-74): per-file LEASES — which task owns a path until
  * it merges.
  *
  * The project's conventions encode several rules that all need to name a file's
@@ -28,7 +28,7 @@ export interface FileLease {
   paths: string[];
   /** The ONE task that holds them. A lease whose holder has reached a terminal
    *  stage or been archived binds nobody — resolved at READ time by
-   *  `activeFileLeases` (ruling 245(b)), never by a sweep that a completion
+   *  `activeFileLeases` (ruling 60), never by a sweep that a completion
    *  path could miss. */
   taskKey: string;
   /** Why it is held, in the holder's own words. Rendered wherever it refuses. */
@@ -98,7 +98,7 @@ function segmentsIntersect(a: string, b: string): boolean {
 }
 
 /**
- * Ruling 417: can one path fall under BOTH globs?
+ * Ruling 61: can one path fall under BOTH globs?
  *
  * Two leases whose globs overlap refuse each other's deliveries: a task that
  * changes a path both cover is refused by the lease it does not hold, so

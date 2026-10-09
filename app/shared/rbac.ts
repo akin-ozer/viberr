@@ -67,7 +67,7 @@ export const RBAC_DEFINITIONS = [
   // who can create and own a task also grooms its metadata. Distinct from
   // `update-goal` ([A,M]): the goal is the reviewable acceptance contract, and
   // three of the four things here are scheduling metadata that changes no gate.
-  // Ruling 309(a): the label named three of the four things this gates, and the
+  // Ruling 26(b): the label named three of the four things this gates, and the
   // fourth is not like the others — `setTaskDependencies` runs on this action
   // too (dependencies.server.ts), and clearing what a task waits on RELEASES a
   // held task onto the board. A table saying "priority, labels & due date" tells
@@ -77,7 +77,7 @@ export const RBAC_DEFINITIONS = [
   {
     id: "edit-task-meta",
     label: "Edit task priority, labels & due date",
-    // Ruling 503: and which epic the task is in, which is planning metadata
+    // Ruling 26: and which epic the task is in, which is planning metadata
     // exactly like a label.
     covers: "the epic a task is in, and what it waits on, which releases it when cleared",
     roles: [A, M, C],
@@ -87,10 +87,10 @@ export const RBAC_DEFINITIONS = [
   // task and changes no gate. Its own row rather than a rider on
   // `edit-task-meta`, because a table that gates attachments under a label
   // reading "priority, labels & due date" answers "who can attach the
-  // fixture?" nowhere — which is the mistake ruling 309(a) corrected for
+  // fixture?" nowhere — which is the mistake ruling 26(b) corrected for
   // dependencies.
   { id: "attach-file", label: "Attach a file to a task", roles: [A, M, C] },
-  // Ruling 503: an epic is planning, held by every role that can create the
+  // Ruling 26: an epic is planning, held by every role that can create the
   // tasks it groups. Putting a task in one or taking it out is the task's own
   // metadata (`edit-task-meta` above), so this row is the epic itself: its
   // name, description, status, colour, lead and dates. There is no delete.
@@ -115,7 +115,7 @@ export const RBAC_DEFINITIONS = [
   { id: "release-any-ownership", label: "Release any task owner", roles: [A] },
   { id: "manage-members", label: "Manage members & roles", roles: [A] },
   { id: "manage-agents", label: "Manage agent profiles", roles: [A] },
-  // Ruling 525: deleting a controller conversation somebody else started,
+  // Ruling 26: deleting a controller conversation somebody else started,
   // when it is about this project (bound to its board or anchored to one of
   // its tasks). The person who started one may always delete it and an org
   // admin may delete any, so neither needs this row, and a conversation about
@@ -126,7 +126,7 @@ export const RBAC_DEFINITIONS = [
     covers: "the ones about this project's board and tasks; everyone may delete their own",
     roles: [A],
   },
-  // Ruling 309(a): also the gate on archiving and restoring a project
+  // Ruling 26(b): also the gate on archiving and restoring a project
   // (`setProjectArchived`), which the label named nowhere — so "who can
   // unarchive this?" had no answer on the page that exists to answer it.
   {
@@ -135,8 +135,8 @@ export const RBAC_DEFINITIONS = [
     covers: "and archiving or restoring the project itself",
     roles: [A],
   },
-  // Ruling 582: taking a file off a task's record: a secret, or a benchmark's
-  // answer key, where agents and people read it. Ruling 584 gave a comment's
+  // Ruling 80: taking a file off a task's record: a secret, or a benchmark's
+  // answer key, where agents and people read it. Ruling 133 gave a comment's
   // words to the operator instead.
   { id: "remove-from-record", label: "Remove a file from a task", roles: [A] },
   // Admin-only override of the required-reviewer / blocked-packet acceptance gate
@@ -148,7 +148,7 @@ export const RBAC_DEFINITIONS = [
   id: string;
   label: string;
   /** What this action ALSO gates, when the grant name does not carry it.
-   *  Ruling 309(a): the name is used inline ("the X grant") and has to stay
+   *  Ruling 26(b): the name is used inline ("the X grant") and has to stay
    *  short; the scope still has to be somewhere a person and a model can read. */
   covers?: string;
   roles: readonly ProjectRole[];
@@ -166,7 +166,7 @@ const ACTION_ROLES = new Map<RbacAction, readonly ProjectRole[]>(
  * A project role as a page receives it, a plain string (the layout loader's
  * `myRole`, a member's stored role), read against the four roles rather than
  * cast into them. Anything else is no role at all, which is what `roleCan`
- * answers for a non-member (ruling 657: one decoder where four modules kept a
+ * answers for a non-member (ruling 12: one decoder where four modules kept a
  * copy and six cast).
  */
 export function asProjectRole(raw: string | null | undefined): ProjectRole | null {

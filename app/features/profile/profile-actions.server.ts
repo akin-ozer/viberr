@@ -92,7 +92,7 @@ export function updateProfileIdentity(
   };
 }
 
-/** Notification-routing toggle (app channel only — ruling 13). */
+/** Notification-routing toggle (app channel only — ruling 30). */
 export function setNotifRoutingPref(
   db: DatabaseSync,
   userId: string,
@@ -172,7 +172,7 @@ export async function changeOwnPassword(
 
 /**
  * GitHub identity disconnect (attribution only). Connected state is
- * derived from users.idp (ruling 13); disconnecting flips sign-in back to
+ * derived from users.idp (ruling 30); disconnecting flips sign-in back to
  * the local account — refused when no password exists (the account would
  * lock itself out). Audit-relevant per profile.md §5.
  */
@@ -202,12 +202,12 @@ export function disconnectGithubIdentity(
   };
 }
 
-// ------------------------------------------------ agent accounts (ruling 127)
+// ------------------------------------------------ agent accounts (ruling 137)
 
 /**
  * Profile → Agent accounts. Every run this instance starts bills ONE person's
  * provider account, so connecting Claude and Codex is a personal action taken
- * here, not a deployment setting (ruling 127).
+ * here, not a deployment setting (ruling 137).
  *
  * These wrappers turn the account store's and the sign-in driver's answers into
  * the sentence a person reads, and `disconnectAgentAccount` resolves the vendor
@@ -217,7 +217,7 @@ export function disconnectGithubIdentity(
 
 /**
  * Start the vendor's own hosted sign-in for this person: into a new account
- * (ruling 507), or with `accountId` into one of their existing sign-ins.
+ * (ruling 138), or with `accountId` into one of their existing sign-ins.
  *
  * No `binaries` override: the driver resolves the ONE binary this flow needs,
  * so a server that has Anthropic's optional package but not OpenAI's can still
@@ -252,7 +252,7 @@ export function cancelBackendSignIn(
 
 /**
  * Store a pasted key or workspace access token as a new account, which becomes
- * the one this person's runs bill. Nothing is replaced (ruling 507): whatever
+ * the one this person's runs bill. Nothing is replaced (ruling 138): whatever
  * was connected stays connected, one switch away.
  */
 export async function connectBackendKey(
@@ -273,7 +273,7 @@ export async function connectBackendKey(
   };
 }
 
-/** Ruling 507: make one of this person's accounts the one their runs bill.
+/** Ruling 138: make one of this person's accounts the one their runs bill.
  *  No sign-in runs; the toast names the account now in use. */
 export function switchAgentAccount(
   db: DatabaseSync,
@@ -284,7 +284,7 @@ export function switchAgentAccount(
   return { toast: `${BACKEND_LABEL[row.backend]} runs now use ${backendAccountName(row)}` };
 }
 
-/** Ruling 507: name one of this person's accounts, or clear its name. */
+/** Ruling 138: name one of this person's accounts, or clear its name. */
 export function renameAgentAccount(
   db: DatabaseSync,
   actor: ProfileActor,
@@ -300,7 +300,7 @@ export function renameAgentAccount(
 }
 
 /**
- * Disconnect ONE of this person's accounts (ruling 507). This backend's
+ * Disconnect ONE of this person's accounts (ruling 138). This backend's
  * `binary` rides along because a vendor SIGN-IN is logged out with that
  * vendor's own logout first; without it the store would delete the local
  * credential and leave the vendor-side session alive. `backendBinaryIfPresent`

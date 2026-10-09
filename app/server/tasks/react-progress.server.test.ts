@@ -4,7 +4,7 @@ import { serverOutcomeSentence } from "~/shared/packet-server-outcome";
 import { headMovedSince, stuckLoopStandings } from "./react-progress.server";
 
 /**
- * Ruling 489 (pass 40, F40-68): the react loop's progress signal is the work
+ * Ruling 119 (pass 40, F40-68): the react loop's progress signal is the work
  * revision the server writes, never the agent's prose. The completion tests in
  * `agent-completion.server.test.ts` drive the loop end to end; these pin the
  * reading itself, one arm at a time.
@@ -29,7 +29,7 @@ function revision(patch: Partial<WorkRevision> = {}): WorkRevision {
   };
 }
 
-describe("ruling 489: headMovedSince reads the revision the server wrote", () => {
+describe("ruling 119: headMovedSince reads the revision the server wrote", () => {
   it("a revision minted during the hop is a committed head, whatever its file says of its kind", () => {
     // CANARY: drop the committed arm and the WEB-8 rework reads as no progress.
     expect(headMovedSince(revision({ createdAt: DURING }), HOP)).toEqual({
@@ -75,7 +75,7 @@ describe("ruling 489: headMovedSince reads the revision the server wrote", () =>
   });
 });
 
-describe("ruling 489: the operator reads what the delivery option did, in Viberr's words", () => {
+describe("ruling 62: the operator reads what the delivery option did, in Viberr's words", () => {
   it("names the PR and the head, or the delivery's own refusal", () => {
     // CANARY: drop the delivery arm of `serverOutcomeSentence` and the
     // operator's packet-resolved turn states nothing about the delivery.
@@ -99,14 +99,14 @@ describe("ruling 489: the operator reads what the delivery option did, in Viberr
     ).toBe("the delivery did not complete (the remote branch diverged); nothing reached the review PR.");
   });
 
-  it("a diverged own PR gets ruling 321's one remedy sentence", () => {
+  it("a diverged own PR gets ruling 230's one remedy sentence", () => {
     expect(
       serverOutcomeSentence({ kind: "resolve_remote_collision", outcome: "own_pr_diverged", prNumber: 5 }),
     ).toContain(DIVERGED_BRANCH_REMEDY);
   });
 });
 
-describe("ruling 489: the capped packet quotes the report's first paragraph", () => {
+describe("ruling 119: the capped packet quotes the report's first paragraph", () => {
   /** The packet body for a task with no head on record, after `replyText`. */
   const body = (replyText: string | null) =>
     stuckLoopStandings({ fm: { workRevision: null, pr: null }, gates: [], replyText, agentHandle: "dev" }).text;

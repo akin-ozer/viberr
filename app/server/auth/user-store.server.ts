@@ -177,7 +177,7 @@ export function updateUserFields(
 }
 
 /**
- * Ruling 154: the still-enabled accounts, other than `exceptUserId`, that carry
+ * Ruling 29: the still-enabled accounts, other than `exceptUserId`, that carry
  * this GitHub handle.
  *
  * `users.github_handle` gained a second writer in pass 35 (an org admin links

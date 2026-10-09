@@ -45,7 +45,7 @@ import { SettingsPage } from "~/features/project-settings/settings-page";
  * /projects/:slug/settings — the project-admin surface (project-settings
  * spec), replacing the phase-4 placeholder. Loader: identity + stages +
  * per-stage counts + membership (with invite status) + credential health
- * (ruling-5 single fact). Actions (POST + CSRF):
+ * (ruling-221 single fact). Actions (POST + CSRF):
  * identity save, stage editor mutations, membership CRUD,
  * grant-scope (phase-7 revalidateProjectCredential — resolves the seeded
  * VIB-142 violation and drops the rail badge), and the danger-zone delete.
@@ -182,9 +182,9 @@ export async function action({ request, params }: Route.ActionArgs) {
       // nothing could write. One project, one repository.
       //
       // Owner ruling 2026-07-26: …and one door that changes WHICH repository
-      // (ruling 539 named it Change). The human types the new owner/name; the
+      // (ruling 226 named it Change). The human types the new owner/name; the
       // server probes it with the bound credential, or with a connection when
-      // none is bound (ruling 669), and refuses misses.
+      // none is bound (ruling 226), and refuses misses.
       case "change-repo": {
         const result = await changeProjectRepo(
           db,
@@ -197,7 +197,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      // Ruling 667: take the repository away from a board that does not
+      // Ruling 226: take the repository away from a board that does not
       // write it. Refused while an agent may write it or a pull request is
       // open for review.
       case "remove-repo": {
@@ -213,7 +213,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      // Ruling 178: the required-reviewer table, posted whole as one JSON field.
+      // Ruling 89: the required-reviewer table, posted whole as one JSON field.
       case "set-required-reviewers": {
         const result = await setRequiredReviewers(
           db,
@@ -222,7 +222,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      // Ruling 396: the lease table, posted whole through the writer the
+      // Ruling 61: the lease table, posted whole through the writer the
       // controller's `set_file_leases` already calls.
       case "set-file-leases": {
         const result = await setProjectFileLeases(
@@ -232,7 +232,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         );
         return { ok: true as const, toast: result.toast };
       }
-      // Ruling 482: the gate table, posted whole through the writer the
+      // Ruling 17: the gate table, posted whole through the writer the
       // controller's `set_project_gates` calls.
       case "set-project-gates": {
         const result = await setProjectGates(
@@ -299,5 +299,5 @@ export default function SettingsView({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.settings");

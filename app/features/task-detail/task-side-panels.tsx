@@ -32,15 +32,15 @@ import {
 /**
  * The task-detail SIDE column: Current state (the next action) and the GitHub
  * trace; Details, the column's last panel, is `task-details-panel.tsx`
- * (ruling 501). Split out of `task-detail-page.tsx` (pass 16, pure
+ * (ruling 309). Split out of `task-detail-page.tsx` (pass 16, pure
  * structural refactor). The Permissions panel that used to close the column
  * — the viewer's role grants restated row by row — is gone (owner, 2026-09-08,
- * ruling 167): what a person may do here is said where they would do it.
+ * ruling 308): what a person may do here is said where they would do it.
  */
 
-/** Ruling 511: a signal's mark, from its pill tone, in the circle family
- *  (ruling 365): a check for a pass, a cross for a failure, the dotted ring
- *  for a wait (ruling 499), a plain ring for the rest; a risk is the alert. */
+/** Ruling 315: a signal's mark, from its pill tone, in the circle family
+ *  (ruling 306): a check for a pass, a cross for a failure, the dotted ring
+ *  for a wait (ruling 168), a plain ring for the rest; a risk is the alert. */
 function signalGlyph(kind: PillKind): IconName {
   switch (kind) {
     case "done":
@@ -58,13 +58,13 @@ function signalGlyph(kind: PillKind): IconName {
 }
 
 /**
- * Ruling 511: one row of the PR card's status list, drawn the way GitHub's
+ * Ruling 315: one row of the PR card's status list, drawn the way GitHub's
  * merge box draws a check: the mark in the pill vocabulary's tone
  * (`github-pills.ts`, so the words and the tones are the ones every other
  * surface prints), the state as the row's title, and what it rests on under
  * it. A plain function rather than a component: the rows are static markup,
  * and a component each would add a render per row to every revalidation
- * (ruling 457).
+ * (ruling 11).
  */
 function prSignal({
   signal,
@@ -99,11 +99,11 @@ function prSignal({
   );
 }
 
-/** Ruling 134(c): the push control's label, with its own busy text and tooltip. */
+/** Ruling 229: the push control's label, with its own busy text and tooltip. */
 const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
 /** The refusal the server would give a plain push of a diverged branch (the
- *  name ruling 160 cites). Module-local: since the ruling 700(e) split its one
+ *  name ruling 232 cites). Module-local: since the ruling 13(b) split its one
  *  use sits in `deliverButton`, and the build ships it as a variable whether or
  *  not it is exported (project.task 360,333 B gzip both ways, measured). */
 const DIVERGED_PUSH_REFUSAL =
@@ -170,7 +170,7 @@ export function GithubTrace({
   /** F19-24: OPEN the merge confirm for an accepted (merge-pending) PR (S2).
    *  Never the submitter — completing the merge is the real, irreversible
    *  GitHub merge and the mandatory human half of every full-autonomy operator
-   *  acceptance (R16-6), so ruling 20's dialog binds here exactly as it does on
+   *  acceptance (R16-6), so ruling 97's dialog binds here exactly as it does on
    *  the Accept button. */
   onCompleteMerge?: () => void;
   /** Admin override of a stuck acceptance gate (DG-2); admin-only, undefined
@@ -180,11 +180,11 @@ export function GithubTrace({
    *  maintainer+ or the task owner; undefined hides the control. */
   onDeliver?: () => void;
   delivering?: boolean;
-  /** Ruling 368: the intent the task page's run fetcher is carrying (it also
+  /** Ruling 286: the intent the task page's run fetcher is carrying (it also
    *  carries interrupt and retry), null while idle. Complete merge and Force
    *  accept wait on any of them and show the work when it is theirs. */
   runIntent?: string | null;
-  /** Ruling 482: queue the project's gates on the revision under review again
+  /** Ruling 104: queue the project's gates on the revision under review again
    *  (maintainer+ or the owner, the manual delivery's tier); undefined hides
    *  the control. */
   onRunGates?: () => void;
@@ -192,8 +192,8 @@ export function GithubTrace({
   /** The attachments route's base, so each gate's log opens where it lives.
    *  Null renders the log names as text. */
   attachmentsBase?: string | null;
-  /** Ruling 665: this task's delivery is the files its deliverer saves on it
-   *  (ruling 535), so it never has a branch: `expected` once that agent holds
+  /** Ruling 228: this task's delivery is the files its deliverer saves on it
+   *  (ruling 128), so it never has a branch: `expected` once that agent holds
    *  the delivery, `delivered` once its files are the task's delivery. Null
    *  for a task delivered on a branch, or with no deliverer yet. */
   filesDelivery?: "expected" | "delivered" | null;
@@ -238,7 +238,7 @@ export function GithubTrace({
   const signals = prCardSignals(task, acceptance, pushOffer);
   return (
     <div className="panel flush pr-card">
-      {/* Ruling 511: the inverted bar stays the card's head (the owner, on
+      {/* Ruling 315: the inverted bar stays the card's head (the owner, on
           the first draft without it: "the old white/black headers were
           looking good"), holding the mark, the repository and the state. The
           other pills it carried are the status rows below. */}
@@ -269,7 +269,7 @@ export function GithubTrace({
           </ul>
         </div>
       )}
-      {/* Ruling 179 (pass 36, F36-7): the `[KEY]` filter above hid the very
+      {/* Ruling 315 (pass 36, F36-7): the `[KEY]` filter above hid the very
           commits that move a reviewed head — a stranger's push sat on the
           branch and this card showed only the task's own. Named apart, not
           mixed in. */}
@@ -303,11 +303,11 @@ export function GithubTrace({
 }
 
 /*
- * Ruling 700(e): the parts of the PR card, each the markup of one slot of
+ * Ruling 13(b): the parts of the PR card, each the markup of one slot of
  * `GithubTrace`, which keeps the card's frame and what it decides. Plain
  * functions rather than components, as `prSignal` is: none calls a hook, and a
  * component each would add a render per part to every revalidation (ruling
- * 457). Called in place, they leave the card's tree, and every id React derives
+ * 11). Called in place, they leave the card's tree, and every id React derives
  * from it, as it was; `GatesRow`, which owns hooks, stands where it always
  * stood.
  */
@@ -340,7 +340,7 @@ function forceAcceptButton({
   return (
     <button
       type="button"
-      // Ruling 149: force-accept is destructive, and the confirmation it
+      // Ruling 278: force-accept is destructive, and the confirmation it
       // opens already commits in red.
       className="btn ghost sm full danger"
       disabled={merging}
@@ -372,7 +372,7 @@ function prCardBar(task: TaskDetail) {
   const prState = task.pr ? prStatePill(task.pr.state) : null;
   return (
     <div className="gh-bar">
-      {/* Ruling 478(f) (F40-35): the panel's name, for heading navigation.
+      {/* Ruling 313 (F40-35): the panel's name, for heading navigation.
           The mark and the repository already say it to the eye; without
           this the panel was the one region of the page a screen reader's
           heading list could not reach once the task had a branch. */}
@@ -395,7 +395,7 @@ function prCardBar(task: TaskDetail) {
 }
 
 /** The pull request's title as the link to it, then the branch as the link to
- *  its tree and the size of the change (ruling 511). */
+ *  its tree and the size of the change (ruling 315). */
 function prCardIdentity(task: TaskDetail, githubHost: string) {
   const { prHref, treeHref } = prCardLinks(task, githubHost);
   const prName = task.pr && (
@@ -449,7 +449,7 @@ function prCardIdentity(task: TaskDetail, githubHost: string) {
   );
 }
 
-/** Ruling 511: the card's status rows, one per signal. */
+/** Ruling 315: the card's status rows, one per signal. */
 function prCardSignalRows({
   task,
   gates,
@@ -487,7 +487,7 @@ function prCardSignalRows({
             </>
           ),
         })}
-      {/* Ruling 482: what Viberr's own run of the project's gates says
+      {/* Ruling 315: what Viberr's own run of the project's gates says
           about the revision under review, beside what GitHub's checks
           say. */}
       {gates && (
@@ -503,7 +503,7 @@ function prCardSignalRows({
       {review && prSignal({ signal: "review", view: review, detail: "GitHub's review decision" })}
       {conflict &&
         prSignal({ signal: "conflicts", view: conflict, detail: "GitHub can't merge it into the base branch" })}
-      {/* Ruling 135: the delivered revision is not on the open PR. Named
+      {/* Ruling 243: the delivered revision is not on the open PR. Named
           among the PR's signals so the push control below reads from a
           fact. */}
       {pushOffer &&
@@ -588,7 +588,7 @@ function prCardActions({
   );
 }
 
-/** R15-2 safety net (b): the hand delivery, or since ruling 134(c) the push of
+/** R15-2 safety net (b): the hand delivery, or since ruling 229 the push of
  *  the delivered revision to the open PR; disabled, with the refusal the server
  *  would give, over a diverged remote or an unanswered closed PR. */
 function deliverButton({
@@ -640,7 +640,7 @@ function deliverButton({
  * quiet branch from a dead poller. "Last change" below stays the
  * provenance row DG-3 skips on unchanged ticks. Two rows, not one
  * merged sentence: they go stale independently, and the whole defect
- * was one number being read as the other. Ruling 511: they close the
+ * was one number being read as the other. Ruling 315: they close the
  * card in small print, because they say how fresh the card is, not
  * what the pull request needs.
  */
@@ -698,11 +698,11 @@ function prCardFreshness(
 }
 
 /**
- * Ruling 482 (F40-52): the PR card's gate record — "Gates on a95c337: 4/4 exit
+ * Ruling 315 (F40-52): the PR card's gate record — "Gates on a95c337: 4/4 exit
  * 0 (run by Viberr)" — with each gate's outcome, time and log, and the control
  * that runs them again. The line is the server's (`projectGatesView`), so the
  * card, the accept dialog, the refusal and every agent's anchor say the same.
- * Ruling 511: it is the first of the card's status rows, and a pass folds its
+ * Ruling 315: it is the first of the card's status rows, and a pass folds its
  * table behind "Show all"; anything short of a pass keeps the table open,
  * because then it is the table that says what to do.
  */
@@ -771,9 +771,9 @@ function GatesRow({
 }
 
 /**
- * Ruling 520: the marks Current state leads its values with. Hoisted, so a
+ * Ruling 309(a): the marks Current state leads its values with. Hoisted, so a
  * revalidation that re-renders the panel hands React the same elements and no
- * `Icon` renders again (ruling 457's no-op revalidation budget).
+ * `Icon` renders again (ruling 11's no-op revalidation budget).
  */
 const MARK = {
   hand: <Icon name="hand" />,
@@ -785,7 +785,7 @@ const MARK = {
 };
 
 /**
- * Ruling 520: the hold's sentence with each entry's label on one line. In the
+ * Ruling 309(a): the hold's sentence with each entry's label on one line. In the
  * property grid's value column Chromium breaks a key after its hyphen ("VIB-"
  * over "151"), and no CSS property stops that; the words between the labels
  * still wrap.
@@ -847,8 +847,8 @@ export function CurrentStatePanel({
   onTransition: (toStageId: string) => void;
   /** A stage transition is in flight (page-owned fetcher) — locks the menu. */
   transitionBusy: boolean;
-  /** Ruling 368: the intent the page's accept fetcher is carrying (the
-   *  acceptance itself, or ruling 449's refresh-and-review), null while idle.
+  /** Ruling 286: the intent the page's accept fetcher is carrying (the
+   *  acceptance itself, or ruling 97's refresh-and-review), null while idle.
    *  Accept shows the work only when it is the acceptance. */
   acceptInFlight: string | null;
   /** An archive / restore submission is in flight: the Archive button's own. */
@@ -880,10 +880,10 @@ export function CurrentStatePanel({
           </span>
         )}
       </div>
-      {/* Ruling 520: the facts are the property grid Details draws (ruling
-          501), one label column and every value on one left edge, each led
+      {/* Ruling 309(a): the facts are the property grid Details draws (ruling
+          309), one label column and every value on one left edge, each led
           by its mark: the stage's dot, who owes the next move in the board
-          card's marks (ruling 365), the activity pulse, the owner's avatar,
+          card's marks (ruling 306), the activity pulse, the owner's avatar,
           the GitHub mark. */}
       <div className="kv props">
         <div className="kv-row">
@@ -899,13 +899,13 @@ export function CurrentStatePanel({
               />
             ) : (
               <span className="stage-static">
-                {/* The colour is the STAGE's, named in the markup (ruling 364);
+                {/* The colour is the STAGE's, named in the markup (ruling 279);
                     the sheet turns the name into paint and owns the size. */}
                 <span
                   className="col-stage-dot sm"
                   data-stage-color={stage?.color}
                 />
-                {/* Ruling 148: the empty string left a bare coloured dot with
+                {/* Ruling 291: the empty string left a bare coloured dot with
                     no words at all. Same phrase as the stage menu. */}
                 {stageLabel(stage)}
               </span>
@@ -959,7 +959,7 @@ export function CurrentStatePanel({
             })}
           </span>
         </div>
-        {/* Ruling 667: a project with no repository has no row to show. */}
+        {/* Ruling 224: a project with no repository has no row to show. */}
         {task.repo && (
           <div className="kv-row">
             <span className="k">Repo</span>
@@ -1002,16 +1002,16 @@ export function CurrentStatePanel({
 }
 
 /*
- * Ruling 700(e): the parts of Current state, each the markup of one slot of
+ * Ruling 13(b): the parts of Current state, each the markup of one slot of
  * `CurrentStatePanel`. Plain functions rather than components, for the reason
  * the PR card's parts are: none calls a hook, and a component each would add
- * a render per part to every revalidation (ruling 457).
+ * a render per part to every revalidation (ruling 11).
  */
 
-/** Who owes the task's next move, in the board card's marks (ruling 365). */
+/** Who owes the task's next move, in the board card's marks (ruling 306). */
 function waitingOnFact(task: TaskDetail) {
   if (task.packet?.awaiting === "goal_edit") {
-    // Ruling 138: a decided edit_goal packet owes exactly one thing.
+    // Ruling 63: a decided edit_goal packet owes exactly one thing.
     return (
       <span
         className="prop-fact by-human"
@@ -1030,7 +1030,7 @@ function waitingOnFact(task: TaskDetail) {
     // subtitle also use — "waiting on a human" ("Waiting on" + "a
     // human") — collapsing the five spellings the app had for "a human
     // owes something". This rail deliberately does NOT personalise to
-    // "you" (ruling 10 / R8-3 reserves the viewer-scoped "waiting on
+    // "you" (ruling 46 / R8-3 reserves the viewer-scoped "waiting on
     // you" for surfaces that resolve the viewer, which this one never
     // did); the project phrase is the correct one here.
     return (
@@ -1044,7 +1044,7 @@ function waitingOnFact(task: TaskDetail) {
     );
   }
   if (task.waiting === "schedule") {
-    // Ruling 225 (F37-45): the rail's job is to name who owes
+    // Ruling 45 (F37-45): the rail's job is to name who owes
     // something. Nobody does — a schedule will pick this task back
     // up. Saying "a human" here was the same false demand the board
     // card made, one surface over.
@@ -1069,7 +1069,7 @@ function waitingOnFact(task: TaskDetail) {
     );
   }
   if (task.waiting === "agent" && task.liveRun === "queued") {
-    // Ruling 349: the run is parked behind the cap; nothing streams,
+    // Ruling 44: the run is parked behind the cap; nothing streams,
     // so the board's ring rather than its pulse.
     return (
       <span
@@ -1090,7 +1090,7 @@ function waitingOnFact(task: TaskDetail) {
     );
   }
   if (task.blockedBy.length > 0) {
-    // Ruling 131(a): a held task owes nobody anything; what it waits
+    // Ruling 55: a held task owes nobody anything; what it waits
     // on is other work, named with each entry's live state.
     return (
       <span
@@ -1140,11 +1140,11 @@ function ownerSeat({
     // hide "Assign me" rather than render a button that 403s.
     // D32-16: an archived task's owner seat is frozen server-side
     // (restore first), so the affordance goes with it. E32-9 /
-    // ruling 118: so is a CLOSED (accepted/merged) task's — live, a
+    // ruling 50: so is a CLOSED (accepted/merged) task's — live, a
     // Done task whose every other control read "task closed" still
     // offered it — except to an ADMIN, who may reassign for the
     // record (the release-any-ownership tier).
-    // Ruling 520: the invitation Details makes for an empty value
+    // Ruling 309(a): the invitation Details makes for an empty value
     // it can fill ("Add dependency"), a ghost trigger at rest.
     <button
       type="button"
@@ -1180,7 +1180,7 @@ function heldOwnerSeat({
   return (
     <span
       className="rev-stack"
-      // Ruling 127 widened what this seat means: the owner is still
+      // Ruling 137 widened what this seat means: the owner is still
       // the human reviewer and acceptance authority for this task,
       // and is now also WHOSE Claude and Codex accounts its agent
       // runs bill. The row that shows (and releases) the seat is
@@ -1245,7 +1245,7 @@ function acceptanceActs({
           GitHub approval instead of an agent verdict. Name the person and
           the commit they approved — a gate a human cleared cannot just go
           green, or whoever accepts has no idea whose judgement they stand
-          on (ruling 19). */}
+          on (ruling 220). */}
       {acceptance.verdictSatisfiedBy && (
         <p className="hint">
           <Icon name="check" />
@@ -1287,7 +1287,7 @@ function acceptButton({
       onClick={onAccept}
     >
       <GlyphSwap rest="check" alt="loader" on={accepting} spinAlt />
-      {/* Ruling 368: only the acceptance's own request reads as it;
+      {/* Ruling 286: only the acceptance's own request reads as it;
           an archive or a refresh in flight leaves this waiting. */}
       {accepting
         ? task.pr
@@ -1337,7 +1337,7 @@ function archiveActs({
     <div className="state-acts">
       <button
         type="button"
-        // Ruling 149: archiving is destructive and its own confirmation
+        // Ruling 278: archiving is destructive and its own confirmation
         // commits in red, so the trigger carries the danger label too.
         // Restoring is a recovery action and stays neutral.
         className={"btn ghost sm full" + (archived ? "" : " danger")}
@@ -1345,7 +1345,7 @@ function archiveActs({
         aria-busy={dispositionBusy || undefined}
         onClick={onArchive}
       >
-        {/* Ruling 459 over ruling 368: the archive mark (ruling 651) trades
+        {/* Ruling 284 over ruling 286: the archive mark (ruling 325) trades
             for the restore mark with the task's state, and that resting
             cell trades for the spinning loader while the disposition is in
             flight (GlyphSwap's `busy`), so neither change is a hard swap

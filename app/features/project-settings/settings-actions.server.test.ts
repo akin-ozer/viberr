@@ -181,7 +181,7 @@ describe("removeStage", () => {
   it("re-joins the neighbours and leaves no orphan rule", async () => {
     const store = setupProjectedStore(ctx);
     // A person approves the move into Review on this board (the Standard
-    // template's is `auto` since ruling 519), so the merge has a gate to keep.
+    // template's is `auto` since ruling 91), so the merge has a gate to keep.
     approveReviewEntry(store);
     await removeStage(
       store.db,
@@ -266,7 +266,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   it("F20-13: removing a stage that collapses two edges to a stricter hop discloses it (toast + audit)", async () => {
     const store = setupProjectedStore(ctx);
     // A chain where a person approves the move into Review (the Standard
-    // template's is `auto` since ruling 519): ready→impl (auto) + impl→review
+    // template's is `auto` since ruling 91): ready→impl (auto) + impl→review
     // (approval). Removing In Progress merges them to the STRICTER `approval`
     // — a tightening the toast and audit must name, not swallow.
     approveReviewEntry(store);
@@ -310,7 +310,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
     expect(removed.details).not.toHaveProperty("tightened");
   });
 
-  it("ruling 364: a new stage takes the first preset NAME no sibling wears — project.md holds the name", async () => {
+  it("ruling 279: a new stage takes the first preset NAME no sibling wears — project.md holds the name", async () => {
     const store = setupProjectedStore(ctx);
     const { stageId } = await addStage(
       store.db,
@@ -330,7 +330,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   });
 });
 
-describe("recolorStage (ruling 364)", () => {
+describe("recolorStage (ruling 279)", () => {
   it("writes the preset name into project.md, reprojects and audits it", async () => {
     const store = setupProjectedStore(ctx);
     const result = await recolorStage(
@@ -480,7 +480,7 @@ describe("renameStage", () => {
   });
 });
 
-/* ------- repository change (owner ruling 2026-07-26, ruling 539) ------- */
+/* ------- repository change (owner ruling 2026-07-26, ruling 226) ------- */
 
 /** Deploy one specialist on the store's project, its repo-write headline in `mode`. */
 function deploy(store: TestStore, mode: "direct" | "off"): void {
@@ -572,7 +572,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     });
   });
 
-  it("ruling 672: refuses a change checked against a repository the project no longer has, writing nothing over it", async () => {
+  it("ruling 224: refuses a change checked against a repository the project no longer has, writing nothing over it", async () => {
     // GitHub is asked between the read and the write. CANARY: write without
     // re-reading under the project file's own lock and, of two people who
     // change the repository at once, the second silently replaces the first.
@@ -598,7 +598,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
   });
 
-  it("ruling 517: the change's probe is the reading the board shows from then on", async () => {
+  it("ruling 223: the change's probe is the reading the board shows from then on", async () => {
     // The board and Home read the last reading taken of the project's
     // repository. A change probes the new repository and used to keep that
     // answer to itself, so "akin-ozer/akin-website · repo not found" stayed on
@@ -654,7 +654,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(listAuditEvents(store.db, { action: "project.repo.updated" })).toHaveLength(0);
   });
 
-  it("F20-15: REFUSES a repo the credential can only READ where an agent writes it, and takes it where none does (ruling 669)", async () => {
+  it("F20-15: REFUSES a repo the credential can only READ where an agent writes it, and takes it where none does (ruling 226)", async () => {
     // Repo is VISIBLE (res.ok) but the token's computed permissions say no push —
     // the octocat/Hello-World live case. `res.ok` alone must not adopt it for a
     // board that delivers through its repository. CANARY: require push of
@@ -739,9 +739,9 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(result.changed).toBe(true);
   });
 
-  it("ruling 669: with NO credential bound it is checked with a connection, takes GitHub's default branch and binds that connection", async () => {
+  it("ruling 226: with NO credential bound it is checked with a connection, takes GitHub's default branch and binds that connection", async () => {
     // The `defaultBranch` on file is the repository's the project is leaving.
-    // A change that wrote the new one unchecked kept it, and ruling 128's
+    // A change that wrote the new one unchecked kept it, and ruling 227's
     // bootstrap would then create that branch on the new repository and make
     // it the default there. CANARY: restore the unchecked write and
     // `defaultBranch` stays `main` on a repository whose default is `trunk`,
@@ -787,7 +787,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     });
   });
 
-  it("ruling 669: the connection that checks is the new owner's, matched as GitHub matches names, and the instance default only when that owner has none", async () => {
+  it("ruling 226: the connection that checks is the new owner's, matched as GitHub matches names, and the instance default only when that owner has none", async () => {
     // B-GH3's rule, at this door. CANARY: always take the default and a
     // project is bound to another owner's token; take the owner's alone and
     // one token that reaches several owners' repositories cannot be used;
@@ -821,7 +821,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     expect(bound(borrowed)).toEqual({ pat_id: defaults });
   });
 
-  it("ruling 669: REFUSES with no credential and no connection to check it with, and a repository GitHub names no default branch for", async () => {
+  it("ruling 226: REFUSES with no credential and no connection to check it with, and a repository GitHub names no default branch for", async () => {
     // Nothing is written unchecked. CANARY: let the first through and a
     // typo'd repository is written with the default branch of the one the
     // project left; let the second through and that branch is the one tasks
@@ -942,7 +942,7 @@ describe("changeProjectRepo — the one door that changes a project's repository
     );
     expect(noop.changed).toBe(false);
 
-    // Ruling 700(a): `owner/..` is a name GitHub does not allow, and a
+    // Ruling 225: `owner/..` is a name GitHub does not allow, and a
     // checkout path built from it is the task directory itself. CANARY: go
     // back to `normalizeRepoInput`'s own `[A-Za-z0-9._-]+` name and it reaches
     // the probe, refused there only for want of a connection.
@@ -963,12 +963,12 @@ describe("changeProjectRepo — the one door that changes a project's repository
 });
 
 /**
- * Ruling 667 (owner, 2026-10-06): a board that delivers results needs no
+ * Ruling 226 (owner, 2026-10-06): a board that delivers results needs no
  * repository, and until this door a project could change its repository and
  * never be without one. The AWS calculator board kept a repository through
  * ten rounds of work that committed nothing to it.
  */
-describe("removeProjectRepo — the door that takes a project's repository away (ruling 667)", () => {
+describe("removeProjectRepo — the door that takes a project's repository away (ruling 226)", () => {
   const ctxOf = (store: TestStore) => ({ dataRoot: store.dataRoot });
 
   it("removes the repository, unbinds the credential, forgets its reading and audits the removal", async () => {
@@ -1074,13 +1074,13 @@ describe("removeProjectRepo — the door that takes a project's repository away 
 });
 
 /**
- * Ruling 667: a project with no repository takes one through the Change door.
+ * Ruling 226: a project with no repository takes one through the Change door.
  * It has no credential to probe with, and an attach that skipped the probe
  * kept the placeholder `defaultBranch: main`: on a repository whose default is
- * `master`, ruling 128's bootstrap would then create `main` and make it the
+ * `master`, ruling 227's bootstrap would then create `main` and make it the
  * repository's default branch.
  */
-describe("changeProjectRepo attaches a repository to a project that has none (ruling 667)", () => {
+describe("changeProjectRepo attaches a repository to a project that has none (ruling 226)", () => {
   const REPO = "acme/site";
   /** A project with no repository, and (unless told otherwise) an `acme` connection. */
   function repoLess(connection = true) {
@@ -1111,7 +1111,7 @@ describe("changeProjectRepo attaches a repository to a project that has none (ru
       toast: "Repository attached: acme/site (default branch master), checked and bound with acme's connection",
       changed: true,
       repo: REPO,
-      // Ruling 672: nothing on this board was waiting on a repository.
+      // Ruling 224: nothing on this board was waiting on a repository.
       settled: { rulingRemoved: null, answered: [], missed: [], operatorsStarted: true },
     });
     expect(projectOf(store)).toMatchObject({ repo: REPO, defaultBranch: "master" });
@@ -1239,7 +1239,7 @@ describe("setBranchCleanup (R15-6)", () => {
 });
 
 // F20-12 / N20-6 — inviting an unknown email must mint a USABLE account and the
-// toast must not claim an email was sent (there is no mailer, ruling 13).
+// toast must not claim an email was sent (there is no mailer, ruling 30).
 describe("inviteMember", () => {
   it("F20-12: an unknown email mints a temp-password account (usable + setup-pending), not a passwordless one", async () => {
     const store = setupProjectedStore(ctx);
@@ -1327,8 +1327,8 @@ describe("inviteMember", () => {
 
 /**
  * Pass 34 review: one prefix a project cannot take. It was `GOAL`, because the
- * dependency grammar (ruling 131) read `GOAL-1` as a goal chain's reference
- * missing its link; since ruling 503 it is `EPIC`, because an epic's id is
+ * dependency grammar (ruling 55) read `GOAL-1` as a goal chain's reference
+ * missing its link; since ruling 55 it is `EPIC`, because an epic's id is
  * `epic-1` and tasks keyed EPIC-1 would read as epics wherever they are named.
  */
 describe("the reserved task prefix", () => {
@@ -1348,7 +1348,7 @@ describe("the reserved task prefix", () => {
       ).rejects.toThrow(/not available as a task prefix/i);
     }
     expect(prefixOf(store)).toBe("VIB");
-    // The prefix ruling 503 freed is fine now: `GOAL-1` is a task key again.
+    // The prefix ruling 55 freed is fine now: `GOAL-1` is a task key again.
     const ok = await updateProjectIdentity(
       store.db,
       { projectSlug: store.slug, name: "Viberr Core", prefix: "GOAL", description: "" },
@@ -1420,14 +1420,14 @@ describe("deleteProject leaves no app-owned rows behind", () => {
 });
 
 /**
- * Ruling 274 (pass 37, F37-107): `controller_conversations` is the fourth
+ * Ruling 249 (pass 37, F37-107): `controller_conversations` is the fourth
  * app-owned table with no FK cascade, and the only one whose orphan is worse
  * than stale. A conversation's `project_slug` is what the controller
  * toolkit's `slugOf()` DEFAULTS to, so a conversation left bound to a deleted
  * slug acts on whatever comes back under it — and a slug comes back the
  * ordinary way, by creating a project with the same name.
  */
-describe("deleteProject releases the conversations bound to it (ruling 274)", () => {
+describe("deleteProject releases the conversations bound to it (ruling 249)", () => {
   it("unbinds them to instance scope, keeps the transcript, and says why", async () => {
     const store = setupTestStore(ctx);
     const actor = admin(store);
@@ -1450,7 +1450,7 @@ describe("deleteProject releases the conversations bound to it (ruling 274)", ()
       userLabel: "arda@viberr.dev",
       projectSlug: null,
     });
-    // Ruling 685: the bound conversation waits on one of the project's tasks.
+    // Ruling 259: the bound conversation waits on one of the project's tasks.
     const { claimFollowUp, openFollowUps, setFollowUp } = await import("~/server/controller/controller-follow-ups.server");
     // A step the instance conversation left on the same task, already started.
     setFollowUp(store.db, {
@@ -1603,12 +1603,12 @@ describe("removeMember clears the notifications they can no longer open", () => 
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the project's required-reviewer rule has ONE
+ * Ruling 89 (pass 36, G36-3): the project's required-reviewer rule has ONE
  * writer, shared by the Settings form and the controller tool — same
  * validation (ids checked by name, nothing written on a refusal), same audit
  * row, same tier (`edit-policy`: a required reviewer is acceptance policy).
  */
-describe("setRequiredReviewers (ruling 178)", () => {
+describe("setRequiredReviewers (ruling 89)", () => {
   function withReviewers(): TestStore {
     const store = setupTestStore(ctx);
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -1717,16 +1717,16 @@ describe("setRequiredReviewers (ruling 178)", () => {
 });
 
 /**
- * Ruling 239 (pass 37): the project's rulings knowledge base — the one KB every
+ * Ruling 208(a) (pass 37): the project's rulings knowledge base — the one KB every
  * run on the project reads, whether or not a profile grants it.
  */
 /**
- * Ruling 245 (pass 37, F37-74): a lease says which task owns a shared path
+ * Ruling 60 (pass 37, F37-74): a lease says which task owns a shared path
  * until it merges — the statement `blockedBy` cannot make, because `blockedBy`
  * means "do not START until done" and what is wanted is "both may proceed, this
  * one owns the lockfile until it lands".
  */
-describe("setProjectFileLeases (ruling 245)", () => {
+describe("setProjectFileLeases (ruling 60)", () => {
   let store: TestStore;
   let holderA = "";
   let holderB = "";
@@ -1803,7 +1803,7 @@ describe("setProjectFileLeases (ruling 245)", () => {
     expect(leases()).toEqual([]);
   });
 
-  it("ruling 417: refuses two ACTIVE holders whose globs overlap, not only identical ones", async () => {
+  it("ruling 61: refuses two ACTIVE holders whose globs overlap, not only identical ones", async () => {
     const { setProjectFileLeases } = await import("./settings-actions.server");
     // CANARY: go back to the exact-glob check and this saves, and each lease
     // refuses the other holder's delivery forever.
@@ -1824,7 +1824,7 @@ describe("setProjectFileLeases (ruling 245)", () => {
     expect(leases()).toEqual([]);
   });
 
-  it("ruling 417: a lease whose holder has FINISHED overlaps nothing, since it binds nobody", async () => {
+  it("ruling 61: a lease whose holder has FINISHED overlaps nothing, since it binds nobody", async () => {
     const { setProjectFileLeases } = await import("./settings-actions.server");
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     await updateTaskFile({ projectSlug: store.slug, taskKey: holderA, dataRoot: store.dataRoot }, (f) => {
@@ -1867,7 +1867,7 @@ describe("setProjectFileLeases (ruling 245)", () => {
   });
 });
 
-describe("setProjectRulingsKb (ruling 239)", () => {
+describe("setProjectRulingsKb (ruling 208(a))", () => {
   let store: TestStore;
   const projectFm = () =>
     readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!.parsed.frontmatter;

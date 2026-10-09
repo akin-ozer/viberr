@@ -10,10 +10,10 @@ import type { ControllerSurfaceView } from "./controller-query.server";
 import { controllerRun } from "../../../test-support/run-view";
 
 /**
- * Ruling 121 on the full controller page: the project is named, task-anchored
+ * Ruling 249 on the full controller page: the project is named, task-anchored
  * threads wear a task chip, and a user message says where it was sent from.
  *
- * Ruling 127 — the controller's unavailable state is about the PERSON reading
+ * Ruling 137 — the controller's unavailable state is about the PERSON reading
  * it, and says where they fix it.
  *
  * The page used to render "Claude backend unavailable" and "The Claude backend
@@ -25,7 +25,7 @@ import { controllerRun } from "../../../test-support/run-view";
  * accounts.
  */
 
-// jsdom's Element has no `scrollIntoView`; the ruling 419(b) case spies on it
+// jsdom's Element has no `scrollIntoView`; the ruling 321 case spies on it
 // to prove the page never calls it.
 Element.prototype.scrollIntoView = () => {};
 
@@ -111,7 +111,7 @@ function renderPage(v: ControllerSurfaceView, search = "", action?: ActionFuncti
   return render(<Stub initialEntries={[`/projects/viberr-core/controller${search}`]} />);
 }
 
-/** The instance surface (no project bound), where the ruling-127 copy lives. */
+/** The instance surface (no project bound), where the ruling-137 copy lives. */
 function renderInstancePage(v: ControllerSurfaceView, action?: ActionFunction) {
   const page: Parameters<typeof createRoutesStub>[0][number]["children"] = [
     {
@@ -135,7 +135,7 @@ function renderInstancePage(v: ControllerSurfaceView, action?: ActionFunction) {
   return render(<Stub initialEntries={["/controller"]} />);
 }
 
-/** The transcript's "is working…" row. Ruling 476(d) made it visual only, so
+/** The transcript's "is working…" row. Ruling 320 made it visual only, so
  *  it is found by its class, not as a status region. */
 function findWorkingRow(): Promise<HTMLElement> {
   return waitFor(() => {
@@ -150,7 +150,7 @@ const composer = (container: HTMLElement) =>
     'textarea[aria-label="Message to the controller"]',
   )!;
 
-describe("the project controller page (ruling 121)", () => {
+describe("the project controller page (ruling 249)", () => {
   it("names the project, not the slug, and chips task-anchored threads", async () => {
     renderPage(view());
     await screen.findByText("Managing the Viberr Core board with your own permissions.");
@@ -200,7 +200,7 @@ describe("the project controller page (ruling 121)", () => {
 describe("the conversation rail (U33-8)", () => {
   it("asks for a blank composer by name, so a bare URL can mean the newest thread", async () => {
     renderPage(view());
-    // Ruling 419(a): New lives in the page head now, one control for the page.
+    // Ruling 321: New lives in the page head now, one control for the page.
     const link = await screen.findByRole("link", { name: "New conversation" });
     expect(link.getAttribute("href")).toBe(
       "/projects/viberr-core/controller?c=new",
@@ -238,7 +238,7 @@ describe("surfaceLabel", () => {
   });
 });
 
-describe("controller page: the Claude-not-connected state (ruling 127)", () => {
+describe("controller page: the Claude-not-connected state (ruling 137)", () => {
   it("names the viewer's own account and where they connect it", async () => {
     const { container } = renderInstancePage(
       view({ available: false, projectName: null, conversations: [] }),
@@ -252,14 +252,14 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
     const note = container.querySelector(".ctl-composer [data-not-connected]");
     expect(note?.textContent).toContain("your own Claude account");
     expect(note?.querySelector('a[href="/profile"]')?.textContent).toBe("Profile → Agent accounts");
-    // Ruling 625: said once beside the box, not again inside it.
+    // Ruling 319: said once beside the box, not again inside it.
     // CANARY: put a not-connected placeholder back on the disabled box.
     expect(box.placeholder).toBe("");
     // The pill states the state in the header's title row, and neither of them
-    // blames the deployment: since ruling 127 it holds no credential to blame.
+    // blames the deployment: since ruling 137 it holds no credential to blame.
     expect(container.querySelector(".ctl-head-title .pill")?.textContent).toBe("Claude not connected");
     expect(container.textContent).not.toContain("backend unavailable");
-    // The blame, not the words: ruling 419(g) puts ruling 314's instance
+    // The blame, not the words: ruling 321 puts ruling 319's instance
     // examples on this page, and one of them asks about the agent profiles
     // "on this instance", which blames nothing.
     expect(container.textContent).not.toMatch(/unavailable[^.]*on this instance/i);
@@ -308,7 +308,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
 });
 
 /**
- * Ruling 259 (pass 37, F37-90): the composer keeps the words until the server
+ * Ruling 319 (pass 37, F37-90): the composer keeps the words until the server
  * takes them. It used to clear the box as it submitted, so a send refused
  * before the engine ran (an expired CSRF token, a scope that is not open, a
  * transport failure) lost the message; four of the five longest messages on
@@ -319,7 +319,7 @@ describe("controller page: the Claude-not-connected state (ruling 127)", () => {
  * box, so "hello " or a message ending in a newline stayed in the box after
  * the controller had taken it.
  */
-describe("ruling 259: the box is compared with what went out, trimmed", () => {
+describe("ruling 319: the box is compared with what went out, trimmed", () => {
   const typed = "hello \n";
 
   /** An action the test settles by hand, so the send stays in flight. */
@@ -389,7 +389,7 @@ describe("ruling 259: the box is compared with what went out, trimmed", () => {
 });
 
 /**
- * Ruling 99, the execution half of the page: a controller turn is a run like
+ * Ruling 247, the execution half of the page: a controller turn is a run like
  * any other, so the page shows the run the way the task page does — the
  * Live-run strip (what it is doing, for how long, how many turns and tokens,
  * on which model, and Interrupt for whoever may stop it) and the Agent-logs
@@ -408,12 +408,12 @@ describe("the open conversation's execution", () => {
     });
 
   /**
-   * Ruling 250 (pass 37, F37-79). A controller turn measured live ran 201s over
+   * Ruling 257 (pass 37, F37-79). A controller turn measured live ran 201s over
    * 11 turns for $4.11 and the conversation said `Controller is working…` for
    * all of it, while the SAME page rendered the phase and step in the live-run
    * panel below. The fact was on the run row and already streaming here.
    */
-  it("ruling 250: the working row carries the turn's own step", async () => {
+  it("ruling 257: the working row carries the turn's own step", async () => {
     renderPage(
       working({
         turn: {
@@ -460,7 +460,7 @@ describe("the open conversation's execution", () => {
     expect(screen.queryByRole("link", { name: "VIB-7" })).toBeNull();
   });
 
-  it("ruling 250: a phase that only repeats the sentence is not printed twice", async () => {
+  it("ruling 257: a phase that only repeats the sentence is not printed twice", async () => {
     // The server sends `phase: null` while it is the generic "Working" — the
     // row already says that in prose. CANARY: render `turn.phase ?? "Working"`
     // and the row reads "Controller is working… Working · npm test".
@@ -522,7 +522,7 @@ describe("the open conversation's execution", () => {
     expect(
       container.querySelector(".runbar .runbar-console")?.textContent,
     ).toContain("Agent logs");
-    // Ruling 524(a): the run is a pane of the layout's own, between the
+    // Ruling 321: the run is a pane of the layout's own, between the
     // conversation and the rail, where the sheet gives it the band's middle
     // column (under the composer when the page is one column). `data-console`
     // is what the sheet reads to size it. CANARY: render the card inside
@@ -553,8 +553,8 @@ describe("the open conversation's execution", () => {
     expect(pane.getAttribute("data-console")).toBe("open");
   });
 
-  it("ruling 524(a): a finished turn's console stays in the run pane as its archive", async () => {
-    // Ruling 380 keeps the settled turn's console on the page. It takes the
+  it("ruling 321: a finished turn's console stays in the run pane as its archive", async () => {
+    // Ruling 311 keeps the settled turn's console on the page. It takes the
     // pane the live card had, so the conversation keeps its column while the
     // log is read. CANARY: render the archive inside `.ctl-main` again and the
     // pane is gone.
@@ -597,7 +597,7 @@ describe("the open conversation's execution", () => {
     expect(dialog.getAttribute("data-screen-label")).toBe("Interrupt turn dialog");
     expect(dialog.textContent).toContain("the transcript records that the turn was stopped");
     const commit = screen.getByRole("button", { name: "Interrupt turn" });
-    // Rulings 149 and 150: stopping a turn discards what it was about to apply,
+    // Ruling 278: stopping a turn discards what it was about to apply,
     // so the commit keeps the confirm's shared `danger` default and the trigger
     // that opened it carries the same red (`btn ghost sm danger`, pinned in
     // `runs-panels.test.tsx`). Canary: pass `tone="primary"` and this fails.
@@ -619,14 +619,14 @@ describe("the open conversation's execution", () => {
     await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     expect(container.querySelector(".runbar")).toBeNull();
     expect(screen.queryByText("Agent logs")).toBeNull();
-    // Ruling 524(a): and no empty pane, so the band keeps two columns.
+    // Ruling 321: and no empty pane, so the band keeps two columns.
     // CANARY: render the `.ctl-run` wrapper unconditionally.
     expect(container.querySelector(".ctl-run")).toBeNull();
   });
 });
 
 /**
- * Ruling 419: the controller page for the person using it.
+ * Ruling 321: the controller page for the person using it.
  *
  * Measured live on ax-clone (six goal chains, three conversations): the list of
  * conversations and its New button began 4,419px down the page on a desktop
@@ -635,14 +635,14 @@ describe("the open conversation's execution", () => {
  * bottom of a 12,625px transcript; one unconfirmed click cancelled a whole
  * chain for good; and a completed chain took 479px to say it was done.
  */
-describe("ruling 419(a): the page's navigation is at its top", () => {
+describe("ruling 321: the page's navigation is at its top", () => {
   it("puts the conversations first in the rail, ahead of the knowledge base", async () => {
     // CANARY: render <KnowledgePanel> before <ConversationList> in the aside.
     const { container } = renderPage(view());
     await screen.findByText("Board thread", { selector: ".ctl-conv-title" });
     const rail = container.querySelector("aside.ctl-side")!;
-    // Ruling 483 put the board's knowledge-base panel under the list. The goal
-    // chains that followed it left the rail with ruling 503: an epic has its
+    // Ruling 267 put the board's knowledge-base panel under the list. The goal
+    // chains that followed it left the rail with ruling 273: an epic has its
     // own pages.
     expect([...rail.children].map((c) => c.className)).toEqual([
       "panel ctl-convs",
@@ -708,7 +708,7 @@ describe("ruling 419(a): the page's navigation is at its top", () => {
   });
 });
 
-describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
+describe("ruling 321: the transcript scrolls itself, never the page", () => {
   /** A thread of one message, the viewer's own. */
   const thread = () =>
     view({
@@ -739,7 +739,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
     }
   });
 
-  it("ruling 626: the keyboard reaches the box, on a thread and on the blank composer", async () => {
+  it("ruling 320: the keyboard reaches the box, on a thread and on the blank composer", async () => {
     // axe's scrollable-region-focusable (WCAG 2.1.1): the box scrolls, and a
     // reply with no link in it, or a phone's blank page whose examples are
     // held while Claude is not connected, left nothing inside it to focus.
@@ -750,7 +750,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
     page.unmount();
 
     renderPage(view({ conversation: null, available: false }), "?c=new");
-    // Ruling 625: while Claude is not connected the blank transcript offers no
+    // Ruling 319: while Claude is not connected the blank transcript offers no
     // examples, so the box holds nothing else the keyboard could reach.
     await screen.findByRole("heading", { name: "Nothing asked yet" });
     expect(screen.queryByRole("button", { name: "Which tasks have been open longest, and why?" })).toBeNull();
@@ -758,7 +758,7 @@ describe("ruling 419(b): the transcript scrolls itself, never the page", () => {
   });
 });
 
-describe("ruling 419(d): the send hint names the key this keyboard has", () => {
+describe("ruling 321: the send hint names the key this keyboard has", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("says Ctrl on a keyboard with no ⌘, and prints no ⌘ anywhere in the footer", async () => {
@@ -774,7 +774,7 @@ describe("ruling 419(d): the send hint names the key this keyboard has", () => {
   });
 });
 
-describe("ruling 419(g): the page's blank transcript offers ruling 314's examples", () => {
+describe("ruling 321: the page's blank transcript offers ruling 319's examples", () => {
   it("lists the board examples and SENDS the one clicked, as the dock does", async () => {
     // CANARY: drop the `ctl-examples` list from the blank transcript.
     const posted: Record<string, string>[] = [];
@@ -800,7 +800,7 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
   });
 
   it("offers no examples while the viewer's Claude is not connected", async () => {
-    // Ruling 625: three disabled suggestions were a fourth way of saying "not
+    // Ruling 319: three disabled suggestions were a fourth way of saying "not
     // connected"; the composer's note says what to do instead.
     // CANARY: render the example list whatever `view.available` says.
     const { container } = renderPage(view({ conversation: null, available: false }), "?c=new");
@@ -811,12 +811,12 @@ describe("ruling 419(g): the page's blank transcript offers ruling 314's example
 });
 
 /**
- * Ruling 451 (motion from transitions.dev, owner 2026-09-23): the page's
+ * Ruling 284 (motion from transitions.dev, owner 2026-09-23): the page's
  * conversation moves as the dock's does. A reply that lands while the
  * transcript is up rises in, and the working row's step arrives as a new line
  * under a sentence that carries its own words for the shimmer band.
  */
-describe("ruling 451: the page's conversation motion", () => {
+describe("ruling 284: the page's conversation motion", () => {
   const message = (id: string, text: string, author: "user" | "controller") => ({
     id,
     conversationId: "cnv_b",
@@ -890,7 +890,7 @@ describe("ruling 451: the page's conversation motion", () => {
     expect(row.querySelector(".ctl-working-step")!.textContent).toBe("Read · app/app.css");
   });
 
-  it("ruling 459: the step on screen when the page opens stands still; the next one is marked to rise", async () => {
+  it("ruling 284: the step on screen when the page opens stands still; the next one is marked to rise", async () => {
     // CANARY: set TurnStep's `data-fresh` unconditionally and the step a
     // person finds on opening the page mid-turn rises as if it had just changed.
     const turn = (step: string) => ({ working: true, runId: "run_ctl", phase: null, step, answering: null, queued: [], steering: [] });
@@ -908,12 +908,12 @@ describe("ruling 451: the page's conversation motion", () => {
 });
 
 /**
- * Ruling 368: a controller request shows itself on the button that sent it.
+ * Ruling 286: a controller request shows itself on the button that sent it.
  * Send named its work but went to the .45 refused step with no busy mark. (The
- * goal controls this ruling also named left with the chains, ruling 503.)
+ * goal controls this ruling also named left with the chains, ruling 273.)
  * Canary: render Send's resting label while `busy` in controller-page.tsx.
  */
-describe("ruling 368: the controller's requests in flight", () => {
+describe("ruling 286: the controller's requests in flight", () => {
   // Never answers: each test reads the wait itself.
   const never = () => new Promise<never>(() => {});
 
@@ -932,13 +932,13 @@ describe("ruling 368: the controller's requests in flight", () => {
 });
 
 /**
- * Ruling 465 (F40-8): each reply sits under the message it answers, and an
+ * Ruling 320 (F40-8): each reply sits under the message it answers, and an
  * unanswered message says where it stands. Live, three dossier parts were
  * queued while a turn worked; the transcript put "Controller is working…"
  * under part 2 while the turn was still on part 1, and once the replies landed
  * it read part 1, part 2, part 3, reply, correction, reply, reply.
  */
-describe("ruling 465: the transcript is in reply order and names the queue", () => {
+describe("ruling 320: the transcript is in reply order and names the queue", () => {
   const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_b",
     userId: "u1",
@@ -1025,12 +1025,12 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
   });
 
   /**
-   * Ruling 527: a message sent while a turn works steers it unless it was
+   * Ruling 251: a message sent while a turn works steers it unless it was
    * queued. It sits in the turn it steers, says whether it is still waiting
    * for the turn's next step or was read, and a message still waiting offers
    * its sender Send now (queued) and Retract.
    */
-  describe("ruling 527: steering", () => {
+  describe("ruling 251: steering", () => {
     const steer = (id: string, seq: number, text: string, into: string | null) => ({
       ...msg(id, seq, "user", text),
       steeredInto: into,
@@ -1174,15 +1174,15 @@ describe("ruling 465: the transcript is in reply order and names the queue", () 
 });
 
 /**
- * Ruling 476 (pass 40, the controller page, dock and goals rail). Measured
+ * Ruling 320 (pass 40, the controller page, dock and goals rail). Measured
  * live on the owner's akinozer.com instance: a thread whose source URLs ran
  * past the transcript, replies opened at their tail, replies no screen reader
  * heard, and a 97px thread switcher. Its findings on the goals rail (a link's
  * number, the head's count, a link's status word, the planning conversation)
- * moved with the chains to the epic pages (ruling 503), whose tests carry
+ * moved with the chains to the epic pages (ruling 273), whose tests carry
  * (g) and (h).
  */
-describe("ruling 476: the controller page", () => {
+describe("ruling 320: the controller page", () => {
   const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_b",
     userId: "u1",
@@ -1356,11 +1356,11 @@ describe("ruling 476: the controller page", () => {
   });
 
   /**
-   * Ruling 572, on (c)'s box: the way back for a reader who has scrolled away.
+   * Ruling 320, on (c)'s box: the way back for a reader who has scrolled away.
    * (c) leaves a reader in history where they are when a reply lands, and
    * nothing on screen said that one had.
    */
-  describe("ruling 572: the jump back to the newest message", () => {
+  describe("ruling 320: the jump back to the newest message", () => {
     /** The reader moves the box; the jump is measured on the next frame. */
     async function scrollTo(top: number) {
       transcript().scrollTop = top;
@@ -1399,7 +1399,7 @@ describe("ruling 476: the controller page", () => {
         expect(jump()?.textContent).toBe("Latest");
         update(at([...three, msg("r2", 4, "controller", "Answer two.", "p2")]));
         await screen.findByText("Answer two.");
-        // Ruling 476(c): the reader stays where they are, and is told.
+        // Ruling 320: the reader stays where they are, and is told.
         // CANARY: forget the reply (c) left below the reader, and this reads Latest.
         expect(transcript().scrollTop).toBe(100);
         const button = within(transcript()).getByRole("button", { name: "New reply" });
@@ -1444,14 +1444,14 @@ describe("ruling 476: the controller page", () => {
 
 
 /**
- * Ruling 483 (F40-59): the project's open knowledge-base proposals are listed
+ * Ruling 267 (F40-59): the project's open knowledge-base proposals are listed
  * where the owner looks, with a count, and Promote and Dismiss ask the
  * controller to carry the decision out. Live on WEB-1 two operator proposals
  * existed only as timeline events that looked like failed reviews, and nothing
- * brought them back. Since ruling 498 nothing files one, and the ones that
+ * brought them back. Since ruling 210 nothing files one, and the ones that
  * documents still hold are listed under the corrections, with Promote all.
  */
-describe("the project's open knowledge-base proposals (ruling 483)", () => {
+describe("the project's open knowledge-base proposals (ruling 267)", () => {
   const proposal = {
     id: "kp-0123456789",
     kb: "akin-rulings",
@@ -1537,7 +1537,7 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     });
     await waitFor(() => expect(posted).toHaveLength(1));
     expect(posted[0]).toContain("Dismiss knowledge-base proposal kp-0123456789");
-    // Ruling 459(e): the confirm leaves the way Keep it does. CANARY: put
+    // Ruling 287: the confirm leaves the way Keep it does. CANARY: put
     // `setConfirmDismiss(null)` back in its onConfirm and the card is gone in
     // the click's own commit, with no exit.
     expect(dialog.isConnected).toBe(true);
@@ -1562,7 +1562,7 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
   });
 
   /**
-   * Ruling 497: a proposal's notification opens its entry here. The router
+   * Ruling 302: a proposal's notification opens its entry here. The router
    * arrives by `pushState`, which never updates `:target`, so the page marks
    * the entry itself. One promoted or dismissed since has left the panel, and
    * the notification still lands on the panel.
@@ -1570,7 +1570,7 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
    * Canaries: drop `data-targeted` from the entry and nothing marks it; drop
    * the fallback in `revealKnowledge` and the second link moves nothing.
    */
-  it("ruling 497: a proposal's notification marks and focuses its entry; a closed one lands on the proposals list", async () => {
+  it("ruling 302: a proposal's notification marks and focuses its entry; a closed one lands on the proposals list", async () => {
     const focus = vi.spyOn(HTMLElement.prototype, "focus");
     renderPage(view({ proposals: [proposal] }), "#proposal-kp-0123456789");
     const panel = await screen.findByRole("region", { name: "Knowledge base" });
@@ -1584,7 +1584,7 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
     renderPage(view({ proposals: [proposal] }), "#proposal-kp-ffffffffff");
     const after = await screen.findByRole("region", { name: "Knowledge base" });
     expect(after.querySelector("[data-targeted]")).toBeNull();
-    // Ruling 498: the proposals sit inside the Knowledge base panel, so a
+    // Ruling 321: the proposals sit inside the Knowledge base panel, so a
     // closed one's link lands on their list.
     const list = after.querySelector("#kb-proposals")!;
     await waitFor(() => expect(focus.mock.contexts).toContain(list));
@@ -1593,12 +1593,12 @@ describe("the project's open knowledge-base proposals (ruling 483)", () => {
 });
 
 /**
- * Ruling 498: the owner stopped approving each knowledge-base correction ("No
+ * Ruling 321: the owner stopped approving each knowledge-base correction ("No
  * human can approve all of these while inspecting them thoroughly"). The panel
  * lists what agents wrote, each passage before and after with its evidence,
  * and an org admin's Undo puts one back, directly, after a confirm.
  */
-describe("the project's knowledge-base corrections (ruling 498)", () => {
+describe("the project's knowledge-base corrections (ruling 321)", () => {
   const correction = {
     id: "kc-0123456789",
     kb: "akinozer-deploy-runbook",
@@ -1652,7 +1652,7 @@ describe("the project's knowledge-base corrections (ruling 498)", () => {
     // CANARY: send it to the controller and every undo costs a turn.
     expect(posted[0]).toMatchObject({ intent: "kb-correction-undo", id: "kc-0123456789", reason: "Previews are on." });
     expect(await screen.findByText("Undid kc-0123456789.")).toBeTruthy();
-    // Ruling 459(e): the confirm leaves the way Keep it does. CANARY: put
+    // Ruling 287: the confirm leaves the way Keep it does. CANARY: put
     // `setConfirmUndo(null)` back in its onConfirm and the card is gone in
     // the click's own commit, with no exit.
     expect(dialog.isConnected).toBe(true);
@@ -1714,12 +1714,12 @@ describe("the project's knowledge-base corrections (ruling 498)", () => {
 });
 
 /**
- * Ruling 525: a conversation is deleted from the rail. Each row the viewer may
+ * Ruling 278: a conversation is deleted from the rail. Each row the viewer may
  * delete carries a Delete that asks first; the confirm says what goes, and for
  * whom when it is somebody else's. A thread the viewer may delete but not read
  * is listed without its words and opens nothing.
  */
-describe("ruling 525: deleting a conversation from the rail", () => {
+describe("ruling 278: deleting a conversation from the rail", () => {
   const open: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_t",
     userId: "u1",
@@ -1869,12 +1869,12 @@ describe("ruling 525: deleting a conversation from the rail", () => {
 });
 
 /**
- * Ruling 573: a person's files, on the page. A pasted screenshot joins the
+ * Ruling 258: a person's files, on the page. A pasted screenshot joins the
  * composer's tray and goes out with the message; a message's files show under
  * its words, a picture as itself and any other file as the tray's chip, each
  * linking to the conversation's own serving route.
  */
-describe("ruling 573: files on the controller page", () => {
+describe("ruling 258: files on the controller page", () => {
   const conversation: NonNullable<ControllerSurfaceView["conversation"]> = {
     id: "cnv_f",
     userId: "u1",

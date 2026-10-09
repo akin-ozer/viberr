@@ -69,7 +69,7 @@ describe("F19-22: the GitHub loader ships the last CHECK beside the last change"
     clearPasses();
     const data = await loadGithubPage();
     // Null, not a borrowed provenance timestamp — the view renders the neutral
-    // change-only cue from this (ruling 46/R17-5: nothing here is wrong).
+    // change-only cue from this (ruling 237/R17-5: nothing here is wrong).
     expect(data.reconcileCheck).toEqual({ at: null, label: null, stale: true });
   });
 

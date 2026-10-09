@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { bashDenyPrefixes, deniedPrefixFor } from "./bash-policy.server";
 
 /**
- * Ruling 101(e), amended by Option D PR 5: the normalizer behind the Claude
+ * Ruling 219(a), amended by Option D PR 5: the normalizer behind the Claude
  * PreToolUse hook. Measured live (2026-09-11), the pinned CLI's own deny rules
  * already stopped `cd . && git push` and `true; git push`, and let
  * `git -C . push` and `sh -c 'git push'` through. Each shape the plan names has

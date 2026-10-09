@@ -17,7 +17,7 @@ import type { MiddlewareFunction } from "react-router";
  * correlation for free — the reason the previous attempt died is that it
  * required every call site to opt in.
  *
- * Ruling 458(d): a record also names WHO and WHAT is behind it. The session
+ * Ruling 43: a record also names WHO and WHAT is behind it. The session
  * guard binds `userId` once the session resolves (`require-user.server.ts`),
  * and a run's own work carries its `runId` and `taskKey` (`run-service`'s
  * `launch`). The id goes back out too: every response the app answers carries
@@ -112,7 +112,7 @@ export function currentCorrelation(): RequestCorrelation | undefined {
   return storage.getStore();
 }
 
-/** The active request id, or null outside a request. Ruling 458(d): the id
+/** The active request id, or null outside a request. Ruling 43: the id
  *  {@link echoRequestId} answers with. */
 export function currentRequestId(): string | null {
   return storage.getStore()?.requestId ?? null;
@@ -120,7 +120,7 @@ export function currentRequestId(): string | null {
 
 /**
  * Adds fields to the ACTIVE correlation, so everything logged later in the same
- * request carries them. Ruling 458(d): the session guard binds `userId` once
+ * request carries them. Ruling 43: the session guard binds `userId` once
  * the session resolves, and `run-service`'s `launch` binds `runId` and
  * `taskKey` inside the run's own {@link forkCorrelation}. No-op outside a
  * request context, so call sites never need a guard. `requestId` cannot be
@@ -164,7 +164,7 @@ export function carryCorrelation<T>(fn: () => T): () => T {
 }
 
 /**
- * `response`, carrying its request's id as `X-Request-Id` (ruling 458(d)): the
+ * `response`, carrying its request's id as `X-Request-Id` (ruling 43): the
  * active request's id, or, outside its context (React Router's data hook runs
  * after the middleware returned), the one {@link correlationFor} gives that
  * Request. Both name one id, the one the request's log records carry. A
@@ -191,7 +191,7 @@ export function echoRequestId(response: Response, request: Request): Response {
 /**
  * Route middleware that binds a correlation for the WHOLE request — loaders,
  * actions and the document render alike — and echoes its id on the response
- * (ruling 458(d)). Mounted once, on the root route (`app/root.tsx`), so it
+ * (ruling 43). Mounted once, on the root route (`app/root.tsx`), so it
  * wraps every matched document, `.data` and resource-route request.
  * `entry.server.tsx` binds the render phase on its own as well, reusing the id
  * bound here, so the render and the data phase share it; it also stamps the

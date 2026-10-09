@@ -45,7 +45,7 @@ if ("window" in globalThis && !Object.hasOwn(window, "ResizeObserver")) {
  * jsdom has no AnimationEvent. React picks, once as it loads, the event name
  * its `onAnimationEnd` listens for: with no AnimationEvent it falls back to the
  * prefixed `webkitAnimationEnd`, a name no current browser fires, so a test's
- * `fireEvent.animationEnd` never reached a handler (ruling 451(g) records a
+ * `fireEvent.animationEnd` never reached a handler (ruling 284 records a
  * refusal's shake as played at its `animationend`). Installed before any test
  * imports react-dom, the shim gives React the browsers' unprefixed wiring.
  */

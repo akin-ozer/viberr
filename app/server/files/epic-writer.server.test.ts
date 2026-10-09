@@ -25,7 +25,7 @@ import { epicFilePath, epicsDir } from "./file-store-root.server";
 import { createTempDirs } from "../../../test-support/temp-dirs";
 
 /**
- * Ruling 503(a): the canonical epic file, `projects/<slug>/epics/epic-<n>.md`,
+ * Ruling 17: the canonical epic file, `projects/<slug>/epics/epic-<n>.md`,
  * and its one writer. Frontmatter in `EPIC_FRONTMATTER_KEYS` order, then
  * `## Description` and the newest-first `## Timeline`; keys the schema does
  * not know round-trip; a file the schema rejects is named field by field; ids
@@ -93,7 +93,7 @@ function bodyOf(text: string): string {
   return text.slice(text.indexOf("\n---\n") + "\n---\n".length);
 }
 
-describe("ruling 503(a): an epic file round-trips through the writer", () => {
+describe("ruling 17: an epic file round-trips through the writer", () => {
   it("writes the frontmatter in EPIC_FRONTMATTER_KEYS order, then ## Description and ## Timeline newest first, and reads back exactly what it wrote", () => {
     // CANARY: build the known mapping from `Object.keys(parsed.frontmatter)`
     // instead of EPIC_FRONTMATTER_KEYS in serializeEpicFile.
@@ -206,7 +206,7 @@ describe("ruling 503(a): an epic file round-trips through the writer", () => {
   });
 });
 
-describe("ruling 503(a): frontmatter keys the schema does not know survive a rewrite", () => {
+describe("ruling 17: frontmatter keys the schema does not know survive a rewrite", () => {
   it("a hand-added scalar, mapping and list ride through updateEpicFile unchanged, after the known keys", async () => {
     // CANARY: pass `{}` instead of `parsed.unknownFrontmatter` to
     // serializeFrontmatterFile in serializeEpicFile.
@@ -255,7 +255,7 @@ describe("ruling 503(a): frontmatter keys the schema does not know survive a rew
   });
 });
 
-describe("ruling 503(a): diagnoseEpicFileContent names what is wrong with a broken file", () => {
+describe("ruling 17: diagnoseEpicFileContent names what is wrong with a broken file", () => {
   const clean = serializeEpicFile({
     frontmatter: frontmatter("epic-3"),
     description: "Fine.",
@@ -346,7 +346,7 @@ describe("ruling 503(a): diagnoseEpicFileContent names what is wrong with a brok
   });
 });
 
-describe("ruling 503(a): nextEpicId mints the next id from a directory scan", () => {
+describe("ruling 17: nextEpicId mints the next id from a directory scan", () => {
   it("mints epic-1 in a project with no epics yet", () => {
     // CANARY: start the scan's reduce from 1 instead of 0 in nextEpicId.
     const dataRoot = temp.make("viberr-epic-mint-");
@@ -381,7 +381,7 @@ describe("ruling 503(a): nextEpicId mints the next id from a directory scan", ()
   });
 });
 
-describe("ruling 503(a): updateEpicFile, the locked read-modify-write", () => {
+describe("ruling 17: updateEpicFile, the locked read-modify-write", () => {
   it("a mutator returning a line puts it on top of the history and bumps updatedAt", async () => {
     // CANARY: `push` the returned line instead of `unshift` in updateEpicFile
     // (the history stops being newest first).
@@ -449,7 +449,7 @@ describe("ruling 503(a): updateEpicFile, the locked read-modify-write", () => {
   });
 });
 
-describe("ruling 503(a): ids are minted under the project's epics lock", () => {
+describe("ruling 17: ids are minted under the project's epics lock", () => {
   it("two concurrent creates under withEpicsLock get distinct ids", async () => {
     // CANARY: make withEpicsLock call `fn` without taking the lock (both scans
     // read an empty directory and mint epic-1).
@@ -484,7 +484,7 @@ describe("ruling 503(a): ids are minted under the project's epics lock", () => {
   });
 });
 
-describe("ruling 503(a): defaultEpicColor", () => {
+describe("ruling 17: defaultEpicColor", () => {
   it("gives consecutive ids far-apart hues: never the same, never neighbours on the wheel, never a neutral", () => {
     // CANARY: put two neighbouring hues next to each other in
     // EPIC_COLOR_SEQUENCE (blue then sky), or add a neutral (slate) to it.

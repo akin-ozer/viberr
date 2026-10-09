@@ -18,13 +18,13 @@ export default [
   // The pathless layout keeps their URLs unchanged; Home and the workspace
   // mount the shortcut themselves, so nothing double-registers.
   //
-  // Ruling 145 gave it a second job: the app header the standalone PAGES were
+  // Ruling 294 gave it a second job: the app header the standalone PAGES were
   // missing (`palette-shell.tsx` renders it for the routes `standalonePageLabel`
-  // names — today /org/settings, /controller (ruling 623) and /insights).
+  // names — today /org/settings, /controller (ruling 321) and /insights).
   layout("routes/palette-shell.tsx", [
     // The real tabbed org-settings surface (org profile, members, resources).
     route("org/settings", "routes/org.settings.tsx"),
-    // Ruling 99: the instance controller — every signed-in user converses;
+    // Ruling 247: the instance controller — every signed-in user converses;
     // what it answers and applies is gated per tool call on that user's own
     // authority.
     route("controller", "routes/controller.tsx"),
@@ -37,16 +37,16 @@ export default [
   // layout above: it renders no component (the loader answers with the file
   // itself), so the shortcut and the header it mounts have nothing to do here.
   route("org/settings/audit-export", "routes/org.settings.audit-export.ts"),
-  // Ruling 653: one board as a board file, for the Import & export tab's
+  // Ruling 32: one board as a board file, for the Import & export tab's
   // Export buttons. Org-admin gated, outside the layout for the same reason.
   route("org/settings/board-export", "routes/org.settings.board-export.ts"),
 
   // Resource actions (fetcher targets, no UI).
   route("notifications/read", "routes/notifications.read.tsx"),
-  // Ruling 457: the bell popover's list, loaded by the bell on intent (pages
+  // Ruling 300: the bell popover's list, loaded by the bell on intent (pages
   // carry only its counts).
   route("resources/notifications", "routes/resources.notifications.ts"),
-  // Ruling 481(c): the unread decisions a tab's title counts and a desktop
+  // Ruling 74: the unread decisions a tab's title counts and a desktop
   // notification announces, read by the root-mounted attention watcher.
   route("resources/attention", "routes/resources.attention.ts"),
   route("prefs/theme", "routes/prefs.theme.tsx"),
@@ -60,12 +60,12 @@ export default [
   // ⌘K palette query (R15-5) — tasks/branches/agents/projects across the
   // viewer's VISIBLE projects.
   route("resources/search", "routes/resources.search.ts"),
-  // Ruling 121: the controller DOCK's data route — the view for the scope the
+  // Ruling 256: the controller DOCK's data route — the view for the scope the
   // person is standing in (GET) and the send (POST). Mounted in root, so it is
   // a resource route rather than a page.
   route("resources/controller", "routes/resources.controller.ts"),
   route("resources/controller-unseen", "routes/resources.controller-unseen.ts"),
-  // Ruling 573: one file a person sent with a controller message, to the two
+  // Ruling 258: one file a person sent with a controller message, to the two
   // who may read its conversation.
   route("resources/controller-file/:id", "routes/resources.controller-file.ts"),
   // Model + effort catalog — the agent create/edit modal fetches this to
@@ -74,13 +74,13 @@ export default [
   // Session export — downloads a bash installer that carries a run's provider
   // transcript so the conversation can be resumed locally (same subscription).
   route("resources/session-export", "routes/resources.session-export.ts"),
-  // Ruling 127: the signed-in viewer's OWN hosted sign-in session plus their
+  // Ruling 137: the signed-in viewer's OWN hosted sign-in session plus their
   // backend health. Profile → Agent accounts polls it while a `claude auth
   // login` / `codex login --device-auth` child is running, because that process
   // lives on the server and the browser has no other way to see what the vendor
   // printed. Keyed by the session user; it reads nobody else's sign-in.
   route("resources/backend-login", "routes/resources.backend-login.ts"),
-  // Ruling 469: where an MCP server's authorization server sends an org
+  // Ruling 192: where an MCP server's authorization server sends an org
   // admin's browser back after an OAuth sign-in started in Instance settings.
   // A resource route: it seals the tokens and answers a plain page.
   route("resources/mcp-oauth/callback", "routes/resources.mcp-oauth.callback.ts"),
@@ -91,13 +91,13 @@ export default [
     "projects/:slug/tasks/:key/attachments/:file",
     "routes/task-attachment.ts",
   ),
-  // Ruling 690: one kept source of a task, by its id. The same kind of route
+  // Ruling 317: one kept source of a task, by its id. The same kind of route
   // as an attachment's: raw bytes, member-only, outside the workspace layout.
   route("projects/:slug/tasks/:key/sources/:id", "routes/task-source.ts"),
-  // Ruling 484: the task page's Changes panel read (the delivered revision's
+  // Ruling 315: the task page's Changes panel read (the delivered revision's
   // files and patches), loaded by the panel itself, member-only.
   route("projects/:slug/tasks/:key/changes", "routes/task-changes.ts"),
-  // Ruling 548: the Blocked by picker's list of the project's other tasks,
+  // Ruling 59: the Blocked by picker's list of the project's other tasks,
   // loaded by the picker itself, member-only.
   route(
     "projects/:slug/tasks/:key/dependency-candidates",
@@ -111,7 +111,7 @@ export default [
   route("projects/:slug", "routes/project.tsx", [
     index("routes/project._index.tsx"),
     route("board", "routes/project.board.tsx"),
-    // Ruling 503: the project's epics, and one epic's page.
+    // Ruling 325: the project's epics, and one epic's page.
     route("epics", "routes/project.epics.tsx"),
     route("epics/:epicId", "routes/project.epic.tsx"),
     route("review", "routes/project.review.tsx"),

@@ -21,7 +21,7 @@ resources:
   kb:
     - controller-handbook
 # No capability matrix: the controller's authority is the ASKING USER's own
-# permission level, enforced server side per tool call (ruling 99). A stored
+# permission level, enforced server side per tool call (ruling 247). A stored
 # grant row here would be a toggle with no effect.
 capabilities: []
 extras: []

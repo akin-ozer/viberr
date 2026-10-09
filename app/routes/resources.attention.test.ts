@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 481(c) (F40-51): the snapshot the attention watcher reads, the
+ * Ruling 74 (F40-51): the snapshot the attention watcher reads, the
  * viewer's own unread decisions only, uncached, and a 401 (never a login
  * redirect) for a tab whose session is gone.
  *
@@ -30,7 +30,7 @@ async function load(cookie?: string): Promise<Response> {
   return loader(routeArgs(request, {}, "/resources/attention"));
 }
 
-describe("/resources/attention (ruling 481)", () => {
+describe("/resources/attention (ruling 74)", () => {
   it("answers the viewer's own snapshot, uncached", async () => {
     const { attentionSnapshot, createNotification } = await import(
       "~/server/projections/notifications.server"

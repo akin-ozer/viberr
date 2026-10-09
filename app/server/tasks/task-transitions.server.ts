@@ -1,5 +1,5 @@
 /**
- * Moving a task between stages (ruling 654): `transitionStage`, the one
+ * Moving a task between stages (ruling 13(a)): `transitionStage`, the one
  * governed move, whoever makes it, with its boundary, verdict and chain-cap
  * rules, which hands a move into the terminal stage to acceptance; and
  * `reorderTask`, a board card's new rank, moving stages through
@@ -65,7 +65,7 @@ import { acceptCompletion } from "./task-acceptance.server";
 import { surfaceDeliveryEvent } from "./task-delivery.server";
 
 /** Markdown blockquote, one `>` per line and no trailing space on a blank one
- *  (ruling 381 quotes a person's move reason on the transition entry). */
+ *  (ruling 47 quotes a person's move reason on the transition entry). */
 function quoteLines(text: string): string {
   return text
     .split("\n")
@@ -99,7 +99,7 @@ export async function transitionStage(
      *  route; forging it from a request would bypass the board-management tier. */
     recommendationAuthorized?: boolean;
     /**
-     * Ruling 381 (F39-8): WHY a person moved it. A manual stage move is one of
+     * Ruling 47 (F39-8): WHY a person moved it. A manual stage move is one of
      * the strongest signals a human sends — not ready, do this first, I
      * disagree with the verdict — and it used to be mute: the event read
      * "moved AX-9 from Review to Verify" and nothing else, while the
@@ -113,7 +113,7 @@ export async function transitionStage(
      * sentence, which is where the operator already looks.
      */
     reason?: string;
-    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+    /** Ruling 97 (F21-2): the acceptance disclosure the human acknowledged.
      *  Only consulted when this move lands on the TERMINAL stage — the server
      *  reads that as accepting the completion (see below) — and threaded
      *  straight through to `acceptCompletion`, whose docs own the three-state
@@ -178,7 +178,7 @@ export async function transitionStage(
   // here so it can't be abused for a forward jump or on a healthy task.
   const fromIndex = project.stages.findIndex((s) => s.id === fromStageId);
   const toIndex = project.stages.findIndex((s) => s.id === input.toStageId);
-  // Ruling 163 (pass 35, F35-13): a revision that CHANGED after a verdict is
+  // Ruling 90 (pass 35, F35-13): a revision that CHANGED after a verdict is
   // rework by definition, and the one backward move it licenses is into the
   // review stage, where the re-verdict can be given. `failing` keeps the whole
   // backward license (R7-4). Same predicate `operatorTransitionStage` reads.
@@ -190,8 +190,8 @@ export async function transitionStage(
     existing.parsed.frontmatter.validation === "changed"
       ? await verdictStageOf(ctx, input.projectSlug, project, existing.parsed.frontmatter)
       : null;
-  // Ruling 702: a task that has no delivering agent and has delivered nothing
-  // may go back to a stage where one can be engaged: ruling 133 judges an
+  // Ruling 112: a task that has no delivering agent and has delivered nothing
+  // may go back to a stage where one can be engaged: ruling 181 judges an
   // unengaged profile by its declared stages, so the agent the task needs may
   // not be one that can be engaged where it stands. Read for every backward
   // move that is not a person's own, because the refusal below says whether a
@@ -215,7 +215,7 @@ export async function transitionStage(
     // applies to a JSX string — see `app/features/copy-ban.test.ts`, which now
     // scans user-facing `AppError` messages under `app/server/**` too.
     //
-    // Ruling 412 (F39-39): and it says WHY, when the answer is in this scope.
+    // Ruling 47 (F39-39): and it says WHY, when the answer is in this scope.
     // A BACKWARD move is refused for one of two reasons this function has
     // already computed — `validation` licenses no rework at all, or it
     // licenses exactly one target and this is not it — and the bare sentence
@@ -223,9 +223,9 @@ export async function transitionStage(
     // Verify to rework against a reviewer's complete blocker list, got "No
     // allowed transition from Review to Verify.", and the THROW aborted the
     // rest of its plan: "Coordination stopped". The task sat on a human. The
-    // way forward existed and nothing said so: ruling 133 lets the engaged
+    // way forward existed and nothing said so: ruling 181 lets the engaged
     // deliverer run at EVERY stage, so the rework never needed the move.
-    // Ruling 429(b): the `changed` arm read `changedReworkTarget`, which is only
+    // Ruling 47: the `changed` arm read `changedReworkTarget`, which is only
     // computed for a move flagged as rework, so an unflagged move off a task
     // whose revision HAD changed was told "this task has neither" (AX-20, 00:47).
     const changedTarget =
@@ -244,7 +244,7 @@ export async function transitionStage(
           ? ""
           : " A backward move is rework, and rework needs a failing verdict or a revision that changed after one; this task has neither."
       : "";
-    // Ruling 702: the way out is named only where it exists. The sentence
+    // Ruling 47: the way out is named only where it exists. The sentence
     // about the engaged deliverer used to close every refused backward move,
     // on a task with no deliverer too, and on one whose deliverer is no
     // longer deployed. A task the operator may take back to engage one is
@@ -252,7 +252,7 @@ export async function transitionStage(
     const wayOut = !backward
       ? ""
       : engage?.deliverer === true
-        ? " The engaged deliverer runs at every stage (ruling 133), so dispatch it here instead of moving the task."
+        ? " The engaged deliverer runs at every stage (ruling 181), so dispatch it here instead of moving the task."
         : engageStages.length > 0
           ? ` It has no delivering agent and has delivered nothing, so the backward moves open to the operator are into a stage where one can be engaged: ${engageStages
               .map((e) => `${stageName(project, e.stageId)} (${e.agents.map((a) => a.name).join(", ")})`)
@@ -280,7 +280,7 @@ export async function transitionStage(
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,
     };
-    // Ruling 88: the stage-move ceremony's echo (F19-37's `stage-move` mode)
+    // Ruling 97: the stage-move ceremony's echo (F19-37's `stage-move` mode)
     // rides along. The KEY is set only when this caller is a
     // disclosure-bearing door — see `acceptCompletion` for why the absence of
     // the key and an explicit `null` mean different things.
@@ -299,7 +299,7 @@ export async function transitionStage(
         "The operator reaches Done only by accepting completion, not a bare transition.",
       );
     }
-    // Ruling 151 (pass 35, F35-2): the boundary always wins. Whatever the
+    // Ruling 111 (pass 35, F35-2): the boundary always wins. Whatever the
     // operator's `stage-transitions` grant says, a declared `approval` or
     // `human` boundary is a human's to cross; the operator may recommend it
     // (`operatorTransitionStage` files the card) and an applied card arrives
@@ -326,7 +326,7 @@ export async function transitionStage(
     } else {
       requireAction(db, project, actor, "approve-transition", "change the task stage");
     }
-    // Ruling 381 (F39-8): a manual move BACKWARD says why, or it does not
+    // Ruling 47 (F39-8): a manual move BACKWARD says why, or it does not
     // happen. AFTER the authority gate on purpose — someone who may not move
     // the task at all is refused for that, not told to write a reason they
     // could never use. No exemption: the operator's rework route never reaches
@@ -384,7 +384,7 @@ export async function transitionStage(
     actor: ctx.operatorAuthorized ? { kind: "operator" } : humanActorRef(db, actor),
     title: null,
     text:
-      // Ruling 693: the opening sentence has one home, because what a task
+      // Ruling 83: the opening sentence has one home, because what a task
       // took counts a person's moves back by it.
       stageMoveLead(
         input.taskKey,
@@ -392,12 +392,12 @@ export async function transitionStage(
         stageName(project, input.toStageId),
         ctx.operatorAuthorized === true,
       ) +
-      // Ruling 381: on the event itself, not in a separate note, so the
+      // Ruling 47: on the event itself, not in a separate note, so the
       // operator reads the move and the reason as one fact — and quoted, the
       // way a packet decision quotes the resolver's words. Appending it as a
       // bare clause ran the person's own sentence on after a full stop
       // ("…to In Progress. the retry path is still unhandled"), which reads
-      // as a typo rather than as an instruction. Ruling 519: the operator's
+      // as a typo rather than as an instruction. Ruling 91: the operator's
       // own move quotes its reason the same way, because the move into Review
       // it now makes by itself used to reach a person as a card that carried
       // that reason.
@@ -420,7 +420,7 @@ export async function transitionStage(
   // file lock, so a retry … can never leave two cards"). `moved` carries the
   // in-lock verdict back out so the event, the audit row, the notification
   // read and the operator re-trigger all follow the ONE write that happened.
-  // Ruling 137: a move AWAY from the acceptance boundary (the review stage the
+  // Ruling 99: a move AWAY from the acceptance boundary (the review stage the
   // workflow graph names, the same source `isAtAcceptanceBoundary` reads)
   // withdraws the standing acceptance offers on the record. A move INTO the
   // terminal stage is the acceptance itself and consumes every card.
@@ -501,7 +501,7 @@ export async function transitionStage(
     // the note counts the survivors it really leaves (pass 34 review: counting
     // before this filter overstated them).
     const staleTransition = (r: Recommendation) => r.kind === "transition";
-    // Ruling 387 (F39-14): the MOVE goes on first, and the withdrawal note it
+    // Ruling 72 (F39-14): the MOVE goes on first, and the withdrawal note it
     // causes lands above it. `event` was built before the lock; the note is
     // stamped inside `withdrawAcceptanceOffers`, so it is always the newer of
     // the two. Unshifting the move last put the OLDER event on top, which is
@@ -599,7 +599,7 @@ export async function transitionStage(
           `transitions with no agent run or human action in between, which is a coordination loop.`,
       });
     } else if (ctx.operatorRun) {
-      // Ruling 152(a) (pass 35, G35-5): this move was made by a LIVE operator
+      // Ruling 120 (pass 35, G35-5): this move was made by a LIVE operator
       // run (`opCtx` carries the run onto the ctx), whose turn continues on
       // its own: the tool reply names the next boundary and the prompt says to
       // walk consecutive `auto` boundaries in one turn. Queuing a fresh
@@ -609,7 +609,7 @@ export async function transitionStage(
       // moves still re-trigger below. The stamp lets the settle-time backstop
       // judge the stage this drive left the task at (`maybeResumeStrandedOperator`).
       ctx.operatorRun.movedToStageId = input.toStageId;
-      // Ruling 357: a move after this drive's own delivery is the drive acting
+      // Ruling 127: a move after this drive's own delivery is the drive acting
       // on it; the lease release then owes no `delivered` follow-up.
       if (ctx.operatorRun.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
     } else {
@@ -664,10 +664,10 @@ export async function transitionStage(
     }
   }
 
-  // Ruling 503: a move into the terminal stage can be the last open task of
+  // Ruling 55: a move into the terminal stage can be the last open task of
   // its epic. Fire-and-forget — a task in no epic costs one file read.
   maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
-  // Ruling 131(e): a move into (or out of) the terminal stage can satisfy a
+  // Ruling 55: a move into (or out of) the terminal stage can satisfy a
   // dependent's wait. Same fire-and-forget posture; the engine converges.
   maybeReleaseDependents(db, ctx, input.projectSlug);
 
@@ -684,12 +684,12 @@ export async function transitionStage(
     const moved = existing.parsed.frontmatter;
     const pr = moved.pr;
     const livePr = pr && pr.state !== "closed" && pr.state !== "merged";
-    // Ruling 546: a task delivered as the files its deliverer saved on it
-    // (rulings 388, 531) has nothing a pull request would carry, and the note
+    // Ruling 235: a task delivered as the files its deliverer saved on it
+    // (rulings 84, 128) has nothing a pull request would carry, and the note
     // told the person the operator was deciding a push and a PR for it.
-    // Ruling 576: nor does a task a reviewer verified has nothing to deliver
+    // Ruling 235: nor does a task a reviewer verified has nothing to deliver
     // (R19-8); live on AWSC-11 the note followed that verification by 30s.
-    // Ruling 667: nor does any task of a project with no repository.
+    // Ruling 224: nor does any task of a project with no repository.
     if (
       !livePr &&
       !deliveredAsFiles(moved) &&
@@ -721,15 +721,15 @@ export async function reorderTask(
     toStageId: string;
     /** Insert immediately before this task; null/absent → append to the end. */
     beforeKey?: string | null;
-    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+    /** Ruling 97 (F21-2): the acceptance disclosure the human acknowledged.
      *  A drop (or a keyboard move) onto the FINAL column is an acceptance — the
-     *  board's own ceremony has fronted it since ruling 53/R18-7 — so the echo
+     *  board's own ceremony has fronted it since ruling 97/R18-7 — so the echo
      *  rides through to `transitionStage`, which consults it on the terminal
      *  branch only. A same-stage rank write never reaches a transition at all,
      *  and an ordinary column move is ack-free. Three states, documented on
      *  `assertAcceptanceDisclosure`. */
     ack?: AcceptanceDisclosure | null;
-    /** Ruling 381 (F39-8): why a person dragged it BACK; forwarded verbatim to
+    /** Ruling 47 (F39-8): why a person dragged it BACK; forwarded verbatim to
      *  the manual transition, which requires one for a backward move. */
     reason?: string;
   },
@@ -771,10 +771,10 @@ export async function reorderTask(
       toStageId: input.toStageId,
       manual: true,
     };
-    // Ruling 88: see the `ack` field above — the key is set only when the caller
+    // Ruling 97: see the `ack` field above — the key is set only when the caller
     // is a disclosure-bearing door, so an in-process reorder stays omitted.
     if ("ack" in input) move.ack = input.ack ?? null;
-    // Ruling 381: a backward DRAG is the same act as the stage menu's move, so
+    // Ruling 47: a backward DRAG is the same act as the stage menu's move, so
     // it answers the same question rather than being refused with nowhere to
     // type the answer.
     if (input.reason) move.reason = input.reason;

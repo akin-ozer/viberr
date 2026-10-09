@@ -81,7 +81,7 @@ function terminalStageId(db: DatabaseSync, projectSlug: string): string | null {
 
 // FR39 asked at DRIVE time is now enforced inside `runOperator` itself, which
 // returns `refused: "closed"` for any turn on a closed task, archived or at its
-// terminal stage (ruling 177; the belt to this claim-time brace). B's standalone
+// terminal stage (ruling 52; the belt to this claim-time brace). B's standalone
 // `scheduledRunIsMoot` drive probe was retired with that guard (RECONCILE §1.2).
 
 // ------------------------------------------------------------------ bounds
@@ -94,7 +94,7 @@ export const SCHEDULE_MAX_MINUTES = 40_320;
 export const SCHEDULE_BOUNDS_SENTENCE = "Schedule between 1 minute and 28 days out.";
 
 /**
- * Ruling 153, shared by ruling 487: the instant a door's `delayMinutes` or ISO
+ * Ruling 264, shared by ruling 125: the instant a door's `delayMinutes` or ISO
  * `dueAt` names, under the task page's bounds and sentences. A crafted delay
  * once overflowed Date, so both forms are clamped here rather than trusted.
  * Throws a validation `AppError`.
@@ -123,14 +123,14 @@ export function scheduleDueMs(
 }
 
 /**
- * Ruling 487: the `createdBy` of an entry the OPERATOR made, through its own
- * `schedule_task_action` or a dispatch of its that was held (ruling 152(c)).
+ * Ruling 125: the `createdBy` of an entry the OPERATOR made, through its own
+ * `schedule_task_action` or a dispatch of its that was held (ruling 151).
  * The fire path reads it: an operator's run carries no human's name, so it
  * must not be started as a person's directive or tag one when it reports.
  */
 export const OPERATOR_SCHEDULER_ID = "operator";
 
-/** The timeline actor a schedule note is written as (ruling 487: the operator
+/** The timeline actor a schedule note is written as (ruling 125: the operator
  *  when the write runs under its authority, the person otherwise). */
 function schedulerEventActor(
   actor: AuditActor,
@@ -162,7 +162,7 @@ export interface ScheduleInput {
  * (`run-agents`, maintainer+ — scheduling triggers agent work). Rejects a
  * past `dueAt` and a task that is already in its terminal stage.
  *
- * Ruling 487: the operator's door (`operatorScheduleRun`) writes through here
+ * Ruling 125: the operator's door (`operatorScheduleRun`) writes through here
  * too, under `ctx.operatorAuthorized` and gated like its immediate dispatch;
  * the entry, its note and its audit row then name the operator.
  */
@@ -199,7 +199,7 @@ export async function scheduleTaskAction(
   const ref = taskRef(ctx, input.projectSlug, input.taskKey);
   const existing = readTaskFile(ref);
   if (!existing) throw AppError.notFound(`Task ${input.taskKey} not found.`);
-  // Ruling 177 (pass 36): a closed task — archived, or at the board's terminal
+  // Ruling 52 (pass 36): a closed task — archived, or at the board's terminal
   // stage whatever it is named — refuses the schedule with the one closure
   // sentence every door uses. Live (U36-9, 19:37Z): "That task is already
   // Done — nothing to schedule." on a board whose last stage is Shipped.
@@ -221,7 +221,7 @@ export async function scheduleTaskAction(
     dueAt: new Date(dueMs).toISOString(),
     profileId: action === "run-agent" ? (input.profileId ?? null) : null,
     prompt: input.prompt?.trim() ? input.prompt.trim() : "",
-    // Ruling 487: an entry written under the operator's authority says so,
+    // Ruling 125: an entry written under the operator's authority says so,
     // which is what the fire path and the operator's own cancel read.
     createdBy: ctx.operatorAuthorized ? OPERATOR_SCHEDULER_ID : (actor.userId ?? "system"),
     createdByLabel: actor.label,
@@ -372,7 +372,7 @@ const MAX_SCHEDULE_RETRIES = 3;
 
 /**
  * Fire every pending schedule whose `dueAt` has passed. A schedule on a closed
- * task (ruling 177) is retired (`fired`, outcome `skipped-done` at the terminal
+ * task (ruling 52) is retired (`fired`, outcome `skipped-done` at the terminal
  * stage, `skipped-archived` when archived) WITHOUT running the operator — the
  * re-check is moot once the task is closed. Fire-and-forget per operator run;
  * one failure never blocks the others.
@@ -504,7 +504,7 @@ export async function fireDueSchedules(
             // row only FOUND the candidate; an acceptance (or archive) landing
             // between the SELECT and this locked read never rides a stale
             // snapshot into a real, unwatched operator turn.
-            // Ruling 177 (pass 36): the one closed-task predicate.
+            // Ruling 52 (pass 36): the one closed-task predicate.
             const closure = taskClosure(
               parsed.frontmatter,
               terminal !== null ? [{ id: terminal }] : [],
@@ -599,21 +599,22 @@ export async function fireDueSchedules(
         let ok = false;
         /** F19-20: the run was refused at FIRE time (the task closed after
          *  this occurrence was claimed: it reached its terminal stage or was
-         *  archived, ruling 177). Not a failure — nothing to retry — but the
+         *  archived, ruling 52). Not a failure — nothing to retry — but the
          *  timeline already announced the start, so the retirement has to say
          *  what actually happened. */
         let refusedTerminal = false;
-        /** Ruling 131(d): the task waits on other work; the operator trigger
+        /** Ruling 115: the task waits on other work; the operator trigger
          *  was refused at fire time. Retired `fired` with a note, outcome
-         *  `skipped-held`. A human-scheduled AGENT run is not refused: the
-         *  ruling refuses operator triggers only, so the run-agent arm stands. */
+         *  `skipped-held`. A scheduled AGENT run on a held task is refused
+         *  by `startAgentRun` like any dispatch (ruling 56) and retires
+         *  `failed` through the refusal arm below. */
         let refusedHeld = false;
-        /** Ruling 141: a decision packet is open; the scheduled operator re-run
-         *  is the same paid no-op ruling 76 refuses for a person, so it was
+        /** Ruling 115: a decision packet is open; the scheduled operator re-run
+         *  is the same paid no-op ruling 63 refuses for a person, so it was
          *  refused at fire time. Retired `fired` with a note, outcome
          *  `skipped-packet`, no retry. */
         let refusedPacket = false;
-        /** Ruling 141: the run was queued behind a live drive; the occurrence is
+        /** Ruling 115: the run was queued behind a live drive; the occurrence is
          *  retired here and its identity travels with the trigger, so a refusal
          *  at the front of the queue writes the final row itself. */
         let queuedBehindDrive = false;
@@ -627,7 +628,7 @@ export async function fireDueSchedules(
          *  no retry spent; the next tick's claim pre-check holds it until the
          *  live run ends. */
         let deferredConflict = false;
-        /** Ruling 152(c) (pass 35, G35-4): the dispatch was HELD because the
+        /** Ruling 151 (pass 35, G35-4): the dispatch was HELD because the
          *  backend is known to be out of quota for the account it bills. The
          *  dispatcher already put the retry on the schedule and said so on
          *  the timeline, so this occurrence retires `fired` with outcome
@@ -681,7 +682,7 @@ export async function fireDueSchedules(
               taskKey: t.taskKey,
               profileId: t.profileId,
             };
-            // Ruling 487: the operator's own entry starts the run the way its
+            // Ruling 125: the operator's own entry starts the run the way its
             // immediate `run_agent` would. Its directive is not a person's
             // words ("A human (operator) asked you"), and there is no person
             // to tag: the completion re-invokes the operator as any of its
@@ -714,13 +715,13 @@ export async function fireDueSchedules(
               // the task with no idea what it was asked to re-check.
               trigger: "scheduled",
               dataRoot: ctx.dataRoot,
-              // Ruling 141: the occurrence's identity travels with the trigger.
+              // Ruling 115: the occurrence's identity travels with the trigger.
               scheduleId: t.scheduleId,
             };
             // Only a real note rides along; an empty one would present itself to
             // the turn instruction as a stated reason.
             if (t.prompt) runInput.scheduleNote = t.prompt;
-            // Ruling 487: the turn says whose re-check this is. "A human set
+            // Ruling 125: the turn says whose re-check this is. "A human set
             // it" is false for the operator's own.
             if (t.createdBy === OPERATOR_SCHEDULER_ID) runInput.scheduledByOperator = true;
             const result = await runOperator(db, runInput);
@@ -763,7 +764,7 @@ export async function fireDueSchedules(
         // the occurrence was no longer claimed: an archive (which cancels the
         // task's schedules) or a person's cancel got there first and wrote its
         // last record, so no row below may claim this occurrence fired.
-        // `archived` names the closure a fire-time refusal met (ruling 177).
+        // `archived` names the closure a fire-time refusal met (ruling 52).
         const finalized = { retired: false, archived: false };
         try {
           await updateTaskFile(
@@ -888,7 +889,7 @@ export async function fireDueSchedules(
               },
             });
           } else if (finalized.retired && queuedBehindDrive) {
-            // Ruling 141: the run did not start here — it waits behind a live
+            // Ruling 115: the run did not start here — it waits behind a live
             // drive. The final row is written when the trigger reaches the
             // front of the queue (a refusal there says so on the task).
             recordAudit(db, {
@@ -959,7 +960,7 @@ export function startScheduleRunner(db: DatabaseSync): void {
           err: toError(error),
         });
       })
-      // Ruling 330: the stranded sweep rides this tick rather than standing up a
+      // Ruling 122: the stranded sweep rides this tick rather than standing up a
       // second interval. It is the same shape of work — "is anything due?" — and
       // a task that has stopped is due in exactly the sense a schedule is. It
       // runs AFTER the schedules so a dispatch that just fired is already a

@@ -8,7 +8,7 @@ import {
 } from "./packet-options";
 
 /**
- * Ruling 164 (pass 35, F35-14) — the classifier behind the authoring guard.
+ * Ruling 131 (pass 35, F35-14) — the classifier behind the authoring guard.
  *
  * The two live options it exists for are asserted verbatim (KNC-3's custom
  * force-accept title, KNC-16's redirect stage move), together with the
@@ -25,7 +25,7 @@ const STAGES: PacketStage[] = [
   { id: "done", name: "Done" },
 ];
 
-describe("ruling 164: an option title is a promise the resolution keeps", () => {
+describe("ruling 131: an option title is a promise the resolution keeps", () => {
   it("reads KNC-3's custom force-accept title as a force_accept promise", () => {
     const promise = misdirectedOptionPromise(
       { kind: "custom", title: "Force-accept as admin without a fresh verdict" },
@@ -106,7 +106,7 @@ describe("ruling 164: an option title is a promise the resolution keeps", () => 
     ).toEqual({ act: "move_stage", stage: { id: "review", name: "Review" } });
   });
 
-  it("leaves the ruling-163 rework redirect alone: its resolution really does return the task", () => {
+  it("leaves the ruling-90 rework redirect alone: its resolution really does return the task", () => {
     // The branch-conflict packet's own option (update-branch-operator.server):
     // `rework: true` makes `resolvePacket` move the task to the review stage in
     // the same write, so "The task returns to Review" is a promise it keeps.
@@ -151,7 +151,7 @@ describe("ruling 164: an option title is a promise the resolution keeps", () => 
   });
 });
 
-describe("ruling 164: a move_stage option names a stage the resolution can move to", () => {
+describe("ruling 131: a move_stage option names a stage the resolution can move to", () => {
   it("resolves the named stage", () => {
     const target = moveStageTarget({ toStage: "review" }, STAGES, "KNC-16");
     expect(target).toEqual({ ok: true, stage: { id: "review", name: "Review" } });

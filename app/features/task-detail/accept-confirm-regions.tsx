@@ -11,7 +11,7 @@ import type { AcceptConfirmTask } from "./accept-confirm";
 import { GateResults } from "./gate-results";
 
 /**
- * The acceptance ceremony's rows and its foot (ruling 700(e), the split of
+ * The acceptance ceremony's rows and its foot (ruling 13(b), the split of
  * `accept-confirm.tsx` along the task-page recipe). Each takes the slot its
  * markup held in `AcceptConfirm`'s row list and calls no hook: the dialog owns
  * `useDialog` and hands the foot its `close` and `commit`, so the markup, and
@@ -55,7 +55,7 @@ export function MergesRow({
           // had a branch to be empty, so "the branch is empty" was simply
           // false on the dialog that authorizes the close. Say what is
           // true of the task in hand — the branch when there is one, its
-          // absence when there is not. Ruling 576: and no outcome name,
+          // absence when there is not. Ruling 316: and no outcome name,
           // since "no changes" is false of a task that corrected a
           // knowledge base; this row says only what merges.
           <NoChangeMerges taskKey={task.key} branch={task.branch} />
@@ -99,7 +99,7 @@ function PrMerges({
         PR #{pr.number} · {prPill.label}
       </Pill>{" "}
       into <span className="mono">{defaultBranch}</span>
-      {/* Ruling 304: this row names the door; ruling 246's rule is
+      {/* Ruling 97: this row names the door; ruling 260's rule is
           that it also says whether the door is open. The checks
           pill was one panel up on the page and absent from the
           dialog that authorizes an irreversible merge. */}
@@ -158,7 +158,7 @@ function AutoDetectMerges({ branch }: { branch: string | null }) {
   );
 }
 
-/** The base refresh this click performs on the branch (ruling 162). */
+/** The base refresh this click performs on the branch (ruling 95). */
 export function BranchRow({
   branch,
   defaultBranch,
@@ -216,7 +216,7 @@ export function BranchRow({
 }
 
 /**
- * Ruling 475 (F40-55 (c)): "Merging this will likely put WEB-2's PR #3 in
+ * Ruling 244 (F40-55 (c)): "Merging this will likely put WEB-2's PR #3 in
  * conflict on `package.json`." Live on akinozer-com the owner accepted WEB-4
  * while WEB-2's open PR changed the same file; Viberr knew, the dialog was
  * silent, and WEB-2's acceptance was refused a minute later. The row names
@@ -292,7 +292,7 @@ export function MergeHeadRow({
   drift: RevisionDriftDescription;
 }) {
   return (
-    // Ruling 132 (pass 34, F34-14): ONE sentence, printed verbatim from
+    // Ruling 239 (pass 34, F34-14): ONE sentence, printed verbatim from
     // `describeRevisionDrift` — a base refresh reads as a base refresh
     // (`obs`, not `warn`), only authored commits read as unreviewed.
     <div className={drift.unreviewed ? "obs warn" : "obs"}>
@@ -324,7 +324,7 @@ export function CeremonyVerdictRow({
             GitHub approval rather than an agent verdict. The pill goes
             green either way, so name the person and the commit they
             approved — a gate a human satisfied cannot pass silently
-            (ruling 19). */}
+            (ruling 220). */}
         {verdictSatisfiedBy && (
           <span className="fine"> · {verdictSatisfiedBy}</span>
         )}
@@ -333,7 +333,7 @@ export function CeremonyVerdictRow({
   );
 }
 
-/** Ruling 482 (F40-52): Viberr's own gate run on the accepted revision. */
+/** Ruling 315 (F40-52): Viberr's own gate run on the accepted revision. */
 export function GatesRow({ gates }: { gates: GatesView }) {
   return (
     <div className={gates.state === "passed" ? "obs" : "obs warn"}>
@@ -395,10 +395,10 @@ export function RefusalRow({
       {/* Only force-accept BYPASSES a refusal. On every other path a
           standing refusal means the server will refuse this click —
           saying "Bypassing" there would promise an override nobody has.
-          Ruling 162 (pass 35): that click is not offered either; the
+          Ruling 95 (pass 35): that click is not offered either; the
           confirm below is disabled and described by this row. */}
       <span className="k">{force ? "Bypassing" : "Blocked"}</span>
-      {/* Ruling 393: on the FORCE path every gate, because that is what
+      {/* Ruling 98: on the FORCE path every gate, because that is what
           the audit row and the completion event will say it bypassed.
           Everywhere else the first one is the refusal, and a list would
           be noise about a click the server is going to refuse anyway. */}
@@ -415,7 +415,7 @@ export function RefusalRow({
   );
 }
 
-/** The open decision this acceptance answers (ruling 471) or withdraws (F32-11). */
+/** The open decision this acceptance answers (ruling 316) or withdraws (F32-11). */
 export function OpenDecisionRow({
   title,
   answersWith,
@@ -425,7 +425,7 @@ export function OpenDecisionRow({
 }) {
   return answersWith ? (
     <div className="obs">
-      {/* Ruling 471: the decision offers the option this acceptance
+      {/* Ruling 316: the decision offers the option this acceptance
           performs, so the acceptance IS its answer, recorded the way
           the packet's own confirm records it. */}
       <span className="k">Answers</span>
@@ -485,7 +485,7 @@ export function CeremonyFoot({
           Not yet
         </button>
         {refreshFirst && (
-          // Ruling 449 (O39-c): the head that merges would be one no review
+          // Ruling 97 (O39-c): the head that merges would be one no review
           // ran on. This runs the review on it first; acceptance comes after.
           <button type="button" className="btn" disabled={busy} onClick={() => commit(refreshFirst)}>
             <Icon name="refresh" />
@@ -495,11 +495,11 @@ export function CeremonyFoot({
         <button
           type="button"
           className={"btn " + (force ? "danger" : "primary")}
-          // Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance
+          // Ruling 95 (pass 35, F35-12 (c)): no surface offers an acceptance
           // the gate will refuse. A standing refusal disables the confirm on
           // every mode but force (the one that bypasses it); the reason sits
           // in the Blocked row above and describes the control. This is a
-          // server-side interlock, not form validation, so ruling 147's
+          // server-side interlock, not form validation, so ruling 288's
           // enabled-until-busy rule does not apply — which is exactly why it
           // needs the refusal to BE the server's own (`blockedReasonAuthoritative`).
           disabled={busy || (interlocked && !force)}

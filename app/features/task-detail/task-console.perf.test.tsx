@@ -16,7 +16,7 @@ import { acceptanceAffordance, taskDetail } from "../../../test-support/task-det
 import { FakeEventSource } from "../../../test-support/fake-event-source";
 
 /**
- * Ruling 457, journey `live-run`: what the browser does per console line, per
+ * Ruling 11, journey `live-run`: what the browser does per console line, per
  * revalidation, per "load older" and per clock tick on a task page whose agent
  * is streaming.
  *
@@ -106,7 +106,7 @@ function runView(patch: Partial<RunView>, seqs: number[], runId: string): RunVie
     cache: NO_RUN_CACHE,
     lines: lines.map((l) => l.display),
     raw: lines.map((l) => l.raw),
-    // Each line's `consoleLineKey`, as the loader ships them (ruling 457).
+    // Each line's `consoleLineKey`, as the loader ships them (ruling 11).
     lineKeys: seqs.map((seq) => `0:${seq}`),
     lineCount: seqs.length,
     logWindow: {
@@ -334,7 +334,7 @@ function consoleRows(container: HTMLElement): number {
   return container.querySelectorAll(".console > .log-line").length;
 }
 
-describe("the task page per console line (ruling 457)", () => {
+describe("the task page per console line (ruling 11)", () => {
   it("mounts once: the console's seed is the store's, not a second commit of the page", async () => {
     // TASK-3: the console's hook seeded its lines in state initialisers and
     // then again in a mount effect, with fresh objects, so every task open
@@ -471,7 +471,7 @@ describe("the task page per console line (ruling 457)", () => {
   });
 });
 
-describe("loaders a live run re-runs on the task page (ruling 457, LIVE-1 / RF-2)", () => {
+describe("loaders a live run re-runs on the task page (ruling 11, LIVE-1 / RF-2)", () => {
   it("a line every half second for 19.5 s (short of the F22 safety tick)", async () => {
     let loaderRuns = 0;
     const count = () => {

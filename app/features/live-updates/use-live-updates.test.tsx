@@ -64,7 +64,7 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 301 (pass 37, F37-136). An SSE connection is a permanent one, this
+   * Ruling 25 (pass 37, F37-136). An SSE connection is a permanent one, this
    * app is served over HTTP/1.1, and a browser allows about six per origin. A
    * task page holds two streams, so FOUR open tabs exhaust the pool and every
    * request from every tab queues forever: loaders never resolve, a submitted
@@ -73,7 +73,7 @@ describe("useLiveUpdates", () => {
    * hung after 300s while the same endpoint answered curl in 12ms, and closing
    * tabs recovered it.
    */
-  it("ruling 301: a hidden tab holds NO connection, and gets one back when it returns", () => {
+  it("ruling 25: a hidden tab holds NO connection, and gets one back when it returns", () => {
     const visibility = { current: "visible" };
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -103,12 +103,12 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 301, as ruling 457 (RF-1) carries it out: a returning tab must be
+   * Ruling 25, as ruling 11 (RF-1) carries it out: a returning tab must be
    * correct, so it asks the broker for everything it missed since the last id
    * it saw, and revalidates for what the broker replays. It used to pull every
    * loader on every return, whether anything had happened or not.
    */
-  it("ruling 301: coming back asks the broker for what the tab missed, from where it stood", () => {
+  it("ruling 25: coming back asks the broker for what the tab missed, from where it stood", () => {
     const visibility = { current: "visible" };
     Object.defineProperty(document, "visibilityState", {
       configurable: true,
@@ -217,7 +217,7 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 457: a flush that finds a load in flight waits for it to land,
+   * Ruling 11: a flush that finds a load in flight waits for it to land,
    * because that load may already carry the event (the echo of one's own
    * action). It then revalidates only if the event is still owed.
    */
@@ -284,7 +284,7 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 457 (CTL-4): a conversation event changes only what shows a
+   * Ruling 11 (CTL-4): a conversation event changes only what shows a
    * conversation. Measured before: one dock send published five of them, and
    * each re-ran every loader of every page the asker had open (Home, a board,
    * a 1.4 MB task page) for a transcript none of them render. The dock is the
@@ -363,7 +363,7 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 457 (LIVE-1 / RF-2): the task's OWN page does not revalidate on its
+   * Ruling 11 (LIVE-1 / RF-2): the task's OWN page does not revalidate on its
    * run's lines either. It used to, floored at one revalidation per 2 s, only
    * to move the Live run strip's phase, step, turns and tokens: root, the
    * layout and the task loader every 2 s of a run (30 loader runs per 20 s in
@@ -394,9 +394,9 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 457 (TASK-6 / LIVE-5): ONE live connection per tab. The console
+   * Ruling 11 (TASK-6 / LIVE-5): ONE live connection per tab. The console
    * used to open a second EventSource on the task scope the layout's stream
-   * already held (ruling 301 called merging them "the next cut"); it now takes
+   * already held (ruling 25 called merging them "the next cut"); it now takes
    * its frames from this hook's stream.
    */
   it("hands the tab's consoles every stream frame, once, whichever stream carried it", () => {
@@ -429,14 +429,14 @@ describe("useLiveUpdates", () => {
   });
 
   /**
-   * Ruling 481(c): a DATA event reaches a frame listener too (the root's
+   * Ruling 74: a DATA event reaches a frame listener too (the root's
    * attention watcher re-reads the unread decisions on `notification.*`), once
    * per id, and it still revalidates the routes that read it.
    *
    * Canary: drop the `dispatchFrame` call beside `recordLive` and `seen` stays
    * empty.
    */
-  it("hands a data event to a frame listener once, and still revalidates on it (ruling 481)", () => {
+  it("hands a data event to a frame listener once, and still revalidates on it (ruling 74)", () => {
     const seen: string[] = [];
     const off = onLiveFrame("notification.created", (event) => seen.push(event.lastEventId));
     try {
@@ -555,11 +555,11 @@ describe("useLiveUpdates", () => {
    * view-marking `notification.read` DURING the navigation that re-scopes this
    * very stream, and the bell badge stayed stale until the next interaction.
    * The reopen used to pull every loader to cover that gap, so every task open
-   * loaded the task twice (RF-1). Ruling 457: the reopen names the last id the
+   * loaded the task twice (RF-1). Ruling 11: the reopen names the last id the
    * stream saw, the broker replays the gap on the new scopes, and a replayed
    * event revalidates like any other; a gap with nothing in it reloads nothing.
    */
-  it("a SCOPE CHANGE reopens from where the stream stood and pulls nothing (ruling 457, RF-1)", () => {
+  it("a SCOPE CHANGE reopens from where the stream stood and pulls nothing (ruling 11, RF-1)", () => {
     const { rerender } = render(<Probe scopes={["project:p", "user"]} />, {
       wrapper: DataRouter,
     });

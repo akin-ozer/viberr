@@ -18,7 +18,7 @@ import { ensureOrgStoreDirs } from "./resources.server";
  * Org-resource seed (Phase 9B) — ADDITIVE to the phase-3/8 demo seed:
  * knowledge bases with REAL files under ${DATA_ROOT}/kb/, skills with real
  * SKILL.md folders under /skills/. Honest empty slate (owner ruling): NO MCP
- * servers, NO GitHub connection and NO Google allowlist domain (ruling 688)
+ * servers, NO GitHub connection and NO Google allowlist domain (ruling 28(c))
  * are seeded — an admin installs real ones; nothing
  * fabricated is presented as configured (see the note by the seed body).
  *
@@ -365,7 +365,7 @@ export function seedOrgResources(
   // No MCP servers and no GitHub connection are seeded — see the honest-empty-
   // slate note above. Any connection an admin already installed is left intact.
 
-  // Ruling 688: no Google sign-in domain is allowlisted. A seeded domain would
+  // Ruling 28(c): no Google sign-in domain is allowlisted. A seeded domain would
   // let anyone at it sign in once Google sign-in is configured; an admin adds
   // the domains they mean in Instance settings.
 

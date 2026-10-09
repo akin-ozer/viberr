@@ -46,7 +46,7 @@ interface AgentOption extends MentionSuggestion {
   modelUnavailable: boolean;
   /** This profile has a live (queued/running) run on the task right now. */
   running: boolean;
-  /** Ruling 127: the task OWNER has not connected this profile's backend (or
+  /** Ruling 137: the task OWNER has not connected this profile's backend (or
    *  the task has no owner), so dispatching it would refuse before it spent
    *  anything. Choosing an agent here commits a paid run, so the fact belongs
    *  on the row — the same reason the row already carries "model unavailable". */
@@ -89,13 +89,13 @@ export function AgentSelect({
   activeProfileIds: readonly string[];
   /** The currently selected profile id (null = nothing picked). */
   selectedId: string | null;
-  /** Ruling 127: the task's run principal, so a row whose backend the OWNER
+  /** Ruling 137: the task's run principal, so a row whose backend the OWNER
    *  cannot run says so before the run is picked. Defaults to null (unowned),
    *  which marks every row — a bare render with no principal is a task nobody
    *  owns, and that is the honest reading. */
   runPrincipal?: TaskRunPrincipalView | null;
   disabled?: boolean;
-  /** Ruling 147: a run refused for an empty pick marks THIS control, because
+  /** Ruling 288: a run refused for an empty pick marks THIS control, because
    *  the picker is the unmet field. Off until a submit is actually refused —
    *  a pristine form is never accused. */
   invalid?: boolean;

@@ -17,18 +17,18 @@ import { toError } from "~/shared/errors";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 498: the task-side half of a knowledge-base correction, one
+ * Ruling 210: the task-side half of a knowledge-base correction, one
  * implementation for every agent that makes one — the operator (Claude tool
  * and Codex plan) and any specialist (its Claude tool) — and for the person who
  * undoes one. The store-side half, which writes the document and keeps the
  * record an undo reads, is `kb-corrections.server.ts`.
  *
- * Rulings 378 and 483 filed a PROPOSAL here, told every watcher with a
+ * Rulings 210 and 267 filed a PROPOSAL here, told every watcher with a
  * notification and a long timeline card, and waited for a person to promote
  * it. The owner, 2026-09-26: "proposal spam is exhausting … No human can
  * approve all of these while inspecting them thoroughly." A correction is now
  * written as it is made. The task records it in one short entry, what the
- * passage was, what it is now and what proves it (ruling 645), and nobody is
+ * passage was, what it is now and what proves it (ruling 211), and nobody is
  * notified: nothing is owed. The project's Controller page lists the
  * corrections, with Undo.
  */
@@ -48,7 +48,7 @@ export interface KbCorrectionRequest {
    *  null adds `text` at the end of the document. */
   replaces: string | null;
   /** The text that takes its place: the corrected fact, in the document's own
-   *  form; empty to delete the passage (ruling 581). */
+   *  form; empty to delete the passage (ruling 210(b)). */
   text: string;
   /** What proves it: the command and its output, a run, a verdict. */
   evidence: string;
@@ -75,7 +75,7 @@ export interface CorrectKnowledgeDocResult {
 /**
  * The Codex plan names the target in one string field (`kbSource`): the
  * knowledge base and the document as `<kb>/<doc>`, or a bare document of the
- * project's rulings (ruling 378's form). The first segment is a knowledge base
+ * project's rulings (ruling 210's form). The first segment is a knowledge base
  * only when the store has one by that name, so a nested rulings document
  * (`gates/ci.md`) is still read as the rulings'.
  */
@@ -97,7 +97,7 @@ export function splitKbSource(
 }
 
 /** One leading "Evidence:" label off the value: a model answering a field
- *  called `evidence` writes the label too (ruling 378's first live proposal
+ *  called `evidence` writes the label too (ruling 210's first live proposal
  *  filed "Evidence: Evidence: …"). */
 function withoutEvidenceLabel(value: string): string {
   return value.trim().replace(/^evidence\s*:\s*/i, "").trim();
@@ -111,13 +111,13 @@ function clipLine(value: string, max: number): string {
 }
 
 /**
- * Ruling 568: the specialists deployed on the project that do NOT hold the
+ * Ruling 211: the specialists deployed on the project that do NOT hold the
  * knowledge base a correction wrote into, by name; empty when every one does,
  * and always empty for the project's rulings, which every run reads.
  *
  * A grant decides who reads a knowledge base, and a task's timeline is read by
  * every agent that can be engaged on it: the prompt's recent entries (ruling
- * 563), `read_timeline_entry`, the operator's snapshot. So a correction's entry
+ * 213(b)), `read_timeline_entry`, the operator's snapshot. So a correction's entry
  * quotes the passage only when nobody the grant leaves out would read it there.
  * Live on AWSC-4 the Estimate Judge found an error in its own golden-set entry,
  * the knowledge base granted to it alone, and could not correct it: the entry
@@ -136,7 +136,7 @@ async function agentsLeftOut(
     .map((s) => s.name);
 }
 
-/** Ruling 568: the sentence an entry carries instead of the passage. */
+/** Ruling 211: the sentence an entry carries instead of the passage. */
 function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
   const names =
     leftOut.length === 1
@@ -151,14 +151,14 @@ function notQuotedSentence(kb: string, leftOut: readonly string[]): string {
 /** The task's entry for a correction: where, its id, what the passage was,
  *  what it is now, and what proves it, each clipped to a line;
  *  `read_timeline_entry` reads them whole ({@link readCorrectionOfEntry}).
- *  Ruling 568: with agents the knowledge base is not given to, only where and
+ *  Ruling 211: with agents the knowledge base is not given to, only where and
  *  the id. */
 function correctionEventText(c: KbCorrection, leftOut: readonly string[] = []): string {
   const where = `\`${c.kb}/${c.doc}\``;
   if (leftOut.length > 0) {
     return `${c.replaced === null ? "Added to" : "Corrected"} ${where} as \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`;
   }
-  // Ruling 645: a correction without its proof on the task reads as a claim
+  // Ruling 211: a correction without its proof on the task reads as a claim
   // nobody proved.
   const evidence = `- **Evidence:** ${clipLine(c.evidence, 280)}`;
   return c.replaced === null
@@ -190,7 +190,7 @@ export type CorrectionReading =
   | { id: string; gone: string };
 
 /**
- * Ruling 645: the correction a `kb_correction` entry names, whole, from its
+ * Ruling 211: the correction a `kb_correction` entry names, whole, from its
  * record; null for an entry that names none.
  *
  * The entry clips each side to a line and, before this ruling, left the
@@ -201,9 +201,9 @@ export type CorrectionReading =
  * corrections, found no citation, and asked a person to read them. Both
  * carried their evidence, the AWS guide that proved them, on the record.
  *
- * Ruling 568 holds here as on the entry: while a deployed agent is not given
+ * Ruling 211 holds here as on the entry: while a deployed agent is not given
  * the knowledge base, the reading names the document and the id and quotes
- * neither the passage nor the evidence that may restate it. Ruling 648: that
+ * neither the passage nor the evidence that may restate it. Ruling 211: that
  * is for a reader the knowledge base is not given to. One given it, which
  * reads the document anyway, reads its corrections whole: live on AWSC-97 the
  * Calculator Builder corrected `aws-calculator-research`, which the Inventory
@@ -260,7 +260,7 @@ export async function correctKnowledgeDoc(
   const text = input.text.trim();
   const evidence = withoutEvidenceLabel(input.evidence);
   const replaces = input.replaces?.trim() ? input.replaces : null;
-  // Ruling 581: an empty `text` deletes the passage `replaces` names.
+  // Ruling 210(b): an empty `text` deletes the passage `replaces` names.
   if (!doc || (!text && !replaces) || !evidence) {
     return {
       outcome: "noop",
@@ -371,7 +371,7 @@ export async function undoKbCorrectionOnTask(
       : `${where} reads as it did before \`${c.id}\`:\n\n` +
         `- **Was:** ~~${clipLine(c.text, 160)}~~\n` +
         `- **Now:** ${clipLine(c.replaced, 280)}`;
-  // Ruling 568: an undo quotes what the correction quoted, and no more.
+  // Ruling 211: an undo quotes what the correction quoted, and no more.
   const body =
     leftOut.length > 0
       ? `${where} reads as it did before \`${c.id}\`. ${notQuotedSentence(c.kb, leftOut)}`

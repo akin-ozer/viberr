@@ -109,7 +109,7 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Where this project caches its repository, or null when `repo` is not a plain
- * `owner/name` pair (`REPO_SLUG_RE`, ruling 700(a)). `project.md` already reads
+ * `owner/name` pair (`REPO_SLUG_RE`, ruling 225). `project.md` already reads
  * any other value as no repository; a caller that hands one in anyway skips
  * the cache rather than deriving a path from it.
  *
@@ -212,7 +212,7 @@ function mirrorCanCheckOut(mirrorDir: string): boolean {
 }
 
 /**
- * Ruling 670: a mirror's `HEAD` is written once, by the clone that built it,
+ * Ruling 195: a mirror's `HEAD` is written once, by the clone that built it,
  * and names the repository's default branch as it was then: `main` for one
  * mirrored while it was empty, the old name for one renamed on GitHub since.
  * While that ref does not exist the mirror cannot serve a clone
@@ -705,7 +705,7 @@ export interface WorkspaceCloneInput {
    *  direct-from-GitHub fallback). Silent on the warm hardlink clone from the
    *  mirror, which finishes in seconds. */
   onCloneProgress?: CloneProgress;
-  /** Ruling 485: whom a destination that stands in the clone's way is
+  /** Ruling 140: whom a destination that stands in the clone's way is
    *  removed as — the task's person (`taskWorkspaceLaunch`). Absent or null is
    *  the server's own user, which only a server that launches no agents
    *  allows; with isolation on the removal refuses instead. */
@@ -795,7 +795,7 @@ export async function cloneWorkspaceRepo(
       // Whatever stood in the way (a half-moved tree, a directory already
       // there) would make the move below refuse the destination too. The
       // destination is in a workspace an agent writes, so it goes as the
-      // task's person (ruling 485), and a failure to clear it is a fault on
+      // task's person (ruling 140), and a failure to clear it is a fault on
       // the server's disk, never a clone's.
       try {
         await removeAgentTree(input.destination, input.person ?? null);

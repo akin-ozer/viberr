@@ -8,7 +8,7 @@ import {
 import { githubFailureMessage } from "./github-client.server";
 
 /**
- * Ruling 266 (pass 37, F37-96): the controller can read what a pull request
+ * Ruling 265 (pass 37, F37-96): the controller can read what a pull request
  * CHANGED, not just which files it touched.
  *
  * Asked to say whether three open PRs should merge, the controller had
@@ -39,7 +39,7 @@ const PER_PAGE = 100;
 /**
  * Total patch bytes one reply may carry, measured AS THE REPLY CARRIES THEM.
  *
- * Ruling 268 (pass 37, F37-98): the first version of this counted raw patch
+ * Ruling 269 (pass 37, F37-98): the first version of this counted raw patch
  * characters against 120 KB, and the reply is JSON — every newline in a diff
  * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way out.
  * The controller called this on PR #32 (4 files) and the protection never
@@ -72,7 +72,7 @@ const prFileSchema = z.object({
 
 const prFilesSchema = z.array(prFileSchema);
 
-/** Ruling 484: the one field the head check reads off the PR detail. */
+/** Ruling 246: the one field the head check reads off the PR detail. */
 const prHeadSchema = z.object({ head: z.object({ sha: z.string().min(1) }) });
 
 export interface PrDiffFile {
@@ -109,7 +109,7 @@ export type PrDiffResult =
   | {
       ok: false;
       reason: string;
-      /** Ruling 484: set when the caller bound the read to a head (`headSha`)
+      /** Ruling 246: set when the caller bound the read to a head (`headSha`)
        *  and the pull request is somewhere else: the head it is at. */
       liveHeadSha?: string;
     };
@@ -127,13 +127,13 @@ export async function readPullRequestDiff(
   opts: GithubContextOptions & {
     path?: string;
     maxPatchBytes?: number;
-    /** Ruling 268: list the changed files WITHOUT their hunks. A caller that
+    /** Ruling 269: list the changed files WITHOUT their hunks. A caller that
      *  wants one file's diff needs the file list first, and asking for every
      *  patch to obtain it is the call most likely to be too big — the loop the
      *  controller hit. This makes the first call always safe. */
     patches?: boolean;
     /**
-     * Ruling 484 (pass 40, F40-54): the head the reader's view must be OF.
+     * Ruling 246 (pass 40, F40-54): the head the reader's view must be OF.
      * `pulls/{n}/files` always describes the pull request's CURRENT head, and
      * the task page's Changes panel promises the delivered revision, whose line
      * notes go to the agent that delivered it. When the two differ (the

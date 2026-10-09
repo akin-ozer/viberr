@@ -68,7 +68,7 @@ const PACKET: TaskPacket = {
 };
 
 /** PACKET with its `accept_completion` option removed: a decision no
- *  acceptance answers (ruling 471), which an acceptance still withdraws. */
+ *  acceptance answers (ruling 100), which an acceptance still withdraws. */
 const PACKET_WITHOUT_ACCEPTANCE: TaskPacket = {
   ...PACKET,
   options: PACKET.options.filter((o) => o.kind !== "accept_completion"),
@@ -232,7 +232,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
         verdicts: [rejectionVerdict("rev_1")], // required reviewer requested changes
         validation: "failing",
       },
-      // Ruling 471: a decision offering `accept_completion` (or
+      // Ruling 100: a decision offering `accept_completion` (or
       // `force_accept`) is ANSWERED by this override, so the F32-11
       // withdrawal below needs one that offers neither.
       PACKET_WITHOUT_ACCEPTANCE,
@@ -350,7 +350,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
 describe("transitionStage boundary enforcement", () => {
   it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
     // impl → review as a board declares it an `approval` human gate (the
-    // Standard template's is `auto` since ruling 519; triage → ready is `auto`,
+    // Standard template's is `auto` since ruling 91; triage → ready is `auto`,
     // tested below).
     const store = setupProjectedStore(ctx);
     approveReviewEntry(store);
@@ -377,7 +377,7 @@ describe("transitionStage boundary enforcement", () => {
 
   it("auto boundary (triage→ready): a contributor may cross it; operator attaches", async () => {
     // Post-D2: triage → ready is `auto` — any project member may cross it, and
-    // leaving triage attaches an operator (ruling 16 semantics).
+    // leaving triage attaches an operator (ruling 295 semantics).
     const store = setupProjectedStore(ctx);
     withTask(store);
     const task = await transitionStage(
@@ -388,7 +388,7 @@ describe("transitionStage boundary enforcement", () => {
     );
     expect(task.stage).toBe("ready");
     expect(task.operator).toMatchObject({ assignedAtStageId: "ready" });
-    // Ruling 98: every real move records where the task CAME from — the
+    // Ruling 124: every real move records where the task CAME from — the
     // durable previous-stage fact the operator's agent choice weighs.
     const fm = readTaskFile({
       projectSlug: store.slug,
@@ -587,7 +587,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
   });
 
   /**
-   * Ruling 381 (F39-8): a manual move BACKWARD says why.
+   * Ruling 47 (F39-8): a manual move BACKWARD says why.
    *
    * It used to be mute — the event read "moved VIB-1 from Review to Ready" and
    * nothing else — while the operator's own playbook told it to read the
@@ -595,7 +595,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
    * specific instruction, there was no field for it, and the operator inferred
    * the work from an older decision and dispatched the wrong thing.
    */
-  it("ruling 381: a BACKWARD manual move is refused without a reason, and carries it when given", async () => {
+  it("ruling 47: a BACKWARD manual move is refused without a reason, and carries it when given", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "review" });
     // CANARY: drop the `movingBack` guard and this resolves — the move lands
@@ -647,7 +647,7 @@ describe("transitionStage manual mode (board / task-detail dropdown)", () => {
     );
   });
 
-  it("ruling 381: a FORWARD manual move needs no reason", async () => {
+  it("ruling 47: a FORWARD manual move needs no reason", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store);
     const task = await transitionStage(
@@ -787,7 +787,7 @@ describe("resolvePacket kind matrix", () => {
     expect(detail?.timeline[0]!.text).toContain("accepted, merge pending");
   });
 
-  it("ruling 98: a packet-resolved acceptance records the stage it came from", async () => {
+  it("ruling 124: a packet-resolved acceptance records the stage it came from", async () => {
     // CANARY: drop the previousStageId line from resolvePacket's accept arm —
     // the Done task still claims it arrived from `impl`.
     //
@@ -852,7 +852,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("ruling 152(c) + 164: the option that says the window has reset RETIRES the exhaustion record", async () => {
+  it("ruling 151 + 131: the option that says the window has reset RETIRES the exhaustion record", async () => {
     // The specialist quota packet's "The window has reset …, or the Codex
     // account changed: send @dev back to continue" and the operator's "…: re-run"
     // are the person's statement that the stored record is stale. Nothing else
@@ -948,7 +948,7 @@ describe("resolvePacket kind matrix", () => {
     expect(task.validation).toBe("none");
     expect(task.packet).toBeNull();
     const detail = getTaskDetail(store.db, store.slug, "VIB-1");
-    // Ruling 130(c) (pass 34, F34-12): without a pre-authored `ev` the record
+    // Ruling 62 (pass 34, F34-12): without a pre-authored `ev` the record
     // restates the option's OWN words. It used to assert "policy / credential
     // updated" whatever the option said, and an operator reading that record
     // told a specialist a GitHub-scope block had been lifted (JC-6).
@@ -1043,7 +1043,7 @@ describe("resolvePacket kind matrix", () => {
 
   // 20s (see the routing tests): resolving this packet starts a real run through
   // the fake adapter, which under full-suite parallelism can exceed the 5s default.
-  it("ruling 133: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", async () => {
+  it("ruling 181: a retry_other_backend resolution starts the retry for a deliverer scoped away from the current stage", async () => {
     // Canary: reinstate the unconditional `assertStageEligible` in
     // dispatchAgentRun (the resolution's retry is refused).
     installFakeRuntime();
@@ -1528,7 +1528,7 @@ describe("resolvePacket kind matrix", () => {
     setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, patActor);
   }
 
-  /** Ruling 136(c): the reads the in-ceremony re-confirm makes when the
+  /** Ruling 233: the reads the in-ceremony re-confirm makes when the
    *  task's own PR stands on the branch, as GitHub reports it. */
   function ownPrRoutes(number: number, state: "open" | "closed", headSha = "1".repeat(40)) {
     const pr = {
@@ -1566,11 +1566,11 @@ describe("resolvePacket kind matrix", () => {
     kind: "delivered",
   };
 
-  it("resolve_remote_collision: the task's OWN open PR on the ref is no collision — nothing is closed or deleted, and the ceremony does what was asked (C05-B, ruling 136(b))", async () => {
+  it("resolve_remote_collision: the task's OWN open PR on the ref is no collision — nothing is closed or deleted, and the ceremony does what was asked (C05-B, ruling 233)", async () => {
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
     await collisionCredential(store);
-    // GitHub confirms PR #5 open on the branch (ruling 136(c)); the DELETE
+    // GitHub confirms PR #5 open on the branch (ruling 233); the DELETE
     // and PATCH routes exist so a regression that reaches them is caught.
     const github = fakeGithubFetch({
       ...ownPrRoutes(5, "open"),
@@ -1633,7 +1633,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("ruling 136(b): own PR open and origin merely BEHIND: the block lifts and the delivery actually runs", async () => {
+  it("ruling 233: own PR open and origin merely BEHIND: the block lifts and the delivery actually runs", async () => {
     // Canary: keep `readiness: blocked` on every refusal.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
@@ -1641,7 +1641,7 @@ describe("resolvePacket kind matrix", () => {
     const pushed = "1".repeat(40);
     const github = fakeGithubFetch({
       ...ownPrRoutes(5, "open", "0".repeat(40)),
-      // The re-confirm (ruling 136(c)) re-measures the record: origin's head
+      // The re-confirm (ruling 233) re-measures the record: origin's head
       // is an ancestor of the delivered revision.
       [`GET /repos/akin-ozer/viberr/compare/${pushed}...${"0".repeat(40)}`]: {
         body: { ahead_by: 0, behind_by: 1, status: "behind", commits: [] },
@@ -1697,7 +1697,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("ruling 136(b): own PR open and origin DIVERGED: the block stays and the note names the history", async () => {
+  it("ruling 233: own PR open and origin DIVERGED: the block stays and the note names the history", async () => {
     // Canary: lift on every `own_pr_open`.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
@@ -1746,12 +1746,12 @@ describe("resolvePacket kind matrix", () => {
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.frontmatter;
     expect(fm.readiness).toBe("blocked");
     const texts = getTaskDetail(store.db, store.slug, "VIB-1")!.timeline.map((e) => e.text);
-    // Ruling 321: the note names the act, not merely that an act is owed.
+    // Ruling 230: the note names the act, not merely that an act is owed.
     expect(texts.some((t) => t.includes("No collision to clear: PR #5") && t.includes("holds commits this workspace does not") && t.includes(DIVERGED_BRANCH_REMEDY))).toBe(true);
     expect(listAuditEvents(store.db, { action: "github.collision.resolved" })[0]!.details).toMatchObject({ outcome: "own_pr_diverged", blockLifted: false });
   });
 
-  it("ruling 136: GitHub refused the delete: the block stays and the operator is handed the typed reason", async () => {
+  it("ruling 233: GitHub refused the delete: the block stays and the operator is handed the typed reason", async () => {
     // Canary: lift on every refusal.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
@@ -1790,7 +1790,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("ruling 136(c), the JC-3 shape: a cached open PR that GitHub reports CLOSED is re-confirmed, the ref deleted, the unowned PR closed", async () => {
+  it("ruling 233, the JC-3 shape: a cached open PR that GitHub reports CLOSED is re-confirmed, the ref deleted, the unowned PR closed", async () => {
     // Canary: decide from the cache and the DELETE never goes out.
     const store = setupProjectedStore(ctx);
     const { fakeGithubFetch } = await import("../../../test-support/fake-github");
@@ -1948,7 +1948,7 @@ describe("resolvePacket kind matrix", () => {
     await collisionCredential(store);
     const github = fakeGithubFetch(ownPrRoutes(270, "open"));
     // The task's own review PR stands on the ref (confirmed live, ruling
-    // 136(c)), so the delete refuses — the safe outcome the C05-B ordering
+    // 233), so the delete refuses — the safe outcome the C05-B ordering
     // exists to produce.
     withTask(
       store,
@@ -1981,7 +1981,7 @@ describe("resolvePacket kind matrix", () => {
       texts.some((t) => t.includes("The stale remote branch is removed")),
     ).toBe(false);
     // …and the outcome is on the timeline exactly once, from the note (ruling
-    // 136(b): the task's own PR on the ref is no collision, and with no
+    // 233: the task's own PR on the ref is no collision, and with no
     // workspace here the delivery that would push the work cannot complete).
     expect(
       texts.filter((t) => t.includes("No collision to clear: PR #270")),
@@ -2054,15 +2054,15 @@ describe("resolvePacket kind matrix", () => {
   });
 
   /**
-   * F33-4 (pass 33) — ruling 110 ends "And it never strands", and F32-7 hung
+   * F33-4 (pass 33) — ruling 233 ends "And it never strands", and F32-7 hung
    * that guarantee on the RE-DELIVERY: full autonomy re-queues the operator,
    * supervised records the "Move to <review>" card. The REFUSING arm runs no
    * re-delivery, so it inherited neither. Live (VIB-1): `stage: impl`,
    * `readiness: ready`, `waiting: human`, empty recommendations, no packet, and
-   * PR #270 open on the branch — the strand ruling 110 quotes, reached through
+   * PR #270 open on the branch — the strand ruling 233 quotes, reached through
    * the safe path the delete-first ordering exists to produce. The card is the
    * board's where a person approves the move into Review; on the Standard
-   * board the move is `auto` (ruling 519), and the operator the refusal hands
+   * board the move is `auto` (ruling 126), and the operator the refusal hands
    * the decision to makes it.
    */
   it("F33-4: a refused collision remedy still leaves the task actionable — the Move-to-review card over the PR it already carries", async () => {
@@ -2098,7 +2098,7 @@ describe("resolvePacket kind matrix", () => {
       taskKey: "VIB-1",
       dataRoot: store.dataRoot,
     })!.parsed.frontmatter;
-    // The remedy really did refuse — no WRITE reached GitHub (the ruling 136(c)
+    // The remedy really did refuse — no WRITE reached GitHub (the ruling 233
     // re-confirm reads). The live read finds the task's own PR on the branch,
     // so the stale collision record is cleared by the reconcile itself.
     expect(github.calls.filter((c) => c.method !== "GET")).toHaveLength(0);
@@ -2269,7 +2269,7 @@ describe("resolvePacket kind matrix", () => {
     expect(discarded[0]!.details).toMatchObject({ branch: "vib-1-work", basis: "local_only" });
   });
 
-  it("ruling 161 (G35-6): the discard retires the reported revision: kind discarded, validation none, note and audit name it", async () => {
+  it("ruling 234 (G35-6): the discard retires the reported revision: kind discarded, validation none, note and audit name it", async () => {
     // Canary: drop the `retires` block from the discard_branch resolution and
     // the revision stays `delivered` with its approve keeping the task healthy.
     const store = setupProjectedStore(ctx);
@@ -2348,7 +2348,7 @@ describe("resolvePacket kind matrix", () => {
     });
   });
 
-  it("discard_branch / ruling 17: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
+  it("discard_branch / ruling 233: refuses an on-remote branch, keeps fm.branch, still resolves the packet", async () => {
     const store = setupProjectedStore(ctx);
     withTask(
       store,
@@ -2427,7 +2427,7 @@ describe("resolvePacket kind matrix", () => {
     ).toBe(true);
   });
 
-  it("ruling 161 (U35-8): archive + deleteBranch records BOTH heads: the local sha and the foreign remote head it deleted", async () => {
+  it("ruling 234 (U35-8): archive + deleteBranch records BOTH heads: the local sha and the foreign remote head it deleted", async () => {
     // Live (KNC-21): the audit named the local head 8c463b7 while the deleted
     // remote `knc-21` held the foreign fixture commit d5f23aa. Canary: drop
     // the pre-delete ref read in `deleteTaskRemoteBranch` (remoteSha null) or
@@ -2527,8 +2527,8 @@ describe("resolvePacket kind matrix", () => {
     expect(back.timeline[0]!.text).toContain("Run the operator");
   });
 
-  it("ruling 664: a task restored at the terminal stage waits on nobody, and its note says so", async () => {
-    // Ruling 651 archives finished tasks too. Restoring one wrote `waiting:
+  it("ruling 52: a task restored at the terminal stage waits on nobody, and its note says so", async () => {
+    // Ruling 274 archives finished tasks too. Restoring one wrote `waiting:
     // human` and "waiting on a human. Run the operator to reopen coordination,
     // or move the task on yourself" over work that was done. Live: AWSC-3,
     // restored at Done so a later benchmark run could take a file from it.
@@ -2660,7 +2660,7 @@ describe("resolvePacket kind matrix", () => {
       dataRoot: store.dataRoot,
     })!.parsed;
     expect(stamped.packet?.awaiting).toBe("goal_edit");
-    // Ruling 138: the packet records WHICH option was chosen, by whom, when —
+    // Ruling 63: the packet records WHICH option was chosen, by whom, when —
     // what a reload renders as decided. Canary: drop the `decided` stamp.
     expect(stamped.packet?.decided).toMatchObject({ optionIndex: 0, byUserId: store.users.murat.id });
     expect(stamped.packet?.decided?.at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -3064,7 +3064,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
 });
 
 /**
- * Ruling 164 (pass 35, F35-14) — the two kinds that perform what their title
+ * Ruling 131 (pass 35, F35-14) — the two kinds that perform what their title
  * promises.
  *
  * Live: KNC-3's `custom` "Force-accept as admin without a fresh verdict"
@@ -3072,7 +3072,7 @@ describe("completeTaskMerge (S2 — finish a merge-pending PR)", () => {
  * gate; KNC-16's `redirect` "Move KNC-16 back to Review" moved nothing. These
  * cases assert the acts themselves, on the same paths their buttons take.
  */
-describe("ruling 164: force_accept and move_stage perform their option's promise", () => {
+describe("ruling 131: force_accept and move_stage perform their option's promise", () => {
   const forcePacket: TaskPacket = {
     type: "blocked",
     kind: "Blocked decision",
@@ -3230,7 +3230,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   /**
-   * Ruling 381 made a manual BACKWARD move name its reason, and this door is a
+   * Ruling 47 made a manual BACKWARD move name its reason, and this door is a
    * manual move. Without one, every move_stage option that goes back was
    * refused after the packet had already cleared: the decision stood on the
    * timeline and the task stayed where it was.
@@ -3303,13 +3303,13 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
   });
 
   /**
-   * Ruling 224 (F37-44). The Codex window went at 23:28 with the provider
+   * Ruling 157 (F37-44). The Codex window went at 23:28 with the provider
    * naming its own reopening, and six tasks stalled at once behind a packet
    * whose every option was wrong right then. The wait is the remedy, and
    * viberr already had the runner for it — what it lacked was a way to say so
    * that also closed the decision.
    */
-  it("wait_for_window: the confirm closes the decision and schedules the resume (ruling 224)", async () => {
+  it("wait_for_window: the confirm closes the decision and schedules the resume (ruling 157)", async () => {
     const store = setupProjectedStore(ctx);
     const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     withTask(
@@ -3377,7 +3377,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
     // against code with no NO_REQUEUE entry at all.)
   });
 
-  it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 224)", async () => {
+  it("wait_for_window: a schedule that cannot be written says so and leaves the decision resolved (ruling 157)", async () => {
     const store = setupProjectedStore(ctx);
     const due = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
     withTask(
@@ -3386,7 +3386,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
         stage: "impl",
         waiting: "agent",
         ownerUserId: store.users.arda.id,
-        archived: true, // a closed task refuses a schedule (ruling 177)
+        archived: true, // a closed task refuses a schedule (ruling 52)
         engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
       },
       {
@@ -3524,7 +3524,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
 });
 
 /**
- * Ruling 189 (pass 37, F37-10): a person's decision joins the task's CONTRACT.
+ * Ruling 64 (pass 37, F37-10): a person's decision joins the task's CONTRACT.
  *
  * Live on SHOP-7, the goal said "the agent must not select a provider … ask
  * Arda to choose". Arda chose; the agent recorded the choice; the required
@@ -3535,7 +3535,7 @@ describe("ruling 164: force_accept and move_stage perform their option's promise
  * the timeline, the contract lived in the goal, and the goal is what a fresh
  * run reads.
  */
-describe("ruling 189: a resolved decision amends the task goal", () => {
+describe("ruling 64: a resolved decision amends the task goal", () => {
   const QUESTION: TaskPacket = {
     type: "input",
     kind: "Agent question",
@@ -3559,9 +3559,9 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     })!.parsed.goal;
 
   /**
-   * Ruling 284 (owner's call, 2026-09-15) inverted this test's subject.
+   * Ruling 64 (owner's call, 2026-09-15) inverted this test's subject.
    *
-   * Ruling 189 welded a typed directive into the goal "because a person wrote
+   * Ruling 64 welded a typed directive into the goal "because a person wrote
    * it". One text box takes both a scope decision and a word to the operator
    * about its own tooling, so the kind of the answer was unknowable — and live
    * on SHOP-27 a directive that was mostly "call read_board before you offer a
@@ -3570,7 +3570,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * structured option is a decision and amends the contract; typing free text
    * is conversation and does not.
    */
-  it("ruling 284: a typed CUSTOM directive answers the packet and does NOT touch the goal", async () => {
+  it("ruling 64: a typed CUSTOM directive answers the packet and does NOT touch the goal", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await resolvePacket(
@@ -3668,11 +3668,11 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   /**
-   * Ruling 571 joins an option's title and detail with a colon. A goal written
+   * Ruling 292 joins an option's title and detail with a colon. A goal written
    * before it holds the same decision joined with a dash, and the first answer
    * after the deploy must still find it there rather than write it again.
    */
-  it("ruling 571: a decision the goal holds from before, joined with a dash, is not written again", async () => {
+  it("ruling 292: a decision the goal holds from before, joined with a dash, is not written again", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, QUESTION);
     await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
@@ -3738,7 +3738,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   /**
-   * Found by the pass's own self-review (ruling 200(h)): the ruling's stated
+   * Found by the pass's own self-review (ruling 64): the ruling's stated
    * exclusion is "a resolution that ENDS the task", and `acceptsInto` catches
    * only ONE of the two doors that do. `force_accept` closes the task through
    * `forceAcceptCompletion` and never assigns it, so a task being closed in the
@@ -3812,11 +3812,11 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   it("F37-60: does NOT amend on wait_for_window or block_on_dependencies either", async () => {
-    // Both kinds POSTDATE ruling 189, so neither was added to its exclusion
+    // Both kinds POSTDATE ruling 64, so neither was added to its exclusion
     // list, and the defect the ruling exists to stop came back through them.
     // Live on SHOP-18: its goal carried five decision blocks, THREE of them
     // "pick a recovery path → Wait for the window and pick the task back up
-    // automatically" — the same sentence ruling 189 quotes from SHOP-7 as the
+    // automatically" — the same sentence ruling 64 quotes from SHOP-7 as the
     // thing that must not be in a contract.
     // CANARY: drop either kind from PROCESS_ONLY_OPTION_KINDS.
     for (const option of [
@@ -3853,7 +3853,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   /**
-   * Ruling 269 (pass 37, F37-101): the resolution CREATES the task. Live on
+   * Ruling 67 (pass 37, F37-101): the resolution CREATES the task. Live on
    * SHOP-26 the recommended option's own text read "You create the task — no
    * option here can", because no kind could: the operator had found a
    * published contract with no producer, the project's conventions say a
@@ -3861,7 +3861,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * could only describe one.
    */
   /**
-   * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+   * Ruling 49 (pass 37, F37-130): a task's TITLE can be corrected.
    *
    * It could not be, by anyone: `updateTaskGoal` wrote the contract every
    * future run re-anchors on, and nothing anywhere wrote the one-line summary
@@ -3870,7 +3870,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * the correction lives in a body almost nobody opens. A false claim I
    * authored is still on the board an hour after being disproved."
    */
-  it("ruling 295: a rename writes the title and records BOTH, so old references still join", async () => {
+  it("ruling 49: a rename writes the title and records BOTH, so old references still join", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
     const { updateTaskTitle } = await import("./task-edits.server");
@@ -3906,7 +3906,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(note.text).toContain("VIB-1");
   });
 
-  it("ruling 295: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
+  it("ruling 49: an unchanged title writes nothing, and an over-long one is refused whole", async () => {
     const store = setupProjectedStore(ctx);
     withTask(store, { stage: "impl", ownerUserId: store.users.arda.id }, null);
     const { updateTaskTitle } = await import("./task-edits.server");
@@ -3929,7 +3929,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
         .parsed.timeline.some((e) => e.title === "Title updated"),
     ).toBe(false);
 
-    // Ruling 288's rule one field over: a title past ruling 295's 200
+    // Ruling 131's rule one field over: a title past ruling 49's 200
     // characters is refused by name with nothing written, never cut.
     // CANARY: `.slice(0, TASK_TITLE_MAX_CHARS)`.
     await expect(
@@ -3951,9 +3951,9 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   /**
-   * Ruling 287 (pass 37, F37-122): connect it in the direction the work runs.
+   * Ruling 67 (pass 37, F37-122): connect it in the direction the work runs.
    *
-   * Ruling 269 let a decision CREATE a task and say what the new task waits on.
+   * Ruling 67 let a decision CREATE a task and say what the new task waits on.
    * A task is usually created to UNBLOCK something, though, so the dependency
    * points the other way — from the existing work to the new task — and that
    * direction could not be expressed at all. Live on SHOP-28 the operator wrote
@@ -3962,7 +3962,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
    * settled and recorded, and delivered as a chore in a person's head, with
    * nothing on SHOP-41 saying an edit was owed.
    */
-  it("ruling 287: create_task makes the EXISTING task wait on the new one, and says so on both", async () => {
+  it("ruling 67: create_task makes the EXISTING task wait on the new one, and says so on both", async () => {
     const store = setupProjectedStore(ctx);
     // The task that must not start until the new one lands.
     writeTask(store.dataRoot, store.slug, {
@@ -4035,14 +4035,14 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     );
   });
 
-  it("ruling 322: when the new task holds the DECIDING task, neither sentence says 'unchanged'", async () => {
+  it("ruling 67: when the new task holds the DECIDING task, neither sentence says 'unchanged'", async () => {
     /**
-     * Ruling 269 wrote two sentences saying this task is untouched — the
+     * Ruling 67 wrote two sentences saying this task is untouched — the
      * decision event's own fallback and the note left after the create — and a
      * comment beside them calling the mutation "a deliberate NO-OP… this option
      * says something about work that is NOT this task". All true at the time.
      *
-     * Ruling 287 then added `newTask.blocks`, and nothing keeps the deciding
+     * Ruling 67 then added `newTask.blocks`, and nothing keeps the deciding
      * task off that list — it is the most natural entry on it, because a task
      * is usually created when the work in front of you cannot proceed without
      * it. The resolution then writes the new key into this task's own
@@ -4103,8 +4103,8 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(texts.filter((t) => t.includes("to unblock this task"))).toHaveLength(0);
   });
 
-  it("ruling 322: a create_task that holds nothing here still reads as unchanged", async () => {
-    // The counterweight — ruling 269's sentence was right for its own case and
+  it("ruling 67: a create_task that holds nothing here still reads as unchanged", async () => {
+    // The counterweight — ruling 67's sentence was right for its own case and
     // stays. A fix that hedged every create_task would lose the one fact the
     // option exists to convey: the work went somewhere else.
     const store = setupProjectedStore(ctx);
@@ -4139,7 +4139,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(here.parsed.timeline.some((e) => e.text.includes("VIB-1 is unchanged"))).toBe(true);
   });
 
-  it("ruling 287: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
+  it("ruling 67: a reverse wait that CANNOT be written says so, and never undoes the task", async () => {
     const store = setupProjectedStore(ctx);
     withTask(
       store,
@@ -4188,7 +4188,7 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(failure!.text).toContain("VIB-404");
   });
 
-  it("ruling 269: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
+  it("ruling 67: a create_task resolution makes the task, joins the record, and leaves this one alone", async () => {
     const store = setupProjectedStore(ctx);
     withTask(
       store,
@@ -4257,10 +4257,10 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
     expect(decision.type).toBe("note");
   });
 
-  it("ruling 284: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
+  it("ruling 64: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
     const store = setupProjectedStore(ctx);
-    // Ruling 189 amended here because "a typed directive is content a person
-    // wrote". Ruling 284 keeps free text out of the contract whatever packet it
+    // Ruling 64 amended here because "a typed directive is content a person
+    // wrote". Ruling 64 keeps free text out of the contract whatever packet it
     // was typed on — the channel decides, not the packet.
     withTask(
       store,
@@ -4320,13 +4320,13 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
   });
 
   /**
-   * Ruling 478(e) (F40-31): WEB-3's "Connected; the first build succeeded"
+   * Ruling 68 (F40-31): WEB-3's "Connected; the first build succeeded"
    * asked for the Worker name and URL, and one Confirm sent it without them.
    * The card refuses first; `resolvePacket` refuses for every other door.
    *
    * CANARY: drop the `picked.reply` check in `resolvePacket`.
    */
-  it("ruling 478(e): a choice marked `reply` is refused without the person's typed answer, and nothing is recorded", async () => {
+  it("ruling 68: a choice marked `reply` is refused without the person's typed answer, and nothing is recorded", async () => {
     const store = setupProjectedStore(ctx);
     withTask(
       store,
@@ -4370,12 +4370,12 @@ describe("ruling 189: a resolved decision amends the task goal", () => {
 });
 
 /**
- * Ruling 354 (pass 38, F38-8): ruling 241's rule at two more packet arms. A
+ * Ruling 66 (pass 38, F38-8): ruling 66's rule at two more packet arms. A
  * retry is a dispatch and a collision ceremony ends in a delivery; both are
  * refused on a held task, and both used to be discovered AFTER the resolution
  * write had cleared the packet.
  */
-describe("ruling 354: a hold refuses a retry or a collision ceremony before the packet is consumed", () => {
+describe("ruling 66: a hold refuses a retry or a collision ceremony before the packet is consumed", () => {
   const RETRY_PACKET: TaskPacket = {
     type: "blocked",
     kind: "Blocked decision",

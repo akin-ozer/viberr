@@ -3,12 +3,12 @@ import { isThoughtLine } from "./runs-helpers";
 import { isRunBoundary, isRunInputsLine, isWaitLine, type LogLine } from "./runtime-types";
 
 /**
- * Ruling 457 (LIVE-4): the console's four folds, applied incrementally.
+ * Ruling 11 (LIVE-4): the console's four folds, applied incrementally.
  *
  * What the console draws: each run's `run·inputs` line moved to the head of
  * its block (P19-G11), then telemetry runs collapsed into one row (P14-WL-02),
  * reasoning runs into one disclosure (P19-RC1) and a call's heartbeats into one
- * wait row (ruling 366) — every fold but the move a no-op under `raw`. Run as a
+ * wait row (ruling 168) — every fold but the move a no-op under `raw`. Run as a
  * batch chain from scratch on every appended line, that was work that grew
  * with the console's history. Every one of those folds merges a line only into
  * the row drawn LAST, so an appended line can be folded onto the rows already

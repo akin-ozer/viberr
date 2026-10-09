@@ -135,7 +135,7 @@ describe("selfHealProjectionDbIfCorrupt", () => {
   it("never heals a file it cannot open, nor one that is not there", () => {
     // A permissions blip is not corruption, and a heal over it would replace a
     // healthy database. The mode bites only for an unprivileged user, which is
-    // how CI runs the suite (ruling 622). CANARY: read every open failure as
+    // how CI runs the suite (ruling 6). CANARY: read every open failure as
     // corruption and the blocked file no longer comes back unhealed.
     const blocked = tmpDb();
     seedRealDb(blocked, { users: 1, filler: 10 });

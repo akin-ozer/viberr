@@ -276,7 +276,7 @@ describe("wire format", () => {
 
 describe("ring buffer replay (Last-Event-ID)", () => {
   it("replays missed scope-matching events after the given id", () => {
-    // Ids count from the process's base (ruling 457, RV-5).
+    // Ids count from the process's base (ruling 11, RV-5).
     const base = getSseBrokerStats().headId;
     publishSseEvent(taskEvent("p", "K-1"), { projectSlug: "p", taskKey: "K-1" }); // 1
     publishSseEvent(taskEvent("p", "K-2"), { projectSlug: "p", taskKey: "K-2" }); // 2
@@ -330,7 +330,7 @@ describe("ring buffer replay (Last-Event-ID)", () => {
   });
 
   /**
-   * Ruling 457 (RV-5): a tab's position from before a restart. The new
+   * Ruling 11 (RV-5): a tab's position from before a restart. The new
    * process's ids used to start at 1 again, so once it had published past the
    * old position, the position read as one of its own: the broker replayed only
    * what came after it, and the change the new process made earlier (id 5
@@ -360,7 +360,7 @@ describe("ring buffer replay (Last-Event-ID)", () => {
   });
 
   /**
-   * Ruling 457 (RV-3): console lines (`run.log-appended`, one per line of a
+   * Ruling 11 (RV-3): console lines (`run.log-appended`, one per line of a
    * run) used to share the one 256-event ring with every data event, and a
    * stream's position only moves on events in its own scopes. So a board left
    * open while the agent it shows printed 300 lines stood at a position the

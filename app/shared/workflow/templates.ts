@@ -1,7 +1,7 @@
 import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
 
 /**
- * The instance-default workflow template (orchestrator ruling 15).
+ * The instance-default workflow template (orchestrator ruling 47).
  *
  * Stages are per-project (stored in project.md); this template feeds org
  * surfaces (the AgentModal instance stage list) and the create-project action.
@@ -11,7 +11,7 @@ import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-fi
  * Done is always reachable. The stage editor maintains that shape as stages are
  * added, removed and reordered — app/shared/workflow/transitions.ts (P13-D-1).
  *
- * P13-AP-04 / owner ruling 2 (2026-07-24): the "Lightweight · 3 stages" preset
+ * P13-AP-04 / P13 owner decision 2 (2026-07-24): the "Lightweight · 3 stages" preset
  * was DELETED. It shipped the built-in Developer/Reviewer, whose eligible
  * stages are the governed ids (`ready`/`impl`/`review`), onto a `todo`/`doing`/
  * `done` board — so no specialist was ever stage-eligible and the operator
@@ -31,7 +31,7 @@ export interface WorkflowTemplate {
 }
 
 /** The Standard template's words for its In Progress → Review edge (ruling
- *  519), shared with the boot conversion that writes them onto older boards. */
+ *  91), shared with the boot conversion that writes them onto older boards. */
 export const TEMPLATE_REVIEW_ENTRY_BY = "Operator, when the work is ready for review";
 
 export const GOVERNED_TEMPLATE: WorkflowTemplate = {
@@ -68,7 +68,7 @@ export const GOVERNED_TEMPLATE: WorkflowTemplate = {
     {
       from: "impl",
       to: "review",
-      // Ruling 519 (owner, 2026-09-27): Review is a state the task reaches on
+      // Ruling 91 (owner, 2026-09-27): Review is a state the task reaches on
       // its own, not one a person confirms. The operator moves the task there
       // when the work is ready and says why on the move; the one person's gate
       // on this board is acceptance, the edge below. It was `approval`, and the

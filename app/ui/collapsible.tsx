@@ -12,18 +12,18 @@ export const CLEAR_PART = 0.78;
 /**
  * A box that clamps when it's very tall, so one long thing can't dominate the
  * page: a long agent reply on the timeline, a task's long list of attachments
- * (ruling 510). Measures the content's full height after mount; if it exceeds
+ * (ruling 314). Measures the content's full height after mount; if it exceeds
  * COLLAPSE_MAX it renders clamped (with a soft fade) behind a Show more / Show
  * less toggle. Expanding restores the full content verbatim — nothing is
  * removed, only the view. SSR-safe: starts un-clamped (matches the server
  * render), then the layout effect measures on the client and clamps before the
  * browser paints a client render.
  *
- * Ruling 510: a keyboard user who moves focus under the fade opens the box.
+ * Ruling 314: a keyboard user who moves focus under the fade opens the box.
  * The links there stay in the tab order, and focusing one scrolled the clamped
  * box so the link sat behind the fade, where its ring was too faint to follow.
  *
- * Ruling 522: a comment's pictures, under its card, fold with its text. The
+ * Ruling 314: a comment's pictures, under its card, fold with its text. The
  * comment then owns the state (`open`, `onOpenChange`) and counts what else the
  * toggle hides (`more`, six images), and the toggle shows for them even when
  * the text itself is short.
@@ -42,15 +42,15 @@ export function Collapsible({
   /** Changes whenever the content does. A clamped box keeps its height
    *  whatever its content does, so the resize observer alone can't tell. */
   contentKey: string | number;
-  /** The clamped height (px). Ruling 521: a reviewer's reason on the
+  /** The clamped height (px). Ruling 316: a reviewer's reason on the
    *  completion packet folds at a few lines, not at a comment's height. */
   max?: number;
   children: ReactNode;
-  /** Ruling 522: the fold's state, held by whoever folds something else with
+  /** Ruling 314: the fold's state, held by whoever folds something else with
    *  this box. Absent, the box keeps its own. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  /** Ruling 522: what the toggle hides outside the box; null for nothing. */
+  /** Ruling 314: what the toggle hides outside the box; null for nothing. */
   more?: Hidden | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -99,7 +99,7 @@ export function Collapsible({
   );
 }
 
-/** Ruling 522: what a fold hides beyond its box, as its toggle counts it. */
+/** Ruling 314: what a fold hides beyond its box, as its toggle counts it. */
 export interface Hidden {
   count: number;
   /** Already agreeing with the count: "images", "file". */
@@ -109,7 +109,7 @@ export interface Hidden {
 /**
  * The fold's one control: "Show more" / "Show less" with `aria-expanded`.
  *
- * Ruling 522: it counts what it hides beyond its box ("Show more · +6 images",
+ * Ruling 314: it counts what it hides beyond its box ("Show more · +6 images",
  * or "Show 6 more images" when the box itself is whole), and closing keeps it
  * where it was on screen. What folds above it (a long reply's
  * text, the rows of pictures a toggle under them hides) otherwise pulled it up
@@ -171,7 +171,7 @@ export function FoldToggle({
 }
 
 /**
- * Ruling 522: how many tiles of a wrapping strip (`ref`) stand on its first
+ * Ruling 314: how many tiles of a wrapping strip (`ref`) stand on its first
  * line, so the rest can fold. Every tile of the strip takes one width, so the
  * line holds as many as fit side by side with the gap between them; that
  * holds whether the rest are drawn or not, so the count survives the fold and

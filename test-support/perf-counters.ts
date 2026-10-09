@@ -5,7 +5,7 @@ import { DatabaseSync, StatementSync } from "node:sqlite";
 import { onTestFinished } from "vitest";
 
 /**
- * Ruling 457: deterministic counters for the perf tests (the one home for
+ * Ruling 11: deterministic counters for the perf tests (the one home for
  * counting SQL, store-file reads and writes). They wrap
  * the process-wide `node:sqlite` prototypes and `fs.readFileSync` for the span
  * between `start` and `stop`, so every module (including ones that prepared

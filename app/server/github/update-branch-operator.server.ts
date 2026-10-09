@@ -62,7 +62,7 @@ import { errorMessage } from "~/shared/errors";
  * The DECISION half of "bring the task branch up to date" (N19 gap 9, owner
  * ruling: operator-decided).
  *
- * Shaped on R15-2 / ruling 21, which decided the adjacent case: delivery is an
+ * Shaped on R15-2 / ruling 126, which decided the adjacent case: delivery is an
  * operator decision, gated by a capability, and the SERVER executes the
  * mechanics while the agent only decides. The same split holds here — no
  * specialist agent may do this, because the delivering engagement is the sole
@@ -71,9 +71,8 @@ import { errorMessage } from "~/shared/errors";
  *
  * A conflict is never retried, forced or narrated away: the merge is aborted
  * and the branch is left exactly as it was (R18-4's shape, a remote branch is
- * never force-reset). Who resolves it is ruling 475's owner decision
- * (2026-09-25, superseding the "a person decides" half of rulings 133(b) and
- * 438 for this case): the operator hands it straight to the task's delivering
+ * never force-reset). Who resolves it is ruling 129's owner decision
+ * (2026-09-25, superseding the "a person decides" half of ruling 129 for this case): the operator hands it straight to the task's delivering
  * agent when that agent is deployed with a repo-write grant, and the resolved
  * branch goes back through the reviewers before anyone accepts it. The
  * blocking decision packet is the fallback, for when no agent can take it.
@@ -85,31 +84,31 @@ type BranchUpdateAuditDetails = {
   /** Base commits the branch was missing — `updated` only. */
   commits?: number;
   /** Conflicting paths (`conflict`), or the store-layout paths that refused the
-   *  update (`store_layout`, ruling 159(b)). */
+   *  update (`store_layout`, ruling 229). */
   files?: string[];
-  /** Ruling 134(c): origin's copy of the branch as it stood BEFORE the call. */
+  /** Ruling 229: origin's copy of the branch as it stood BEFORE the call. */
   remote?: RemoteBranchState["kind"];
   remoteHeadSha?: string | null;
-  /** Ruling 132: the merge commit an `updated` refresh created. */
+  /** Ruling 239: the merge commit an `updated` refresh created. */
   mergeSha?: string;
-  /** Ruling 133(b): conflicts only — who can resolve it in product: the
+  /** Ruling 129: conflicts only — who can resolve it in product: the
    *  deployed, repo-write delivering agent, or nobody. */
   resolver?: "deliverer" | "none";
-  /** Ruling 475: conflicts only — where the conflict went. `deliverer`: the
+  /** Ruling 129: conflicts only — where the conflict went. `deliverer`: the
    *  operator handed it to the delivering agent (`handedTo`); `packet`: a
    *  blocking decision packet for a person; `in_progress`: the deliverer is
    *  already resolving this same conflict, so nothing new was sent. */
   route?: "deliverer" | "packet" | "in_progress";
-  /** Ruling 475: the profile the conflict was handed to. */
+  /** Ruling 129: the profile the conflict was handed to. */
   handedTo?: string;
-  /** Ruling 475: the packet is the fallback because the deliverer was already
+  /** Ruling 129: the packet is the fallback because the deliverer was already
    *  sent this same conflict once and the branch still conflicts. */
   repeat?: true;
-  /** Ruling 475: the handoff was attempted and no run started; the reason. */
+  /** Ruling 129: the handoff was attempted and no run started; the reason. */
   handoffRefused?: string;
-  /** Ruling 475: `conflict` only — the base tip the merge was attempted on. */
+  /** Ruling 129: `conflict` only — the base tip the merge was attempted on. */
   baseSha?: string;
-  /** Ruling 428: the leased path that refused the update, and its holder. */
+  /** Ruling 241: the leased path that refused the update, and its holder. */
   path?: string;
   holder?: string;
 };
@@ -117,7 +116,7 @@ type BranchUpdateAuditDetails = {
 /** The action the operator's branch-update audit rows carry. */
 const BRANCH_UPDATE_AUDIT_ACTION = "github.branch_update.operator";
 
-/** Ruling 133(b): who can resolve a conflict in product. A deliverer only
+/** Ruling 129: who can resolve a conflict in product. A deliverer only
  *  counts when its profile is deployed with a repo-write grant; otherwise the
  *  packet must not promise a resolver that cannot execute. */
 type ConflictResolver =
@@ -144,7 +143,7 @@ function conflictResolverFor(
 /** The two outcomes the conflict arm handles. */
 type ConflictResult = Extract<UpdateBranchResult, { status: "conflict" | "push_conflict" }>;
 
-/** Ruling 475: what makes two conflicts "the same one": the same files
+/** Ruling 129: what makes two conflicts "the same one": the same files
  *  against the same base commit, or the same head of origin's copy refusing
  *  the push. A sha that could not be read matches any, which errs towards the
  *  packet (a person decides), never towards a second handoff. */
@@ -173,7 +172,7 @@ const handoffRowSchema = z.object({
 const HANDOFF_LOOKBACK_ROWS = 50;
 
 /**
- * Ruling 475: when this same conflict was already handed to the delivering
+ * Ruling 129: when this same conflict was already handed to the delivering
  * agent, the handoff on record (newest first), else null. Read from this
  * door's own audit rows, which record every routing decision.
  */
@@ -201,7 +200,7 @@ function earlierHandoff(
   return null;
 }
 
-/** Ruling 475: the profile has a run in flight (running or queued) on the task. */
+/** Ruling 129: the profile has a run in flight (running or queued) on the task. */
 function hasLiveRun(
   db: DatabaseSync,
   ref: { projectSlug: string; taskKey: string },
@@ -223,7 +222,7 @@ function conflictPhrase(files: readonly string[]): string {
 }
 
 /**
- * Ruling 475 (ruling 438's one agent merge): the directive the delivering
+ * Ruling 129 (ruling 129's one agent merge): the directive the delivering
  * agent's run starts with. It says what to merge, where it already is, what to
  * resolve, and that delivering is not the agent's job.
  */
@@ -253,7 +252,7 @@ function conflictDirective(result: ConflictResult): string {
 }
 
 /**
- * Ruling 475: the sentence the person reads on the timeline when the operator
+ * Ruling 129: the sentence the person reads on the timeline when the operator
  * hands the conflict on. Written for a person: who got it, what they do with
  * it, and what happens before anyone accepts the result.
  */
@@ -284,10 +283,10 @@ function remoteHeadOf(remote: RemoteBranchState): string | null {
 }
 
 /**
- * Ruling 134(c): the sentence about origin's copy of the branch, FOR THE MODEL
+ * Ruling 229: the sentence about origin's copy of the branch, FOR THE MODEL
  * (the tool result). The tool stays the BASE tool: when origin lags it points
- * at `deliver_for_review` (pushing is delivery, ruling 21) and never at a
- * person. Ruling 475 (F40-60): the timeline gets {@link remotePersonSentence}
+ * at `deliver_for_review` (pushing is delivery, ruling 126) and never at a
+ * person. Ruling 241 (F40-60): the timeline gets {@link remotePersonSentence}
  * instead, because this one is an instruction to the operator.
  */
 function remoteSentence(branch: string, remote: RemoteBranchState): string {
@@ -314,9 +313,9 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
 }
 
 /**
- * Ruling 475 (F40-60): the same fact for the PERSON reading the timeline.
+ * Ruling 241 (F40-60): the same fact for the PERSON reading the timeline.
  *
- * Ruling 134(c) put origin's lag on the record for the humans and then wrote
+ * Ruling 229 put origin's lag on the record for the humans and then wrote
  * the model's sentence there: live on WEB-1, WEB-2 and WEB-4, every delivery
  * was preceded by "call `deliver_for_review` to push it. Do not ask a person
  * to push.", an imperative addressed to the operator about a tool no control
@@ -393,10 +392,10 @@ function conflictOptions(
   base: string,
   resolver: ConflictResolver,
   outcome: "conflict" | "push_conflict",
-  /** Ruling 163: the redirect's resolution returns the task to the review
+  /** Ruling 90: the redirect's resolution returns the task to the review
    *  stage; null when the task stands before it (nothing to return to). */
   returnsToReview: { stageName: string } | null = null,
-  /** Ruling 475: the deliverer was already sent this same conflict and the
+  /** Ruling 129: the deliverer was already sent this same conflict and the
    *  branch still conflicts, so resolving by hand is recommended and the
    *  redirect becomes a second attempt a person may still choose. */
   alreadyTried = false,
@@ -418,13 +417,13 @@ function conflictOptions(
     detail: "Keeps the record and the branch; the task leaves the board.",
     ev: `**Decision:** archive the task rather than resolve \`${branch}\` against \`${base}\`.`,
   };
-  // Ruling 133(b): a packet offers only options that can execute. With no
+  // Ruling 129: a packet offers only options that can execute. With no
   // deployed, repo-write deliverer the in-product redirect would promise a
   // resolver that does not exist, so resolving by hand is what is recommended.
   if (resolver.kind === "none") {
     return [{ ...byHand, recommended: true }, archive];
   }
-  // Ruling 163 (pass 35, F35-13): a redirect resolved on a task at or past the
+  // Ruling 90 (pass 35, F35-13): a redirect resolved on a task at or past the
   // review stage RETURNS it there in the same write (`rework: true` is what
   // `resolvePacket` reads), so the resolved revision gets its verdict where
   // the reviewers are eligible instead of waiting at Merge for a verdict
@@ -434,7 +433,7 @@ function conflictOptions(
     : "";
   const redirect = {
     // `redirect` routes the decision back to the agent side (the resolver
-    // re-engages the deliverer, which runs at every stage, ruling 133). This
+    // re-engages the deliverer, which runs at every stage, ruling 181). This
     // is the IN-PRODUCT resolution and it is recommended for a reason: the
     // base is now fetched into the delivering engagement's own workspace, so
     // it can merge `origin/<base>` and resolve the files where it already has
@@ -461,7 +460,7 @@ function conflictOptions(
           `\`${base}\` in its own workspace.`
         : `**Decision:** ${resolver.name} reconciles \`${branch}\` with origin's copy in its own workspace.`,
   };
-  // Ruling 475: a resolver that already failed this conflict once is still a
+  // Ruling 129: a resolver that already failed this conflict once is still a
   // choice a person may make (with their own guidance), but not the one the
   // packet recommends.
   return alreadyTried
@@ -469,9 +468,9 @@ function conflictOptions(
     : [redirect, byHand, archive];
 }
 
-/** Ruling 163: the review stage a redirect's resolution returns the task to,
+/** Ruling 90: the review stage a redirect's resolution returns the task to,
  *  by id and display name, when the task stands at or past it (and is not
- *  terminal); null otherwise. Ruling 475's handoff returns the task there
+ *  terminal); null otherwise. Ruling 129's handoff returns the task there
  *  itself, in the same write that records the handoff. */
 function redirectReturnsToReview(
   ctx: TaskActionContext,
@@ -512,11 +511,11 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
     case "push_conflict":
       return `The update could not be published: ${r.reason}.`;
     case "store_layout":
-      // Ruling 159(b): the same refusal the delivery push reports, through the
+      // Ruling 229: the same refusal the delivery push reports, through the
       // door that pushes the workspace head. Naming the paths is the remedy.
       return `\`${r.branch}\` was NOT updated: ${r.reason}. Remove those paths from the branch, then update it again.`;
     case "lease_held":
-      // Ruling 428: the delivery push's lease refusal, through this door.
+      // Ruling 241: the delivery push's lease refusal, through this door.
       return (
         `\`${r.branch}\` was NOT updated, and nothing was merged or pushed: ${r.reason} ` +
         `Do not retry the refresh until ${r.holder} has merged.`
@@ -529,15 +528,15 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
 }
 
 /**
- * Ruling 132 (pass 34, F34-14), in three explicit steps, shared since pass 35
- * (ruling 162) by the operator's tool and the acceptance ceremony. (A) Under
+ * Ruling 239 (pass 34, F34-14), in three explicit steps, shared since pass 35
+ * (ruling 95) by the operator's tool and the acceptance ceremony. (A) Under
  * the file lock, record the refresh: the merge commit, the base tip, the base
  * name and the count. Without this row the reconciler has no way to tell this
  * merge from authored work, and it would report the base's commits as
  * unreviewed. (B) Reconcile, so `pr.revisionDrift` is re-measured NOW rather
  * than by the five-minute poll (the PR is open, so no divergence arm fires; the
  * reconcile may still notify watchers or wake the operator on an out-of-band
- * change, which is the same behaviour any pass has). Since ruling 494 this is
+ * change, which is the same behaviour any pass has). Since ruling 238 this is
  * the push's re-compare (`recompareAfterPush`): the push is recorded first, so
  * a count the pass could not replace reads as the one before it. (C) Re-read
  * and write the timeline event from the re-read, carrying the canonical drift sentence; the
@@ -570,8 +569,8 @@ export async function recordBranchRefresh(
       at: new Date().toISOString(),
       onto: result.onto,
     });
-    // Ruling 439: the push that published the merge published the revision it
-    // was made onto, the same fact a delivery push stamps (ruling 161).
+    // Ruling 239: the push that published the merge published the revision it
+    // was made onto, the same fact a delivery push stamps (ruling 234).
     const rev = activeWorkRevision(parsed.frontmatter.workRevision);
     if (
       rev &&
@@ -581,7 +580,7 @@ export async function recordBranchRefresh(
       rev.pushedAt = new Date().toISOString();
     }
   });
-  // Ruling 494 (F40-70): the push moved the branch, so its re-compare records
+  // Ruling 238 (F40-70): the push moved the branch, so its re-compare records
   // the push and then runs this pass in the task's lock: the count on record
   // is counted on `mergeSha`, or reads as older when the pass could not run.
   const reconcile = await recompareAfterPush(
@@ -604,7 +603,7 @@ export async function recordBranchRefresh(
   // acceptance ceremony did that and merged, so the permanent completion
   // record left out the refresh the acceptance itself shipped. The pushed head
   // is in hand, and Viberr recorded every commit between it and the reviewed
-  // revision, so the drift is read from that record (ruling 439) until GitHub
+  // revision, so the drift is read from that record (ruling 239) until GitHub
   // catches up. The same record answers when GitHub could not be read at all.
   let lagging = false;
   let fromRecord: ReturnType<typeof refreshOnlyDrift> = null;
@@ -631,7 +630,7 @@ export async function recordBranchRefresh(
           : drift.kind === "none"
             ? `The review PR's head now equals the reviewed revision.`
             : `Drift re-measured: ${drift.sentence}.`;
-  // Ruling 494: a re-compare that could not run leaves the count from before
+  // Ruling 238: a re-compare that could not run leaves the count from before
   // the push on record, and the line says so rather than letting it stand.
   const recount =
     reconcile.status === "reconciled"
@@ -705,7 +704,7 @@ export async function operatorUpdateBranchFromBase(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
-  // Ruling 162 / G35-5(d): the operator stops refreshing at the acceptance
+  // Ruling 95 / G35-5(d): the operator stops refreshing at the acceptance
   // boundary; the acceptance ceremony refreshes once and merges.
   const projectFile = readProjectFile({ projectSlug: input.projectSlug, dataRoot: ctx.dataRoot });
   const boundaryRefusal = projectFile
@@ -724,7 +723,7 @@ export async function operatorUpdateBranchFromBase(
   // That is the misblame class LV-03 exists to prevent, and this type's own
   // contract already says which field decides it.
   if (boundaryRefusal) return { outcome: "noop", message: boundaryRefusal };
-  // Ruling 163: a task at or past the review stage returns to it when the
+  // Ruling 90: a task at or past the review stage returns to it when the
   // conflict's redirect is resolved, so the resolved revision gets its verdict
   // where the reviewers are eligible. Decided here so the option's own text
   // says what its resolution does.
@@ -762,7 +761,7 @@ export async function operatorUpdateBranchFromBase(
   if (result.status === "conflict" || result.status === "store_layout") {
     details.files = result.files;
   }
-  // Ruling 475: what identifies this conflict, so a second one can be told
+  // Ruling 129: what identifies this conflict, so a second one can be told
   // from the one already handed to the deliverer.
   if (result.status === "conflict" && result.baseSha) details.baseSha = result.baseSha;
   if (result.status === "push_conflict" && result.remoteHeadSha) {
@@ -784,7 +783,7 @@ export async function operatorUpdateBranchFromBase(
     });
 
   if (result.status === "conflict" || result.status === "push_conflict") {
-    // Ruling 133(b): who can resolve it in product, decided once here so the
+    // Ruling 129: who can resolve it in product, decided once here so the
     // audit row, the handoff and the packet cannot disagree. The conflict arm
     // records the audit row itself, once it knows where the conflict went.
     const resolver = conflictResolverFor(ctx, input.projectSlug, existing.parsed.frontmatter);
@@ -820,11 +819,11 @@ export async function operatorUpdateBranchFromBase(
   }
 
   if (result.status === "already_current" && result.remote.kind !== "current") {
-    // Ruling 134(c): origin lagging the workspace is a fact the humans need on
+    // Ruling 229: origin lagging the workspace is a fact the humans need on
     // the record, not only the model. The tool is idempotent by contract, so
     // the record is too: the line is SUPPRESSED when the newest `github` event
     // already says exactly this; the audit row above still fires every call.
-    // Ruling 475 (F40-60): the record gets the PERSON's sentence; the model's,
+    // Ruling 241 (F40-60): the record gets the PERSON's sentence; the model's,
     // which tells the operator which tool to call, stays the tool result.
     const sentence = outcomeSentence(result);
     const personSentence = remotePersonSentence(result.branch, result.base, result.remote);
@@ -841,7 +840,7 @@ export async function operatorUpdateBranchFromBase(
       });
       rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ctx.dataRoot });
     }
-    // Ruling 229 (F37-49): `done`, not `noop`. An already-current branch is this
+    // Ruling 129 (F37-49): `done`, not `noop`. An already-current branch is this
     // tool's SUCCESS condition, not a state conflict — its own description tells
     // the operator so ("It is idempotent and cheap: an already-current branch
     // changes nothing and says so, so call it when you are unsure rather than
@@ -849,14 +848,14 @@ export async function operatorUpdateBranchFromBase(
     // `narrateRefusedActions` headlined it "The operator's plan was not carried
     // out in full." 51 of the 57 such notes on the pass-37 board were this one
     // line. Worse, the sentence was already on the timeline as the `github`
-    // event three lines up — the event ruling 134(c) deliberately suppresses
+    // event three lines up — the event ruling 229 deliberately suppresses
     // when it would duplicate, re-added by the refusal narration with no
     // suppression and a worse headline.
     stampRefreshed(ctx);
     return { outcome: "done", message: sentence };
   }
 
-  // Ruling 229: the other already-current shape — the remote is level too, so
+  // Ruling 129: the other already-current shape — the remote is level too, so
   // there is nothing even to note. Same reasoning: the tool did its job.
   if (result.status === "already_current") {
     stampRefreshed(ctx);
@@ -878,7 +877,7 @@ function asSentence(text: string): string {
 }
 
 /**
- * Ruling 475 (F40-20, owner decision 2026-09-25): where a conflict goes.
+ * Ruling 129 (F40-20, owner decision 2026-09-25): where a conflict goes.
  *
  * Live on akinozer-com at 00:27 UTC WEB-2's accept was refused over a
  * `package.json` conflict with WEB-4's merge. The operator ran this door, wrote
@@ -889,10 +888,10 @@ function asSentence(text: string): string {
  * recommendation.
  *
  * So the operator routes it:
- *  - A delivering agent deployed with a repo-write grant (ruling 133(b)'s
+ *  - A delivering agent deployed with a repo-write grant (ruling 129's
  *    eligibility) gets it straight away: a task at or past review returns to
- *    the review stage (ruling 163's `returnsToReview`) with a person-facing
- *    line on the timeline, and the agent's run starts with ruling 438's
+ *    the review stage (ruling 90's `returnsToReview`) with a person-facing
+ *    line on the timeline, and the agent's run starts with ruling 129's
  *    directive. Its resolved branch is delivered and judged by the reviewers
  *    again before anyone accepts it.
  *  - That same conflict (the same files against the same base commit, or the
@@ -971,7 +970,7 @@ async function routeConflict(
           taskKey: ref.taskKey,
           profileId: resolver.profileId,
           prompt: conflictDirective(result),
-          reason: `Ruling 475: the branch conflicts with its base, and the delivering agent resolves it.`,
+          reason: `Ruling 129: the branch conflicts with its base, and the delivering agent resolves it.`,
         },
         authority,
       ).catch((error) => ({ outcome: "noop" as const, message: errorMessage(error) }));
@@ -983,7 +982,7 @@ async function routeConflict(
         return {
           outcome: "done",
           message:
-            `${sentence} Ruling 475: handed it to ${resolver.name}, the delivering agent. ` +
+            `${sentence} Ruling 129: handed it to ${resolver.name}, the delivering agent. ` +
             `${asSentence(dispatched.message)} ` +
             (returned
               ? `${ref.taskKey} returned from ${returned.fromName} to ${returned.toName} for the re-verdict. `
@@ -1058,12 +1057,12 @@ async function routeConflict(
         ? "Opened a blocking decision packet for a human to resolve; do not retry this yourself."
         : `A decision packet could NOT be opened (${packet.message}); say so and ask a human to resolve the branch.`),
   };
-  // Ruling 443: the packet is this step's outcome, not a refusal of it.
+  // Ruling 118: the packet is this step's outcome, not a refusal of it.
   if (packet.outcome === "done") conflicted.openedPacket = true;
   return conflicted;
 }
 
-/** Ruling 475 (F40-55 (b)): withdraw an open packet that offers acceptance,
+/** Ruling 244 (F40-55 (b)): withdraw an open packet that offers acceptance,
  *  because the branch it would merge conflicts. No write when none stands. */
 async function withdrawMootAcceptancePacket(
   db: DatabaseSync,
@@ -1093,7 +1092,7 @@ async function withdrawMootAcceptancePacket(
   rebuildPath(db, resolveTaskFilePath(ref), { dataRoot: ref.dataRoot });
 }
 
-/** Ruling 475: a task's return to the review stage, by stage id and names. */
+/** Ruling 129: a task's return to the review stage, by stage id and names. */
 interface HandoffReturn {
   fromId: string;
   fromName: string;
@@ -1107,10 +1106,10 @@ interface HandoffWriteSlot {
 }
 
 /**
- * Ruling 475: the record of a handoff, in one write: the person-facing
- * sentence, and (ruling 163) the task's return to the review stage when it
+ * Ruling 129: the record of a handoff, in one write: the person-facing
+ * sentence, and (ruling 90) the task's return to the review stage when it
  * stands past it, with the acceptance offers that return makes moot withdrawn
- * (ruling 137). The stage move is audited like the packet redirect's.
+ * (ruling 99). The stage move is audited like the packet redirect's.
  */
 async function recordHandoff(
   db: DatabaseSync,

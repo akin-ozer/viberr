@@ -6,7 +6,7 @@ import { Icon } from "./icon";
 /**
  * Status, readiness, and validation pills.
  *
- * ORCHESTRATOR RULING 1: the canonical readiness enum is
+ * ORCHESTRATOR RULING 44: the canonical readiness enum is
  * `ready | input_required | inconsistency_risk_detected | blocked`; this is
  * the ONE mapping module from canonical values to the mock's pill CSS kinds
  * and labels. "accepted" is a derived display state (stage done + accepted),
@@ -91,7 +91,7 @@ const READINESS_UNKNOWN: PillDisplay = {
 };
 
 /** The readiness vocabulary's label alone — for the board card's status chip
- *  (ruling 365), which draws the value with its own mark. Unknown values fall
+ *  (ruling 306), which draws the value with its own mark. Unknown values fall
  *  back to "unknown" exactly as the pill does (C12: never greenwash). */
 export function readinessLabel(value: string): string {
   return (READINESS_BY_VALUE.get(value) ?? READINESS_UNKNOWN).label;
@@ -106,7 +106,7 @@ export function readinessLabel(value: string): string {
  * kind) so it reads as a different CLASS of object from the stage's colour dot.
  * This reuses the existing Icon-in-Pill pattern (the `archived` pill does the
  * same) — no new app.css class, which the stylesheet's integrity gate requires.
- * Ruling 169 went further on the hero: the stage and the status there are
+ * Ruling 308 went further on the hero: the stage and the status there are
  * labelled fields ("Stage", "Status"), because the glyph alone still let the
  * owner read the Ready stage as a status word.
  */
@@ -178,7 +178,7 @@ export function validationLabel(value: string): string {
 
 /** Whether a validation value belongs to the quiet tier — a description of
  *  where the evidence stands, not a problem. The board card draws only the
- *  fills (ruling 168, `cardProblems`), and so does the task hero.
+ *  fills (ruling 306, `cardProblems`), and so does the task hero.
  *  Read from the vocabulary so the tier is decided in one place. */
 export function validationQuiet(value: string): boolean {
   return (VALIDATION_BY_VALUE.get(value) ?? VALIDATION_DISPLAY.none).quiet === true;

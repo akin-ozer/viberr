@@ -126,7 +126,7 @@ export async function runGrantScope(
   ctx: CredentialCallContext = {},
 ): Promise<GithubActionOutcome> {
   const result = await revalidateProjectCredential(db, projectSlug, actor, ctx);
-  // LV-05, ruling 540: a re-validation can change the credential's health, so
+  // LV-05, ruling 223: a re-validation can change the credential's health, so
   // neither the memo nor the board's remembered check may keep the pre-check
   // answer.
   await refreshRepoAccess(db, projectSlug, ctx);
@@ -245,7 +245,7 @@ async function probeRepoWithConnection(
  * Attach / re-attach the project's GitHub credential (finding #13): binds an
  * org connection to the project via the phase-7 set-PAT flow. Re-attach is the
  * same operation on an already-bound project; it never replaces a token, which
- * only the connection's Update token in Instance settings does. Ruling 480
+ * only the connection's Update token in Instance settings does. Ruling 222
  * (F40-45): the button said "Rotate credential" and the toast "Credential
  * rotated", so on a one-connection instance someone reacting to a leaked token
  * was told it was rotated while the same token stayed live. The toast now says
@@ -263,7 +263,7 @@ async function probeRepoWithConnection(
  * stranded the entirely legitimate one-PAT-many-owners setup (org repos,
  * collaborator repos) that `changeProjectRepo` explicitly supports — it accepts
  * any `owner/name`, and with no credential bound makes this same choice of
- * connection (ruling 669). So a project with
+ * connection (ruling 226). So a project with
  * no owner-matched connection falls back to the org default and asks GitHub
  * whether that token reaches the repo; only a real access miss refuses.
  */
@@ -324,7 +324,7 @@ export async function runSetCredential(
 
   const previousPatId = getProjectCredential(db, projectSlug)?.id ?? null;
   setProjectCredential(db, { projectSlug, patId: connection.patId }, actor);
-  // LV-05, ruling 540: the connection pill and the board read a remembered
+  // LV-05, ruling 223: the connection pill and the board read a remembered
   // `checkRepoAccess` probe. Without a new one the pill kept saying "no
   // credential" after a full reload, and the board kept its verdict about the
   // credential this one replaced.
@@ -367,7 +367,7 @@ export async function runClearCredential(
   actor: AuditActor,
 ): Promise<GithubActionOutcome> {
   const cleared = clearProjectCredential(db, projectSlug, actor);
-  // LV-05, ruling 540: same new reading on removal, otherwise the pill claims
+  // LV-05, ruling 223: same new reading on removal, otherwise the pill claims
   // "connected" for up to 30 s after the credential is gone and the board
   // keeps its verdict about it. With no credential it needs no GitHub call.
   await refreshRepoAccess(db, projectSlug);

@@ -18,14 +18,14 @@ state on the local filesystem. There is no external database, cache, or queue to
   built from `node:26-slim` in four stages: `prod-deps` (`npm ci --omit=dev`, keyed on
   the lockfile only, so a source edit never reinstalls it), `build` (`npm ci` +
   `npm run build`), `launcher` (gcc compiles `tools/viberr-launch/viberr-launch.c`, keyed
-  on that one file; ruling 460) and the runtime stage.
+  on that one file; ruling 139) and the runtime stage.
 - `react-router-serve` on `$PORT` (`3000` in the image), started as
   `node /app/node_modules/@react-router/serve/bin.cjs ./build/server/index.js`, not
   `npm run start`: with node as pid 1 a `docker compose stop` SIGTERM reaches the process
   whose shutdown handler checkpoints the WAL and releases the writer lock. There is no
   `ENTRYPOINT`; compose's `init: true` reaps orphaned children.
 - The app runs as the non-root `node` user (uid 1000). `EXPOSE 3000`.
-- **Every agent process runs as its person's own OS user (ruling 460).** The image adds
+- **Every agent process runs as its person's own OS user (ruling 139).** The image adds
   the group `viberr-agents` (gid 20000, `node` a supplementary member), the setuid launcher
   `/usr/local/libexec/viberr-launch` (root:node 4750: only root and group `node` can run
   it), and a root-owned `/etc/gitconfig` with `safe.directory=*` and
@@ -38,21 +38,21 @@ state on the local filesystem. There is no external database, cache, or queue to
   the launcher.
 - SQLite projections + app data at `$VIBERR_DATA_ROOT` (`/data` in the image), which
   **must** be a persistent volume on a filesystem that enforces file permissions between
-  users. Compose mounts the named volume `viberr-data` there (ruling 460). The earlier
+  users. Compose mounts the named volume `viberr-data` there (ruling 38). The earlier
   `./docker-data` bind mount does not qualify on Docker Desktop for macOS: VirtioFS let uid
   65534 read a 0600 file owned by uid 1000, and `ls -l` showed every entry as owned by
   whoever read it (measured 2026-09-24), so an agent uid could read the projection
   database. A store still there boots `agentIsolation: degraded` and readiness answers 503;
-  move it once, below ([Moving the store to the named volume](#moving-the-store-to-the-named-volume-ruling-460)).
+  move it once, below ([Moving the store to the named volume](#moving-the-store-to-the-named-volume-ruling-38)).
 - The image also carries `db/`, `scripts/`, `app/` and `tsconfig.json`, so the maintenance
   CLIs (`npm run backup`, `keys`, `store:check`, …) run inside the container through `tsx`.
 
-What `compose.yml` adds around it: `env_file: .env`, optional (ruling 504); `NODE_ENV=production` and
+What `compose.yml` adds around it: `env_file: .env`, optional (ruling 38); `NODE_ENV=production` and
 `VIBERR_DATA_ROOT=/data` forced over whatever `.env` says; the four controller unlock
-flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 345); an
+flags defaulting to `disabled`; the three `VIBERR_BUILD_*` build args (ruling 41); an
 empty `./.host-disk` mounted read-only at `/host-disk` and named in
 `VIBERR_HOST_DISK_PATH`, so the free-space check reads the host disk under Docker
-Desktop's volume (ruling 603, [configuration.md](configuration.md));
+Desktop's volume (ruling 40, [configuration.md](configuration.md));
 `hostname: viberr` (the writer lock's holder identity, see
 [Single-writer safety](#single-writer-safety-b-fd1--f18-5)); `ports:
 "${PORT:-3000}:${PORT:-3000}"`; a healthcheck that fetches `/resources/health` every 30 s
@@ -61,7 +61,7 @@ Desktop's volume (ruling 603, [configuration.md](configuration.md));
 run-concurrency cap counts runs, and one run can fork a test worker per host CPU (measured
 on a 10-core Mac with the cap at 0: six live runs, the container at 723% CPU and 5.4 GB).
 Set `VIBERR_CPUS` in `.env` to roughly cores minus 3 on a machine someone also works on.
-Unset, there is no ceiling (ruling 504): Docker refuses to start a container whose ceiling
+Unset, there is no ceiling (ruling 38): Docker refuses to start a container whose ceiling
 exceeds the host's CPU count, so the fixed `7` it used to be stopped a starter's first `up`
 on a small VM.
 
@@ -71,7 +71,7 @@ All configuration comes from environment variables, validated at startup
 ([`app/server/config/env.server.ts`](../../app/server/config/env.server.ts)) — the
 process refuses to boot and prints every invalid variable. Every variable is optional
 (see [`.env.example`](../../.env.example) and [configuration.md](configuration.md)),
-the two secrets included (ruling 504). When the environment leaves
+the two secrets included (ruling 38). When the environment leaves
 `VIBERR_SESSION_SECRET` or `VIBERR_SECRET_ENCRYPTION_KEY` unset, the first process that
 reads the env generates both, once, into `<data root>/state/instance-secrets.json`: 0600,
 inside the server-only `state/`, so no agent uid can open it. Every process after it (the
@@ -107,7 +107,7 @@ Optional integrations, enabled only when their vars are present:
 `GITHUB_OAUTH_*` / `GOOGLE_OAUTH_*` (OAuth sign-in; an `oauth_providers` row set in the
 app overrides them) and `VIBERR_SEED_ADMIN_*` (bootstrap admin on first boot of an empty
 DB). Agent backends are **not** among them: they carry no environment variables at all
-(ruling 127) and are connected per person in the app (below).
+(ruling 137) and are connected per person in the app (below).
 
 ## TLS and the reverse proxy
 
@@ -155,7 +155,7 @@ Three proxy details worth getting right:
   which holds two (the layout's and its own); `/insights` has none, and the controller
   dock opens one there while its panel is open. Over HTTP/1.1 a browser allows about six
   connections per origin, so several visible pages of one instance can exhaust the pool
-  and every request then hangs with no error (ruling 301; a hidden tab closes its
+  and every request then hangs with no error (ruling 25; a hidden tab closes its
   streams). The app serves HTTP/1.1; a proxy that speaks HTTP/2 to the browser
   multiplexes the streams over one connection.
 
@@ -172,7 +172,7 @@ sign-ins and form submissions from. Unset behind the proxy, a sign-in answers 40
 "Cross-origin request rejected." and a form or fetcher post answers 403 "That request
 expired (security token mismatch). Try again." React Router's own action-origin check, which
 from 8.3.1 compares the whole origin the same way and cannot see the public one, is off
-(`allowedActionOrigins: ["**"]` in `react-router.config.ts`, ruling 687), which leaves the
+(`allowedActionOrigins: ["**"]` in `react-router.config.ts`, ruling 28), which leaves the
 app's guard as the one origin check. The exception is `/api/auth/*` (the OAuth start and
 callbacks): it never runs the app's guard, and better-auth checks it against its own
 `trustedOrigins`, which it builds from the same `BETTER_AUTH_URL`. Do not make the server
@@ -182,18 +182,18 @@ so the e2e suite does not exercise this path.
 
 HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 
-## Agent accounts are per person (ruling 127)
+## Agent accounts are per person (ruling 137)
 
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
 linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
-agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 196), Debian
+agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 42), Debian
 `chromium` with `fonts-liberation` and `fonts-noto-color-emoji`, and with
-`fonts-inter-variable`, `fonts-ebgaramond` and `fonts-jetbrains-mono` (ruling 698: 1.8, 1.2
+`fonts-inter-variable`, `fonts-ebgaramond` and `fonts-jetbrains-mono` (ruling 42: 1.8, 1.2
 and 7.5 MB installed, so a picture an agent draws can name Inter, EB Garamond or JetBrains
 Mono; Inter is installed as the family `Inter Variable`, and `/etc/fonts/local.conf` says
 plain `Inter` is the same family), for the governed browser
-and the page capture (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`; ruling 691: the emoji
+and the page capture (`VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium`; ruling 42: the emoji
 font, 11 MB installed, and `/etc/fonts/local.conf`, which names the Liberation face each
 generic family means, because with `fonts-liberation` alone an emoji drew as an empty box
 and a page set in `system-ui` was pictured in a monospace face; no font is installed for
@@ -202,7 +202,7 @@ CJK, Arabic or Indic scripts, which draw as boxes in a picture until one is adde
 faces, a page whose list names `Inter` is now pictured in it, and a character Liberation
 lacks is drawn from one of the three new families where it was a box or a colour emoji),
 `poppler-utils` (`pdftoppm`, `pdftotext`,
-`pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 566),
+`pdfinfo`) so an agent can look at the pages of a PDF it delivers or judges (ruling 42),
 and `uv`/`uvx` for Python stdio MCP
 servers (their caches live under `runtimes/uv-cache` and `runtimes/uv-python` on the
 volume; uv manages its own CPython, so there is no system `python3`).
@@ -221,10 +221,10 @@ Two ways to connect, per backend:
   --device-auth`, the device-code flow OpenAI ships for headless machines. Viberr drives
   the binary, shows the URL (and, for Codex, the one-time code to type), and never sees
   the token: the binary writes its own credential file into the home of the account being
-  signed in (ruling 507), inside that person's runtime home,
+  signed in (ruling 138), inside that person's runtime home,
   `<dataRoot>/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json` or
   `.../codex-home/accounts/<accountId>/auth.json` (Viberr creates the directory mode `0700`
-  and nothing else about that file; an account connected before ruling 507 keeps its file
+  and nothing else about that file; an account connected before ruling 138 keeps its file
   directly in `claude-home/` or `codex-home/`). This is what Anthropic's
   [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
   requires of a platform that hosts Claude Code: each end user authenticates with their
@@ -244,27 +244,27 @@ A ChatGPT workspace can have device-code authorization switched off; the sign-in
 then reports the vendor's own refusal and points at the workspace admin, or at a pasted
 key. Treat a pasted token as a secret, prefer a finite expiration, and rotate it.
 
-A person may keep several accounts per backend (ruling 507), up to ten: each sign-in or
+A person may keep several accounts per backend (ruling 138), up to ten: each sign-in or
 pasted key adds one and makes it the one their runs bill, and the **Runs use** picker on
-Profile → Agent accounts switches to another without a sign-in (ruling 616), because each
+Profile → Agent accounts switches to another without a sign-in (ruling 323), because each
 keeps its sign-in in its own home. A run already going keeps the account it started on.
 
 Each Codex run works in a private copy of its principal's home,
-`runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 181): the billed account's
+`runtimes/users/<userId>/codex-home/runs/<runId>/` (ruling 145): the billed account's
 `auth.json` and the shared `config.toml` copied in, `sessions/`, `skills/` and `memories/`
 linked back to the shared home, `CODEX_SQLITE_HOME` pointed at the shared home. When the
 run settles, an `auth.json` the CLI refreshed is copied back to that account's home and the
 directory is deleted; boot recovery does the same for a run a restart orphaned, and the
 end-of-run compaction works in a copy of its own (`runs/<runId>-compaction/`), which boot
-also finishes when a restart cut the compaction after its run had ended (ruling 701).
+also finishes when a restart cut the compaction after its run had ended (ruling 175).
 
 **First run, as the first admin.** After `docker compose up -d`, sign in as the bootstrap
 admin, open **Profile → Agent accounts**, and connect at least one backend for yourself.
-Home's setup checklist (ruling 532) lists it with the instance's other gaps, each a link
+Home's setup checklist (ruling 322) lists it with the instance's other gaps, each a link
 to where it is closed: a GitHub connection, an account of your own beside the bootstrap
 admin, and the first project. GitHub is needed only for a board that delivers through a
-repository: a board that delivers results is created with none (ruling 667), a software
-board can connect its repository later (ruling 672), and the
+repository: a board that delivers results is created with none (ruling 224), a software
+board can connect its repository later (ruling 224), and the
 checklist stops listing GitHub once a project exists on an instance with no connection.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest
@@ -308,7 +308,7 @@ degraded: it means nobody has connected that backend yet. It is not a validity c
 either, and it cannot answer "can this task run", which is a fact about the task's owner
 and is shown on the task page, in the packet and on the Agents page.
 
-## Codex runs are not OS-confined (ruling 185)
+## Codex runs are not OS-confined (ruling 144)
 
 Viberr starts **every** Codex run `danger-full-access`, and the container keeps Docker's
 own seccomp profile — `compose.yml` carries no `security_opt`. Do not add one back without
@@ -345,7 +345,7 @@ both backends (it is the CLI's own tool, not the sandbox), and so do the MCP wri
 denials.
 
 The host toolchain is still reported — versions only (`app/server/ops/toolchain.server.ts`,
-rulings 182(b), 191 and 196):
+rulings 40, 148 and 42):
 
 ```bash
 curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
@@ -354,12 +354,12 @@ curl -s localhost:${PORT:-3000}/resources/health | jq .toolchain
 #  "codexCli":"0.160.1","claudeAgentSdk":"0.3.292"}
 ```
 
-`make`, `curl` and a pinned `pnpm` (`12.9.1`) ship in the image (ruling 196); `docker` is
+`make`, `curl` and a pinned `pnpm` (`12.9.1`) ship in the image (ruling 42); `docker` is
 `null` deliberately and is not coming — an agent holding the daemon socket controls every
 container on the host. The same reading is injected into every specialist, operator and
-controller prompt (ruling 191), so an agent plans around what is present instead of
+controller prompt (ruling 148), so an agent plans around what is present instead of
 discovering each absence as an exit-127. For any other command the controller's
-`instance_health` takes a `probe` list of up to 8 bare names (ruling 377).
+`instance_health` takes a `probe` list of up to 8 bare names (ruling 269).
 
 ## First run
 
@@ -369,9 +369,9 @@ docker compose logs -f app  # boot integrity log: dirs, migrations, counts, user
 curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   # "status":"on"
 ```
 
-No `.env` is needed (ruling 504): Compose treats it as optional, the two secrets are
+No `.env` is needed (ruling 38): Compose treats it as optional, the two secrets are
 generated into the store, and Compose creates the store, the named volume `viberr-data`
-(ruling 460), on this first `up`. Docker initialises the empty volume from the image's
+(ruling 38), on this first `up`. Docker initialises the empty volume from the image's
 `/data` (owned `node:viberr-agents`, 0750), so there is no host directory to create or
 chown.
 
@@ -383,9 +383,9 @@ repository: read a live instance through the app, `docker compose exec app …` 
 maintenance CLIs, `ls`, `cat`) or a backup (`npm run backup`, below), never by opening
 files on the host.
 
-### Moving the store to the named volume (ruling 460)
+### Moving the store to the named volume (ruling 38)
 
-A deployment from before ruling 460 keeps its store in `./docker-data` (a bind mount).
+A deployment from before ruling 38 keeps its store in `./docker-data` (a bind mount).
 Move it once, with the app stopped:
 
 ```bash
@@ -437,16 +437,16 @@ is the two-second check, and the same URL over `http://` shows the throttle.
   as `VIBERR BOOTSTRAP ADMIN`, which must be changed at first sign-in).
 - Boot writes the shipped agent assets (each built-in agent's definition and expertise
   skill, the base profile templates) into a store that lacks them.
-- Home's setup checklist lists what is still missing, until nothing is (ruling 532): for
+- Home's setup checklist lists what is still missing, until nothing is (ruling 322): for
   an org admin a GitHub connection (only while the instance has one or has no project
-  yet, ruling 667), an account other than the bootstrap admin, their own
+  yet, ruling 322), an account other than the bootstrap admin, their own
   Claude or Codex account and the first project; for everyone else the last two. Once
   there is a project, its cross hides it until the sign-in or the browser's session ends
-  (ruling 621).
+  (ruling 322).
 - Connect an agent backend for yourself on **Profile → Agent accounts** before expecting
-  any agent to run (ruling 127). Nothing in `.env` does it, and an instance with nobody
+  any agent to run (ruling 137). Nothing in `.env` does it, and an instance with nobody
   connected refuses every agent run honestly rather than starting one. See
-  [Agent accounts are per person](#agent-accounts-are-per-person-ruling-127).
+  [Agent accounts are per person](#agent-accounts-are-per-person-ruling-137).
 - Seed BEFORE the app starts (or stop it first) — `npm run seed` takes the
   single-writer lock and refuses against a running container.
   `npm run seed` seeds the product baseline — the built-in agent
@@ -466,29 +466,29 @@ is the two-second check, and the same URL over `http://` shows the throttle.
 ## Persistence, backup & restore
 
 Everything stateful lives in the named volume `viberr-data` in the Compose setup, mounted
-at `/data` (ruling 460; `./docker-data` before it). Both SDKs keep their resumable state
+at `/data` (ruling 38; `./docker-data` before it). Both SDKs keep their resumable state
 under `runtimes/`:
 
 ```
 projects/       canonical project.md, task.md, epics/*.md (the source of truth — editable);
                 per task: workspace/ (git clones, a cache), attachments/ (evidence files),
-                deliveries/ (each files delivery as it was delivered, ruling 597) and
+                deliveries/ (each files delivery as it was delivered, ruling 86) and
                 sources/ (what the task's result rests on, kept as the agents read it and
-                never pruned, ruling 690);
+                never pruned, ruling 15);
                 per project: .repo-mirror/ (bare mirror, a cache)
 agents/         agents/profiles/*.md templates + agents/definitions/ doctrine files
 kb/ skills/     knowledge-base and skill files
 runtimes/       claude/ and codex/: raw NDJSON run logs per backend (0700);
                 users/<userId>/{claude-home,codex-home}/: one person's provider sessions
-                (ruling 127), each account's own home under accounts/<accountId>/ with
-                its vendor sign-in file (ruling 507), and codex-home/runs/<runId>/
-                while a Codex run is live (ruling 181); users/<userId>/home/: that person's
-                agents' $HOME (ruling 460) — all owned by the person's agent uid;
+                (ruling 137), each account's own home under accounts/<accountId>/ with
+                its vendor sign-in file (ruling 138), and codex-home/runs/<runId>/
+                while a Codex run is live (ruling 145); users/<userId>/home/: that person's
+                agents' $HOME (ruling 139) — all owned by the person's agent uid;
                 uv-cache/, uv-python/ and controller-scratch/ (shared with the agent group)
 audit-exports/  audit-events-<date>.jsonl written before each 90-day purge
 state/          projection.sqlite (users, sessions, projections, audit, PATs, notifications,
                 sealed personal backend keys), writer.lock, shipped-assets.json;
-                tmp/reader-<pid>/ only while a read-only CLI holds its copy (ruling 158)
+                tmp/reader-<pid>/ only while a read-only CLI holds its copy (ruling 23)
 ```
 
 Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profiles`,
@@ -496,14 +496,14 @@ Boot creates the nine `DATA_ROOT_SUBDIRS` (`projects`, `agents`, `agents/profile
 `app/server/files/file-store-root.server.ts`); the rest appear when first written,
 including each person's own `runtimes/users/<userId>/{claude-home,codex-home}` (created by
 `ensureUserBackendHome` the first time they connect, and handed to their agent uid — owner
-the uid, group `node`, 2770 — by the launcher, ruling 460). In the image boot then
+the uid, group `node`, 2770 — by the launcher, ruling 139). In the image boot then
 re-asserts the modes: `/data` 0750 in group `viberr-agents`, `state/`, `audit-exports/` and
 `runtimes/claude|codex/` 0700, `runtimes/users/` 0710, `agents/`, `kb/`, `skills/`,
 `projects/` 0755, and each task's `workspace/`, `attachments/`, `.operator-scratch/` 2770 in
 the agent group ([agents-and-runtime.md §8](../domain/agents-and-runtime.md#8-boot-recovery)).
-A task's `sources/` is not among them (ruling 690): it is the server's own, like `task.md`
+A task's `sources/` is not among them (ruling 15): it is the server's own, like `task.md`
 beside it, so an agent reads a kept source and cannot rewrite or delete it. Nor is its
-`.captures/` (ruling 691, the page renderer's scratch): that folder and each run's folder
+`.captures/` (ruling 194, the page renderer's scratch): that folder and each run's folder
 in it are the server's own, 0710 in the agent group, and only one render's own folder
 below them is 2770, made when the render starts.
 There is no `auth/`,
@@ -517,7 +517,7 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   and `audit-exports/` (`BACKED_UP_STORE_DIRS`; a directory that does not exist yet is
   skipped) — and a `MANIFEST.json` (format `viberr-backup/1`) recording byte size, sha256
   and the row counts read back out of the artefact, plus a `README.txt`. `audit-exports/`
-  is in that list because ruling 102 makes it the durable record that outlives the 90-day
+  is in that list because ruling 33 makes it the durable record that outlives the 90-day
   `audit_events` window: a backup without it would drop exactly the history the purge was
   designed to preserve. It does **not** take the writer lock: a backup that refused to run
   on a live instance would be no backup at all.
@@ -525,7 +525,7 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   **How it reads a live root.** Never through a second connection: whenever
   `state/writer.lock` is there at all the CLI copies `projection.sqlite` and its
   `-wal` to `state/tmp/reader-<pid>/`, runs the `VACUUM INTO` on the copy and removes it
-  (ruling 158; the manifest's first `contains` line then says the database was read from a
+  (ruling 23; the manifest's first `contains` line then says the database was read from a
   copy taken while `state/writer.lock` named a holder). Only a root with no lock file is
   just files it opens in place, read-only: a reader cannot tell a dead holder from a live
   one in another pid namespace, and a copy it did not need costs nothing but disk. That is
@@ -544,7 +544,7 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   docker compose cp app:/tmp/viberr-backups/. ./backups/
   ```
 
-  The store is a named volume (ruling 460), so the host cannot open it: the in-container
+  The store is a named volume (ruling 38), so the host cannot open it: the in-container
   form above is the one that reads the instance, running or not. `npm run backup` from the
   repo root backs up whatever `.env`'s `VIBERR_DATA_ROOT` names on the host — the dev
   server's `./docker-data`, not the container's store.
@@ -558,13 +558,13 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   run can be mid-write so the copy would be torn, and they dwarf what is actually truth (on
   the tree this was found on, 17M of git against 168K of project and task markdown); the
   next run re-clones and re-fetches. A task's `.captures/` and `.capture-input/` are left
-  out too (ruling 691): they are what a page render works in, a browser's profile only its
+  out too (ruling 194): they are what a page render works in, a browser's profile only its
   uid can enter and a copy of a kept delivery, and the pictures it keeps are among the
   attachments and the kept deliveries. `state/writer.lock` and `*.tmp` files are never
   copied. Without the key every sealed PAT, MCP credential and personal backend API key in
   the backed-up database is unreadable, so back an environment key up separately. A key
   the instance generated for itself is IN the artefact, as `state/instance-secrets.json`
-  (ruling 504): the manifest says so, and the artefact then opens every sealed secret, so
+  (ruling 38): the manifest says so, and the artefact then opens every sealed secret, so
   treat it as a secret.
 
   Copying the volume wholesale (`docker run --rm -v viberr-data:/data:ro -v
@@ -578,7 +578,7 @@ with retention: [`../architecture/data-model.md`](../architecture/data-model.md#
   replaced only when the artefact carries it. Generated secrets come back with the
   database they sealed; the replaced root's own move aside with its database, and on a
   fresh volume the pair the restore's own start generated never counts as data needing
-  `--force` (ruling 504). To recover a single hand-broken canonical
+  `--force` (ruling 38). To recover a single hand-broken canonical
   file without touching the database: `npm run restore -- --from <artefact> --file
   projects/<slug>/tasks/<KEY>/task.md` — the broken bytes are kept beside it as
   `task.md.broken-<ts>`.
@@ -607,12 +607,12 @@ database's rebuilder tables lag the running build (`logBootIntegrity` in
 
 - `refuses`: CHECK values the running build produces that this root's stored CHECK does not
   admit (`projectionCheckGaps`): `task_projections.validation` (F21-1),
-  `task_projections.waiting` (ruling 225), `notifications.kind` (ruling 140) and
-  `epic_projections.status` (ruling 503). A task
+  `task_projections.waiting` (ruling 45), `notifications.kind` (ruling 50) and
+  `epic_projections.status` (ruling 272). A task
   whose derived value lands on a refused member stops projecting behind a generic
   `projection rebuild failed`; a notification of a refused kind is refused at its insert.
   Boot widens `notifications.kind` itself before this check (`widenNotificationKindCheck`,
-  ruling 481: the app-owned table is rebuilt from the baseline's DDL with its rows and
+  ruling 74: the app-owned table is rebuilt from the baseline's DDL with its rows and
   indexes), so that entry appears only when the rebuild failed, and its ERROR line says
   so.
 - `missingColumns`: `task_projections` / `task_events` columns the shipped baseline has and
@@ -631,7 +631,7 @@ through it, such as `npm run seed` and `npm run rescan`) runs `ensureSingleFligh
 (`app/server/db/sqlite.server.ts`). The second `ALTER TABLE … ADD COLUMN`s each missing
 entry of `BASELINE_COLUMNS`, creates the `BASELINE_TABLES` and `BASELINE_INDEXES` this
 root lacks, brings `user_backend_credentials` to its several-accounts shape
-(`ensureBackendAccountsTable`, ruling 507), and logs `added a baseline column this data
+(`ensureBackendAccountsTable`, ruling 138), and logs `added a baseline column this data
 root predated` for each column it adds. The lists, table by table, are in
 [data-model.md §6](../architecture/data-model.md#6-schema-changes). A column whose DEFAULT
 would be WRONG for the rows that predate it carries a one-time backfill run in the same
@@ -645,7 +645,7 @@ logged as a warn. A failure to
 ALTER is warned, not fatal, and retried next boot.
 
 A `missingColumns` entry that is NOT in `BASELINE_COLUMNS` (for example
-`task_projections.blocked_by_json` on a root older than ruling 131) is still additive:
+`task_projections.blocked_by_json` on a root older than ruling 55) is still additive:
 with the app stopped, the WARN's own remedy is `ALTER TABLE <table> ADD COLUMN <column>`
 with the column's definition from `0001_baseline.sql`, which keeps every non-derived row.
 What follows is for the shape no ALTER can fix: a CHECK constraint that refuses a value
@@ -685,8 +685,8 @@ docker compose run --rm --no-deps --entrypoint sh app \
 docker compose up -d                 # migrations re-apply, projections rebuild from projects/
 ```
 
-The store is the named volume (ruling 460), so the deletion runs in a one-off container
-on it rather than on a host path. The backup reads a copy of the live root (ruling 158);
+The store is the named volume (ruling 38), so the deletion runs in a one-off container
+on it rather than on a host path. The backup reads a copy of the live root (ruling 23);
 nothing writes between it and the stop but what a live instance writes in those seconds.
 
 **Name the cost before you run it.** The projection *tables* are derived and rebuild from
@@ -706,7 +706,7 @@ the data-root volume carries state across deploys. Roll back by redeploying the 
 image against the same volume (migrations are additive and forward-only — take a data-root
 backup before a major upgrade).
 
-**Use `npm run deploy`** (`scripts/deploy.ts`, ruling 345). It stamps the build from git,
+**Use `npm run deploy`** (`scripts/deploy.ts`, ruling 41). It stamps the build from git,
 builds, restarts, and then reads `/resources/health` back and refuses to report success
 unless the running instance names the sha it just built:
 
@@ -715,7 +715,7 @@ npm run deploy              # stamp from git, build, up -d, verify
 npm run deploy -- --no-up   # stamp and build only, nothing restarted
 ```
 
-Before it builds, it measures the host (ruling 603, `app/server/ops/host-disk.server.ts`):
+Before it builds, it measures the host (ruling 41, `app/server/ops/host-disk.server.ts`):
 the checkout's disk, Docker Desktop's directory (`~/Library/Containers/com.docker.docker/Data`
 on a Mac, `~/.docker/desktop` on Linux) and Docker's root directory when it is on this
 host. With less than 8 GB free on the tightest, it refuses and names that disk. A build
@@ -726,7 +726,7 @@ because the volume there reported 940.8 GB free. `--skip-disk-check` builds with
 measurement.
 
 After the instance reports the new build, it removes the older builds of this project's
-app that earlier deploys left untagged, keeping the one this deploy replaced (ruling 605):
+app that earlier deploys left untagged, keeping the one this deploy replaced (ruling 41):
 each is about 0.9 GB of its own layers, and three deploys left 2.6 GB. To roll back to the
 kept build, tag it and restart without building:
 
@@ -736,7 +736,7 @@ docker tag <image id> viberr-app:latest && docker compose up -d --no-build
 ```
 
 Then it trims Docker's build cache to at most 3 GiB of reclaimable cache, the most recently
-used first (`docker builder prune --max-used-space`, ruling 628). That holds a whole build's
+used first (`docker builder prune --max-used-space`, ruling 41). That holds a whole build's
 layers, so the next build stays incremental; the layers the running build holds are kept
 beside it and not counted. Every build adds the layers it made, and after deploy 48 the cache had grown to
 6.7 GB, 4.8 GB of it reclaimable.
@@ -754,7 +754,7 @@ the reported `build.revision` is not the first 12 characters of the sha it stamp
 Note that `up -d` kills every run in flight, so check the board before deploying. It
 also cuts a completion compaction that is still running after a specialist's run has
 finished, which is on no board: nothing is lost but that summary, and boot finishes what
-the compaction left (ruling 701). Such a run reads `finished` with the phase "Compacting
+the compaction left (ruling 175). Such a run reads `finished` with the phase "Compacting
 context" when the ops toolkit's `list_runs` is asked for its task (with no arguments that
 tool lists live runs only).
 
@@ -805,7 +805,7 @@ Two ways this bites in practice, both to avoid:
   notices and exits. Stop the app first, then reset the store.
 - **Beware the same-port `::1` vs IPv4 split.** A host dev server on `[::1]:5173` and a
   compose container's docker-proxy on `*:5173` both answer `localhost:5173` (macOS resolves
-  `localhost` → `::1` first). Two live servers can look like one app. Since ruling 460 they
+  `localhost` → `::1` first). Two live servers can look like one app. Since ruling 38 they
   no longer write the same store (the container's is the named volume, the dev server's
   `./docker-data`), which makes the split worse to notice, not better: you may be looking
   at the wrong store. Run exactly one per port; the health holder names which.
@@ -826,7 +826,7 @@ app; `backup`, `store:check`, `restore --file` and `keys -- status` take none. T
 read the database (`backup`, `keys -- status`) copy it first rather than open it whenever
 that lock file exists at all (they judge its PRESENCE, never its holder's liveness, which
 cannot be probed from another pid namespace), since a second connection to a live root is
-a hazard of its own (ruling 158). See
+a hazard of its own (ruling 23). See
 [`runbook.md`](runbook.md#the-single-writer-lock-and-cli-refusals).
 
 ## The e2e stack (`compose.e2e.yml`)
@@ -841,19 +841,19 @@ volume and hands it to uid 1000; the `app` service then boots the final image wi
 port, which the script reads with `docker compose port app 3000`. The script removes any
 leftover stack, runs `up --build --wait`, waits for `/resources/health`, requires
 `agentIsolation.status` to be `on` and runs `scripts/check-agent-isolation.sh` inside the
-app container (ruling 460: as a launched agent uid the server's `/proc/<pid>/environ`, the
+app container (ruling 139: as a launched agent uid the server's `/proc/<pid>/environ`, the
 projection database and another person's home are refused, its own home and a shared
 workspace are writable, a workspace git launched with the server's overrides runs nothing
 an agent planted and a branch is fetched out of an agent-only checkout through the
 launcher's `git-upload-pack`, an agent-written checkout the server's own `rm -rf` cannot
-finish is removed by the server's replace as its persons (ruling 485), what the server
+finish is removed by the server's replace as its persons (ruling 140), what the server
 itself wrote in an agent's tree is removable by the person and an emptied workspace root
-goes with the server's `rmdir`, never through an agent's link (ruling 495), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
+goes with the server's `rmdir`, never through an agent's link (ruling 140), the launcher relays SIGTERM, SIGUSR2 kills the group grandchild
 included, PDEATHSIG takes the agent down with the server, `--reap` finds a detached process
 by its marker, and every refusal holds), runs `scripts/check-page-capture.sh` the same way
-(ruling 691: the page capture's renderer against the image's own Chromium as an agent
+(ruling 42: the page capture's renderer against the image's own Chromium as an agent
 uid, its pictures' widths and pixels, a picture of an exact size at scale 2, 0.5 and 1.5
-and an SVG drawing set as a page (ruling 698), a page's requests to another loopback port and to a
+and an SVG drawing set as a page (ruling 194), a page's requests to another loopback port and to a
 remote host loading nothing, and the image's fonts), passes the base URL to Playwright as
 `VIBERR_E2E_BASE_URL`, and tears the stack down with its volume afterwards unless
 `VIBERR_E2E_KEEP=1`. Details:

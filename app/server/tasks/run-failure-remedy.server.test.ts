@@ -8,7 +8,7 @@ import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
 import { describeRunFailure, formatResetLabel } from "./run-failure-remedy.server";
 
 /**
- * Ruling 130 (pass 34, F34-1 / F34-12): the ONE failure-to-words mapping.
+ * Ruling 156 (pass 34, F34-1 / F34-12): the ONE failure-to-words mapping.
  * Quota and auth name the credential principal's own remedy (Profile → Agent
  * accounts) and the reset instant; nothing says "policy / credential updated"
  * for a failure that was neither; a specialist's backend failure never
@@ -39,7 +39,7 @@ function describe_(store: TestStore, input: Partial<Parameters<typeof describeRu
 }
 
 describe("describeRunFailure", () => {
-  it("ruling 175: a spending-cap cut-off names the cap and the spend, and who can raise it; re-running is recommended", () => {
+  it("ruling 159: a spending-cap cut-off names the cap and the spend, and who can raise it; re-running is recommended", () => {
     // Canary: drop the `max_budget` case and the reason falls to the generic
     // "did not complete: run failed (max_budget)" with no figure.
     const store = setupTestStore(ctx);
@@ -60,7 +60,7 @@ describe("describeRunFailure", () => {
   });
 
   /**
-   * Ruling 326 — CONNECTED is not RUNNABLE NOW, and for four days that cost
+   * Ruling 156 — CONNECTED is not RUNNABLE NOW, and for four days that cost
    * this board every escalation it tried to raise.
    *
    * `ownerHasOther` asked only whether the owner has the other backend
@@ -77,7 +77,7 @@ describe("describeRunFailure", () => {
    * failure taking several tasks out at once. Not one of them produced a
    * packet.
    */
-  it("ruling 326: the other backend being OUT OF QUOTA is not an alternative", async () => {
+  it("ruling 156: the other backend being OUT OF QUOTA is not an alternative", async () => {
     const store = setupTestStore(ctx);
     await connectFakeBackend(store.db, store.users.arda.id, "codex");
     await connectFakeBackend(store.db, store.users.arda.id, "claude");
@@ -154,12 +154,12 @@ describe("describeRunFailure", () => {
     expect(d.reason + d.remedy).not.toMatch(/retry on the other backend|review the runtime configuration|fix the credential/i);
   });
 
-  it("ruling 152(c): the options that assert the window has reset NAME the backend they assert about", () => {
+  it("ruling 151: the options that assert the window has reset NAME the backend they assert about", () => {
     // The assertion is what retires the instance's exhaustion record
     // (`resolvePacket`), and the record is per backend — so the option carries
     // the backend that refused. Canary: drop `backend: failed` from the quota
     // and auth arms and the resolution has nothing to clear, so the hold that
-    // ruling 152(c) put on the next dispatch outlives the person's statement.
+    // ruling 151 put on the next dispatch outlives the person's statement.
     const store = setupTestStore(ctx);
     const operatorQuota = describe_(store, {
       failure: failure("quota", { windowRejected: true, window: "five_hour", resetsAt: RESET }),
@@ -214,7 +214,7 @@ describe("describeRunFailure", () => {
     expect(rec.title).toBe("Re-run the operator now");
     expect(rec.ev).toContain("No policy or credential was changed");
     expect(d.options.map((o) => o.kind)).toEqual(["block_on_policy", "redirect", "hold_runtime_debug"]);
-    // The unavailable kind carries the run's own ruling-127 sentence.
+    // The unavailable kind carries the run's own ruling-137 sentence.
     const u = describe_(store, { failure: { kind: "unavailable", text: "Arda has not connected Claude." } });
     expect(u.reason).toBe("Arda has not connected Claude.");
   });
@@ -287,7 +287,7 @@ describe("describeRunFailure", () => {
     expect(keep.detail).not.toContain("is a Claude model");
 
     /**
-     * Ruling 254 (pass 37, F37-83): F36-8 named the model, and the sentence is
+     * Ruling 156(b) (pass 37, F37-83): F36-8 named the model, and the sentence is
      * FROZEN into the packet when the option is authored. Live, the owner moved
      * eight profiles from `gpt-5.6-luna` to `opus` while four of these packets
      * sat open, and every one went on offering "on `sonnet` (Claude's default:
@@ -341,7 +341,7 @@ describe("describeRunFailure", () => {
   });
 
   /**
-   * Ruling 660 (owner, 2026-10-05: "yes recommend same-backend retry for
+   * Ruling 156(c) (owner, 2026-10-05: "yes recommend same-backend retry for
    * overloads"). An overload is the provider busy for a moment. Live on
    * AWSC-110 a Codex compaction hit "Selected model is at capacity", and the
    * packet recommended moving a GPT-6 Luna agent to Claude Sonnet for the rest
@@ -399,12 +399,12 @@ describe("describeRunFailure", () => {
   });
 
   /**
-   * Ruling 595: a hung run is not a wrong directive. Live in round 4 both
+   * Ruling 158(a): a hung run is not a wrong directive. Live in round 4 both
    * stall packets for an idle-timed-out Inventory Analyst recommended
    * "Redirect with sharper guidance", and the person answered each with the
    * plain send-back.
    */
-  it("ruling 595: a hung specialist run recommends running the same agent again, the directive unchanged; redirect stays, unrecommended", () => {
+  it("ruling 158(a): a hung specialist run recommends running the same agent again, the directive unchanged; redirect stays, unrecommended", () => {
     const store = setupTestStore(ctx);
     const hung: RunFailure = {
       kind: "idle_timeout",
@@ -453,12 +453,12 @@ describe("describeRunFailure", () => {
     expect(op.options[0]).toMatchObject({ kind: "block_on_policy", title: "Re-run the operator now", recommended: true });
 
     const sp = describe_(store, { failure: local(), role: "specialist", agentHandle: "jc-developer", profileId: "jc-developer" });
-    // Ruling 212: the other backend is still OFFERED — the owner has it — but it
+    // Ruling 156: the other backend is still OFFERED — the owner has it — but it
     // is no longer the recommendation, because this fault was on the
     // deployment's own network path and the other provider is reached over the
     // same path. Taking it would change the task's model permanently to work
     // around a DNS or TLS problem that is still there.
-    // Ruling 660: an overload of either origin puts the recommended same-backend
+    // Ruling 156(c): an overload of either origin puts the recommended same-backend
     // retry first.
     // CANARY: restore `recommended: true` on the retry_other_backend arm and
     // viberr's default answer to a local network fault is a model change.
@@ -487,7 +487,7 @@ describe("describeRunFailure", () => {
   });
 
   /**
-   * Ruling 224 (F37-44). Live on pass 37 the Codex window went at 23:28 with
+   * Ruling 157 (F37-44). Live on pass 37 the Codex window went at 23:28 with
    * the provider naming its own reopening ("try again at Sep 14th, 2026 2:27
    * AM"), and every option on the packet was wrong at the moment it was
    * offered: the RECOMMENDED one moved the task permanently off the model its
@@ -495,7 +495,7 @@ describe("describeRunFailure", () => {
    * alternative asked a human to assert the window had reset three hours
    * before it would. Six tasks stalled that way at once.
    */
-  describe("a spent window the provider dated (ruling 224)", () => {
+  describe("a spent window the provider dated (ruling 157)", () => {
     const FUTURE = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
 
     it("offers the wait first, takes the recommendation, and carries the instant", () => {
@@ -546,7 +546,7 @@ describe("describeRunFailure", () => {
       expect(d.options.filter((o) => o.recommended)).toHaveLength(1);
     });
 
-    it("reads the instant off the quota STORE when the run's facts carry none (ruling 224)", async () => {
+    it("reads the instant off the quota STORE when the run's facts carry none (ruling 157)", async () => {
       const store = setupTestStore(ctx);
       // The shape that actually stalls a board: Codex refuses at spawn time, so
       // no machine rate_limit_event reaches the run and `facts.resetsAt` is
@@ -615,13 +615,13 @@ describe("describeRunFailure", () => {
   });
 
   /**
-   * Ruling 221 (F37-41): `session_missing` now has two roads into it, and the
+   * Ruling 162 (F37-41): `session_missing` now has two roads into it, and the
    * difference is what a human does next. A vanished session heals itself on
    * the next fresh run; a session STORE that cannot be opened keeps failing
    * every resume on this host until the file is repaired, so the sentence has
    * to say which one happened.
    */
-  it("names the unreadable STORE rather than a vanished session (ruling 221)", () => {
+  it("names the unreadable STORE rather than a vanished session (ruling 162)", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {
       role: "specialist",
@@ -639,7 +639,7 @@ describe("describeRunFailure", () => {
     expect(d.remedy).toContain("repaired or removed");
   });
 
-  it("keeps the vanished-session sentence for a vanished session (ruling 221)", () => {
+  it("keeps the vanished-session sentence for a vanished session (ruling 162)", () => {
     const store = setupTestStore(ctx);
     const d = describe_(store, {
       role: "specialist",

@@ -22,7 +22,7 @@ import {
 } from "./task-detail-derive";
 
 /**
- * The task page's regions that stand only some of the time (ruling 700(d), the
+ * The task page's regions that stand only some of the time (ruling 13(b), the
  * pilot split of `task-detail-page.tsx`): the decision region and the
  * acceptance ceremony. Each takes the slot its markup held in the page and
  * calls no hook, so the page's markup, and every id React derives from its
@@ -31,7 +31,7 @@ import {
 
 /**
  * U35-2: `.detail-packet`, the open decision packet, the page's most important
- * object, with the completion packet inside it or under it (ruling 521); with
+ * object, with the completion packet inside it or under it (ruling 316); with
  * no packet open, the completion packet on its own. The page renders this only
  * while one of the two shows.
  */
@@ -55,15 +55,15 @@ export function TaskDecisionRegion({
   onAsk,
 }: {
   task: TaskDetail;
-  /** Ruling 497: a notification's link landed here. */
+  /** Ruling 302: a notification's link landed here. */
   targeted: boolean;
   placement: CompletionPlacement;
   /** The Changes panel's reader, riding inside the completion packet. */
   diff: CompletionDiff | null;
   attachmentsBase: string | null;
-  /** Ruling 690: the sources route, or null to draw no source as a link. */
+  /** Ruling 317: the sources route, or null to draw no source as a link. */
   sourcesBase: string | null;
-  /** Ruling 693: what the task took, or null when the loader shipped none. */
+  /** Ruling 83: what the task took, or null when the loader shipped none. */
   took: TookCard | null;
   githubHost: string;
   acceptance: AcceptanceAffordance;
@@ -103,14 +103,14 @@ export function TaskDecisionRegion({
         packet={task.packet}
         busy={resolution.busy}
         completion={acceptanceDecision ? completionPacket : null}
-        // Ruling 529: a question the work does not wait on, because an
+        // Ruling 312: a question the work does not wait on, because an
         // agent keeps working beside it (the wait the board card and the
         // Waiting on row read). A block never is.
         aside={task.packet.type === "input" && task.waiting === "agent"}
-        // Ruling 319: a packet keyed to an account failure answers its
+        // Ruling 65: a packet keyed to an account failure answers its
         // siblings too — the card says so before the confirm, not after.
         alsoAnswers={alsoAnswers}
-        // Ruling 324: a create_task confirm names what already looks like it.
+        // Ruling 67: a create_task confirm names what already looks like it.
         createTaskEchoes={createTaskEchoes}
         canResolve={can.canResolvePacket}
         canResolveCompletion={can.canDecideOwned}
@@ -122,12 +122,12 @@ export function TaskDecisionRegion({
         // F20-6: discard_branch re-checks the same `approve-transition` tier
         // the archive-with-branch-deletion needs (it destroys commits).
         canDiscardBranch={can.canArchiveViaPacket}
-        // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the
+        // Ruling 131 (pass 35, F35-14): a `force_accept` option runs the
         // admin override, and a `move_stage` option runs the stage
         // picker's move, so each carries that control's own tier.
         canForceAccept={can.canForceAcceptViaPacket}
         canMoveStage={can.canArchiveViaPacket}
-        // Ruling 672: both answers to the repository question decide the
+        // Ruling 65: both answers to the repository question decide the
         // board, on the tier its repository setting holds.
         canEditPolicy={can.canEditPolicy}
         archiveDisclosure={packetArchiveDisclosure(task, pendingRecommendations)}
@@ -163,16 +163,16 @@ function ceremonyDecision(
 ): CeremonyDecision {
   return {
     // F32-11: the open decision this acceptance withdraws, if any.
-    // Ruling 164 + F19-7, applied to the sibling row: a PACKET resolution
+    // Ruling 131 + F19-7, applied to the sibling row: a PACKET resolution
     // (the `accept_completion` option, and the `force_accept` one ruling
-    // 164 added) ANSWERS the open decision, so nothing is withdrawn. The
+    // 131 added) ANSWERS the open decision, so nothing is withdrawn. The
     // row used to name that packet and say it "closes unanswered", while
     // `task.acceptance.forced` recorded `withdrawnPacket: null` — the
     // disclosure is read after the packet path has cleared it. The direct
     // doors (Accept, Force accept, a recommendation, a stage move) close a
     // standing decision too.
     openPacketTitle: pending.mode === "packet" ? null : (task.packet?.title ?? null),
-    // Ruling 471: and a direct door ANSWERS it when it offers the option
+    // Ruling 316: and a direct door ANSWERS it when it offers the option
     // that door performs. The loader names that option per door (the
     // packet render's `forceAnswersWith` for Force accept, and
     // `acceptAnswersWith` for every plain acceptance); without one the
@@ -186,14 +186,14 @@ function ceremonyDecision(
     ceremony:
       "label" in pending
         ? {
-            // Ruling 164: the `force_accept` option is a packet
+            // Ruling 131: the `force_accept` option is a packet
             // resolution that performs the override, so it wears the
             // force ceremony and keeps the option's title as its subject.
             mode: forced ? "force" : pending.mode,
             label: pending.label,
           }
         : { mode: pending.mode },
-    // Ruling 393 (F39-20): the gate LIST, for the force path only — the
+    // Ruling 98 (F39-20): the gate LIST, for the force path only — the
     // dialog's "Bypassing" row and the audit row must name the same set.
     // The packet and clean paths keep their single refusal, which is the
     // right sentence for each: one is about a click the server will
@@ -209,7 +209,7 @@ function ceremonyRefusal(
   acceptance: AcceptanceAffordance,
 ): string | null {
   return (
-    // Ruling 164 + F19-7: the `force_accept` option is a PACKET
+    // Ruling 131 + F19-7: the `force_accept` option is a PACKET
     // resolution, so it clears the packet before the override runs.
     // `task.blockReason` and `acceptance.blockedReason` both fold in
     // the open-blocked-packet sentence, and that packet is the one this
@@ -280,7 +280,7 @@ export function TaskAcceptConfirm({
   transition: StageTransition;
   onCancel: () => void;
 }) {
-  // Ruling 164 (pass 35, F35-14): the pending decision is the `force_accept`
+  // Ruling 131 (pass 35, F35-14): the pending decision is the `force_accept`
   // option, so the one ceremony opens in its force form (heading, bypass row,
   // danger confirm) while the confirmed click still travels as a packet
   // resolution. Derived once: the dialog reads it for BOTH the mode it renders
@@ -309,13 +309,13 @@ export function TaskAcceptConfirm({
       // R19-B: the human GitHub approval carrying the verdict gate, rendered
       // on the verdict row (null when an agent verdict cleared it).
       verdictSatisfiedBy={acceptance.verdictSatisfiedBy}
-      // Ruling 482: Viberr's own gate run on the revision this accepts.
+      // Ruling 315: Viberr's own gate run on the revision this accepts.
       gates={acceptance.gates ?? null}
       ceremony={decision.ceremony}
       blockedGates={decision.blockedGates}
       blockedReason={ceremonyRefusal(pending, forced, task, acceptance)}
       busy={accept.busy || run.runBusy || recs.busy || resolution.busy || transition.busy}
-      // Ruling 449: only the direct Accept offers the re-review first; the
+      // Ruling 97: only the direct Accept offers the re-review first; the
       // other doors are answering a decision someone already framed.
       {...(pending.mode === "accept"
         ? {
@@ -324,7 +324,7 @@ export function TaskAcceptConfirm({
         : {})}
       onCancel={onCancel}
       onConfirm={(disclosure) => {
-        // Ruling 88: EVERY acceptance intent carries this dialog's own echo
+        // Ruling 97: EVERY acceptance intent carries this dialog's own echo
         // of what it displayed. `apply-recommendation` and `resolve-packet`
         // included: their server-side pins (the recommendation id, the
         // packet identity) prove WHICH decision is being settled, never that

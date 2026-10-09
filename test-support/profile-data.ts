@@ -19,7 +19,7 @@ export const PROFILE_DATA: ProfileData = {
   memberships: [{ slug: "viberr-core", name: "Viberr Core", role: "maintainer" }],
   accessRole: "maintainer",
   githubConfigured: true,
-  // Ruling 127: the viewer's own agent accounts, neither connected.
+  // Ruling 137: the viewer's own agent accounts, neither connected.
   backends: [
     {
       backend: "claude",

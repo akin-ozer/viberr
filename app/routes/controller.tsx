@@ -10,11 +10,11 @@ import { controllerPageAction } from "~/features/controller/waiting-actions.serv
 import { controllerPageView } from "~/features/controller/controller-query.server";
 
 /**
- * /controller — the instance controller surface (ruling 99). Every signed-in
+ * /controller — the instance controller surface (ruling 247). Every signed-in
  * user converses; what the controller answers and applies is gated per tool
  * call on THAT user's own authority. Conversations belong to their owner
  * (org admins may read everyone's with ?all=1), who may delete them, as may
- * an org admin (ruling 525).
+ * an org admin (ruling 26).
  */
 
 export function meta() {
@@ -30,7 +30,7 @@ export async function action({ request }: Route.ActionArgs) {
   const auth = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
-  // UI-32 (ruling 121 brought it here): a stale token answers a toast-shaped
+  // UI-32 (ruling 256 brought it here): a stale token answers a toast-shaped
   // result, not a thrown 403 that replaces the page with the root boundary.
   const csrfFailure = await csrfError(request, auth.sessionId, formData);
   if (csrfFailure) return csrfFailure;
@@ -48,5 +48,5 @@ export default function ControllerRoute({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/controller");

@@ -54,7 +54,7 @@ import type { TaskActionContext } from "./task-action-core.server";
 import { errorMessage, toError } from "~/shared/errors";
 
 /**
- * Ruling 131 (pass 34, Q34-11): the ONE writer for a task's `blockedBy` list,
+ * Ruling 55 (pass 34, Q34-11): the ONE writer for a task's `blockedBy` list,
  * and the two halves of its release.
  *
  * Three doors write the list (a human on the task page, the controller through
@@ -79,7 +79,7 @@ interface TaskRow {
 
 function taskRow(db: DatabaseSync, slug: string, key: string): TaskRow | null {
   // SAFETY: `archived` INTEGER NOT NULL and `blocked_by_json` TEXT NOT NULL on
-  // `task_projections` (0001 + ruling 131).
+  // `task_projections` (0001 + ruling 55).
   const row = db
     .prepare(`SELECT archived, blocked_by_json FROM task_projections WHERE project_slug = ? AND task_key = ?`)
     .get(slug, key) as TaskRow | undefined;
@@ -102,7 +102,7 @@ function sameNode(ref: DependencyRef, self: DependencySelf): boolean {
   return self !== null && formatDependencyRef(ref) === formatDependencyRef(self);
 }
 
-/** Depth-first from `start` along stored edges (ruling 131(b)); the path back
+/** Depth-first from `start` along stored edges (ruling 55); the path back
  *  to `self`, or null when no cycle would close. */
 function cyclePath(db: DatabaseSync, slug: string, start: DependencyRef, self: DependencySelf): string[] | null {
   const seen = new Set<string>();
@@ -193,10 +193,10 @@ export interface SetTaskDependenciesResult {
   blockedBy: string[];
   added: string[];
   removed: string[];
-  /** Ruling 620: every entry on the written list is done, so it holds nothing. */
+  /** Ruling 57: every entry on the written list is done, so it holds nothing. */
   satisfied: boolean;
   /** The write released the task: a person emptied the list, or left only
-   *  done entries on it (ruling 620). An operator's satisfied list is the
+   *  done entries on it (ruling 57). An operator's satisfied list is the
    *  sweep's to release, within a minute. */
   released: boolean;
 }
@@ -206,12 +206,12 @@ export interface SetTaskDependenciesResult {
  * operator is acting (`ctx.operatorAuthorized`); an archived task is refused
  * with its own sentence; an unchanged list short-circuits. A non-empty list
  * settles `waiting: "none"` when nothing else is pending (the task owes nobody
- * anything while it waits, ruling 131(a)); an emptied list clears a recorded
+ * anything while it waits, ruling 55); an emptied list clears a recorded
  * `heldAtStage`. When a NON-operator write empties a previously non-empty
- * list, that write IS the release (ruling 131(e)): the release note is the
+ * list, that write IS the release (ruling 55): the release note is the
  * one note that lands, through the same two halves the engine uses. A
  * non-operator write that leaves only done entries releases the task too
- * (ruling 620), through the engine's own `releaseTask`.
+ * (ruling 57), through the engine's own `releaseTask`.
  */
 export async function setTaskDependencies(
   db: DatabaseSync,
@@ -257,7 +257,7 @@ export async function setTaskDependencies(
   if (alreadyDone.length > 0) {
     throw AppError.validation(doneEntriesRefusal(alreadyDone.map((e) => e.label)));
   }
-  // Ruling 620: a list whose every entry is done holds nothing. It can only be
+  // Ruling 57: a list whose every entry is done holds nothing. It can only be
   // written by taking entries off (an added done entry is refused above):
   // live on aws-cost-calculator the controller took AWSC-75 off two hold-outs
   // that also waited on the done AWSC-73 and AWSC-74. The note said "Held
@@ -327,17 +327,17 @@ export async function setTaskDependencies(
     });
     released = true;
   } else if (satisfied && !ctx.operatorAuthorized) {
-    // Ruling 620: the release the minute sweep would make, made now. Not for
+    // Ruling 57: the release the minute sweep would make, made now. Not for
     // the operator, for the reason `releasing` excludes it: the release
     // re-invokes the operator, so its own satisfied list waits for the sweep.
     released = await releaseTask(db, ctx, input.projectSlug, input.taskKey);
   } else if (previous.length > 0 && next.length === 0) {
-    // Ruling 241, corrected by self-review: the drain belongs wherever the HOLD
+    // Ruling 66, corrected by self-review: the drain belongs wherever the HOLD
     // GOES AWAY, not only where a release is ANNOUNCED. `releasing` excludes
     // `ctx.operatorAuthorized` on purpose — `announceRelease` re-invokes the
     // operator, and doing that from inside the operator's own turn would loop —
     // so an operator correcting a wait with `set_dependencies` (the door ruling
-    // 240 names as the remedy for a wrong hold) took the last branch and left
+    // 56 names as the remedy for a wrong hold) took the last branch and left
     // the question stranded forever, under a wait panel still promising it
     // would be put when the wait cleared, on a task with nothing left to clear.
     // That is F37-68's own shape inside F37-68's own fix.
@@ -357,7 +357,7 @@ export async function setTaskDependencies(
 // --------------------------------------------------------------- release
 
 /**
- * The frontmatter half of a release (ruling 131(e)): the list is cleared, a
+ * The frontmatter half of a release (ruling 55): the list is cleared, a
  * recorded `heldAtStage` with it, and a STORED `blocked` readiness is lifted
  * to `ready` (the derived floor lifts by itself on reproject; the stored
  * value would otherwise keep the task red). Returns the entries cleared.
@@ -377,7 +377,7 @@ export interface AnnounceReleaseInput {
   /** The person who emptied the list by hand, when it was not the engine. */
   clearedBy?: string;
   /**
-   * F39-65: every entry was done before the task existed. Ruling 358 releases
+   * F39-65: every entry was done before the task existed. Ruling 272 releases
    * a chain link the moment it is minted by the completion it waits on, and
    * the note then said "the base branch has changed since the hold" about a
    * hold that never was, and told a task with no delivered work to re-read the
@@ -410,7 +410,7 @@ export async function announceRelease(
       : `Released: everything this task waited on is done (${list}). The task can move again; the base branch has changed since the hold, so the work re-reads it before continuing.`;
   const at = new Date().toISOString();
   await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
-    // The hold wrote `waiting: none` (ruling 131(a): a held task owes nobody
+    // The hold wrote `waiting: none` (ruling 55: a held task owes nobody
     // anything) and nothing took it back, so in a project with no operator a
     // released task owed nobody its next move for good. It settles where
     // `clearWaitingToHuman` settles a task nothing holds: on a person, until a
@@ -451,16 +451,16 @@ export async function announceRelease(
       title: `${taskKey} can move again`,
       text,
       about: { event: at },
-      // Ruling 361: the engine, by the name its timeline note carries.
+      // Ruling 74: the engine, by the name its timeline note carries.
       from: DEPENDENCY_RELEASE_FROM,
     },
     ctx,
   );
-  // Ruling 241 (F37-68): drain the questions the hold refused, BEFORE the
+  // Ruling 66 (F37-68): drain the questions the hold refused, BEFORE the
   // operator is re-invoked. A person decided that the reviewer answers before
   // anyone reworks anything; re-invoking the operator first would let it
   // dispatch the rework that decision exists to stop, in the window between the
-  // release and the question. Same ordering ruling 203 uses on a completion,
+  // release and the question. Same ordering ruling 69 uses on a completion,
   // and for the same reason: the person's instruction goes first.
   await drainQueuedQuestions(db, ctx, projectSlug, taskKey);
   try {
@@ -486,12 +486,12 @@ export async function announceRelease(
 }
 
 /**
- * Ruling 241: put the questions a dependency hold refused, now that it is gone.
+ * Ruling 66: put the questions a dependency hold refused, now that it is gone.
  *
  * Each entry is REMOVED from the task before its run starts, whatever the run
  * then does. A question that stayed queued through a failed start would be put
  * again on the next release, and a reviewer asked the same question twice is
- * the loop ruling 237 exists to break. A start that fails says so on the
+ * the loop ruling 94 exists to break. A start that fails says so on the
  * timeline instead, which is the same honesty the resolution's own arm keeps.
  */
 async function drainQueuedQuestions(
@@ -512,7 +512,7 @@ async function drainQueuedQuestions(
   });
   if (taken.length === 0) return;
   // Dynamic, like every other reach into the task-action modules from this
-  // module (ruling 207(e)).
+  // module (ruling 70).
   const { OPERATOR_TASK_ACTOR } = await import("./task-action-core.server");
   const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
   const startAgentRun =
@@ -527,8 +527,8 @@ async function drainQueuedQuestions(
         directive: question.directive,
         directiveFrom: question.decidedByLabel,
       };
-      // Ruling 316: this is ruling 241's DEFERRED half of the same dispatch
-      // `packet-resolution` makes when the task is not held, and ruling 313 patched
+      // Ruling 66: this is ruling 66's DEFERRED half of the same dispatch
+      // `packet-resolution` makes when the task is not held, and ruling 87 patched
       // only the immediate one — so a deadlock question put after a hold
       // cleared kept the verdict channel the immediate one had lost. A queued
       // question is the same question; it withholds the same way.
@@ -564,7 +564,7 @@ async function drainQueuedQuestions(
 
 // ---------------------------------------------------------------- engine
 
-/** Ruling 361: the inbox names the engine exactly as the task timeline does
+/** Ruling 74: the inbox names the engine exactly as the task timeline does
  *  (`systemId: "dependency-release"` → "Dependency release"). */
 const DEPENDENCY_RELEASE_FROM: ActorRender = {
   kind: "system",
@@ -572,7 +572,7 @@ const DEPENDENCY_RELEASE_FROM: ActorRender = {
 };
 
 /**
- * Release ONE task when every entry it waits on is done (ruling 131(e)).
+ * Release ONE task when every entry it waits on is done (ruling 55).
  * Idempotent and convergent: an empty list has nothing to release, an
  * unsatisfied list is left alone, and a satisfied one goes through the same
  * two halves a person's clear does. Returns true when a release happened.
@@ -678,8 +678,8 @@ interface DependencyRunnerHost {
 /**
  * Boot: release every held task whose wait is satisfied, once and then every
  * minute, so a hand edit, a rescan or a restart the write hooks never saw
- * still releases within a minute (ruling 131(e)). The goal runner of ruling 99
- * ran this sweep on its tick; ruling 503 retired the chains and kept the
+ * still releases within a minute (ruling 55). The goal runner of ruling 273
+ * ran this sweep on its tick; ruling 273 retired the chains and kept the
  * sweep. Idempotent; the timer is unref'd so it never blocks exit, and a tick
  * still running when the next is due is not overlapped.
  */
@@ -735,7 +735,7 @@ const DEAD_NOTE_TITLE = "Waiting on work that cannot complete";
 
 /**
  * A dependency that can never complete (its task was archived) does not
- * release the dependent (ruling 131(e)): it is noted ONCE on the dependent's
+ * release the dependent (ruling 55): it is noted ONCE on the dependent's
  * timeline, the owner and supervisors are told once, and the task is left
  * `waiting: human`, because a person owes the list an edit. The derived
  * `blocked` readiness stays, and the entry renders as "archived" until they

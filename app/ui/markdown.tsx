@@ -248,7 +248,7 @@ function safeDecodeName(rest: string): string | null {
 
 /** Click-handler factory for an attachment (the task page passes the lightbox
  *  factory — attachment-lightbox.tsx — whose shape this is). Every kind opens
- *  the card (ruling 105 + addendum): images the lightbox, viewable text files
+ *  the card (ruling 78 + addendum): images the lightbox, viewable text files
  *  the read-only viewer, anything else a no-preview note with Download. */
 type AttachmentOpenFactory = (att: {
   name: string;
@@ -326,9 +326,9 @@ function MarkdownImg({
 const fenceProps = z.object({ className: z.string().optional(), children: z.string() });
 
 /**
- * Ruling 500 (AICSS's Code Block): a fenced block in a comment gets a head,
+ * Ruling 313 (AICSS's Code Block): a fenced block in a comment gets a head,
  * the language its fence names (or "code") and Copy, and, past one line, the
- * attachment reader's line-number gutter (`.code-view`, ruling 363), which a
+ * attachment reader's line-number gutter (`.code-view`, ruling 317), which a
  * selection skips. The code itself is not highlighted here: a comment's block
  * renders at once, and the reader keeps its grammars. A `<pre>` this does not
  * recognise renders as it came.
@@ -413,7 +413,7 @@ function componentsFor(
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
       // The link is the interactive element.
       const repaired = repairAttachmentHref(href, attachments, base);
-      // Ruling 105 (+ addendum): a link to a task attachment opens the in-app
+      // Ruling 78 (+ addendum): a link to a task attachment opens the in-app
       // card on a plain click, whatever the kind. Only a CLEAN single-segment
       // suffix of the base is intercepted — an author-written URL carrying a
       // query, fragment, nested path, or malformed percent-escape would derive
@@ -489,7 +489,7 @@ interface MdastNode {
 }
 
 /**
- * Ruling 478(f) (F40-35): remark plugin factory for text that sits UNDER one of
+ * Ruling 313 (F40-35): remark plugin factory for text that sits UNDER one of
  * the page's own headings. An agent writes `#` and `##` for the sections of its
  * report, and rendered as h1/h2 they joined the task page's outline beside
  * Timeline, Agent logs and Details (twelve such h2s on WEB-4), and a packet
@@ -531,7 +531,7 @@ interface MarkdownProps {
   /** Opens an embedded attachment image in the task page's lightbox — pass
    *  `useAttachmentLightbox()`'s factory. Absent ⇒ embeds are plain images. */
   onAttachmentOpen?: AttachmentOpenFactory;
-  /** Ruling 478(f): the level the text's top heading renders at, for text
+  /** Ruling 313: the level the text's top heading renders at, for text
    *  that sits under one of the page's own headings (a timeline entry under
    *  Timeline's h2, a packet body under the packet's h2); deeper headings
    *  follow. Absent ⇒ 1, as written. */
@@ -564,7 +564,7 @@ function linkOf(links: TaskLinks | undefined, key: string): string | undefined {
 }
 
 /**
- * Ruling 457 (CTL-7): the links THIS text can render. A transcript hands every
+ * Ruling 11 (CTL-7): the links THIS text can render. A transcript hands every
  * message one conversation-wide map, so a reply that names a new key changed
  * the map under all thirty messages above it and re-parsed each one. Only a key
  * the text names can change its output, so the maps are compared on those.

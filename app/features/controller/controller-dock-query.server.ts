@@ -25,7 +25,7 @@ import {
 } from "~/server/controller/controller-run.server";
 
 /**
- * The controller DOCK's view (ruling 121): what the floating panel shows for
+ * The controller DOCK's view (ruling 256): what the floating panel shows for
  * the place the person is standing. One scope at a time — the instance, one
  * board, or one task — with that scope's own threads, the active transcript,
  * and the one-line disclosure of what the controller knows here.
@@ -37,7 +37,7 @@ import {
  * `fetcher.load`, and React Router routes a fetcher loader's thrown response to
  * the boundary of the route that owns the fetcher — root — so a throw here
  * replaces the WHOLE page with the root error page, which is exactly the hazard
- * ruling 121(f) named for CSRF and fixed there. A selection that is stale,
+ * ruling 256 named for CSRF and fixed there. A selection that is stale,
  * unreadable or out of scope is therefore not an error: the view answers the
  * scope's newest thread and reports `staleSelection`, and the client drops the
  * id it asked for. A scope the person cannot reach answers `unavailable`. Neither
@@ -82,12 +82,12 @@ export interface ControllerDockView {
   /** U39-29: the task keys the transcript names that this viewer can open,
    *  key to path. */
   taskLinks: TaskLinks;
-  /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
+  /** Ruling 257: `phase`/`step` say what the live turn is doing, for the row
    *  the person is watching. */
   turn: ConversationTurnState;
   threads: ControllerDockThread[];
   viewerOwnsActive: boolean;
-  /** Ruling 457: the caller is not signed in. Only the view
+  /** Ruling 11: the caller is not signed in. Only the view
    *  `/resources/controller` answers with its 401 carries it, `unavailable`
    *  with it, and the panel then asks for a sign-in instead of blaming the
    *  scope or the person's Claude account. */
@@ -159,7 +159,7 @@ export function getControllerDock(
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
      * seen it. A load without it reads nothing: a load nobody looked at must
-     * not mark the reply it fetched as read. (Since ruling 457 the dock loads
+     * not mark the reply it fetched as read. (Since ruling 11 the dock loads
      * this view only while the panel is open; the closed button reads the
      * dock's status instead.)
      */
@@ -208,7 +208,7 @@ export function getControllerDock(
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
-    // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
+    // Ruling 137: a controller turn runs on the ASKER's own Claude account, so
     // the dock's "available" is a fact about the person the panel is open for,
     // never about this deployment.
     available: isBackendAvailableFor(db, viewer.id, "claude", {
@@ -280,7 +280,7 @@ function refusedDockView(
  *  itself and offers no composer, and the page it sits on is untouched. */
 export function unavailableDockView(
   db: DatabaseSync,
-  /** Ruling 127: even the refusal view answers availability for THIS person. */
+  /** Ruling 137: even the refusal view answers availability for THIS person. */
   viewer: { id: string },
   binding: { projectSlug: string | null; taskKey: string | null },
   dataRoot?: string,
@@ -295,7 +295,7 @@ export function unavailableDockView(
   };
 }
 
-/** Ruling 457 (test audit L14-29): the view for a caller who is not signed in
+/** Ruling 11 (test audit L14-29): the view for a caller who is not signed in
  *  (no session, or a forced password reset pending), which
  *  `/resources/controller` answers with its 401 instead of a login redirect.
  *  Nothing is read for it, not even the controller's configured name: nobody

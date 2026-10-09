@@ -31,7 +31,7 @@ import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
 
 /**
  * Viberr's granted skills reach a Claude run as a LOCAL PLUGIN beside the task
- * checkout (ruling 180, pass 36) — never as files inside it.
+ * checkout (ruling 185, pass 36) — never as files inside it.
  *
  * Two halves of one rule ("a governed run may see the resources its profile
  * grants and NOTHING else"), kept in one module so a caller cannot do half:
@@ -64,7 +64,7 @@ import { removeAgentTree, removeAgentTreeSync } from "./agent-trees.server";
  * on the same workspace can no longer unmount a live run's skills (the F19-15
  * race the old in-checkout mount needed a per-process marker to survive).
  *
- * Ruling 495(a), F40-71: the plugin is the server's, in a tree the task's
+ * Ruling 140, F40-71: the plugin is the server's, in a tree the task's
  * person removes, and unlinking needs write on the directory. Every entry is
  * made anew with the mode that removal needs and is never changed once it
  * exists ({@link copySkillFolder}, {@link writeNewPluginFile}): its folders
@@ -98,7 +98,7 @@ const SKILL_PLUGINS_DIR = ".viberr-plugins";
  * index. (A run whose task is to edit the repo's own `.claude` cannot deliver
  * those edits — the intended governance posture, not a bug.)
  *
- * Since ruling 180 nothing of Viberr's lives in this directory, so the strip
+ * Since ruling 185 nothing of Viberr's lives in this directory, so the strip
  * is whole: every entry goes, on every call.
  *
  * Pass 40 review (R-seams-1): the two git reads run as the task's person
@@ -106,7 +106,7 @@ const SKILL_PLUGINS_DIR = ".viberr-plugins";
  * with no person to name gets the server's own user only where no agent is
  * launched; with isolation on the git step is skipped.
  *
- * Ruling 485: the catalog itself is removed as that same person
+ * Ruling 140: the catalog itself is removed as that same person
  * (`removeAgentTree`), never by the server's own recursive remove — an agent
  * writes `.claude` too. With isolation on and no person to name, the removal
  * refuses and this throws: the catalog is left, and the caller says so.
@@ -166,7 +166,7 @@ export interface SkillPlugin {
   path: string;
   /** The manifest's `name` — the prefix of every skill's qualified name. */
   name: string;
-  /** Ruling 485: whom the plugin is removed as — the task's person. It sits in
+  /** Ruling 140: whom the plugin is removed as — the task's person. It sits in
    *  the task's workspace, which every agent in the group can write. Absent:
    *  the server's own user, which only a server that launches no agents
    *  allows. */
@@ -202,7 +202,7 @@ function skillPluginDir(workspaceDir: string, runId: string): string {
  * Build the run's plugin beside the checkout: copy each GRANTED skill from the
  * store into `<plugin>/skills/<name>` and write the manifest the CLI reads.
  *
- * WHY BESIDE THE CHECKOUT AND NOT INSIDE (F36-9, ruling 180): see the module
+ * WHY BESIDE THE CHECKOUT AND NOT INSIDE (F36-9, ruling 185): see the module
  * note. Why the checkout is still required: the plugin is a sibling of the
  * working tree, and a run with no checkout runs in the bare task directory
  * with no tree to be beside — it keeps prompt-text injection, exactly as it
@@ -249,12 +249,12 @@ export async function mountGrantedSkills(input: {
   // Strip FIRST, every run (fresh clone AND resume): the repo may ship its own
   // `.claude`, and an agent may have written one — including a `settings.json`
   // whose hooks a project settings source would execute. No run opens that
-  // source any more (ruling 180), and the working tree still must not carry
+  // source any more (ruling 185), and the working tree still must not carry
   // an ungoverned catalog for the model to read by hand.
   const git = input.git === undefined ? workspaceGitWhenIsolationOff() : input.git;
   await stripUngovernedRepoCatalog(dir, git);
 
-  // Ruling 485: the plugin sits in the task's workspace, which any agent in
+  // Ruling 140: the plugin sits in the task's workspace, which any agent in
   // the group can write, so every removal of it is the task's person's.
   const person = git ? git.launch : null;
   const pluginRoot = skillPluginDir(dir, input.runId);
@@ -305,7 +305,7 @@ export async function mountGrantedSkills(input: {
   return { mounted, skipped, plugin };
 }
 
-/** Remove a plugin tree as `person` (ruling 485), never throwing: residue of a
+/** Remove a plugin tree as `person` (ruling 140), never throwing: residue of a
  *  plugin no run names is inert, and is logged. */
 function removePluginQuietly(target: string, person: AgentLaunch | null): void {
   try {
@@ -331,7 +331,7 @@ export function removeSkillPlugin(plugin: SkillPlugin | null | undefined): void 
     return;
   }
   // Inert residue when it fails: no session names this path once its run has
-  // settled. As the task's person (ruling 485).
+  // settled. As the task's person (ruling 140).
   removePluginQuietly(plugin.path, plugin.person ?? null);
 }
 
@@ -426,7 +426,7 @@ function mountOneSkill(
     // A half-copied folder must not be listed: this run falls back to
     // prompt-text injection for the skill, because we return a reason below.
     // It is in the task's workspace, so it goes as the task's person (ruling
-    // 485).
+    // 140).
     removePluginQuietly(dest, person);
     logger.warn("granted skill could not be mounted into the run's plugin", {
       skill: name,
@@ -438,7 +438,7 @@ function mountOneSkill(
 }
 
 /**
- * Ruling 495(a): make one file of a run's plugin, in a tree every agent in
+ * Ruling 140: make one file of a run's plugin, in a tree every agent in
  * the group can write. It is made anew (`O_EXCL`), never opened where an
  * entry already is, and never through a link at its own name (`O_NOFOLLOW`);
  * its mode is set on the new file's own descriptor, so it is group-readable
@@ -460,7 +460,7 @@ function writeNewPluginFile(file: string, content: string | Uint8Array, executab
 }
 
 /**
- * Ruling 495(a), F40-71: copy a store skill folder into the run's plugin at
+ * Ruling 140, F40-71: copy a store skill folder into the run's plugin at
  * `dest`, making every entry anew. A folder is made by `mkdir` (never one
  * already there) under the server's umask, 0002 whenever it launches agents
  * (boot sets it), in the workspace's setgid chain: 2775 in the workspace's

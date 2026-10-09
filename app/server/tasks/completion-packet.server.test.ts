@@ -27,11 +27,11 @@ import {
 } from "./completion-packet.server";
 
 /**
- * Ruling 521: the completion packet Operator writes before it offers a task
+ * Ruling 103: the completion packet Operator writes before it offers a task
  * for acceptance, and the view the task page draws from it. The offer's
  * refusals are the operator suite's (`operatorAcceptCompletion`), the tool
  * doors the toolkit's and the plan executor's; this suite owns what the
- * writer accepts and stores, and what the page is told. Ruling 668: and the
+ * writer accepts and stores, and what the page is told. Ruling 103: and the
  * notes and result files that make the packet the task's result.
  */
 
@@ -118,7 +118,7 @@ function attach(name: string): void {
 const parsed = () =>
   readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
 
-describe("ruling 521: the operator writes the completion packet", () => {
+describe("ruling 130: the operator writes the completion packet", () => {
   it("stores it in task.md for the revision under review, with the screenshots it named, and notes it on the timeline", async () => {
     // CANARY: bind the packet to the head sha alone (no `subject`) and a
     // revision re-delivered on the same head would keep an old summary.
@@ -206,7 +206,7 @@ describe("ruling 521: the operator writes the completion packet", () => {
   });
 });
 
-describe("ruling 521: what the task page is told", () => {
+describe("ruling 103: what the task page is told", () => {
   const nameOf = (id: string) => ({ reviewer: "Code Reviewer", qa: "QA" })[id] ?? id;
   const verdict = (
     profileId: string,
@@ -321,12 +321,12 @@ describe("ruling 521: what the task page is told", () => {
   });
 });
 
-describe("ruling 668: the packet names the result of a task delivered as files", () => {
+describe("ruling 103: the packet names the result of a task delivered as files", () => {
   const STAMP = "2026-10-06T08:30:52.847Z";
   const DELIVERED = ["estimate.json", "inventory.csv", "summary.md"];
 
   /** VIB-1 delivered as files at `STAMP`, the delivery kept as it stood
-   *  (ruling 597), and one more file saved on the task after it. */
+   *  (ruling 86), and one more file saved on the task after it. */
   function seedFiles(): void {
     seed({ workRevision: null, branch: null, github: null, deliveredAt: STAMP });
     for (const name of DELIVERED) attach(name);
@@ -398,7 +398,7 @@ describe("ruling 668: the packet names the result of a task delivered as files",
     expect(parsed().frontmatter.completionPacket).toBeUndefined();
   });
 
-  it("ruling 675: names a result stored decomposed by its composed name, and keeps the file's own spelling", async () => {
+  it("ruling 76: names a result stored decomposed by its composed name, and keeps the file's own spelling", async () => {
     // A deliverer's script names its output after a decomposed input, so the
     // result is stored decomposed and the operator types what it reads.
     // CANARY: match the typed name byte for byte and the packet is refused as
@@ -484,7 +484,7 @@ describe("ruling 668: the packet names the result of a task delivered as files",
       hiddenFiles: 1,
     });
     expect(member.paths).toBeNull();
-    // Another task reads the same result as one text (ruling 569).
+    // Another task reads the same result as one text (ruling 213(a)).
     expect(completionPacketText(fm.completionPacket!)).toBe(
       "The attach flow works.\n\nAssumptions:\n730 hours a month.\n\n" +
         "Result files:\n- estimate.json: The calculator import\n- summary.md",
@@ -505,7 +505,7 @@ describe("ruling 668: the packet names the result of a task delivered as files",
   });
 });
 
-describe("ruling 690: what the work under review rests on", () => {
+describe("ruling 82: what the work under review rests on", () => {
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -631,7 +631,7 @@ describe("ruling 690: what the work under review rests on", () => {
 
   it("the page's card carries the count and the first twelve, says zero for a files result, and nothing for a revision that rests on none", () => {
     // CANARY: carry `sources` on every view and the task page's payload grows
-    // on every task that keeps none (ruling 457's console budget measures it);
+    // on every task that keeps none (ruling 11's console budget measures it);
     // drop it at zero for a files result and the card cannot say the result
     // rests on no kept source.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -661,7 +661,7 @@ describe("ruling 690: what the work under review rests on", () => {
   });
 });
 
-describe("ruling 691: Viberr's own pictures of a delivered page", () => {
+describe("ruling 316: Viberr's own pictures of a delivered page", () => {
   const STAMP = "2026-10-07T12:00:00.000Z";
   const AT = "2026-10-07T12:00:09.412Z";
   const PICTURES = ["post.html.capture-desktop.png", "post.html.capture-phone.png"];

@@ -28,7 +28,7 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
 import { useLogSelection, useRunControls, type ActionResult } from "./task-detail-hooks";
 
 /**
- * The task page's posts (ruling 700(d), the pilot split of
+ * The task page's posts (ruling 13(b), the pilot split of
  * `task-detail-page.tsx`), each with its fetcher, toast, local state and
  * confirm: who owns the task, the open decision, the archive, the acceptance,
  * the run console, the recommendations and the stage. The page calls them in
@@ -39,13 +39,13 @@ import { useLogSelection, useRunControls, type ActionResult } from "./task-detai
  */
 
 /**
- * The acceptance ceremony's pending state (ruling 20 / R15-1). Every variant
+ * The acceptance ceremony's pending state (ruling 97 / R15-1). Every variant
  * ends in "task Done + a real GitHub merge", so every variant asks first; the
  * payload is whatever the confirmed click has to replay.
  *
  * F15-10/R15-1: accepting merges the PR — it fires only through the confirm
  * dialog (which states PR, revision, merge head, verdict state and target
- * branch). Pass 19 (ruling 20 / the acceptance-writer matrix): the dialog now
+ * branch). Pass 19 (ruling 97 / the acceptance-writer matrix): the dialog now
  * covers EVERY writer that ends in "Done + real merge", not just the two
  * buttons that already had it. The pending state carries what the confirmed
  * action has to replay — a recommendation id, a packet option + its note, or
@@ -54,7 +54,7 @@ import { useLogSelection, useRunControls, type ActionResult } from "./task-detai
 export type PendingAccept =
   | { mode: Extract<AcceptCeremonyMode, "accept" | "force" | "complete-merge"> }
   | { mode: "apply-recommendation"; recId: string; label: string }
-  /** Ruling 164 (pass 35, F35-14): `force` marks the `force_accept` option,
+  /** Ruling 131 (pass 35, F35-14): `force` marks the `force_accept` option,
    *  whose resolution runs the admin override — so the ceremony opens in its
    *  FORCE form (the skipped stages, the bypassed refusal, the danger confirm)
    *  while the click still travels as a packet resolution. */
@@ -97,7 +97,7 @@ export function useWorkspaceFocus(): RefObject<HTMLDivElement | null> {
   const detailRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const detail = detailRef.current;
-    // Ruling 497: a link that opened a place on this page (a timeline event)
+    // Ruling 302: a link that opened a place on this page (a timeline event)
     // has focused it already, and inside `.detail` the keys scroll just the same.
     if (detail?.contains(document.activeElement)) return;
     detail?.focus({ preventScroll: true });
@@ -105,8 +105,8 @@ export function useWorkspaceFocus(): RefObject<HTMLDivElement | null> {
   return detailRef;
 }
 
-/** Ruling 497: the page's own places a notification opens (the timeline's
- *  events are the timeline's); ruling 547 names a decision by its packet. */
+/** Ruling 75: the page's own places a notification opens (the timeline's
+ *  events are the timeline's); ruling 302 names a decision by its packet. */
 function isTaskRegionAnchor(id: string): boolean {
   return (
     id === TASK_DECISION_ANCHOR ||
@@ -116,11 +116,11 @@ function isTaskRegionAnchor(id: string): boolean {
 }
 
 /**
- * Ruling 547: the element a region link lands on: the place it names while
+ * Ruling 302: the element a region link lands on: the place it names while
  * the page shows it, else the timeline, which records what became of it (the
  * decision answered or withdrawn, the recommendations applied or dismissed).
  * A link naming a packet opens the card only for that packet; the bare
- * `#decision` of a row written before ruling 547 opens whichever is open.
+ * `#decision` of a row written before ruling 302 opens whichever is open.
  */
 function regionPlace(
   id: string,
@@ -137,9 +137,9 @@ function regionPlace(
 }
 
 /**
- * Ruling 497: a decision's notification opens the packet or the
+ * Ruling 75: a decision's notification opens the packet or the
  * recommendation cards, and a second click on it, from this page, brings
- * them back into view. Ruling 547: once they are gone, the timeline. Returns
+ * them back into view. Ruling 302: once they are gone, the timeline. Returns
  * the anchor of the place the link landed on, which the page marks, or null.
  */
 export function useRegionLanding(
@@ -223,7 +223,7 @@ export function usePacketResolution(
   const submitResolve = (
     optionIndex: number,
     note: string,
-    // Ruling 88: set ONLY for the `accept_completion` option, the one kind that
+    // Ruling 97: set ONLY for the `accept_completion` option, the one kind that
     // writes Done and merges — the server gates that arm on the echo and leaves
     // every other decision ack-free.
     disclosure?: AcceptanceDisclosure,
@@ -264,7 +264,7 @@ export function usePacketResolution(
       });
       return;
     }
-    // Ruling 164 (pass 35, F35-14): a `force_accept` option runs the admin
+    // Ruling 131 (pass 35, F35-14): a `force_accept` option runs the admin
     // override, and the server refuses a resolution that carries no echo of it
     // (`forceAcceptCompletion` holds the same ceremony the button does). Open
     // the FORCE form of the one dialog: it names the stages the close skips and
@@ -287,7 +287,7 @@ export function usePacketResolution(
     submitResolveCustom,
     onResolve,
     onEditGoal: (draft: string) => {
-      // Ruling 138: the reload path opens the editor with the SAME
+      // Ruling 63: the reload path opens the editor with the SAME
       // draft the confirm response carried.
       setEditGoalDraft(draft);
       setEditGoalSignal((n) => n + 1);
@@ -344,7 +344,7 @@ export function useAcceptCompletion(csrf: string) {
   const acceptFetcher = useFetcher<ActionResult>();
   useActionToast(acceptFetcher);
   const acceptBusy = acceptFetcher.state !== "idle";
-  // Ruling 88 (F21-2): the acceptance intents carry the ceremony's own echo of
+  // Ruling 97 (F21-2): the acceptance intents carry the ceremony's own echo of
   // what it displayed. The server refuses this POST without it — that refusal
   // is the invariant; this is just the honest client half of it.
   const submitAccept = (disclosure: AcceptanceDisclosure) => {
@@ -354,7 +354,7 @@ export function useAcceptCompletion(csrf: string) {
     acceptFetcher.submit(fd, { method: "post" });
   };
 
-  // Ruling 449 (O39-c): the dialog's "bring it up to date and re-review
+  // Ruling 97 (O39-c): the dialog's "bring it up to date and re-review
   // first". Rides the accept fetcher, so the dialog's busy state and the
   // toast are the acceptance's own.
   const submitRefreshFirst = () => {
@@ -394,7 +394,7 @@ export function useRunConsole({
   // one silent click while a reversible archive took a three-row ceremony.
   const [confirmInterrupt, setConfirmInterrupt] = useState<string | null>(null);
 
-  // The run-log console's store (ruling 457): it follows the task's runs
+  // The run-log console's store (ruling 11): it follows the task's runs
   // line by line on the layout's live stream, fills a thread the payload did
   // not carry, and keeps its lines OUTSIDE this page's state, so a console
   // line re-renders the console and not the page.
@@ -423,7 +423,7 @@ export function useRunConsole({
     runtime,
     myRole,
     canRunAgents,
-    // Ruling 127: the retry-on-the-other-backend offer bills the task owner,
+    // Ruling 137: the retry-on-the-other-backend offer bills the task owner,
     // so it follows their connected accounts, not the viewer's grant alone.
     runPrincipal,
     // F19-10: the merge control follows the SERVER's acceptance authority
@@ -463,14 +463,14 @@ export function useRunConsole({
   );
 
   // D6: interrupt a live run — discards uncommitted in-flight work. That
-  // discard is ruling 149's destructive class, so the commit keeps the
-  // shared `danger` default and, under ruling 150, the `LiveRunPanel`
+  // discard is ruling 278's destructive class, so the commit keeps the
+  // shared `danger` default and, under ruling 278, the `LiveRunPanel`
   // trigger that opens this dialog carries the same red label.
   const interruptDialog = confirmInterrupt && (
     <ConfirmDialog
       screenLabel="Interrupt run dialog"
       title="Interrupt this run?"
-      /* Ruling 272 (pass 37, F37-104): this said "Anything it has not
+      /* Ruling 310 (pass 37, F37-104): this said "Anything it has not
          already committed or delivered is lost", and nothing is. An
          interrupt kills the PROCESS; it never touches the task's
          workspace, and the next run reuses that checkout as it stands
@@ -502,7 +502,7 @@ export function useRunConsole({
     agentLogs,
     liveRun,
     // The state setter itself, never a wrapper: the memoised run card keeps
-    // one reference across renders (ruling 457).
+    // one reference across renders (ruling 11).
     askInterrupt: setConfirmInterrupt,
     interruptDialog,
   };
@@ -526,7 +526,7 @@ export function useRecommendationActions(
   const recFetcher = useFetcher<ActionResult>();
   useActionToast(recFetcher);
   const recBusy = recFetcher.state !== "idle";
-  // Ruling 368: the card whose request this fetcher carries shows it in
+  // Ruling 286: the card whose request this fetcher carries shows it in
   // flight. The fetcher keeps its form data through `submitting` and the
   // revalidating `loading` that follows, which is exactly the stretch the
   // human is waiting through.
@@ -540,7 +540,7 @@ export function useRecommendationActions(
       : null;
   const submitApplyRec = (
     recId: string,
-    // Ruling 88: set ONLY when the card REACHES acceptance
+    // Ruling 97: set ONLY when the card REACHES acceptance
     // (`reachesAcceptance` — kind or terminal target), which is the same
     // predicate the server consults its own copy of before demanding the echo.
     disclosure?: AcceptanceDisclosure,
@@ -582,7 +582,7 @@ export function useRecommendationActions(
   // D6: dismiss an operator recommendation — an audited decision, and one
   // that takes nothing away: the dismissal is recorded on the timeline and
   // the operator may raise the recommendation again on its next run. Under
-  // rulings 149 and 150 the danger treatment belongs to the controls that
+  // ruling 278 the danger treatment belongs to the controls that
   // take something away, so this one commits `primary`, like the neutral
   // `btn ghost sm` trigger that opens it.
   const dismissDialog = confirmDismiss && (
@@ -617,7 +617,7 @@ export function useRecommendationActions(
 
 /**
  * Manual stage change from the Current-state menu. Page-owned since F19-37 —
- * see below. With it, the move-back confirm (ruling 381).
+ * see below. With it, the move-back confirm (ruling 47).
  */
 export function useStageTransition(
   csrf: string,
@@ -631,10 +631,10 @@ export function useStageTransition(
   const transitionBusy = transitionFetcher.state !== "idle";
   const submitTransition = (
     toStageId: string,
-    // Ruling 88: set ONLY for the stage-move-into-Done case, which the server
+    // Ruling 97: set ONLY for the stage-move-into-Done case, which the server
     // reads as an acceptance and gates on the disclosure like any other accept.
     disclosure?: AcceptanceDisclosure,
-    // Ruling 381: WHY, for a move backward. The server requires it there and
+    // Ruling 47: WHY, for a move backward. The server requires it there and
     // refuses without it, so the dialog below collects it first.
     reason?: string,
   ) => {
@@ -649,11 +649,11 @@ export function useStageTransition(
   // the LAST stage as an acceptance: transitionStage's own comment reads "A
   // HUMAN manually moving a task INTO the final stage IS accepting completion",
   // and it calls acceptCompletion — the real, irreversible PR merge. The board's
-  // identical stage menu has confirmed since ruling 53/R18-7; this one was the
+  // identical stage menu has confirmed since ruling 97/R18-7; this one was the
   // last surface where dropping a card on Done merged silently. Same ceremony,
   // and the confirmed click still posts `transition` (the server's own
   // stage-move contract writes the acceptance from there).
-  /** Ruling 381: the move the operator has to act on, so it carries its reason. */
+  /** Ruling 47: the move the operator has to act on, so it carries its reason. */
   const [confirmMoveBack, setConfirmMoveBack] = useState<string | null>(null);
   const stageIndexOf = (id: string) => task.stages.findIndex((s) => s.id === id);
   const onTransition = (toStageId: string) => {

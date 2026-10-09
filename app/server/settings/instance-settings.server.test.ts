@@ -44,10 +44,10 @@ describe("instance settings — run concurrency cap", () => {
     expect(getMaxConcurrentRuns(db)).toBe(5);
   });
 
-  // Ruling 152(b): one extra slot per four of the cap, minimum one, none when
+  // Ruling 150: one extra slot per four of the cap, minimum one, none when
   // the gate is off. The org-settings sentence, the admission gate and the
   // health snapshot all read this one function.
-  it("ruling 152: the coordination lane is one slot per four of the cap, minimum one", () => {
+  it("ruling 150: the coordination lane is one slot per four of the cap, minimum one", () => {
     expect(coordinationLane(0)).toBe(0);
     expect(coordinationLane(1)).toBe(1);
     expect(coordinationLane(4)).toBe(1);

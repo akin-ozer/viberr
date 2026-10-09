@@ -54,7 +54,7 @@ git clone https://github.com/akin-ozer/viberr.git && cd viberr
 docker compose up
 ```
 
-That is the whole install: no `.env` to write and no volume to create (ruling 504). Open
+That is the whole install: no `.env` to write and no volume to create (ruling 38). Open
 <http://localhost:3000> and sign in as `admin@viberr.dev` with the one-time password the log
 prints on the line marked `VIBERR BOOTSTRAP ADMIN`. You choose your own password at first
 sign-in.
@@ -114,7 +114,7 @@ agents ──┘    RBAC · agent capabilities    │          ▼
   sessions, encrypted secrets, audit, notifications and run history.
 - **Agent runs** go through the Claude Agent SDK or the Codex SDK. In the container, every
   agent process runs as its person's own OS user, so it cannot read the server's secrets,
-  the database or anyone else's sign-in (ruling 460).
+  the database or anyone else's sign-in (ruling 139).
 
 The architecture in one read: [docs/architecture/overview.md](docs/architecture/overview.md).
 

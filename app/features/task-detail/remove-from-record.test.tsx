@@ -6,7 +6,7 @@ import { ToastProvider } from "~/ui/toast";
 import { AttachmentLightboxProvider, useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
- * Ruling 582: a project admin takes a file off a task's record from the card
+ * Ruling 80: a project admin takes a file off a task's record from the card
  * it opens in; anyone else is not offered it. The writer and its refusals are
  * `record-removal.server.test.ts`'s.
  */
@@ -39,7 +39,7 @@ function OpenFile() {
   );
 }
 
-describe("ruling 582: removing from a task's record", () => {
+describe("ruling 80: removing from a task's record", () => {
   it("offers an admin Remove on a file's card, posted to the task that serves it", async () => {
     // CANARY: drop `removable` from the provider's card and the file has no
     // way off the record but a shell.

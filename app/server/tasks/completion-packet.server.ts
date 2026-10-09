@@ -50,7 +50,7 @@ import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 521 (owner, 2026-09-27): the completion packet.
+ * Ruling 103 (owner, 2026-09-27): the completion packet.
  *
  * "Up to date reviewer verdicts should be visible on a completion to done
  * packet summarized by Operator, including the UI screenshots, code changes
@@ -74,7 +74,7 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * and the fold that files the acceptance card after a move onto the boundary.
  * A person's own acceptance is never refused over it.
  *
- * Ruling 668 (owner, 2026-10-06): "we need operator to create summary of the
+ * Ruling 103 (owner, 2026-10-06): "we need operator to create summary of the
  * task by outputs (like related output files, what are the considerations,
  * what are the assumptions and what were the gaps), then ask for done. And if
  * that recommendation is accepted, then there is a result card ... including
@@ -88,7 +88,7 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  */
 
 /**
- * Ruling 691: the operator's word on a delivered page's pictures, said where
+ * Ruling 316: the operator's word on a delivered page's pictures, said where
  * `write_completion_packet` is described on either backend (and in the
  * operator's definition). Viberr puts them on the card itself, so the operator
  * names none, and it opens one before it writes how a page looks.
@@ -112,7 +112,7 @@ export function currentCompletionPacket(fm: PacketState): CompletionPacket | nul
 }
 
 /**
- * Ruling 668: the packet as one text, for a reader that takes prose (another
+ * Ruling 103: the packet as one text, for a reader that takes prose (another
  * task's read of what this one came to): the summary, each note under its
  * label, and the result's files with what each is.
  */
@@ -140,7 +140,7 @@ function subjectPhrase(fm: Pick<TaskFrontmatter, "workRevision">): string {
  * Why the operator may not offer this task for acceptance yet, or null.
  *
  * Null while nothing is delivered: there is no work to summarize, and the
- * acceptance gate speaks for that case itself (ruling 161). Otherwise the
+ * acceptance gate speaks for that case itself (ruling 234). Otherwise the
  * packet must describe the current subject.
  */
 export function completionPacketRefusal(fm: PacketState, taskKey: string): string | null {
@@ -152,11 +152,11 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
   return (
     `Write the completion packet for ${subjectPhrase(fm)} first (write_completion_packet), ` +
     `then offer ${taskKey} for acceptance: the person who accepts it reads your summary, the ` +
-    `screenshots you pick and the change beside each reviewer's verdict (ruling 521).${stale}`
+    `screenshots you pick and the change beside each reviewer's verdict (ruling 130).${stale}`
   );
 }
 
-/** The image attachments a packet may show, newest first. Ruling 691: never
+/** The image attachments a packet may show, newest first. Ruling 86: never
  *  Viberr's own picture of a page on the task (`pagePictures`), which shows
  *  beside that page. A screenshot an agent named like one is offered. */
 function screenshotCandidates(
@@ -169,12 +169,12 @@ function screenshotCandidates(
 type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | undefined };
 
 /**
- * Ruling 668: the files a packet may name as the result of a task delivered as
+ * Ruling 103: the files a packet may name as the result of a task delivered as
  * files. They are the files of the delivery under review as it was kept
- * (ruling 597: what the reviewers judged), still on the task; a delivery
+ * (ruling 86: what the reviewers judged), still on the task; a delivery
  * nobody kept offers the task's files. The browser's working files are never
- * a result (ruling 570), and neither is Viberr's own picture of a delivered
- * page (ruling 691). Empty when the delivery is a revision.
+ * a result (ruling 85), and neither is Viberr's own picture of a delivered
+ * page (ruling 86). Empty when the delivery is a revision.
  */
 function resultFileCandidates(fm: PacketState, ref: StoreRef, files: TaskFiles): string[] {
   if (!deliveredAsFiles(fm)) return [];
@@ -188,7 +188,7 @@ function resultFileCandidates(fm: PacketState, ref: StoreRef, files: TaskFiles):
 }
 
 /**
- * Ruling 690: the kept sources the work under review rests on, in id order.
+ * Ruling 82: the kept sources the work under review rests on, in id order.
  *
  * A delivery that is files recorded the sources the task held when it was
  * stamped (`recordDeliverySources`), so those are read back; a delivery whose
@@ -225,7 +225,7 @@ export function sourcesRestedOn(
 }
 
 /** The names a task's attachments hold, and which of them are Viberr's own
- *  pictures of the pages among them (ruling 691). */
+ *  pictures of the pages among them (ruling 86). */
 interface TaskFiles {
   names: string[];
   pagePictures: Set<string>;
@@ -251,17 +251,17 @@ export interface CompletionPacketFact {
   changesSummaryRequired: boolean;
   /** Image attachments you may name as screenshots, newest first. */
   screenshotCandidates: string[];
-  /** Ruling 668: the packet must name the result's files (`files`): the
+  /** Ruling 130: the packet must name the result's files (`files`): the
    *  delivery is files on the task. */
   resultFilesRequired: boolean;
-  /** Ruling 668: the delivered files you may name as the result. */
+  /** Ruling 130: the delivered files you may name as the result. */
   resultFileCandidates: string[];
-  /** Ruling 690: how many sources the task keeps (`kept`) and how many of
+  /** Ruling 82: how many sources the task keeps (`kept`) and how many of
    *  them the delivery under review rests on (`restedOn`); `read_task_source`
    *  lists them. A result that states facts from outside and rests on none
    *  has a gap to name. */
   sources: CompletionSourcesFact;
-  /** Ruling 691: Viberr's own pictures of the pages of the delivery under
+  /** Ruling 316: Viberr's own pictures of the pages of the delivery under
    *  review, which the card shows beside each page without your naming them.
    *  `problem` says why a page has no picture. Empty when it has no page, or
    *  none was pictured. */
@@ -269,7 +269,7 @@ export interface CompletionPacketFact {
   note: string;
 }
 
-/** Ruling 690: the snapshot's count of a task's sources. */
+/** Ruling 82: the snapshot's count of a task's sources. */
 interface CompletionSourcesFact {
   kept: number;
   restedOn: number;
@@ -357,11 +357,11 @@ export interface CompletionPacketInput {
   taskKey: string;
   summary: string;
   changes?: string | null;
-  /** Ruling 668: the three notes, each markdown or left out. */
+  /** Ruling 103: the three notes, each markdown or left out. */
   considerations?: string | null;
   assumptions?: string | null;
   gaps?: string | null;
-  /** Ruling 668: the files that are the result of a task delivered as files. */
+  /** Ruling 103: the files that are the result of a task delivered as files. */
   files?: readonly { name: string; caption?: string | null }[];
   screenshots?: readonly { name: string; caption?: string | null }[];
 }
@@ -447,7 +447,7 @@ export async function writeCompletionPacket(
     };
   }
 
-  // Ruling 668: the three notes. One left out or blank is absent; none is cut.
+  // Ruling 103: the three notes. One left out or blank is absent; none is cut.
   const notes = {
     considerations: input.considerations?.trim() || null,
     assumptions: input.assumptions?.trim() || null,
@@ -463,13 +463,13 @@ export async function writeCompletionPacket(
     }
   }
 
-  // Ruling 668: the result's files. A task delivered as files names them; a
+  // Ruling 103: the result's files. A task delivered as files names them; a
   // revision's pull request holds its files, so any named for one are left out
   // and the reply says so.
   const asFiles = deliveredAsFiles(fm);
   const files: CompletionPacket["files"] = [];
   const namedFiles = new Set<string>();
-  // Ruling 691: Viberr's own picture of a page on the task is neither a
+  // Ruling 86: Viberr's own picture of a page on the task is neither a
   // result file nor a screenshot to pick: it shows beside its page. One named
   // is left out, and the reply says so.
   const onTask = taskFiles({ projectSlug, taskKey, dataRoot: ctx.dataRoot }, fm);
@@ -508,7 +508,7 @@ export async function writeCompletionPacket(
         message: `Name at most ${COMPLETION_FILES_MAX} result files: the ones a person takes away.`,
       };
     }
-    // Ruling 675: a name is matched to the delivered file in either Unicode
+    // Ruling 76: a name is matched to the delivered file in either Unicode
     // form, and the packet keeps the file's own spelling, the one its card
     // opens. A result a script named after a decomposed input is stored so.
     const unknown = files.filter((f) => storedNameAmong(candidates, f.name) === null).map((f) => f.name);
@@ -657,7 +657,7 @@ export interface CompletionVerdictRow {
   earlier: { result: "approve" | "request_changes"; sha: string | null; at: string } | null;
 }
 
-/** Ruling 691: one of Viberr's pictures of a result file that is a page. */
+/** Ruling 316: one of Viberr's pictures of a result file that is a page. */
 export interface CompletionPageShot {
   view: PageCaptureViewId;
   /** The picture's name in the attachments store. */
@@ -679,7 +679,7 @@ export interface CompletionFilePage {
 export interface CompletionFile {
   name: string;
   caption: string;
-  /** Ruling 691: null for a file that is not a page, for a packet written
+  /** Ruling 316: null for a file that is not a page, for a packet written
    *  for earlier work, for a page the record does not name, and while no
    *  record pictures the delivery under review (a server without a browser,
    *  or a delivery from before the ruling), so nothing extra is drawn there. */
@@ -694,11 +694,11 @@ export interface CompletionView {
   packet: {
     summary: string;
     changes: string | null;
-    /** Ruling 668: what to weigh, what was assumed, what is missing. */
+    /** Ruling 103: what to weigh, what was assumed, what is missing. */
     considerations: string | null;
     assumptions: string | null;
     gaps: string | null;
-    /** Ruling 668: the result's files the viewer may see. */
+    /** Ruling 103: the result's files the viewer may see. */
     files: CompletionFile[];
     /** Result files the viewer may not see, or that have left the store. */
     hiddenFiles: number;
@@ -714,20 +714,20 @@ export interface CompletionView {
   verdicts: CompletionVerdictRow[];
   /** The change's size; null when there is no revision or nobody counted. */
   change: { files: number; add: number; del: number; small: boolean } | null;
-  /** Ruling 668: the paths the pull request changes, as last read (ruling
-   *  236), for the result of a task delivered as a revision: the first
+  /** Ruling 103: the paths the pull request changes, as last read (ruling
+   *  242), for the result of a task delivered as a revision: the first
    *  `RESULT_PATHS_SHOWN`, how many more were read, and whether the read
    *  itself was cut. Null when nobody read them. */
   paths: { shown: string[]; more: number; truncated: boolean } | null;
-  /** Ruling 690: the kept sources the work under review rests on: how many,
+  /** Ruling 82: the kept sources the work under review rests on: how many,
    *  and the first `RESULT_SOURCES_SHOWN` of them. Absent for a viewer who
    *  may not see the task's files, and for a revision that rests on none, so
-   *  a task that keeps no sources ships the bytes it always did (ruling 457);
+   *  a task that keeps no sources ships the bytes it always did (ruling 11);
    *  a delivery that is files carries it at zero, which the card says. */
   sources?: ResultSources;
 }
 
-/** Ruling 690: a result's sources as its card lists them. */
+/** Ruling 82: a result's sources as its card lists them. */
 export interface ResultSources {
   count: number;
   shown: ResultSourceRow[];
@@ -742,7 +742,7 @@ export interface ResultSourceRow {
   from: string;
 }
 
-/** Ruling 690: how many of a result's sources the card lists; the Sources
+/** Ruling 82: how many of a result's sources the card lists; the Sources
  *  panel lists the rest. */
 const RESULT_SOURCES_SHOWN = 12;
 
@@ -750,9 +750,9 @@ const RESULT_SOURCES_SHOWN = 12;
  * The completion packet as the task page shows it, from the task file the
  * loader has already read. `canSee` answers whether a named attachment is
  * still there; `nameOf` names a reviewer; `ruleReviewers` are the profiles
- * the project's rules require on every delivered task (ruling 178). None of
+ * the project's rules require on every delivered task (ruling 89). None of
  * them reads a store file, so the task page's revalidation budget is
- * untouched (ruling 457). Ruling 690: `sources` is the work's kept sources as
+ * untouched (ruling 11). Ruling 82: `sources` is the work's kept sources as
  * the loader read them (`sourcesRestedOn`).
  */
 export function completionView(
@@ -773,7 +773,7 @@ export function completionView(
   if (onFile) {
     const canSee = opts.canSee;
     const screenshots = onFile.screenshots.filter((s) => canSee(s.name));
-    // Ruling 691: bound to the delivery under review, like the packet itself.
+    // Ruling 316: bound to the delivery under review, like the packet itself.
     // A picture of an earlier delivery never shows beside a newer file.
     const pictured = onFile.subject === subject ? currentPageCaptures(fm) : null;
     const pageOf = (name: string): CompletionFilePage | null => {
@@ -809,7 +809,7 @@ export function completionView(
   }
 
   // Acceptance waits on the task's engaged reviewers and on the project's
-  // rules, whether or not anyone engaged a rule's reviewer (ruling 178).
+  // rules, whether or not anyone engaged a rule's reviewer (ruling 89).
   const required = new Set([
     ...requiredReviewers(fm).map((e) => e.profileId),
     ...opts.ruleReviewers,
@@ -862,7 +862,7 @@ export function completionView(
         }
       : null,
   };
-  // Ruling 690: a files result says what it rests on even when that is
+  // Ruling 82: a files result says what it rests on even when that is
   // nothing; a revision says so only when it rests on something.
   const rested = opts.sources ?? null;
   if (rested !== null && (rested.length > 0 || !rev)) {

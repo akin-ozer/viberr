@@ -10,7 +10,7 @@ import { initialsOf } from "~/ui/initials";
  * project.md is the canonical membership store ({userId, role} rows) — the
  * project_members projection carries only userId/role, so this helper reads
  * the file and joins the users table for display fields. Identity is user id
- * everywhere (ruling 6); names/emails are render-only.
+ * everywhere (ruling 26(a)); names/emails are render-only.
  */
 
 export interface MembershipView {
@@ -94,7 +94,7 @@ interface DisabledFlagRow {
  * sign in, so neither counts, and neither is ever the last: taking its seat
  * leaves the admins who can sign in as they were. Refusing that removal
  * deadlocked the one way to clear a ghost admin (F18-6), and the demotion is
- * let go exactly as the removal is (ruling 705).
+ * let go exactly as the removal is (ruling 26).
  */
 export function isLastLiveAdmin(
   db: DatabaseSync,

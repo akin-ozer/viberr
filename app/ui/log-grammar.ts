@@ -2,7 +2,7 @@ import type { LanguageRegistration } from "shiki/types";
 import upstream from "@shikijs/langs/log";
 
 /**
- * Ruling 508: the reader's log grammar. It is Shiki's (the Log File
+ * Ruling 317: the reader's log grammar. It is Shiki's (the Log File
  * Highlighter grammar VS Code ships) with three repairs, and it rides the
  * grammar's own chunk: `code-highlight.ts` imports this module where it
  * imported `@shikijs/langs/log`.

@@ -8,7 +8,7 @@ import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support
  *
  * The Live-run strip's Interrupt (confirmed on the page) posts the open
  * conversation and the working run's id; the route hands them to
- * `interruptControllerTurn`, which carries the ruling-99 scope to the engine.
+ * `interruptControllerTurn`, which carries the ruling-247 scope to the engine.
  * The engine's authority (owner or org admin) answers a stranger with the
  * not-found shape, which `appErrorResponse` turns into a toast-shaped result
  * rather than a thrown response.
@@ -89,7 +89,7 @@ async function workingTurn(surface: Surface) {
 
 /**
  * U35-4 (pass 35): a refused turn (no Claude connected for the asker, ruling
- * 127) used to answer `{ ok: true }` on both pages, so the HTTP door said yes
+ * 137) used to answer `{ ok: true }` on both pages, so the HTTP door said yes
  * where the composer said no. The refusal stays in the transcript; the door
  * answers 409 with it. Murat has no fake credential here. Canary: restore
  * `{ ok: true }` in the `refused` branch.
@@ -138,12 +138,12 @@ describe.each<Surface>(["instance", "project"])("POST intent=interrupt on the %s
 });
 
 /**
- * Ruling 527 on both pages: a send while a turn works steers it unless its
+ * Ruling 251 on both pages: a send while a turn works steers it unless its
  * form says `mode=queue`, and the owner's Send now and Retract act on a
  * message still waiting. Canary: drop `mode: sendModeOf(formData)` from the
  * send, or the `waitingMessageAction` branch, and the replies below differ.
  */
-describe.each<Surface>(["instance", "project"])("ruling 527: steering and the queue on the %s surface", (surface) => {
+describe.each<Surface>(["instance", "project"])("ruling 251: steering and the queue on the %s surface", (surface) => {
   it("queues or steers as the form says; the owner may Send now and Retract, a stranger may not", async () => {
     const { conversationTurnState } = await import("~/server/controller/controller-run.server");
     const { conversationId, runId } = await workingTurn(surface);
@@ -182,7 +182,7 @@ describe.each<Surface>(["instance", "project"])("ruling 527: steering and the qu
 });
 
 /**
- * Ruling 525: the rail's Delete posts `delete-conversation` with the thread the
+ * Ruling 278: the rail's Delete posts `delete-conversation` with the thread the
  * page has open. Deleting another thread answers a toast; deleting the open one
  * answers a redirect to where a bare visit lands, replacing the history entry
  * that named it, since its URL now answers 404. Canary: drop the `open` branch
@@ -253,12 +253,12 @@ describe.each<Surface>(["instance", "project"])("POST intent=delete-conversation
 });
 
 /**
- * Ruling 498: the Knowledge base panel's Undo posts `kb-correction-undo`, and
+ * Ruling 321: the Knowledge base panel's Undo posts `kb-correction-undo`, and
  * the route undoes the correction itself, no controller turn, for an org admin
  * only: the undo edits an org knowledge base. Canary: drop the org-admin check
  * and a member rewrites what every run reads.
  */
-describe("POST intent=kb-correction-undo on the project surface (ruling 498)", () => {
+describe("POST intent=kb-correction-undo on the project surface (ruling 321)", () => {
   it("an org admin undoes a correction; a member is refused and nothing changes", async () => {
     const { readFileSync } = await import("node:fs");
     const path = await import("node:path");
@@ -308,7 +308,7 @@ describe("POST intent=kb-correction-undo on the project surface (ruling 498)", (
 /**
  * U33-8 — the two controller PAGE loaders open the same thread the dock would.
  *
- * Ruling 121 gave the dock a continuity rule ("the newest thread of the scope
+ * Ruling 256 gave the dock a continuity rule ("the newest thread of the scope
  * you are standing in"); the page answered a blank composer, so one person on
  * one scope got two different answers from the two entry points. These pin the
  * page half of that rule: a bare URL opens the scope's newest thread, `?c=new`

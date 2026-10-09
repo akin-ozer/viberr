@@ -13,7 +13,7 @@ import type { DependencyCandidate } from "~/shared/dependency-candidates";
 import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
 
 /**
- * Ruling 131 (pass 34, Q34-11): the READ model for a task's `blockedBy` list.
+ * Ruling 55 (pass 34, Q34-11): the READ model for a task's `blockedBy` list.
  * Every entry is resolved to `open | done | failed | missing` at read time,
  * from the projections, never cached — so rebuild order cannot stale it and a
  * hand-moved or archived task cannot leave a dependent lying.
@@ -21,9 +21,9 @@ import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
  * Terminality is derived through `isTerminalStage` over the project's stage
  * list, never a positional "last stage id" guess. A task archived before it
  * was done is `failed`: a wait that can never complete without a person
- * editing the list (ruling 131(e)). One archived at the terminal stage is
+ * editing the list (ruling 55). One archived at the terminal stage is
  * `done`: archiving filed finished work away, and what waited on it got what
- * it waited for (ruling 651). Every entry names a task (ruling 503 retired the
+ * it waited for (ruling 55). Every entry names a task (ruling 55 retired the
  * goal-link spelling with the goal chains).
  */
 
@@ -125,7 +125,7 @@ export function deadDependencies(entries: readonly DependencyRender[]): Dependen
 }
 
 /**
- * Ruling 355: the hold sentence with the entries' live states read — the
+ * Ruling 58: the hold sentence with the entries' live states read — the
  * server's one door to `holdRefusal`, so every refusal names an entry that can
  * never complete instead of promising a release that cannot come.
  */
@@ -136,7 +136,7 @@ export function holdRefusalFor(
   held: readonly string[],
   verb: string,
 ): string {
-  // Rulings 355 and 356: the sentence reads the live states of the entries.
+  // Ruling 58: the sentence reads the live states of the entries.
   return holdRefusal(taskKey, resolveDependencies(db, slug, held), verb);
 }
 
@@ -145,7 +145,7 @@ export function listHeldTasks(
   db: DatabaseSync,
   slug: string,
 ): { taskKey: string; blockedBy: string[] }[] {
-  // SAFETY: `blocked_by_json` is TEXT NOT NULL DEFAULT '[]' (ruling 131) and
+  // SAFETY: `blocked_by_json` is TEXT NOT NULL DEFAULT '[]' (ruling 55) and
   // `task_key` TEXT NOT NULL on `task_projections`; only the held rows are read.
   const rows = db
     .prepare(
@@ -160,7 +160,7 @@ export function listHeldTasks(
 }
 
 /**
- * Ruling 300: which tasks a task's completion would RELEASE, directly and
+ * Ruling 263: which tasks a task's completion would RELEASE, directly and
  * down the chain.
  *
  * The controller asked for this from a decision queue: `list_decisions` gave it
@@ -176,7 +176,7 @@ export function listHeldTasks(
  * queue by.
  */
 /**
- * Ruling 336: what comes unblocked, split by WHEN.
+ * Ruling 263: what comes unblocked, split by WHEN.
  *
  * `direct` are the tasks whose last wait is this task — they move the moment it
  * completes. `downstream` are the rest of the transitive closure: each needs
@@ -197,7 +197,7 @@ export function listHeldTasks(
  * after another human decision" is wrong for the one job it has.
  */
 /**
- * Ruling 426: every open task that still WAITS on `taskKey`, in key order.
+ * Ruling 61: every open task that still WAITS on `taskKey`, in key order.
  *
  * Not `tasksReleasedBy`: that counts only the tasks whose LAST wait this is,
  * which is a release count. This is the question a lease asks before it holds
@@ -267,7 +267,7 @@ type CandidateRow = {
 };
 
 /**
- * Ruling 548: every task another task could be set to wait on, as the Blocked
+ * Ruling 59: every task another task could be set to wait on, as the Blocked
  * by picker lists them: the project's tasks but `taskKey` itself, newest key
  * first, each with the refusal the writer would give it as a new entry
  * (`DependencyCandidateBar`, in the order the writer checks). Null when
@@ -286,7 +286,7 @@ export function listDependencyCandidates(
 ): DependencyCandidate[] | null {
   // SAFETY: the five selected columns are TEXT NOT NULL (`task_key`, `title`,
   // `stage`, `blocked_by_json`) and INTEGER NOT NULL (`archived`) on
-  // `task_projections` (0001 + ruling 131).
+  // `task_projections` (0001 + ruling 55).
   const rows = db
     .prepare(
       `SELECT task_key, title, stage, archived, blocked_by_json FROM task_projections

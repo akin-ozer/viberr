@@ -1,13 +1,13 @@
 /**
- * Ruling 548: what the Details panel's Blocked by picker offers, and the
- * writer's refusals of a `blockedBy` entry (ruling 131) in the one wording
+ * Ruling 59: what the Details panel's Blocked by picker offers, and the
+ * writer's refusals of a `blockedBy` entry (ruling 55) in the one wording
  * both use: `validateDependencyRefs` and `setTaskDependencies` throw these
  * sentences, and the picker says them on the row before Save, so the words a
- * person meets there are the words Save would answer with (ruling 186's rule).
+ * person meets there are the words Save would answer with (ruling 56's rule).
  *
  * Its own module rather than `dependencies.ts`: the picker is a chunk of its
  * own, and that module's hold sentences would follow it into a chunk the task
- * page loads (ruling 457).
+ * page loads (ruling 11).
  */
 
 /** Why the writer would refuse a task as a NEW entry, in the order it checks. */

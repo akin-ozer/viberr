@@ -73,7 +73,7 @@ test("viberr-core board renders stage columns and the VIB-142 card", async ({
   await expect(page.getByText("VIB-142").first()).toBeVisible();
 });
 
-test("a lane scrolls only while its cards overflow it, and then reserves the dock's reach (ruling 661)", async ({
+test("a lane scrolls only while its cards overflow it, and then reserves the dock's reach (ruling 307)", async ({
   page,
 }) => {
   // The dock reserve (`--dock-clear`, 80px) was every lane's foot, so a lane
@@ -289,10 +289,10 @@ test("cross-stage drop onto a column body appends and the card changes column", 
     /\bdrop-preview\b/,
   );
 
-  // Triage stands before Ready, so this drop is a move BACK, and ruling 381
+  // Triage stands before Ready, so this drop is a move BACK, and ruling 47
   // has it ask why before anything is sent. This test predated that and waited
   // for a request the dialog now withholds (as the Done-stage tests below once
-  // did for ruling 53): the release writes nothing, the reason is typed, and
+  // did for ruling 97): the release writes nothing, the reason is typed, and
   // only the confirm submits it — on the same append slot.
   let reorders = 0;
   page.on("request", (r) => {
@@ -366,7 +366,7 @@ test("Escape cancels a lifted drag — no request, visuals cleared, card unmoved
   expect(reorders).toBe(0);
 });
 
-// Ruling 53 (R18-7/B1) put a confirm in front of the board drop, because
+// Ruling 97 (R18-7/B1) put a confirm in front of the board drop, because
 // "the most irreversible action in the product was also its most casual one".
 // This test predated that and still asserted the OLD flow — drop, POST, error
 // toast — so it waited for a request the confirm now withholds and timed out.
@@ -393,7 +393,7 @@ test("a Done-stage drop asks before it accepts, and dismissing writes nothing", 
   await liftOver(page, "VIB-142", done.locator(".col-body"));
   await page.mouse.up();
 
-  // The confirm names the task and what accepting does, per ruling 20 (R15-1).
+  // The confirm names the task and what accepting does, per ruling 97 (R15-1).
   // D3 (pass 20): the board now renders the ONE shared acceptance ceremony
   // (task-detail/accept-confirm), matched by its stable data-screen-label; its
   // aria-label carries the task key ("Accept by moving to Done: VIB-142").
@@ -447,7 +447,7 @@ test("confirming a Done-stage drop still meets the verdict gate, and the board s
 
   // Any error toast used to satisfy this, and one of them was the WRONG
   // refusal: VIB-142 really has delivered a revision, the board's ceremony
-  // disclosed "No delivered revision recorded." anyway, and ruling 88 made the
+  // disclosed "No delivered revision recorded." anyway, and ruling 97 made the
   // server refuse that stale echo ("VIB-142 changed after the accept dialog was
   // opened…") before the verdict gate this test is named for ever spoke. Pin the
   // gate's own words, so a board move refused for the wrong reason — or for a

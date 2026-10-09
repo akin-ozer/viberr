@@ -17,7 +17,7 @@ const temp = createTempDirs();
 afterAll(temp.cleanup);
 
 /**
- * Ruling 370: a profile's STATIC block is byte-identical across the tasks it
+ * Ruling 169: a profile's STATIC block is byte-identical across the tasks it
  * runs on, whatever order its grants were stored in, and nothing in it names a
  * task, a run or a path. The dynamic tail differs only where the task differs.
  * Two builders, the same two proofs each; the controller's is in
@@ -38,7 +38,7 @@ function dataRootWithKbs(): string {
   return dataRoot;
 }
 
-/** Ruling 506: what `correct_knowledge_doc` does to a document, appended to
+/** Ruling 169: what `correct_knowledge_doc` does to a document, appended to
  *  the house-style document `dataRootWithKbs` wrote. */
 function correctHouseStyle(dataRoot: string, addition: string): void {
   writeFileSync(
@@ -51,7 +51,7 @@ function correctHouseStyle(dataRoot: string, addition: string): void {
 const TASK_A = "/data/projects/acme/tasks/ACME-1/attachments";
 const TASK_B = "/data/projects/acme/tasks/ACME-2/attachments";
 
-describe("ruling 370: the specialist prefix", () => {
+describe("ruling 169: the specialist prefix", () => {
   const base = (dataRoot: string, task: string): SpecialistPersonaInput => ({
     profileId: "dev",
     backend: "claude",
@@ -80,7 +80,7 @@ describe("ruling 370: the specialist prefix", () => {
     const statics = a.static.join("");
     expect(statics).not.toContain("/data/projects");
     expect(statics).not.toContain("ACME-1");
-    // Ruling 283: the index names the document and its headings, not its text.
+    // Ruling 205: the index names the document and its headings, not its text.
     expect(statics).toContain("house-style (knowledge base)");
     expect(statics).toContain("# Style");
     expect(statics).not.toContain("KB-STYLE-MARKER");
@@ -110,8 +110,8 @@ describe("ruling 370: the specialist prefix", () => {
     expect(text).toContain("write_a, write_b (on alpha)");
   });
 
-  it("ruling 506: a correction inside a knowledge-base document leaves the static block as it was", () => {
-    // Ruling 498 writes agents' corrections straight into the document, so an
+  it("ruling 169: a correction inside a knowledge-base document leaves the static block as it was", () => {
+    // Ruling 210 writes agents' corrections straight into the document, so an
     // edit is routine, and the index is in this block. The exact byte count it
     // printed moved on every edit: each one cost every run of the profile its
     // cached prefix, and every resumed session its whole history.
@@ -127,7 +127,7 @@ describe("ruling 370: the specialist prefix", () => {
   });
 });
 
-describe("ruling 370: the operator prefix", () => {
+describe("ruling 169: the operator prefix", () => {
   function authority(overrides: Partial<OperatorAuthority> = {}): OperatorAuthority {
     return operatorAuthority(
       { "transition-to-done": "human", "accept-completion": "recommend" },
@@ -196,7 +196,7 @@ describe("ruling 370: the operator prefix", () => {
     expect(a.inputs.mcp.mounted).toEqual(["alpha", "zulu"]);
   });
 
-  it("ruling 506: a correction inside a knowledge-base document leaves the static block as it was", () => {
+  it("ruling 169: a correction inside a knowledge-base document leaves the static block as it was", () => {
     const dataRoot = dataRootWithKbs();
     const statics = () =>
       buildOperatorSystemPrompt(authority(), dataRoot, mcp, checkout("ACME-1"), true, ["get_task"])

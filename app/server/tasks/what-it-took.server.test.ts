@@ -30,7 +30,7 @@ import { whatItTookFor } from "./what-it-took.server";
 import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
- * Ruling 693: what a task took, read from its run rows and its own record.
+ * Ruling 83: what a task took, read from its run rows and its own record.
  *
  * This suite owns the figure's arithmetic and its sentences, at the read the
  * controller's `get_task` makes (`whatItTookFor`, through the store's own run
@@ -135,8 +135,8 @@ const REVIEWER = {
   roleHint: "Code review",
 } as const;
 
-describe("what a task took (ruling 693)", () => {
-  it("ruling 693: counts the runs that started, sums their time and their reported cost, and names what it left out", async () => {
+describe("what a task took (ruling 83)", () => {
+  it("ruling 83: counts the runs that started, sums their time and their reported cost, and names what it left out", async () => {
     // CANARY: (a) in `measuredInterval`, stop returning null for a run cut by
     // a restart and agent time jumps by the five-hour outage (335 for 35);
     // (b) start `measureRuns`' `costUsd` at 0 instead of null and the
@@ -199,7 +199,7 @@ describe("what a task took (ruling 693)", () => {
     expect(codexOnly.facts).toEqual(["1 run, 10m of agent time", "cost not reported"]);
   });
 
-  it("ruling 693: a run still going is a run that started, and its time and cost are said to be missing, not unreported", () => {
+  it("ruling 83: a run still going is a run that started, and its time and cost are said to be missing, not unreported", () => {
     // CANARY: drop the `continue` for a live run in `measureRuns` and it is
     // counted as a run that ended without reporting a cost: VIB-1 reads
     // "$1.00, 1 run reported no cost" and VIB-2 "cost not reported", for a
@@ -221,7 +221,7 @@ describe("what a task took (ruling 693)", () => {
     expect(onlyLive.notes).toEqual(["1 run is still going; its time and cost are not counted yet."]);
   });
 
-  it("ruling 693: says the run record is gone when agents ran here and no run row is left, and not for a task that was only relayed to", async () => {
+  it("ruling 83: says the run record is gone when agents ran here and no run row is left, and not for a task that was only relayed to", async () => {
     // CANARY: (a) set `recordKept` to true whatever the timeline holds and a
     // rebuilt database reads as a task nobody ran, with no word that the
     // runs are unknown; (b) take any agent's entry as the trace of a run
@@ -252,7 +252,7 @@ describe("what a task took (ruling 693)", () => {
     ]);
 
     // VIB-2 waits on VIB-1's numbers, and VIB-1's developer relays them
-    // before anything has run on VIB-2 (ruling 488).
+    // before anything has run on VIB-2 (ruling 71).
     seedTask("VIB-2");
     expect(
       (
@@ -276,7 +276,7 @@ describe("what a task took (ruling 693)", () => {
     expect(relayedTo.notes).toEqual([]);
   });
 
-  it("ruling 693: who spent it is the first eight agents by agent time, with the count of the rest", () => {
+  it("ruling 83: who spent it is the first eight agents by agent time, with the count of the rest", () => {
     // CANARY: drop the `slice(0, BY_AGENT_MAX)` in `tookByAgent` and a task
     // ten agents ran on lists all ten, so the figure grows with the roster
     // (and `moreAgents` still says two more exist than are shown).
@@ -310,7 +310,7 @@ describe("what a task took (ruling 693)", () => {
     expect(figure.runs.total).toBe(10);
   });
 
-  it("ruling 693: a person is asked once per decision, whoever raised it, and a declined card is not a round", async () => {
+  it("ruling 83: a person is asked once per decision, whoever raised it, and a declined card is not a round", async () => {
     // CANARY: (a) reword the decision entry's lead in `resolvePacket`'s
     // default arm ("**Decided:**") and rounds reads 2 for 4; (b) drop the
     // declined-title exclusion in `whatItTook` and it reads 5; (c) stop
@@ -394,7 +394,7 @@ describe("what a task took (ruling 693)", () => {
     ]);
   });
 
-  it("ruling 693: a decision waiting for the goal edit it chose is one round, and one that offers acceptance is a round only when answered another way", async () => {
+  it("ruling 83: a decision waiting for the goal edit it chose is one round, and one that offers acceptance is a round only when answered another way", async () => {
     // CANARY: (a) count every open packet (`file.packet !== null` alone) and
     // the decision kept open for its goal edit reads 2 rounds for 1; (b)
     // count an open packet that offers acceptance and the figure reads "asked
@@ -422,7 +422,7 @@ describe("what a task took (ruling 693)", () => {
     // The acceptance decision, on two delivered tasks: one the person
     // accepts, one they send back through the same card.
     const offer = async (taskKey: string) => {
-      // Delivered as a file, kept as it was delivered (ruling 597).
+      // Delivered as a file, kept as it was delivered (ruling 86).
       seedTask(taskKey, { stage: "review", validation: "healthy", deliveredAt: at("09:30") });
       writeTaskAttachment(store.slug, taskKey, "plan.md", new TextEncoder().encode("# Plan\n"), store.dataRoot);
       keepDelivery(store.slug, taskKey, at("09:30"), ["plan.md"], store.dataRoot);
@@ -472,7 +472,7 @@ describe("what a task took (ruling 693)", () => {
     expect(took("VIB-3").asked).toEqual({ rounds: 1, byAgents: 0, open: false });
   });
 
-  it("ruling 693: sent back counts each reviewer's request for changes and each move back by a person", async () => {
+  it("ruling 83: sent back counts each reviewer's request for changes and each move back by a person", async () => {
     // CANARY: (a) read `verdicts[]` instead of the quality notes and the
     // approval on the same delivery erases the objection (0 for 1); (b) count
     // every stage move of a person's, not the ones to an earlier stage, and
@@ -532,7 +532,7 @@ describe("what a task took (ruling 693)", () => {
     vi.setSystemTime(new Date(at("09:40")));
     await review("VIB-1", "request_changes", "The retry path is unhandled: a second failure loses the job.");
     // Asked again before the developer has run: the same objection on the
-    // same untouched delivery sends nothing back a second time (ruling 416).
+    // same untouched delivery sends nothing back a second time (ruling 92).
     vi.setSystemTime(new Date(at("09:45")));
     await review("VIB-1", "request_changes", "Still unhandled, and the timeout is not configurable either.");
     expect(timeline()[0]).toMatchObject({ type: "quality", title: "Changes requested, on unchanged work" });
@@ -564,13 +564,13 @@ describe("what a task took (ruling 693)", () => {
 
     // Three objections that bound to no delivery, each recorded in words
     // under a title that says so. Nothing was sent back by any of them.
-    // Nothing delivered yet (ruling 583).
+    // Nothing delivered yet (ruling 245).
     seedTask("VIB-2");
     await review("VIB-2", "request_changes", "There is nothing here to review yet.", "none");
-    // The reviewer made the delivery it is judging (ruling 556).
+    // The reviewer made the delivery it is judging (ruling 245).
     seedTask("VIB-3", delivered("reviewer"));
     await review("VIB-3", "request_changes", "My own patch misses the retry path.");
-    // A newer delivery landed while it was reading the one before (ruling 544).
+    // A newer delivery landed while it was reading the one before (ruling 84).
     seedTask("VIB-4", delivered("developer"));
     await review("VIB-4", "request_changes", "The retry path is unhandled.", "rev_0");
     for (const [taskKey, why] of [
@@ -586,7 +586,7 @@ describe("what a task took (ruling 693)", () => {
     }
   });
 
-  it("ruling 693: wall time runs from filing to the first delivery and to acceptance, split into agent time and time waiting on a person", async () => {
+  it("ruling 83: wall time runs from filing to the first delivery and to acceptance, split into agent time and time waiting on a person", async () => {
     // CANARY: (a) drop the run-overlap subtraction in `spanTo` and the comment
     // made while the reviewer ran counts that run as waiting (3h for 1h 30m);
     // (b) skip the run rows in `firstDeliveryOf` and a reworked task's first
@@ -699,7 +699,7 @@ describe("what a task took (ruling 693)", () => {
     expect(outside.facts.filter((fact) => fact.startsWith("first delivery"))).toEqual([]);
   });
 
-  it("ruling 693: the stretch a run cut by a restart or still going may have been running is waiting on nobody, and no agent time either", async () => {
+  it("ruling 83: the stretch a run cut by a restart or still going may have been running is waiting on nobody, and no agent time either", async () => {
     // CANARY: subtract the measured runs alone from a person's wait (pass
     // `busy` for `occupied` in `whatItTook`) and the hour the developer ran
     // before the restart cut it reads as waiting on the person who commented

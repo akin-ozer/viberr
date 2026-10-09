@@ -102,7 +102,7 @@ function schemeEndsAt(text: string, end: number): boolean {
 }
 
 /**
- * Ruling 690: whether a text holds what reads as a credential, by the two
+ * Ruling 82: whether a text holds what reads as a credential, by the two
  * shapes the scrub below removes on sight: a token by its prefix, and a
  * password in a URL's userinfo. A kept source is stored as it is and every
  * project member can open it, so the keep refuses on these rather than
@@ -211,7 +211,7 @@ export function redactGitOutput(
  * R20-3 (F20-4): one redacted SENTENCE from a Claude/Codex provider failure,
  * for a packet observation line, a fenced timeline block and a log field.
  *
- * Ruling 69's argument transfers verbatim from git to the model runtimes: the
+ * Ruling 219's argument transfers verbatim from git to the model runtimes: the
  * credential never lives in argv (both adapters get it on the run's spawn env,
  * assembled per run from its credential principal), so the same value+pattern scrub plus
  * control-character stripping makes a provider's own complaint safe to surface.
@@ -220,7 +220,7 @@ export function redactGitOutput(
  * the LAST non-empty line (the provider states its verdict at the tail, same as
  * git — see MAX_DETAIL_CHARS's reasoning), and clamp shorter still, because the
  * consumers (a packet observation, the 240-char delivery-reason convention from
- * ruling 69) want one sentence, not eight lines.
+ * ruling 219) want one sentence, not eight lines.
  */
 export const PROVIDER_TEXT_CHARS = 240;
 

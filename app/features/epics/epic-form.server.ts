@@ -1,6 +1,6 @@
 import type { UpdateEpicInput } from "~/server/tasks/epic-actions.server";
 
-/** The fields an epic's create or edit form carries (ruling 503). */
+/** The fields an epic's create or edit form carries (ruling 272). */
 export type EpicFormFields = Omit<UpdateEpicInput, "projectSlug" | "epicId">;
 
 /**

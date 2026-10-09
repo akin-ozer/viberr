@@ -1,7 +1,7 @@
 /**
  * U33-8: `?c=new` — the blank composer, asked for by name.
  *
- * Ruling 121 gave the DOCK a continuity rule: with nothing selected it opens
+ * Ruling 256 gave the DOCK a continuity rule: with nothing selected it opens
  * the newest thread of the scope you are standing in. This page opened an
  * empty composer instead, so the same person, on the same scope, got a
  * different answer depending on which entry point they used. The page now
@@ -11,7 +11,7 @@
  * here, `selectedConversationId` in controller-query.server.ts resolves it for
  * both route loaders, and controller-page.tsx writes it into the New link.
  * The dock component keeps its own `NEW_THREAD` spelling, because importing
- * this leaf would add a module to its ruling-457 closure budget.
+ * this leaf would add a module to its ruling-11 closure budget.
  *
  * It lives in this import-free leaf so the server queries can read it without
  * importing the page component.

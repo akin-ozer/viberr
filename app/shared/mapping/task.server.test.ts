@@ -95,7 +95,7 @@ const WAITS_ON_VIB_2: DependencyRender[] = [
   { ref: "VIB-2", label: "VIB-2", state: "open", taskKey: "VIB-2" },
 ];
 
-describe("ruling 131: the summary carries the caller's resolved dependency list", () => {
+describe("ruling 55: the summary carries the caller's resolved dependency list", () => {
   it("passes the resolved entries through verbatim (the mapper resolves nothing itself)", () => {
     // Canary: omit `blockedBy` from the mapper's return object.
     const entries = [
@@ -115,9 +115,9 @@ describe("ruling 131: the summary carries the caller's resolved dependency list"
 
 /**
  * Projected facts the summary carries through as they are, each one a surface
- * reads: the task's epic (ruling 503), a force-accept (N20-14), the delivered
+ * reads: the task's epic (ruling 272), a force-accept (N20-14), the delivered
  * revision the board's acceptance ceremony discloses and echoes back for the
- * server to compare with the live task (rulings 53/88), and degraded runtime
+ * server to compare with the live task (ruling 97), and degraded runtime
  * continuity (D4). Each is null while its column is.
  */
 describe("the summary carries the projected facts its surfaces read", () => {
@@ -212,7 +212,7 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(summarize(r, false).displayReadiness).toBe("blocked");
   });
 
-  it("ruling 138: a decided edit_goal packet reads 'goal edit pending' over input_required and a stored blocked, never over agent_working or a terminal state", () => {
+  it("ruling 63: a decided edit_goal packet reads 'goal edit pending' over input_required and a stored blocked, never over agent_working or a terminal state", () => {
     // Canary: make the goal-edit branch return `readiness` unchanged and the
     // input case reads "input_required" (the pill row is a TYPE, not a runtime,
     // canary).
@@ -281,7 +281,7 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(summarize(row({ packet_json: inputPacket }), false).packet?.goalDraft).toBeUndefined();
   });
 
-  it("ruling 471: the render names the option each direct acceptance answers, so the dialog never guesses", () => {
+  it("ruling 316: the render names the option each direct acceptance answers, so the dialog never guesses", () => {
     // Canary: drop the two `acceptanceAnswerOf` lines in `mapPacket` and the
     // first asserts read undefined (the dialog would say "Withdraws").
     const packet = (options: unknown[], extra: { awaiting?: "goal_edit" } = {}) =>
@@ -328,7 +328,7 @@ describe("displayReadiness derivation (F7-UI3)", () => {
     expect(decided?.acceptAnswersWith).toBeUndefined();
   });
 
-  it("ruling 478(e) (F40-31): an agent's question names the agent the answer goes back to", () => {
+  it("ruling 68 (F40-31): an agent's question names the agent the answer goes back to", () => {
     // Canary: drop the `answerTo` line in `mapPacket` and the card labels the
     // box "Note for the operator" again.
     const question = (extra: { askedBy?: string; kind?: string }) =>
@@ -365,20 +365,20 @@ describe("displayReadiness derivation (F7-UI3)", () => {
 });
 
 /**
- * Ruling 157 (pass 35, F35-8). A stored `blocked` with no open packet and no
+ * Ruling 54 (pass 35, F35-8). A stored `blocked` with no open packet and no
  * dependency list is a HOLD (`hold_runtime_debug`, the refused arm of a
  * collision ceremony), and the server lifts it on the record when a person
  * starts the operator or any dispatch starts a run. The display says the same
  * thing: while an agent carries such a hold the card reads "agent working",
  * never "blocked" and "agent working" on one line (KNC-25 live, 15:12Z). A
  * diagnostics floor (derived `blocked` over a stored `ready`), a dependency
- * hold (ruling 131's floor) and an open `blocked` packet all keep reading
+ * hold (ruling 55's floor) and an open `blocked` packet all keep reading
  * `blocked`: a run outranks none of those.
  *
  * Canary: drop the first-priority branch in `deriveDisplayReadiness` and the
  * first assert is red.
  */
-describe("ruling 157: a packet-less, list-less stored block carried by an agent reads 'agent working'", () => {
+describe("ruling 54: a packet-less, list-less stored block carried by an agent reads 'agent working'", () => {
   it("lifts a hold on the display while an agent carries it", () => {
     const held = row({ readiness: "blocked", stored_readiness: "blocked", waiting: "agent" });
     expect(summarize(held, false).displayReadiness).toBe("agent_working");
@@ -398,7 +398,7 @@ describe("ruling 157: a packet-less, list-less stored block carried by an agent 
       body: "",
       options: [{ kind: "hold_runtime_debug", t: "Hold", d: "", rec: false }],
     });
-    // Ruling 131's floor: the list is the block, and a run does not answer it.
+    // Ruling 55's floor: the list is the block, and a run does not answer it.
     expect(summarize(held, false, WORKFLOW, WAITS_ON_VIB_2).displayReadiness).toBe("blocked");
     // A diagnostic floored the derived value over a stored `ready`: not a hold.
     expect(
@@ -494,7 +494,7 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
   });
 
   /**
-   * Ruling 276 (pass 37, F37-109): `prRefSchema` keeps "never read" (the key is
+   * Ruling 237 (pass 37, F37-109): `prRefSchema` keeps "never read" (the key is
    * absent) apart from "read, and GitHub reported no check runs" (`total: 0`),
    * and says so in its own comment. `mapPrChecks` collapses both to null —
    * correctly, a display has nothing to draw either way — and every reader
@@ -503,7 +503,7 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
    * not tell which; "no CI is configured" and "we have not looked" ask for
    * opposite next moves.
    */
-  it("ruling 276: `never read` and `GitHub reported none` are told apart", () => {
+  it("ruling 237: `never read` and `GitHub reported none` are told apart", () => {
     // CANARY: return `pr?.checks != null` without the undefined check, or read
     // it off `mapPrChecks`, and the two collapse again.
     expect(prChecksRead(pr())).toBe(false);
@@ -519,7 +519,7 @@ describe("mapPrChecks / mapPrReview (P13-D-28)", () => {
     expect(prChecksRead(null)).toBe(false);
   });
 
-  it("ruling 360: a refused read is mapped only while nothing was ever read", () => {
+  it("ruling 237: a refused read is mapped only while nothing was ever read", () => {
     // CANARY: return the refusal regardless of `prChecksRead`.
     const refusal = {
       status: 403,
@@ -629,7 +629,7 @@ describe("isAtAcceptanceBoundary mirrors the server's stage gate", () => {
 
   it("honors a custom graph with a SECOND edge into the terminal stage", () => {
     // The server allows any declared edge into terminal, not just the resolved
-    // review stage — refusing this would be the forked mapping rulings 12/14 ban.
+    // review stage — refusing this would be the forked mapping rulings 237/297 ban.
     expect(
       isAtAcceptanceBoundary("ready", STAGES, [
         ...WORKFLOW,
@@ -786,7 +786,7 @@ describe("withLiveAgentIdentities (live deployment wins over the engage-time sna
 });
 
 /**
- * Ruling 225 (F37-45): the card names the instant a clock-resting task picks
+ * Ruling 45 (F37-45): the card names the instant a clock-resting task picks
  * itself back up. The read boundary is where a corrupt value must stop, the
  * same rule `parseTaskLabels` follows.
  */
@@ -836,7 +836,7 @@ describe("resumesAt: the schedule a clock-resting task picks itself back up on",
   });
 });
 
-describe("ruling 349: withLiveRun reads the run row into the display state", () => {
+describe("ruling 44: withLiveRun reads the run row into the display state", () => {
   // A summary the mapper itself derived, so the test reads the real
   // `agent_working` and not a hand-written one.
   const agentCarried = summarize(row({ waiting: "agent", readiness: "ready" }), false);
@@ -865,7 +865,7 @@ describe("ruling 349: withLiveRun reads the run row into the display state", () 
 });
 
 /**
- * Ruling 405(b): every surface reads the verdict's head pin, or two of them
+ * Ruling 315(d): every surface reads the verdict's head pin, or two of them
  * disagree.
  *
  * `conflictingPrBlockedReason` (the acceptance gate), the GitHub page and the
@@ -875,7 +875,7 @@ describe("ruling 349: withLiveRun reads the run row into the display state", () 
  * task through. Found by checking my own fix's consumers, which is the third
  * time this pass a change reached some of them and not all.
  */
-describe("ruling 405(b): mapPrMergeable honours the head the verdict was measured on", () => {
+describe("ruling 315(d): mapPrMergeable honours the head the verdict was measured on", () => {
   const pr = (mergeable: "conflicting" | "clean", at: string | null, headSha: string) => {
     const ref = {
       number: 15,

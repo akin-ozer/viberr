@@ -1,7 +1,7 @@
 import type { PacketOption, PacketOptionKind } from "~/schemas/task-file.schema";
 
 /**
- * Ruling 471: which option of the open decision a DIRECT human acceptance
+ * Ruling 100: which option of the open decision a DIRECT human acceptance
  * answers, or null when it answers none. Client-safe, because the server's
  * write and the loader's view of the accept dialog both read it.
  *

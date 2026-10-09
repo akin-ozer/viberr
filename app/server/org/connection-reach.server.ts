@@ -15,7 +15,7 @@ import {
 } from "~/shared/connection-reach";
 
 /**
- * Ruling 463 (pass 40, F40-6): which repositories a connection's token
+ * Ruling 222 (pass 40, F40-6): which repositories a connection's token
  * actually reaches.
  *
  * The connection card used to read "PAT ····k3ui · 3 public repos": the
@@ -77,8 +77,8 @@ export function parseStoredReach(raw: string | null): StoredReach | null {
 }
 
 /**
- * Ruling 463's dated note (pre-merge review R-seams-4): a repository Viberr
- * has just created through this token (ruling 462) is one the token reaches,
+ * Ruling 222's dated note (pre-merge review R-seams-4): a repository Viberr
+ * has just created through this token (ruling 225) is one the token reaches,
  * so a `read` reach gains it; `list_github_connections` says a repository
  * missing from a read reach is one the token cannot see. An `unknown` reach
  * stays unknown (one entry is not a count), and one already listing it

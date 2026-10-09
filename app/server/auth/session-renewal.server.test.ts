@@ -16,7 +16,7 @@ import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-supp
  * captures the header (returnHeaders: true), and root's
  * `sessionRenewalMiddleware` forwards it onto the response. Both are pinned
  * through the middleware: drop the capture and it has nothing to forward.
- * Ruling 457 moved the forwarding from the root loader to the middleware: root
+ * Ruling 11 moved the forwarding from the root loader to the middleware: root
  * no longer re-runs on live events and navigations (RF-7), and the day's one
  * renewal lands on whichever GET first asks once it is due, often a layout's
  * `.data` that root sits out.
@@ -83,7 +83,7 @@ describe("F10-17: rolling-session renewal reaches the browser", () => {
     expect(response.headers.get("Content-Type")).toBe("application/json");
   });
 
-  it("forwards it when root's loader sits the request out (ruling 457, RF-7)", async () => {
+  it("forwards it when root's loader sits the request out (ruling 11, RF-7)", async () => {
     // A layout `.data` without root: `_routes` names the layout alone, as a
     // live revalidation now does. The workspace loader resolves the session.
     const { loader } = await import("~/routes/project");

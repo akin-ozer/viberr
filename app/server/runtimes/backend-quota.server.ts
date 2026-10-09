@@ -32,7 +32,7 @@ import {
  *
  * ## D5 (pass 31): the exhaustion the card could not see
  *
- * The live `rate_limit_event` channel is CLAUDE-only. (Since ruling 604 a
+ * The live `rate_limit_event` channel is CLAUDE-only. (Since ruling 161(b) a
  * Codex run's rollout supplies live readings too, but only once it makes a
  * model call.) A Codex subscription that is already spent never emits one — it fails the run with a sentence naming
  * the limit and the date it reopens ("You've hit your usage limit … try again
@@ -55,7 +55,7 @@ const CREDENTIAL_REFUSED_KEY_PREFIX = "backendCredentialRefused.";
 export const BACKENDS = ["claude", "codex"] as const;
 export type QuotaBackend = (typeof BACKENDS)[number];
 
-/** Ruling 130(d) (pass 34): WHOSE account a record is about. Under ruling 127
+/** Ruling 160(a) (pass 34): WHOSE account a record is about. Under ruling 137
  *  a run bills one person's credential, so an instance-wide row that named no
  *  principal presented one person's refusal as everyone's. Stripped from the
  *  unauthenticated health body (`stripQuotaPrincipals`); shown to org admins
@@ -77,9 +77,9 @@ const readingSchema = z.object({
   /** Unix seconds when the window resets; null when omitted. */
   resetsAt: z.number().nullable(),
   isUsingOverage: z.boolean(),
-  /** Ruling 608: every window the provider reported with this reading,
+  /** Ruling 161(b): every window the provider reported with this reading,
    *  shortest first (Codex's five-hour and weekly windows, and the plan
-   *  windows a Claude run's CLI reports, ruling 611); the fields above are the
+   *  windows a Claude run's CLI reports, ruling 161(a)); the fields above are the
    *  binding one. Absent on a reading that knew one. */
   windows: z
     .array(
@@ -108,7 +108,7 @@ const exhaustionSchema = z.object({
   /** How `resetsAt` was derived — `"exact"` for a machine instant the provider
    *  emitted (or the SDK's own `resetsAt`), `"prose"` for one reconstructed
    *  from wall-clock words whose timezone it never named, `"clock"` (ruling
-   *  130(d)) for a UTC wall-clock time ("resets 11:50am (UTC)") resolved to the
+   *  160(a)) for a UTC wall-clock time ("resets 11:50am (UTC)") resolved to the
    *  next occurrence at or after the observation. Records written before this
    *  field existed parse as null and are treated exactly like `"prose"`:
    *  unknown provenance gets the conservative handling, never the precise one. */
@@ -126,14 +126,14 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * F32-4 (pass 32): the provider REFUSED a run on this backend for its
  * CREDENTIAL — an expired refresh token, a revoked key, a 401. The connection
  * counts on the health probe and `userBackendHealth` judge row/file PRESENCE
- * only (ruling 78: no synthetic token probe; ruling 127 made the reading
+ * only (ruling 149: no synthetic token probe; ruling 137 made the reading
  * per-person without changing that), so after a real refusal both kept
  * answering "connected" and the controller told the admin the credential was
  * fine ten minutes after a run had died on it. Same shape as
  * exhaustion: derived from the failed run, carrying its id and the provider's
  * own sentence; retired by the next run that COMPLETES on the backend (the real
  * run is the re-probe) or by the person it names changing that credential
- * (ruling 165, `retireBackendRecordsFor`), and by nothing else — a dead
+ * (ruling 160(b), `retireBackendRecordsFor`), and by nothing else — a dead
  * credential does not heal with time.
  */
 const credentialRefusalSchema = z.object({
@@ -154,22 +154,22 @@ export interface BackendQuotaRow {
   /**
    * F32-4: set while the last thing this backend told us was "your credential
    * is not accepted". Cleared by a run that completes on the backend, or by the
-   * person it names changing their credential on it (ruling 165).
+   * person it names changing their credential on it (ruling 160(b)).
    */
   credentialRefused: BackendCredentialRefusal | null;
   /**
    * D5: set while the last thing this backend told us was "you are over your
    * limit". Cleared by the only honest re-probe there is — a real run that
-   * completes (the same rule model availability uses, ruling 19) — by the
-   * person it names changing their credential on the backend (ruling 165), by
-   * the packet option that states the window has reset (ruling 152(c)), and
+   * completes (the same rule model availability uses, ruling 220) — by the
+   * person it names changing their credential on the backend (ruling 160(b)), by
+   * the packet option that states the window has reset (ruling 151), and
    * dropped by the reader once the provider's own reset instant has passed
    * (plus a grace window for a prose-derived one) or, for a record that named
    * no reset at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
    */
   exhausted: BackendQuotaExhaustion | null;
   /**
-   * Ruling 481(d) (F40-50): the window `reading` describes has reset since it
+   * Ruling 161(c) (F40-50): the window `reading` describes has reset since it
    * was read (`readingWindowReset`). The reading is kept, as history, but no
    * surface presents its utilization as current: Profile and Insights word it
    * in the past tense and draw no bar.
@@ -178,7 +178,7 @@ export interface BackendQuotaRow {
 }
 
 /**
- * Ruling 481(d) (F40-50): has the window this reading was read in reset?
+ * Ruling 161(c) (F40-50): has the window this reading was read in reset?
  *
  * Only an exhaustion used to age against its reset (`exhaustionExpired`); a
  * reading was returned untouched, so on an idle instance Profile said "The
@@ -197,10 +197,10 @@ function readingWindowReset(
 }
 
 /**
- * Ruling 612: a reading ages window by window.
+ * Ruling 161(c): a reading ages window by window.
  *
- * Since rulings 608 and 611 a reading lists every window it knows, and ruling
- * 481(d) aged it as one piece by its binding window's reset. So once the
+ * Since rulings 161(b) and 161(a) a reading lists every window it knows, and ruling
+ * 161(c) aged it as one piece by its binding window's reset. So once the
  * binding five-hour window reset, Profile and Insights read "five hour window
  * reset" and dropped the weekly figure beside it, which was still current; and
  * a lapsed window kept the figure of a window that is over. Each window now
@@ -394,7 +394,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
     const at = epoch[1]!.length >= 12 ? Math.round(n / 1000) : Math.round(n);
     return { at, precision: "exact" };
   }
-  // Ruling 130(d): the UTC wall-clock shape Claude's session-limit refusal
+  // Ruling 160(a): the UTC wall-clock shape Claude's session-limit refusal
   // uses ("resets 11:50am (UTC)"): the next occurrence at or after the
   // observation, precision `clock` (a real UTC time, rendered to the minute,
   // retired with the prose grace because the day is inferred).
@@ -418,7 +418,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
   if (ms != null && Number.isFinite(ms)) {
     return { at: Math.round(ms / 1000), precision: "prose" };
   }
-  // G35-4 (pass 35, ruling 152(c)): the TIME-ONLY shape a five-hour Codex
+  // G35-4 (pass 35, ruling 151): the TIME-ONLY shape a five-hour Codex
   // window refuses with ("try again at 6:18 PM"): no month, no day, no zone.
   // The Codex CLI prints the wall clock of the PROCESS that ran it (verified
   // live: "6:18 PM" in a UTC container was 18:18Z), so the hour is resolved
@@ -441,7 +441,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
   return { at: Math.round(local.getTime() / 1000), precision: "clock" };
 }
 
-/** Ruling 130(d): the rows without their principal, for the unauthenticated
+/** Ruling 160(a): the rows without their principal, for the unauthenticated
  *  health body (which documents "never data"). */
 export function stripQuotaPrincipals(rows: BackendQuotaRow[]): BackendQuotaRow[] {
   const strip = <T extends { credentialUserId: string | null; credentialLabel: string | null }>(
@@ -492,7 +492,7 @@ export function recordBackendQuotaExhaustion(
 
 /**
  * D5: a run on this backend just COMPLETED, so the account is demonstrably not
- * refusing work any more. That real run is the re-probe (ruling 19's rule for
+ * refusing work any more. That real run is the re-probe (ruling 220's rule for
  * model availability, applied to the same kind of claim) — there is no synthetic
  * check, and none is wanted. Best-effort.
  */
@@ -544,7 +544,7 @@ export function clearBackendCredentialRefusal(
 }
 
 /**
- * Ruling 165: the person the records name changed their credential slot on
+ * Ruling 160(b): the person the records name changed their credential slot on
  * this backend — a confirmed sign-in, a pasted key, a disconnect, an account
  * removal — so an exhaustion or credential refusal observed on the PREVIOUS
  * credential is no longer evidence about the one that bills the next run.
@@ -553,11 +553,11 @@ export function clearBackendCredentialRefusal(
  * through and the notice contradicted them, because a completed run was the
  * record's only retirement short of the instant the OLD account had named.
  *
- * Scoped like the dispatch hold (ruling 146): only a record naming THIS person
+ * Scoped like the dispatch hold (ruling 151): only a record naming THIS person
  * is retired. A record naming somebody else, or nobody (a row older than
- * ruling 130(d)), is untouched — nothing here knows whose account it was
+ * ruling 160(a)), is untouched — nothing here knows whose account it was
  * about. Signing back into the SAME spent account retires it too: Viberr never
- * stores the vendor identity behind a sign-in (ruling 127), so it cannot tell,
+ * stores the vendor identity behind a sign-in (ruling 137), so it cannot tell,
  * and one refused run re-records the window, which is cheaper than a notice
  * that lies about a new account. The dispatch hold rests on the same record,
  * so it lifts with it: the next run on the new credential is the real probe.
@@ -583,8 +583,8 @@ export function retireBackendRecordsFor(
     if (refused?.credentialUserId === credentialUserId) {
       deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
     }
-    // Ruling 294 (F37-129): the UTILIZATION READING goes with the account too,
-    // and it did not. Ruling 165's own sentence is "the refusal Viberr observed
+    // Ruling 161 (F37-129): the UTILIZATION READING goes with the account too,
+    // and it did not. Ruling 160(b)'s own sentence is "the refusal Viberr observed
     // on the slot goes with it" — and a reading is an observation ABOUT that
     // slot in exactly the same way. It was applied to two of the three records
     // this module keeps and not the third, which is this pass's shape a fourth
@@ -666,10 +666,10 @@ function exhaustionExpired(
  * unknown), and a record that named no instant at all expires on age
  * (`UNDATED_EXHAUSTION_TTL_MS`) rather than waiting for a completed run. The
  * same instant marks a reading whose own window has reset
- * (`readingWindowReset`, ruling 481(d)): the one home Profile and Insights
+ * (`readingWindowReset`, ruling 161(c)): the one home Profile and Insights
  * both read, so neither presents a closed window as current. A reading that
  * lists its windows ages each one on its own reset first (`agedReading`,
- * ruling 612).
+ * ruling 161(c)).
  */
 export function latestBackendRateLimits(
   db: DatabaseSync,
@@ -700,7 +700,7 @@ export function latestBackendRateLimits(
 }
 
 /**
- * G35-4 / ruling 152(c) (pass 35): the hold a dispatch must honour.
+ * G35-4 / ruling 151 (pass 35): the hold a dispatch must honour.
  *
  * Live, nine Codex deliveries were dispatched one after another into a window
  * the instance had already recorded as spent: each paid a clone, an adapter
@@ -715,7 +715,7 @@ export function latestBackendRateLimits(
  * SHOWING a spent window too long is cheap and holding a dispatch too long
  * is not).
  *
- * Ruling 146: a refusal is a statement about ONE person's account, so a hold
+ * Ruling 151: a refusal is a statement about ONE person's account, so a hold
  * applies to the account it names. Pass the principal the dispatch would
  * bill: a record naming a different person holds nothing for this one, and a
  * record naming nobody (an older row) holds every dispatch on the backend.
@@ -740,7 +740,7 @@ export function backendDispatchHold(
   backend: QuotaBackend,
   input: {
     nowMs?: number;
-    /** The user the dispatch bills (ruling 127); the hold is scoped to it. */
+    /** The user the dispatch bills (ruling 137); the hold is scoped to it. */
     credentialUserId: string;
   },
 ): BackendDispatchHold | null {

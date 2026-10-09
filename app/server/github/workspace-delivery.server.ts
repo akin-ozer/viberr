@@ -46,7 +46,7 @@ import { errorMessage } from "~/shared/errors";
 
 /** The github cache a workspace-side collision note writes: the base cache's
  *  footprint plus the unowned PR, carrying the reconciler's foreign-head
- *  record only while it stands (ruling 161). */
+ *  record only while it stands (ruling 234). */
 function collisionCache(base: GithubCache | null, unownedPr: number): GithubCache {
   const cache: GithubCache = {
     commits: base?.commits ?? [],
@@ -255,7 +255,7 @@ function parseOneline(stdout: string): { sha: string; msg: string }[] {
 }
 
 /**
- * Ruling 135: relate origin's copy of the task branch (the PR head `gh`
+ * Ruling 243: relate origin's copy of the task branch (the PR head `gh`
  * reported) to the workspace revision, from the workspace's own history.
  * `behind`: the PR head is an ancestor of the revision, a plain push
  * fast-forwards. `diverged`: both are known here and neither contains the
@@ -263,7 +263,7 @@ function parseOneline(stdout: string): { sha: string; msg: string }[] {
  * cannot be related. Null when there is nothing to record: no revision, no
  * head, a settled PR, a `verified` revision, or a head that already carries
  * the revision (equal, or the revision is an ancestor of the head, which is
- * ruling 42's drift and not this fact).
+ * ruling 96's drift and not this fact).
  */
 async function classifyUnpushedRevision(
   exec: CommandExec,
@@ -571,13 +571,13 @@ export async function reconcileWorkspaceDelivery(
         // here re-armed the "branch name collision" note on the next poll tick.
         unownedPr: fm.github?.unownedPr ?? null,
       };
-      // Ruling 161: the foreign-head record is the reconciler's; carried the
+      // Ruling 234: the foreign-head record is the reconciler's; carried the
       // same way, and only while it stands (an absent key stays absent).
       if (fm.github?.foreignHead) branchPatch.github.foreignHead = fm.github.foreignHead;
       commitsChanged = true;
     }
     if (Object.keys(branchPatch).length > 0) {
-      // Ruling 137: the write that mints a new work revision withdraws the
+      // Ruling 99: the write that mints a new work revision withdraws the
       // acceptance offers authored against the old one, inside the same
       // locked write, and keeps the branch-linked event it always wrote.
       const revisionCause: OfferWithdrawalCause | null = workRevisionPatch
@@ -621,7 +621,7 @@ export async function reconcileWorkspaceDelivery(
           actor: { userId: null, label: "system:workspace-reconcile" },
         });
       }
-      // Ruling 482 (F40-52): a new head on a task whose pull request stands is
+      // Ruling 104 (F40-52): a new head on a task whose pull request stands is
       // the delivered head moving before verdicts count, so the project's
       // gates are queued on it now. Before the first delivery the delivery
       // itself asks.
@@ -749,13 +749,13 @@ export async function reconcileWorkspaceDelivery(
             samePr && cur.state === "accepted" && liveState === "review"
               ? "accepted"
               : liveState;
-          // Ruling 135: a refresh of the SAME PR keeps the reconciler-owned
+          // Ruling 243: a refresh of the SAME PR keeps the reconciler-owned
           // facts (checks, review, mergeable, drift), as `writePrToTask` does;
           // a different PR starts clean.
           const detected: PrRef = samePr
             ? { ...cur, number, state: detectedState, title: view.title }
             : { number, state: detectedState, title: view.title };
-          // Ruling 135: the moment a delivering run mints a revision on a branch
+          // Ruling 243: the moment a delivering run mints a revision on a branch
           // whose PR is open, the file says whether that PR carries it, so the
           // acceptance gate does not wait for the five-minute poll.
           const revisionNow = workRevisionPatch ?? activeWorkRevision(fm.workRevision);
@@ -837,7 +837,7 @@ export async function reconcileWorkspaceDelivery(
           }
         }
       } else if (workRevisionPatch && fm.pr?.unpushedRevision) {
-        // Ruling 445: the PR could not be read here (a workspace with no
+        // Ruling 243: the PR could not be read here (a workspace with no
         // GitHub credential skips `gh`), and this reconcile minted a revision.
         // The recorded "not on the PR" line named the one it superseded until
         // the GitHub pass, five minutes on. Live on ax-clone AX-5 the review

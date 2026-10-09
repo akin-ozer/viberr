@@ -30,13 +30,13 @@ const agentProfileFrontmatterSchema = z
   .object({
     id: z.string().min(1),
     // "controller" is the instance-level conversational agent (one per
-    // instance, ruling 99). It is machinery like the operator: never deployed
+    // instance, ruling 247). It is machinery like the operator: never deployed
     // into a project's `agents:` list, resolved by kind from the template file.
     kind: z.enum(["operator", "specialist", "controller"]),
     name: z.string().min(1),
     /** What the profile does, shown under its name. Every kind but the operator
      *  requires one (the refinement below). The operator has none (ruling
-     *  518): it is one agent, called Operator. */
+     *  176): it is one agent, called Operator. */
     role: z.string().min(1).optional(),
     /** Short scannable description (one paragraph) — what the OPERATOR reads
      * when picking a profile for a task (generic-agents G-selection). Distinct
@@ -47,7 +47,7 @@ const agentProfileFrontmatterSchema = z
     backends: z.array(z.enum(["codex", "claude"])).default([]),
     model: z.string().default(""),
     /** Reasoning effort. Only the controller profile is edited through this key
-     *  today (ruling 106) — deployed specialists carry model+effort on their
+     *  today (ruling 270) — deployed specialists carry model+effort on their
      *  project.md `agents:` entry, not the template — but the key is schema
      *  level so carrying it is never "drift". Absent = the backend default.
      *  TOLERANT like the pre-schema decoder it replaced: a hand-edited
@@ -162,7 +162,7 @@ export function parseAgentProfileContent(
   // preserved but otherwise SILENT — the exact drift the task/project files guard
   // against. Surface it as a warning so a stale profile is diagnosable (and a
   // fixture guard can assert zero unknowns on the shipped profiles).
-  // Ruling 518: the operator has no role, so a `role` on its file (a hand-edited
+  // Ruling 176: the operator has no role, so a `role` on its file (a hand-edited
   // copy from before the ruling) is drift too, and it is dropped here so no
   // reader can show it.
   const frontmatter = { ...result.data };
@@ -191,7 +191,7 @@ export interface AgentProfileReadResult extends AgentProfileParseResult {
 }
 
 /** Reads + parses one profile file; null when it is absent. The parse goes
- *  through the store readers' parse memo (ruling 457). */
+ *  through the store readers' parse memo (ruling 21). */
 export function readAgentProfileFile(
   absPath: string,
   fallbackId: string,

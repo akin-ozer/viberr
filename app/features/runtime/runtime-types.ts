@@ -14,7 +14,7 @@
 import type { RunFailureFacts, RunFailureKind } from "~/shared/run-failure";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 
-/** Lifecycle stored in agent_runs.state (orchestrator ruling 11). */
+/** Lifecycle stored in agent_runs.state (orchestrator ruling 165). */
 export type RunState =
   | "queued"
   | "running"
@@ -23,7 +23,7 @@ export type RunState =
   | "interrupted";
 
 /**
- * Pass 35 U35-7 (ruling 158 addendum): the stored reason an `interrupted` run
+ * Pass 35 U35-7 (ruling 153 addendum): the stored reason an `interrupted` run
  * stopped when no person interrupted it. A restart is a reason, not an actor;
  * `interrupted_by` stays a user id or null.
  */
@@ -60,7 +60,7 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-/** Where a step of an agent's to-do list stands (ruling 499). */
+/** Where a step of an agent's to-do list stands (ruling 168). */
 export type TodoStatus = "pending" | "in_progress" | "completed";
 
 /** One step of an agent's to-do list, as the console draws it. */
@@ -105,13 +105,13 @@ export interface LogLine {
     in: number;
     cached: number;
     out: number;
-    /** Ruling 175: each model's share, from the result's `modelUsage` (the
+    /** Ruling 159: each model's share, from the result's `modelUsage` (the
      *  main loop, subagents and compaction can each run on another model).
      *  Absent when the result carried none, and on older lines. */
     models?: { model: string; in: number; cached: number; out: number; cost: number }[];
   } | null;
   /** Codex turn.completed usage: the turn's own total (on a resumed thread the
-   *  raw `turn.completed.usage` is the thread's; ruling 541). */
+   *  raw `turn.completed.usage` is the thread's; ruling 165(b)). */
   usage?: {
     input_tokens: number;
     cached_input_tokens: number;
@@ -119,17 +119,17 @@ export interface LogLine {
   } | null;
   /** Codex file_change changes → raw `file_change.changes`. */
   changes?: { path: string; kind: "add" | "update" | "delete" }[] | null;
-  /** Ruling 499: a Codex `todo_list` item's steps, which the console draws as
+  /** Ruling 168: a Codex `todo_list` item's steps, which the console draws as
    *  the agent's to-do list (Claude's `TodoWrite` carries its own in `input`).
    *  Codex marks a step done or not; it names no step in progress. Absent on
    *  every other line, and on lines projected before the ruling. */
   todos?: ConsoleTodo[];
-  /** Ruling 130(a) (pass 34): the adapter's classified failure record, on the
+  /** Ruling 155(a) (pass 34): the adapter's classified failure record, on the
    *  terminal `err` line only (beside its `run·error·<kind>` tag). Every
    *  reader of a failure consumes THIS, never a second regex over the raw
    *  stream. Absent on every other line. */
   failure?: RunFailureFacts;
-  /** Ruling 366: a provider heartbeat (Claude's `tool_progress`): the call it
+  /** Ruling 168: a provider heartbeat (Claude's `tool_progress`): the call it
    *  reports on is still running. `call` is the tool_use id every heartbeat
    *  of one call shares (the console folds them into one wait row); `elapsed`
    *  is the provider's own figure in seconds, null when it sent none — never
@@ -146,7 +146,7 @@ export interface LogLine {
 }
 
 /**
- * Ruling 366: the tag of a provider heartbeat line — the projection writes it
+ * Ruling 168: the tag of a provider heartbeat line — the projection writes it
  * for Claude's `tool_progress` envelope (one every ~30 s while a tool call is
  * open; 7,472 of them on this instance's stored runs, 120 on one operator's
  * `run_agent` alone). The console folds a run of them into one wait row.
@@ -154,7 +154,7 @@ export interface LogLine {
 export const TOOL_PROGRESS_TAG = "tool_progress";
 
 /**
- * Ruling 366(c): the longest a single argument value prints on a tool row's
+ * Ruling 168: the longest a single argument value prints on a tool row's
  * arguments line. A longer string is clipped there, and the row links to it in
  * full (366(d)) — both sides read the same figure, so the link appears exactly
  * when the projection cut something.
@@ -207,7 +207,7 @@ export interface RunInputs {
   repo: string | null;
   /** A checkout actually landed in `cwd`. False → the agent ran on an empty dir. */
   cloned: boolean;
-  /** Ruling 129 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
+  /** Ruling 195 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
    *  checkout, in words. Absent on a fresh clone, which needs none, and on a
    *  run with no working tree. A refresh that could not run says so here
    *  rather than leaving the reader to assume `origin/*` is current. */
@@ -236,11 +236,11 @@ export interface RunInputs {
     /** Servers mounted on the run (profile grants + the viberr toolkit). */
     mounted: string[];
     /** Granted, but mounted nowhere. Names only: the reason each server gave
-     *  rides the run's prompt (ruling 310), not this record. */
+     *  rides the run's prompt (ruling 190), not this record. */
     unresolved: string[];
     /** Mounted, but the last connection check failed. */
     unhealthy: string[];
-    /** Ruling 176: per mounted org server, the tools an admin marked as write
+    /** Ruling 188: per mounted org server, the tools an admin marked as write
      *  tools and this run withholds (its repo-write grant is withheld). Absent
      *  on lines written before the ruling. */
     writeToolsDenied?: McpToolDenial[];
@@ -253,7 +253,7 @@ export interface RunInputs {
     denied: string[];
     /** Viberr collaboration tools mounted for this run. */
     toolkit: string[];
-    /** Ruling 564: where Edit, MultiEdit and Write may write on a Claude run
+    /** Ruling 217(d): where Edit, MultiEdit and Write may write on a Claude run
      *  that posts files while its grants withhold repo-write (the attachments
      *  folder, then the temp directory). Absent when the tools are unconfined
      *  or denied. */
@@ -261,7 +261,7 @@ export interface RunInputs {
   };
   /** The turn's directive and who wrote it (null → no directive this turn). */
   directive: { from: string | null; chars: number } | null;
-  /** Ruling 175: the instance's spending cap per run when this run started
+  /** Ruling 159: the instance's spending cap per run when this run started
    *  (USD), null when none was set. Claude enforces it; Codex has no budget
    *  option, and the row says so. Absent on lines written before the ruling. */
   spendCapUsd?: number | null;
@@ -327,7 +327,7 @@ export function runBoundaryLine(runNumber: number, runTotal: number): LogLine {
 /**
  * The window's line budget (the server's byte budget is its other bound,
  * `RUN_LOG_WINDOW_BYTES`). Declared here, where the client can read it, and
- * applied by `run-projection.server.ts`: ruling 457 (CON-2) re-windows a
+ * applied by `run-projection.server.ts`: ruling 11 (CON-2) re-windows a
  * console whose live tail fell further behind than one window, rather than
  * reading every missed line forward in one request.
  */
@@ -351,7 +351,7 @@ export interface RunLogWindow {
    */
   headSeq: number;
   /**
-   * Ruling 457 (owner decision 2, 2026-09-24): false when this payload does
+   * Ruling 300 (owner decision 2, 2026-09-24): false when this payload does
    * NOT carry the group's window — every group on a revalidation or a client
    * navigation, every group but the shown one on a document load. The console
    * fills such a thread with one `/resources/run-log?window=1` request when it
@@ -361,7 +361,7 @@ export interface RunLogWindow {
 }
 
 /**
- * Ruling 457: a console line's identity within its agent group, stable across
+ * Ruling 11: a console line's identity within its agent group, stable across
  * appends, backward pages and revalidations — the React key of its row and the
  * key of its open disclosures. `run` is the line's index in
  * `logWindow.runIds`; a UI-53 boundary is keyed by the run it opens.
@@ -397,7 +397,7 @@ export const RUN_PHASE = {
   preparing: "Preparing workspace",
   starting: "Starting",
   working: "Working",
-  /** Ruling 371: the CLI is summarizing the context — a full-history model
+  /** Ruling 170: the CLI is summarizing the context — a full-history model
    *  call that took 131 s on the one stored compaction — so the strip says
    *  what the wait is instead of showing the last tool as still running. */
   compacting: "Compacting context",
@@ -405,7 +405,7 @@ export const RUN_PHASE = {
 } as const;
 
 /**
- * Ruling 250: the phase a controller's working row names. Null while it is
+ * Ruling 257: the phase a controller's working row names. Null while it is
  * the generic "Working", which the row's own sentence already says.
  */
 export function namedTurnPhase(phase: string | null): string | null {
@@ -413,7 +413,7 @@ export function namedTurnPhase(phase: string | null): string | null {
 }
 
 /**
- * Ruling 457 (LIVE-1): what the Live run strip and the console's facts row
+ * Ruling 11 (LIVE-1): what the Live run strip and the console's facts row
  * read off a run row that moves while it streams. Every `/resources/run-log`
  * answer carries the run's current set, so the strip follows the console's
  * own tail instead of a loader revalidation every two seconds.
@@ -426,7 +426,7 @@ export interface RunLiveFacts {
   tokensEstimated: boolean;
   cache: RunCacheView;
   /**
-   * Ruling 457 (CON-7): when the row these facts were read from last changed
+   * Ruling 11 (CON-7): when the row these facts were read from last changed
    * (`agent_runs.updated_at`, epoch ms; every write of a fact bumps it). A
    * revalidation's projection and a tail read land in any order, so the store
    * keeps the newer read, not the last one to arrive. Absent when the row's
@@ -437,7 +437,7 @@ export interface RunLiveFacts {
 }
 
 /**
- * Ruling 369: what the prompt cache did for a run, as the console and the
+ * Ruling 172: what the prompt cache did for a run, as the console and the
  * strip read it off the row (`agent_runs.cache_write_tokens`,
  * `first_call_*`, `cache_ttl_bucket`, `peak_prompt_tokens`,
  * `last_prompt_tokens`, `compactions`).
@@ -463,7 +463,7 @@ export interface RunCacheView {
   ttlBucket: "5m" | "1h" | "mixed" | null;
   /** The largest prompt any one call carried. */
   peakPromptTokens: number;
-  /** The last call's prompt — what a resume replays (ruling 372). */
+  /** The last call's prompt — what a resume replays (ruling 173). */
   lastPromptTokens: number;
   /** Context compactions the provider performed. */
   compactions: number;
@@ -515,7 +515,7 @@ export interface RunView {
   /** The run failed because its backend was unavailable / quota-limited (not a
    *  genuine task failure). The UI offers a one-click retry on `altBackend`. */
   failedBackendUnavailable?: boolean;
-  /** Ruling 130(a): the classified failure kind of an errored run, for EVERY
+  /** Ruling 155(a): the classified failure kind of an errored run, for EVERY
    *  run kind; the Agent-logs footer selects its sentence from this. */
   failureKind?: RunFailureKind;
   /** U35-11: for an `overloaded` failure, where it happened: the provider's
@@ -545,10 +545,10 @@ export interface RunView {
    *  that errored before the provider replied, keeps its estimate after it
    *  ends. The cell prints `~1.2M` with a tooltip while true. */
   tokensEstimated: boolean;
-  /** Ruling 369: the prompt-cache record (write vs read, the first call's
+  /** Ruling 172: the prompt-cache record (write vs read, the first call's
    *  temperature, the TTL bucket, the peak and last prompt, compactions). */
   cache: RunCacheView;
-  /** Ruling 457 (CON-7): `RunLiveFacts.factsAt`, the row's last change. */
+  /** Ruling 11 (CON-7): `RunLiveFacts.factsAt`, the row's last change. */
   factsAt?: number;
   /** The projected log lines for the group's bounded window (newest last),
    * with UI-53's synthetic `── resumed · run N of M ──` boundaries between
@@ -556,14 +556,14 @@ export interface RunView {
   lines: LogLine[];
   /** The exact stored wire envelope per line (index-aligned with `lines`) —
    * what the `{ } raw` toggle renders verbatim (runs.md §5.4). Boundary rows
-   * carry an empty envelope. Ruling 457: the task and controller pages ship
+   * carry an empty envelope. Ruling 300: the task and controller pages ship
    * none (`[]`); the console loads the envelopes when the raw view opens. */
   raw: string[];
-  /** Ruling 457: each line's `consoleLineKey` (index-aligned with `lines`),
+  /** Ruling 11: each line's `consoleLineKey` (index-aligned with `lines`),
    *  so a row keeps its identity when lines are appended or paged in. */
   lineKeys?: string[];
   /**
-   * Ruling 457 (TASK-1): the group's console holds a dead-session marker
+   * Ruling 300 (TASK-1): the group's console holds a dead-session marker
    * (P13-D-2) inside its window, with the session the marker names. The
    * Continuity Recovery Panel reads this; it used to scan `lines` and `raw`
    * for it, which only worked while the loader shipped every window.

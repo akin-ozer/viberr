@@ -52,7 +52,7 @@ interface ProfileBase {
   id: string;
   kind: "operator" | "specialist";
   name: string;
-  /** Absent on the operator alone (ruling 518). */
+  /** Absent on the operator alone (ruling 176). */
   role?: string;
   icon: string;
   backends: ("codex" | "claude")[];
@@ -84,7 +84,7 @@ function profile(
 export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
   profile(
     {
-      // Ruling 518: one agent, called Operator, with no role beside the name.
+      // Ruling 106: one agent, called Operator, with no role beside the name.
       id: "operator", kind: "operator", name: "Operator",
       icon: "shield", backends: ["claude", "codex"], model: "orchestration runtime",
       scope: "Built in · runs on every task",
@@ -123,7 +123,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
       // ChatGPT-account Codex here is over quota until Sep 18). Codex stays a
       // secondary backend the profile still OFFERS — an admin flips it in the
       // editor, where switching to Codex reselects its own catalog default
-      // (gpt-6.1-sol since ruling 687; F20-33 had made it gpt-5.6-terra,
+      // (gpt-6.1-sol since ruling 149; F20-33 had made it gpt-5.6-terra,
       // because this account can't run gpt-5.6-sol, per R20-8).
       // TRADEOFF (accepted): this inverts the prior default, so a fresh install
       // with ONLY Codex credentials now needs the admin to flip the profile
@@ -201,7 +201,7 @@ export const SEED_AGENT_PROFILES: SeedAgentProfile[] = [
 ];
 
 /**
- * Ruling 692: the agents that ship in the library beside the base roster, for a
+ * Ruling 179: the agents that ship in the library beside the base roster, for a
  * board whose result is prose a person puts their name to. They are global
  * templates like the Developer and the Reviewer, written by the same two
  * writers (the boot backfill and `npm run seed`), but they are in no project's
@@ -223,7 +223,7 @@ export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
       // The Writer is the delivering agent of a prose task. On a board with a
       // repository (a site whose posts are files in git) it commits the piece on
       // the task's branch, so it holds the delivery grants the Developer holds;
-      // a board made to deliver results withholds them at creation (ruling 667)
+      // a board made to deliver results withholds them at creation (ruling 199)
       // and the piece comes back as files on the task. It ships WITH the browser
       // and web egress as an explicit pair, for the reason the Developer does:
       // a screenshot of the real thing is one of the three pictures a piece may
@@ -254,10 +254,10 @@ export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
     },
     "The quality specialist of a prose task: reads the piece cold beside the person's own writing, checks every fact against the sources kept on the task, looks at the page and at every picture as a reader sees them, then records an approve or request-changes verdict that gates acceptance. Never rewrites the piece.",
   ),
-  // Ruling 699: the two agents that make a piece's pictures. Supporting agents
+  // Ruling 179: the two agents that make a piece's pictures. Supporting agents
   // by design: neither holds a delivery grant, so the piece stays its writer's
   // delivery, and each saves its picture on the task and the piece again with
-  // the picture placed (ruling 587 then moves the review to the assembled
+  // the picture placed (ruling 85 then moves the review to the assembled
   // piece). Claude only, as the Editor is: each judges its own work by looking
   // at the picture `capture_page` returns, and an image a tool returns is not
   // proven to reach a Codex model.
@@ -272,7 +272,7 @@ export const LIBRARY_AGENT_PROFILES: SeedAgentProfile[] = [
     {
       // Web egress is explicit: a part it draws may rest on a file no kept
       // source holds yet, which it opens and keeps. It asks the person nothing
-      // (the writer asked once, ruling 692): what only they can supply is a
+      // (the writer asked once, ruling 202): what only they can supply is a
       // line of its report. "Ask the human a question" is direct when absent,
       // so it is withheld by name.
       direct: ["Attach evidence references", "Post mid-run comments", "Search & fetch from the web"],

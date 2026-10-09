@@ -27,7 +27,7 @@ import {
   shutdownDatabase,
 } from "./sqlite.server";
 
-describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)", () => {
+describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)", () => {
   it("adds every baseline column a pre-existing root lacks, idempotently", () => {
     // A data root that applied 0001 BEFORE the columns existed never re-runs
     // the file (migrations stay squashed into 0001), and `patchRun` naming a
@@ -51,21 +51,21 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "outcome_key",
         "dispatched_by_name",
         "dispatched_by_user_id",
-        // Ruling 127: `upsertRun` names the credential principal on every
+        // Ruling 137: `upsertRun` names the credential principal on every
         // insert, so a root without this column could not start a run at all.
         "credential_user_id",
         // Pass 35 U35-7: boot recovery writes the reason on every orphan sweep.
         "interrupted_reason",
         // F35-1: the sink patches it on every persisted line.
         "usage_final",
-        // Ruling 248: `patchRun` names it on every completion registration.
+        // Ruling 87: `patchRun` names it on every completion registration.
         "no_checkout",
-        // Ruling 316: `upsertRun` names it on every insert, so a root without
-        // it could not start a run at all — the ruling-127 failure shape.
+        // Ruling 66: `upsertRun` names it on every insert, so a root without
+        // it could not start a run at all — the ruling-137 failure shape.
         "verdict_withheld",
-        // Ruling 544: `upsertRun` names it on every insert as well.
+        // Ruling 153: `upsertRun` names it on every insert as well.
         "review_subject",
-        // Ruling 369: the sink names every one of these on a run's first
+        // Ruling 24: the sink names every one of these on a run's first
         // persisted line, and `upsertRun` names `credential_kind` on every
         // insert — the same failure shape on a root that lacks them.
         "cache_write_tokens",
@@ -79,13 +79,13 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "last_prompt_tokens",
         "compactions",
         "credential_kind",
-        // Ruling 507: `upsertRun` names the billed account on every insert.
+        // Ruling 138: `upsertRun` names the billed account on every insert.
         "credential_account_id",
       ]);
 
       // F37-71: a task projection from before the recommendation-kinds column.
       // The rebuilder names it on EVERY task write, so a root without it could
-      // not project a single task. Ruling 503's `epic_id` is the same shape.
+      // not project a single task. Ruling 272's `epic_id` is the same shape.
       // CANARY: drop the `task_projections` entry from BASELINE_COLUMNS and
       // this reads two columns, not four.
       db.exec(
@@ -103,11 +103,11 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "epic_id",
       ]);
 
-      // Ruling 176: an org MCP registry from before the write-tool columns.
+      // Ruling 188: an org MCP registry from before the write-tool columns.
       // `listMcpServers` names both on every Settings render and run mount.
-      // Ruling 469: and the OAuth sign-in's sealed and public halves, which
+      // Ruling 192: and the OAuth sign-in's sealed and public halves, which
       // every MCP read (`oauth_json`) and the gateway (`oauth_ref`) name.
-      // Ruling 486: and the scope an admin asks the next sign-in for.
+      // Ruling 192: and the scope an admin asks the next sign-in for.
       db.exec(`CREATE TABLE org_mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL)`);
       ensureBaselineColumns(db);
       ensureBaselineColumns(db);
@@ -125,7 +125,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         "oauth_requested_scope",
       ]);
 
-      // Ruling 497: notifications from before a row recorded where it opens.
+      // Ruling 24: notifications from before a row recorded where it opens.
       // `createNotification` names `href` on every insert, and its callers
       // fail open, so a root without it would drop every notification.
       // CANARY: drop the `notifications` entry and this reads no `href`.
@@ -208,17 +208,17 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 121 (review G1). The dock's loader names `task_key` on the FIRST
+   * Ruling 249 (review G1). The dock's loader names `task_key` on the FIRST
    * signed-in page of every surface, so on a root that applied 0001 before
-   * ruling 121 the missing column would 500 that loader and, fetcher errors
+   * ruling 249 the missing column would 500 that loader and, fetcher errors
    * going to the route's boundary, replace every page with the root error
    * page. Reproduced here against the PRE-121 controller schema.
    */
-  it("adds the ruling-121 controller columns and the scope index a pre-121 root lacks", () => {
+  it("adds the ruling-249 controller columns and the scope index a pre-121 root lacks", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrow-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
-      // The exact shape 0001 created before ruling 121: no task_key, no
+      // The exact shape 0001 created before ruling 249: no task_key, no
       // surface, and only the per-user index.
       db.exec(
         `CREATE TABLE controller_conversations (
@@ -276,7 +276,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 457: the task page's freshness reads got composite indexes after
+   * Ruling 11: the task page's freshness reads got composite indexes after
    * roots had applied the baseline; boot adds them to an older root.
    */
   it("adds the freshness indexes a pre-457 root lacks", () => {
@@ -370,7 +370,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
    */
   it.each([
     {
-      // Ruling 480: what each repository proved about a token. Every PAT read
+      // Ruling 220: what each repository proved about a token. Every PAT read
       // names it, so a root that predates it would fail the credential card and
       // every GitHub call's context.
       table: "github_pats",
@@ -384,7 +384,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
            VALUES ('pat_1', 'u_1', 'connection · akin-ozer', 'v1$x', 'k3ui', '2026-09-20');`,
     },
     {
-      // Ruling 463: which repositories a connection's token reaches. Every
+      // Ruling 222: which repositories a connection's token reaches. Every
       // connection reader names it, so a root that predates it would fail the
       // Instance settings card, the New project dialog and the controller's
       // read. NULL is the truth for an existing connection ("not read yet").
@@ -417,7 +417,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 465: `reply_to` says which user message a controller row answers.
+   * Ruling 252: `reply_to` says which user message a controller row answers.
    * An older root holds replies already, and boot recovery notes every user
    * message no reply names, so a NULL would write a restart note under every
    * old message. The backfill replays the writers' order: a turn's reply
@@ -487,7 +487,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
         fail: "q2",
         rel: null,
       });
-      // Ruling 465 (2026-09-25): and q3 is earlier history, not linked, so
+      // Ruling 252 (2026-09-25): and q3 is earlier history, not linked, so
       // boot recovery does not write a restart note under it.
       // SAFETY: the SELECT names one TEXT column.
       const history = db
@@ -501,7 +501,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 121 controller tables)"
   });
 
   /**
-   * Ruling 465 (2026-09-25): a root the first backfill already linked (the
+   * Ruling 252 (2026-09-25): a root the first backfill already linked (the
    * owner's, deployed 2026-09-24 21:50 UTC) has `reply_to` and lacks
    * `unlinked_history`. Adding that column runs the corrected walk there once,
    * which replaces the links the first one shifted past a lost message.
@@ -652,8 +652,8 @@ describe("shutdownDatabase", () => {
 });
 
 describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", () => {
-  it("creates user_backend_credentials on a root that predates ruling 127", () => {
-    // The healer's own sibling miss: ruling 127 added BOTH the
+  it("creates user_backend_credentials on a root that predates ruling 137", () => {
+    // The healer's own sibling miss: ruling 137 added BOTH the
     // `agent_runs.credential_user_id` column and the `user_backend_credentials`
     // table to the squashed baseline, but only the column was added to the
     // healer's list. 0001 never re-runs, so a root created before that commit
@@ -690,7 +690,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
     }
   });
 
-  it("creates controller_follow_ups on a root that predates ruling 685", () => {
+  it("creates controller_follow_ups on a root that predates ruling 259", () => {
     // 0001 never re-runs, so a root created before the ruling boots without
     // the table: the controller's `continue_when_done` would fail on its
     // insert, and every acceptance would log a failed read and continue
@@ -727,8 +727,8 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
     }
   });
 
-  it("rebuilds the one-account shape into the several-accounts shape, carrying every row (ruling 507)", () => {
-    // A root created before ruling 507 has `UNIQUE (user_id, backend)`, which
+  it("rebuilds the one-account shape into the several-accounts shape, carrying every row (ruling 138)", () => {
+    // A root created before ruling 138 has `UNIQUE (user_id, backend)`, which
     // refuses a person's second Claude account at its INSERT, and ALTER TABLE
     // cannot drop a constraint. Canary: remove the rebuild and the second
     // INSERT below throws "UNIQUE constraint failed".
@@ -825,7 +825,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
 
 
 /**
- * Ruling 158, pass 35 review. A reader copies the database and then its WAL,
+ * Ruling 23, pass 35 review. A reader copies the database and then its WAL,
  * and nothing used to pin the two: SQLite checkpoints on its own (the writer
  * leaves `wal_autocheckpoint` at its default) and a checkpoint RESETS the log,
  * renumbering frames from 1 under a new salt. A copy taken across that reset
@@ -833,7 +833,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
  * catch it — they cover a torn tail — and `backup` labels the artefact a
  * consistent point-in-time copy, so the reader has to detect the reset itself.
  */
-describe("readWalIdentity (ruling 158): a reset changes the WAL's identity", () => {
+describe("readWalIdentity (ruling 23): a reset changes the WAL's identity", () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -873,7 +873,7 @@ describe("readWalIdentity (ruling 158): a reset changes the WAL's identity", () 
 });
 
 /**
- * Ruling 158 (pass 35 F35-9): no process but the server opens a live root's
+ * Ruling 23 (pass 35 F35-9): no process but the server opens a live root's
  * `projection.sqlite`. Until this, `openDatabaseReadOnly` opened the live file
  * with `readOnly: true` and the runbook called that the safe form. Live it was
  * not: an in-container `readOnly: true` reader preceded the server's SIGBUS
@@ -889,7 +889,7 @@ describe("readWalIdentity (ruling 158): a reset changes the WAL's identity", () 
  * is the live path, the later row is visible); restore the boot's verdict as
  * the reader's rule and the dead-pid case opens the live file too.
  */
-describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", () => {
+describe("openDatabaseReadOnly (ruling 23): a reader never opens a live root", () => {
   interface Root {
     dir: string;
     stateDir: string;
@@ -1005,7 +1005,7 @@ describe("openDatabaseReadOnly (ruling 158): a reader never opens a live root", 
     // container from that file (`docker compose run --rm app npm run backup`)
     // has the app's own hostname and its OWN pid namespace, where the live
     // holder's pid is simply unoccupied. Answering "stale" there opens the live
-    // database beside the running server: the second `-shm` mapping ruling 158
+    // database beside the running server: the second `-shm` mapping ruling 23
     // exists to prevent. A needless copy costs disk; this costs the server.
     const r = seeded();
     const gone = deadPid();

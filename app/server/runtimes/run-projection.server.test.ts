@@ -126,7 +126,7 @@ describe("projectRunsForTask grouping", () => {
       kind: "primary",
       backend: "codex",
       state: "error",
-      // Ruling 127: a run that actually spawned billed somebody, so the retry
+      // Ruling 137: a run that actually spawned billed somebody, so the retry
       // offer is about THAT person's other account.
       credentialUserId: "u_owner",
     });
@@ -148,7 +148,7 @@ describe("projectRunsForTask grouping", () => {
     // signatures. The projection must key off the tag so the "retry on the
     // other backend" affordance still renders.
     //
-    // Ruling 127: this is the refusal the other backend CAN fix — the task's
+    // Ruling 137: this is the refusal the other backend CAN fix — the task's
     // owner is known (the row records whose account it would have billed) and
     // has simply not connected Claude.
     const refusal =
@@ -175,7 +175,7 @@ describe("projectRunsForTask grouping", () => {
     expect(view!.altBackend).toBe("codex"); // claude failed → offer codex
   });
 
-  it("withholds the retry offer when NO principal was resolvable (ruling 127)", () => {
+  it("withholds the retry offer when NO principal was resolvable (ruling 137)", () => {
     // An unowned task (or one whose owner account is gone) has nobody to bill
     // on EITHER backend, and the run service records that as a null
     // `credential_user_id`. Offering "Retry on Codex" here would promise a
@@ -340,7 +340,7 @@ describe("projectRunsForTask grouping", () => {
  * F35-1 (pass 35): the strip's Tokens cell tells an estimate from a total. A
  * live Claude row holds the adapter's estimate until the result lands
  * (`usage_final = 0`), a live Codex row holds nothing until its first model
- * call completes (ruling 541), and a row the provider has totalled prints
+ * call completes (ruling 165(b)), and a row the provider has totalled prints
  * plain.
  */
 describe("F35-1: tokens are marked estimated until the provider's total lands", () => {
@@ -383,11 +383,11 @@ describe("F35-1: tokens are marked estimated until the provider's total lands", 
 });
 
 /**
- * Ruling 457 (CON-7): a revalidation's projection and the console's tail
+ * Ruling 11 (CON-7): a revalidation's projection and the console's tail
  * reads race, so every read of a run's live facts carries the row's version,
  * and the console keeps the newer one (`run-log-store.test.ts` "CON-7").
  */
-describe("ruling 457 (CON-7): the live facts carry the row's version", () => {
+describe("ruling 11 (CON-7): the live facts carry the row's version", () => {
   afterEach(() => vi.useRealTimers());
 
   it("stamps factsAt with agent_runs.updated_at, which every fact write moves", () => {
@@ -570,12 +570,12 @@ describe("projectRunsForTask — bounded log window", () => {
 });
 
 /**
- * Ruling 130(a): the projection consults the CLASSIFIED terminal line first,
+ * Ruling 155(a): the projection consults the CLASSIFIED terminal line first,
  * for every run kind, so a refusal whose raw tail carries no prose signature
  * is still flagged, on a specialist and on an operator run alike. Canary:
  * remove the tag/failure clause (the raw scan alone flags nothing here).
  */
-describe("ruling 130(a): the classified failure reaches the view for every run kind", () => {
+describe("ruling 155(a): the classified failure reaches the view for every run kind", () => {
   it("flags a run whose classified tag is ·auth or ·quota even when the raw tail carries no signature", () => {
     insert({ id: "run_auth", threadId: "primary", kind: "primary", backend: "claude", state: "error", credentialUserId: "u_owner" });
     insertRunLine(db, {
@@ -640,10 +640,10 @@ describe("pass 35 U35-7: a restart is a reason, not an actor", () => {
 });
 
 /**
- * Ruling 369: the projection reads the prompt-cache record off the row as the
+ * Ruling 172: the projection reads the prompt-cache record off the row as the
  * sink stored it, and a row with no first call says so (null), never "cold".
  */
-describe("ruling 369: the cache record on the run view", () => {
+describe("ruling 172: the cache record on the run view", () => {
   it("projects every stored figure, and null for a first call that never landed", () => {
     insert({ id: "run_cache", threadId: "primary", state: "finished" });
     patchRun(db, "run_cache", {
@@ -683,7 +683,7 @@ describe("ruling 369: the cache record on the run view", () => {
   });
 });
 
-/* ------------- ruling 457: how much of the console a payload carries ------------- */
+/* ------------- ruling 300: how much of the console a payload carries ------------- */
 
 /**
  * Owner decision 2 (2026-09-24): a hard refresh carries the shown agent's
@@ -693,7 +693,7 @@ describe("ruling 369: the cache record on the run view", () => {
  * same keys, so a thread filled later is exactly the one a hard refresh would
  * have shipped.
  */
-describe("ruling 457: console shipping", () => {
+describe("ruling 300: console shipping", () => {
   /** `count` lines of ~`bytes` on `runId`, from `from`. */
   function fill(runId: string, count: number, bytes = 40, from = 0): void {
     for (let i = from; i < from + count; i++) {
@@ -803,14 +803,14 @@ describe("ruling 457: console shipping", () => {
 });
 
 /**
- * Ruling 457 (TASK-1) moved the Continuity Recovery Panel's marker search to
+ * Ruling 300 (TASK-1) moved the Continuity Recovery Panel's marker search to
  * the projection: the panel scanned `lines` and `raw`, which a payload now
  * carries on a hard load only. P13-D-2's contract is unchanged: the marker is
  * found by its tag's shared suffix, the dead session is read out of the STORED
  * envelope (never display text), and only while the marker is inside the
  * group's window (the panel's retirement rule).
  */
-describe("ruling 457: the continuity marker (sessionMissing)", () => {
+describe("ruling 300: the continuity marker (sessionMissing)", () => {
   /** The envelope `recordSessionMissing` stores; `session_id` is ABSENT (not
    *  null) when the writer never learned one. */
   interface MarkerEnvelope {

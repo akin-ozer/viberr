@@ -6,7 +6,7 @@ import { listNotifications } from "~/server/projections/notifications.server";
 import { BELL_LIST_CAP } from "~/features/shell/top-bell";
 
 /**
- * GET /resources/notifications — the bell popover's list (ruling 457, owner
+ * GET /resources/notifications — the bell popover's list (ruling 300, owner
  * decision 2026-09-24, FL-4 / SRV-6). Pages used to ship the newest hundred
  * notifications with every document and every revalidation, for a popover
  * that is closed at first paint: 62 % of Home's payload on the demo seed.
@@ -24,7 +24,7 @@ export function shouldRevalidate(): boolean {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457: a 401, not `requireUser`'s login redirect, which names THIS
+  // Ruling 300: a 401, not `requireUser`'s login redirect, which names THIS
   // route as the returnTo. The bell loads it on a mere hover and a fetcher
   // follows a redirect as a navigation, so a stale tab's hover went to /login
   // and, once signed in, to a page of raw JSON. The `clientLoader` below turns
@@ -40,7 +40,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 457: a failed load is the bell's, never the page's. React Router
+ * Ruling 300: a failed load is the bell's, never the page's. React Router
  * sends a fetcher's failed load to the error boundary of the route that owns
  * the fetcher, so a hover during a restart, a 5xx or a dead network replaced
  * the whole page with the root error page. Any failure (a 401 above included)

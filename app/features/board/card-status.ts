@@ -4,7 +4,7 @@ import { readinessLabel, validationLabel, validationQuiet } from "~/ui/pill";
 import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pills";
 
 /**
- * Ruling 365 — the board card's ONE status seat and its problem chips.
+ * Ruling 306 — the board card's ONE status seat and its problem chips.
  *
  * Before this the card stated its state in three seats: a readiness pill beside
  * the key, problem pills in the foot's left cell and a wait tag in its right
@@ -20,12 +20,12 @@ import { checksPill, prStatePill, reviewPill } from "~/features/github/github-pi
  * Everything that is WRONG with the task is a problem chip, most severe first:
  * a failing validation, failing checks, a review asking for changes, a closed
  * PR, an inconsistency risk (a readiness value, but a problem rather than a
- * demand — ruling 168(a) — so it never takes the seat), a degraded continuity
+ * demand — ruling 306 — so it never takes the seat), a degraded continuity
  * (D4), and the amber "merge pending" a human still owes (R16-6). A hold
  * (`blocked`) displaced from the seat by a working agent joins them: ruling
- * 168(a) kept it beside "agent working" because the two are different facts,
+ * 306 kept it beside "agent working" because the two are different facts,
  * while a human wait absorbs it (the hold IS what the human is asked about).
- * So does a decision the viewer owes (ruling 529), first and in the seat's own
+ * So does a decision the viewer owes (ruling 46), first and in the seat's own
  * words: a question can stand open while an agent keeps working.
  *
  * Every label comes from the vocabulary that owns it (`pill.tsx`,
@@ -51,14 +51,14 @@ export interface CardStatus {
   label: string;
   /** The mark beside the word; null for "agent working", whose mark is the live pulse. */
   icon: IconName | null;
-  /** `scheduled` only: the instant the task picks itself back up (ruling 225). */
+  /** `scheduled` only: the instant the task picks itself back up (ruling 45). */
   resumesAt?: string | null;
 }
 
 export function cardStatus(task: BoardCard): CardStatus | null {
   if (task.archived) return { kind: "archived", label: "archived", icon: "archive" };
   if (task.waiting === "agent") {
-    // Ruling 349: parked behind the concurrent-run cap — no pulse, nothing streams.
+    // Ruling 44: parked behind the concurrent-run cap — no pulse, nothing streams.
     return task.liveRun === "queued"
       ? { kind: "queued", label: "agent queued", icon: "ring" }
       : { kind: "agent", label: "agent working", icon: null };
@@ -100,7 +100,7 @@ export interface CardProblem {
   label: string;
   icon: IconName;
   /** A demand rather than a failure: amber ink instead of red; blue for a
-   *  decision the viewer owes, the seat's "waiting on you" ink (ruling 529). */
+   *  decision the viewer owes, the seat's "waiting on you" ink (ruling 277). */
   tone?: "amber" | "blue";
 }
 
@@ -112,7 +112,7 @@ export function cardProblems(task: BoardCard): CardProblem[] {
   if (task.archived) return [];
   const terminal = task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   const out: CardProblem[] = [];
-  // Ruling 529: CALC-1's card said only "agent working" while a decision
+  // Ruling 46: CALC-1's card said only "agent working" while a decision
   // waited on its owner. Both were true, and the one that is the viewer's own
   // leads, as it does when it holds the seat (R8-3: only the viewer who can
   // act is named).
@@ -122,7 +122,7 @@ export function cardProblems(task: BoardCard): CardProblem[] {
   if (task.displayReadiness === "blocked" && task.waiting === "agent") {
     out.push({ key: "blocked", label: readinessLabel("blocked"), icon: "ban", tone: "amber" });
   }
-  // P13-D-6 / ruling 168(b): validation is a problem or nothing — the fill
+  // P13-D-6 / ruling 306: validation is a problem or nothing — the fill
   // tier only ("validation failing", and the force-accept override "accepted ·
   // gate bypassed"); the quiet tier stays on the task hero. C2 / UXO-1: a
   // terminal completion owes no verdict, so its validation is withdrawn.

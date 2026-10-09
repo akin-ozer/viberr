@@ -19,7 +19,7 @@ import {
 const NOW = "2026-09-21T12:00:00.000Z";
 const minutesBefore = (m: number) => new Date(Date.parse(NOW) - m * 60_000).toISOString();
 
-describe("ruling 370: the numbers have one home", () => {
+describe("ruling 169: the numbers have one home", () => {
   it("Codex carries the shared summarizer prompt and no limit; the operator carries nothing", () => {
     const shared = codexCompactionConfig("primary").compact_prompt;
     expect(shared).toContain("Do not invent");
@@ -29,7 +29,7 @@ describe("ruling 370: the numbers have one home", () => {
     expect(codexCompactionConfig("operator")).toEqual({});
   });
 
-  it("ruling 376: the completion threshold is the owner's 100k, with instructions that name what to keep", () => {
+  it("ruling 174: the completion threshold is the owner's 100k, with instructions that name what to keep", () => {
     expect(COMPACT_AT_COMPLETION_TOKENS).toBe(100_000);
     expect(COMPACT_AT_COMPLETION_TOKENS).toBeLessThan(RESUME_FRESH_CONTEXT_TOKENS);
     for (const must of ["task.md", "read_knowledge_doc", "branch", "pull request", "failed", "pending", "last report"]) {
@@ -64,7 +64,7 @@ describe("ruling 370: the numbers have one home", () => {
   });
 });
 
-describe("ruling 372: the resume verdict", () => {
+describe("ruling 173: the resume verdict", () => {
   it("starts fresh only when the session is BOTH past its TTL AND large", () => {
     const large = RESUME_FRESH_CONTEXT_TOKENS + 1;
     // Stale and large: fresh.
@@ -154,7 +154,7 @@ describe("ruling 372: the resume verdict", () => {
   });
 });
 
-describe("ruling 369: start temperature and the large-write line", () => {
+describe("ruling 172: start temperature and the large-write line", () => {
   it("warm reads more than it wrote; anything else is cold", () => {
     expect(startTemperature(4_200, 47_900)).toBe("warm");
     expect(startTemperature(14_100, 0)).toBe("cold");
@@ -167,7 +167,7 @@ describe("ruling 369: start temperature and the large-write line", () => {
   });
 });
 
-describe("ruling 505: what Insights measures the policy by", () => {
+describe("ruling 172: what Insights measures the policy by", () => {
   it("sorts resumes at every TTL the policy assumes, then at the extended retention", () => {
     expect([...RESUME_IDLE_EDGES_MS]).toEqual([
       5 * 60_000,
@@ -186,7 +186,7 @@ describe("ruling 505: what Insights measures the policy by", () => {
   });
 });
 
-describe("ruling 371/373: the compaction anchors", () => {
+describe("ruling 170: the compaction anchors", () => {
   it("the specialist anchor pins the task file, branch, PR, knowledge bases and the rulings note", () => {
     const text = specialistCompactAnchor({
       taskKey: "VIB-7",

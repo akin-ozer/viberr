@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 import type { EpicColor, EpicStatus } from "~/schemas/epic-file.schema";
 
-/** What a surface needs to draw an epic beside a task (ruling 503). */
+/** What a surface needs to draw an epic beside a task (ruling 325). */
 export interface EpicChipView {
   id: string;
   title: string;
@@ -14,9 +14,9 @@ export interface EpicOption extends EpicChipView {
 }
 
 /**
- * Ruling 503: an epic, named beside a task. Its colour is a dot and its title
+ * Ruling 325: an epic, named beside a task. Its colour is a dot and its title
  * the text, outlined rather than filled: an epic describes the work rather
- * than saying what it waits for, so it never wears a status tint (ruling 365).
+ * than saying what it waits for, so it never wears a status tint (ruling 306).
  * A person reads "Checkout revamp"; the id is the pointer's extra, and a
  * screen reader hears "Epic" first so the name is not taken for a label.
  *

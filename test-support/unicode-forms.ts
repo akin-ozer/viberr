@@ -4,7 +4,7 @@ import path from "node:path";
 
 /**
  * Whether the disk the tests run on treats the two Unicode forms of a name as
- * one file (ruling 675). APFS does: writing `é` composed and then decomposed
+ * one file (ruling 76). APFS does: writing `é` composed and then decomposed
  * leaves one entry. The disk production runs on does not, so a folder there
  * can hold both as two files, and a test about that pair has nothing to stand
  * on here. Such a test is skipped with `it.skipIf(diskFoldsUnicodeForms)`

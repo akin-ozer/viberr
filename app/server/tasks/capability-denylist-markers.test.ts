@@ -12,8 +12,8 @@ import { resolveSpecialistDisallowedTools } from "./specialist-tool-policy";
  * run-service.server by matching EXACT marker strings against the denylist
  * `specialist-tool-policy` emits. The web one is a REAL Codex lever
  * (`webSearchMode: "disabled"`); the repo-write one no longer drives a
- * sandbox (ruling 185) but still decides which admin-marked MCP write tools a
- * run loses (ruling 176), on both backends. The two constants live in different files with
+ * sandbox (ruling 183) but still decides which admin-marked MCP write tools a
+ * run loses (ruling 188), on both backends. The two constants live in different files with
  * no compile-time link: rename or re-scope a `CAP_DENY_RULES` entry and the
  * marker sets silently stop matching — Codex enforcement quietly drops while
  * Claude keeps working, which is invisible in every test that asserts one side
@@ -71,7 +71,7 @@ describe("capability denylist ↔ Codex withheld detectors (B-AG6)", () => {
   it("withholding only the SCOPED delivery steps must not read as repo-write withheld", () => {
     // branch/push/PR withheld while the headline stays granted: the run may
     // still edit files, so the repo-write detector must NOT trip (it would
-    // strip the run's MCP write tools, ruling 176).
+    // strip the run's MCP write tools, ruling 188).
     const denied = resolveSpecialistDisallowedTools(
       grants({
         "execute-code-or-write-repo": "direct",

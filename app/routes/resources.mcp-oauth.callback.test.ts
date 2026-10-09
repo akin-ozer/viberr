@@ -9,7 +9,7 @@ import {
 } from "../../test-support/mcp-oauth-server";
 
 /**
- * Ruling 469, through the routes: an org admin's "Sign in" (`mcp-oauth-start`
+ * Ruling 192, through the routes: an org admin's "Sign in" (`mcp-oauth-start`
  * on /org/settings) hands back the authorization URL with this instance's
  * callback as its redirect URI; the browser consents and lands on
  * GET /resources/mcp-oauth/callback, which seals the tokens, probes the
@@ -77,7 +77,7 @@ async function callback(back: URL, cookie: string): Promise<{ status: number; ht
   }
 }
 
-describe("MCP OAuth sign-in through the routes (ruling 469)", () => {
+describe("MCP OAuth sign-in through the routes (ruling 192)", () => {
   let back: URL;
   let adminCookie: string;
 

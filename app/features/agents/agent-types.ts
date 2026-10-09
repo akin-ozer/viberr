@@ -30,7 +30,7 @@ export interface AgentDeploymentView {
   /** Display role — "Operator" or the assignment's role snapshot. */
   role: string;
   /** null for operator engagements: the Live roster names the operator
-   *  profile's own run backend for them (ruling 479(e)). */
+   *  profile's own run backend for them (ruling 326). */
   backend: "codex" | "claude" | null;
   engagement: Engagement;
   taskKey: string;
@@ -55,7 +55,7 @@ export interface ResourceLists {
   kb: string[];
 }
 
-/** Ruling 156: what a deployment's copy lacks (`missing`: on the template,
+/** Ruling 177: what a deployment's copy lacks (`missing`: on the template,
  *  not on the copy) and holds beyond the template (`extra`). Order-insensitive:
  *  a copy naming the same keys in another order does not drift. */
 export interface ResourceDrift {
@@ -67,7 +67,7 @@ export interface ResourceDrift {
  * Every grant in one set of lists, rendered as the replies and the card spell
  * it (`MCP server context7`), skills first, then MCP servers, then knowledge
  * bases. The propagation's `added`/`removed`, the controller's drift lines and
- * (ruling 479(d)) the Agents page's confirm all read this one wording.
+ * (ruling 326) the Agents page's confirm all read this one wording.
  */
 export function describeDriftLists(lists: ResourceLists): string[] {
   const out: string[] = [];
@@ -103,7 +103,7 @@ export interface AgentProfileView {
    *  substitutes the default and the UI flags it. */
   modelKnown: boolean;
   /** R20-3 / F20-4: set when the model a run would resolve to was refused by the
-   *  provider for this account (learned from a real run's failure — ruling 19).
+   *  provider for this account (learned from a real run's failure — ruling 220).
    *  The card disables/flags it with the provider's own redacted sentence;
    *  absent = unknown-but-offered, never "proven available". */
   modelUnavailable?: { reason: string; markedAt: string };
@@ -133,13 +133,13 @@ export interface AgentProfileView {
    * `CapabilityPolicyPanel`, the Policy page's pcap counts and the matrix
    * modal render. */
   actions: { direct: string[]; recommend: string[]; forbidden: string[]; off?: string[] };
-  /** Id-based policy (edit-modal seeding; ruling 7). */
+  /** Id-based policy (edit-modal seeding; ruling 62(a)). */
   capabilities: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[];
   /** Bespoke labels with no catalog id — display-only, preserved on save. */
   extras: { label: string; mode: "direct" | "recommend" | "human" | "off" }[];
   resources: { skills: string[]; mcps: string[]; kb: string[] };
   /**
-   * Ruling 156 (pass 35, F35-7): how this deployment's COPY of the grants
+   * Ruling 177 (pass 35, F35-7): how this deployment's COPY of the grants
    * differs from its template's, or null when there is no template, the
    * deployment carries no copy (it resolves the template live), or the two
    * agree. `customized` stays an identity signal (OBS-7) and never widens to
@@ -149,7 +149,7 @@ export interface AgentProfileView {
   /** "template" = org base deployed here · "project" = created in-project. */
   source: "template" | "project";
   /**
-   * Ruling 479(g): some field this profile renders still resolves from the org
+   * Ruling 177: some field this profile renders still resolves from the org
    * template LIVE, because the deployment's definition leaves it unset (the
    * seeded rows carry no definition at all). A save writes a full snapshot, so
    * only then does saving stop this project following the template, and only
@@ -167,7 +167,7 @@ export interface AgentProfileView {
 
 /**
  * One org-level TEMPLATE offered by the project's "Add from library" picker —
- * a global profile this project has not deployed yet (owner ruling 1 /
+ * a global profile this project has not deployed yet (P13 owner decision 1 /
  * P13-AP-05). Assembled by `listLibraryProfiles` (agents-query.server).
  */
 export interface LibraryProfileView {
@@ -200,7 +200,7 @@ export const DEFAULT_SPECIALIST_ROLE_LABEL = "Agent profile";
 
 /**
  * The role line a profile renders under (or beside) its name, or null for the
- * operator: it is one agent, called Operator, with no role (ruling 518), so
+ * operator: it is one agent, called Operator, with no role (ruling 176), so
  * its row, pill and glyph show the name alone.
  *
  * P14-WL-05: the library deploy writes `role: fm.role || fm.name`, so a
@@ -243,7 +243,7 @@ export function deploymentStatusKind(
   status: string,
 ): "agent" | "input" | "info" | "neutral" {
   if (status === "working" || status === "coordinating") return "agent";
-  // Ruling 625: an open packet is a decision waiting on a person, which is
+  // Ruling 280: an open packet is a decision waiting on a person, which is
   // blue everywhere; amber is an agent's question.
   if (status === "packet open" || status === "waiting on human") return "info";
   return "neutral";

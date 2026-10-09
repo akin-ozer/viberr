@@ -10,7 +10,7 @@
  * Flow: remove any leftover stack → `up --build` (seed one-shot, then the
  * production app on a fresh named volume) → wait for /resources/health →
  * `agentIsolation` must be `on` and `scripts/check-agent-isolation.sh` must
- * pass inside the app container (ruling 460) → `playwright test` with the
+ * pass inside the app container (ruling 139) → `playwright test` with the
  * derived base URL → tear down with --volumes.
  */
 import { spawn } from "node:child_process";
@@ -25,7 +25,7 @@ const COMPOSE = ["compose", "-f", "compose.e2e.yml", "-p", PROJECT];
  *  which is what the polling loop does with a failed parse. */
 const healthBody = z.object({ ok: z.boolean().catch(false) }).catch({ ok: false });
 
-/** Ruling 460's reading, off the same body. */
+/** Ruling 40's reading, off the same body. */
 const agentIsolationBody = z.object({
   agentIsolation: z
     .object({ status: z.string(), reason: z.string().nullable() })
@@ -98,7 +98,7 @@ async function main(): Promise<number> {
     await waitForHealth(`${baseUrl}/resources/health`, 60_000);
     console.log(`e2e: production stack healthy at ${baseUrl}`);
 
-    // Ruling 460: the shipped image runs every agent as its person's own OS
+    // Ruling 139: the shipped image runs every agent as its person's own OS
     // user, and this stack's store is a named volume, so the isolation must be
     // `on` — and the kernel must agree, which only a check inside the running
     // container can ask (`scripts/check-agent-isolation.sh`).
@@ -114,7 +114,7 @@ async function main(): Promise<number> {
       console.error("e2e: the in-image agent isolation check failed");
       return 1;
     }
-    // Ruling 691: the unit suites drive the page capture's renderer with a
+    // Ruling 42: the unit suites drive the page capture's renderer with a
     // stand-in browser, so what only the image's own Chromium can show (the
     // proxy rule that leaves a page no way out, a full-page picture that
     // leaves the layout alone, a picture of an exact size drawn at its own

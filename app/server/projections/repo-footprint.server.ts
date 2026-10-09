@@ -10,7 +10,7 @@ const countRow = z.object({ n: z.number() });
  * friction-free.
  *
  * In a module of its own, with no import beyond the database: the settings
- * door reads it, and so does the operator's repository question (ruling 672),
+ * door reads it, and so does the operator's repository question (ruling 224),
  * which must not load the settings door to ask it. It did, lazily, in the
  * middle of the operator's action, and that first load is slow enough on a
  * cold process to outlast whatever waits for the packet.

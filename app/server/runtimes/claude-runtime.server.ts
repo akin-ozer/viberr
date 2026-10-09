@@ -98,7 +98,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * `npm run dev` going under `run_in_background` would have sat past its result
  * until the idle guard settled it as hung, and 0.3.291 was pinned exactly
  * until the run could settle on its result. The result grace
- * (`RESULT_GRACE_MS`, ruling 687) replaced that pin: the first result, a
+ * (`RESULT_GRACE_MS`, ruling 155) replaced that pin: the first result, a
  * success or an error, starts a 5 s window for the stream to end, and later
  * results do not extend it. A stream still open when it closes has its CLI
  * stopped, and the run settles from the last result it read, so a run cut off
@@ -122,7 +122,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * = <session_id>`. Autonomous: `options.permissionMode = 'bypassPermissions'`.
  * Success is gated on the final result's `is_error`, NOT any exit code.
  *
- * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 127) — the
+ * Auth: whatever the run's CREDENTIAL PRINCIPAL connected (ruling 137) — the
  * hosted sign-in the bundled `claude` binary holds inside that person's
  * `CLAUDE_CONFIG_DIR`, or a Console `ANTHROPIC_API_KEY` they pasted. Both
  * arrive on `spec.env`, assembled by `runCredentialFor` in the run service;
@@ -137,11 +137,11 @@ export interface ClaudeQueryOptions {
   /** Reasoning effort: 'low'|'medium'|'high'|'xhigh'|'max' (default high). */
   effort?: string;
   maxTurns?: number;
-  /** Ruling 175: the instance's spending cap per run. The SDK ends a query
+  /** Ruling 159: the instance's spending cap per run. The SDK ends a query
    *  that exceeds it with an `error_max_budget_usd` result (sdk.d.ts). */
   maxBudgetUsd?: number;
   permissionMode?: string;
-  /** Ruling 174: the SDK declares this "must be set to `true` when using
+  /** Ruling 142: the SDK declares this "must be set to `true` when using
    *  `permissionMode: 'bypassPermissions'`" (sdk.d.ts), defaults it to false
    *  and forwards it to the CLI. The pinned CLI does not enforce it yet; the
    *  day one does, a run without it would lose bypass and every tool with it. */
@@ -161,14 +161,14 @@ export interface ClaudeQueryOptions {
   env?: Record<string, string>;
   abortController?: AbortController;
   /** Custom system prompt. A string (or a `string[]` split at the SDK's
-   *  dynamic boundary, ruling 370) REPLACES the default (operator: tools-only,
+   *  dynamic boundary, ruling 169) REPLACES the default (operator: tools-only,
    *  no coding harness); the custom OBJECT form is the same text recorded on
    *  the session's first request (`snapshot`, the controller). The
    *  append-preset form keeps Claude Code's default scaffolding and appends
    *  the persona (specialists: they DO write code); `excludeDynamicSections`
    *  moves the preset's per-directory sections into the first user message so
    *  every dispatch of one profile shares one system-prompt cache entry
-   *  (ruling 371). */
+   *  (ruling 170). */
   systemPrompt?:
     | string
     | string[]
@@ -196,7 +196,7 @@ export interface ClaudeQueryOptions {
   disallowedTools?: string[];
   /** Which filesystem settings to load. ALWAYS `[]` on a Viberr run (SDK
    *  isolation mode): none of the host's `~/.claude` tiers leak in, and no
-   *  project source is opened over the checkout either — since ruling 180 the
+   *  project source is opened over the checkout either — since ruling 185 the
    *  granted skills arrive through `plugins`, so nothing under cwd needs
    *  reading. Never `'user'` or `'local'` (the host machine's tiers, F13) and
    *  never `'project'` (the repository under review's own `.claude` and
@@ -208,7 +208,7 @@ export interface ClaudeQueryOptions {
    *  `<plugin>:<name>`) and hides the rest, including the SDK's own bundled
    *  set. Setting this option auto-adds the `Skill` tool to `allowedTools`. */
   skills?: string[];
-  /** Local plugins to load for the session. Ruling 180: exactly the run's own
+  /** Local plugins to load for the session. Ruling 185: exactly the run's own
    *  skill plugin when it mounted any (`RunSpec.skillPlugin`), else `[]` —
    *  which also closes the plugin-marketplace leak channel (F13): a
    *  host-installed plugin's slash-commands/skills never reach a Viberr run.
@@ -218,17 +218,17 @@ export interface ClaudeQueryOptions {
    *  plugin MCP) — only the servers Viberr passes via `mcpServers` reach the run.
    *  Governance parity with `settingSources`, for the MCP catalog channel. */
   strictMcpConfig?: boolean;
-  /** Ruling 174: Viberr spawns the CLI itself, as the leader of its own
+  /** Ruling 142: Viberr spawns the CLI itself, as the leader of its own
    *  process group (`claude-spawn.server.ts`), instead of the SDK's local
    *  spawn. */
   spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
-  /** Ruling 101(e), amended (Option D PR 5): the PreToolUse hook that refuses a
+  /** Ruling 219(a), amended (Option D PR 5): the PreToolUse hook that refuses a
    *  Bash command reaching one of the run's argument-level denies, however it
    *  is wrapped, with a reason the model reads. It only ever denies.
-   *  Ruling 371/373: the `SessionStart` hook on the `compact` source that hands
+   *  Ruling 170: the `SessionStart` hook on the `compact` source that hands
    *  the run its anchor back after a compaction, and the `PreCompact` hook that
    *  names the wait on the strip.
-   *  Ruling 527: the `PostToolBatch` hook that hands a controller turn the
+   *  Ruling 251: the `PostToolBatch` hook that hands a controller turn the
    *  steering messages waiting for it, and the `Stop` hook that closes its
    *  steering once the model has written its final answer. */
   hooks?: {
@@ -258,7 +258,7 @@ export type ClaudePreCompactHook = (
   options: { signal: AbortSignal },
 ) => Promise<Record<string, never>>;
 
-/** Ruling 527: the SDK's `PostToolBatch` callback, fired once when every tool
+/** Ruling 251: the SDK's `PostToolBatch` callback, fired once when every tool
  *  call of a batch has answered and before the next model request, narrowed to
  *  the one answer Viberr gives: text the model reads beside those results. */
 export type ClaudePostToolBatchHook = (
@@ -269,7 +269,7 @@ export type ClaudePostToolBatchHook = (
   hookSpecificOutput?: { hookEventName: "PostToolBatch"; additionalContext: string };
 }>;
 
-/** Ruling 527: the SDK's `Stop` callback, fired when the model ends its turn;
+/** Ruling 251: the SDK's `Stop` callback, fired when the model ends its turn;
  *  Viberr's hook only observes (an `additionalContext` here would keep the
  *  turn going past its final answer). */
 export type ClaudeStopHook = (
@@ -299,12 +299,12 @@ export interface ClaudeHookAnswer {
 /** The Bash tool's input, read only for the command line. */
 const bashCommandSchema = z.object({ command: z.string() });
 
-/** A file tool's input, read only for the path it writes (ruling 564). */
+/** A file tool's input, read only for the path it writes (ruling 217(d)). */
 const filePathSchema = z.object({ file_path: z.string() });
 
 export interface ClaudeQuery extends AsyncGenerator<unknown, void> {
   interrupt(): Promise<void>;
-  /** Ruling 611: the structured data behind the CLI's `/usage`, the account's
+  /** Ruling 161(a): the structured data behind the CLI's `/usage`, the account's
    *  plan windows among it. The SDK marks it experimental and says its name
    *  will change, so it is optional here and a run without it reads none. */
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?(opts?: {
@@ -321,7 +321,7 @@ interface ClaudeAdapterDeps {
   /** Injected `query` (default: the real SDK, imported lazily). */
   queryFn?: ClaudeQueryFn;
   env?: Record<string, string>;
-  /** Ruling 174 seams: the spawn under the detached CLI, the signal it sends
+  /** Ruling 142 seams: the spawn under the detached CLI, the signal it sends
    *  its group, and the sweep that runs once the run has settled. Default: the
    *  real ones. A fake `queryFn` never calls `spawnClaudeCodeProcess`, so
    *  without a test driving it none of these is reached. */
@@ -401,7 +401,7 @@ function resolveClaudeEffort(effort?: string): string | undefined {
  * turn/tool may produce no message before the run is treated as hung.
  * Overridable via VIBERR_CLAUDE_IDLE_TIMEOUT_MS; defaults to 15 minutes, the
  * same window the Codex adapter uses (owner ruling A8; the default and the
- * parse live in the env schema, ruling 458(j)).
+ * parse live in the env schema, ruling 39).
  *
  * P13-RT-11: Claude had NO timer of any kind. `maxTurns` bounds turns, not
  * wall-clock or idle time, and a `for await` over a stalled SDK stream never
@@ -422,8 +422,8 @@ function claudeIdleTimeoutMs(): number {
 }
 
 /**
- * Ruling 577: the CLI's switch for its auto-memory. Live on 2026-09-28, 13 of
- * 138 Claude runs tried to keep notes there, 32 writes in all; ruling 564's
+ * Ruling 141(b): the CLI's switch for its auto-memory. Live on 2026-09-28, 13 of
+ * 138 Claude runs tried to keep notes there, 32 writes in all; ruling 217(d)'s
  * hook refused every one, and each refusal cost the run a turn.
  */
 const AUTO_MEMORY_OFF_ENV = "CLAUDE_CODE_DISABLE_AUTO_MEMORY";
@@ -440,7 +440,7 @@ export const INTERRUPT_GRACE_MS = 20_000;
 /**
  * After the cooperative grace elapses the adapter aborts the SDK's
  * AbortController, which tears the child down (SIGTERM, then SIGKILL ~5s later,
- * to the CLI's whole process group since ruling 174). That abort ends the
+ * to the CLI's whole process group since ruling 142). That abort ends the
  * stream, and the loop's own catch settles the run once the process is
  * actually gone — the point being that a settled run no longer leaves a live
  * process writing the workspace (the settle sweep, `reapRunProcesses`, takes
@@ -451,18 +451,18 @@ export const INTERRUPT_GRACE_MS = 20_000;
 export const INTERRUPT_ABORT_GRACE_MS = 10_000;
 
 /**
- * Ruling 687: how long a run's stream may stay open after its first result,
+ * Ruling 155: how long a run's stream may stay open after its first result,
  * successful or not, before the adapter stops the CLI itself. Claude Code
  * 2.1.292 keeps an SDK run open after its final result until every background
  * command the agent started has ended (a dev server under `run_in_background`
  * never does), where earlier releases stopped such a command 5 s after the
  * final result and exited. This adapter reads until the stream ends, so without the
  * grace that run would hold its slot until the idle guard settled it as hung,
- * and a run cut off by a cap (ruling 175) or failed by its provider would lose
+ * and a run cut off by a cap (ruling 159) or failed by its provider would lose
  * that class to `run·error·idle_timeout`. 5 s is the window the CLI itself
  * used to give. When it has passed, the CLI is stopped the way a forced stop
  * does it, the run settles from the last result it read as a stream that
- * ended does, and the settle sweep of ruling 174 reaps what the run left
+ * ended does, and the settle sweep of ruling 142 reaps what the run left
  * running.
  */
 const RESULT_GRACE_MS = 5_000;
@@ -518,7 +518,7 @@ export const OPERATOR_READ_ONLY_DENIED_TOOLS = [
  * profile's grants say — a supporting run pushing or opening a PR is the
  * VIB-30 class (a review agent committed, pushed, and opened a PR with no
  * delivery linkage). Deny wins under bypassPermissions, so these bind. On
- * Codex neither half has a tool-layer channel: ruling 185 starts every thread
+ * Codex neither half has a tool-layer channel: ruling 183 starts every thread
  * `danger-full-access`, so the grants-derived write posture is advisory there,
  * and the remote stays out of reach regardless (agents hold no credential;
  * delivery is server-owned).
@@ -629,7 +629,7 @@ export interface NativeSkillsOutcome {
 /**
  * The skills THIS run enables natively — the names above, gated on the one
  * precondition the native channel cannot run without: the run's plugin
- * directory (ruling 180) still holds the manifest the CLI reads.
+ * directory (ruling 185) still holds the manifest the CLI reads.
  *
  * The plugin is built beside the checkout by `mountGrantedSkills` moments
  * before the spawn, and the checkout's neighbourhood is writable by the agent
@@ -701,7 +701,7 @@ async function realQuery(): Promise<ClaudeQueryFn> {
 }
 
 /**
- * Ruling 611: a Claude run reads its account's plan windows.
+ * Ruling 161(a): a Claude run reads its account's plan windows.
  *
  * A `rate_limit_event` names one window, and gives its percentage only once
  * the provider warns (`allowed_warning`). On 2026-10-01 every run on the
@@ -827,7 +827,7 @@ async function readPlanWindows(q: ClaudeQuery): Promise<PlanWindow[] | null> {
  * provider's event stays the live word: its window's percentage and reset
  * replace the plan's, and a warning or a rejection keeps that window as the
  * binding one with the provider's status. Otherwise the binding window is the
- * one closest to its limit, as ruling 608 reads Codex's. Without plan windows
+ * one closest to its limit, as ruling 161(b) reads Codex's. Without plan windows
  * the event is recorded as it came.
  */
 function withPlanWindows(event: RateLimitFact | null, plan: PlanWindow[] | null): RateLimitFact | null {
@@ -927,7 +927,7 @@ const claudeEnvelopeSchema = z
       .refine((text) => text.trim() !== "")
       .nullable()
       .catch(null),
-    /** Ruling 130(a): the assistant envelope's API-error code, the result's
+    /** Ruling 155(a): the assistant envelope's API-error code, the result's
      *  HTTP status and terminal reason, and a rate-limit reading's status,
      *  window and reset. Read only to classify; never persisted raw. */
     error: z.string().nullable().catch(null),
@@ -948,7 +948,7 @@ const claudeEnvelopeSchema = z
     /** `assistant` envelopes: the content blocks THIS envelope carries
      *  (F35-1: the live output estimate is read off them, because the usage's
      *  `output_tokens` is a placeholder until the result). The prompt figures
-     *  are read once, at the wire boundary (`facts.cache`, ruling 369). */
+     *  are read once, at the wire boundary (`facts.cache`, ruling 172). */
     message: z
       .object({
         content: z.array(claudeContentBlock).catch(() => []),
@@ -968,7 +968,7 @@ const claudeEnvelopeSchema = z
     message: null,
   });
 /**
- * Ruling 371: the dynamic tail of a specialist's prompt split rides its FIRST
+ * Ruling 170: the dynamic tail of a specialist's prompt split rides its FIRST
  * user message, ahead of the instruction, so the preset's system prompt (the
  * static block as its append) stays byte-identical across the tasks one
  * profile is dispatched on. The heading tells the model what it is reading.
@@ -1013,7 +1013,7 @@ type ClaudeFailureKind =
 /** Turn cap for a claude run — a RUNAWAY guard, not a work budget; deployments
  *  tune it with VIBERR_CLAUDE_MAX_TURNS in .env. Why the default of 2000 is
  *  deliberately huge, and the parse of a set value, live in the env schema
- *  (ruling 458(j)). */
+ *  (ruling 39). */
 function resolveMaxTurns(): number {
   return getEnv().VIBERR_CLAUDE_MAX_TURNS;
 }
@@ -1024,12 +1024,12 @@ interface ClaudeFailure {
   kind: ClaudeFailureKind;
   message: string;
   providerText: string;
-  /** Ruling 130(a): the machine facts, attached to the terminal line. */
+  /** Ruling 155(a): the machine facts, attached to the terminal line. */
   facts: RunFailureFacts;
 }
 
 /**
- * Ruling 130(a): what the stream said about the failure BEFORE the prose is
+ * Ruling 155(a): what the stream said about the failure BEFORE the prose is
  * consulted. `rateLimit` is the last `rate_limit_event` reading; `apiError`
  * the last assistant envelope's error code; `apiErrorStatus` and
  * `terminalReason` the result's own fields.
@@ -1088,7 +1088,7 @@ const spawnErrorCodeSchema = z
   .catch("");
 
 /**
- * Ruling 130(a): classify a failure from the STRUCTURED envelope evidence
+ * Ruling 155(a): classify a failure from the STRUCTURED envelope evidence
  * first (a rejected rate-limit reading, the assistant envelope's error code,
  * the result's HTTP status) and from prose second, in this order: spawn codes
  * → session_missing → quota → auth → unknown. The prose regexes stay as the
@@ -1263,7 +1263,7 @@ interface AssembleContext {
     reason: string,
     toolUseId: string | undefined,
   ) => void;
-  /** Ruling 527: the run's steering channel and the console's record of each
+  /** Ruling 251: the run's steering channel and the console's record of each
    *  delivery. Null on the completion compaction, whose single request is
    *  past the turn's final answer. */
   steering: { channel: RunSteering; onDelivered: (count: number) => void } | null;
@@ -1271,11 +1271,11 @@ interface AssembleContext {
 }
 
 /**
- * Ruling 542: the totals each Claude session last REPORTED, keyed by session
+ * Ruling 165(c): the totals each Claude session last REPORTED, keyed by session
  * id. The CLI restores a session's cost state when it resumes it, so every
  * result after the first reports the session's running totals; the next
  * result's share (`sessionShareOf`) is taken from what this held. A run and
- * its completion compaction (ruling 536) both read and update it. After a
+ * its completion compaction (ruling 165(c)) both read and update it. After a
  * restart it is empty, and a resumed session's first result is recorded as
  * reported, as it was before. Bounded: the oldest session goes first.
  */
@@ -1291,7 +1291,7 @@ function rememberReported(sessionId: string, totals: ClaudeResultUsage): void {
   }
 }
 
-/** Ruling 559: after a restart this process holds nothing for a resumed
+/** Ruling 165(c): after a restart this process holds nothing for a resumed
  *  session; the run log's newest result for it, which `startRun` read into
  *  the spec, stands in until this run reports. */
 function recallReported(spec: RunSpec): void {
@@ -1301,7 +1301,7 @@ function recallReported(spec: RunSpec): void {
   }
 }
 
-/** Ruling 542: what a resumed session had spent when it was last reported,
+/** Ruling 165(c): what a resumed session had spent when it was last reported,
  *  which the CLI restores and counts against a run's spending cap. */
 function restoredSpendUsd(sessionId: string | null | undefined): number {
   return sessionId ? (reportedBySession.get(sessionId)?.costUsd ?? 0) : 0;
@@ -1316,7 +1316,7 @@ interface AssembledClaudeQuery {
 /**
  * The query options a run of `spec` is started with, and its first prompt.
  * ONE builder for the run and for the completion compaction that follows it
- * (ruling 376): the compaction request must carry the same tools, system
+ * (ruling 174): the compaction request must carry the same tools, system
  * prompt and servers as the run, or it is a different prefix and the cache it
  * was meant to read is missed.
  */
@@ -1348,7 +1348,7 @@ function assembleClaudeOptions(
     // tiers into a Viberr run — a run must see exactly the resources its
     // profile grants, not the operator-user's personal Claude Code
     // settings/plugins/skills. `settingSources: []` on EVERY run: no host
-    // tier, and no project source over the checkout either (ruling 180),
+    // tier, and no project source over the checkout either (ruling 185),
     // so the repository under review's `.claude` and CLAUDE.md never
     // reach the model at system-prompt tier.
     //
@@ -1364,7 +1364,7 @@ function assembleClaudeOptions(
     //    run's init. That is why `BASE_DENIED_BUILTINS` denies the
     //    `Skill` TOOL, making them UNINVOKABLE.
     //
-    //  · GRANTED skills mounted — ruling 180 (F36-9): the run's plugin
+    //  · GRANTED skills mounted — ruling 185 (F36-9): the run's plugin
     //    directory (`<checkout>/../.viberr-plugins/<runId>/`, built by
     //    `mountGrantedSkills` moments earlier) is the ONE local plugin,
     //    and `skills: ["<plugin>:<name>", …]` enables exactly its skills
@@ -1376,7 +1376,7 @@ function assembleClaudeOptions(
     //    exactly as a clean clone. Canaried inside the image 2026-09-11:
     //    the CLI's init lists `viberr:<name>` and the model invokes it.
     settingSources: [],
-    // Ruling 370: sorted, so two runs of one profile list the same
+    // Ruling 169: sorted, so two runs of one profile list the same
     // skills in the same order (enumeration drift was the one measured
     // residual of a shared preset prefix).
     skills: skillPlugin
@@ -1391,20 +1391,20 @@ function assembleClaudeOptions(
     // in-process toolkit via `mcpServers`; nothing ambient should widen it.
     strictMcpConfig: true,
   };
-  // Ruling 174: the SDK requires this beside `bypassPermissions`
+  // Ruling 142: the SDK requires this beside `bypassPermissions`
   // (sdk.d.ts) and defaults it to false. Only the autonomous run asks
   // for bypass, so only it carries the acknowledgement.
   if (spec.autonomous) options.allowDangerouslySkipPermissions = true;
-  // Ruling 174: the CLI leads its own process group, so every signal the
+  // Ruling 142: the CLI leads its own process group, so every signal the
   // SDK sends it reaches the MCP servers it starts, and the settle sweep
   // can name the group. The handle is this run's alone.
   options.spawnClaudeCodeProcess = (request) => ctx.spawn(request);
-  // Ruling 175: the instance's spending cap, when one is set. The SDK
+  // Ruling 159: the instance's spending cap, when one is set. The SDK
   // stops the query past it and says so with `error_max_budget_usd`.
-  // Ruling 542: the CLI measures the cap against the session's restored
+  // Ruling 165(c): the CLI measures the cap against the session's restored
   // total, so a resumed session's allowance starts from what it had spent.
   if (spec.maxSpendUsd) {
-    // Ruling 553: only when the CLI will restore the session's spend does its
+    // Ruling 159: only when the CLI will restore the session's spend does its
     // cap need the room; otherwise the room is spend the run could overrun by.
     options.maxBudgetUsd =
       spec.maxSpendUsd + (spec.costStateRestored ? restoredSpendUsd(spec.resumeSessionId) : 0);
@@ -1422,10 +1422,10 @@ function assembleClaudeOptions(
   // Base adapter env, overlaid with any per-run env (e.g. the specialist's
   // GIT_CEILING_DIRECTORIES workspace confinement).
   if (deps.env || spec.env) {
-    // Ruling 577: no run keeps Claude Code's auto-memory. Its notes live in
-    // the account home, outside every root a run may write (ruling 564), and
+    // Ruling 141(b): no run keeps Claude Code's auto-memory. Its notes live in
+    // the account home, outside every root a run may write (ruling 217(d)), and
     // a note one agent keeps on one task reaches no other; a board learns
-    // through its knowledge bases (ruling 498).
+    // through its knowledge bases (ruling 210).
     options.env = { ...deps.env, ...spec.env, [AUTO_MEMORY_OFF_ENV]: "1" };
   }
   // System prompt strategy differs by run kind:
@@ -1438,12 +1438,12 @@ function assembleClaudeOptions(
   //    Replacing it (the old behavior) stripped the scaffolding and made a
   //    coding agent run on persona prose alone.
   // The instruction the first user message carries. A specialist's
-  // prompt split puts its dynamic tail here (ruling 371).
+  // prompt split puts its dynamic tail here (ruling 170).
   let prompt = spec.prompt;
   if (spec.systemPrompt) {
     // C02-R7: the persona announced the mounted skills; when the start
     // could not enable them, the correction rides the run — on the
-    // dynamic side, since it varies per run (ruling 370).
+    // dynamic side, since it varies per run (ruling 169).
     const correction = droppedSkills.length > 0 ? droppedSkillsNotice(droppedSkills) : "";
     const split = isPromptPrefix(spec.systemPrompt)
       ? {
@@ -1454,13 +1454,13 @@ function assembleClaudeOptions(
         }
       : null;
     if (spec.kind === "operator") {
-      // Ruling 370: a fresh session per turn, so nothing to record; the
+      // Ruling 170: a fresh session per turn, so nothing to record; the
       // static block caches across tasks behind the SDK's boundary.
       options.systemPrompt = split
         ? claudeSystemPromptBlocks(split)
         : spec.systemPrompt + correction;
     } else if (spec.kind === "controller") {
-      // Ruling 373: coordination machinery like the operator (its
+      // Ruling 170: coordination machinery like the operator (its
       // persona REPLACES the coding harness), resumed on every turn —
       // so the prompt is recorded on the session's first request and
       // reused until compaction (`snapshot`).
@@ -1470,7 +1470,7 @@ function assembleClaudeOptions(
         snapshot: true,
       };
     } else {
-      // Ruling 371: the coding harness with the STATIC block appended,
+      // Ruling 170: the coding harness with the STATIC block appended,
       // its per-directory sections moved out of the system prompt
       // (`excludeDynamicSections`) and the whole thing recorded for the
       // session (`snapshot`); the dynamic tail opens the first user
@@ -1486,7 +1486,7 @@ function assembleClaudeOptions(
       if (split) prompt = withDynamicTail(dynamicPromptText(split), prompt);
     }
   }
-  // Ruling 370: servers in name order, so the init's `mcp_servers` and
+  // Ruling 169: servers in name order, so the init's `mcp_servers` and
   // the tool definitions the SDK sends are the same bytes on every run.
   if (spec.mcpServers) options.mcpServers = sortedRecord(spec.mcpServers);
   if (spec.allowedTools && spec.allowedTools.length) {
@@ -1502,7 +1502,7 @@ function assembleClaudeOptions(
   //     just the persona prompt.
   //   - specialist: deny the git/gh commands for capabilities the profile
   //     withholds (push / PR / merge), computed upstream.
-  // Ruling 564: a run that posts files keeps its file tools when its grants
+  // Ruling 217(d): a run that posts files keeps its file tools when its grants
   // withhold them; the hook below confines them to where its posting goes.
   const writeRoots =
     spec.kind === "operator" || spec.kind === "controller"
@@ -1529,12 +1529,12 @@ function assembleClaudeOptions(
     ...(spec.kind === "reviewer" ? SUPPORTING_DELIVERY_DENIED_BUILTINS : []),
     ...(spec.disallowedTools ?? []),
   ];
-  // Ruling 370: sorted and deduplicated for the same reason as the
+  // Ruling 169: sorted and deduplicated for the same reason as the
   // servers above; the rules read the same whatever their order. The full
   // list still names the withheld capability in the Bash hook's reasons.
   const sdkDenied = writeRoots ? withoutConfinedFileTools(denied) : denied;
   if (sdkDenied.length) options.disallowedTools = sortedNames(sdkDenied);
-  // Ruling 101(e), amended (Option D PR 5): the prefix rules above match a
+  // Ruling 219(a), amended (Option D PR 5): the prefix rules above match a
   // command by its leading words, and the pinned CLI, which already splits
   // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
   // through (measured 2026-09-11: both refs landed on a local remote). A
@@ -1575,7 +1575,7 @@ function assembleClaudeOptions(
     preToolUse.push({ matcher: DROP_FILE_TOOLS.join("|"), hooks: [fileHook] });
   }
   if (preToolUse.length) options.hooks = { PreToolUse: preToolUse };
-  // Ruling 371/373: the run's anchor comes back the moment its context
+  // Ruling 170: the run's anchor comes back the moment its context
   // has been compacted (the `compact` source of `SessionStart`) — the
   // system prompt survives compaction, tool output and the summary's
   // omissions do not. `PreCompact` only names the wait: the summary
@@ -1601,7 +1601,7 @@ function assembleClaudeOptions(
     return {};
   };
   options.hooks = { ...options.hooks, PreCompact: [{ hooks: [preCompactHook] }] };
-  // Ruling 527: a message the person sends while a controller turn works
+  // Ruling 251: a message the person sends while a controller turn works
   // reaches the model at the turn's next step boundary, beside the results of
   // the tool calls it was waiting on. The SDK's own mid-turn input (a `next`
   // priority user message) is not used: measured on SDK 0.3.280, one that
@@ -1640,7 +1640,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
   return {
     backend: "claude",
     /**
-     * Ruling 376: `/compact` on the session a run just left, built from the
+     * Ruling 174: `/compact` on the session a run just left, built from the
      * same spec so the request reads the run's cached prefix. The boundary the
      * CLI reports becomes the run's own compaction fact (trigger `completion`,
      * sizes from the CLI); the request's cost and tokens add to the run's
@@ -1651,7 +1651,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       const queryFn = deps.queryFn ?? (await realQuery());
       const { native: nativeSkills, dropped: droppedSkills } = nativeSkillsOutcome(spec);
       const phase = (name: string, step: string | null) => cb.onPhase?.(name, step);
-      // Ruling 701: the request has no timeout of its own, so the run service
+      // Ruling 175: the request has no timeout of its own, so the run service
       // gives it one and says so here; the SDK stops its CLI on the abort.
       const compactionAbort = new AbortController();
       if (cb.signal?.aborted) compactionAbort.abort();
@@ -1670,7 +1670,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       });
       options.resume = sessionId;
       options.maxTurns = 1;
-      // Ruling 542: the compaction resumes the session too, so its cap starts
+      // Ruling 165(c): the compaction resumes the session too, so its cap starts
       // from the session's restored total, not from the run's own spend.
       if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd + restoredSpendUsd(sessionId);
       // Its own marker: the run's settle sweep must not reap this process.
@@ -1692,8 +1692,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         });
         for await (const message of q) {
           const occurredAt = new Date().toISOString();
-          // Ruling 542: the compaction's result reports the session's totals
-          // too (ruling 536); its share is what the run had not reported.
+          // Ruling 165(c): the compaction's result reports the session's totals
+          // too (ruling 165(c)); its share is what the run had not reported.
           const { display, facts } = projectEnvelope(
             "claude",
             message,
@@ -1731,8 +1731,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             };
           } else if (facts.isResult) {
             resultText = envelope.result ?? null;
-            // Ruling 536: the facts are the compaction's own share already
-            // (ruling 542's projection), added to the run's figures.
+            // Ruling 165(c): the facts are the compaction's own share already
+            // (ruling 165(c)'s projection), added to the run's figures.
             const reported = claudeReportedTotals(message);
             if (reported) rememberReported(sessionId, reported);
             if (facts.costUsd != null) folded.costAddUsd = facts.costUsd;
@@ -1749,7 +1749,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               ev: "meta",
               tag: "run·compaction·request",
               // The row's input is the whole prompt, cache reads included
-              // (ruling 175), so the cached share is named, never added again.
+              // (ruling 159), so the cached share is named, never added again.
               text:
                 `compaction request · ${facts.costUsd != null ? `$${facts.costUsd.toFixed(2)}` : "cost not reported"}` +
                 (own ? ` · ${k(own.input_tokens)} in (cached ${k(own.cached_input_tokens)}), ${k(own.output_tokens)} out` : ""),
@@ -1782,16 +1782,16 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let sawResult = false;
       let resultIsError = false;
       let resultSubtype: string | null = null;
-      /** Ruling 175: what the result says the run spent, for a `max_budget`
+      /** Ruling 159: what the result says the run spent, for a `max_budget`
        *  cut-off's facts. */
       let resultCostUsd: number | null = null;
       /** The failing RESULT envelope's own error prose, kept only long enough to
        *  classify it (P14-RT-10) — it is never persisted or logged raw. */
       let resultErrorText: string | null = null;
-      /** Ruling 130(a): the structured evidence the stream produced, kept for
+      /** Ruling 155(a): the structured evidence the stream produced, kept for
        *  the classifier. */
       const evidence: FailureEvidence = { ...NO_EVIDENCE };
-      /** Ruling 611: the account's plan windows as this run's CLI reported
+      /** Ruling 161(a): the account's plan windows as this run's CLI reported
        *  them, whether they still wait for a line to ride, and the last
        *  `rate_limit_event` reading they are recorded beside. */
       let plan: PlanWindow[] | null = null;
@@ -1801,25 +1801,25 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       let interrupted = false;
       let settled = false;
       let idleTimedOut = false;
-      /** Ruling 687: a result has armed the result grace, and the grace has
+      /** Ruling 155: a result has armed the result grace, and the grace has
        *  run out and stopped the CLI. */
       let resultGraceArmed = false;
       let stoppedAfterResult = false;
       let queryHandle: ClaudeQuery | null = null;
       // Wired into the SDK query options below. Aborting it tears down the
       // spawned CLI subprocess (SIGTERM→SIGKILL, to its whole group since
-      // ruling 174) — the real stop lever behind the cooperative
+      // ruling 142) — the real stop lever behind the cooperative
       // `interrupt()`, which a wedged CLI never answers.
       const abortController = new AbortController();
       // This run's CLI once the SDK has spawned it through
-      // `spawnClaudeCodeProcess` (ruling 174). Per run, never module state, so
+      // `spawnClaudeCodeProcess` (ruling 142). Per run, never module state, so
       // two concurrent runs cannot signal each other's group.
       let cli: ClaudeCli | null = null;
 
       // R21-4 / G5 (FR28): the live phase/step the run strip renders. `lastStep`
       // sticks so a stretch of model thinking still shows the tool the run is
       // waiting on, instead of blanking the column — and, once that tool has
-      // answered, names it as answered (ruling 348).
+      // answered, names it as answered (ruling 166).
       let lastStep: string | null = null;
       const phase = (name: string, step: string | null = lastStep) => {
         cb.onPhase?.(name, step);
@@ -1853,7 +1853,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         } catch {
           // Already aborted / nothing to tear down.
         }
-        // Ruling 174: the abort ends the SDK's stdin and SIGTERMs the CLI
+        // Ruling 142: the abort ends the SDK's stdin and SIGTERMs the CLI
         // after its own grace; the group hears it now, so the stdio MCP
         // servers the CLI started stop with it rather than outliving a CLI
         // that is past answering. The SDK's SIGKILL, and the settle sweep,
@@ -1885,7 +1885,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       };
       const armIdle = () => {
         disarmIdle();
-        // Ruling 687: once the result grace is armed it is the run's watchdog,
+        // Ruling 155: once the result grace is armed it is the run's watchdog,
         // and the lines that still arrive inside it must not re-arm this one.
         if (resultGraceArmed) return;
         idleTimer = setTimeout(() => {
@@ -1956,7 +1956,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         cb.onLine({ raw: JSON.stringify(envelope), display, facts, occurredAt });
       };
 
-      /** Ruling 527: the console's record of a steering delivery, at the step
+      /** Ruling 251: the console's record of a steering delivery, at the step
        *  it happened. The SDK echoes nothing for a hook's context, so without
        *  this line the log would show the model reacting to words it never
        *  shows arriving. */
@@ -2001,7 +2001,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       };
 
       /**
-       * Ruling 174: a settled run leaves no live process. The CLI gets its own
+       * Ruling 142: a settled run leaves no live process. The CLI gets its own
        * exit first (the SDK closes it after the result, and its shutdown stops
        * the commands it tracks), bounded by the reap grace; then the sweep
        * signals its group and every process carrying this run's marker —
@@ -2023,7 +2023,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             runIds: spec.env?.[RUN_MARKER_ENV] ? [spec.runId] : [],
             groupLeader: spawned.pid,
           };
-          // Ruling 460: the group leader is the launcher; its hard kill differs.
+          // Ruling 139: the group leader is the launcher; its hard kill differs.
           if (spec.agent) targets.launched = true;
           await reapProcesses(targets);
         })().catch((error) => {
@@ -2088,7 +2088,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           droppedSkills,
           skillPlugin,
           spawn: (request) => {
-            // Ruling 460: as the principal's own OS user when the run carries
+            // Ruling 139: as the principal's own OS user when the run carries
             // a launch; the launcher then leads the group signalled below.
             cli = spawnClaudeCli(request, deps.spawnCli, deps.signalProcess, spec.agent ?? null);
             return cli.process;
@@ -2140,13 +2140,13 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         let liveCached = 0;
         const seenMessages = new Set<string>();
 
-        // Ruling 394: the drop that landed after the query's own result.
+        // Ruling 155(d): the drop that landed after the query's own result.
         const emitPostTurnTransport = (detail: string) => {
           cb.onLine(postTurnTransportLine(detail));
         };
         /**
          * A result that reports a CAP, not a task failure: the turn cap and,
-         * since ruling 175, the spending cap. Writes the cut-off's classified
+         * since ruling 159, the spending cap. Writes the cut-off's classified
          * line and says whether it did. Without it a turn-capped run surfaced as
          * `run·error·unknown` with "review the runtime configuration" copy
          * (observed live: a completed implementation died at turn 51 running
@@ -2167,7 +2167,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             return true;
           }
           if (resultSubtype === "error_max_budget_usd") {
-            // Ruling 175: the instance's spending cap cut the run off — like the
+            // Ruling 159: the instance's spending cap cut the run off — like the
             // turn cap, not a task failure. The typed record carries the cap and
             // the spend, so the packet names both without reading this prose.
             const failure = emptyRunFailureFacts("max_budget");
@@ -2194,7 +2194,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         const settleEnded = () => {
           // Once only: the result grace's backstop settles a stream that never
           // ended, and when it does end or throw later, its classified line
-          // has already been written (ruling 687).
+          // has already been written (ruling 155).
           if (settled) return;
           // A stream that ENDS (rather than throwing) after the abort still has
           // to report the hang, not a plain "no result" error.
@@ -2226,7 +2226,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         };
 
         /**
-         * Ruling 687: the first result, a success or an error, gives the
+         * Ruling 155: the first result, a success or an error, gives the
          * stream `RESULT_GRACE_MS` to end on its own (see the constant for why
          * 2.1.292 may not). Lines that arrive meanwhile are read and emitted as
          * before, and a later result replaces what the run settles from without
@@ -2257,7 +2257,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           for await (const message of q) {
             armIdle(); // reset the inactivity window on every message
             const occurredAt = new Date().toISOString();
-            // Ruling 542: a result states this run's share of its session.
+            // Ruling 165(c): a result states this run's share of its session.
             const session = sessionId ?? spec.resumeSessionId ?? null;
             const { display, facts } = projectEnvelope(
               "claude",
@@ -2267,12 +2267,12 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             );
             const envelope = claudeEnvelopeSchema.parse(message);
             if (facts.sessionId) sessionId = facts.sessionId;
-            // Ruling 130(a): keep the last rate-limit reading, the last API
+            // Ruling 155(a): keep the last rate-limit reading, the last API
             // error code and the result's status/terminal reason for the classifier.
             if (envelope.type === "rate_limit_event" && envelope.rate_limit_info) {
               evidence.rateLimit = envelope.rate_limit_info;
             }
-            // Ruling 611: once the CLI is up, ask it for the account's plan
+            // Ruling 161(a): once the CLI is up, ask it for the account's plan
             // windows. They ride the next line, and every rate_limit_event
             // after them is recorded beside them.
             if (!planAsked && envelope.type === "system" && envelope.subtype === "init") {
@@ -2311,7 +2311,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               liveTurns = 1 + liveUsers;
               facts.turns = liveTurns;
             } else if (envelope.type === "assistant" && !envelope.parent_tool_use_id) {
-              // Ruling 369: the call's prompt-cache figures were read once at
+              // Ruling 172: the call's prompt-cache figures were read once at
               // the wire boundary. One API message yields one envelope per
               // content block, all carrying the same figures under the same
               // id: the first one counts, and the repeats are stripped so the
@@ -2346,7 +2346,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             // R21-4: the strip's live row. `turn N` is the honest fallback until
             // the run invokes its first tool — a number that climbs is what
             // tells a human the run is alive. The service throttles the writes.
-            // Ruling 348: a tool stays named while it runs; once its result lands the
+            // Ruling 166: a tool stays named while it runs; once its result lands the
             // step says the model is composing again, instead of the finished call.
             const update = stepUpdateForLine(emitted);
             if (update?.kind === "tool") lastStep = update.step;
@@ -2361,7 +2361,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           if (idleTimedOut) return settleIdleTimeout();
           // AbortError from interrupt() is expected; anything else is a fault.
           if (interrupted) return settle("interrupted");
-          // Ruling 687: the throw is the abort the result grace sent, not a
+          // Ruling 155: the throw is the abort the result grace sent, not a
           // transport drop or the run's failure, so the run settles as an
           // ended stream does, from its last result: an error result's cut-off
           // or classified line is written there, once, never the abort's.
@@ -2370,20 +2370,20 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           // is an error and the CLI exits non-zero after it, the SDK swaps the
           // exit error for "Claude Code returned an error result: <text>"
           // (sdk.mjs `readMessages`), measured live on the spending cap (ruling
-          // 175). The result is the truth, so a capped run stays a cut-off; any
+          // 159). The result is the truth, so a capped run stays a cut-off; any
           // other thrown error is classified from the throw, as before.
           if (emitCutOff()) {
             logger.info("claude run cut off by a cap", { runId: spec.runId, subtype: resultSubtype });
             return settle("error");
           }
-          // Ruling 394: the SDK's terminal `result` had already landed and it
+          // Ruling 155(d): the SDK's terminal `result` had already landed and it
           // was not an error, so the query finished and the stream threw on
           // teardown. The Codex half of this ruling is the one the ax-clone
           // board demonstrated; this is the same gate on the same reasoning,
           // and `sawResult` is stronger evidence still: the result closes the
           // run's own work. Since Claude Code 2.1.292 a backgrounded command's
           // completion can wake a further turn behind it, which the result
-          // grace cuts at 5 s (ruling 687); the run stays `finished` unless
+          // grace cuts at 5 s (ruling 155); the run stays `finished` unless
           // the last result it read was an error.
           if (sawResult && !resultIsError) {
             logger.info("claude stream threw after its result", {
@@ -2437,7 +2437,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           void queryHandle?.interrupt().catch(() => {
             // The generator may already have completed.
           });
-          // Ruling 687: after a result the grace's clock is already running.
+          // Ruling 155: after a result the grace's clock is already running.
           // It aborts the CLI 5 s after that result, never later than the
           // cooperative window would from now, and its backstop settles the
           // run, `interrupted` now like any stopped run. Keep that clock.

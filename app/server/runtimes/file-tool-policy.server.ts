@@ -4,11 +4,11 @@ import path from "node:path";
 import { capabilityById } from "~/shared/capabilities";
 
 /**
- * Ruling 564: a run that posts files keeps its file tools, and they write only
+ * Ruling 217(d): a run that posts files keeps its file tools, and they write only
  * where its posting goes.
  *
- * Ruling 109 gives every run whose profile holds `attach-evidence-references`
- * the task's attachments folder, and ruling 535 lets an agent that makes a
+ * Ruling 183 gives every run whose profile holds `attach-evidence-references`
+ * the task's attachments folder, and ruling 128 lets an agent that makes a
  * result deliver it there without a repo-write grant. The write posture never
  * met either: a withheld `execute-code-or-write-repo` removes Edit, MultiEdit
  * and Write outright (the parity ruling of 2026-08-31), so on Claude the agent
@@ -24,9 +24,9 @@ import { capabilityById } from "~/shared/capabilities";
  * target is outside the attachments folder and the temp directory, with a
  * sentence naming both. The checkout stays out of their reach, which is what
  * the withheld grant is about, and NotebookEdit stays denied. Coverage, not
- * containment, like the Bash hook beside it (ruling 101(e)): the run keeps
+ * containment, like the Bash hook beside it (ruling 219(a)): the run keeps
  * Bash, which writes anywhere its user can. Codex is unchanged: since ruling
- * 185 its write posture is advisory, and its patch tool already writes the
+ * 183 its write posture is advisory, and its patch tool already writes the
  * drop.
  */
 
@@ -91,7 +91,7 @@ export function fileWriteDenyReason(
   const id = "execute-code-or-write-repo";
   const label = capabilityById(id)?.label ?? id;
   const [attachments, ...scratch] = roots;
-  // Ruling 692(d): the last sentence. The grant's label used to open with
+  // Ruling 183: the last sentence. The grant's label used to open with
   // "Execute code", and live a writer that read this refusal stopped running
   // commands for the rest of its run ("after that I only counted words and
   // checked links"), though the grant never took its shell away.

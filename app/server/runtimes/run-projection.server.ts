@@ -71,7 +71,7 @@ export const SDK_LABEL = {
  * that walks backwards through it via `/resources/run-log?before=`.
  *
  * The line budget is declared in runtime-types.ts, because the console reads
- * it too (ruling 457, CON-2: a tail further behind than one window re-windows).
+ * it too (ruling 11, CON-2: a tail further behind than one window re-windows).
  */
 const RUN_LOG_WINDOW_BYTES = 384 * 1024;
 
@@ -123,7 +123,7 @@ function renderStateOf(lifecycle: RunState, finished: string | null): RunView["s
 }
 
 /**
- * Ruling 457 (LIVE-1): the facts of a run row that move while it streams —
+ * Ruling 11 (LIVE-1): the facts of a run row that move while it streams —
  * the Live run strip's phase, step, turns and tokens and the console's cache
  * row. One mapping for the loader's `RunView` and the `/resources/run-log`
  * answer the console tails with, so the two can never read a row differently.
@@ -149,7 +149,7 @@ export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
     // provider's total, which is the dishonesty F35-1 exists to remove, and
     // would disagree with the Insights sums, which leave that same row out.
     tokensEstimated: row.usage_final === 0,
-    // Ruling 369: read off the row as stored; the sink folded every figure.
+    // Ruling 172: read off the row as stored; the sink folded every figure.
     cache: {
       writeTokens: row.cache_write_tokens,
       readTokens: row.cached_input_tokens,
@@ -169,7 +169,7 @@ export function runLiveFacts(row: AgentRunRow): RunLiveFacts {
       compactions: row.compactions,
     },
   };
-  // Ruling 457 (CON-7): the row's version (`patchRun` moves `updated_at` on
+  // Ruling 11 (CON-7): the row's version (`patchRun` moves `updated_at` on
   // every fact write), so the console keeps the newer of a revalidation's
   // read and a tail read, whichever lands last.
   const factsAt = Date.parse(row.updated_at);
@@ -181,7 +181,7 @@ function projectRow(
   db: DatabaseSync,
   row: AgentRunRow,
   slice: GroupConsoleSlice,
-  /** Ruling 130(a) / ruling 416: how the run ended (`classifyRunEndOf`). */
+  /** Ruling 155(a) / ruling 92: how the run ended (`classifyRunEndOf`). */
   end: RunEnd,
 ): ProjectedRunView {
   const { display: lines, raw, keys: lineKeys, meta: logWindow, sessionMissing } = slice;
@@ -222,7 +222,7 @@ function projectRow(
   // signatures), so trust the tag directly and fall back to the prose scan for
   // real backend errors that carry no tag.
   //
-  // Ruling 127 added a refusal the other backend CANNOT fix: a run bills a
+  // Ruling 137 added a refusal the other backend CANNOT fix: a run bills a
   // person, and a task with no owner (or an owner whose account is gone) has
   // nobody to bill on either backend. `credential_user_id` is exactly that
   // distinction — the run service records the owner's id even when the refusal
@@ -238,7 +238,7 @@ function projectRow(
   // UI-38 fixed once already, and false twice over here: nothing streamed and
   // no session was lost.
   const noPrincipal = row.credential_user_id === null;
-  // Ruling 130(a) / ruling 416: one classification of how the run ended,
+  // Ruling 155(a) / ruling 92: one classification of how the run ended,
   // shared with the review-round counter so the two can never disagree.
   const { failureKind, failureOrigin, failedBackendUnavailable } = end;
   const view: ProjectedRunView = {
@@ -259,7 +259,7 @@ function projectRow(
     // session id is present. `transcriptExists` is the cheap cached probe —
     // never the full locator, which reads whole files and is too heavy per run
     // row on a loader path.
-    // Ruling 127: probed in the home of the person the run billed — a run with
+    // Ruling 137: probed in the home of the person the run billed — a run with
     // no principal (refused before it started) never wrote one.
     exportable: row.session_id
       ? transcriptExists(backend, row.credential_user_id, row.session_id)
@@ -285,7 +285,7 @@ function projectRow(
   if (failureOrigin) view.failureOrigin = failureOrigin;
   // Absent entirely on a run that failed for any other reason. `altBackend` is
   // the D4 offer and rides only when there is a person for the retry to bill
-  // (ruling 127): without it the panel states the failure and offers nothing,
+  // (ruling 137): without it the panel states the failure and offers nothing,
   // which is the truth for an unowned task.
   if (failedBackendUnavailable) {
     view.failedBackendUnavailable = true;
@@ -327,7 +327,7 @@ function pickRepresentative(rows: AgentRunRow[]): AgentRunRow {
 }
 
 /**
- * Ruling 457 (owner decision 2, 2026-09-24): how much of each agent group's
+ * Ruling 300 (owner decision 2, 2026-09-24): how much of each agent group's
  * console a projection carries.
  *
  *   - `all`: every group's window, display lines and stored envelopes. The
@@ -346,7 +346,7 @@ export type ConsoleShipping = "all" | "shown" | "none";
 export interface RunsForTaskOptions {
   console?: ConsoleShipping;
   /** The task's run rows as `listRunsForTaskRows` returns them, when the
-   *  caller holds them already (ruling 693). */
+   *  caller holds them already (ruling 83). */
   rows?: AgentRunRow[];
 }
 
@@ -368,7 +368,7 @@ function shownGroupIndex(representatives: AgentRunRow[]): number {
  * key appears defines its slot), so a task with an operator + a primary "dev"
  * (with many resume runs) + an optional reviewer shows 2–3 named entries.
  *
- * Ruling 693: a caller that has already read the task's run rows hands them
+ * Ruling 83: a caller that has already read the task's run rows hands them
  * in (`rows`), so the task page reads them once for this and for what the
  * task took; without them this reads its own.
  */
@@ -381,7 +381,7 @@ export function projectRunsForTask(
   const groups = groupRuns(rows ?? listRunsForTaskRows(db, projectSlug, taskKey));
   if (groups.length === 0) return [];
   const representatives = groups.map(pickRepresentative);
-  // Ruling 457 (TASK-1): one COUNT/MAX for the task, not one per run.
+  // Ruling 11 (TASK-1): one COUNT/MAX for the task, not one per run.
   const stats = runLineStatsForTask(db, projectSlug, taskKey);
   const shown = shipping === "shown" ? shownGroupIndex(representatives) : -1;
   return groups.map((bucket, i) => {
@@ -414,7 +414,7 @@ function groupRuns(rows: AgentRunRow[]): AgentRunRow[][] {
 }
 
 /**
- * Ruling 457 (TASK-1, owner decision 2): the console window of the agent group
+ * Ruling 300 (TASK-1, owner decision 2): the console window of the agent group
  * `run` belongs to, as the task loader would ship it for the shown group:
  * display lines, their keys and the window facts, plus the representative's
  * live facts. The console fills a thread with this one request when the page
@@ -469,7 +469,7 @@ interface GroupConsoleSlice {
 }
 
 /**
- * How much of each line a window reads (ruling 457): `full` bodies and
+ * How much of each line a window reads (ruling 300): `full` bodies and
  * envelopes, `display` bodies only, `sizes` neither (only the facts that
  * bound the window and find the continuity marker).
  */
@@ -489,7 +489,7 @@ interface WindowLine {
  * first: drop from the OLDEST end of the run's tail until the byte budget
  * fits — one 300 KB tool output must not evict the whole rest of the window —
  * but keep at least `budget.keep` of the newest (see `windowForGroup`). The
- * two ruling-457 reads apply that rule inside their query, so a line outside
+ * two ruling-11 reads apply that rule inside their query, so a line outside
  * the window is neither returned nor parsed.
  */
 function readTail(db: DatabaseSync, runId: string, budget: TailBudget, read: WindowRead): WindowLine[] {
@@ -561,7 +561,7 @@ function deadSessionId(raw: string | null): string | null {
  * always survives the budget, then re-assembles chronologically with the same
  * explicit `run N of M` boundary UI-53 introduced.
  *
- * Ruling 457: the window is bounded the same way whatever `read` carries, so a
+ * Ruling 300: the window is bounded the same way whatever `read` carries, so a
  * thread the console fills later gets exactly the window a document load
  * would have shipped, and the continuity marker (P13-D-2) counts only while it
  * is inside that window (the panel's retirement rule, continuity-recovery.tsx).

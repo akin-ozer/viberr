@@ -1,5 +1,5 @@
 /**
- * Ruling 239 (pass 37): the project's RULINGS knowledge base.
+ * Ruling 208(a) (pass 37): the project's RULINGS knowledge base.
  *
  * A knowledge base is granted per profile (`agents[].resources.kb`), which
  * makes it a thing a controller can attach to eight profiles and forget on the
@@ -9,7 +9,7 @@
  * repository with a stated rule above — not a novel defect to be re-derived
  * from first principles on each task", and noting that four reviewers had each
  * re-derived it for four rework rounds. SHOP-24's Code Reviewer then blocked on
- * exactly that rule twice more, which raised ruling 237's packet and cost a
+ * exactly that rule twice more, which raised ruling 94's packet and cost a
  * human a goal amendment.
  *
  * (That reviewer HAD the KB — checked, twice, because the obvious hypothesis
@@ -44,9 +44,9 @@ export function projectRulingsKb(
 /**
  * A run's KB list with the project's rulings KB guaranteed present.
  *
- * Appended, not prepended: ruling 239 puts a profile's own grants first and the
+ * Appended, not prepended: ruling 208(a) puts a profile's own grants first and the
  * project's rulings last, and `readKbIndexes` emits the indexes in that order.
- * It is a reading order now; until ruling 283 it was a shared character budget
+ * It is a reading order now; until ruling 205 it was a shared character budget
  * spent in order, and a rulings KB in front would have silently taken context
  * from the thing the profile was deployed to do. Deduped, because a profile
  * that ALSO grants it explicitly must not have it indexed twice — which is the

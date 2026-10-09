@@ -18,7 +18,7 @@ import type { OperatorPacketOptionInput } from "./operator-packets.server";
 import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.server";
 
 /**
- * Ruling 130 (pass 34, F34-1 / F34-12 / Q34-7): the ONE home for
+ * Ruling 156 (pass 34, F34-1 / F34-12 / Q34-7): the ONE home for
  * failure-to-words, for operator and specialist runs alike.
  *
  * Live: a five-hour session limit and a 403 `oauth_org_not_allowed` were both
@@ -26,7 +26,7 @@ import { SESSION_STORE_UNREADABLE_MARK } from "~/server/runtimes/session-export.
  * updated the policy / credential"; the resolved decision was recorded as
  * "policy / credential updated"; and an operator acting on that record told a
  * specialist a GitHub-scope block had been lifted (JC-6), undoing the owner's
- * decision. Under ruling 127 the remedy for `quota` and `auth` belongs to the
+ * decision. Under ruling 137 the remedy for `quota` and `auth` belongs to the
  * credential principal (the task owner): wait until the reset instant, or
  * switch to or connect a different account (or an API key) on Profile → Agent accounts.
  * Generic advice ("fix the credential", "retry on the other backend", "review
@@ -37,7 +37,7 @@ export interface DescribeRunFailureInput {
   failure: RunFailure | null;
   backend: RealBackend;
   taskKey: string;
-  /** The task owner (ruling 127's credential principal); null when unowned. */
+  /** The task owner (ruling 137's credential principal); null when unowned. */
   ownerUserId: string | null;
   /** Whose run failed: the operator's own, or an engaged specialist's. */
   role: "operator" | "specialist";
@@ -96,7 +96,7 @@ function windowWord(window: string | null | undefined): string {
 }
 
 /**
- * Ruling 224: the reset instant viberr actually knows, when the run's own
+ * Ruling 157: the reset instant viberr actually knows, when the run's own
  * failure facts do not carry one.
  *
  * `RunFailureFacts.resetsAt` is set only from a machine `rate_limit_event` the
@@ -130,7 +130,7 @@ export function describeRunFailure(
   const other: RealBackend = input.backend === "codex" ? "claude" : "codex";
   const kind = input.failure?.kind ?? "unknown";
   const facts = input.failure?.facts;
-  // Ruling 224 (F37-44), second correction: the FACTS carry a reset instant
+  // Ruling 157 (F37-44), second correction: the FACTS carry a reset instant
   // only when the provider sent a machine `rate_limit_event` this run —
   // Codex's spawn-time refusal sends none, so `facts.resetsAt` is null on
   // exactly the failure that stalls a board. Viberr does know the instant: the
@@ -144,7 +144,7 @@ export function describeRunFailure(
   const ownerRecord = input.ownerUserId ? findUserById(db, input.ownerUserId) : null;
   const owner = ownerRecord ? { userId: ownerRecord.id, name: ownerRecord.name } : null;
   /**
-   * Ruling 326: CONNECTED is not the question. RUNNABLE NOW is.
+   * Ruling 156: CONNECTED is not the question. RUNNABLE NOW is.
    *
    * This used to ask only whether the owner has the other backend connected,
    * and every option and sentence built on it promises a retry that happens
@@ -160,7 +160,7 @@ export function describeRunFailure(
    * that window composed a packet the authoring guard then refused — eleven
    * times, in three bursts, each burst one account failure taking out several
    * tasks at once. Each of the eleven left a note saying only that "the
-   * recovery packet could not be opened" (ruling 325) and no packet at all. For
+   * recovery packet could not be opened" (ruling 122) and no packet at all. For
    * four days this board could not escalate a stalled task.
    *
    * A held backend is a backend the owner has; it is not one the retry can use.
@@ -206,7 +206,7 @@ export function describeRunFailure(
       break;
     }
     case "unavailable":
-      // Ruling 127: the run's own line already names the person and their
+      // Ruling 137: the run's own line already names the person and their
       // remedy; that sentence is the reason and the remedy.
       reason = input.failure?.text
         ? endSentence(input.failure.text)
@@ -241,7 +241,7 @@ export function describeRunFailure(
       remedy = "Re-run it with a narrower directive, or split the work.";
       break;
     case "max_budget": {
-      // Ruling 175: the instance's spending cap, not the task, ended the run.
+      // Ruling 159: the instance's spending cap, not the task, ended the run.
       // Both figures come from the adapter's typed record.
       const cap = facts?.spendCapUsd;
       const spent = facts?.spentUsd;
@@ -253,7 +253,7 @@ export function describeRunFailure(
       break;
     }
     case "idle_timeout":
-      // Ruling 595: nothing marks the directive or the account as the cause
+      // Ruling 158(a): nothing marks the directive or the account as the cause
       // of a hang, so the remedy is a plain re-run. The adapter's own line,
       // with the window and what was watched, stays on the run's console.
       reason = `${runWord.charAt(0).toUpperCase()}${runWord.slice(1)} was stopped as hung: ${backend} produced nothing for the whole idle window.`;
@@ -261,7 +261,7 @@ export function describeRunFailure(
         "Nothing marks the directive or the account as the cause. Run it again; if it hangs again, inspect the session for what it was waiting on.";
       break;
     case "tool_loop":
-      // Ruling 598: the gateway's own sentence names the call and what it
+      // Ruling 158(b): the gateway's own sentence names the call and what it
       // answered, which is the guidance the agent was missing. Neither the
       // account nor the backend is the cause, and a plain re-run repeats the
       // loop, so the default option, a redirect, stays recommended.
@@ -272,7 +272,7 @@ export function describeRunFailure(
         "Nothing marks the account or the backend as the cause. Redirect the agent: tell it what the tool answered, and to read each answer and change the call rather than send it again.";
       break;
     case "session_missing":
-      // Ruling 221 (F37-41): two roads to one class, and the difference is
+      // Ruling 162 (F37-41): two roads to one class, and the difference is
       // what a human does next. A vanished session heals itself on the next
       // fresh run; a session STORE that cannot be opened keeps failing every
       // resume on this host until someone repairs or removes the file, so the
@@ -324,7 +324,7 @@ function operatorOptions(
    *  backend's exhaustion record on the strength of the assertion. */
   failed: RealBackend,
   resetLabel: string | null,
-  /** Ruling 224: the provider's own reset instant, when it gave one. */
+  /** Ruling 157: the provider's own reset instant, when it gave one. */
   resetsAt: string | null = null,
 ): OperatorPacketOptionInput[] {
   const rerun: OperatorPacketOptionInput = {
@@ -344,7 +344,7 @@ function operatorOptions(
     detail: "Closes this decision and starts NO run. The task stays blocked and waiting on you; use Run operator when you are ready.",
   };
   if (kind === "quota") {
-    // Ruling 224 (F37-44): the operator's packet had the same defect as the
+    // Ruling 157 (F37-44): the operator's packet had the same defect as the
     // specialist's — its recommended option asks a human to ASSERT the window
     // has reset, which at the moment it is offered is the one statement on the
     // packet that is false. When the provider dated the reopening, waiting for
@@ -398,8 +398,8 @@ function operatorOptions(
 
 /** A specialist's recovery options: the other backend first when the owner
  *  has it, else "send the agent back to continue"; an overload retries on the
- *  same backend first (ruling 660); `redirect` present and NOT recommended for
- *  a backend failure or a hung run (the agent did nothing wrong, ruling 595). */
+ *  same backend first (ruling 156(c)); `redirect` present and NOT recommended for
+ *  a backend failure or a hung run (the agent did nothing wrong, ruling 158(a)). */
 function specialistOptions(
   kind: RunFailure["kind"],
   backend: string,
@@ -414,7 +414,7 @@ function specialistOptions(
   profileModel: string | undefined,
   /** U35-11: the `overloaded` failure was this deployment's own network path. */
   localNetwork = false,
-  /** Ruling 224: the provider's own reset instant, when it gave one. A spent
+  /** Ruling 157: the provider's own reset instant, when it gave one. A spent
    *  window with a KNOWN reopening has a remedy that is neither a model change
    *  nor a false assertion: wait for it, and come back by itself. */
   resetsAt: string | null = null,
@@ -425,7 +425,7 @@ function specialistOptions(
   // (`startRun` substitutes and discloses it, F21-13); one the other backend
   // knows keeps its own. Live, the option read "re-run the same agent there and
   // continue", the retry ran on `sonnet`, and nothing on the task named it.
-  // Ruling 254 (pass 37, F37-83): and it says WHEN it was true. This sentence
+  // Ruling 156(b) (pass 37, F37-83): and it says WHEN it was true. This sentence
   // is frozen into the packet when the option is authored, and a packet can sit
   // open for hours — live, the owner moved eight profiles from `gpt-5.6-luna`
   // to `opus` while four of these packets waited, and every one of them went on
@@ -443,7 +443,7 @@ function specialistOptions(
           : `on its own \`${profileModel}\` as deployed right now`;
       })()
     : `on ${BACKEND_LABEL[other]}'s default model as deployed right now`;
-  /** Ruling 254: the option carries a backend, not a model, so a deployment
+  /** Ruling 156(b): the option carries a backend, not a model, so a deployment
    *  edit between authoring and answering moves the run and not the text. */
   const retryModelCaveat =
     " This option pins the backend, not the model: if the deployment changes " +
@@ -457,7 +457,7 @@ function specialistOptions(
     kind === "quota" || kind === "auth" || kind === "unavailable" || kind === "overloaded";
   if (backendFailure) {
     const options: OperatorPacketOptionInput[] = [];
-    // Ruling 224 (F37-44): a spent window the provider dated. Every other
+    // Ruling 157 (F37-44): a spent window the provider dated. Every other
     // option on this packet is wrong at the moment it is offered — the
     // cross-backend retry permanently moves the task off the model its profile
     // declares, and the send-back asks a human to ASSERT a window has reset
@@ -485,7 +485,7 @@ function specialistOptions(
       };
       options.push(wait);
     }
-    // Ruling 660 (owner, 2026-10-05): an overload is the provider busy for a
+    // Ruling 156(c) (owner, 2026-10-05): an overload is the provider busy for a
     // moment, so the same-backend retry is the recommendation and comes first.
     // The other backend stays offered: it changes the agent's model for the
     // rest of the task to save a wait of minutes.
@@ -499,7 +499,7 @@ function specialistOptions(
           `The owner has ${BACKEND_LABEL[other]} connected; re-run the same agent there ${retryModel} and continue. ` +
           `Later runs on this task stay on ${BACKEND_LABEL[other]} until another retry moves them.` +
           retryModelCaveat +
-          // Ruling 212: when the fault is THIS deployment's network path, the
+          // Ruling 156: when the fault is THIS deployment's network path, the
           // other provider is reached over the same path, so switching is not a
           // remedy — and it permanently moves the task off the model its
           // profile declares. Offered, never recommended, and the reason is on
@@ -511,10 +511,10 @@ function specialistOptions(
               : ""),
         backend: other,
       };
-      // Ruling 212: not recommended when the fault is this deployment's own
-      // network path. Ruling 224: nor when waiting for a dated window is on the
+      // Ruling 156: not recommended when the fault is this deployment's own
+      // network path. Ruling 157: nor when waiting for a dated window is on the
       // table — exactly one option is recommended, and a permanent model change
-      // is not it. Ruling 660: nor for any overload, local or the provider's.
+      // is not it. Ruling 156(c): nor for any overload, local or the provider's.
       if (!overloaded && !waitUntil) retry.recommended = true;
       if (profileId) retry.profileId = profileId;
     }
@@ -536,14 +536,14 @@ function specialistOptions(
             ? "Closes this decision and re-runs the agent on the same account with the same directive. If the deployment still cannot reach the provider you get a new decision packet."
             : "Closes this decision and re-runs the agent on the same account with the same directive. If the provider is still overloaded you get a new decision packet."
           : "Closes this decision and re-runs the agent on the owner's current account with the same directive.",
-      // Ruling 212: the same-backend retry is the recommendation whenever the
+      // Ruling 156: the same-backend retry is the recommendation whenever the
       // other backend is not a real alternative — either the owner does not
       // have it, or the fault was local and switching would only change the
       // model.
-      // Ruling 224: and never when the wait is offered — asking a human to
+      // Ruling 157: and never when the wait is offered — asking a human to
       // assert the window has reset, minutes after the provider said it has
       // hours to run, is the one thing on this packet that is simply false.
-      // Ruling 660: and for every overload, the provider's included.
+      // Ruling 156(c): and for every overload, the provider's included.
       recommended: (!ownerHasOther || overloaded) && !waitUntil,
       ev:
         kind === "quota"
@@ -558,19 +558,19 @@ function specialistOptions(
     // account now answers for it) name the backend they assert about, so the
     // resolution can retire that backend's exhaustion record. Without it the
     // record outlives the person's statement: only a run that COMPLETES clears
-    // it, the dispatch hold (ruling 152(c)) stops any run from starting until
+    // it, the dispatch hold (ruling 151) stops any run from starting until
     // the recorded instant passes, and the option's own promise — "send the
-    // agent back to continue" — cannot be kept (ruling 164). The overloaded and
+    // agent back to continue" — cannot be kept (ruling 131). The overloaded and
     // unavailable titles assert nothing about quota and name nothing.
     if (kind === "quota" || kind === "auth") sendBack.backend = failed;
-    // Ruling 660: the recommended option comes first.
+    // Ruling 156(c): the recommended option comes first.
     if (overloaded) options.push(sendBack, ...(retry ? [retry] : []));
     else options.push(...(retry ? [retry] : []), sendBack);
     options.push(redirect);
     return options;
   }
   if (kind === "idle_timeout") {
-    // Ruling 595: a hung run is not a wrong directive. Live, both stall
+    // Ruling 158(a): a hung run is not a wrong directive. Live, both stall
     // packets of round 4 recommended "Redirect with sharper guidance" for a
     // run the idle guard had stopped, and the person answered each with the
     // plain send-back. The same agent, the same directive, is the remedy;

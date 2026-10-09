@@ -32,7 +32,7 @@ import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
  *
  * `state/projection.sqlite` is not a cache. It is the ONLY home of users,
  * better-auth credentials and sessions, AES-sealed PATs and personal
- * agent-backend API keys (ruling 127), audit events and notifications — none of it rebuildable from the canonical markdown. The
+ * agent-backend API keys (ruling 137), audit events and notifications — none of it rebuildable from the canonical markdown. The
  * product's own answer to FR33's 90-day audit hard-delete is "snapshot the
  * data root on a schedule", and to a bad hand-edit it is "restore the backup".
  * Both rested on a paragraph of prose: there was no backup command, and the
@@ -48,7 +48,7 @@ import { openDatabase, openDatabaseReadOnly } from "./sqlite.server";
  * transaction, so the artefact is the database as of one instant — WAL content
  * included — written to a single file with no sidecars. The source is opened
  * through `openDatabaseReadOnly`, so this is never the second connection to a
- * live root (ruling 158): while a writer lock is there at all the reader copies
+ * live root (ruling 23): while a writer lock is there at all the reader copies
  * `projection.sqlite` and its `-wal` next to the store and the VACUUM runs on
  * the copy; on a root with no lock it runs on the file itself.
  * Either way it takes no data-root lock (a backup that refused to run while the
@@ -82,11 +82,11 @@ const PROJECTION_NAME = "projection.sqlite";
 const STORE_DIR = "store";
 
 /** The file-native store directories a backup carries by default.
- *  C01-A3 (pass 32): `audit-exports/` joined the list — ruling 102's purge
+ *  C01-A3 (pass 32): `audit-exports/` joined the list — ruling 33's purge
  *  writes the expiring audit rows there as the DURABLE record, and `npm run
  *  backup` silently dropped it. A directory that does not exist yet (a root
  *  that never purged) is skipped, as every entry here is. */
-/** Ruling 691: the two folders of a task a page render works in. */
+/** Ruling 194: the two folders of a task a page render works in. */
 const RENDER_WORK_DIRS: ReadonlySet<string> = new Set([TASK_CAPTURE_SCRATCH_DIR, TASK_CAPTURE_INPUT_DIR]);
 
 const BACKED_UP_STORE_DIRS = [
@@ -98,9 +98,9 @@ const BACKED_UP_STORE_DIRS = [
 ] as const;
 
 /**
- * `runtimes/` holds LIVE agent credentials — since ruling 127 each person's own
+ * `runtimes/` holds LIVE agent credentials — since ruling 137 each person's own
  * (`users/<userId>/codex-home/accounts/<accountId>/auth.json`, one per account
- * since ruling 507) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
+ * since ruling 138) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */
@@ -136,7 +136,7 @@ export interface BackupManifest {
     bytes: number;
   };
   /** True when the artefact carries the secrets the instance generated for
-   *  itself (`instance-secrets.json`, ruling 504). Absent on older artefacts. */
+   *  itself (`instance-secrets.json`, ruling 38). Absent on older artefacts. */
   instanceSecrets?: boolean;
   /** Plain-English inventory — what a restore of this artefact brings back. */
   contains: string[];
@@ -215,7 +215,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   if (existsSync(source)) {
     const target = path.join(dir, PROJECTION_NAME);
     // A reader, never the second writer that B-FD1 exists to prevent, and
-    // never the second CONNECTION to a live root either (ruling 158): with a
+    // never the second CONNECTION to a live root either (ruling 23): with a
     // writer lock present this opens a copy taken next to the store, and the
     // VACUUM INTO runs on that copy. It runs in a read transaction, so the
     // artefact includes everything committed to the WAL at that instant.
@@ -261,7 +261,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
         const parts = path.relative(from, src).split(path.sep);
         if (parts[1] === ".repo-mirror") return false;
         if (parts[1] === "tasks" && parts[3] === "workspace") return false;
-        // Ruling 691: nor is what a page render works in. The scratch holds a
+        // Ruling 194: nor is what a page render works in. The scratch holds a
         // browser profile only its uid can enter, so a copy of it stops the
         // whole backup, and the input folder is a copy of a kept delivery.
         if (parts[1] === "tasks" && parts[3] !== undefined && RENDER_WORK_DIRS.has(parts[3])) return false;
@@ -273,7 +273,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   const store = { dirs: copied, ...walkFiles(storeRoot) };
 
   // ------------------------------------------------- the generated secrets
-  // Ruling 504: an instance whose environment sets no secrets generated its
+  // Ruling 38: an instance whose environment sets no secrets generated its
   // own into state/. They sealed every secret in the database above, so they
   // travel with it, or a restore could never open those credentials again.
   const secrets = instanceSecretsPath(dataRoot);
@@ -336,7 +336,7 @@ function countRows(dbPath: string): TableRowCounts {
 }
 
 /** How the projection was read: the live file on a root carrying no writer lock,
- *  or a copy taken beside the store because one was there (ruling 158). */
+ *  or a copy taken beside the store because one was there (ruling 23). */
 type ProjectionSource = "live" | "snapshot";
 
 function projectionProvenance(source: ProjectionSource): string {
@@ -353,12 +353,12 @@ function contains(
   const list = [
     ...(projection !== null
       ? [
-          `state/projection.sqlite: users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 127), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
+          `state/projection.sqlite: users, better-auth credentials and sessions, AES-sealed GitHub PATs, MCP credentials and personal agent-backend API keys (ruling 137), audit events, notifications, and every projection (a consistent point-in-time copy, WAL included; ${projectionProvenance(projection)})`,
         ]
       : []),
     ...(instanceSecrets
       ? [
-          "state/instance-secrets.json: the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this instance generated for itself (ruling 504). They open every sealed secret in the database, so treat this artefact as a secret. A value the environment sets overrides the file and is not in here.",
+          "state/instance-secrets.json: the VIBERR_SESSION_SECRET and VIBERR_SECRET_ENCRYPTION_KEY this instance generated for itself (ruling 38). They open every sealed secret in the database, so treat this artefact as a secret. A value the environment sets overrides the file and is not in here.",
         ]
       : []),
     ...dirs.map((dir) => `${dir}/: the canonical files, copied verbatim`),
@@ -499,7 +499,7 @@ export interface RestoreResult {
   /** Directories replaced in the data root. */
   restoredDirs: string[];
   projectionRestored: boolean;
-  /** The artefact's generated secrets were put back (ruling 504). */
+  /** The artefact's generated secrets were put back (ruling 38). */
   instanceSecretsRestored: boolean;
   /** Stale `-wal` / `-shm` removed beside the replaced projection. */
   removedSidecars: string[];
@@ -599,7 +599,7 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
     }
   }
 
-  // Ruling 504: generated secrets come back with the database they sealed.
+  // Ruling 38: generated secrets come back with the database they sealed.
   // The root's own go aside with its displaced database, so that copy still
   // opens; on a root with no database they sealed nothing, and are replaced.
   let instanceSecretsRestored = false;
@@ -641,7 +641,7 @@ export function restoreBackup(options: RestoreBackupOptions): RestoreResult {
  * drop the single-writer guard mid-restore (and trip the F18-5 ownership guard
  * of any process still watching it). `runtimes/` is never listed — a restore
  * must not wipe the agent CLI logins it deliberately does not carry. Nor is
- * `state/instance-secrets.json` (ruling 504): the restore CLI's own env read
+ * `state/instance-secrets.json` (ruling 38): the restore CLI's own env read
  * generates one on a fresh root, and it moves with the database it sealed
  * rather than making a root "occupied".
  */
@@ -696,7 +696,7 @@ function renderRestore(result: Omit<RestoreResult, "text">): string {
       : "  runtimes/ was left exactly as it was: this restore did not touch anyone's agent CLI logins",
     "",
     result.instanceSecretsRestored
-      ? "state/instance-secrets.json came back from the artefact: the secrets this instance generated for itself, which open the restored credentials (ruling 504). A value the environment sets still overrides them."
+      ? "state/instance-secrets.json came back from the artefact: the secrets this instance generated for itself, which open the restored credentials (ruling 38). A value the environment sets still overrides them."
       : "VIBERR_SECRET_ENCRYPTION_KEY is not part of the artefact: without the key this backup was taken under, every sealed secret is unreadable (GitHub PATs, MCP credentials, sign-in provider secrets, the S3 audit-export key, and each person's agent-backend API keys).",
     "Start the app; boot reconciles the projection against the restored files.",
   );
@@ -757,7 +757,7 @@ export function restoreStoreFile(options: {
     "  the database was NOT touched: users, sessions, PATs, audit and notifications are unchanged",
     "  the watcher re-projects it within ~1s while the app runs; otherwise `npm run rescan`",
   ].join("\n");
-  // Ruling 466: a size in bytes is a UTF-8 byte count, never a string length.
+  // Ruling 18(b): a size in bytes is a UTF-8 byte count, never a string length.
   return { path: rel, absPath: target, displacedTo, bytes: Buffer.byteLength(content, "utf8"), text };
 }
 

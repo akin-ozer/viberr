@@ -100,11 +100,11 @@ function entriesOf(dir: string): string[] {
 }
 
 /**
- * Ruling 485: the directories a run writes — each task's `workspace/`,
+ * Ruling 140: the directories a run writes — each task's `workspace/`,
  * `attachments/` and `.operator-scratch/` — are the agents' trees (a tool they
  * ran can leave a directory only its uid can enter), so a reset removes them
  * as each task's owner before the rest of `projects/`, the server's own, goes.
- * Ruling 691: so is what the page renderer left in a task's `.captures/` (a
+ * Ruling 194: so is what the page renderer left in a task's `.captures/` (a
  * browser's profile is its uid's alone).
  * Where the seed runs beside a launcher and a task has no owner, it throws
  * rather than remove that task's trees as the server.
@@ -125,10 +125,10 @@ function removeTaskAgentTrees(db: DatabaseSync, dataRoot: string, projRoot: stri
  * Wipe the store back to a clean sheet: projects/, agents/profiles, the raw
  * runtime .jsonl transcript truth, and every derived table. Scoped to the
  * per-backend RUN-LOG dirs (`runtimes/<backend>/<id>.jsonl`) and NEVER the
- * per-person runtime homes that also live under `runtimes/` — ruling 127 put
+ * per-person runtime homes that also live under `runtimes/` — ruling 137 put
  * every vendor sign-in there (`users/<id>/codex-home/accounts/<account>/auth.json`,
  * `users/<id>/claude-home/accounts/<account>/.credentials.json` since ruling
- * 507, or directly in the two homes before it), so deleting them would sign
+ * 138, or directly in the two homes before it), so deleting them would sign
  * every person on the instance out of their own accounts (P11-04, when the
  * homes were still deployment-wide). Users/auth tables are preserved.
  */
@@ -210,7 +210,7 @@ export async function runSeed(
   //    permanently. `kbGrants: true` because `npm run seed` also seeds the
   //    backing knowledge bases (seedOrgResources); the bare boot backfill
   //    doesn't, which is the one field the two writers differ on.
-  //    Ruling 692: the library's Writer and Editor are written beside them.
+  //    Ruling 179: the library's Writer and Editor are written beside them.
   for (const profile of [...SEED_AGENT_PROFILES, ...LIBRARY_AGENT_PROFILES]) {
     writeFileAtomic(
       agentProfileFilePath(profile.frontmatter.id, dataRoot),

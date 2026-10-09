@@ -10,7 +10,7 @@ import type { RealBackend } from "./runtime-registry.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 
 /**
- * Whose account a run bills (ruling 127).
+ * Whose account a run bills (ruling 137).
  *
  * Every agent run has a credential PRINCIPAL, and there are exactly two rules:
  *
@@ -20,7 +20,7 @@ import { BACKEND_LABEL } from "~/shared/text/backend-label";
  *
  * A task with no owner therefore cannot run agents at all: there is nobody to
  * bill, and inventing one (the viewer, the dispatcher, an instance credential)
- * is precisely what ruling 127 forbids. That refusal is honest and cheap — it
+ * is precisely what ruling 137 forbids. That refusal is honest and cheap — it
  * happens before any clone, any reservation and any process — which is why
  * creation now seats the creator as owner.
  *

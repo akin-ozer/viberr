@@ -31,7 +31,7 @@ import { useDismiss } from "./use-dismiss";
  * behaves identically in the (non-dialog) Details panel.
  */
 
-/** What ends a press (ruling 561): its click, which goes to where the press
+/** What ends a press (ruling 289): its click, which goes to where the press
  *  began and ended before any listener runs, so letting go there moves nothing
  *  it lands on; or the drop of a drag it started, which sends no click. */
 const PRESS_ENDS = ["click", "dragend"] as const;
@@ -80,7 +80,7 @@ export function LabelInput({
     if (showList) listRef.current?.scrollIntoView?.({ block: "nearest" });
   }, [showList]);
 
-  // Ruling 561: listening only while the list is shown or a label is half
+  // Ruling 289: listening only while the list is shown or a label is half
   // typed: nothing else here moves.
   usePressHold(wrapRef, showList || query !== "");
 
@@ -114,7 +114,7 @@ export function LabelInput({
     const { next, added, dup, refused } = foldLabels(value, raws);
     if (added > 0) {
       onChange(next);
-      // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
+      // Inline plural, not `countLabel`: ruling 11 (shared/text/plural.ts).
       setStatus(`Added ${added} label${added > 1 ? "s" : ""}, ${next.length} of ${MAX_TASK_LABELS}`);
     } else if (refused.length > 0) {
       setStatus(capNote);
@@ -269,14 +269,14 @@ export function LabelInput({
 }
 
 /**
- * Ruling 561: a press that takes the focus out of the field lands on what it
+ * Ruling 289: a press that takes the focus out of the field lands on what it
  * pressed. The press folds the list (useDismiss, the blur) and commits a
  * half-typed label as it begins, and with the list went its height: the
  * Details editor's Save rose 128 px between the press and the release, so
  * the release landed on no button and the browser sent no click. While a
  * press outside is under way the combo keeps the height it had, and lets
  * go at the press's click. `shifts`: the list is shown or a label is half
- * typed. (Ruling 700(e), the split of `LabelInput`: its effect, unchanged,
+ * typed. (Ruling 13(b), the split of `LabelInput`: its effect, unchanged,
  * called where it always ran.)
  */
 function usePressHold(wrapRef: RefObject<HTMLDivElement | null>, shifts: boolean) {
@@ -304,7 +304,7 @@ function usePressHold(wrapRef: RefObject<HTMLDivElement | null>, shifts: boolean
   }, [shifts, wrapRef]);
 }
 
-/** The open checkbox list (ruling 700(e), the split of `LabelInput`:
+/** The open checkbox list (ruling 13(b), the split of `LabelInput`:
  *  hook-free, in the slot its `showList &&` held). */
 function LabelOptions({
   rows,

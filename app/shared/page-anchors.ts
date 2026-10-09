@@ -1,8 +1,8 @@
 /**
- * Ruling 497: the places inside a page that a notification opens, in one home.
+ * Ruling 75: the places inside a page that a notification opens, in one home.
  * The page that renders an element takes its id from here, and so does the
  * notifier that links to it, so the two can never disagree about a spelling.
- * (An epic has a page of its own, ruling 503, so a notice about one opens it
+ * (An epic has a page of its own, ruling 325, so a notice about one opens it
  * with no anchor.)
  */
 
@@ -26,7 +26,7 @@ export function timelineEventTime(anchor: string): string | null {
 /** The task page's open decision packet (an operator's, or an agent's question). */
 export const TASK_DECISION_ANCHOR = "decision";
 
-/** Ruling 547: one decision packet, by its id: what a notification about it
+/** Ruling 75: one decision packet, by its id: what a notification about it
  *  links to while it is open, so the row can follow it once it closes. */
 export function decisionAnchor(packetId: string): string {
   return `${TASK_DECISION_ANCHOR}-${packetId}`;
@@ -42,13 +42,13 @@ export function decisionPacketId(anchor: string): string | null {
 /** The task page's pending recommendations, each a decision to apply. */
 export const TASK_RECOMMENDATIONS_ANCHOR = "recommendations";
 
-/** Ruling 547: the task page's timeline, where a link to a decision or to the
+/** Ruling 302: the task page's timeline, where a link to a decision or to the
  *  recommendations lands once they are gone from the page: what became of
  *  them is recorded there. */
 export const TASK_TIMELINE_ANCHOR = "timeline";
 
-/** The project Controller page's open proposals (ruling 483), listed inside
- *  its Knowledge base panel since ruling 498. */
+/** The project Controller page's open proposals (ruling 267), listed inside
+ *  its Knowledge base panel since ruling 321. */
 export const KB_PROPOSALS_ANCHOR = "kb-proposals";
 
 /** One open proposal's entry in that panel. */
@@ -56,7 +56,7 @@ export function proposalAnchor(id: string): string {
   return `proposal-${id}`;
 }
 
-/** Ruling 498: the same page's Knowledge base panel, which lists the
+/** Ruling 321: the same page's Knowledge base panel, which lists the
  *  corrections agents wrote (the proposals above sit inside it). */
 export const KB_CORRECTIONS_ANCHOR = "kb-corrections";
 
@@ -65,7 +65,7 @@ export function correctionAnchor(id: string): string {
   return `correction-${id}`;
 }
 
-/** Ruling 532: Profile's Agent accounts panel, which Home's setup checklist
+/** Ruling 322: Profile's Agent accounts panel, which Home's setup checklist
  *  opens to connect Claude or Codex. */
 export const AGENT_ACCOUNTS_ANCHOR = "agent-accounts";
 

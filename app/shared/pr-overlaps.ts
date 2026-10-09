@@ -1,17 +1,17 @@
 import type { PrRef } from "~/schemas/task-file.schema";
 
 /**
- * Ruling 236's pairwise path intersection between open review pull requests,
+ * Ruling 242's pairwise path intersection between open review pull requests,
  * as a pure rule every surface shares.
  *
- * It lived in `review-queue.server.ts` (extracted there by ruling 413 so the
- * operator snapshot could reuse it). Ruling 475 (F40-55 (c)) moved it here
+ * It lived in `review-queue.server.ts` (extracted there by ruling 116 so the
+ * operator snapshot could reuse it). Ruling 244 (F40-55 (c)) moved it here
  * because the acceptance dialog needs the same answer on both of its doors: the
  * task page's loader computes it on the server, and the board computes it from
  * the cards it already holds (their `pr.paths`), with no extra payload.
  */
 
-/** Ruling 236: one other open PR this row's diff collides with. */
+/** Ruling 242: one other open PR this row's diff collides with. */
 export interface PrOverlap {
   taskKey: string;
   prNumber: number;
@@ -24,7 +24,7 @@ export interface PrOverlap {
   partial: boolean;
 }
 
-/** Ruling 413: one side of the pairwise intersection, as either caller has it. */
+/** Ruling 116: one side of the pairwise intersection, as either caller has it. */
 export interface PrDiffPaths {
   taskKey: string;
   prNumber: number;
@@ -33,10 +33,10 @@ export interface PrDiffPaths {
 }
 
 /**
- * Ruling 236's pairwise path intersection, as a pure rule.
+ * Ruling 242's pairwise path intersection, as a pure rule.
  *
- * Extracted (ruling 413) because the operator needs the same answer the review
- * queue renders, and ruling 407 is the standing lesson about re-deriving a
+ * Extracted (ruling 116) because the operator needs the same answer the review
+ * queue renders, and ruling 37 is the standing lesson about re-deriving a
  * predicate in a second surface instead of reusing it.
  */
 export function prPathOverlaps(
@@ -63,7 +63,7 @@ export function prPathOverlaps(
 type PrPathsView = Pick<PrRef, "number" | "state" | "paths">;
 
 /**
- * Ruling 475 (F40-55 (c)): the task's side of the intersection when its pull
+ * Ruling 244 (F40-55 (c)): the task's side of the intersection when its pull
  * request is still OPEN on GitHub (`review`, or `accepted` with the merge
  * pending) and its changed paths were read; null otherwise.
  */
@@ -76,7 +76,7 @@ export function openPrDiffPaths(task: { key: string; pr: PrPathsView | null }): 
 }
 
 /**
- * Ruling 475 (F40-55 (c)): the other open pull requests that merging `task`'s
+ * Ruling 244 (F40-55 (c)): the other open pull requests that merging `task`'s
  * would likely put in conflict, because they change a path it changes. Empty
  * when the task has no open PR with a read path list. The accept dialog names
  * them before the merge rather than after it.

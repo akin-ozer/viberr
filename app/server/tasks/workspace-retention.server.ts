@@ -105,7 +105,7 @@ export function reclaimTerminalTaskWorkspaces(
       if (task.stage !== terminalStageId) continue;
       const dir = taskDir(project.slug, task.key, options.dataRoot);
       const workspace = path.join(dir, "workspace");
-      // Ruling 691: the page renderer's scratch is beside the workspace, in
+      // Ruling 194: the page renderer's scratch is beside the workspace, in
       // the task's own directory. What a render or a run that a restart cut
       // short left there is reclaimed the same way; it is no workspace and is
       // not counted as one.
@@ -113,7 +113,7 @@ export function reclaimTerminalTaskWorkspaces(
         if (!existsSync(tree)) continue;
         const size = dirSize(tree);
         try {
-          // Ruling 485: the tree is the agents' (a tool they ran can leave
+          // Ruling 140: the tree is the agents' (a tool they ran can leave
           // directories only its uid can enter), so it goes as the task's
           // person (synchronously: nothing may start in it while it is
           // going). With isolation on and no owner this refuses and it stays.
@@ -132,7 +132,7 @@ export function reclaimTerminalTaskWorkspaces(
           });
         }
       }
-      // Ruling 691: the copy of a kept delivery a cut render was reading is
+      // Ruling 194: the copy of a kept delivery a cut render was reading is
       // the server's own folder (no agent can write in it), so the server
       // removes it itself. Nothing else comes to a closed task to do it.
       const carried = path.join(dir, TASK_CAPTURE_INPUT_DIR);

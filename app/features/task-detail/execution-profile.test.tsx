@@ -38,7 +38,7 @@ function unownedTask(): TaskSummary {
 }
 
 /** The same row, OWNED by the viewer — the fixture for anything that presses a
- *  run control, since ruling 127 refuses every run on a task with no owner to
+ *  run control, since ruling 137 refuses every run on a task with no owner to
  *  bill. */
 function ownedTask(): TaskSummary {
   return {
@@ -146,7 +146,7 @@ describe("ExecutionProfile — unowned copy matches the RBAC matrix (F19-11)", (
  * hazard is IME composition: an Enter that merely confirms a multibyte
  * candidate must not launch the billable operator run.
  */
-describe("ruling 131(d): the run control on a held task", () => {
+describe("ruling 115: the run control on a held task", () => {
   const waits = () => ({
     ...ownedTask(),
     readiness: "blocked" as const,
@@ -165,7 +165,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     const { container } = renderExec({ task: waits(), runPrincipal: connectedPrincipal() });
     const note = container.querySelector("[data-hold-note]")!;
     expect(note.textContent).toBe(
-      // Ruling 356: JC-3 is done in the fixture, and reads as done.
+      // Ruling 58: JC-3 is done in the fixture, and reads as done.
       "Waiting on other work (JC-2 and JC-3 (done)). A manual run still answers you; the operator will not advance the task or dispatch delivery while it waits.",
     );
     expect(note.className).toContain("sub");
@@ -186,9 +186,9 @@ describe("ruling 131(d): the run control on a held task", () => {
   });
 
   /**
-   * Ruling 186 (pass 37, F37-2). The OPERATOR control stays enabled on a held
+   * Ruling 310 (pass 37, F37-2). The OPERATOR control stays enabled on a held
    * task — a manual run still answers a person. The AGENT control does not:
-   * since ruling 186 the server refuses every dispatch onto a held task, so the
+   * since ruling 310 the server refuses every dispatch onto a held task, so the
    * words before the click have to be the words the server answers with.
    */
   const agentRunButton = (root: HTMLElement) =>
@@ -196,7 +196,7 @@ describe("ruling 131(d): the run control on a held task", () => {
       (b) => (b.textContent ?? "").trim() === "Run" && /agent/i.test(b.title),
     );
 
-  it("ruling 186: the AGENT run control is disabled on a held task and says why", () => {
+  it("ruling 310: the AGENT run control is disabled on a held task and says why", () => {
     const { container } = renderExec({
       task: waits(),
       runPrincipal: connectedPrincipal(),
@@ -204,7 +204,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     const btn = agentRunButton(container);
     expect(btn).toBeTruthy();
     expect(btn!.disabled).toBe(true);
-    // The server's own sentence, from the shared `holdRefusal`. Ruling 356:
+    // The server's own sentence, from the shared `holdRefusal`. Ruling 58:
     // the done entry reads as done (CANARY: drop the done split from
     // `holdEntriesSentence`).
     expect(container.textContent).toContain(
@@ -215,7 +215,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(container.textContent).not.toMatch(/JC-3(?! \(done\))/);
   });
 
-  it("ruling 355: an entry that can never complete is named, not promised a release", () => {
+  it("ruling 58: an entry that can never complete is named, not promised a release", () => {
     // CANARY: hand `holdRefusal` the entries with their states reset to open.
     const held = waits();
     const { container } = renderExec({
@@ -232,7 +232,7 @@ describe("ruling 131(d): the run control on a held task", () => {
     expect(container.textContent).not.toContain("releases it when every entry is done");
   });
 
-  it("ruling 186: a task that waits on nothing leaves the agent control alone", () => {
+  it("ruling 310: a task that waits on nothing leaves the agent control alone", () => {
     const { container } = renderExec({
       task: { ...waits(), blockedBy: [], readiness: "ready", displayReadiness: "ready" },
       runPrincipal: connectedPrincipal(),
@@ -244,7 +244,7 @@ describe("ruling 131(d): the run control on a held task", () => {
 describe("OperatorRunControl steer input — Enter submits, IME-guarded", () => {
   function renderWithRunSpy() {
     const calls: string[] = [];
-    // Ruling 127: a run needs an owner to bill, so the steer tests run on an
+    // Ruling 137: a run needs an owner to bill, so the steer tests run on an
     // OWNED task whose owner has connected both backends.
     const utils = renderExec({
       task: ownedTask(),
@@ -415,7 +415,7 @@ describe("model-unavailable warnings — run control + ledger rows", () => {
 });
 
 /**
- * Ruling 127 — every run control on this panel answers for the task OWNER.
+ * Ruling 137 — every run control on this panel answers for the task OWNER.
  *
  * The panel used to take one deployment-wide `backendAvailable` boolean pair,
  * so a disabled Run could only ever say "the backend isn't configured on this
@@ -430,7 +430,7 @@ describe("model-unavailable warnings — run control + ledger rows", () => {
  * (the owner can connect the backend, or the seat can change hands, before it
  * fires).
  */
-describe("ruling 127: the run controls answer for the task owner", () => {
+describe("ruling 137: the run controls answer for the task owner", () => {
   const operatorRun = (container: HTMLElement) =>
     [...container.querySelectorAll<HTMLButtonElement>(".op-run > button")].find(
       (b) => /Run operator|Schedule/.test(b.textContent ?? ""),
@@ -597,7 +597,7 @@ describe("the engaged-agent card names the live run's lifecycle", () => {
 });
 
 /**
- * Ruling 368: a run control's request shows itself on the control's own button.
+ * Ruling 286: a run control's request shows itself on the control's own button.
  * The operator control read "Running…" for every request, a SCHEDULE included,
  * with the resting glyph and the .45 refused step (the picker resets to Now on
  * the click, so the control could not tell what it had sent); the agent control
@@ -605,7 +605,7 @@ describe("the engaged-agent card names the live run's lifecycle", () => {
  * button carries `aria-busy`, the loader spinning, and the work's own name.
  * Canary: drop `aria-busy` from the operator control's button in execution-profile.tsx.
  */
-describe("ruling 368: the run controls name the request in flight", () => {
+describe("ruling 286: the run controls name the request in flight", () => {
   const operatorButton = (c: HTMLElement) =>
     c.querySelectorAll<HTMLButtonElement>(".op-run")[0]!.querySelector<HTMLButtonElement>(
       "button.btn",
@@ -624,7 +624,7 @@ describe("ruling 368: the run controls name the request in flight", () => {
     expect(b.getAttribute("aria-busy")).toBe("true");
     expect(b.disabled).toBe(true);
     expect(b.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
-    // Ruling 459: one loader, never a second one drawn beside it.
+    // Ruling 284: one loader, never a second one drawn beside it.
     expect(b.querySelectorAll(".spin")).toHaveLength(1);
     // The agent control's request is not this one.
     expect(agentButton(container).hasAttribute("aria-busy")).toBe(false);

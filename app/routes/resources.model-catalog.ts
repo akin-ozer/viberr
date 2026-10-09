@@ -15,7 +15,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * (reasoning) catalog for a backend, fetched by the agent create/edit modal
  * (useFetcher) on open and whenever the backend toggles. Claude enhances the
  * curated fallback with the LIVE `supportedModels()` list of the VIEWER's OWN
- * Claude account when they have connected one (ruling 127: there is no
+ * Claude account when they have connected one (ruling 137: there is no
  * instance account to enumerate, and one person's subscription must not decide
  * another's picker); codex is curated-only. Any signed-in user may read (V1
  * read RBAC: all app users see all projects; profile CRUD is the gated action,
@@ -30,7 +30,7 @@ import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
  * silently offering one that 400s at the SDK.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 457 (test audit L14-29): a 401, never `requireUser`'s login
+  // Ruling 11 (test audit L14-29): a 401, never `requireUser`'s login
   // redirect, which named THIS route as the returnTo. The editors load it
   // through a fetcher when they open and when the backend changes, and a
   // fetcher follows a redirect as a navigation: opening one in a stale tab
@@ -55,7 +55,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const raw = url.searchParams.get("backend");
   const backend: RealBackend = raw === "codex" ? "codex" : "claude";
   // Pass 40 review (R-launcher-1): the viewer is also who the live probe runs
-  // as (ruling 460), since it runs the CLI against their own sign-in.
+  // as (ruling 139), since it runs the CLI against their own sign-in.
   const deps: Parameters<typeof getModelCatalog>[1] = { db, userId: user.id };
   const credential = viewerClaudeCredential(db, backend, user.id);
   if (credential) deps.credential = credential;
@@ -64,7 +64,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 457: a failed load is the editor's, never the page's. React Router
+ * Ruling 11: a failed load is the editor's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, so a restart, a 5xx or a dead network as an agent editor opened or
  * switched backend replaced the page under it with its error page. Any

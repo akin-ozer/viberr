@@ -21,7 +21,7 @@ export function operatorSnapshot(
 ): OperatorTaskSnapshot {
   return {
     key: "VIB-1",
-    // Ruling 302: the window's own size, always present.
+    // Ruling 117: the window's own size, always present.
     timelineTotal: 0,
     title: "Add the file listing",
     goal: "Ship the file-listing deliverable.",
@@ -52,7 +52,7 @@ export function operatorSnapshot(
     recentTimeline: [],
     recommendations: { pending: [], declined: [] },
     pr: null,
-    // Ruling 162: `acceptanceRefusalFor`'s first gate for a task at the work stage.
+    // Ruling 95: `acceptanceRefusalFor`'s first gate for a task at the work stage.
     notAcceptableReason:
       "VIB-1 is at In Progress, not Review. A completion can only be accepted from the boundary " +
       "the workflow puts before Done. Move the task through the workflow first.",
@@ -89,7 +89,7 @@ export function operatorSnapshot(
 /** A deployed Claude operator's resolved authority holding `policy`
  *  (capability → mode): supervised, on a board with a repository and no human
  *  gate before work, with no skills, knowledge bases (rulings or other) or MCP
- *  servers. Ruling 67: its `configuredAutonomy` is its own `autonomy` and
+ *  servers. Ruling 108: its `configuredAutonomy` is its own `autonomy` and
  *  nothing was clamped, unless the patch names them. What a prompt or toolkit
  *  test hands in place of `resolveOperatorAuthority`; pass what the case is about. */
 export function operatorAuthority(

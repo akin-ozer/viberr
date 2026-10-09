@@ -19,11 +19,11 @@ function firstSentence(description: string): string {
 }
 
 /**
- * Ruling 297: a server tells the model what it holds, in a list built from
+ * Ruling 255: a server tells the model what it holds, in a list built from
  * the tools it is actually mounting.
  *
  * The controller's tools are deferred behind ToolSearch, which is measured and
- * deliberate (ruling 185's successor: `alwaysLoad` on these servers tripled
+ * deliberate (ruling 144's successor: `alwaysLoad` on these servers tripled
  * turn 1 and quadrupled a cold turn). What nobody costed is that a deferred
  * toolkit never arrives as a LIST. The controller reported, from inside its
  * own prompt: three tools are fully present, everything else is names only in

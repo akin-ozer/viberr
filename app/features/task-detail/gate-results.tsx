@@ -3,7 +3,7 @@ import { Icon } from "~/ui/icon";
 import type { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
- * Ruling 493: the project's gates as one table wherever they are shown, on
+ * Ruling 313: the project's gates as one table wherever they are shown, on
  * the note a run writes to the timeline, on the PR card and in the accept
  * dialog. A row is the gate's pass or fail mark, its name (a failure adds its
  * outcome in words), its time and its log, which opens in the in-app reader
@@ -20,7 +20,7 @@ export function GateResults({
   attachmentsBase?: string | null;
   /** The caller's `useAttachmentLightbox()`. Passed in, never imported, so
    *  a surface that links no log (the accept dialog, on the board too) does
-   *  not load the reader (ruling 457). */
+   *  not load the reader (ruling 11). */
   openLog?: ReturnType<typeof useAttachmentLightbox>;
   /** The side panel and the dialog set the table at their smaller size. */
   compact?: boolean;

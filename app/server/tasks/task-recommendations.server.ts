@@ -1,5 +1,5 @@
 /**
- * A person deciding an operator recommendation (ruling 654):
+ * A person deciding an operator recommendation (ruling 13(a)):
  * `applyRecommendation` carries it out (a stage move, a delivery or an
  * acceptance) and `dismissRecommendation` declines it.
  */
@@ -37,7 +37,7 @@ import { transitionStage } from "./task-transitions.server";
 export interface AppliedRecommendation {
   task: TaskSummary;
   label: string;
-  /** Ruling 134(a): set when the card was a `delivery`, so the route's toast
+  /** Ruling 229: set when the card was a `delivery`, so the route's toast
    *  can say what moved. */
   delivery?: DeliveryOutcome;
 }
@@ -48,7 +48,7 @@ export async function applyRecommendation(
     projectSlug: string;
     taskKey: string;
     recId: string;
-    /** Ruling 88 (F21-2): the acceptance disclosure the human acknowledged.
+    /** Ruling 97 (F21-2): the acceptance disclosure the human acknowledged.
      *  Consulted ONLY when the card being applied REACHES acceptance — an
      *  `accept_completion` card, or a `transition` card whose target is the
      *  terminal stage (F19-3: one Apply click merged an unreviewed head into
@@ -138,9 +138,9 @@ export async function applyRecommendation(
     // Apply installs exactly what was recommended — re-deriving here could
     // flip a "supporting" recommendation into a delivery hand-off.
     if (rec.delivers !== undefined) dispatch.delivers = rec.delivers;
-    // Ruling 421: a recommended completeness question is stamped on Apply too.
+    // Ruling 93: a recommended completeness question is stamped on Apply too.
     if (rec.completeness) dispatch.completeness = true;
-    // Ruling 583: and a run recommended not to judge runs without a verdict.
+    // Ruling 124: and a run recommended not to judge runs without a verdict.
     if (rec.noVerdict) dispatch.withholdVerdict = true;
     await startAgentRun(db, dispatch, runActor, runCtx);
   } else if (rec.kind === "transition" && rec.toStageId) {
@@ -164,14 +164,14 @@ export async function applyRecommendation(
     };
     if (!declaredEdge) move.manual = true;
     if (asCoordination("approve-transition")) move.recommendationAuthorized = true;
-    // Ruling 381: a backward move says why. On this path the card IS the why —
+    // Ruling 47: a backward move says why. On this path the card IS the why —
     // the operator wrote it — so its own words ride onto the transition entry
     // instead of the human being asked to retype them into a dialog they never
     // see. `detail` is the operator's reasoning; `label` is the button text and
     // is never empty, so the move can never be refused for a reason the Apply
     // click has no way to supply.
     move.reason = (rec.detail ?? "").trim() || rec.label;
-    // Ruling 88: a recommended move onto the TERMINAL stage is an acceptance
+    // Ruling 97: a recommended move onto the TERMINAL stage is an acceptance
     // (`transitionStage` routes it to `acceptCompletion` — the real merge), and
     // that is exactly the F19-3 card whose Apply the ceremony now fronts. The
     // key rides through for every recommended move; `transitionStage` consults
@@ -193,14 +193,14 @@ export async function applyRecommendation(
     if (outcome.status !== "delivered") {
       throw AppError.conflict(`Delivery did not complete: ${outcome.message}`);
     }
-    // Ruling 134(a): the person who applied the card is told what moved, through
+    // Ruling 229: the person who applied the card is told what moved, through
     // the same toast the task page's own control uses.
     delivery = outcome;
   } else if (rec.kind === "accept_completion") {
     // The operator's "accept completion → Done" recommendation. Applying it is
     // the human acceptance of the review→done boundary: same semantics as
     // resolving an acceptance packet (Done, PR merged, completion event) — and,
-    // per ruling 88, the same demand for the ceremony's echo.
+    // per ruling 97, the same demand for the ceremony's echo.
     const acceptance: Parameters<typeof acceptCompletion>[1] = {
       projectSlug: input.projectSlug,
       taskKey: input.taskKey,

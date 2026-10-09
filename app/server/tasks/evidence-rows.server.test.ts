@@ -61,7 +61,7 @@ describe("normalizeEvidenceRows", () => {
   });
 
   /**
-   * Ruling 526: the checklist marks a row by its status, so a row always has
+   * Ruling 16: the checklist marks a row by its status, so a row always has
    * one. The schema asks every agent for it; a row that still arrives without
    * one, or with a word the schema does not know, is a reference, never a
    * pass. CANARY: default the status to "pass" and a check nobody ran reads
@@ -100,7 +100,7 @@ describe("normalizeEvidenceRows", () => {
   });
 
   /**
-   * Ruling 639: a failure's result says why in a sentence, and the file is the
+   * Ruling 16: a failure's result says why in a sentence, and the file is the
    * only copy. At 40 characters the row kept "The proposed pay-as-you-go
    * default list…" and no surface could show the rest. CANARY: put the result
    * cap back to 40 and the sentence is cut.
@@ -120,7 +120,7 @@ describe("normalizeEvidenceRows", () => {
       result: "1 passed",
       status: "pass",
     }));
-    expect(normalizeEvidenceRows(many)!.length).toBe(8); // ruling 493: eight rows
+    expect(normalizeEvidenceRows(many)!.length).toBe(8); // ruling 313: eight rows
   });
 });
 
@@ -212,7 +212,7 @@ describe("recordAgentCompletion attaches evidence to the outcome event", () => {
     const projected = detail.timeline.find((e) => e.type === "quality")!;
     expect(projected.evidence).toHaveLength(2);
     expect(projected.evidence![0]!.label).toBe("unit/policy_gate_test");
-    // Ruling 526: and the timeline reads the verdict back from the note: its
+    // Ruling 313: and the timeline reads the verdict back from the note: its
     // title and revision say the note's whole sentence, so nothing is left.
     expect(projected.verdict).toEqual({ result: "approve", sha: "aaaaaaa", detail: null });
   });

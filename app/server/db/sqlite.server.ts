@@ -41,7 +41,7 @@ export function openDatabase(dbPath: string): DatabaseSync {
 const READER_SNAPSHOT_DIR = "tmp";
 
 /**
- * A read-only handle on the projection database (ruling 158). `db` is either
+ * A read-only handle on the projection database (ruling 23). `db` is either
  * the live file itself or a private copy of it; `close` releases the handle and
  * removes the copy. Callers never hold a bare `DatabaseSync` here, so the copy
  * cannot be left behind by a caller that closed the handle and forgot the
@@ -125,7 +125,7 @@ function copyStorePair(dbPath: string, copyPath: string): void {
 
 /**
  * Opens the database for READING, never as the second connection to a live root
- * (ruling 158). Used by the read-only maintenance CLIs (`npm run backup`,
+ * (ruling 23). Used by the read-only maintenance CLIs (`npm run backup`,
  * `npm run keys -- status`), which must work against a LIVE instance and
  * therefore cannot take the writer lock.
  *
@@ -354,7 +354,7 @@ function ensureSingleFlightIndexes(db: DatabaseSync): void {
  * being left to an operator: a missing column would otherwise fail every
  * writer that names it ("no such column").
  *
- * Ruling 121 added the controller ones. Their absence is worse than the run
+ * Ruling 249 added the controller ones. Their absence is worse than the run
  * columns' — `listConversations` names `task_key` on the dock's root-owned
  * loader, which runs on the FIRST signed-in page of every surface, so an
  * upgraded root would answer a 500 there and (fetcher errors going to the
@@ -382,7 +382,7 @@ const BASELINE_COLUMNS: readonly {
      * for existing rows; omitted everywhere the default is the truth.
      */
     backfill?: string;
-    /** The same, when the meaning cannot be one statement (ruling 465's reply
+    /** The same, when the meaning cannot be one statement (ruling 252's reply
      *  links replay the writers' order, message by message). */
     backfillWith?: (db: DatabaseSync) => void;
   }[];
@@ -392,7 +392,7 @@ const BASELINE_COLUMNS: readonly {
     columns: [
       { name: "dispatched_by_name", ddl: "dispatched_by_name TEXT" },
       { name: "dispatched_by_user_id", ddl: "dispatched_by_user_id TEXT" },
-      // Ruling 127: the run's credential principal. `upsertRun` names it on
+      // Ruling 137: the run's credential principal. `upsertRun` names it on
       // EVERY insert, so a root that predates the baseline edit would fail
       // every run start rather than degrade — the exact failure this healer
       // exists for.
@@ -416,25 +416,25 @@ const BASELINE_COLUMNS: readonly {
         ddl: "usage_final INTEGER NOT NULL DEFAULT 0",
         backfill: "UPDATE agent_runs SET usage_final = 1 WHERE state = 'finished'",
       },
-      // Ruling 248 (F37-77): the run executed with no working tree. Named by
+      // Ruling 87 (F37-77): the run executed with no working tree. Named by
       // `patchRun` on every completion registration, so a root that predates it
       // would fail every run's completion. No backfill: the default is the
       // honest value for a row written before viberr recorded the fact — 0 says
       // "nothing here says this run was checkout-less", which is exactly true.
       { name: "no_checkout", ddl: "no_checkout INTEGER NOT NULL DEFAULT 0" },
-      // Ruling 316: 0 is the TRUTH for every historical row — no run before
+      // Ruling 66: 0 is the TRUTH for every historical row — no run before
       // this column existed had its verdict channel withheld, because nothing
       // could withhold it — so this needs no backfill.
       {
         name: "verdict_withheld",
         ddl: "verdict_withheld INTEGER NOT NULL DEFAULT 0",
       },
-      // Ruling 544: `upsertRun` names it on every insert — the ruling-127
+      // Ruling 153: `upsertRun` names it on every insert — the ruling-137
       // failure shape. NULL is the truth for an older row (nothing recorded
       // what it was dispatched on), and the completion binds such a run's
       // verdict to the subject at completion, as before the ruling.
       { name: "review_subject", ddl: "review_subject TEXT" },
-      // Ruling 369: the prompt-cache columns the sink folds on every persisted
+      // Ruling 24: the prompt-cache columns the sink folds on every persisted
       // line, so a root that predates them would fail every run's first line.
       // No backfill on any of them: a row written before the columns existed
       // carries no first-call figure (NULL says so), wrote no counted cache
@@ -452,8 +452,8 @@ const BASELINE_COLUMNS: readonly {
       { name: "last_prompt_tokens", ddl: "last_prompt_tokens INTEGER NOT NULL DEFAULT 0" },
       { name: "compactions", ddl: "compactions INTEGER NOT NULL DEFAULT 0" },
       { name: "credential_kind", ddl: "credential_kind TEXT" },
-      // Ruling 507: which of the principal's accounts the run billed. `upsertRun`
-      // names it on every insert — the ruling-127 failure shape again. NULL is
+      // Ruling 138: which of the principal's accounts the run billed. `upsertRun`
+      // names it on every insert — the ruling-137 failure shape again. NULL is
       // the truth for a run that predates it: the one account there was.
       { name: "credential_account_id", ddl: "credential_account_id TEXT" },
     ],
@@ -473,7 +473,7 @@ const BASELINE_COLUMNS: readonly {
       },
     ],
   },
-  // Ruling 176: an org MCP server's marked write tools and its discovered tool
+  // Ruling 188: an org MCP server's marked write tools and its discovered tool
   // names. `listMcpServers` names both on every Settings render and every run
   // mount, so a root that predates them would fail both.
   {
@@ -481,13 +481,13 @@ const BASELINE_COLUMNS: readonly {
     columns: [
       { name: "tool_policy_json", ddl: "tool_policy_json TEXT" },
       { name: "tool_names_json", ddl: "tool_names_json TEXT" },
-      // Ruling 469: an OAuth sign-in, sealed and public halves. Every MCP read
+      // Ruling 192: an OAuth sign-in, sealed and public halves. Every MCP read
       // names `oauth_json` and the gateway and probes name `oauth_ref`. No
       // backfill: NULL is the truth for every row that predates them (no
       // connection was signed in with OAuth before they existed).
       { name: "oauth_ref", ddl: "oauth_ref TEXT" },
       { name: "oauth_json", ddl: "oauth_json TEXT" },
-      // Ruling 486(c): the scope an admin asks the next sign-in for. The
+      // Ruling 192: the scope an admin asks the next sign-in for. The
       // sign-in and every MCP read name it; NULL (ask for what the resource
       // advertises) is the truth for every row that predates it.
       { name: "oauth_requested_scope", ddl: "oauth_requested_scope TEXT" },
@@ -497,13 +497,13 @@ const BASELINE_COLUMNS: readonly {
     table: "controller_messages",
     columns: [
       { name: "surface", ddl: "surface TEXT" },
-      // Ruling 465: the user message a controller row answers. NULL is WRONG
+      // Ruling 252: the user message a controller row answers. NULL is WRONG
       // for the replies an older root already holds: boot recovery notes every
       // user message no reply names, so it would write a restart note under
       // each old one. Its backfill is `unlinked_history`'s, added right after
       // it in the same pass: one walk writes both columns.
       { name: "reply_to", ddl: "reply_to TEXT" },
-      // Ruling 465 (dated 2026-09-25): 1 on an old user message whose answer
+      // Ruling 252 (dated 2026-09-25): 1 on an old user message whose answer
       // the backfill cannot prove (a restart or a failed start lost it, or the
       // order stopped proving anything): earlier history, not linked, which
       // recovery never notes. Its backfill links what the writers' order
@@ -515,14 +515,14 @@ const BASELINE_COLUMNS: readonly {
         ddl: "unlinked_history INTEGER NOT NULL DEFAULT 0",
         backfillWith: backfillControllerReplyLinks,
       },
-      // Ruling 527: the turn a steering message went into. The steering mark,
+      // Ruling 251: the turn a steering message went into. The steering mark,
       // the turn digest and boot recovery name it, so a root that predates it
       // would fail all three. No backfill: nothing before the column could
       // steer a turn, so NULL is true of every older row.
       { name: "steered_into", ddl: "steered_into TEXT" },
     ],
   },
-  // Ruling 463: which repositories a connection's token reaches. Every
+  // Ruling 222: which repositories a connection's token reaches. Every
   // connection reader names it (the Instance settings card, the New project
   // modal's connection list, the controller's `list_github_connections`), so a
   // root that predates it would fail all three. No backfill: NULL says "not
@@ -532,7 +532,7 @@ const BASELINE_COLUMNS: readonly {
     table: "github_connections",
     columns: [{ name: "reach_json", ddl: "reach_json TEXT" }],
   },
-  // Ruling 480: what each repository proved about a token. Every PAT read
+  // Ruling 220: what each repository proved about a token. Every PAT read
   // names it (the project credential card, the connection card, every GitHub
   // call's context), so a root that predates it would fail all of them. No
   // backfill: NULL is "nothing stored yet", and `repoScopeProofsOf` still reads
@@ -541,7 +541,7 @@ const BASELINE_COLUMNS: readonly {
     table: "github_pats",
     columns: [{ name: "repo_scopes_json", ddl: "repo_scopes_json TEXT" }],
   },
-  // Ruling 178: the project's resolved required-reviewer rules. The rebuilder
+  // Ruling 89: the project's resolved required-reviewer rules. The rebuilder
   // names the column on every project write and every task walk reads it, so
   // a root that predates it would stop projecting entirely; its DEFAULT is the
   // honest value for every existing project (none declared).
@@ -552,7 +552,7 @@ const BASELINE_COLUMNS: readonly {
         name: "required_reviewers_json",
         ddl: "required_reviewers_json TEXT NOT NULL DEFAULT '[]'",
       },
-      // Ruling 482: the project's declared gates. Named by the rebuilder on
+      // Ruling 104: the project's declared gates. Named by the rebuilder on
       // every project write and read by every task walk, like the column
       // above; its DEFAULT is the truth for every project that predates it
       // (none declared gates before the key existed).
@@ -576,7 +576,7 @@ const BASELINE_COLUMNS: readonly {
         name: "recommendation_kinds",
         ddl: "recommendation_kinds TEXT NOT NULL DEFAULT ''",
       },
-      // Ruling 503: the epic a task belongs to. The rebuilder names it on
+      // Ruling 272: the epic a task belongs to. The rebuilder names it on
       // EVERY task write, like the column above. No backfill: NULL says "in no
       // epic", which is true of every row until the goal-to-epic conversion
       // (or a person) puts a task in one, and both reproject what they write.
@@ -586,7 +586,7 @@ const BASELINE_COLUMNS: readonly {
   {
     table: "notifications",
     columns: [
-      // Ruling 497: where a row opens. `createNotification` names it on every
+      // Ruling 24: where a row opens. `createNotification` names it on every
       // insert and its callers fail open, so a root that predates it would
       // drop every notification without a word. No backfill: NULL opens the
       // task or the board, which is where every older row opened.
@@ -611,12 +611,12 @@ const BASELINE_TABLES: readonly string[] = [
      result_json TEXT NOT NULL,
      checked_at TEXT NOT NULL
    )`,
-  // Ruling 127's `user_backend_credentials` is not in this list any more: ruling
-  // 507 changed its shape in a way `CREATE TABLE IF NOT EXISTS` cannot carry
+  // Ruling 137's `user_backend_credentials` is not in this list any more: ruling
+  // 138 changed its shape in a way `CREATE TABLE IF NOT EXISTS` cannot carry
   // onto a root that already has the table, so `ensureBackendAccountsTable`
   // below owns both cases (missing, and the one-account shape) from the
   // baseline's own DDL.
-  // Ruling 460: each person's agent uid. A root that predates it would refuse
+  // Ruling 139: each person's agent uid. A root that predates it would refuse
   // every run start in the image ("no such table") — the uid is allocated
   // before the launch.
   `CREATE TABLE IF NOT EXISTS agent_os_users (
@@ -624,7 +624,7 @@ const BASELINE_TABLES: readonly string[] = [
      os_uid INTEGER NOT NULL UNIQUE,
      created_at TEXT NOT NULL
   )`,
-  // Ruling 503: the epic rows. The rebuilder writes them on every epic file,
+  // Ruling 272: the epic rows. The rebuilder writes them on every epic file,
   // and the board, the task page and the Epics pages read them, so a root that
   // predates it would fail all of them. Same DDL as the baseline.
   `CREATE TABLE IF NOT EXISTS epic_projections (
@@ -648,7 +648,7 @@ const BASELINE_TABLES: readonly string[] = [
      parsed_at TEXT NOT NULL,
      PRIMARY KEY (project_slug, epic_id)
    )`,
-  // Ruling 573: the files sent with a controller message. The page, the dock
+  // Ruling 258: the files sent with a controller message. The page, the dock
   // and the send name it, so a root that predates it would fail them all.
   // Same DDL as the baseline.
   `CREATE TABLE IF NOT EXISTS controller_message_files (
@@ -663,7 +663,7 @@ const BASELINE_TABLES: readonly string[] = [
      created_at TEXT NOT NULL,
      UNIQUE (conversation_id, name)
    )`,
-  // Ruling 685: what a controller conversation left itself to do when a task
+  // Ruling 259: what a controller conversation left itself to do when a task
   // is accepted. Every acceptance reads it and the controller's tool writes
   // it: on a root that predates it the read would be logged and skipped, and
   // the tool would fail. Same DDL as the baseline.
@@ -687,14 +687,14 @@ const BASELINE_TABLES: readonly string[] = [
 const BASELINE_INDEXES: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS idx_controller_conversations__scope
      ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC)`,
-  // Ruling 457: the task page's GitHub freshness reads, which otherwise walk
+  // Ruling 11: the task page's GitHub freshness reads, which otherwise walk
   // every task's reconcile rows (the audit heartbeat grows ~288 rows a day per
   // delivered task and is kept 90 days).
   `CREATE INDEX IF NOT EXISTS idx_audit_events__task_action
      ON audit_events (project_slug, task_key, action, occurred_at)`,
   `CREATE INDEX IF NOT EXISTS idx_provenance__path_action
      ON provenance (source_path, action)`,
-  // Ruling 503: an epic's tasks and its progress. Follows the `epic_id`
+  // Ruling 272: an epic's tasks and its progress. Follows the `epic_id`
   // column above. Partial, so only a read that names an epic can use it: a
   // whole index on (project_slug, epic_id) is an equal-cost choice for every
   // `WHERE project_slug = ?` read, and taking it moved the order those reads
@@ -702,11 +702,11 @@ const BASELINE_INDEXES: readonly string[] = [
   // instead of key order).
   `CREATE INDEX IF NOT EXISTS idx_task_projections__epic
      ON task_projections (project_slug, epic_id) WHERE epic_id IS NOT NULL`,
-  // Ruling 573: a message's files, for the transcript's reads. Follows the
+  // Ruling 258: a message's files, for the transcript's reads. Follows the
   // table above.
   `CREATE INDEX IF NOT EXISTS idx_controller_message_files__message
      ON controller_message_files (message_id)`,
-  // Ruling 685: a task's open follow-ups, for the acceptance that claims them.
+  // Ruling 259: a task's open follow-ups, for the acceptance that claims them.
   `CREATE INDEX IF NOT EXISTS idx_controller_follow_ups__task
      ON controller_follow_ups (project_slug, task_key, fired_at)`,
 ];
@@ -770,7 +770,7 @@ export function ensureBaselineColumns(db: DatabaseSync): void {
   try {
     const outcome = ensureBackendAccountsTable(db);
     if (outcome !== "current") {
-      logger.info("user_backend_credentials brought to the several-accounts shape (ruling 507)", {
+      logger.info("user_backend_credentials brought to the several-accounts shape (ruling 138)", {
         outcome,
       });
     }
@@ -799,7 +799,7 @@ const BACKEND_ACCOUNTS_TABLE = "user_backend_credentials";
 const indexListSchema = z.array(z.object({ origin: z.string() }).loose());
 
 /**
- * Ruling 507: a person may hold several accounts per backend, and the table
+ * Ruling 138: a person may hold several accounts per backend, and the table
  * that holds them was created, before that ruling, with `UNIQUE (user_id,
  * backend)`: the second account would be refused at its INSERT. ALTER TABLE
  * can add a column but never drop a constraint, and re-baselining the whole
@@ -813,7 +813,7 @@ const indexListSchema = z.array(z.object({ origin: z.string() }).loose());
  *    (person, backend), so nothing changes for a run;
  *  - each is marked `legacy_home = 1`: its vendor sign-in was written into the
  *    person's backend home itself, and it stays there — Viberr never moves a
- *    vendor's credential file (ruling 127). Accounts connected from now on get
+ *    vendor's credential file (ruling 137). Accounts connected from now on get
  *    a home of their own.
  *
  * A root that predates the table altogether gets it created from the same DDL.
@@ -860,7 +860,7 @@ export function ensureBackendAccountsTable(
     }
     const expected = tableColumnNames(expectedDb, BACKEND_ACCOUNTS_TABLE);
     // The columns both shapes have are copied as they are; the three ruling
-    // 507 added are given the meaning described above, unless the old root
+    // 138 added are given the meaning described above, unless the old root
     // somehow has them already.
     const carried = expected.filter((column) => present.includes(column));
     const derived: [string, string][] = [

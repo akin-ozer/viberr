@@ -27,7 +27,7 @@ import {
 const MCP_STDIO_MAX_LINE_BYTES = STDIO_DEFAULT_MAX_BUFFER_SIZE;
 
 /**
- * Ruling 461: a credentialed STDIO org server is started by the SERVER, never
+ * Ruling 191: a credentialed STDIO org server is started by the SERVER, never
  * by the agent's CLI.
  *
  * The CLI used to spawn it with `MCP_CREDENTIAL` in its environment, which the
@@ -55,7 +55,7 @@ class McpChildTransport implements Transport {
 
   private child: McpChild | null = null;
   /** The SDK's limit, the one the CLI's own stdio transport applied before
-   *  ruling 461 moved the process here: a larger single line stops the child. */
+   *  ruling 191 moved the process here: a larger single line stops the child. */
   private readonly buffer = new ReadBuffer({ maxBufferSize: MCP_STDIO_MAX_LINE_BYTES });
   private closed = false;
   /** The tail of what the command printed on stderr, for a failure's reason. */

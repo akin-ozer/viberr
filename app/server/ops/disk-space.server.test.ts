@@ -106,7 +106,7 @@ describe("measureDataRootSpace (gap 16)", () => {
   });
 });
 
-describe("the host disk under the data root (ruling 603)", () => {
+describe("the host disk under the data root (ruling 40)", () => {
   // Live on 2026-09-30, Docker Desktop: the named volume's ext4 is a sparse
   // image that reported 940.8 GB free, while the host disk it grows on had
   // 19.9 GB (the `/host-disk` bind mount reads the host's own df).
@@ -209,7 +209,7 @@ describe("thresholds", () => {
     });
   });
 
-  // Ruling 458(c): a nonsense override used to be ignored for the default. It
+  // Ruling 39: a nonsense override used to be ignored for the default. It
   // still cannot disable the signal, and it no longer passes in silence: the
   // env schema refuses it, which fails boot.
   it("refuses a nonsense override rather than disabling the signal", async () => {

@@ -10,8 +10,8 @@ import { waitFor } from "../../test-support/polling";
 import type { RunSpec } from "~/server/runtimes/adapter.server";
 
 /**
- * Ruling 375 (live catch, 2026-09-21): the Run-an-agent control with a prompt
- * used to run the agent TWICE — the dispatch, then ruling 203's completion
+ * Ruling 69 (live catch, 2026-09-21): the Run-an-agent control with a prompt
+ * used to run the agent TWICE — the dispatch, then ruling 69's completion
  * hook redelivering the prompt it had just recorded as the person's own
  * `@<agent>` comment, because that comment was written after the run started
  * and so sat inside the "posted after this run started" window. The directive
@@ -30,7 +30,7 @@ beforeAll(async () => {
   const { runDemoSeed } = await import("../../test-support/demo-seed");
   const { userIds } = await runDemoSeed(app.db, { dataRoot: app.dataRoot });
   arda = userIds.arda;
-  // VIB-151 is Selin's task and a run bills the OWNER's accounts (ruling 127).
+  // VIB-151 is Selin's task and a run bills the OWNER's accounts (ruling 137).
   for (const userId of [arda, userIds.selin]) {
     await connectFakeBackend(app.db, userId, "codex");
     await connectFakeBackend(app.db, userId, "claude");
@@ -63,11 +63,11 @@ async function post(fields: Record<string, string>) {
 }
 
 /**
- * Ruling 449 (O39-c): the accept dialog's "update the branch and re-review
+ * Ruling 97 (O39-c): the accept dialog's "update the branch and re-review
  * first" reaches the action through the task route. A refusal of the step
  * itself comes back as the toast's sentence.
  */
-describe("ruling 449: the refresh-and-review intent", () => {
+describe("ruling 97: the refresh-and-review intent", () => {
   it("answers a task with no open pull request with a 409 that says so", async () => {
     // CANARY: drop the route's `refresh-and-review` case and this is the
     // generic unknown-intent refusal instead.
@@ -82,8 +82,8 @@ describe("ruling 449: the refresh-and-review intent", () => {
   });
 });
 
-describe("ruling 375: a prompted manual dispatch runs once", () => {
-  it("records the directive before the run, so ruling 203's window never redelivers it", async () => {
+describe("ruling 69: a prompted manual dispatch runs once", () => {
+  it("records the directive before the run, so ruling 69's window never redelivers it", async () => {
     const before = developerRuns().length;
     const prompt = "Prompt-cache check-in: reply with one sentence and stop.";
     const result = await post({ intent: "run-agent", profileId: "developer", prompt });
@@ -113,7 +113,7 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
     // The order is the fix: the record predates the run it is the directive of.
     expect(directive!.occurredAt <= run!.started_at!).toBe(true);
 
-    // Ruling 203's completion hook, asked directly with this run's window:
+    // Ruling 69's completion hook, asked directly with this run's window:
     // nothing to redeliver, nothing started.
     const { deliverDeferredMention } = await import("~/server/tasks/agent-completion.server");
     const delivered = await deliverDeferredMention(
@@ -149,13 +149,13 @@ describe("ruling 375: a prompted manual dispatch runs once", () => {
 });
 
 /**
- * Ruling 452 (owner, 2026-09-24): a prompted dispatch refused because the agent
- * is already running on the task. The directive is recorded first (ruling 375),
- * so it sits inside the live run's window and ruling 203 delivers it when that
+ * Ruling 152 (owner, 2026-09-24): a prompted dispatch refused because the agent
+ * is already running on the task. The directive is recorded first (ruling 69),
+ * so it sits inside the live run's window and ruling 69 delivers it when that
  * run finishes. The person's note used to say "No run started", beside an error
  * telling them to wait and start another, which would deliver the words twice.
  */
-describe("ruling 452: a dispatch refused because the agent is running is delivered when it finishes", () => {
+describe("ruling 152: a dispatch refused because the agent is running is delivered when it finishes", () => {
   it("says so in the toast and the note, and the finished run hands the words over once", async () => {
     // Held live until released, then finished normally. VIB-151's developer
     // runs on Codex; were that to change, nothing would hold the run and the

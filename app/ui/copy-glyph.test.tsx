@@ -15,12 +15,12 @@ const glyph = (name: IconName) => {
 };
 
 /**
- * Ruling 459 (extending ruling 451(c)): a glyph that trades with its
+ * Ruling 284 (extending ruling 284): a glyph that trades with its
  * control's state keeps both marks drawn in one cell, and only `data-copied`
  * changes, so the sheet can cross-fade them. A ternary on the icon name
  * swapped them in one frame.
  */
-describe("ruling 459: GlyphSwap keeps both glyphs and flips one attribute", () => {
+describe("ruling 284: GlyphSwap keeps both glyphs and flips one attribute", () => {
   it("draws the resting mark first and the alternate last, and trades them on `on`", () => {
     // CANARY: render `<Icon name={on ? alt : rest} />` alone and the cell
     // holds one glyph, remounted on every change.
@@ -57,7 +57,7 @@ describe("ruling 459: GlyphSwap keeps both glyphs and flips one attribute", () =
     expect(container.querySelector(".copy-glyph .spin")).toBeNull();
   });
 
-  it("`busy` trades the whole resting cell for the one spinning loader, one cell up (ruling 459 over 368)", () => {
+  it("`busy` trades the whole resting cell for the one spinning loader, one cell up (ruling 284 over 368)", () => {
     // CANARY: draw the loader inside the inner cell (a third child), and the
     // Run → Schedule trade and the busy trade fight over one `data-copied`.
     const { container, rerender } = render(<GlyphSwap rest="bolt" alt="clock" on={false} busy={false} />);

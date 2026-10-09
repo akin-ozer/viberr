@@ -134,7 +134,7 @@ describe("getReviewQueue", () => {
     );
   });
 
-  it("ruling 457: the board's own list gives the same queue, without a second task query", async () => {
+  it("ruling 11: the board's own list gives the same queue, without a second task query", async () => {
     const store = setup();
     // An archived review task: on the board's list, never in the queue.
     writeTask(store.dataRoot, store.slug, {
@@ -200,7 +200,7 @@ describe("getReviewQueue", () => {
     expect(queue.working[0]!.validation).toBe("none");
   });
 
-  it("ruling 435: a conflict measured on an older head does not reach the row", () => {
+  it("ruling 242: a conflict measured on an older head does not reach the row", () => {
     // Live on AX-21: the refresh that resolved the conflict pushed a new head,
     // GitHub was still computing, and the file kept the old `conflicting`.
     // CANARY: copy `t.pr.mergeable` onto the row raw again.
@@ -608,7 +608,7 @@ describe("R15-1: the verdict gate reaches the queue through the projection", () 
 });
 
 /**
- * F19-32 / ruling 40 (R16-6): "accepted" — a completion accepted with the real
+ * F19-32 / ruling 244 (R16-6): "accepted" — a completion accepted with the real
  * GitHub merge still outstanding — is a FIRST-CLASS pr state, and the ruling
  * requires the difference to be visible on the board card AND this queue. The
  * row used to narrow the union to review|merged|closed and coerce everything
@@ -795,13 +795,13 @@ describe("the row carries GitHub's mergeability", () => {
 });
 
 /**
- * Ruling 135: the row carries `pr.headSha` and the CURRENT `pr.unpushedRevision`
+ * Ruling 243: the row carries `pr.headSha` and the CURRENT `pr.unpushedRevision`
  * from the REAL projection (a hand-built fixture would let `prStateSub`'s
  * branch pass while the row carried nothing, the P14-LV-07 defect again), and
  * such a task never sits under "Waiting on your acceptance". Canary: stop
  * copying the two fields in the row builder.
  */
-describe("ruling 135: the queue row and the unpushed revision", () => {
+describe("ruling 243: the queue row and the unpushed revision", () => {
   it("carries both fields through the projection and keeps the task out of `ready`", () => {
     const store = setupTestStore(ctx);
     const record = { revisionSha: "9".repeat(40), prHeadSha: "1".repeat(40), relation: "behind" as const };
@@ -837,10 +837,10 @@ describe("ruling 135: the queue row and the unpushed revision", () => {
   });
 });
 
-/** Ruling 132: the queue row carries the WHOLE drift record (a projection of
+/** Ruling 239: the queue row carries the WHOLE drift record (a projection of
  *  the count alone dropped `baseRefresh` before the row was built). Canary:
  *  restore `pr.revisionDrift = { headSha, authored }`. */
-describe("ruling 132: the queue row carries the whole drift record", () => {
+describe("ruling 239: the queue row carries the whole drift record", () => {
   it("baseRefresh rides through the real projection", () => {
     const store = setupTestStore(ctx);
     const record = { headSha: "b".repeat(40), authored: 0, baseRefresh: { merges: 1, commits: 4 } };
@@ -859,9 +859,9 @@ describe("ruling 132: the queue row carries the whole drift record", () => {
   });
 });
 
-/** Ruling 138: the row says a decided edit_goal packet owes a goal edit.
+/** Ruling 63: the row says a decided edit_goal packet owes a goal edit.
  *  Canary: drop `goalEditPending` from the row build. */
-describe("ruling 138: the queue row flags a decided edit_goal packet", () => {
+describe("ruling 63: the queue row flags a decided edit_goal packet", () => {
   it("carries goalEditPending from the packet's awaiting stamp", () => {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -1121,7 +1121,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
 });
 
 /**
- * Ruling 236 (owner, 2026-09-14) — the queue says which OTHER open PRs a merge
+ * Ruling 242 (owner, 2026-09-14) — the queue says which OTHER open PRs a merge
  * will put into conflict.
  *
  * Live cause: merging SHOP-2 put four of six open pull requests into
@@ -1130,7 +1130,7 @@ describe("U35-5: review work before the boundary is listed on a custom board", (
  * six independent rows the whole time. A person found each collision by
  * pressing Accept.
  */
-describe("ruling 236: colliding pull requests are named in the queue", () => {
+describe("ruling 242: colliding pull requests are named in the queue", () => {
   function seedThree(store: ReturnType<typeof setupTestStore>) {
     const open = (
       key: string,

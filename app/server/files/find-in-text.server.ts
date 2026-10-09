@@ -2,10 +2,10 @@ import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { escapeRegExp } from "~/shared/text/regexp";
 
 /**
- * Ruling 706: the places in a text that hold a word or a short phrase, for a
+ * Ruling 82: the places in a text that hold a word or a short phrase, for a
  * reader that would otherwise page through all of it.
  *
- * A kept source is read a page at a time (ruling 624: 32,000 bytes), and a
+ * A kept source is read a page at a time (ruling 215: 32,000 bytes), and a
  * record that grows runs to megabytes: the decisions file kept on BLOG-7 is
  * 2.25 MB, seventy-one pages. No review of that post opened it. Two read the
  * fifteen entries the writer had cut out of it; a third, at `max`, fetched
@@ -48,7 +48,7 @@ const HIT_ENTRY_HEAD = 200;
  *  costs each place a bounded walk. */
 const ENTRY_HEAD_REACH = 200_000;
 /** The most places one answer lists, and the UTF-8 bytes they may take
- *  together: well inside a page (ruling 624), with room for the answer's own
+ *  together: well inside a page (ruling 215), with room for the answer's own
  *  fields. No one place comes near the second figure. */
 export const FIND_HITS_MAX = 40;
 const HITS_MAX_BYTES = 24_000;
@@ -217,7 +217,7 @@ export function findInText(whole: string, words: readonly string[], from = 0, ha
   // everywhere and moves nowhere.
   if (words.join("") === "") return find;
   // Literal words joined by `\s+`. A run of white space of any length does
-  // not overflow the engine's stack, as the counted run of ruling 676 did:
+  // not overflow the engine's stack, as the counted run of ruling 79 did:
   // measured on a 16,000,000-character run of spaces.
   const pattern = new RegExp(words.map(escapeRegExp).join("\\s+"), "gi");
 

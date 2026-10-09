@@ -29,14 +29,14 @@ import { TimelineEntryBody, TimelineEntryFiles, TimelineEntryMeta } from "./time
  * the 9 typed-event renderings, evidence rows, guest pills, toagent tint.
  *
  * Real-app replacements: events carry UTC ISO `occurredAt` → the shared
- * ruling-4 formatter renders "9:41" / "Yesterday · 15:12" / "Mar 30 · 17:26";
+ * ruling-293 formatter renders "9:41" / "Yesterday · 15:12" / "Mar 30 · 17:26";
  * posting goes through the route action (revalidation, no optimistic
  * governed state; failures keep the draft and show an inline error);
  * long histories are served as a bounded newest-first slice with a
  * "Show older" affordance driving the `?events=` param (progressive
  * disclosure — the first payload never ships the full history).
  *
- * Ruling 700(e) split the two components along the task page's recipe, a
+ * Ruling 13(b) split the two components along the task page's recipe, a
  * pure structural refactor: the comment post and the filter tab with its
  * landing are hooks in `timeline-actions.ts`, called where their hooks always
  * ran; what the list reads off its tab is pure functions in
@@ -54,7 +54,7 @@ const TL_FILTERS = [
 export type TimelineFilterId = (typeof TL_FILTERS)[number]["id"];
 
 /**
- * Ruling 493: a gate run's note takes its ending's mark on the rail and its
+ * Ruling 313: a gate run's note takes its ending's mark on the rail and its
  * word in the pill, in the PR card's colours (`gatesPill`). Beside the actor
  * the pill finishes the sentence: "Project gates passed".
  */
@@ -65,9 +65,9 @@ const GATE_NOTE_META = {
 } as const satisfies Record<GateNoteState, { node: string; icon: IconName; label: string }>;
 
 /**
- * Ruling 526: a verdict's mark on the rail is the reviewer's own verdict, as a
- * gate run's is its ending (ruling 493): the check on green for an approval
- * (ruling 491), the cross on red for changes requested. Its pill stays the
+ * Ruling 313: a verdict's mark on the rail is the reviewer's own verdict, as a
+ * gate run's is its ending (ruling 313): the check on green for an approval
+ * (ruling 315), the cross on red for changes requested. Its pill stays the
  * category; the card under it says the rest.
  */
 const VERDICT_META = {
@@ -87,7 +87,7 @@ function picturesFirst(names: string[]): string[] {
   return [...names.filter((name) => IMAGE_RE.test(name)), ...names.filter((name) => !IMAGE_RE.test(name))];
 }
 
-/** Ruling 522: what a folded strip hides, as its toggle counts it: images,
+/** Ruling 314: what a folded strip hides, as its toggle counts it: images,
  *  or files once anything but a picture is among them. */
 function hiddenFiles(names: string[]): Hidden | null {
   if (names.length === 0) return null;
@@ -96,7 +96,7 @@ function hiddenFiles(names: string[]): Hidden | null {
 }
 
 /**
- * Ruling 457 (CS-3 / TASK-4): memoised. Its props hold still while its event
+ * Ruling 11 (CS-3 / TASK-4): memoised. Its props hold still while its event
  * does (the timeline shares the rows and the lookups it passes across
  * revalidations), so a send's fetcher states and a live event that brings
  * the same rows back re-render none of the items; each used to re-run its
@@ -114,18 +114,18 @@ export const TimelineItem = memo(function TimelineItem({
   knowledgeHref,
 }: {
   ev: TimelineEventRender;
-  /** Ruling 497: the id a link to this event names (`timelineEventAnchor`).
+  /** Ruling 75: the id a link to this event names (`timelineEventAnchor`).
    *  Only the first of the events that share a time carries it. */
   anchor?: string;
-  /** Ruling 497: the link that opened the page named this event. */
+  /** Ruling 302: the link that opened the page named this event. */
   targeted?: boolean;
-  /** Ruling 523: that link focused this event, and it keeps the tabindex that
+  /** Ruling 302(c): that link focused this event, and it keeps the tabindex that
    *  let it once the mark ends; a focused element that loses it drops the focus
    *  to the body, and the keys that scroll `.detail` from it (G7) stop. */
   focusable?: boolean;
   /** U39-31: the other tasks the event names, key to path. */
   taskLinks?: TaskLinks;
-  /** Rulings 483 and 498: the project's Controller page, whose Knowledge base
+  /** Rulings 267 and 210: the project's Controller page, whose Knowledge base
    *  panel a `proposal` or an agent's `kb_correction` links to; absent in bare
    *  renders. */
   knowledgeHref?: string;
@@ -148,11 +148,11 @@ export const TimelineItem = memo(function TimelineItem({
   // Image evidence pops the in-app lightbox on a plain click; the anchors stay
   // real links so modified clicks and no-provider renders keep the raw tab.
   const lightbox = useAttachmentLightbox();
-  // Ruling 522: the files the event's run saved show their first row; the rest
+  // Ruling 314: the files the event's run saved show their first row; the rest
   // fold with a comment's text, or behind their own toggle under a typed
-  // event, and the toggle says how many it hides. Ruling 526: a typed event's
+  // event, and the toggle says how many it hides. Ruling 313: a typed event's
   // row that names a file already opens it, so a file that is not a picture
-  // is not drawn a second time as a tile (a gate note's logs, ruling 493).
+  // is not drawn a second time as a tile (a gate note's logs, ruling 313).
   const files = useMemo(() => {
     if (!ev.attachments || !attachmentsBase) return NO_NAMES;
     const cited = isTyped && ev.evidence && attachmentNames ? citedFiles(ev.evidence, attachmentNames) : null;
@@ -202,7 +202,7 @@ export const TimelineItem = memo(function TimelineItem({
             lightbox={lightbox}
           />
         )}
-        {/* Ruling 522: a comment's toggle stands at the foot of its card; a
+        {/* Ruling 314: a comment's toggle stands at the foot of its card; a
             typed event has no card, so its pictures' toggle follows them. */}
         {isTyped && more && <FoldToggle open={open} onOpenChange={setOpen} cut={false} more={more} />}
       </div>
@@ -231,11 +231,11 @@ export function Timeline({
 }: {
   /** Newest-first bounded slice from the loader. */
   events: TimelineEventRender[];
-  /** Ruling 547: a link to a decision or to the recommendations landed here,
+  /** Ruling 302: a link to a decision or to the recommendations landed here,
    *  because they are gone from the page (`regionPlace` in
    *  task-detail-actions.tsx). */
   landed?: boolean;
-  /** Rulings 483 and 498: the project's Controller page, which a `proposal` or
+  /** Rulings 267 and 210: the project's Controller page, which a `proposal` or
    *  `kb_correction` event links. */
   knowledgeHref?: string;
   /** U39-31: the other tasks the slice names, key to path (loader). */
@@ -248,7 +248,7 @@ export function Timeline({
   ask: number;
   /** @-mention autocomplete directory (loader) — agents/users/reserved. */
   mentionables: Mentionables;
-  /** Ruling 127: the task owner whose accounts an `@claude` / `@codex` mention
+  /** Ruling 137: the task owner whose accounts an `@claude` / `@codex` mention
    *  would bill, so the menu can mark a handle that would refuse. */
   runPrincipal?: TaskRunPrincipalView | null;
   /** BUG 3: when an @agent comment triggers a run, the server returns the
@@ -259,7 +259,7 @@ export function Timeline({
   taskClosed?: boolean;
   /** U33-1: a run is live (queued or running) on this task RIGHT NOW — the same
    *  projection fact the Live-run strip renders from, ~400px up the same page.
-   *  Ruling 87(b) exists so a healthy pre-run phase reads as healthy, and the
+   *  Ruling 152 exists so a healthy pre-run phase reads as healthy, and the
    *  no-events empty state below undid half of it: it declared "this task
    *  hasn't started its operator loop" while the strip above said "Preparing
    *  workspace · Cloning akin-ozer/viberr · 13%". Absent (bare renders) ⇒ the
@@ -269,14 +269,14 @@ export function Timeline({
    *  become links to the serving route. Absent ⇒ plain text (bare renders). */
   attachmentNames?: string[];
   attachmentsBase?: string;
-  /** Ruling 573: the viewer may attach files to a comment (`attach-file`, a
+  /** Ruling 76: the viewer may attach files to a comment (`attach-file`, a
    *  task not archived). Absent ⇒ the composer takes words only. */
   canAttach?: boolean;
 }) {
   // P13-D-39: the send handler below accepts either modifier, so the hint has to
   // name the one the viewer's keyboard actually has (UI-55's rule).
   const sendHint = useModifierHint("↵");
-  // Ruling 457 (CS-3 / TASK-4): every revalidation decodes new objects for
+  // Ruling 11 (CS-3 / TASK-4): every revalidation decodes new objects for
   // all of these; kept while their content is the same, so the memoised items
   // below re-render only for an event that changed.
   const rows = useStableRows(events, eventKeyOf);
@@ -309,13 +309,13 @@ export function Timeline({
     submitDraft,
     keepDraft,
   } = useCommentPost({ ask, canAttach, onAgentLog });
-  // The filter tab, which a link to an event opens to All (ruling 497), the
-  // event it marks and, ruling 523, the one it keeps focusable
+  // The filter tab, which a link to an event opens to All (ruling 302), the
+  // event it marks and, ruling 302(c), the one it keeps focusable
   // (`useTimelineTab`, timeline-actions.ts).
   const { f, setF, targeted, arrived } = useTimelineTab({ tlDefault, rows, hasMore, nextLimit });
 
   const items = useMemo(() => rows.filter((e) => shownBy(f, e)), [rows, f]);
-  // Ruling 497: the first of the events that share a time is the one its
+  // Ruling 75: the first of the events that share a time is the one its
   // link names (they were written together, so they sit together).
   const anchors = useMemo(() => {
     const byEvent = new Map<number, string>();
@@ -391,7 +391,7 @@ export function Timeline({
             className="composer-input"
             ref={composerBoxRef}
             onPasteCapture={(e) => {
-              // Ruling 573: a bare screenshot joins the comment before the
+              // Ruling 76: a bare screenshot joins the comment before the
               // editor sees the paste; copied text stays the editor's.
               if (!canAttach) return;
               const pasted = filesFromPaste(e.clipboardData, true, files);
@@ -404,7 +404,7 @@ export function Timeline({
             {/* Lexical plain-text editor: known @mentions highlight live as
                 character-editable text (no backdrop mirroring); the posted
                 value stays exactly the trimmed plain draft. Loaded lazily
-                behind a same-size stand-in (ruling 457). */}
+                behind a same-size stand-in (ruling 300). */}
             <CommentComposer
               ref={composerRef}
               mentionables={directory}
@@ -415,7 +415,7 @@ export function Timeline({
           </div>
           <div className="composer-foot">
             {/* UXA-1: this read "Open to every registered user" — the same false
-                sentence the task page's Permissions panel (since removed, ruling 167) had dropped
+                sentence the task page's Permissions panel (since removed, ruling 308) had dropped
                 under E1 ("false, and false on a surface whose whole job is
                 stating what the server enforces"). Membership is the gate:
                 R15-4 members-only was re-proven live this pass — a signed-in
@@ -432,13 +432,13 @@ export function Timeline({
                 {commentError}
               </span>
             )}
-            {/* Ruling 625: the controller composer's hint, in its words and
+            {/* Ruling 319: the controller composer's hint, in its words and
                 its class: the body face (a key hint is not code), and gone
-                on a touch screen (ruling 419(d)). */}
+                on a touch screen (ruling 321). */}
             <span className="fine dim push kbd-hint" suppressHydrationWarning>
               {sendHint} sends
             </span>
-            {/* Ruling 500: the frame's one action, primary as the
+            {/* Ruling 313: the frame's one action, primary as the
                 controller composer's Send is. */}
             <button
               type="button"

@@ -24,7 +24,7 @@ import { FakeEventSource } from "../../../test-support/fake-event-source";
  * The hook calls `useRevalidator`, so it runs under a real data router
  * (`test-support/data-router.tsx`).
  *
- * Ruling 457: the console opens no connection of its own. Its frames come from
+ * Ruling 11: the console opens no connection of its own. Its frames come from
  * the tab's one live stream (`useLiveUpdates`, the layout's on a task page),
  * so every probe here mounts that stream beside the hook, on the scope the
  * page's layout holds.
@@ -38,7 +38,7 @@ interface RunLogAppended {
   seq: number;
 }
 
-/** The `controller.log-appended` frame body (ruling 99: keyed by conversation). */
+/** The `controller.log-appended` frame body (ruling 247: keyed by conversation). */
 interface ControllerLogAppended {
   conversationId: string;
   userId: string;
@@ -217,7 +217,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("one live connection per tab (ruling 457, TASK-6 / LIVE-5)", () => {
+describe("one live connection per tab (ruling 11, TASK-6 / LIVE-5)", () => {
   it("opens no EventSource of its own: the layout's stream carries the console's frames", async () => {
     // CANARY: open an EventSource in the hook again and this reads 2.
     fetchMock.mockResolvedValue(tailOf([{ seq: 0, text: "a" }]));
@@ -377,7 +377,7 @@ describe("P13-D-11: the live tail seeds from logWindow.headSeq", () => {
 });
 
 /**
- * Ruling 457 (TASK-3 / LIVE-3): a revalidation used to re-seed the console
+ * Ruling 11 (TASK-3 / LIVE-3): a revalidation used to re-seed the console
  * from the loader's copy of the window: a second full commit of the page on
  * every open, and, once the window was full, every row rewritten as the
  * index keys shifted. The store keeps what a thread holds unless the thread's
@@ -408,7 +408,7 @@ describe("a revalidation keeps what the console holds", () => {
         { seq: 2, text: "c" },
       ]),
     );
-    // Ruling 301: the reconnect revalidates, and the revalidation says the
+    // Ruling 25: the reconnect revalidates, and the revalidation says the
     // run's head moved while the tab was away.
     await act(async () => {
       rerender(<Page threads={[thread({ logWindow: win({ headSeq: 2, totalLines: 3, loaded: false }) })]} />);
@@ -443,7 +443,7 @@ describe("a revalidation keeps what the console holds", () => {
 });
 
 /**
- * Ruling 457 (TASK-1, owner decision 2): a revalidation or a client navigation
+ * Ruling 300 (TASK-1, owner decision 2): a revalidation or a client navigation
  * carries no console lines, only each thread's window facts; the console fills
  * the thread it shows with ONE request, the window a hard refresh would have
  * shipped.
@@ -505,7 +505,7 @@ describe("a thread the page did not carry", () => {
     });
   });
 
-  it("ruling 524(e): a load the page's own cleanup aborted is asked again, not failed", async () => {
+  it("ruling 153: a load the page's own cleanup aborted is asked again, not failed", async () => {
     // StrictMode, as on the dev server: React rehearses the mount, so the
     // console shows its thread, the page's cleanup disposes the store and
     // aborts that window load, and the console shows the thread again. Here
@@ -572,7 +572,7 @@ describe("a thread the page did not carry", () => {
   });
 });
 
-describe("the raw view (ruling 457: envelopes load when it opens)", () => {
+describe("the raw view (ruling 300: envelopes load when it opens)", () => {
   it("fills the shown thread's envelopes with backward pages, and tails with them", async () => {
     render(
       <Page
@@ -622,7 +622,7 @@ describe("the raw view (ruling 457: envelopes load when it opens)", () => {
   });
 });
 
-describe("the Live run strip's facts (ruling 457, LIVE-1)", () => {
+describe("the Live run strip's facts (ruling 11, LIVE-1)", () => {
   it("each tail read carries the run row's facts, and the page does not revalidate", async () => {
     render(<Page />, { wrapper: DataRouter });
     expect(store.facts("run_1")).toEqual(FACTS);
@@ -731,7 +731,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
       "b4",
       "b5",
     ]);
-    // Every row keeps an identity of its own (ruling 457, LIVE-4).
+    // Every row keeps an identity of its own (ruling 11, LIVE-4).
     const keys = store.thread("primary")!.lines.map((l) => l.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect(keys[4]).toBe("1:resumed");
@@ -838,7 +838,7 @@ describe("P13-D-11: paging backwards through the withheld history", () => {
 });
 
 /**
- * Ruling 99: the controller channel. A controller conversation's runs have no
+ * Ruling 247: the controller channel. A controller conversation's runs have no
  * task scope, so their frames come down the owner's `user` stream as
  * `controller.log-appended`; the console follows the OPEN conversation only.
  */

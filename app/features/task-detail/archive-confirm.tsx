@@ -30,15 +30,15 @@ export function ArchiveConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  // Ruling 459: the confirm leaves the way Cancel does (`commit`).
+  // Ruling 287: the confirm leaves the way Cancel does (`commit`).
   const { ref: panelRef, close, commit } = useDialog(onCancel);
-  // Ruling 148: the same words as the stage menu and the board row, and never
+  // Ruling 291: the same words as the stage menu and the board row, and never
   // the raw internal id (the F19-36 defect below, second axis).
   const stageName = stageLabel(task.stages.find((s) => s.id === task.stage));
   // F19-36: this printed the raw internal state token — "PR #12 accepted" for a
   // PR that is really merge-pending, "PR #12 review" for one in review — while
   // every other surface renders the canonical label from the ONE PR-state map
-  // (ruling 12). Same defect as F19-14 at accept-confirm-derive.ts (`prPill`),
+  // (ruling 237). Same defect as F19-14 at accept-confirm-derive.ts (`prPill`),
   // second site.
   const prPill = task.pr ? prStatePill(task.pr.state) : null;
   // What archiving withdraws, named exactly — the server writes the same list
@@ -47,7 +47,7 @@ export function ArchiveConfirm({
     ...(task.packet ? [`the open “${task.packet.title}” decision`] : []),
     ...(pendingRecommendations > 0
       ? [
-          // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
+          // Inline plural, not `countLabel`: ruling 11 (shared/text/plural.ts).
           `${pendingRecommendations} pending operator recommendation${
             pendingRecommendations === 1 ? "" : "s"
           }`,

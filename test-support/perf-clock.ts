@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 /**
- * Ruling 457: the wall clock a perf fixture reads. A figure must not move
+ * Ruling 11: the wall clock a perf fixture reads. A figure must not move
  * with the time of day or the zone the suite runs in, and the demo seed dates
  * its events from `new Date()` in LOCAL time (`todayAt(9, 58)`), while loaders
  * derive from the hour too. Measured on the real clock:

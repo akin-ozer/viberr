@@ -105,28 +105,28 @@ function fakeGit(opts: {
    *  through, so the tree stays dirty and 0-ahead — the shape that used to be
    *  read as a verified zero-diff. */
   commitFails?: boolean;
-  /** Ruling 134: what `git ls-remote --heads origin <branch>` answers — the
+  /** Ruling 229: what `git ls-remote --heads origin <branch>` answers — the
    *  sha origin holds for the branch, `null` for "no such branch", or absent
    *  for "same as HEAD" (the default: the fixtures below started on a lagging
-   *  remote before ruling 134 existed). */
+   *  remote before ruling 229 existed). */
   remoteHead?: string | null;
   /** `ls-remote` fails outright (offline, refused). */
   lsRemoteFails?: boolean;
-  /** Ruling 144: what `git log --format= --name-only <range> -- .github/workflows/`
+  /** Ruling 221(a): what `git log --format= --name-only <range> -- .github/workflows/`
    *  lists, keyed by range. Absent ranges list nothing. */
   workflowFilesByRange?: Record<string, string[]>;
-  /** Ruling 245: what the UNFILTERED `git log --name-only <range>` lists — every
+  /** Ruling 60: what the UNFILTERED `git log --name-only <range>` lists — every
    *  file the push changes, which the lease gate reads. Keyed by range, and
    *  distinct from the workflow list because the two calls differ only by their
    *  pathspec and a shared fixture would make one stand in for the other. */
   changedFilesByRange?: Record<string, string[]>;
-  /** Ruling 353: what `git merge-base origin/<default> HEAD` answers — the
+  /** Ruling 60: what `git merge-base origin/<default> HEAD` answers — the
    *  fork point the lease gate measures the BRANCH from. Defaults to FORK. */
   mergeBase?: string | null;
   /** Pass 34 review: the `git log` that measures those files FAILS (a shallow
    *  clone with no `origin/<default>`, a truncated history). */
   workflowLogFails?: boolean;
-  /** Ruling 159: what `git ls-tree -r --name-only HEAD -- projects/<slug>/tasks/`
+  /** Ruling 229: what `git ls-tree -r --name-only HEAD -- projects/<slug>/tasks/`
    *  lists, i.e. the store-layout paths HEAD's tree carries. `after` lists
    *  them only once the delivery auto-commit ran (the agent left the stray
    *  folder uncommitted). */
@@ -136,7 +136,7 @@ function fakeGit(opts: {
   lsTreeFails?: boolean;
 }) {
   const calls: string[][] = [];
-  /** The env the `ls-remote` read ran under (ruling 134: the askpass channel). */
+  /** The env the `ls-remote` read ran under (ruling 229: the askpass channel). */
   const envs: { args: string[]; env: NodeJS.ProcessEnv | undefined }[] = [];
   let committed = false;
   const HEAD = "a".repeat(40);
@@ -176,7 +176,7 @@ function fakeGit(opts: {
         return { ok: false, stdout: "", stderr: "fatal: bad revision 'origin/main..HEAD'" };
       }
       const range = args[args.indexOf("--name-only") + 1] ?? "";
-      // Ruling 245: the lease gate's read carries no pathspec; ruling 144's
+      // Ruling 60: the lease gate's read carries no pathspec; ruling 221(a)'s
       // carries `.github/workflows/`. Same command, different question.
       const scoped = args.includes(".github/workflows/");
       const table = scoped ? opts.workflowFilesByRange : opts.changedFilesByRange;
@@ -270,7 +270,7 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
     );
   });
 
-  it("ruling 480 (F40-43): a push GitHub accepted proves `repo` on the project's repository; a refused one proves nothing", async () => {
+  it("ruling 220 (F40-43): a push GitHub accepted proves `repo` on the project's repository; a refused one proves nothing", async () => {
     // Live, the card read "repo unproven (verified on first use)" after three
     // pushes. Canary: drop the `markWriteScopeProven(…, "push")` call after the
     // push and the last assertion reads `unchecked`.
@@ -294,10 +294,10 @@ describe("pushWorkspaceBranch (F-GH3)", () => {
   });
 
   /**
-   * Ruling 134 (pass 34, F34-11): delivery is defined by the REMOTE. Origin's
+   * Ruling 229 (pass 34, F34-11): delivery is defined by the REMOTE. Origin's
    * head for the branch is read before the push; equal → no push at all.
    */
-  describe("ruling 134: the pre-push remote read", () => {
+  describe("ruling 229: the pre-push remote read", () => {
     it("a workspace HEAD origin already carries is `up_to_date` and runs no push", async () => {
       // Canary: delete the early `up_to_date` return and this pushes anyway.
       bindPat();
@@ -835,7 +835,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
   });
 
   it("refuses when the remote cannot answer, instead of destroying commits", async () => {
-    // The ruling-17 guard ran `ls-remote` with NO credential, so on a private
+    // The ruling-233 guard ran `ls-remote` with NO credential, so on a private
     // repo it always failed to authenticate — and `--exit-code` made that
     // failure indistinguishable from "origin does not carry it", so the branch
     // was deleted anyway and the outcome recorded a check that never happened.
@@ -912,7 +912,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     expect(out.status).toBe("not_found");
   });
 
-  it("ruling 17: refuses a branch that exists on the remote and keeps it local", async () => {
+  it("ruling 233: refuses a branch that exists on the remote and keeps it local", async () => {
     const repoDir = initWorkspaceRepo(true);
     // The PROJECT's repository (`akin-ozer/viberr`), stood in for on disk:
     // pass 40 review (R-seams-1) asks GitHub by the project's own URL, from
@@ -952,7 +952,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
     expect(out.status).toBe("no_workspace");
   });
 
-  it("ruling 69: a failed git command carries git's REDACTED words", async () => {
+  it("ruling 219: a failed git command carries git's REDACTED words", async () => {
     // Fake exec: the branch delete fails with a token-bearing URL in stderr.
     const exec = vi.fn(async (_file: string, args: string[]) => {
       if (args.includes("--verify")) {
@@ -988,7 +988,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
 });
 
 /**
- * Ruling 144 (pass 34, G34-2): the `workflow` scope. (b) Delivery measures the
+ * Ruling 221(a) (pass 34, G34-2): the `workflow` scope. (b) Delivery measures the
  * workflow files a push changes as GitHub measures them and refuses BEFORE the
  * push when the bound classic token's published scopes lack `workflow`; (c)
  * GitHub's own refusal is classified `push_refused_scope`, never the generic
@@ -996,7 +996,7 @@ describe("discardLocalTaskBranch (F20-6 / R20-2)", () => {
  * files are present (ignore the token); measure against `origin/<default>`
  * unconditionally; delete the classifier branch.
  */
-describe("ruling 144: workflow-file pushes and the workflow scope", () => {
+describe("ruling 221(a): workflow-file pushes and the workflow scope", () => {
   const CI = ".github/workflows/ci.yml";
   const REMOTE = "b".repeat(40);
   function bindPatWith(validation: Pick<PatValidation, "tokenKind" | "headerScopes">) {
@@ -1073,7 +1073,7 @@ describe("ruling 144: workflow-file pushes and the workflow scope", () => {
   it("an UNMEASURED push reports null, is not refused before the push, and claims nothing", async () => {
     // Canary: return `[]` from changedWorkflowFiles when history cannot answer
     // — the degraded read then reads as "this push changes no workflow files",
-    // which the delivery would take as proof (ruling 144(c)).
+    // which the delivery would take as proof (ruling 221(a)).
     bindPatWith({ tokenKind: "classic", headerScopes: ["repo"] });
     const git = fakeGit({ branch: "vib-1-work", ahead: 1, remoteHead: null, workflowLogFails: true });
     const res = await push(git);
@@ -1097,10 +1097,10 @@ const pushBound = (git: ReturnType<typeof fakeGit>) => {
 
 /** Lease `paths` to `taskKey` in project.md's `fileLeases`, which the push gate reads. */
 async function leaseTo(taskKey: string, paths: string[]) {
-  // Ruling 245(b): the holder must be a LIVE task. A lease naming a task that
+  // Ruling 60: the holder must be a LIVE task. A lease naming a task that
   // is done, archived or absent binds nobody, so a fixture that skipped
   // seeding it would prove the gate works while actually proving it is
-  // skipped — which is how the ruling-245 suite first passed against a
+  // skipped — which is how the ruling-60 suite first passed against a
   // phantom holder.
   if (taskKey !== "VIB-1") {
     writeTask(store.dataRoot, store.slug, {
@@ -1115,19 +1115,19 @@ async function leaseTo(taskKey: string, paths: string[]) {
 }
 
 /**
- * Ruling 245 (pass 37, F37-74): a push that changes a file another task LEASES
+ * Ruling 60 (pass 37, F37-74): a push that changes a file another task LEASES
  * is refused before it reaches GitHub.
  *
- * The seam is ruling 144's: this is the moment the change would become
+ * The seam is ruling 221(a)'s: this is the moment the change would become
  * published history, and the last one at which refusing costs nothing.
  */
-describe("ruling 245: a leased file refuses the push", () => {
+describe("ruling 60: a leased file refuses the push", () => {
   const REMOTE = "c".repeat(40);
-  // Ruling 353: the gate measures the branch from its fork point, not the push.
+  // Ruling 60: the gate measures the branch from its fork point, not the push.
   const FORK = "d".repeat(40);
   const range = `${FORK}..HEAD`;
 
-  it("ruling 245(b): a lease whose HOLDER has merged binds nobody", async () => {
+  it("ruling 60: a lease whose HOLDER has merged binds nobody", async () => {
     await leaseTo("VIB-9", ["Makefile"]);
     // The live shape: SHOP-11 merged and its lease went on refusing SHOP-5.
     writeTask(store.dataRoot, store.slug, {
@@ -1183,7 +1183,7 @@ describe("ruling 245: a leased file refuses the push", () => {
   });
 
   it("an UNMEASURABLE diff refuses nothing, rather than refusing everything", async () => {
-    // Ruling 144's own distinction: `null` is "history could not answer", not
+    // Ruling 221(a)'s own distinction: `null` is "history could not answer", not
     // "no files changed". CANARY: treat a failed read as an empty list and this
     // still passes; treat it as a conflict and every degraded clone is blocked.
     await leaseTo("VIB-9", ["Makefile"]);
@@ -1198,14 +1198,14 @@ describe("ruling 245: a leased file refuses the push", () => {
 });
 
 /**
- * Ruling 159 (pass 35, F35-10): a tree that carries Viberr's own store layout
+ * Ruling 229 (pass 35, F35-10): a tree that carries Viberr's own store layout
  * (`projects/<slug>/tasks/...`) is never pushed. KNC-9's agent created the
  * store-relative attachments path inside its checkout, committed it, and the
  * delivery pushed it to GitHub. Canaries: delete the pre-count check (the push
  * proceeds); read the tree before the auto-commit (the uncommitted folder
  * slips through); treat an unreadable tree as empty.
  */
-describe("ruling 159: the store layout never reaches origin", () => {
+describe("ruling 229: the store layout never reaches origin", () => {
   const STRAY = (slug: string) => `projects/${slug}/tasks/VIB-1/attachments/knc-9-licence-verification.txt`;
 
   it("refuses a revision whose tree holds projects/<slug>/tasks/..., names the path, and runs no push", async () => {
@@ -1261,12 +1261,12 @@ describe("ruling 159: the store layout never reaches origin", () => {
 });
 
 /**
- * Ruling 353 (pass 38, F38-7): a lease binds the BRANCH, so a leased path that
+ * Ruling 60 (pass 38, F38-7): a lease binds the BRANCH, so a leased path that
  * reached origin before the lease was declared is still refused on the next
- * push — ruling 245's delta read let it through, and the acceptance ceremony
+ * push — ruling 60's delta read let it through, and the acceptance ceremony
  * (no lease read) merged it ahead of the holder.
  */
-describe("ruling 353: the lease gate measures the branch from its fork point", () => {
+describe("ruling 60: the lease gate measures the branch from its fork point", () => {
   const REMOTE = "c".repeat(40);
   const FORK = "d".repeat(40);
 
