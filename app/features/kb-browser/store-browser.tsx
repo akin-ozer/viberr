@@ -1142,8 +1142,8 @@ function DocumentCard({
           <div className="cred-warn">
             <Icon name="alert" />
             This document is larger than the editor can load, so only the
-            first part is shown. Saving would destroy the rest. Edit it on
-            disk instead.
+            first part is shown, and Save is refused because it would delete
+            the rest. Edit it on disk, or upload the whole file again.
           </div>
         </div>
       )}

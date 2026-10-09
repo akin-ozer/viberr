@@ -395,7 +395,9 @@ an opened document until its text changes, and the foot reads "Unsaved changes" 
 differs (its line count and size otherwise). The read hands back the document's version
 and the save sends it back (ruling 18(c)): once the file is no longer that version, because
 an agent merged a correction or someone else saved, the save is refused, the card keeps
-the typed text and says the document changed after it was opened. A new document opens
+the typed text and says the document changed after it was opened. A document over the
+256 KB the editor opens shows its first part under a warning, and its save is refused
+the same way, because it would delete the rest (ruling 212). A new document opens
 on Raw under its file-name row, and Preview renders the draft.
 A GitHub connection row (ruling 222) says what its token reaches: a `<details>`
 (`.conn-reach`) whose summary reads "Reaches 3 repositories · 1 private" (or "300+"

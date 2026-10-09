@@ -542,6 +542,10 @@ function docVersionOf(bytes: Buffer): string {
   return sha256Hex(bytes).slice(0, 12);
 }
 
+/** How much of a document the editor opens; a replace of a longer file is
+ *  refused (ruling 212). */
+const EDITOR_READ_MAX_BYTES = 256 * 1024;
+
 /** Read one store text doc for the editor (`null` when absent). A doc the
  *  editor cannot round-trip safely is refused by TYPE rather than reported as
  *  missing (P14-KM-08 — this reader had no production caller at all until the
@@ -549,7 +553,7 @@ function docVersionOf(bytes: Buffer): string {
 export function readStoreDoc(
   target: StoreTarget,
   nodePath: string[],
-  maxBytes = 256 * 1024,
+  maxBytes = EDITOR_READ_MAX_BYTES,
 ): { text: string; truncated: boolean } | null {
   const parts = sanitizeDirPath(nodePath);
   if (parts.length === 0) return null;
@@ -628,8 +632,10 @@ export function writeStoreDoc(
      * Ruling 18(c): the version this replace read (`storeDocVersion`). A replace
      * that names one is refused once the file is no longer that version, so a
      * write made meanwhile (an agent's correction, another person's save) is
-     * not wiped by a save that never saw it. The document editor sends it;
-     * the controller checks its own (ruling 212(a)).
+     * not wiped by a save that never saw it. It is also refused when the file
+     * is longer than the editor opens, since that save never saw its tail
+     * (ruling 212). The document editor sends it; the controller checks its
+     * own (ruling 212(a)).
      */
     replaces?: string;
     /**
@@ -680,6 +686,16 @@ export function writeStoreDoc(
       `${[...base, withExt].join("/")} changed after you opened it: an agent's correction or another ` +
         "edit was saved meanwhile. Nothing was written, and your text is still here. Copy your change, " +
         "reopen the document, and make it again on top of what is there now.",
+    );
+  }
+  // Ruling 212: the version is hashed from the whole file, but the editor
+  // that read it was given only its first 256 KB, so a replace from that read
+  // would delete the tail its writer never saw.
+  if (previous && opts.replaces !== undefined && previous.length > EDITOR_READ_MAX_BYTES) {
+    throw AppError.validation(
+      `${[...base, withExt].join("/")} is over the 256 KB the editor opens, so it held only the ` +
+        "first part, and saving that would delete the rest. Nothing was written, and your text is " +
+        "still here. Edit the file on disk, or upload the whole file again with your change.",
     );
   }
   const sent = Buffer.from(body, "utf8");
