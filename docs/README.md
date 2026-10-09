@@ -112,9 +112,9 @@ what V1 covers, [product/glossary.md](product/glossary.md) for the vocabulary, t
   from, the discovery-pass ledgers, QA evidence and the documentation-sweep ledgers left
   the tree before launch (ruling 3). They are in git history; `d423716` is the last
   commit that holds them. A pass or finding id a code comment cites (`F18-14`,
-  `P13-D-34`) resolves there. `decisions.md` was compacted on 2026-10-09 from 706
+  `P13-D-34`) resolves there. `decisions.md` was compacted on 2026-10-09 from 707
   additive rulings into its current set and renumbered; the earlier edition, whose numbers
-  older commits and pull requests cite, is at `f4ea3f3`.
+  older commits and pull requests cite, is at `5cb6fe1`.
 
 ## Keeping this set honest
 

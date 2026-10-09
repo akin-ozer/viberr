@@ -24,7 +24,7 @@ import {
 } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { listProjectTasks } from "~/server/projections/board-query.server";
-import { pageEnd } from "~/server/runtimes/read-page-budget.server";
+import { pageEnd, READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 import { completionPacketText, currentCompletionPacket } from "./completion-packet.server";
 import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
 import type { TaskMutationContext } from "./task-mutation.server";
@@ -579,7 +579,6 @@ function boardRows(deps: BoardReadContext) {
  * now somewhere to go, exactly as ruling 205 did for a knowledge base — index
  * in the prompt, document on demand.
  */
-const TIMELINE_ENTRY_READ_CHARS = 40_000;
 
 /**
  * Ruling 72: how a shared budget splits between entries. Each gets an equal
@@ -599,16 +598,114 @@ function shareBudget(lengths: readonly number[], total: number): number[] {
 
 /** One entry as `read_timeline_entry` returns it. */
 interface TimelineEntryReading {
+  /** Ruling 72: which of the entries that share the stamp, counted from 1 in
+   *  the order they were written; absent when the stamp names one entry. */
+  entry?: number;
   type: string;
   actor: string;
   title: string | null;
+  /** Ruling 213(d): where this page starts, when it is not the entry's start. */
+  offset?: number;
   truncated: boolean;
   text: string;
+  /** Ruling 213(d): the offset the next page starts at, on a truncated read. */
+  nextOffset?: number;
+  /** Ruling 213(d): the entry's whole length, on a read that is not all of it. */
+  characters?: number;
   /** Ruling 211: a `kb_correction` entry's correction, whole from its record. */
   correction?: CorrectionReading;
 }
 
-/** One timeline entry, whole, addressed by the `occurredAt` stamp `get_task`
+/** Who wrote an entry, as a read names them. */
+function entryActor(entry: TaskFileEvent): string {
+  return entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind;
+}
+
+/**
+ * Ruling 213(d): one page of one entry's text, from `offset`, in at most `bytes`
+ * of UTF-8 (`pageEnd`: no character is split, and a page always moves). A
+ * page that is not the whole entry says where it starts, where the next one
+ * does and how long the entry is.
+ */
+function entryPage(entry: TaskFileEvent, offset: number, bytes: number, numbered: number | null): TimelineEntryReading {
+  const end = pageEnd(entry.text, offset, bytes);
+  const more = end < entry.text.length;
+  // What a reader pages by leads the entry's own text. A page of JSON prints
+  // longer than a page of prose, and a Codex run's output is cut from the
+  // middle past its limit (ruling 215), which keeps both ends of the answer.
+  // An entry alone keeps its fields either way; among entries that share a
+  // page, the ones after the first sit towards the middle, so the answer
+  // also opens with what was cut (`cut`, below).
+  const which: Pick<TimelineEntryReading, "entry"> = {};
+  if (numbered !== null) which.entry = numbered;
+  const from: Pick<TimelineEntryReading, "offset"> = {};
+  if (offset > 0) from.offset = offset;
+  const rest: Pick<TimelineEntryReading, "characters" | "nextOffset"> = {};
+  if (offset > 0 || more) rest.characters = entry.text.length;
+  if (more) rest.nextOffset = end;
+  return {
+    ...which,
+    type: entry.type,
+    actor: entryActor(entry),
+    title: entry.title,
+    ...from,
+    // Reported, never hidden: a clipped entry that reads as complete is how a
+    // model states a half-read report as fact, the very failure this tool
+    // exists to end.
+    truncated: more,
+    ...rest,
+    text: entry.text.slice(offset, end),
+  };
+}
+
+const count = (n: number) => n.toLocaleString("en-US");
+
+/**
+ * Ruling 72: the one entry a read with `offset` or `entry` is of, as its
+ * place among the entries that share the stamp, or the sentence that says why
+ * none can be told. Null for a read of them all from the start.
+ *
+ * `entry` names it. Without it an `offset` reads on in the only entry there
+ * is, or in the only one long enough to reach that offset: a verdict's report
+ * beside its one-line quality marker is the usual pair, and a reader that
+ * passes back the `nextOffset` it was given means the report.
+ */
+function entryToReadOn(
+  entries: readonly TaskFileEvent[],
+  taskKey: string,
+  stamp: string,
+  offset: number,
+  entry: number | undefined,
+): { index: number } | { refusal: string } | null {
+  if (entry !== undefined) {
+    if (entry >= 1 && entry <= entries.length) return { index: entry - 1 };
+    return {
+      refusal:
+        entries.length === 1
+          ? `[noop] One entry on ${taskKey} carries the stamp \`${stamp}\`: \`entry\` can only be 1, or left out.`
+          : `[noop] ${entries.length} entries on ${taskKey} carry the stamp \`${stamp}\`: \`entry\` is 1 to ${entries.length}, in the order they were written.`,
+    };
+  }
+  if (offset === 0) return null;
+  if (entries.length === 1) return { index: 0 };
+  const reach = entries.flatMap((e, i) => (e.text.length > offset ? [i] : []));
+  if (reach.length === 1) return { index: reach[0]! };
+  if (reach.length === 0) {
+    const longest = Math.max(...entries.map((e) => e.text.length));
+    return {
+      refusal:
+        `[noop] None of the ${entries.length} entries on ${taskKey} that carry the stamp \`${stamp}\` runs to offset ${count(offset)}: ` +
+        `the longest reads as ${count(longest)} characters.`,
+    };
+  }
+  return {
+    refusal:
+      `[noop] ${entries.length} entries on ${taskKey} carry the stamp \`${stamp}\` and ${reach.length} of them run past offset ${count(offset)} ` +
+      `(entries ${reach.map((i) => i + 1).join(", ")}): say which to read on with \`entry\`.`,
+  };
+}
+
+/** One timeline entry, addressed by the `occurredAt` stamp `get_task`
  *  prints or `read_board` lists (ruling 213). Ruling 72: every entry the stamp
  *  names. One write often stamps two entries with one instant (a verdict's
  *  report and its quality marker, a failed run's report and its failure, a
@@ -622,11 +719,22 @@ interface TimelineEntryReading {
  *  read as first written first: on AWSC-97 the Estimate Judge read an agent's
  *  question as sent before the report that saved its ledger, which was written
  *  first, and marked the run down for it. A knowledge-base correction's entry
- *  comes back with the correction whole ({@link readCorrectionOfEntry}). */
+ *  comes back with the correction whole ({@link readCorrectionOfEntry}).
+ *
+ *  Ruling 213(d): in pages. A read that stopped at a cap, said `truncated`
+ *  and offered no way on would be a wall (ruling 117), and a read longer than
+ *  the page every other read is sized to (ruling 215) would hand a Codex run a
+ *  long entry with its middle cut out. A read carries at most one page
+ *  (`READ_PAGE_BYTES`) of text: the entries a stamp names share the first one
+ *  (`shareBudget`), an entry cut short gives `nextOffset`, and `offset` (with
+ *  `entry`, where the stamp names several) reads on in one entry with a page
+ *  to itself. */
 export async function readTimelineEntry(
   deps: BoardReadContext,
   taskKey: string,
   occurredAt: string,
+  offset = 0,
+  entry?: number,
 ): Promise<string> {
   const file = readTaskFile({
     projectSlug: deps.projectSlug,
@@ -635,6 +743,16 @@ export async function readTimelineEntry(
   });
   if (!file) {
     return `[noop] No task ${taskKey} in this project.`;
+  }
+  // Ruling 213(e): every door refuses these before they get here, and the
+  // reader does not rest on that: a negative offset would read from an entry's
+  // end, a fraction would come back as the next offset, and a fraction for
+  // `entry` would throw.
+  if (!Number.isInteger(offset) || offset < 0) {
+    return "[noop] `offset` is a whole number from 0, in characters: the `nextOffset` a truncated read returned.";
+  }
+  if (entry !== undefined && !Number.isInteger(entry)) {
+    return "[noop] `entry` is a whole number from 1: the number a first read gives an entry that shares its stamp.";
   }
   const wanted = occurredAt.trim();
   // Every writer puts its entry at the head of the file, so the reverse of
@@ -653,46 +771,53 @@ export async function readTimelineEntry(
       `\`timeline\` (or \`get_task\` prints it). The eight most recent:\n${recent.join("\n")}`
     );
   }
+  const correctionOf = (e: TaskFileEvent) =>
+    e.type === "kb_correction"
+      ? readCorrectionOfEntry(deps.db, deps.ctx, deps.projectSlug, e.text, deps.readerKbs)
+      : Promise.resolve(null);
+
+  const one = entryToReadOn(entries, taskKey, wanted, offset, entry);
+  if (one !== null) {
+    if ("refusal" in one) return one.refusal;
+    const picked = entries[one.index]!;
+    const numbered = entries.length > 1 ? one.index + 1 : null;
+    if (offset > 0 && offset >= picked.text.length) {
+      const which = numbered === null ? "The entry" : `Entry ${numbered} of ${entries.length}`;
+      return `[noop] ${which} reads as ${count(picked.text.length)} characters; offset ${count(offset)} is past its end.`;
+    }
+    // Its correction rides with the entry's first page, where the reader
+    // meets it, and not again on the pages after. It is read whole, beside
+    // the page and not out of it: a correction is bounded by its own limits.
+    const correction = offset === 0 ? await correctionOf(picked) : null;
+    const reading = entryPage(picked, offset, READ_PAGE_BYTES, numbered);
+    if (correction) reading.correction = correction;
+    return JSON.stringify({ occurredAt: wanted, ...reading }, null, 1);
+  }
+
+  const corrections = await Promise.all(entries.map(correctionOf));
   const caps = shareBudget(
-    entries.map((e) => e.text.length),
-    TIMELINE_ENTRY_READ_CHARS,
+    entries.map((e) => Buffer.byteLength(e.text)),
+    READ_PAGE_BYTES,
   );
-  const readings = await Promise.all(
-    entries.map(async (entry, i) => {
-      const cap = caps[i]!;
-      const reading: TimelineEntryReading = {
-        type: entry.type,
-        actor: entry.actor.kind === "human" ? (entry.actor.nameHint ?? "human") : entry.actor.kind,
-        title: entry.title,
-        // Reported, never hidden: a clipped entry that reads as complete is how a
-        // model states a half-read report as fact, the very failure this tool
-        // exists to end.
-        truncated: entry.text.length > cap,
-        text: entry.text.slice(0, cap),
-      };
-      if (entry.type === "kb_correction") {
-        const correction = await readCorrectionOfEntry(
-          deps.db,
-          deps.ctx,
-          deps.projectSlug,
-          entry.text,
-          deps.readerKbs,
-        );
-        if (correction) reading.correction = correction;
-      }
-      return reading;
-    }),
-  );
+  const readings = entries.map((e, i) => {
+    const reading = entryPage(e, 0, caps[i]!, entries.length > 1 ? i + 1 : null);
+    const correction = corrections[i];
+    if (correction) reading.correction = correction;
+    return reading;
+  });
   if (readings.length === 1) {
     return JSON.stringify({ occurredAt: wanted, ...readings[0] }, null, 1);
   }
-  return JSON.stringify(
-    {
-      occurredAt: wanted,
-      shared: `${readings.length} entries were written with this stamp. They are listed in the order they were written: the first was written first.`,
-      entries: readings,
-    },
-    null,
-    1,
+  // Ruling 213(d): the entries this page cut short, with where each reads on,
+  // ahead of the entries themselves. Two long entries split a page evenly,
+  // which puts the second one's own fields at the middle of the answer,
+  // where an output over a Codex run's limit is cut.
+  const cut = readings.flatMap((r) =>
+    r.nextOffset === undefined ? [] : [{ entry: r.entry, characters: r.characters, nextOffset: r.nextOffset }],
   );
+  const head = {
+    occurredAt: wanted,
+    shared: `${readings.length} entries were written with this stamp. They are listed in the order they were written: the first was written first.`,
+  };
+  return JSON.stringify(cut.length === 0 ? { ...head, entries: readings } : { ...head, cut, entries: readings }, null, 1);
 }

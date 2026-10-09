@@ -437,9 +437,15 @@ describe("ruling 216: the gateway answers a Codex run's board server itself", ()
       ],
     });
     const answer = `1: Yes, the owner approves the redesign. ${"2: the address is app01's own. ".repeat(12).trim()}`;
+    // Ruling 72: a report longer than a page, beside its marker.
+    const longAt = "2026-09-29T11:30:00.000Z";
+    const longReport = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
+    const judge = { kind: "agent" as const, backend: "codex" as const, profileId: "estimate-judge", roleHint: "Estimate Judge" };
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
       timeline: [
+        { occurredAt: longAt, type: "quality", actor: judge, title: "Changes requested", text: "**Validation:** failing.", toAgent: false, evidence: null },
+        { occurredAt: longAt, type: "comment", actor: judge, title: "Review verdict", text: longReport, toAgent: false, evidence: null },
         {
           occurredAt: "2026-09-29T11:11:33.126Z",
           type: "comment",
@@ -500,6 +506,85 @@ describe("ruling 216: the gateway answers a Codex run's board server itself", ()
     expect(entry.text).toBe(answer);
     const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
     expect(refused.isError).toBe(true);
+    // Ruling 213(d): a long entry in pages, through the door a Codex run has.
+    // This is the run a page was sized for (ruling 215): over about 40,000
+    // bytes its tool output is cut from the middle. CANARY: drop `offset` or
+    // `entry` on the way from this door to the reader, and a Codex run's
+    // second read is the first page again.
+    const entryPage = z.object({ entry: z.number(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
+    const readPage = async (args: Record<string, number>) => {
+      const result = await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: longAt, ...args } });
+      const printedAs = z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+      expect(Buffer.byteLength(JSON.stringify(result.content)) / 4).toBeLessThanOrEqual(10_000);
+      return entryPage.parse(JSON.parse(printedAs));
+    };
+    let part = await readPage({ entry: 1 });
+    expect(part.truncated).toBe(true);
+    let joined = part.text;
+    // Bounded, so a door that drops `offset` fails here and does not spin.
+    for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
+      part = await readPage({ entry: 1, offset: part.nextOffset });
+      joined += part.text;
+    }
+    expect(joined).toBe(longReport);
+    expect((await readPage({ entry: 2 })).text).toBe("**Validation:** failing.");
+    // What this door refuses, it refuses in words a run can act on: each
+    // argument by what it takes. A run told a number is text sends "32000"
+    // and is refused again.
+    // CANARIES: take a fraction, a negative offset or `entry: 0`; say "as
+    // text" of the two numbers.
+    const refusedWith = async (name: string, args: Record<string, string | number>) => {
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      return z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    };
+    const entryRefusal =
+      "read_timeline_entry takes `occurredAt` and `taskKey` as text, `offset` as a whole number from 0 and `entry` as a whole number from 1, " +
+      "and nothing else; `occurredAt` is required. Nothing was read.";
+    const badPages: Record<string, string | number>[] = [{ offset: 1.5 }, { offset: -1 }, { offset: "32000" }, { entry: 0 }, { entry: 1.5 }, { entry: "1" }];
+    for (const bad of badPages) {
+      expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, ...bad })).toBe(entryRefusal);
+    }
+    // An argument the tool does not declare is refused, as on Claude, never
+    // dropped (ruling 216): a run that passes back `nextOffset` under its own
+    // name, or asks for `page: 2`, is not answered the first page again as a
+    // good read. CANARY: parse this door's arguments loosely.
+    expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, nextOffset: 31_976 })).toBe(entryRefusal);
+    expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, entry: 1, page: 2 })).toBe(entryRefusal);
+    // The other readers of this server hold to the same two rules: the
+    // attachment reader pages too, and parsed loosely it would answer
+    // `nextOffset` under its own name with the first page again. CANARY:
+    // leave either parser loose, or either published schema silent on it.
+    const attachmentRefusal =
+      "read_task_attachment takes `name`, `taskKey` and `delivery` as text and `offset` as a whole number from 0, and nothing else; `name` is required. Nothing was read.";
+    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", offset: "5" })).toBe(attachmentRefusal);
+    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", nextOffset: 32_000 })).toBe(attachmentRefusal);
+    expect(await refusedWith("read_task_source", { id: "S1", page: 2 })).toBe(
+      "read_task_source takes `id`, `taskKey` and `find` as text and `offset` as a whole number from 0, and nothing else. Nothing was read.",
+    );
+    const boardRefusal = "read_board takes `taskKey` as text, and nothing else. Nothing was read.";
+    expect(await refusedWith("read_board", { taskKey: 5 })).toBe(boardRefusal);
+    expect(await refusedWith("read_board", { undeclared: "x" })).toBe(boardRefusal);
+    const strictOnes = (await client.listTools()).tools.filter((tool) => tool.name !== "keep_source");
+    expect(strictOnes.map((tool) => [tool.name, tool.inputSchema.additionalProperties])).toEqual([
+      ["read_board", false],
+      ["read_timeline_entry", false],
+      ["read_task_attachment", false],
+      ["read_task_source", false],
+    ]);
+    const listedEntry = (await client.listTools()).tools.find((tool) => tool.name === "read_timeline_entry");
+    expect(listedEntry?.description).toContain("A long entry comes in pages of up to 32,000 bytes");
+    expect(listedEntry?.description).toContain("read and print one page per call");
+    expect(Object.keys(listedEntry?.inputSchema.properties ?? {})).toEqual(["occurredAt", "taskKey", "offset", "entry"]);
+    // Whole numbers with their floors, and nothing undeclared, as the model is told.
+    expect(listedEntry?.inputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: { offset: { type: "integer", minimum: 0 }, entry: { type: "integer", minimum: 1 } },
+    });
+    expect(z.object({ offset: z.object({ description: z.string() }), entry: z.object({ description: z.string() }) }).parse(listedEntry?.inputSchema.properties)).toMatchObject({
+      offset: { description: expect.stringContaining("the `nextOffset` a truncated read returned") },
+      entry: { description: expect.stringContaining("counted from 1 in the order they were written") },
+    });
     // Ruling 213: another task's entry, by the stamp read_board lists for it.
     // CANARY: bind the gateway's reader to the run's own task and this reads a miss.
     expect(z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" }))).timeline).toEqual([
@@ -599,7 +684,7 @@ describe("ruling 82: a Codex run keeps and reads a task's sources through the bo
       "t3.medium $0.0416 per hour",
     );
     // Ruling 82: and searches it. The arguments are parsed strictly here
-    // (ruling 136). CANARY: declare `find` on the Claude twin alone and a
+    // (ruling 216). CANARY: declare `find` on the Claude twin alone and a
     // Codex run's search is refused as an argument the tool does not take.
     const sought = await keeper.client.callTool({
       name: "read_task_source",
