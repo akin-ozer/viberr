@@ -9,7 +9,7 @@ import {
 /**
  * Ruling 55 (pass 34): `blockedBy` has one spelling, a task key. Everything
  * the writers refuse by name starts here, so the grammar is pinned tightly.
- * Ruling 55 retired the second spelling, `goal-1 link 3`, with the chains.
+ * The chains' `goal-1 link 3` spelling is gone with them (ruling 273).
  *
  * Canary: loosen `TASK_REF_RE` (drop its anchors, or narrow `\d+` to `\d`)
  * and the "nothing else" / two-digit cases below fail.

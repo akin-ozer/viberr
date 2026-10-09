@@ -51,7 +51,7 @@ export interface ReviewRowView {
     state: PrState;
     /** P14-LV-07: GitHub's live mergeability for an open PR; absent = never read. */
     mergeable?: "clean" | "conflicting" | "unknown" | null;
-    /** R17-1 as amended by ruling 239 (pass 34): the whole drift record, so the
+    /** Ruling 239: the whole drift record, so the
      *  subline prints `describeRevisionDrift`'s sentence verbatim — authored
      *  commits merge unreviewed; a base refresh is named as a base refresh. */
     revisionDrift?: RevisionDrift | null;
@@ -141,8 +141,8 @@ function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
     // its own PR #15.
     return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the base is merged INTO the branch (not rebased).`;
   }
-  // R17-1 (F17-L12) as amended by ruling 239 (pass 34, F34-14): the head moved
-  // after the review — the ONE canonical sentence says what moved, and only
+  // Ruling 239 (F17-L12, F34-14): the head moved after the review — the ONE
+  // canonical sentence says what moved, and only
   // authored commits are called unreviewed.
   const drift = describeRevisionDrift(pr.revisionDrift);
   if (drift.kind !== "none") return `PR #${pr.number} is open. ${drift.sentence}.`;

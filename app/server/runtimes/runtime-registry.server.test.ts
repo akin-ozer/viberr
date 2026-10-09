@@ -281,8 +281,8 @@ describe("runtime-registry", () => {
     );
   });
 
-  it("ruling 169: filteredSpawnEnv strips the CLI's prompt-cache and compaction switches, and no other cache setting", () => {
-    // Rulings 171 and 171: the cache lifetime and the compaction point
+  it("ruling 171: filteredSpawnEnv strips the CLI's prompt-cache and compaction switches, and no other cache setting", () => {
+    // Rulings 171 and 174: the cache lifetime and the compaction point
     // are the CLI's own choice, and Viberr sets none of these. None is
     // credential-shaped or declared, so one on the HOST rode into every Claude
     // child, where a developer's `DISABLE_PROMPT_CACHING=1` would turn caching

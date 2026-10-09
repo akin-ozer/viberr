@@ -336,8 +336,8 @@ const engagementSchema = z
     pinnedBackend: z.enum(["codex", "claude"]).nullable().optional(),
     /**
      * Ruling 93 (F39-43): the run this engagement is answering the
-     * completeness question in. Ruling 93 has the operator ask a reviewer
-     * that keeps objecting for EVERYTHING it would still block on, and every
+     * completeness question in. The operator asks a reviewer that keeps
+     * objecting for EVERYTHING it would still block on, and every
      * operator on ax-clone folded that question into the review that follows
      * a rework. Nothing recorded that it had, so three deadlock packets in 25
      * minutes recommended asking again the question the very verdict they
@@ -366,15 +366,14 @@ export function deliveringEngagement(fm: {
 }
 
 /**
- * Ruling 93, as amended by ruling 92: successive OBJECTIONS `profileId` has
- * raised, newest first, stopping at its first `approve` (or at the start of its
- * history).
+ * Ruling 92: successive OBJECTIONS `profileId` has raised, newest first,
+ * stopping at its first `approve` (or at the start of its history).
  *
- * ROUNDS are summed, not revisions. Ruling 93 counted distinct revisions on
+ * ROUNDS are summed, not revisions. Counting distinct revisions rested on
  * the reasoning that "a reviewer re-run twice on the same revision has objected
  * once" — and live on SHOP-9 that was exactly backwards: in a deadlock the
  * deliverer commits nothing, so no new revision is ever minted and the count sat
- * at 1 while the loop ran. The distinction 193 was reaching for survives in the
+ * at 1 while the loop ran. The distinction it was reaching for survives in the
  * `rounds` field itself, which the verdict upsert increments only when a
  * completed review returns the SAME result again; a re-DISPATCH that records no
  * verdict still counts for nothing.
@@ -505,11 +504,11 @@ const SCHEDULE_STATUS_VALUES = [
  *
  * Ruling 94's escalation recommends asking the reviewer to name everything it
  * would still block on. Ruling 56 refuses every agent dispatch on a held task
- * ("Every dispatch door lands here, so every one of them refuses"), and ruling
- * 94 added a dispatch door without checking. Live on SHOP-5 the person chose
- * the recommended option, the decision was written onto the task contract, the
- * packet was cleared, and the reviewer was never asked: the one option that
- * could end the loop consumed the decision and did nothing.
+ * ("Every dispatch door lands here, so every one of them refuses"), and the
+ * escalation's option was a dispatch door that did not check. Live on SHOP-5
+ * the person chose the recommended option, the decision was written onto the
+ * task contract, the packet was cleared, and the reviewer was never asked: the
+ * one option that could end the loop consumed the decision and did nothing.
  *
  * The owner's call was QUEUE, not refuse: the question survives the wait and is
  * put the moment the task can run again. `announceRelease` is the one release
@@ -549,7 +548,7 @@ export const scheduleSchema = z
     // unattended, so following the profile that is actually deployed then
     // matters MORE than freezing whatever was configured hours earlier (it was
     // also the temporal twin of the #183 stale-backend-display bug). `.loose()`
-    // ignores the `backend`/`autonomy` keys any pre-ruling entry still carries.
+    // ignores the `backend`/`autonomy` keys any older entry still carries.
     /** `run-agent` only: the deployed agent to dispatch when the entry fires.
      *  The profile ID is the pin (identity); backend/model/capabilities resolve
      *  from the LIVE deployment at fire time, the same R22 rule as the operator
@@ -687,9 +686,9 @@ export const prRefSchema = z
     // head has moved underneath it. Live on ax-clone AX-18: the operator
     // resolved the conflict, pushed `d44e874`, and was refused the transition
     // twice on a `conflicting` measured at `5ae0752`, the commit it had just
-    // superseded. `paths` has carried this pin since ruling 242 ("a list read
-    // for a DIFFERENT head than the one now live is dropped rather than shown
-    // stale"); the verdict that BLOCKS had none. Absent = never measured.
+    // superseded. `paths` already carried this pin (a list read for a
+    // DIFFERENT head than the one now live is dropped rather than shown
+    // stale); the verdict that BLOCKS had none. Absent = never measured.
     mergeableAt: z.string().min(1).nullish().catch(null),
     // Ruling 242 (owner, 2026-09-14): the repository paths this PR changes, so
     // the review queue can say which OTHER open PRs a merge would put into
@@ -713,10 +712,9 @@ export const prRefSchema = z
     // above); carried forward by the reconciler and by a PR reuse; never
     // inherited by a DIFFERENT PR number.
     headSha: z.string().min(1).nullish().catch(null),
-    // R17-1 (F17-L12) as amended by ruling 239 (pass 34, F34-14): drift is the
-    // number of AUTHORED commits since the reviewed revision, with a base
-    // refresh Viberr itself made reported SEPARATELY and never as unreviewed
-    // work. `describeRevisionDrift` (app/shared/revision-drift.ts) is the ONE
+    // Ruling 239 (F17-L12, F34-14): drift is the number of AUTHORED commits
+    // since the reviewed revision, with a base refresh Viberr itself made
+    // reported SEPARATELY and never as unreviewed work. `describeRevisionDrift` (app/shared/revision-drift.ts) is the ONE
     // sentence every surface prints. Absent when the head equals the reviewed
     // revision (or the drift was never measured). `merges` is `.min(0)`, not
     // positive: `update_branch_from_base` runs a plain `git merge`, and a
@@ -786,7 +784,7 @@ export const prRefSchema = z
     // (one note per revision). Written by `openTaskPr` on create and on every
     // rewrite, carried across a refresh of the SAME number by every `pr`
     // writer, never inherited by a different PR. Absent = Viberr never
-    // recorded the body (a PR opened before ruling 231(c), or one it adopted),
+    // recorded the body (an older PR, or one it adopted; ruling 231(c)),
     // which a delivery treats as Viberr's own.
     bodyWritten: z
       .object({
@@ -1049,7 +1047,7 @@ export const packetOptionSchema = z
         blockedBy: z.array(dependencyRefTextSchema).optional(),
         /**
          * Ruling 67: the EXISTING tasks that must wait on the new one — the
-         * reverse edge, which ruling 67 could not express at all.
+         * reverse edge.
          *
          * A task is usually created to UNBLOCK something, so the dependency
          * runs from the existing work to the new task, and that is the
@@ -1122,7 +1120,7 @@ export const taskPacketSchema = z
       })
       .optional(),
     /**
-     * Ruling 63: the CAUSE that raised this packet, when the cause is bigger
+     * Ruling 65: the CAUSE that raised this packet, when the cause is bigger
      * than the task.
      *
      * A backend account losing its quota or its credential takes out every task
@@ -1520,7 +1518,7 @@ const taskFrontmatterFields = {
   dueDate: z.string().nullable().default(null),
   /** Ruling 55 (pass 34, Q34-11): what this task WAITS ON — task keys in the
    *  same project, in the canonical spelling of `app/shared/dependencies.ts`
-   *  (`JC-6`; ruling 55 retired `goal-1 link 3` with the chains). Planning metadata
+   *  (`JC-6`). Planning metadata
    *  with one difference from priority, labels and due date: while the list
    *  is non-empty the derived readiness is floored at `blocked`, the task owes
    *  nobody anything (`waiting: none` unless a packet or recommendation is
@@ -1548,12 +1546,12 @@ const taskFrontmatterFields = {
    * run saved into `attachments/`, and there is no revision to bind a review
    * to. Everything downstream of review was keyed on `workRevision`, so such a
    * task could not hold a verdict, could not derive a validation from one, and
-   * after ruling 81 could not be accepted either. This is the identity the
+   * under ruling 81's reviewer gate could not be accepted either. This is the identity the
    * review binds to instead, and a later run that saves files moves it, which
    * is what makes the old verdict stale — the same rule a new revision follows.
    *
    * A person's own upload never sets it: an uploaded fixture is an input to the
-   * work, not the work (ruling 76).
+   * work, not the work (ruling 81).
    */
   deliveredAt: z.string().nullable().default(null),
   /** F10-15: per-engagement verdicts, each bound to the revision it judged. */
@@ -1685,7 +1683,7 @@ export const FILES_SUBJECT_PREFIX = "files:";
  * moment a run last saved files. ONE place decides it, so the verdict writer,
  * the staleness rule, the derived validation and the required-reviewer gate can
  * never disagree about what was reviewed. Null when the task has delivered
- * nothing at all, which is ruling 234's case: nobody owes a verdict.
+ * nothing at all, which is ruling 84's case: nobody owes a verdict.
  */
 export function reviewSubjectId(fm: {
   workRevision: WorkRevision | null;

@@ -749,7 +749,12 @@ function LibraryPicker({
     if (done) close();
   }, [done, close]);
   return (
-    <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
+    <dialog
+      className="modal-card"
+      aria-label="Add from library"
+      data-screen-label="Add from library modal"
+      ref={dialogRef}
+    >
       <div className="modal-head">
         <span className="agent-glyph lg">
           <Icon name="agents" />

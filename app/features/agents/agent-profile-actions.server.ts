@@ -98,8 +98,8 @@ export interface ProfileSaveResult {
    * write the repo, read back through the same predicate the runtime gates on
    * (`isWithheld` over the delivery headline). Set by the library deploy,
    * whose every reply used to promise "delivery starts withheld" — true only
-   * of a template with no grants of its own, since ruling 177 made the deploy
-   * COPY the template's grants.
+   * of a template with no grants of its own, because the deploy COPIES the
+   * template's grants (ruling 177).
    */
   delivery?: "granted" | "withheld";
 }
@@ -701,7 +701,7 @@ export function buildLibraryDeployment(
       (templateModel && !foreignModelBackend(backend, templateModel)
         ? templateModel
         : defaultModelFor(backend)),
-    // Ruling 264 (pass 35, G35-2): the template's own default effort is
+    // Ruling 261 (pass 35, G35-2): the template's own default effort is
     // taken when it is a tier this backend offers; an override still wins,
     // and an absent or foreign tier falls back to the backend default.
     effort:

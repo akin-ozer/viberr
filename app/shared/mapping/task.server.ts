@@ -360,9 +360,9 @@ export interface TaskSummary {
    * delivery.
    *
    * The board's acceptance ceremony (board-accept-confirm.tsx `AcceptOnBoardConfirm`) is
-   * the same dialog the task page renders, and ruling 97 requires it to disclose
-   * what it accepts; ruling 97 then makes the confirmed click echo that
-   * disclosure back for the server to compare against the live task. A board
+   * the same dialog the task page renders, and must disclose what it accepts;
+   * the confirmed click echoes that disclosure back for the server to compare
+   * against the live task. A board
    * card holds nothing but this summary, so the ceremony had to disclose "No
    * delivered revision recorded." on every task — and the server refused the
    * resulting `"none"` echo as stale on any task that HAD delivered, i.e. a
@@ -459,7 +459,7 @@ export function prChecksRead(pr: PrRef | null): boolean {
 }
 
 /** Ruling 237: the refused read, as the GitHub view's data and the
- *  controller's `get_github_state` carry it (no pill prints it, ruling 237). */
+ *  controller's `get_github_state` carry it (no pill prints it). */
 export interface PrChecksUnread {
   status: number | null;
   message: string;

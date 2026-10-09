@@ -305,7 +305,7 @@ waiting: human                    # human | agent | none (secondary signal)
                                   # on a person. Never written to a task file.
 ownerUserId: u_abc123             # ONE human owner; null when unowned
 engagements:                      # ONE uniform list of engaged agents (G1),
-  - profileId: developer          # written by the DISPATCH since ruling 51 —
+  - profileId: developer          # written by the DISPATCH (ruling 51) —
     backend: codex                # running an unengaged deployed profile
     role: Developer               # engages it (delivering iff no deliverer AND
     delivers: true                # repo-write; supporting otherwise). At most
@@ -373,7 +373,7 @@ deliveredAt: null                 # ruling 84: when a DELIVERER last saved files
                                   # new revision does. Only the delivering
                                   # engagement sets it: a reviewer's own captures
                                   # are evidence, and a person's upload is an
-                                  # input (ruling 76), not the work.
+                                  # input (ruling 81), not the work.
 verdicts:                         # per-engagement, each bound to a SUBJECT
   - profileId: reviewer
     revisionId: rev_9f2c          # ruling 84: the workRevision.id, or
@@ -471,9 +471,8 @@ priority: normal                  # low | normal | high | urgent (PRIORITY_VALUE
 labels: []                        # R26-2: free-text labels, searchable on the board and ⌘K
 dueDate: null                     # R26-1: `YYYY-MM-DD` or null — advisory metadata
 blockedBy:                        # ruling 55: what this task WAITS ON, as task
-  - JC-6                          # keys (app/shared/dependencies.ts; ruling 55
-  - JC-9                          # retired `<goal-id> link <n>`). Non-empty
-                                  # floors the derived readiness at `blocked`,
+  - JC-6                          # keys (app/shared/dependencies.ts). Non-empty
+  - JC-9                          # floors the derived readiness at `blocked`,
                                   # settles `waiting: none`, refuses the operator's
                                   # create/transition/scheduled triggers, and is
                                   # cleared by the release engine when every entry
@@ -743,13 +742,13 @@ Packet notes:
   The schema is `.loose()`, so an unknown option key round-trips and is read by nothing. There
   is no `accept:` field: acceptance is gated **solely** on `kind === "accept_completion"`, plus
   the admin|maintainer re-check in `resolvePacket`.
-- Packet-level fields beside the sample's: `cause` (ruling 63: the shared cause string,
+- Packet-level fields beside the sample's: `cause` (ruling 65: the shared cause string,
   `backend:<backend>:<kind>:<credentialUserId>`, stamped on a quota, auth or unavailable
   failure; answering one such packet applies the same option to every sibling still carrying
-  it, ruling 65, and a quota answer stands for the rest of its window, ruling 65, kept
+  it, and a quota answer stands for the rest of its window, kept
   in `instance_settings` under `packetCauseDecision:<cause>`; the repository question
   carries `repository:<projectSlug>`, so its answer reaches every task on the board that
-  asked, ruling 65), `stalled: true` (ruling 123: a stall escalation, the only kind a later
+  asked), `stalled: true` (ruling 123: a stall escalation, the only kind a later
   successful run may withdraw), and `askedBy` (R15-14: the profile of the agent that raised
   the question; resolving it resumes that agent's session).
 - `options` and `observations` parse per row: a malformed row drops only itself
@@ -837,7 +836,7 @@ Packet notes:
   for a reference that is neither; the result says in a few words how it came out
   (`102 passed, 0 failed`, `+412 −87` with U+2212), and `—` stands for none. A label may
   itself hold ` · `: the result is the last segment, and a writer strips the separator from a
-  result. A row written before ruling 16, `- <label> · <add> · <del>`, still reads, as an
+  result. A row with no status, `- <label> · <add> · <del>`, still reads, as an
   `info` row whose result is its two cells (signed counts spaced, words joined by a comma,
   `—` dropped); the next write of the file puts it in the new form. At most 8 rows (label and
   result 200 characters each, ruling 16). An optional `attachments:` block follows the same way, one `- <file name>`
@@ -948,10 +947,10 @@ icon: branch                      # an ICON_PATHS name (app/ui/icon.tsx); defaul
 backends: [codex, claude]
 model: sonnet                     # ONE catalog id for the first backend (see
                                   # docs/domain/agents-and-runtime.md §2.3);
-                                  # ruling 264: the template's DEFAULT, taken by a
+                                  # ruling 261: the template's DEFAULT, taken by a
                                   # library deploy when no override is given
 effort: high                      # optional reasoning effort: the controller (ruling
-                                  # 270) and, ruling 264, a specialist template's
+                                  # 270) and, ruling 261, a specialist template's
                                   # default that a library deploy copies onto the
                                   # deployment when the backend offers the tier. A
                                   # non-string value reads as absent

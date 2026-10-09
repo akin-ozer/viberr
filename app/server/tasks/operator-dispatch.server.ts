@@ -259,7 +259,7 @@ export async function operatorDispatchAgent(
     delivers?: boolean;
     /** The operator's stated reason, when it gave one. */
     reason?: string;
-    /** Ruling 93: this run puts ruling 93's completeness question, so the
+    /** Ruling 93: this run puts the completeness question, so the
      *  verdict it returns is recorded as the reviewer's complete set. */
     completeness?: boolean;
     /** Ruling 124: this run must not judge, so its verdict tool is withheld

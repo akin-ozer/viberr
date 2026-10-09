@@ -13,8 +13,8 @@ import {
  * On the AWS board agents merge knowledge-base corrections during their runs
  * and a person hand-edits the same documents (the board's rulings §6), so a
  * correction merged while the editor was open would have been wiped by the
- * person's Save, under a success toast. The controller's replace has named
- * the version it read since ruling 212(a); this is the editor's half.
+ * person's Save, under a success toast. The controller's replace names the
+ * version it read (ruling 212(a)); this is the editor's half.
  */
 
 let app: AppTestContext;

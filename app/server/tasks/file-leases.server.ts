@@ -2,15 +2,15 @@
  * Ruling 60 (pass 37, F37-76): a lease whose HOLDER is finished holds
  * nothing.
  *
- * Ruling 60 shipped with `FileLease.taskKey` documented as "released when it
- * reaches a terminal stage" and nothing implementing it. The controller read
+ * `FileLease.taskKey` was once documented as "released when it reaches a
+ * terminal stage" with nothing implementing it. The controller read
  * that contract, believed it, and wrote it into the first real lease's own
  * reason — "Lease releases when SHOP-11 merges". SHOP-11 then merged, and the
  * lease stood: `pnpm-lock.yaml` owned by a completed task, refusing SHOP-5's
  * delivery in the name of work that had already landed, with two records
  * promising the opposite. A comment claiming a mechanism nobody built is the
- * defect this pass has found more often than any other, and ruling 60's own
- * finding note called a stale lease "its own stale-record problem".
+ * defect this pass has found more often than any other, and the finding note
+ * behind ruling 60 called a stale lease "its own stale-record problem".
  *
  * Resolved at READ time rather than swept on completion, for ruling 55's
  * reason: a sweep is a hook that some path completing a task will eventually
@@ -144,7 +144,8 @@ export function overlappingLeases(
  * its own task is refused by name here, and the holder keeps what it declared.
  *
  * Only clashes with the NEW globs count: an overlap two other leases already
- * had (declared before ruling 61 refused one) is not this task's to answer.
+ * had (declared before overlaps were refused, ruling 61) is not this task's
+ * to answer.
  */
 export function leaseHeldAgainst(
   projectSlug: string,

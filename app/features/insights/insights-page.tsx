@@ -973,7 +973,7 @@ const NO_WRITE_FIGURE = "No run in this group is on a backend that reports a cac
 
 /**
  * Ruling 36: PLAN.md's "avg first-call write". A group with no run on a
- * backend that reports writes says so, as the write column does (ruling 36);
+ * backend that reports writes says so, as the write column does;
  * one whose reporting runs never reached the provider has no mean to take.
  */
 function FirstWriteCell({ r }: { r: CacheRow }) {

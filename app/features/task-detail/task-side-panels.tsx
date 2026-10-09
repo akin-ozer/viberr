@@ -103,7 +103,7 @@ function prSignal({
 const PUSH_LABEL = (rev: string, prNumber: number): string =>
   `Push ${rev} to PR #${prNumber}`;
 /** The refusal the server would give a plain push of a diverged branch (the
- *  name ruling 232 cites). Module-local: since the ruling 13(b) split its one
+ *  name ruling 229 cites). Module-local: since the ruling 13(b) split its one
  *  use sits in `deliverButton`, and the build ships it as a variable whether or
  *  not it is exported (project.task 360,333 B gzip both ways, measured). */
 const DIVERGED_PUSH_REFUSAL =
@@ -588,8 +588,8 @@ function prCardActions({
   );
 }
 
-/** R15-2 safety net (b): the hand delivery, or since ruling 229 the push of
- *  the delivered revision to the open PR; disabled, with the refusal the server
+/** R15-2 safety net (b): the hand delivery, or the push of the delivered
+ *  revision to the open PR (ruling 229); disabled, with the refusal the server
  *  would give, over a diverged remote or an unanswered closed PR. */
 function deliverButton({
   pushOffer,
@@ -1245,7 +1245,7 @@ function acceptanceActs({
           GitHub approval instead of an agent verdict. Name the person and
           the commit they approved — a gate a human cleared cannot just go
           green, or whoever accepts has no idea whose judgement they stand
-          on (ruling 220). */}
+          on (ruling 245). */}
       {acceptance.verdictSatisfiedBy && (
         <p className="hint">
           <Icon name="check" />

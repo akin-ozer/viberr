@@ -213,7 +213,7 @@ function taskLine(task: TaskSummary, stages: readonly { id: string; name: string
 /**
  * Ruling 254: the asking person's live role on the bound project.
  *
- * `instanceContext` has named it per project since ruling 253 and the two
+ * `instanceContext` already named it per project (ruling 253) and the two
  * bound scopes — the ones a person is actually standing in when they ask for
  * something — named nothing. The controller is told "their live permissions are
  * the ceiling for everything you do here" and then given their ORG role, which
@@ -496,8 +496,8 @@ function proposalLine(p: KbProposal, rulingsKb: string | null): string {
  * the turn context, so the next conversation knows they wait and raises them.
  * Live on WEB-1 two proposals were never promoted: nothing brought them back
  * after they scrolled off the timeline, and the controller only runs when a
- * person talks to it. Since ruling 210 an agent's correction is written as it
- * is made, so these are only the ones filed before, which documents still hold.
+ * person talks to it. An agent's correction is written as it is made (ruling
+ * 210), so these are only older filed ones, which documents still hold.
  */
 function projectProposalsContextLine(
   db: DatabaseSync,

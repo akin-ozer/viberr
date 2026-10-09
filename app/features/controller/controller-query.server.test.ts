@@ -79,7 +79,7 @@ describe("getControllerSurface — availability is the viewer's own Claude (ruli
 /**
  * The open conversation's runtime rides the surface: the Live-run strip and
  * the Agent-logs console on the controller page are the task page's panels fed
- * from the same projection, asked for the ruling-247 scope a controller run is
+ * from the same projection, asked for the ruling-251 scope a controller run is
  * stored under (`project_slug = ''`, `task_key = <conversation id>`).
  */
 describe("getControllerSurface — the open conversation's runtime", () => {
@@ -160,12 +160,12 @@ describe("getControllerSurface — the open conversation's runtime", () => {
 });
 
 /**
- * Ruling 321: a person is named on the controller page the way the rest of
+ * Ruling 320: a person is named on the controller page the way the rest of
  * the app names them. A conversation stores its owner's email when it is
  * created, and the transcript and the rail printed "arda@viberr.dev" beside
  * every message the task timeline attributes to "Arda".
  */
-describe("getControllerSurface — people are named by display name (ruling 321)", () => {
+describe("getControllerSurface — people are named by display name (ruling 320)", () => {
   it("names the open thread's owner and every listed thread's owner, not their address", async () => {
     // CANARY: return `c.userLabel` / the stored conversation unchanged.
     const { createConversation } = await import("~/server/controller/controller-conversations.server");
@@ -295,7 +295,7 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
       dataRoot: store.dataRoot,
     });
     const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
-    // Filed before ruling 210, and still standing in its document.
+    // A proposal no tool files any more (ruling 210(c)), still standing in its document.
     const body = withLegacyProposals("# Facts\n\n- A fact.\n", [
       { taskKey: "VIB-1", filedBy: "Operator", line: "A fact.", correction: "A truer fact.", evidence: "measured" },
     ]);

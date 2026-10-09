@@ -453,8 +453,8 @@ function reportText(text: string, max = REPORT_TEXT_MAX_CHARS): string {
 const reportName = (name: string): string => reportText(name, REPORT_NAME_MAX_CHARS);
 
 /** Remove one render's scratch, or a folder inside it: what the renderer
- *  wrote goes as the person who wrote it (ruling 140), and the emptied
- *  folder the server made goes with the server's `rmdir` (ruling 140). */
+ *  wrote goes as the person who wrote it, and the emptied folder the server
+ *  made goes with the server's `rmdir` (ruling 140(a)). */
 async function removeScratch(dir: string, launch: AgentLaunch | null): Promise<void> {
   try {
     await removeAgentTree(dir, launch);

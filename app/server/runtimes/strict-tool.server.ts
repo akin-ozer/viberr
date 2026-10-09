@@ -22,7 +22,7 @@ export interface ToolImage {
   mimeType: string;
 }
 
-/** Ruling 117: a text block, then the picture itself. A coordinator handed a
+/** Ruling 79: a text block, then the picture itself. A coordinator handed a
  *  screenshot a person attached sees it, instead of reasoning from its name.
  *  Ruling 194: or several, so one reply carries a page at both its widths. */
 export function imageResult(text: string, image: ToolImage | readonly ToolImage[]) {

@@ -2,9 +2,9 @@ import { memo } from "react";
 import { Icon, type IconName } from "~/ui/icon";
 
 /**
- * Ruling 284, extended by ruling 287: a glyph that trades for another with
- * state. Both marks are always drawn, stacked in one grid cell, and the sheet
- * trades them on `data-copied` (the attribute ruling 284's tests pin): the
+ * Ruling 284(b): a glyph that trades for another with state. Both marks are
+ * always drawn, stacked in one grid cell, and the sheet trades them on
+ * `data-copied` (the attribute the tests pin): the
  * resting mark shrinks and blurs out as the other grows in, and the reverse
  * when the state lapses. A swap that React made in one frame read as a flicker
  * between two unrelated icons; this reads as one mark changing its mind.

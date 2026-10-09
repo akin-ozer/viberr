@@ -507,7 +507,7 @@ describe("the controller dock (ruling 256)", () => {
   });
 
   /**
-   * Ruling 11, test audit L14-29: a signed-out tab's dock loads used to
+   * Ruling 256, test audit L14-29: a signed-out tab's dock loads used to
    * navigate it to /login. They now answer 401 with an empty status and the
    * signed-out view (returned, not thrown, so the view reaches the panel
    * rather than the `clientLoader`'s failure answer), and the panel says what
@@ -899,7 +899,7 @@ describe("the controller dock (ruling 256)", () => {
   });
 
   /**
-   * Ruling 11: a request the server never answers (a restart, a 5xx, a dead
+   * Ruling 256: a request the server never answers (a restart, a 5xx, a dead
    * network) is the dock's, never the page's. React Router sends a fetcher's
    * failure to the error boundary of the route that owns the fetcher, and
    * root owns all three of the dock's, so a failed send, reload or working
@@ -1263,8 +1263,8 @@ describe("ruling 286: the dock's send in flight", () => {
 });
 
 /**
- * Ruling 285's deferred dock half (owner, 2026-09-24: "do the two dock fixes
- * now"), built on ruling 285's sheet. F20: the open and close can be turned
+ * Ruling 285(b), the dock's deferred half (owner, 2026-09-24: "do the two dock
+ * fixes now"), built on the 285(c) sheet. F20: the open and close can be turned
  * around mid-flight. F24: a panel the per-tab restore reopens appears in
  * place (`data-restored`). The motion itself is CSS, pinned in app.css.test.ts
  * "ruling 285: the dock's deferred half"; these are the component's halves.
@@ -1454,7 +1454,7 @@ describe("ruling 285: the dock's deferred half", () => {
   });
 
   describe("at sheet width, a close that interrupts a pull's settle", () => {
-    // Ruling 285's gesture under ruling 285's take-back. The 720px block's
+    // Ruling 285: the (c) gesture under the (b) take-back. The 720px block's
     // flag makes the panel a sheet; jsdom lays nothing out, so the sheet's
     // height is stubbed (halfway at 300px).
     let height: { mockRestore(): void } | null = null;

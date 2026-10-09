@@ -566,7 +566,7 @@ describe("widenNotificationKindCheck (ruling 74)", () => {
       const db = ctx.makeDb();
       // A current root: nothing to do.
       expect(widenNotificationKindCheck(db)).toEqual([]);
-      // What a root first opened before ruling 74 carries.
+      // What a root first opened before the `question` kind existed carries.
       db.exec(`
         DROP TABLE notifications;
         CREATE TABLE notifications (

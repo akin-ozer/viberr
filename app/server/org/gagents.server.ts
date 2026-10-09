@@ -82,7 +82,7 @@ export interface GagentView {
   /** The markdown body — the agent's persona / system-prompt material. */
   persona: string;
   stages: string[];
-  /** Ruling 264 (pass 35, G35-2): the template's default model id for its
+  /** Ruling 261 (pass 35, G35-2): the template's default model id for its
    *  backend ("" = the backend default) and effort tier ("" = the backend
    *  default); `deploy_agent` takes both when no override is given. */
   model: string;
@@ -375,8 +375,8 @@ export interface SaveGagentInput {
   mcps?: string[];
   kbs?: string[];
   /**
-   * Ruling 264 (pass 35, G35-2): the template's default model and effort,
-   * checked by name against `backend` (ruling 261). Both are merge fields on
+   * Ruling 261 (pass 35, G35-2): the template's default model and effort,
+   * checked by name against `backend`. Both are merge fields on
    * an edit: omitted keeps the stored value, `""` clears it. A backend switch
    * whose stored model belongs to the other backend clears the model and the
    * toast says so.
@@ -439,7 +439,7 @@ export interface SaveGagentResult {
 }
 
 /**
- * The model to store after one save (ruling 264): the caller's, checked by
+ * The model to store after one save (ruling 261): the caller's, checked by
  * name against the backend; omitted keeps the stored one, `""` clears it. A
  * stored model the NEW backend cannot run is cleared (it would be substituted
  * silently at run time, F21-13's class) and the caller is told which backend
@@ -540,7 +540,7 @@ export async function saveGlobalAgentProfile(
     if (!existing || existing.frontmatter.kind !== "specialist") {
       throw AppError.notFound("No such agent profile.");
     }
-    // Ruling 261/264: both defaults are judged BEFORE anything is written.
+    // Ruling 261: both defaults are judged BEFORE anything is written.
     const model = nextTemplateModel(backend, existing.frontmatter.model, input);
     const effort = nextTemplateEffort(backend, existing.frontmatter.effort, input);
     // P13-AP-01/AP-02: `desc` (what the operator reads) is now rewritten on
@@ -720,7 +720,7 @@ export async function saveGlobalAgentProfile(
     },
     description: input.persona.trim() || input.summary.trim(),
   };
-  // Ruling 264: the template's default effort, only when the caller set one.
+  // Ruling 261: the template's default effort, only when the caller set one.
   if (createEffort) created.frontmatter.effort = createEffort;
   writeFileAtomic(
     agentProfileFilePath(id, ctx.dataRoot),

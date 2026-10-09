@@ -60,7 +60,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
         "usage_final",
         // Ruling 87: `patchRun` names it on every completion registration.
         "no_checkout",
-        // Ruling 66: `upsertRun` names it on every insert, so a root without
+        // Ruling 87: `upsertRun` names it on every insert, so a root without
         // it could not start a run at all — the ruling-137 failure shape.
         "verdict_withheld",
         // Ruling 153: `upsertRun` names it on every insert as well.
@@ -106,8 +106,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
       // Ruling 188: an org MCP registry from before the write-tool columns.
       // `listMcpServers` names both on every Settings render and run mount.
       // Ruling 192: and the OAuth sign-in's sealed and public halves, which
-      // every MCP read (`oauth_json`) and the gateway (`oauth_ref`) name.
-      // Ruling 192: and the scope an admin asks the next sign-in for.
+      // every MCP read (`oauth_json`) and the gateway (`oauth_ref`) name, and
+      // the scope an admin asks the next sign-in for.
       db.exec(`CREATE TABLE org_mcp_servers (id TEXT PRIMARY KEY, name TEXT NOT NULL)`);
       ensureBaselineColumns(db);
       ensureBaselineColumns(db);
@@ -218,8 +218,8 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrow-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
-      // The exact shape 0001 created before ruling 249: no task_key, no
-      // surface, and only the per-user index.
+      // The exact shape an older 0001 created: no task_key, no surface, and
+      // only the per-user index.
       db.exec(
         `CREATE TABLE controller_conversations (
            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, user_label TEXT NOT NULL,
@@ -653,10 +653,9 @@ describe("shutdownDatabase", () => {
 
 describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", () => {
   it("creates user_backend_credentials on a root that predates ruling 137", () => {
-    // The healer's own sibling miss: ruling 137 added BOTH the
+    // The healer's own sibling miss: the squashed baseline gained BOTH the
     // `agent_runs.credential_user_id` column and the `user_backend_credentials`
-    // table to the squashed baseline, but only the column was added to the
-    // healer's list. 0001 never re-runs, so a root created before that commit
+    // table, but only the column was added to the healer's list. 0001 never re-runs, so a root created before that commit
     // booted with the column and WITHOUT the table — and the first read of
     // Profile → Agent accounts, or the first run start, 500s on "no such
     // table". Canary: drop the table from BASELINE_TABLES and this fails.

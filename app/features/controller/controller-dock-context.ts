@@ -119,7 +119,7 @@ export function dockResourceShouldRevalidate(): boolean {
 }
 
 /** The dock's status on every page (`resources.controller-unseen.ts`): O39-d's
- *  unseen replies and, since ruling 11, the viewer's turns working right now.
+ *  unseen replies and the viewer's turns working right now (ruling 257).
  *  What the button reads, and all its working poll loads. */
 export const DOCK_STATUS_URL = "/resources/controller-unseen";
 

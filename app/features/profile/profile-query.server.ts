@@ -42,8 +42,8 @@ import {
  * session id into the display facts the panels need. Credential hashes never
  * leaves the server; only the derived `hasPassword` boolean ships.
  *
- * `githubConnected` is DERIVED from users.idp (ruling 30 dropped the
- * mock's `ghConnected` pref) — connected means this account currently
+ * `githubConnected` is DERIVED from users.idp (there is no `ghConnected`
+ * pref, ruling 30) — connected means this account currently
  * signs in through the GitHub OAuth whitelist flow.
  */
 

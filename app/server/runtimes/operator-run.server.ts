@@ -201,7 +201,7 @@ export interface RunOperatorInput {
    *  turn instruction can tell the operator exactly what was decided rather than
    *  making it re-derive the answer from the timeline (R20-1). */
   resolvedOption?: ResolvedPacketOption;
-  /** `dependencies-released` trigger (ruling 55): what the task waited on
+  /** `dependencies-released` trigger (ruling 57): what the task waited on
    *  and who cleared it, so the turn instruction names the entries and says
    *  the base branch has changed since the hold. */
   dependencyRelease?: DependencyReleasePayload;
@@ -291,20 +291,20 @@ export interface RunOperatorResult {
   /**
    * The trigger was REFUSED at fire time rather than driven. The caller owns the
    * honesty follow-up.
-   *   `closed` (F19-20, widened by ruling 52) — FR39's "a scheduled re-run
+   *   `closed` (F19-20, ruling 52) — FR39's "a scheduled re-run
    *     never fires on a terminal stage", enforced where the run would actually
    *     start rather than only where it was scheduled (the schedule runner
    *     records the retirement). Ruling 52 refuses EVERY trigger on a closed
    *     task, archived or at its terminal stage, with the sentence in
    *     `refusalReason`.
-   *   `open-packet` (R20-1 / F20-5, widened by ruling 115) — a HUMAN pressed
+   *   `open-packet` (R20-1 / F20-5, ruling 115) — a HUMAN pressed
    *     "Run operator" while a decision packet is open, which is a paid no-op
    *     (coordination is paused by the packet). Scoped to the `manual` trigger
-   *     and, since ruling 115, the `scheduled` one, the same turn with nobody
+   *     and the `scheduled` one, the same turn with nobody
    *     watching (`PACKET_REFUSED_TRIGGERS`; the schedule runner records it as
    *     `skipped-packet`). The other machine triggers legitimately run with a
    *     packet open (a `pr-diverged` recovery withdraws a moot packet — ruling
-   *     233; `agent-reply` reacts to a run already in flight). The route turns
+   *     232; `agent-reply` reacts to a run already in flight). The route turns
    *     this into "resolve the open decision to continue".
    *   `blocked-by` (ruling 115, pass 34) — the task WAITS ON OTHER WORK
    *     (`blockedBy` is non-empty). The `create`, `transition` and `scheduled`
@@ -774,7 +774,7 @@ function leaseRefFromKey(key: string) {
  * only in the server log while the timeline still said "Scheduled action
  * starting". Mirrors {@link noteQueuedTriggerFireFailed} but SETTLES NOTHING:
  * every refusal arm (`closed`, `blocked-by`, `open-packet`) already settled
- * inside `runOperator` (ruling 115 made the open-packet arm settle too). When
+ * inside `runOperator` (ruling 115). When
  * the trigger carries a schedule occurrence (`scheduleId`) the occurrence is
  * retired the same way the schedule runner retires a fire-time refusal
  * (`fired`, `claimedAt: null`) and the final `task.schedule.fired` row records
@@ -787,9 +787,9 @@ async function noteQueuedTriggerRefused(
   queued: RunOperatorInput,
   refused: NonNullable<RunOperatorResult["refused"]>,
   /**
-   * Ruling 115 (F37-46): WHERE the refusal happened. Ruling 115 taught the
-   * refusal to speak when a trigger met it at the front of the lease queue, and
-   * left the three refusals at the DOOR silent — so a person who wrote
+   * Ruling 115 (F37-46): WHERE the refusal happened. A trigger refused at the
+   * front of the lease queue already spoke, and the three refusals at the DOOR
+   * were silent — so a person who wrote
    * "@operator do X" on a task with an open packet got a comment on the
    * timeline, an accepted-looking mention, and nobody coming, with the refusal
    * only in the server log. Live on SHOP-2 at 02:44. Same note, same reasons;
@@ -951,8 +951,8 @@ async function noteQueuedTriggerFireFailed(
  * re-trigger, a stage the drive itself moved the task onto is a stage nothing
  * else will follow up on — and on the shipped board of the time the operator's
  * own move landed on In Progress, whose outbound boundary was `approval` (it
- * still is on a strict board; ruling 120 made it `auto` on the Standard
- * template), so the `auto` test alone left every such move with no follow-up
+ * still is on a strict board; the Standard template makes it `auto`, ruling
+ * 91), so the `auto` test alone left every such move with no follow-up
  * at all: no re-trigger, no resume, and `clearWaitingToHuman` flipped the
  * board to "waiting on you" with no agent engaged and no packet.
  */
@@ -1294,7 +1294,7 @@ function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boo
     );
   }
   if (ownRun?.refusedCalls?.length) {
-    // Ruling 121 on Claude (ruling 121): the same verdict, said truly where no
+    // Ruling 121 on Claude: the same verdict, said truly where no
     // refusal note exists. A Claude drive's tools answered each refusal to the
     // model as it called them, so the note quotes them itself, and it says
     // nothing of the drive before the nudge, whose refusals it cannot quote.
@@ -1496,7 +1496,7 @@ function operatorCheckoutTarget(input: TaskFileRef): {
  *
  * The Claude operator physically cannot write: `Bash`/`Edit`/`Write`/`MultiEdit`/
  * `NotebookEdit` are removed from its context. The Codex operator has no such
- * denylist channel, and since ruling 144 no OS sandbox either: every Codex
+ * denylist channel, and no OS sandbox either (ruling 144): every Codex
  * thread starts `danger-full-access`, so nothing refuses a write anywhere.
  * What the folder still buys is where the run STANDS. Left at the task folder
  * (the default), the cwd would contain `task.md` (the canonical governance
@@ -1806,7 +1806,7 @@ export async function runOperator(
   // get_task). Refuse it and say why. Ruling 115 (pass 34, F34-8): a SCHEDULED
   // re-run is the same turn with nobody watching, so it takes the same refusal.
   // Machine reaction triggers still run with a packet open — `pr-diverged`
-  // recovery WITHDRAWS a moot packet (ruling 233), and `agent-reply` reacts to a
+  // recovery WITHDRAWS a moot packet (ruling 232), and `agent-reply` reacts to a
   // run that was already in flight.
   //
   // Ruling 115 (F37-17): this arm used to say "the packet already owns
@@ -2098,7 +2098,7 @@ async function startCodexOperatorRun(
   /** R21-4: the identity (and any reserved row) claimed before the clone. */
   start: OperatorRunStart,
 ): Promise<RunOperatorResult> {
-  // Ruling 116: this operator returns a plan and cannot call tools, so the
+  // Ruling 117: this operator returns a plan and cannot call tools, so the
   // snapshot carries content where it would otherwise carry an address.
   const snapshot = operatorSnapshot(
     db,
@@ -2114,8 +2114,8 @@ async function startCodexOperatorRun(
   // was real on one backend and decorative on the other — a Codex operator could
   // not call the read tools that would inform its plan. The CLI translation
   // drops credentials and stamps approve-mode (codex-runtime). The CLI, not
-  // the operator's shell, connects to MCP servers, and since ruling 144 no OS
-  // sandbox sits between either of them and the network.
+  // the operator's shell, connects to MCP servers, and no OS sandbox sits
+  // between either of them and the network (ruling 144).
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
@@ -2180,7 +2180,7 @@ async function startCodexOperatorRun(
     // cwd. It is placement, not confinement: the thread is `danger-full-access`.
     workdir: scratchDir,
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
-    // denylist channel and, since ruling 183, no OS sandbox, so the read-only
+    // denylist channel and no OS sandbox (ruling 144), so the read-only
     // half does not bind there; a withheld web grant still does, because
     // `startRun` derives `webSearchWithheld` from this list (as it does
     // `repoWriteWithheld`). The spec STATES the run's policy rather than
@@ -2248,7 +2248,7 @@ async function startCodexOperatorRun(
     // Provider output is only executable after a clean terminal completion.
     // A failed/interrupted turn may have persisted a syntactically valid
     // partial agent_message before it stopped; never treat that as a plan.
-    // R20-3 (F20-4) / ruling 220, the half the Codex path never got: a run that
+    // R20-3 (F20-4) / ruling 149, the half the Codex path never got: a run that
     // reached completion PROVES its model is usable on this account, and
     // clearing on a real success is the re-probe (there is no synthetic
     // check). The Claude operator's completion handler does this; this one did
@@ -2509,7 +2509,7 @@ async function startRealOperatorRun(
     // still being written; whichever landed second silently replaced the other.
     // R20-3 (F20-4): a coordinating run that reached completion proves its model
     // is usable on this account — clear any stale unavailability mark (ruling
-    // 220: clearing on a real success is the re-probe, no synthetic check).
+    // 149: clearing on a real success is the re-probe, no synthetic check).
     if (finished.state === "finished") {
       const ranModel = getRun(db, runId)?.model ?? null;
       if (ranModel) clearModelMark(db, input.backend ?? "claude", ranModel);

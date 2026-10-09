@@ -116,7 +116,7 @@ import {
 } from "./controller-reply-links.server";
 
 /**
- * The controller conversation engine (ruling 247).
+ * The controller conversation engine (ruling 251).
  *
  * One user message = one controller RUN through the existing run machinery
  * (`agent_runs.kind = 'controller'`, project_slug '' + task_key = the
@@ -305,7 +305,7 @@ export interface ControllerMountInput {
   /** Ruling 260: the conversation's anchored task, when it has one. */
   taskKey: string | null;
   /** Ruling 273: the conversation the turn answers in, which an epic the
-   *  turn creates records (ruling 273). */
+   *  turn creates records. */
   conversationId?: string | null;
   /** The user message this turn answers, by which a turn a follow-up started
    *  is told from one a person asked for. */
@@ -1175,7 +1175,7 @@ async function settleTurn(
  * Stop the turn a conversation is working on.
  *
  * A controller run lives at `project_slug = ''` with the conversation id for
- * its task key (ruling 247), which is the one fact both controller pages would
+ * its task key (ruling 251), which is the one fact both controller pages would
  * otherwise have to spell out to reach `interruptRun`. The engine keeps the
  * whole interrupt (the live handle or the terminal write, the audit row, the
  * slot release, the completion fire that settles this turn) and asks
@@ -1314,7 +1314,7 @@ export function recoverControllerConversations(db: DatabaseSync): number {
 
   // SAFETY: `agent_runs.id` and `.task_key` are both declared NOT NULL TEXT
   // (0001_baseline). A controller run's `task_key` is its conversation id
-  // (ruling 247), and the EXISTS clause proves that conversation is real.
+  // (ruling 251), and the EXISTS clause proves that conversation is real.
   const orphanedTurns = db
     .prepare(
       `SELECT r.id AS run_id, r.task_key AS conversation_id
@@ -1432,7 +1432,7 @@ export function buildTurnPrompt(
   const lead = context ? `${context}\n---\n\n` : "";
   // Ruling 255: the model is named here, in the one part of the request
   // rendered fresh every turn. The system prompt is recorded when the
-  // conversation starts (ruling 255) and kept until it compacts, so a model
+  // conversation starts and kept until it compacts, so a model
   // changed in settings reached the run and not its own description of it.
   const runtime = model
     ? `You run on model \`${model}\` this turn. Where your system prompt or earlier turns name another model, this line is current.\n\n---\n\n`
@@ -1555,7 +1555,7 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
   parts.push(
     "\n\n---\n# Your runtime\n\n" +
       // Ruling 255: the model is named in each turn's message instead. This
-      // prompt is recorded for the conversation (ruling 255), so a model named
+      // prompt is recorded for the conversation, so a model named
       // here went stale the day settings changed it: live on the ax-clone
       // controller, "Opus 5 ... claude-opus-5[1m]" after the switch to 5.5.
       "You are the instance controller, running on the Claude backend. Each turn's message names " +
@@ -1665,8 +1665,8 @@ export function buildControllerSystemPrompt(input: SystemPromptInput): Controlle
     prefix,
     // Ruling 167: off the same locals the prompt was assembled from.
     inputs: resolvedResourceInputs({
-      // The controller has no checkout at all — ruling 265 gave it repository
-      // READS through a tool, not a working tree — so a `repo`/`cloned` claim
+      // The controller has no checkout at all — it READS the repository
+      // through a tool (ruling 265), not a working tree — so a `repo`/`cloned` claim
       // here would be the only place in the product asserting one.
       cwd: null,
       repo: null,

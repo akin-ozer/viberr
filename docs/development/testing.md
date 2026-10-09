@@ -80,7 +80,7 @@ names the contract it independently guards:
   tightens it by accident; only a test waiting on a real process, a CLI or a watcher, may
   raise its own, with the reason beside it), a fixed sleep, or a wall clock a policy should
   take injected (`nowIso`, `FROZEN_NOW`, `pinPerfClock`, a frozen `Date`);
-- a test of a `test-support/` helper (ruling 11), or of production code only tests
+- a test of a `test-support/` helper (ruling 8), or of production code only tests
   call (delete the code instead).
 
 **Retention bar.** Keep a test that independently enforces a route or resource shape, a
@@ -262,7 +262,7 @@ the only gates. Jobs run again since 2026-10-01.
 | `perf-*.ts`, `perf-budgets/`, `render-counter.ts`, `revalidation-harness.tsx`, `static-imports.ts`, `console-fixture.ts` | the ruling-11 perf harnesses and budget tables; [performance.md](performance.md) §4 documents them |
 
 A `test-support/` helper has no test of its own: the tests that use it are its coverage
-(ruling 11). A helper that breaks fails the suites built on it, and the collected tree
+(ruling 8). A helper that breaks fails the suites built on it, and the collected tree
 (`app/**`) does not reach `test-support/` anyway.
 
 Import route modules **after** `setupAppTest()` so they see the test env. A route action
@@ -371,9 +371,9 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
   rendered copy or seed assets (P21) or in any string literal under `app/server`,
   `app/schemas`, `app/shared` or `app/lib` (ruling 292), and no "primary specialist"
   (F19-12).
-- `app/features/shortcut-glyph.test.ts` (ruling 321): no ⌘ glyph in copy; the key is
+- `app/features/shortcut-glyph.test.ts` (ruling 319): no ⌘ glyph in copy; the key is
   spelled for the platform that reads it.
-- `app/features/live-updates/one-event-source.test.ts` (ruling 11): exactly one module
+- `app/features/live-updates/one-event-source.test.ts` (ruling 25): exactly one module
   under `app/` opens an `EventSource`, the live-updates hook every page shares.
 - `app/server/runtimes/tool-description-hygiene.test.ts` (ruling 10): a tool's
   description says each thing once.

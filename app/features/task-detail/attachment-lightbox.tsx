@@ -27,7 +27,7 @@ import { attachmentDownloadHref } from "./attachment-download-href";
  * (`useDialog`: showModal, Escape, backdrop click, animated close), and keeps
  * an "Open original" link so the raw-file tab is one click away, not gone.
  *
- * Ruling 78 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
+ * Ruling 317 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
  * txt/md/json/csv attachment opens as a read-only viewer in the same popup,
  * with a Download button (`?download=1` on the serving route). The owner's
  * same-day addendum makes the card UNIVERSAL: every attachment kind opens it
@@ -72,7 +72,7 @@ const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
 
 /**
  * Click-handler factory for an attachment link — every kind opens the card
- * (ruling 78 addendum); modified clicks keep the plain anchor. Usage:
+ * (ruling 317 addendum); modified clicks keep the plain anchor. Usage:
  *   const lightbox = useAttachmentLightbox();
  *   <a href={url} target="_blank" onClick={lightbox({ name, url })}>…
  */
@@ -107,7 +107,7 @@ const UNSERVABLE_COPY =
 /**
  * Read at most `cap` characters of the body, then STOP the transfer — the
  * route serves up to 50 MB, and `res.text()` would buffer all of it before
- * the display cap could apply (ruling-78 review). Falls back to the buffered
+ * the display cap could apply (ruling-317 review). Falls back to the buffered
  * read where the body stream is unavailable (older jsdom shims).
  */
 async function readTextCapped(
@@ -133,7 +133,7 @@ async function readTextCapped(
 }
 
 /** The read-only body of a text attachment, fetched from the member-only
- *  serving route (inert text/plain for the ruling-78 types, a download for
+ *  serving route (inert text/plain for the ruling-317 types, a download for
  *  every other name — fetch reads either; nothing is ever rendered).
  *  `onUnservable` fires when the fetch PROVED the file unservable (404, 413,
  *  auth redirect, network failure) so the footer can drop its Download button
@@ -146,8 +146,8 @@ function LightboxTextBody({
   links,
 }: {
   url: string;
-  /** The filename — it picks the grammar (ruling 317), and whether the file
-   *  renders as markdown (ruling 317). */
+  /** The filename — it picks the grammar and whether the file renders as
+   *  markdown (ruling 317). */
   name: string;
   onUnservable: () => void;
   links: AttachmentDocLinks | null;
@@ -337,7 +337,7 @@ function Lightbox({
   // route's 50 MB inline cap (413), or an unsupported type. Show a message
   // instead of a broken image; "Open original" below still reaches the route.
   const [failed, setFailed] = useState(false);
-  // Ruling 78: a text attachment renders as a read-only viewer in the same
+  // Ruling 317: a text attachment renders as a read-only viewer in the same
   // popup; per the addendum every other kind opens the card too, with a
   // no-preview note standing in for content the popup cannot render.
   // Ruling 317: the name rules out images and the known binary kinds; every
@@ -403,7 +403,7 @@ function Lightbox({
       )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
-        {/* Every kind gets the button (ruling 78 addendum) — unless a fetch
+        {/* Every kind gets the button (ruling 317 addendum) — unless a fetch
             proved the file unservable, see `fetchFailed`. The serving route
             forces a save dialog on `download=1` — the raw URL renders inline
             where the type allows (that is what the viewer itself fetches).
@@ -439,7 +439,7 @@ function Lightbox({
             the same control as every modal head and the page overlay. It stays
             the foot's trailing item — the foot sits on the card's own surface,
             where the shared transparent rest and soft hover read correctly,
-            and an absolute corner control would sit over the ruling-78 text
+            and an absolute corner control would sit over the ruling-317 text
             viewer's scrolling first line. */}
         <button
           type="button"

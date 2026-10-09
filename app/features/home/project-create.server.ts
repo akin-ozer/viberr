@@ -89,8 +89,8 @@ export type PolicyPreset = "strict" | "balanced" | "auto";
  * - **strict** — a human gates every stage: the operator does NOT auto-advance
  *   before work starts. Every `auto` boundary short of the last stage becomes
  *   `approval`, so a human must approve triage→ready (and ready→impl) before an
- *   agent touches the repo, and the move into review too (ruling 91 made that
- *   one automatic everywhere else). Operator stays supervised.
+ *   agent touches the repo, and the move into review too (automatic
+ *   everywhere else, ruling 91). Operator stays supervised.
  * - **balanced** — the template defaults (the operator advances every boundary
  *   up to review under a supervised operator; review→done human).
  * - **auto** — the operator runs at FULL autonomy: it crosses the governed
@@ -475,7 +475,7 @@ export interface CreateProjectInput {
   key: string;
   /** Ruling 224: what the board delivers; `software` when left out. The
    *  agents of a board that delivers results are deployed with repo-write
-   *  withheld. Ruling 224: either kind may start with no repository, `owner`
+   *  withheld. Either kind may start with no repository, `owner`
    *  and `repoName` both empty; a software board's agents keep repo-write for
    *  the one it connects later. */
   delivers?: BoardDelivers;
@@ -485,7 +485,7 @@ export interface CreateProjectInput {
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
   policy: "strict" | "balanced" | "auto";
-  /** Ruling 247: the whole custom shape in one request (the controller's
+  /** Ruling 266: the whole custom shape in one request (the controller's
    *  create-project path; the New-project modal never sets it). Everything
    *  here composes BEFORE the single project.md write, so a refused shape
    *  creates nothing. */
@@ -500,13 +500,13 @@ export interface CreateProjectInput {
    *  Developer or Reviewer; absent (the New project modal), the base roster.
    *  Every entry is checked before anything is written. */
   agents?: RosterEntry[];
-  /** Ruling 266: the operator's own model and effort, checked the same way.
-   *  Ruling 266: and the backend they run on. */
+  /** Ruling 266: the operator's own model and effort, checked the same way,
+   *  and the backend they run on. */
   operator?: OperatorOverrides;
 }
 
-/** Ruling 266: the operator's overrides at creation, ruling 266's model and
- *  effort plus the backend they run on (the operator's own when omitted). */
+/** Ruling 266: the operator's overrides at creation, its model and effort
+ *  plus the backend they run on (the operator's own when omitted). */
 export interface OperatorOverrides extends DeployOverrides {
   backend?: RealBackend;
 }
@@ -550,7 +550,7 @@ export interface CreateProjectResult {
   repo: string | null;
   /**
    * UI-09: what the repository probe found that a person has to act on, or
-   * null. Since ruling 225 that is one case: a repository the token can read
+   * null. Under ruling 225 that is one case: a repository the token can read
    * and cannot push to, which is created against all the same. The caller
    * states it instead of reporting a plain success.
    */
@@ -641,13 +641,9 @@ export function checkNewProjectIdentity(
   if (isReservedTaskPrefix(key)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
-  // Every project took a repository once (owner ruling 2026-07-17, which
-  // reversed F10): a board that delivers software hands its work over through
-  // GitHub, "and a repo-less one dead-ends the moment execution starts".
-  // Ruling 224 let a board that delivers results go without. Ruling 224
-  // (owner, 2026-10-06: "repoless boards should exist … at creation") lets
-  // every board start without: the dead end is gone, because the operator
-  // asks for a repository the first time a task needs one. So a repository is
+  // Ruling 224: every board may start without a repository (owner,
+  // 2026-10-06: "repoless boards should exist … at creation"), because the
+  // operator asks for one the first time a task needs it. So a repository is
   // named whole, connection and name, or not at all.
   if (Boolean(owner) !== Boolean(repoName)) {
     throw AppError.validation(
@@ -697,7 +693,7 @@ async function createProjectImpl(
   // edited in project settings, after creation, where the stage grants can be
   // adjusted alongside them.
   //
-  // Ruling 247: the controller's create-project path may carry the WHOLE custom
+  // Ruling 266: the controller's create-project path may carry the WHOLE custom
   // shape (stages, boundaries, members, description) in one request. The shape
   // is validated and composed here, before the single project.md write, so a
   // refused shape creates nothing. The template stays the default.
@@ -828,7 +824,7 @@ export async function reachProjectRepository(
   const { owner, repoName, repo, slug } = identity;
   // Ruling 224: no repository, so no connection to resolve and nothing to
   // probe. `defaultBranch` keeps the schema's own fallback and names nothing.
-  // Ruling 224: a software board made with none says what that means, on
+  // A software board made with none says what that means, on
   // every door that reports a creation.
   if (repo === null) {
     return {
@@ -939,10 +935,10 @@ export async function reachProjectRepository(
     repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
   }
 
-  // Ruling 227: an empty repository is stated, not warned about: Viberr makes
-  // its first commit (ruling 227's bootstrap) before the first task branch.
-  // Its dated note (R-repo-2): not with a token that can only read, which
-  // GitHub refuses that commit; the fix is the token, and the note says so.
+  // Ruling 227(a): an empty repository is stated, not warned about: Viberr
+  // makes its first commit before the first task branch. Not with a token that
+  // can only read, which GitHub refuses that commit (R-repo-2); the fix is the
+  // token, and the note says so.
   if (repoAccess.status === "connected" && repoAccess.empty) {
     const empty = repoAccess.readOnly
       ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
@@ -1141,7 +1137,7 @@ function withOperatorOverrides(
   return { ...operator, definition };
 }
 
-// ------------------------------------------------- custom shape (ruling 247)
+// ------------------------------------------------- custom shape (ruling 266)
 
 /** The composed, validated custom blueprint ready for the frontmatter write. */
 interface ResolvedBlueprint {

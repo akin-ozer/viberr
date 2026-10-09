@@ -272,7 +272,7 @@ async function refreshBranchAsPerson(
    * withholding." SHOP-3: the same shape, 7h45m, same exit.
    *
    * Ruling 243's words sit sixty lines below this arm: "A refusal with no exit
-   * is its own defect." Ruling 96 gave exactly this hand-off to the sibling
+   * is its own defect." Ruling 96 gives exactly this hand-off to the sibling
    * refusal (an unpushed reviewed revision) because only the operator may push;
    * the same is true of the merge, and this arm was left out.
    *
@@ -1079,7 +1079,7 @@ export async function refuseUnverifiedHead(
   const refusal = check.refusal ?? "";
   // Ruling 96 (F37-55): a KNOWN mismatch is not a decision. The reviewed
   // revision simply is not on the pull request, the only remedy is to push it,
-  // and ruling 229 reserves pushing for the operator — so there is nothing to
+  // and ruling 126 reserves pushing for the operator — so there is nothing to
   // ask a person. It gets a record and a hand-off instead of a packet; only the
   // UNVERIFIABLE case (ruling 243), where a maintainer really must choose
   // between re-delivering and merging unchecked, opens one.
@@ -1869,9 +1869,9 @@ export function unverifiedHeadNote(fm: TaskFrontmatter, headCheck: AcceptancePrH
  * (a person's Accept or board move, a recommendation card, a force-accept,
  * the operator's own acceptance) and the decision packet's "accept
  * completion" option, which writes the stage itself. Both end here, so a
- * step added for one is not forgotten for the other: the packet's option ran
- * none of these until ruling 259 gave it the third, and an epic whose last
- * task was accepted from a decision was never told it was done.
+ * step added for one is not forgotten for the other: the packet's option once
+ * ran none of these, and an epic whose last task was accepted from a decision
+ * was never told it was done.
  *
  * Each is fire-and-forget and reads the store as it stands, so a call that
  * finds nothing to do writes nothing (the release reads every held task of
@@ -1880,7 +1880,7 @@ export function unverifiedHeadNote(fm: TaskFrontmatter, headCheck: AcceptancePrH
 export function afterAcceptance(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string, taskKey: string): void {
   // Ruling 55: an acceptance is the usual way an epic's last task is done.
   maybeNoteEpicComplete(db, ctx, projectSlug, taskKey);
-  // Ruling 55: and the usual way a waited-on task is done. The runner's
+  // Ruling 57: and the usual way a waited-on task is done. The runner's
   // minute tick would release its dependents too; this does it now.
   maybeReleaseDependents(db, ctx, projectSlug);
   // Ruling 259: and the moment a controller conversation that waited for

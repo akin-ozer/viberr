@@ -1992,7 +1992,12 @@ function ChangeRepoDialog({
   } = useChangeRepoForm({ footprintTasks, busy, result, done, onCancel, onSubmit });
   const verb = current ? "Change" : "Attach";
   return (
-    <dialog ref={ref} className="confirm-card" aria-label={verb + " repository"}>
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      aria-label={verb + " repository"}
+      data-screen-label={verb + " repository dialog"}
+    >
       {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
       <div className="confirm-icon primary">
         <Icon name="github" />

@@ -602,10 +602,10 @@ describe("a run with no credential principal (ruling 137)", () => {
 /**
  * Ruling 144 (owner Q36-14, 2026-09-12): Viberr does not confine a Codex run
  * with the CLI's OS sandbox, so there is no host condition left to refuse one
- * over. Ruling 144 are gone with it.
+ * over.
  */
 describe("ruling 144: no Codex run is refused for a sandbox", () => {
-  it("a write-withheld reviewer — the shape ruling 144 refused — starts normally", async () => {
+  it("a write-withheld reviewer — the shape the sandbox refusal hit — starts normally", async () => {
     // Canary: re-introduce `codexSandboxRefusal` in `startRun` and this run
     // ends `error` with `run·unavailable` instead of finishing. The refusal
     // existed because bubblewrap could not start under Docker's default
@@ -1465,7 +1465,7 @@ describe("resumeRun — continuity recovery", () => {
    * — whose contract is "resume as before". The previous owner's session id
    * then went to the SDK inside the new owner's home and failed at the vendor
    * ("No conversation found with session ID …"), producing a blocked packet
-   * instead of the one fresh re-anchored run ruling 137 promises.
+   * instead of the one fresh re-anchored run ruling 162 promises.
    */
   it("re-anchors for a new principal who has never had a run here", async () => {
     const { specs, resume } = await startThenResume();
@@ -2241,7 +2241,7 @@ describe("C4: noteCompletionEffectsLost (a lost completion callback)", () => {
 
 /**
  * Rulings 172, 174 and 173 on the run service: every run stamps the kind of
- * credential it bills and, since ruling 174, carries no context window; a
+ * credential it bills and carries no context window; a
  * resume of a session that is BOTH idle past its cache TTL AND larger than the
  * replay threshold starts fresh on task.md and the last report, under its own
  * reason, on both backends and for the controller. Every clock is pinned.
@@ -3118,7 +3118,7 @@ describe("compaction at completion (ruling 174)", () => {
     }
   });
 
-  it("ruling 175: an operator's session is never compacted, whatever its size", async () => {
+  it("ruling 174: an operator's session is never compacted, whatever its size", async () => {
     // Every operator turn starts a fresh session and nothing resumes one, so
     // the summary had no reader. CANARY: drop the kind from the condition and
     // a compaction is asked for.
@@ -3275,7 +3275,7 @@ describe("compaction at completion (ruling 174)", () => {
       backend: "codex", model: "gpt-5.6-terra", prompt: "go", dataRoot: store.dataRoot,
     });
     // Ruling 175 on Codex: the run's completion fires before the app-server
-    // is asked. CANARY: keep ruling 175's order for this backend.
+    // is asked. CANARY: compact before firing the completion on this backend.
     const askedWhenCompleted: number[] = [];
     registerRunCompletion(runId, () => askedWhenCompleted.push(compactedRunSpecs().length - before));
     open();

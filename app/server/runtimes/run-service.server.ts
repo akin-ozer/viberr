@@ -209,8 +209,8 @@ interface ServiceState {
    *  the freed slot, so the nested call returns immediately. */
   draining?: boolean;
   /**
-   * Ruling 175: the sessions a completion compaction (ruling 175) is still
-   * summarizing after their run has ended: session id → the run that left it.
+   * Ruling 175: the sessions a completion compaction is still summarizing
+   * after their run has ended: session id → the run that left it.
    * That run's record is closed and its completion has fired; what is left is
    * the session's own housekeeping. A run that resumes one of these sessions
    * is parked in its lane's queue and passed over by the drain until the
@@ -405,8 +405,8 @@ export function chainRunCompletion(
 /**
  * Test-only: reset live handles and install explicitly supplied adapters.
  *
- * It no longer forces availability: since ruling 137 "available" is a fact
- * about a PERSON, so a test that wants a run to reach its adapter seeds a
+ * It does not force availability: "available" is a fact about a PERSON
+ * (ruling 137), so a test that wants a run to reach its adapter seeds a
  * credential row for that run's principal (`connectFakeBackend` in
  * `test-support/`). Installing the fakes here still fails the runtime closed —
  * nothing in the suite can construct a real adapter — which is what this was
@@ -447,7 +447,7 @@ export interface StartRunInput {
    *  packet body and the disabled control all render, so a person cannot be
    *  told three different stories about one refusal. */
   principalRefusal?: RunPrincipalRefusal;
-  /** Ruling 66: this dispatch withheld the run's VERDICT channel, so a reply
+  /** Ruling 87: this dispatch withheld the run's VERDICT channel, so a reply
    *  with no envelope verdict is an answer rather than a silence the prose
    *  fallback should repair. Stored on the run row. */
   verdictWithheld?: boolean;
@@ -797,11 +797,11 @@ const REPO_WRITE_DENY_MARKERS = ["Edit", "Write", "NotebookEdit"] as const;
  * `resolveSpecialistDisallowedTools` policy, backend-agnostically — it just had
  * no effect on Codex, which has no denylist channel. Deriving the flag from it
  * means the spec records the withholding for exactly the profiles the matrix
- * already shows as withheld, with no second source of truth to drift. It no
- * longer drives a sandbox: ruling 183 bound it through Codex's read-only mode,
- * and ruling 183 removed the OS sandbox, so on Codex the withholding is
- * advisory. What it still decides is the admin-marked MCP write tools a run
- * loses (ruling 188) and the `repoWriteWithheld` the spec records.
+ * already shows as withheld, with no second source of truth to drift. It
+ * drives no sandbox: a Codex run is never OS-confined (ruling 144), so on
+ * Codex the withholding is advisory. What it still decides is the
+ * admin-marked MCP write tools a run loses (ruling 188) and the
+ * `repoWriteWithheld` the spec records.
  */
 export function repoWriteWithheldFromDenylist(
   disallowedTools?: readonly string[],
@@ -929,7 +929,7 @@ const RUN_TMP_UNAVAILABLE_TAG = "run·tmp_unavailable";
  * `error`. That routes the failure through the EXISTING error-run path
  * (completion callbacks fire immediately, `applyAgentCompletionEffects`
  * posts the typed blocked event and escalation packet via runFailureReason).
- * Returns the run id and, since ruling 152, what actually happened to it.
+ * Returns the run id and what actually happened to it (ruling 152).
  */
 export async function startRun(
   db: DatabaseSync,
@@ -1011,7 +1011,7 @@ export async function startRun(
     // when the credential was resolved. Boot recovery hands an orphaned Codex
     // run's refreshed sign-in back to this account and to no other.
     credentialAccountId: credential.ok ? credential.credential.accountId : null,
-    // Ruling 66: kept on the row so the completion path can tell an answer
+    // Ruling 87: kept on the row so the completion path can tell an answer
     // from a silence long after the dispatch is gone.
     verdictWithheld: input.verdictWithheld === true,
     // Ruling 153: what this run is judging, for the completion to compare.
@@ -1123,7 +1123,7 @@ export async function startRun(
   if (input.skills && input.skills.length) spec.skills = input.skills;
   if (input.skillPlugin) spec.skillPlugin = input.skillPlugin;
   // Records the withheld repo-write grant on the spec: Claude's denylist binds
-  // it; on Codex it is advisory (ruling 183 removed the OS sandbox) and the
+  // it; on Codex it is advisory (no OS sandbox, ruling 144) and the
   // delivery gate is the boundary.
   if (repoWriteWithheldFromDenylist(input.disallowedTools)) spec.repoWriteWithheld = true;
   // Same for web egress: withheld ⇒ Codex runs with its web search disabled,
@@ -1191,9 +1191,9 @@ export async function startRun(
 
   // The reasons no process may start, decided on the finished spec: the
   // credential (ruling 137) and the launch as the principal's own user
-  // (ruling 139) — each an honest `run·unavailable` error row. Ruling 144's
-  // sandbox refusal is gone with the sandbox itself (ruling 144): a Codex run
-  // is never OS-confined by the CLI, so there is no such host condition.
+  // (ruling 139) — each an honest `run·unavailable` error row. There is no
+  // sandbox refusal: a Codex run is never OS-confined by the CLI (ruling 144),
+  // so there is no such host condition.
   const refusal: string | null = credential.ok ? launchRefusal : credential.message;
 
   const details: RunStartedAudit = {
@@ -1491,7 +1491,7 @@ const SESSION_MISSING_TAG = "run·session_missing";
 /** Ruling 162: WHY a resume did not reach its session. The causes look
  *  identical downstream and read completely differently to a human: one is a
  *  storage fault worth investigating, the others are decisions viberr made.
- *  Ruling 173 added `stale_large_session`: the transcript exists and Viberr
+ *  `stale_large_session` (ruling 173): the transcript exists and Viberr
  *  chose not to replay it — idle past its cache TTL and above the replay
  *  threshold, so a resume would re-write the whole history as one cache
  *  write. */
@@ -1894,8 +1894,8 @@ export interface ResumeRunInput {
    *  its envelope, a fresh-vs-resume parity break (F7). */
   outputSchema?: unknown;
   /** C02-R3 (pass 32): re-apply the task's attachments drop on resume, so a
-   *  resumed run's persona and its writable set still agree. It no longer
-   *  widens any sandbox (ruling 144 removed Codex's; Claude never had one) —
+   *  resumed run's persona and its writable set still agree. It widens no
+   *  sandbox (a Codex run has none, ruling 144; Claude never had one) —
    *  it is the path the persona names, and the prompt must not promise a drop
    *  the run was not told about. Same fresh-vs-resume parity class as
    *  XS-1/F7. */
@@ -1972,7 +1972,7 @@ export async function resumeRun(
   const resumeThreadId =
     prev.thread_id + "-r" + newId("t").replace("t_", "").slice(0, 6);
 
-  // Ruling 137: an OWNER CHANGE decides continuity on its own, before any
+  // Ruling 162: an OWNER CHANGE decides continuity on its own, before any
   // filesystem is consulted. The probe below reads the principal's own runtime
   // home, and a home whose transcript store does not exist yet — the new owner
   // connected the backend but has never had a run on this server, so
@@ -2449,8 +2449,7 @@ function launch(
       deferredTimer = null;
       deferred = null;
       // The handle is tracked only for a run still in flight, so the flag is
-      // set here, synchronously, exactly as before ruling 174 made the rest
-      // of the exit asynchronous.
+      // set here, synchronously, ahead of the asynchronous rest of the exit.
       exited = true;
       // Ruling 174: the exit may compact the session, a provider round trip,
       // so the settle is asynchronous. Ruling 175: for a specialist's run the
@@ -2558,7 +2557,7 @@ function launch(
           sessionId &&
           exit.outcome !== "interrupted" &&
           !refused &&
-          // Ruling 175: nor an operator's session. Every operator turn starts
+          // Ruling 174: nor an operator's session. Every operator turn starts
           // a fresh one (`runOperator` passes no session to resume), so the
           // summary would have no reader: 39 of them on one instance, none
           // ever resumed.
@@ -2609,7 +2608,7 @@ function launch(
                 const occurredAt = new Date().toISOString();
                 // Ruling 172: the CLI writes this compaction's own size line
                 // between its two spellings, so the rollout has measured it.
-                // Ruling 172: when it has not (a marker with nothing after it),
+                // When it has not (a marker with nothing after it),
                 // the figure is unknown rather than zero. Say so.
                 const post =
                   event.postTokens === null

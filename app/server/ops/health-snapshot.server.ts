@@ -98,10 +98,10 @@ export interface HealthSnapshot {
    */
   quota: BackendQuotaRow[];
   /**
-   * Ruling 40 (pass 36, G36-4), narrowed by ruling 144: what this host can
-   * run — the versions of the tools an agent's shell finds (null when absent)
-   * and the pinned CLI packages. Probed once per process. The sandbox verdict
-   * and the `startRun` refusal it fed went with the sandbox. Informational
+   * Ruling 40 (pass 36, G36-4): what this host can run — the versions of the
+   * tools an agent's shell finds (null when absent) and the pinned CLI
+   * packages. Probed once per process. No sandbox verdict and no `startRun`
+   * refusal (ruling 144). Informational
    * here, like `browser`: a missing tool is something a run should know about,
    * not a broken host, so it never degrades health.
    */
@@ -233,9 +233,9 @@ export function healthSnapshot(
     // Memoized: the first call (boot's integrity line, normally) pays the
     // probe once.
     toolchain: cachedToolchain(),
-    // Appended by ruling 191, then followed by ruling 40's key (key-order contract above).
+    // Ruling 191's key, after the toolchain (key-order contract above).
     mcpProxy: mcpGatewayStatus(),
-    // LAST, by the key-order contract above (ruling 40 appended it after ruling 191's mcpProxy).
+    // LAST, by the key-order contract above (ruling 40's agent isolation, after mcpProxy).
     agentIsolation: isolation,
   };
 }

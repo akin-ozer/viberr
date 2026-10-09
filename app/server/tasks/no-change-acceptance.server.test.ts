@@ -319,8 +319,9 @@ describe("the verdict binds — a verification revision is minted at review time
 
   it("ruling 101: files another agent saved are not \"nothing to deliver\": no mint, and the note says to hand delivery", async () => {
     // Live on AWSC-2 the Workflow Researcher saved the result as a supporting
-    // agent (before ruling 128 let it deliver), and the Estimate Judge's
-    // approval would have been recorded against `main` as "no changes".
+    // agent (it could not yet deliver, as ruling 128 lets it), and the
+    // Estimate Judge's approval would have been recorded against `main` as
+    // "no changes".
     // CANARY: drop the `filesSavedByOtherAgents` precondition and this mints.
     deployAgents();
     seedVerificationTask();
@@ -380,7 +381,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(card?.detail).toContain("so it does not count.");
   });
 
-  it("ruling 101: an approval of the files a result was delivered in says it bound to them", async () => {
+  it("ruling 88: an approval of the files a result was delivered in says it bound to them", async () => {
     // Ruling 84 bound it all along; the note read "there is no delivered
     // revision to bind the verdict to yet" beside a healthy validation.
     // CANARY: branch the note on `rev` again instead of the review subject.

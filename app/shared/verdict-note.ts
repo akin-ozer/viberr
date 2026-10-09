@@ -19,9 +19,8 @@ const CHANGES_REQUESTED = "Changes requested";
  * Ruling 83: a request for changes that sent nothing back adds why too,
  * because what a task took counts the notes titled `changesRequested` alone
  * (`what-it-took.server.ts`). `changesNotCounted` is an objection that bound
- * to no delivery: nothing was delivered yet (ruling 245), the reviewer made
- * the delivery itself (ruling 245), or the delivery moved while it read
- * (ruling 84). `changesOnUnchangedWork` is the same reviewer objecting again
+ * to no delivery: nothing was delivered yet or the reviewer made the delivery
+ * itself (ruling 245), or the delivery moved while it read (ruling 84). `changesOnUnchangedWork` is the same reviewer objecting again
  * to a delivery nobody has reworked since its last objection (ruling 92): it
  * binds, and it fought no round.
  */

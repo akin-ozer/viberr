@@ -15,10 +15,10 @@ import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
  * its collaboration tools.
  *
  * A Claude run that holds any collaboration grant reads the project's board
- * (`read_board`, ruling 213(a), with each task's outcome and verdict reports,
- * ruling 213(a)) and any entry of its own task's timeline in full
- * (`read_timeline_entry`, ruling 213(b)). A Codex run mounted neither (ruling
- * 217(a)). Live on AWSC-24 the Workflow Researcher, on GPT-6 Luna, was asked to
+ * (`read_board`, ruling 213(a), with each task's outcome and verdict reports)
+ * and any entry of its own task's timeline in full (`read_timeline_entry`,
+ * ruling 213(b)). A Codex run mounted neither. Live on AWSC-24 the Workflow
+ * Researcher, on GPT-6 Luna, was asked to
  * compare the Estimate Judge's round-3 verdicts on AWSC-20 to AWSC-23. It
  * looked for them in those tasks' attachment folders, found no verdict file
  * for two of them, and wrote that it used the operator's summaries in its

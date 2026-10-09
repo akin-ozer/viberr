@@ -75,7 +75,7 @@ only in `shared/freshness.ts`; DB rows map to camelCase only through `shared/map
 Tests are co-located (`foo.server.test.ts`). There are no `utils.ts` dumping grounds.
 `app/routes/` holds 47 modules (45 routes plus `project-visibility.server.ts`, the
 members-only 404 guard for actions, and `project-workspace.server.ts`, the one gated read
-of a project the workspace layout and the board loader share per request, ruling 21);
+of a project the workspace layout and the board loader share per request, ruling 11);
 the route table is `app/routes.ts`.
 
 ## 3. `app/server/` by directory
@@ -116,7 +116,7 @@ the route table is `app/routes.ts`.
 | Directory | Surface |
 |---|---|
 | `shell/` | Workspace rail (`nav.ts` order: Board, Epics, Review queue, Controller, Agents, Policy, GitHub, Activity, Settings), topbar, the standalone-page header (`page-topbar.tsx`, ruling 294 — mounted by the `palette-shell` layout for the routes `standalonePageLabel` names), the shared palette trigger both headers render, ⌘K palette and its server query, bell popover (pages ship its counts; it loads its list from `routes/resources.notifications.ts`, ruling 300), user menu, theme preference, route pending bar, CSRF result helper. |
-| `home/` | `/`: the setup checklist (`setup-checklist.tsx`, its steps read by `getHomeSetup`, ruling 322; closed for the session through `setup-hidden.server.ts`, ruling 322), project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, agent policy preset; the first four in `project-fields.tsx`, shared with the board import dialog), project creation server logic (its identity check, repository reach and write are the steps a board import composes too), org tiles, admin store strip (re-scan, rebuild). |
+| `home/` | `/`: the setup checklist (`setup-checklist.tsx`, its steps read by `getHomeSetup`; closed for the session through `setup-hidden.server.ts`, ruling 322), project cards, pinned/all/archived groups, new-project modal (name, key, connection, repo, workflow, agent policy preset; the first four in `project-fields.tsx`, shared with the board import dialog), project creation server logic (its identity check, repository reach and write are the steps a board import composes too), org tiles, admin store strip (re-scan, rebuild). |
 | `board/` | Board columns, the board card projection the board loader ships (`board-card.ts`, `toBoardCard`: the fields the board reads, ruling 11), the card's one status seat and problem chips (`card-status.ts`, ruling 306), filters (URL params), dnd-kit drag with server-authoritative drop resolution (`board-dnd.ts`), list view, new-task modal, board-drop acceptance confirm, orphan and repo-access banners. |
 | `task-detail/` | Hero, diagnostics, recommendations, execution profile with the agent picker, run controls and scheduling, decision packet, live run strip, agent logs, timeline (Lexical composer with @mention autocomplete, loaded lazily behind a same-size stand-in that keeps what was typed, ruling 300; sliced newest-first), attachments panel and lightbox, the Sources panel (`sources-panel.tsx`, ruling 317), side panels (GitHub trace, current state, permissions), accept/release/archive/move-back confirms (move-back asks why, ruling 47), delivery and completion toasts, continuity recovery panel, plus the per-person run principal every run control answers from (`run-principal-view.ts`, ruling 137). The page itself is composition only (ruling 13(b)): its posts, each with its fetcher, toast and confirm, are hooks in `task-detail-actions.tsx`, what it reads off its props is pure functions in `task-detail-derive.ts`, and the decision region, the acceptance ceremony (`task-detail-regions.tsx`) and the main column (`task-main-column.tsx`) are hook-free components that each take one slot of its markup. |
 | `runtime/` | Run panels (live strip, log console, raw view), the run-log console's store and hook (`run-log-store.ts`, `use-run-log-stream.ts`: lines outside React state, frames from the layout's live stream, ruling 11), the incremental console fold (`console-fold.ts`), the readable live step, log noise filter and clock helpers. |
@@ -138,7 +138,7 @@ the route table is `app/routes.ts`.
 Also under `features/`, five copy and behaviour pins: `copy-ban.test.ts` (the "govern*"
 word is banned from rendered copy), `retired-vocabulary.test.tsx` ("primary specialist"
 and friends), `rebase-advice.test.ts` (Viberr never tells anyone to rebase, ruling 230),
-`shortcut-glyph.test.ts` (no literal ⌘, ruling 321) and `toast-honesty.test.ts` (a
+`shortcut-glyph.test.ts` (no literal ⌘, ruling 319) and `toast-honesty.test.ts` (a
 failure toast never renders the success tick).
 
 ## 5. `app/ui/` primitives
@@ -158,9 +158,9 @@ numbers and levels by severity, in the grammar's own chunk, ruling 317), `mentio
 `confirm-dialog`, `use-dialog` (native `<dialog>` contract: Escape, backdrop click, focus
 restore; `commit` runs a primary action and then the same exit, ruling 287), `copy-glyph`
 (`GlyphSwap`: a glyph that trades with its control's state cross-fades in place; `CopyGlyph` is
-its copy case, ruling 284), `use-fresh-line` (a line animates only once it replaces the one first
-painted, ruling 284), `live-pose` (a dialog closed mid-entrance leaves from where it is, ruling
-287), `spring` (the board drop's spring and pointer velocity, ruling 285; momentum projection
+its copy case, ruling 284(b)), `use-fresh-line` (a line animates only once it replaces the one first
+painted, ruling 284(a)), `live-pose` (a dialog closed mid-entrance leaves from where it is, ruling
+287), `spring` (the board drop's spring and pointer velocity, momentum projection
 and rubber-banding, ruling 285), `use-sheet-drag` (the dock's pull-to-dismiss sheet, ruling
 285), `use-dismiss`, `page-overlay`, `stage-menu`, `task-meta` (priority, labels, due
 date), `label-input` (its rows and label fold in `label-input-derive`), `calendar` + `date-picker`, `local-time` + `use-relative-time`

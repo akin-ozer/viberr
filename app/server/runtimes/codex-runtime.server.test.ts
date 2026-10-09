@@ -2146,7 +2146,7 @@ describe("codex run marker and settle sweep (ruling 142)", () => {
  * does not), and the server table reaches the CLI in name order.
  */
 describe("ruling 169/170: the joined prompt, the compaction keys and sorted servers", () => {
-  it("joins a prompt split into developer_instructions and sets the specialist's summarizer prompt (no limit since ruling 174)", async () => {
+  it("joins a prompt split into developer_instructions and sets the specialist's summarizer prompt (no limit, ruling 174)", async () => {
     const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
     createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
       { ...SPEC, systemPrompt: { static: ["# Persona\n"], dynamic: ["# This task\n"] } },

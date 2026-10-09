@@ -339,7 +339,7 @@ function LiveTurnStep({ turn, runtime }: { turn: ConversationTurnState; runtime:
 /**
  * The open conversation's EXECUTION, on this surface: the task page's two
  * runtime panels, fed by the same projection (`view.runtime`, asked for the
- * ruling-247 scope a controller run is stored under).
+ * ruling-251 scope a controller run is stored under).
  *
  * - The **Live run** strip while a turn is working: what the controller is
  *   doing (its phase and last tool step), elapsed from the run's own start,
@@ -452,9 +452,9 @@ function ConversationRuntime({
         </div>
       )}
       {/* D6: stopping a turn discards what it was about to apply, which is
-          ruling 278's destructive class, so the commit keeps the shared
-          `danger` default. Ruling 278 puts the same red on the trigger: the
-          shared `btn ghost sm danger` in `LiveRunPanel`. */}
+          ruling 278(a)'s destructive class, so the commit keeps the shared
+          `danger` default and the trigger carries the same red: the shared
+          `btn ghost sm danger` in `LiveRunPanel`. */}
       {confirmInterrupt && (
         <ConfirmDialog
           screenLabel="Interrupt turn dialog"
@@ -644,9 +644,9 @@ function ConversationList({ view, csrf }: { view: ControllerSurfaceView; csrf: s
 }
 
 /**
- * Ruling 278: what deleting a conversation does, said before it is done. It
- * is permanent, so the commit keeps the shared `danger` (ruling 278), and the
- * sentence names whose it is when it is not the reader's own.
+ * Ruling 278(c): what deleting a conversation does, said before it is done. It
+ * is permanent, so the commit keeps the shared `danger`, and the sentence
+ * names whose it is when it is not the reader's own.
  */
 function DeleteConversationConfirm({
   conversation: c,
@@ -699,7 +699,7 @@ function Transcript({
   restoreDraft,
 }: {
   view: ControllerSurfaceView;
-  /** Ruling 321: ruling 319's examples, on the blank transcript only. */
+  /** Ruling 319's examples, on the blank transcript only. */
   examples?: ControllerExample[];
   examplesDisabled?: boolean;
   onExample?: (text: string) => void;
@@ -711,7 +711,7 @@ function Transcript({
   // Ruling 284: a reply that lands while the transcript is up enters the way
   // it does in the dock; history never animates.
   const fresh = useFreshMessageIds(view.messages, view.conversation?.id ?? null);
-  // Ruling 321: scroll the TRANSCRIPT, never the page. This used to be
+  // Ruling 320: scroll the TRANSCRIPT, never the page. This used to be
   // `scrollIntoView` on an end marker, which scrolls every scrollable
   // ancestor too: on a phone the page itself jumped to the bottom of a
   // 12,625px conversation, past the header, the thread switcher and the
@@ -759,9 +759,9 @@ function Transcript({
             resources, agents. Everything runs with your own permissions, and
             refusals say why.
           </p>
-          {/* Ruling 319 as the dock has it: clicking one SENDS it. Ruling 319:
-              not while the viewer cannot send at all; three suggestions at
-              half opacity were a fourth way of saying "not connected". */}
+          {/* Ruling 319 as the dock has it: clicking one SENDS it, and not
+              while the viewer cannot send at all; three suggestions at half
+              opacity were a fourth way of saying "not connected". */}
           {examples.length > 0 && onExample && view.available && (
             <ControllerExampleList examples={examples} disabled={examplesDisabled} onSend={onExample} />
           )}
@@ -841,7 +841,7 @@ function Composer({
       restoreDraft.current = null;
     };
   }, [restoreDraft]);
-  // Ruling 321: the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // Ruling 319: the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55's rule, which P13-D-39 applied to the comment
   // composer and this one missed).
   const sendHint = useModifierHint("↵");

@@ -583,7 +583,7 @@ export async function action({ request }: Route.ActionArgs) {
 
       // ------------------------------------------------- agent resources
       case "controller-save": {
-        // Ruling 247: only org admins modify the controller itself (this whole
+        // Ruling 270: only org admins modify the controller itself (this whole
         // action is admin-gated above).
         const splitNames = (raw: string) =>
           raw

@@ -102,7 +102,7 @@ describe("LiveRunPanel", () => {
     expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
-  it("ruling 321: the Elapsed clock's digits land well inside its one-second tick", () => {
+  it("ruling 311: the Elapsed clock's digits land well inside its one-second tick", () => {
     // number-flow's own roll is a 900 ms spring, so the seconds were mid-roll
     // nine tenths of every second: two glyphs half in view, read as "03:1"
     // (owner's screenshot, 2026-09-27). A roll that ends inside half a tick
@@ -202,7 +202,7 @@ describe("LiveRunPanel", () => {
     expect(container.querySelector(".run-phase .step")?.textContent).toBe(
       "Cloning acme/app",
     );
-    // Ruling 313 (F40-33): phase and step sit in the text column the sheet
+    // Ruling 311 (F40-33): phase and step sit in the text column the sheet
     // lets shrink (`.run-phase-text { min-width: 0 }`, app.css.test.ts), so a
     // long step cuts at the strip's edge. CANARY: drop the class.
     const column = container.querySelector(".run-phase > .run-phase-text")!;
@@ -252,8 +252,8 @@ describe("LiveRunPanel", () => {
     );
     expect(queryByText("Interrupt")).toBeNull();
     rerender(<LiveRunPanel runtime={[mkRun({})]} onViewLogs={() => {}} onInterrupt={onInterrupt} canInterrupt interrupting={false} />);
-    // Ruling 278: a stop discards the work in flight, so this trigger wears
-    // ruling 278's red label like the confirm it opens — and its sibling
+    // Ruling 278(a): a stop discards the work in flight, so this trigger wears
+    // the red label like the confirm it opens — and its sibling
     // "View logs", which takes nothing away, stays neutral. Canary: drop
     // `danger` from the class and the row holds no danger control at all.
     const reds = container.querySelectorAll(".run-actions .btn.danger");
@@ -1278,10 +1278,10 @@ describe("AgentPicker dismissal (shared useDismiss)", () => {
 });
 
 /**
- * Ruling 313 (F40-34): the stream picker says whose console is shown, and
+ * Ruling 311 (F40-34): the stream picker says whose console is shown, and
  * only a deliberate choice switches it.
  */
-describe("ruling 313: the agent log stream picker", () => {
+describe("ruling 311: the agent log stream picker", () => {
   const op = mkRun({ id: "op", op: true, who: { kind: "agent", name: "Operator" }, state: "idle", lifecycle: "finished" });
   const dev = mkRun({ id: "primary", who: { kind: "agent", backend: "claude", name: "Platform Engineer", role: "developer" }, state: "idle", lifecycle: "finished" });
   const rev = mkRun({ id: "c0", kind: "reviewer", who: { kind: "agent", backend: "claude", name: "Site Reviewer", role: "reviewer" }, state: "idle", lifecycle: "finished" });

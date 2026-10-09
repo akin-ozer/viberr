@@ -208,7 +208,7 @@ export interface SetTaskDependenciesResult {
  * settles `waiting: "none"` when nothing else is pending (the task owes nobody
  * anything while it waits, ruling 55); an emptied list clears a recorded
  * `heldAtStage`. When a NON-operator write empties a previously non-empty
- * list, that write IS the release (ruling 55): the release note is the
+ * list, that write IS the release (ruling 57): the release note is the
  * one note that lands, through the same two halves the engine uses. A
  * non-operator write that leaves only done entries releases the task too
  * (ruling 57), through the engine's own `releaseTask`.
@@ -357,7 +357,7 @@ export async function setTaskDependencies(
 // --------------------------------------------------------------- release
 
 /**
- * The frontmatter half of a release (ruling 55): the list is cleared, a
+ * The frontmatter half of a release (ruling 57): the list is cleared, a
  * recorded `heldAtStage` with it, and a STORED `blocked` readiness is lifted
  * to `ready` (the derived floor lifts by itself on reproject; the stored
  * value would otherwise keep the task red). Returns the entries cleared.
@@ -512,7 +512,7 @@ async function drainQueuedQuestions(
   });
   if (taken.length === 0) return;
   // Dynamic, like every other reach into the task-action modules from this
-  // module (ruling 70).
+  // module (ruling 13).
   const { OPERATOR_TASK_ACTOR } = await import("./task-action-core.server");
   const { REVIEW_DEADLOCK_QUESTION } = await import("./review-deadlock.server");
   const startAgentRun =
@@ -527,11 +527,11 @@ async function drainQueuedQuestions(
         directive: question.directive,
         directiveFrom: question.decidedByLabel,
       };
-      // Ruling 66: this is ruling 66's DEFERRED half of the same dispatch
-      // `packet-resolution` makes when the task is not held, and ruling 87 patched
-      // only the immediate one — so a deadlock question put after a hold
-      // cleared kept the verdict channel the immediate one had lost. A queued
-      // question is the same question; it withholds the same way.
+      // Ruling 66: this is the DEFERRED half of the same dispatch
+      // `packet-resolution` makes when the task is not held. A queued question
+      // is the same question, so it withholds its verdict the same way (ruling
+      // 87); a fix to the immediate half alone once left a deadlock question
+      // put after a hold cleared with the verdict channel.
       if (question.directive === REVIEW_DEADLOCK_QUESTION) run.withholdVerdict = true;
       await startAgentRun(db, run, OPERATOR_TASK_ACTOR, opCtx);
     } catch (error) {
@@ -572,7 +572,7 @@ const DEPENDENCY_RELEASE_FROM: ActorRender = {
 };
 
 /**
- * Release ONE task when every entry it waits on is done (ruling 55).
+ * Release ONE task when every entry it waits on is done (ruling 57).
  * Idempotent and convergent: an empty list has nothing to release, an
  * unsatisfied list is left alone, and a satisfied one goes through the same
  * two halves a person's clear does. Returns true when a release happened.
@@ -678,10 +678,9 @@ interface DependencyRunnerHost {
 /**
  * Boot: release every held task whose wait is satisfied, once and then every
  * minute, so a hand edit, a rescan or a restart the write hooks never saw
- * still releases within a minute (ruling 55). The goal runner of ruling 273
- * ran this sweep on its tick; ruling 273 retired the chains and kept the
- * sweep. Idempotent; the timer is unref'd so it never blocks exit, and a tick
- * still running when the next is due is not overlapped.
+ * still releases within a minute (ruling 57). Idempotent; the timer is
+ * unref'd so it never blocks exit, and a tick still running when the next is
+ * due is not overlapped.
  */
 export function startDependencyRunner(db: DatabaseSync, ctx: TaskActionContext = {}): void {
   // SAFETY: registry symbol under a viberr-namespaced name; only this module
@@ -735,7 +734,7 @@ const DEAD_NOTE_TITLE = "Waiting on work that cannot complete";
 
 /**
  * A dependency that can never complete (its task was archived) does not
- * release the dependent (ruling 55): it is noted ONCE on the dependent's
+ * release the dependent (ruling 57): it is noted ONCE on the dependent's
  * timeline, the owner and supervisors are told once, and the task is left
  * `waiting: human`, because a person owes the list an edit. The derived
  * `blocked` readiness stays, and the entry renders as "archived" until they

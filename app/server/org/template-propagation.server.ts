@@ -88,8 +88,8 @@ export function resourceDrift(
 }
 
 /** Every grant named in a drift half, rendered (`MCP server context7`). Its one
- *  home is the client-safe `agent-types.ts` since ruling 326: the Agents
- *  page's confirm names the same grants before the press. */
+ *  home is the client-safe `agent-types.ts`, because the Agents page's confirm
+ *  names the same grants before the press (ruling 326). */
 export { describeDriftLists };
 
 export interface TemplateCopyDrift {

@@ -121,7 +121,7 @@ export interface BackendRuns {
 /**
  * Ruling 35: what one backend's runs are weighed in. Cost where the backend
  * reported one at all, else tokens, the figure every backend reports. Read off
- * the rows, never off a list of which backend prices its runs (ruling 148): a
+ * the rows, never off a list of which backend prices its runs: a
  * Codex that starts reporting a cost is weighed in it the day it does.
  */
 export type RunMeasure = "cost" | "tokens";
@@ -777,21 +777,22 @@ export function oversightSummary(
   );
   const clearTasks = active.length - unclearTasks.length;
 
-  // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
-  // or a recorded PR. A branch alone is not a delivery — ruling 228 allocates
-  // the name at first dispatch, before any work exists (ruling 37, U34-9).
+  // 2. Key↔branch↔PR traceability over DELIVERED tasks (ruling 37): a
+  // delivered revision or a recorded PR. A branch alone is not a delivery —
+  // ruling 228 allocates the name at first dispatch, before any work exists
+  // (U34-9).
   //
-  // Ruling 37 (F39-34): a delivery that was never commit-shaped has no branch
-  // and no PR to carry, so counting it here states a demand that can NEVER be
-  // met — on finished work, in a metric whose whole point (ruling 37) is to
-  // name exceptions a person can act on. Live: ax-clone AX-12 delivered an
+  // Less `commitless` deliveries (F39-34): a delivery that was never
+  // commit-shaped has no branch and no PR to carry, so counting it here states
+  // a demand that can NEVER be met — on finished work, in a metric whose whole
+  // point is to name exceptions a person can act on. Live: ax-clone AX-12 delivered an
   // upstream-fidelity REPORT as 20 attachments, `noChanges: true`, zero
   // commits, force-accepted and Done; Insights read its `workRevision`, found
   // no PR, and reported "18 of 19 delivered tasks carry branch + PR" naming
-  // AX-12 as the one that does not. Ruling 235 settled that a report is
-  // delivered work and ruling 237 dropped the same task's "behind main" pill
-  // on the same reasoning, with the same predicate — terminal stage, no PR, no
-  // commits — which is reused here rather than re-derived. A task that DID
+  // AX-12 as the one that does not. A report is delivered work (ruling 81),
+  // and the branch pill reads `no_branch` for the same task (ruling 237) on
+  // the same predicate — terminal stage, no PR, no commits — which is reused
+  // here rather than re-derived. A task that DID
   // commit and never opened a PR is still untraceable and still counted.
   const commitless = (t: z.infer<typeof govTaskSchema>): boolean => {
     const terminal = roles.get(t.project_slug)?.terminalId ?? null;
@@ -937,7 +938,7 @@ function namedKeys(rows: readonly { project_slug: string; task_key: string }[]):
 }
 
 /**
- * Ruling 172: the fresh start `resumeRun` records instead of a replay, in the
+ * Ruling 173: the fresh start `resumeRun` records instead of a replay, in the
  * run's start audit (`continuityReset`). Typed against the service's own
  * reason list, so a rename there fails here.
  */
@@ -954,8 +955,8 @@ const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossRe
  * write, reads per run, the peak prompt's spread), resumes by idle time (the
  * Codex retention probe, and the check on every TTL ruling 173 assumes) and the
  * operator bursts the plan said to count before building a gate. All of it is
- * read off rows the sink already writes, so an instance's history since ruling
- * 36 answers at once.
+ * read off rows the sink already writes, so an instance's existing history
+ * answers at once.
  */
 function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
   const { clause, params, and } = scope(filter);
@@ -1086,7 +1087,7 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
  * row is keyed by the kind the EARLIER run billed: its writes are what the
  * resume reads, and ruling 173 takes the TTL from it. Only resumes whose first
  * call landed are counted; the set-aside column counts the fresh starts
- * ruling 173 made instead of a replay, from their start audit.
+ * made instead of a replay, from their start audit.
  */
 function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
   const { params, and } = scope(filter);
@@ -1341,7 +1342,7 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
   );
 
   // Ruling 35: the backend is weighed in cost when any of its runs reported
-  // one. Read off the rows (ruling 148): which backend prices its runs is a
+  // one. Read off the rows: which backend prices its runs is a
   // fact about the data, not a list in the source.
   const measure: RunMeasure = totals.costed_runs > 0 ? "cost" : "tokens";
   const coordination = coordinationShare(db, filter, measure);
@@ -1413,7 +1414,7 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
           )
           .all(...params),
       )
-      // Ruling 247: controller turns carry project_slug "" (instance scope) —
+      // Ruling 251: controller turns carry project_slug "" (instance scope) —
       // label them honestly instead of rendering a blank bar.
       .map((r) => {
         const label = r.label === "" ? "controller (instance)" : (r.label ?? "unknown");
@@ -1551,7 +1552,7 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
     // earns its runs". A task key is only unique inside its project, so an
     // unscoped read labels each row with the project it belongs to.
     // U39-22: a controller turn's `task_key` is its CONVERSATION id and its
-    // project is '' (ruling 247), so every turn read as a task named
+    // project is '' (ruling 251), so every turn read as a task named
     // "/cnv_tjVMn13JkW-0". They are one row, named for what they are.
     byTask: group(
       `CASE WHEN kind = 'controller' THEN 'controller conversations' ELSE ${

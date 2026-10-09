@@ -29,9 +29,9 @@ import type { CapSelection } from "./create-profile-modal";
  */
 
 /** The capability rows, their defaults and the modes a row offers, for the
- *  profile's kind. R7-5: the specialist picker offers 3 honest modes
- *  (Allowed/Human-only/Off); the operator keeps all 4 (`recommend` is real for
- *  the operator only). */
+ *  profile's kind. The specialist picker offers 3 honest modes (`MODE_LABEL`:
+ *  Acts directly, Human-only, Off; ruling 298); the operator keeps all 4
+ *  (`recommend` is real for the operator only). */
 export function capabilityPolicyFor(isOperator: boolean): {
   capCatalog: readonly ModalCapGroup[];
   capDefaults: Readonly<CapSelection>;

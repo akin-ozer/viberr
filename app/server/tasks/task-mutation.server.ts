@@ -127,13 +127,13 @@ export interface TaskMutationContext {
      * Ruling 121 (F39-33): this drive CARRIED OUT at least one action (an
      * `outcome: "done"`, or a packet it opened, ruling 118), whatever effect it
      * had: a Codex plan step or a Claude tool call alike, both stamped by
-     * `noteCarriedOutAction` (ruling 121).
+     * `noteCarriedOutAction`.
      *
      * The settle-time "deliberate hold" verdict used to be reached by
-     * enumerating effects, and the list kept turning out to be short: ruling
-     * 120 added a transition that landed elsewhere, ruling 121 added
-     * delivery ("a drive whose single action was `deliver_for_review` was
-     * called a deliberate hold"), ruling 120 added the wholly-refused plan.
+     * enumerating effects, and the list kept turning out to be short: a
+     * transition that landed elsewhere, then a delivery ("a drive whose single
+     * action was `deliver_for_review` was called a deliberate hold"), then the
+     * wholly-refused plan.
      * Live on ax-clone AX-18 it happened a fourth time, and this time Viberr
      * was punishing an operator for following Viberr's own instruction: the
      * transition was refused with "Open the conflict packet
@@ -164,14 +164,14 @@ export interface TaskMutationContext {
      * automatic retry can CARRY them instead of telling the operator to go
      * and read them.
      *
-     * Ruling 201 settled this shape for agents — an instruction that delegates
+     * Ruling 201 holds the same for agents — an instruction that delegates
      * reading costs a run — and the plan-refused nudge was committing it a
      * level up, against a reader whose own timeline window clamps entries and
      * whose attention is the thing being spent.
      */
     refusedPlanSteps?: { tool: string; message: string }[];
     /**
-     * Ruling 121 on Claude (ruling 121): each governed call of a CLAUDE drive
+     * Ruling 121 on Claude: each governed call of a CLAUDE drive
      * that Viberr refused (`planRefusalOf`), in order, recorded by
      * `noteRefusedCall` from the toolkit's reply. Its one reader is the
      * settle's hold note: a nudged drive that carried out nothing and was

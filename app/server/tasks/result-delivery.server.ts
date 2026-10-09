@@ -7,7 +7,7 @@
  * changes, and where" and reads the repository first, and its delivery rule
  * delivers whatever the deliverer committed. Live on aws-cost-calculator, the
  * CALC-4 pilot estimate was committed under `estimates/CALC-4/` and delivered
- * as PR #4 (its goal, written before ruling 268, said "on the task branch"),
+ * as PR #4 (its goal said "on the task branch"),
  * so accepting the estimate would have merged it into the repository.
  *
  * This is the rules' one home. The operator's turn prompt carries both
