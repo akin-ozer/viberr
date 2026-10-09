@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -165,6 +166,35 @@ function bench(files: Record<string, string>): Bench {
       });
     },
   };
+}
+
+/** The loopback servers a test stands in for the web with, closed with the
+ *  file. */
+const sites: Server[] = [];
+afterAll(() => {
+  for (const server of sites) {
+    server.closeAllConnections();
+    server.close();
+  }
+});
+
+/** A site on a loopback port of its own, serving `files` by path. `{origin}`
+ *  in a file is the site's own origin, which a page cannot know until its
+ *  server is up. `close` takes the site down, so nothing answers there. */
+function site(files: Record<string, string>): Promise<{ origin: string; close(): Promise<void> }> {
+  return new Promise((resolve) => {
+    let origin = "";
+    const server = createServer((req, res) => {
+      const body = files[(req.url ?? "/").split("?")[0] ?? "/"];
+      res.writeHead(body === undefined ? 404 : 200, { "content-type": "text/html; charset=utf-8" });
+      res.end(body === undefined ? "not found" : body.replaceAll("{origin}", origin));
+    });
+    sites.push(server);
+    server.listen(0, "127.0.0.1", () => {
+      origin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(server.address()).port}`;
+      resolve({ origin, close: () => new Promise((closed) => server.close(() => closed())) });
+    });
+  });
 }
 
 /** A PNG's own width and height, from its header. */
@@ -895,5 +925,120 @@ describe("the page capture's renderer child (ruling 194)", () => {
     );
     // Refused whole, before any browser is started.
     expect(b.browser.launches()).toEqual([]);
+  });
+});
+
+describe("a page on the web, pictured by the renderer child (ruling 327)", () => {
+  it("opens a page on the web at its own address in a browser with the network open, pictures it once it has gone quiet, and reports nothing as asked of the network or missing", async () => {
+    const other = await site({ "/logo.png": "the logo" });
+    const reference = await site({
+      // Three requests after the load event, 200 ms apart: a page that goes
+      // on fetching once it has loaded.
+      "/": `<p>fake-height:9000 fake-trickle:3</p><img src="${other.origin}/logo.png"><img src="/hero.png"><img src="/gone.png">`,
+      "/hero.png": "the hero",
+    });
+    const b = bench({});
+    const report = await b.run({
+      pages: [],
+      web: [{ file: "the reference", url: `${reference.origin}/` }],
+      views: [{ ...DESKTOP, whole: true, stretches: 2 }, PHONE, { ...DESKTOP, id: "top", moving: true }],
+    });
+    // The label it was given, and nothing of what a task page reports: what
+    // a site asks the network for is its own business.
+    expect(report.pages[0]).toMatchObject({ file: "the reference", error: null, asked: [], askedCount: 0, missing: [] });
+    expect(report.pages[0]!.shots.map((shot) => [shot.file, shot.from, shot.height, shot.cut])).toEqual([
+      ["1-desktop.png", 0, 4800, false],
+      ["1-desktop-s2.png", 4800, 4200, false],
+      ["1-phone.png", 0, 5064, true],
+      ["1-top-m1.png", 0, 800, true],
+      ["1-top-m2.png", 0, 800, true],
+      ["1-top-m3.png", 0, 800, true],
+    ]);
+    // At its own address, never through the page server, and what it draws
+    // from another host is fetched: the network is open to it. CANARY: start
+    // a web page's browser with the task pages' flags and the stand-in, like
+    // Chromium behind the dead proxy, fetches nothing from the other host
+    // (`status: null`).
+    const [first] = b.browser.pages();
+    expect(b.browser.pages().map((page) => page.url)).toEqual(Array.from({ length: 3 }, () => `${reference.origin}/`));
+    expect(first!.resources).toEqual([
+      { src: `${other.origin}/logo.png`, status: 200, bytes: 8 },
+      { src: "/hero.png", status: 200, bytes: 8 },
+      { src: "/gone.png", status: 404, bytes: 9 },
+    ]);
+    const [launch] = b.browser.launches();
+    expect(launch!.argv.filter((arg) => arg.startsWith("--proxy"))).toEqual([]);
+    // Every other flag stays.
+    expect(launch!.argv).toEqual(
+      expect.arrayContaining([
+        "--headless=new",
+        "--remote-debugging-pipe",
+        "--no-sandbox",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--password-store=basic",
+        "--use-mock-keychain",
+      ]),
+    );
+    // Pictured only once the page had asked for nothing for half a second.
+    // CANARY: walk a web page straight after its load event, as a task page
+    // is, and its first picture is taken with all three late requests still
+    // to come.
+    for (const shot of b.browser.shots().slice(0, 3)) {
+      expect(shot.late).toBe(0);
+      expect(shot.quietMs).toBeGreaterThanOrEqual(500);
+    }
+    // But a moving view's frames are due from the load event, so nothing is
+    // waited for ahead of them. CANARY: wait for quiet there too and the
+    // first frame comes over a second after the load.
+    expect(report.pages[0]!.shots[3]!.moment).toBeLessThan(1000);
+  });
+
+  it("says in the browser's own words when a page on the web does not load, refuses one that ends up off the web, and holds a press to the site the page is on", async () => {
+    const reference = await site({
+      // A site may send its visitor on to another address of the web.
+      "/moved": `<p>fake-lands:"https://www.example.com/landing"</p>`,
+      // Or to something that is no web page at all.
+      "/broken": `<p>fake-lands:"chrome-error://chromewebdata/"</p>`,
+    });
+    const gone = await site({});
+    await gone.close();
+    const b = bench({});
+    const web = (file: string, url: string): WebPage => ({ file, url });
+    const pages = await b.run({
+      pages: [],
+      web: [web("gone", `${gone.origin}/`), web("moved", `${reference.origin}/moved`), web("broken", `${reference.origin}/broken`)],
+      views: [DESKTOP],
+    });
+    // CANARY: hold a web page to the page server's origin, as a task page is
+    // held, and "moved" is refused for going where its own site sent it.
+    expect(pages.pages.map((page) => [page.file, page.shots.length, page.error])).toEqual([
+      ["gone", 0, "the page did not load (net::ERR_CONNECTION_REFUSED)"],
+      ["moved", 1, null],
+      ["broken", 0, "the page sent the browser to an address that is not on the web"],
+    ]);
+
+    // A press may move within the site the page is on, and one that leaves
+    // it is the act's own failure, as a press off the page server is on a
+    // task page. CANARY: hold a press on a web page to the page server's
+    // origin and "Docs", which stays on its site, is refused too.
+    const linked = await site({
+      "/": '<p>fake-find:{"Docs":[40,20,"link","{origin}/docs"],"Partner":[90,20,"link","https://partner.example.com/"]}</p>',
+    });
+    const acted = await b.run({
+      pages: [],
+      web: [web("linked", `${linked.origin}/`)],
+      views: [
+        { ...DESKTOP, id: "docs", act: { press: "Docs" } },
+        { ...DESKTOP, id: "partner", act: { press: "Partner" } },
+      ],
+    });
+    expect(acted.pages[0]).toMatchObject({
+      error: null,
+      acts: [
+        { view: "docs", done: 'pressed link "Docs"', error: null },
+        { view: "partner", done: null, error: "the press sent the browser to another address" },
+      ],
+    });
+    expect(acted.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-docs-a.png"]);
   });
 });

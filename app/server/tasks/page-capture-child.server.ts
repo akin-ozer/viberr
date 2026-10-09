@@ -69,6 +69,10 @@ import { z } from "zod";
  *    on one, with the key and pointer events a reader's own hands send, and
  *    pictures the one screen the window then shows. An act that cannot be
  *    done is said in the report and costs the page nothing else.
+ *  - **Pictures a page on the web the same ways** (ruling 327, a page of
+ *    kind `web`): opened at its own address in a browser with the network
+ *    open, once it has asked for nothing for half a second. A job holds such
+ *    pages or task pages, never both, so no task page meets the open network.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -297,6 +301,11 @@ const ACT_NAME_MAX = 40;
  *  ring's or a hover's transition, and after a press a menu's or a panel's. */
 const AFTER_POINTER_MS = 400;
 const AFTER_PRESS_MS = 700;
+/** A page on the web is pictured once it has asked the network for nothing
+ *  for the first of these, counted from its load event at the earliest, and
+ *  is never waited on for longer than the second. */
+const QUIET_MS = 500;
+const QUIET_MAX_MS = 5_000;
 /** The longest reason an act carries: the name asked for, and every control
  *  the page named in its place. */
 const ACT_ERROR_MAX = SENTENCE_MAX + ACT_NAMES_MAX * (ACT_NAME_MAX + 4);
@@ -728,10 +737,15 @@ class Browser {
   }
 }
 
-/** The flags one page's browser starts with. Only the page server is
- *  reachable: every other request, loopback included, goes to a closed proxy
- *  port. `--no-sandbox` for the reason the browser mount gives. */
-function browserArgs(profile: string, port: number): string[] {
+/** The flags one page's browser starts with. For a task page only the page
+ *  server is reachable: every other request, loopback included, goes to a
+ *  closed proxy port. A page on the web (ruling 327) is opened with the
+ *  network open, so its browser starts without those two flags and with
+ *  every other one; a job never holds both kinds of page, so the open browser
+ *  is never a task page's. `--no-sandbox` for the reason the browser mount
+ *  gives. */
+function browserArgs(profile: string, port: number, open: boolean): string[] {
+  const closed = open ? [] : ["--proxy-server=http://127.0.0.1:9", `--proxy-bypass-list=<-loopback>;127.0.0.1:${port}`];
   return [
     "--headless=new",
     "--remote-debugging-pipe",
@@ -749,8 +763,7 @@ function browserArgs(profile: string, port: number): string[] {
     "--mute-audio",
     "--hide-scrollbars",
     "--force-color-profile=srgb",
-    "--proxy-server=http://127.0.0.1:9",
-    `--proxy-bypass-list=<-loopback>;127.0.0.1:${port}`,
+    ...closed,
     // A peer connection would otherwise send UDP past the proxy.
     "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     // No keyring: the cookie store asks the system's for a key before the
@@ -1041,8 +1054,18 @@ interface ViewContext {
   browser: Browser;
   sessionId: string;
   url: string;
-  /** The page server's origin: where a page must still be when pictured. */
+  /** The page server's origin: where a task page must still be when
+   *  pictured. */
   origin: string;
+  /** True for a page on the web (ruling 327): opened at its own address,
+   *  with the network open, and held to no one address. */
+  web: boolean;
+  /** The origin the loaded page is on, which a press must not leave: the
+   *  page server's for a task page, and for a page on the web wherever its
+   *  address led. */
+  site: string;
+  /** When the page last asked the network for anything. */
+  traffic: { last: number };
   out: string;
   maxBytes: number;
   pictures: Pictures;
@@ -1092,8 +1115,9 @@ const MOVE_WAIT_MS = 2_000;
 /**
  * Walk the page, and say where it ended up. A page that sends the browser on
  * (a redirect stub, a script that sets `location`) ends the walk under it, so
- * the walk is taken again on the document that loaded. One that left the page
- * server is not pictured: what would be drawn is the browser's own error page.
+ * the walk is taken again on the document that loaded. A task page that left
+ * the page server is not pictured: what would be drawn is the browser's own
+ * error page.
  */
 async function walkPage(ctx: ViewContext, view: JobView): Promise<void> {
   const { browser, sessionId } = ctx;
@@ -1117,7 +1141,15 @@ async function walkPage(ctx: ViewContext, view: JobView): Promise<void> {
       continue;
     }
     const address = walked.result?.value;
-    if (address !== undefined && !address.startsWith(`${ctx.origin}/`)) {
+    if (address === undefined) return;
+    if (ctx.web) {
+      // A site may send its visitor on, so a page on the web is held to no
+      // one address, only to the web: anything else is the browser's own
+      // page for a load that failed.
+      const landed = webAddress(address);
+      if (!landed) throw new Error("the page sent the browser to an address that is not on the web");
+      ctx.site = landed.origin;
+    } else if (!address.startsWith(`${ctx.origin}/`)) {
       throw new Error("the page sent the browser to another address, and a capture loads only the task's own files");
     }
     return;
@@ -1135,9 +1167,23 @@ function pngSize(bytes: Buffer): PictureSize | null {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
+/** Wait until a page on the web has asked the network for nothing for
+ *  `QUIET_MS`. A site goes on fetching after its load event (what it draws
+ *  from a script, a font, a picture below the fold), and a picture taken at
+ *  the event is of a page still arriving. */
+async function networkQuiet(ctx: ViewContext, loadedAt: number): Promise<void> {
+  for (;;) {
+    const quietAt = Math.max(ctx.traffic.last, loadedAt) + QUIET_MS;
+    const wait = Math.min(quietAt, loadedAt + QUIET_MAX_MS) - Date.now();
+    if (wait <= 0) return;
+    await pause(wait);
+  }
+}
+
 /** Open the page at a view's viewport and device scale and wait for its load
- *  event. Resolves with when the event fired, by this process's clock. */
-async function openView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<number> {
+ *  event, and for a page on the web to go quiet after it unless `settle` is
+ *  false. Resolves with when the event fired, by this process's clock. */
+async function openView(ctx: ViewContext, view: JobView, deviceScaleFactor: number, settle = true): Promise<number> {
   const { browser, sessionId } = ctx;
   await browser.send(
     "Emulation.setDeviceMetricsOverride",
@@ -1156,7 +1202,9 @@ async function openView(ctx: ViewContext, view: JobView, deviceScaleFactor: numb
   const navigated = navigateResultSchema.parse(await browser.send("Page.navigate", { url: ctx.url }, sessionId));
   if (navigated.errorText) throw new Error(`the page did not load (${navigated.errorText})`);
   await loaded;
-  return Date.now();
+  const loadedAt = Date.now();
+  if (ctx.web && settle) await networkQuiet(ctx, loadedAt);
+  return loadedAt;
 }
 
 type Layout = z.infer<typeof layoutSchema>;
@@ -1458,9 +1506,10 @@ async function act(ctx: ViewContext, asked: JobAct): Promise<string> {
     await pause(AFTER_PRESS_MS);
     // A link to another site leaves the page server, and what would be
     // pictured is the browser's own error page. One that moves within the
-    // page, or to another file of the task, is pictured where it led.
+    // page, or to another file of the task, is pictured where it led. A page
+    // on the web is held to the site it is on the same way.
     const screen = await screenNow(ctx);
-    if (!screen.href.startsWith(`${ctx.origin}/`)) throw new Error("the press sent the browser to another address");
+    if (!screen.href.startsWith(`${ctx.site}/`)) throw new Error("the press sent the browser to another address");
     did.push(`pressed ${control.name}`);
   }
   if (asked.hover !== undefined) {
@@ -1505,7 +1554,9 @@ async function pictureAct(ctx: ViewContext, view: JobView, asked: JobAct, file: 
  * says when it was really taken.
  */
 async function pictureMoving(ctx: ViewContext, view: JobView, files: readonly string[]): Promise<void> {
-  const loadedAt = await openView(ctx, view, 1);
+  // At the top of a page the frames are due from the load event, so a page on
+  // the web is not waited on there until it goes quiet.
+  const loadedAt = await openView(ctx, view, 1, view.from > 0);
   await askPage(ctx, FONTS_EXPRESSION, z.object({}));
   const size = pageSize(await layoutNow(ctx), view);
   if (view.from >= size.pageHeight) {
@@ -1538,48 +1589,59 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   const pictures: Pictures = { shots: [], ended: [], acts: [] };
   const { shots, ended, acts } = pictures;
   const dialogs = { count: 0 };
+  // Ruling 327: a page on the web is opened at its own address, never through
+  // the page server, so what a task page reports of the network and of the
+  // page server (asked, missing) is not its to report.
+  const web = page.kind === "web";
+  const traffic = { last: 0 };
   const report = (error: string | null): PageReport => ({
     file: page.file,
     shots,
     ended,
     acts,
     dialogs: dialogs.count,
-    asked: [...asked.hosts].slice(0, REPORT_LIST_MAX),
-    askedCount: asked.urls.size,
-    missing: server.missing(),
+    asked: web ? [] : [...asked.hosts].slice(0, REPORT_LIST_MAX),
+    askedCount: web ? 0 : asked.urls.size,
+    missing: web ? [] : server.missing(),
     error,
   });
 
   let url = server.base + encodeURIComponent(page.file);
   let setPage: string | null = null;
-  // Opened here first, by the page server's own rule: a name it would not
-  // answer (a dot name, a path), one that is gone, or a link would otherwise
-  // be pictured as the server's "not found".
-  const source = servable(page.file) ? openStored(job.root, page.file, job.names) : null;
-  if (!source) return report("the file is not there to render");
-  try {
-    if (page.kind === "markdown") {
-      if (source.size > MARKDOWN_MAX_BYTES) {
-        return report(`the markdown file is ${source.size} bytes; one of up to ${MARKDOWN_MAX_BYTES} is set as a page`);
+  if (web) {
+    const address = webAddress(page.url);
+    if (!address) return report("the page has no http or https address");
+    url = address.href;
+  } else {
+    // Opened here first, by the page server's own rule: a name it would not
+    // answer (a dot name, a path), one that is gone, or a link would otherwise
+    // be pictured as the server's "not found".
+    const source = servable(page.file) ? openStored(job.root, page.file, job.names) : null;
+    if (!source) return report("the file is not there to render");
+    try {
+      if (page.kind === "markdown") {
+        if (source.size > MARKDOWN_MAX_BYTES) {
+          return report(`the markdown file is ${source.size} bytes; one of up to ${MARKDOWN_MAX_BYTES} is set as a page`);
+        }
+        setPage = articlePage(page.file, readFileSync(source.fd, "utf8"));
+      } else if (page.kind === "svg") {
+        if (source.size > DRAWING_MAX_BYTES) {
+          return report(`the drawing is ${source.size} bytes; one of up to ${DRAWING_MAX_BYTES} is set as a page`);
+        }
+        setPage = drawingPage(page.file, readFileSync(source.fd, "utf8"));
       }
-      setPage = articlePage(page.file, readFileSync(source.fd, "utf8"));
-    } else if (page.kind === "svg") {
-      if (source.size > DRAWING_MAX_BYTES) {
-        return report(`the drawing is ${source.size} bytes; one of up to ${DRAWING_MAX_BYTES} is set as a page`);
-      }
-      setPage = drawingPage(page.file, readFileSync(source.fd, "utf8"));
+      // Served from the folder the source is in, so a name beside it still
+      // resolves to the file of that name.
+      if (setPage !== null) url = server.base + SET_PAGE_NAME;
+    } finally {
+      closeSync(source.fd);
     }
-    // Served from the folder the source is in, so a name beside it still
-    // resolves to the file of that name.
-    if (setPage !== null) url = server.base + SET_PAGE_NAME;
-  } finally {
-    closeSync(source.fd);
   }
   server.begin(setPage);
 
   const profile = path.join(job.profile, String(index + 1));
   mkdirSync(profile, { recursive: true });
-  const browser = new Browser(job.browser, browserArgs(profile, server.port));
+  const browser = new Browser(job.browser, browserArgs(profile, server.port, web));
   current = browser;
   let timer: NodeJS.Timeout | null = null;
   const expired = new Promise<never>((_, reject) => {
@@ -1596,6 +1658,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
     const sessionId = session.sessionId;
     const stop = browser.listen(sessionId, (method, params) => {
       if (method === "Network.requestWillBeSent") {
+        traffic.last = Date.now();
         const event = requestEventSchema.safeParse(params);
         if (event.success) noteRequest(asked, event.data.request.url, server.origin);
       } else if (method === "Audits.issueAdded") {
@@ -1615,7 +1678,18 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
         browser.send("Page.handleJavaScriptDialog", { accept: leaving }, sessionId).catch(() => {});
       }
     });
-    const ctx: ViewContext = { browser, sessionId, url, origin: server.origin, out: job.out, maxBytes: job.maxBytes, pictures };
+    const ctx: ViewContext = {
+      browser,
+      sessionId,
+      url,
+      origin: server.origin,
+      web,
+      site: web ? new URL(url).origin : server.origin,
+      traffic,
+      out: job.out,
+      maxBytes: job.maxBytes,
+      pictures,
+    };
     try {
       await browser.send("Page.enable", {}, sessionId);
       await browser.send("Network.enable", {}, sessionId);
