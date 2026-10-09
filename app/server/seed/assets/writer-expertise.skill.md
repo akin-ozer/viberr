@@ -20,6 +20,7 @@ A fact you state from outside (a number, a quote, a version, a date, a name, how
 - **Keep it.** Hand each source you rely on to `keep_source` with where it came from and a one-line title, as your run's workspace contract describes. Pin what moves: the commit, the tag, the date you read it. Cite the id it gives you (`S1`, `S2`) in your note beside the claim. The editor and the person check your piece against these copies, and a claim with no kept source is a defect whoever notices it.
 - **What you cannot open, you do not state.** Cut it, or say plainly that you could not confirm it and leave the decision to the person.
 - **Check that it is still true.** Notes and documentation go stale. When what you find differs from the notes, the finding goes to the person before it goes in the piece.
+- **A record that grows goes stale inside itself.** A decisions file, a changelog, release notes, an issue thread: an entry says what held on its date, and a later entry may have changed it. Before you state what holds now from one entry, search the whole record for the later entries on the same subject and read them. State what holds after the latest one that speaks to it, and cite that one. Keep the record whole, beside any cut of it you made for reading: the editor searches it.
 
 ## Code and commands
 

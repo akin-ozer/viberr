@@ -665,7 +665,11 @@ reviewer keeps while checking the work is on the task and not under that deliver
 delivery that is a revision rests on what was kept by the instant the revision was minted
 (`workRevision.createdAt`), not by the time the operator summarized it, which is after the
 reviews. The reviewers check the work's claims against these with `read_task_source`, and
-a claim with no kept source behind it reads as unsupported.
+a claim with no kept source behind it reads as unsupported. A source too long to page
+through is searched (ruling 706): `read_task_source` with `find` answers the places that
+hold a word or phrase, each with its line and the offset to read it from, which is how a
+reviewer reads a record that grows (a changelog, a decisions file) beyond the entry a
+claim cites, to the latest one on its subject.
 
 **A delivered page is pictured (ruling 691).** Once a files delivery is stamped and kept
 (ruling 597) and the completion's delivery reconcile has run, Viberr renders each page in

@@ -159,7 +159,9 @@ software to do the agents' work.
   once, their voice taken from their own writing, the page checked as its reader sees it.
   So the board's own skill and rulings hold only what is this board's: what a task returns,
   where it goes and in which format, and whose voice it is. Add an agent only for a step
-  neither of them does.
+  neither of them does. Deploy the Editor at `high` effort: on the first board that
+  compared, its review of a full piece took 4 minutes at `high`, and a review of the same
+  piece and pictures at `max` took 19 and found nothing more.
 - **When the result carries pictures somebody has to draw, add the shipped Diagrammer and
   Cover Designer** (ruling 699): `diagrammer` for its diagrams, `cover-designer` for its
   cover, each deployed at the stage where its step happens, after the piece is written and

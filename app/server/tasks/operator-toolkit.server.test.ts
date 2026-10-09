@@ -812,6 +812,28 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       name: "rds-pricing.html",
       text: "db.t3.medium $0.068 per hour",
     });
+    // Ruling 706: and searches one, as at every door. Briefed on a later
+    // entry of a 2 MB record on BLOG-7, the operator found it in three reads
+    // at guessed offsets, and only because the request named its line.
+    // CANARY: drop `args.find` on the way to the reader and a search is
+    // answered with a page of the source.
+    expect(await read({ taskKey: "VIB-2", id: "S1", find: "T3.MEDIUM  $0.068" })).toEqual({
+      id: "S1",
+      title: "The page rds-pricing.html",
+      from: "https://aws.amazon.com/rds-pricing.html",
+      find: "T3.MEDIUM $0.068",
+      found: 1,
+      hits: [{ line: 1, offset: 0, text: "db.t3.medium $0.068 per hour" }],
+    });
+    // And the operator is told so: the tool's description, and what a search
+    // lists and leaves out on the argument itself. CANARY: declare `find`
+    // here with no description.
+    const tool = tools.find((t) => t.name === "read_task_source")!;
+    expect(tool.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
+    expect(z.toJSONSchema(tool.inputSchema).properties?.find).toHaveProperty(
+      "description",
+      expect.stringContaining("A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow."),
+    );
   });
 
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {

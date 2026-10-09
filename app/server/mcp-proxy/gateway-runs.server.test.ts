@@ -597,6 +597,29 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     expect(textOf(await keeper.client.callTool({ name: "read_task_source", arguments: { id: "S1" } }))).toContain(
       "t3.medium $0.0416 per hour",
     );
+    // Ruling 706: and searches it. The arguments are parsed strictly here
+    // (ruling 296). CANARY: declare `find` on the Claude twin alone and a
+    // Codex run's search is refused as an argument the tool does not take.
+    const sought = await keeper.client.callTool({
+      name: "read_task_source",
+      arguments: { id: "S1", find: "T3.MEDIUM   $0.0416" },
+    });
+    expect(sought.isError).not.toBe(true);
+    expect(JSON.parse(textOf(sought))).toEqual({
+      id: "S1",
+      title: "AWS EC2 on-demand pricing",
+      from: "https://aws.amazon.com/ec2/pricing/on-demand/",
+      find: "T3.MEDIUM $0.0416",
+      found: 1,
+      hits: [{ line: 1, offset: 0, text: "<html>t3.medium $0.0416 per hour</html>" }],
+    });
+    // And the tool a Codex run lists says so, in the words the Claude one uses.
+    const listed = (await keeper.client.listTools()).tools.find((tool) => tool.name === "read_task_source");
+    expect(listed?.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
+    expect(Object.keys(listed?.inputSchema.properties ?? {})).toEqual(["id", "taskKey", "offset", "find"]);
+    expect(z.object({ find: z.object({ description: z.string() }) }).parse(listed?.inputSchema.properties).find.description).toContain(
+      "A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow.",
+    );
     // An argument the tool does not declare is refused, as on Claude.
     const undeclared = await keeper.client.callTool({
       name: "keep_source",

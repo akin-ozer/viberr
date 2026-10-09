@@ -270,6 +270,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 692's note of 2026-10-09: before the guide said to deploy the
+    // Editor at high effort, with what a review took at each.
+    "a9ff90ee8fc6a085586d661a8d56cccdb5e52f489027afd4f0db9d71db5bd3e7",
     // Ruling 699's third note of 2026-10-08: before the guide said to deploy
     // the two drawing agents at high effort, with what each effort took.
     "56c5a3ff8a12958bdd1b0307b5eb3f9ad9b9d31fb273dba734dc7b915a6acf53",
@@ -611,6 +614,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "d7c78f20730ef44a8e1d490cc2efbb2a1cf1cd1c5bb21a63bf8343df7ba1b17e",
   ],
   [path.join("skills", "writer-expertise", "SKILL.md")]: [
+    // Ruling 706 (2026-10-09): before the manual said a record that grows
+    // goes stale inside itself, and that the latest entry is what holds.
+    "92789f682bfe7b9bc16780687ce552ad79b729a9af4a768be5ef36b63935004f",
     // Ruling 699's second note of 2026-10-08, after the first live post:
     // before the manual kept out of the writer's note what a later picture
     // makes untrue (a count of the whole file, "no pictures").
@@ -624,6 +630,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "7f3e87f2478e5c2b798d2b45884ff95f9e62f81f25faa5cefc92161bd1166244",
   ],
   [path.join("skills", "editor-expertise", "SKILL.md")]: [
+    // Ruling 706 (2026-10-09): before the manual read a record that grows
+    // beyond the entry cited, for a later one that changes what the piece says.
+    "4db16badd8b3fccd4e2e0bcbe9a09709da677d53584de03baf77adb230a18709",
     // Ruling 699 (2026-10-08): before the manual had the Editor open every
     // picture and judge a diagram against the sources and a cover against
     // the piece.
@@ -652,6 +661,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 706 (2026-10-09): before the guardrails had a record that grows
+    // searched for a later entry on what the work states.
+    "6703e3624becd424684c32a912b403fddf5d71994023d706fdac6613d724def7",
     // Ruling 690 (2026-10-07): before the guardrails said to check a claim
     // against the source kept on the task, and that a claim with no kept
     // source is a finding.

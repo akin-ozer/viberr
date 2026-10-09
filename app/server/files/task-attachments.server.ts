@@ -32,6 +32,7 @@ import {
   storedFileName,
   taskAttachmentsDir,
 } from "./file-store-root.server";
+import { findInText, type TextFind } from "./find-in-text.server";
 import { resolveKeptDeliveryFile } from "./kept-deliveries.server";
 import { pdfToText } from "./pdf-text.server";
 import { xlsxToText } from "./xlsx-text.server";
@@ -1046,6 +1047,73 @@ export function attachmentWholeText(name: string, bytes: Buffer): string | null 
   if (IMAGE_READ_TYPES.has(ext) || bytes.length > readCap(ext)) return null;
   const whole = wholeText(name, ext, bytes, "elsewhere");
   return "unreadable" in whole ? null : whole.text;
+}
+
+/**
+ * Ruling 706: the kinds of file whose indentation does not say which line
+ * continues which, by their names. In data and markup an indent is nesting,
+ * and a search that took an indented line to continue the line above it
+ * would head every place in a printed JSON list with the list's first line.
+ * A workbook is searched as the CSV a read renders it to. A PDF's text keeps
+ * the page's layout, where an indent is a paragraph's first line or a margin.
+ */
+const INDENT_IS_NESTING = new Set([
+  ".pdf",
+  ".json",
+  ".jsonl",
+  ".ndjson",
+  ".yaml",
+  ".yml",
+  ".toml",
+  ".xml",
+  ".atom",
+  ".rss",
+  ".html",
+  ".htm",
+  ".svg",
+  ".csv",
+  ".tsv",
+  ".xlsx",
+]);
+
+/** Ruling 706: what a search of one file answers: the places that hold the
+ *  words, or a sentence saying why the file has no text to search. */
+export type AttachmentFind =
+  | (TextFind & {
+      /** Whether the file's text was cut where its rendering stopped, so the
+       *  search covered that much of it. */
+      truncated: boolean;
+      /** Ruling 676: what the text searched leaves out of the file. */
+      leftOut: string | null;
+    })
+  | UnreadableFile;
+
+/**
+ * Ruling 706: the places in one file that hold `words`, from bytes already in
+ * hand. The text searched is the text a read of the file pages
+ * (`readAttachmentContent`), so a place's `offset` is an offset a read takes:
+ * a PDF as its text, a workbook as CSV, an HTML page with its embedded files
+ * left out. `where` says where a person opens a file this cannot search.
+ *
+ * The caller hands over a file within its reader's cap: a kept source is at
+ * most `MAX_UPLOAD_BYTES`, under every cap a read applies.
+ */
+export function findInAttachmentContent(
+  name: string,
+  bytes: Buffer,
+  words: readonly string[],
+  offset: number,
+  where: string,
+): AttachmentFind {
+  const ext = path.extname(name).toLowerCase();
+  if (IMAGE_READ_TYPES.has(ext)) {
+    return { unreadable: `\`${name}\` is an image: it has no text to search. Read it without \`find\` to look at it.` };
+  }
+  const whole = wholeText(name, ext, bytes, where);
+  if ("unreadable" in whole) return whole;
+  if (offset > 0 && offset >= whole.text.length) return pastTheEnd(name, whole.text.length, offset);
+  const prose = !INDENT_IS_NESTING.has(ext);
+  return { ...findInText(whole.text, words, offset, prose), truncated: whole.truncated, leftOut: whole.leftOut };
 }
 
 /**
