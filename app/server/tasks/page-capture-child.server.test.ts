@@ -800,6 +800,62 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(stretches(past)).toEqual([["1-phone.png", 0, 5064, true]]);
   });
 
+  it("pictures a moving view's screen at three moments after it came into view, without walking the page first", async () => {
+    const b = bench({ "page.html": "<p>fake-height:3000 an entrance that plays as the page loads</p>" });
+    // The top of the page comes into view when it loads, a screen further
+    // down when the window is sent there.
+    const report = await b.run({
+      pages: ["page.html"],
+      views: [
+        { ...DESKTOP, moving: true },
+        { ...PHONE, from: 1200, moving: true },
+      ],
+    });
+    expect(report.pages[0]).toMatchObject({ error: null, ended: [] });
+    const frames = report.pages[0]!.shots;
+    // One screen each, at `from`, in a file named for the frame.
+    expect(frames.map((shot) => [shot.file, shot.from, shot.height, shot.cut])).toEqual([
+      ["1-desktop-m1.png", 0, 800, true],
+      ["1-desktop-m2.png", 0, 800, true],
+      ["1-desktop-m3.png", 0, 800, true],
+      ["1-phone-m1.png", 1200, 844, true],
+      ["1-phone-m2.png", 1200, 844, true],
+      ["1-phone-m3.png", 1200, 844, true],
+    ]);
+    expect(b.browser.shots().map((shot) => shot.clip.y)).toEqual([0, 0, 0, 1200, 1200, 1200]);
+    // About 250, 1,000 and 3,000 ms on, each frame saying when it was taken.
+    // CANARY: take the three one after another and the last is a few ms
+    // after the first, of a page that has not moved between them.
+    for (const [first, second, third] of [frames.slice(0, 3), frames.slice(3)].map((view) => view.map((shot) => shot.moment ?? -1))) {
+      expect(first).toBeGreaterThanOrEqual(250);
+      expect(first).toBeLessThan(1000);
+      expect(second).toBeGreaterThanOrEqual(1000);
+      expect(second).toBeLessThan(3000);
+      expect(third).toBeGreaterThanOrEqual(3000);
+    }
+    // The page is not walked: a walk plays what moves on it before the first
+    // frame. Its fonts are waited for, and the window goes down in one step.
+    // CANARY: load a moving view as any other (`loadView`) and a walk comes
+    // first in each of these.
+    expect(b.browser.asks().map((asked) => asked.ask)).toEqual([
+      "fonts",
+      "screen",
+      "screen",
+      "screen",
+      "fonts",
+      "scroll",
+      "screen",
+      "screen",
+      "screen",
+    ]);
+    expect(b.browser.asks().find((asked) => asked.ask === "scroll")!.args).toEqual({ y: 1200 });
+
+    // Nothing at `from` at this width is the view's own outcome here too.
+    const past = await b.run({ pages: ["page.html"], views: [{ ...DESKTOP, from: 5000, moving: true }, PHONE] });
+    expect(past.pages[0]).toMatchObject({ error: null, ended: [{ view: "desktop", pageHeight: 3000 }] });
+    expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
+  });
+
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
     // A view is one kind of picture: a box, a whole page, an act or a moving
     // screen.

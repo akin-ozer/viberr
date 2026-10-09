@@ -61,6 +61,9 @@ import { z } from "zod";
  *    `box`): laid out in a viewport of that size and cut to it from the top
  *    left, as a PNG of exactly the box times its scale. That one is never
  *    retaken shorter: a picture of another size is not the one asked for.
+ *  - **Or pictures it while it moves** (a view with `moving`): loaded and
+ *    not walked, the screen at `from` is taken at three moments after it came
+ *    into view, so what plays as a page loads is seen playing.
  *  - **Or shows it in a state** (ruling 194, a view with `act`): after the
  *    load and the walk it presses Tab, presses a control or puts the pointer
  *    on one, with the key and pointer events a reader's own hands send, and
@@ -775,6 +778,8 @@ type PageArgs = { [key: string]: string | number | boolean };
  *  - `kind`: what a control is, in a word: its `role`, else "link" for an
  *    `a`, "button" for a button-like `input`, "field" for any other, else its
  *    tag.
+ *  - `jump`: send the window to a height in one step, whatever
+ *    `scroll-behavior` the page sets.
  */
 const PAGE_HELPERS = `
 const flat = (text) => String(text == null ? "" : text).replace(/\\s+/g, " ").trim();
@@ -812,6 +817,8 @@ const centre = (el) => {
   const box = boxes[0] || el.getBoundingClientRect();
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 };
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+const jump = (y) => window.scrollTo({ top: y, left: 0, behavior: "instant" });
 const KEPT = Symbol.for("viberr.kept");
 `;
 
@@ -903,6 +910,22 @@ const FOCUS_EXPRESSION = inPage(
 
 /** Where the window is scrolled to, and the address it is at. */
 const SCREEN_EXPRESSION = inPage("screen", {}, "return JSON.stringify({ x: window.scrollX, y: window.scrollY, href: location.href });");
+
+/** Give the page's fonts a second to arrive. A moving screen is not held
+ *  for the three a walk gives them. */
+const FONTS_EXPRESSION = inPage(
+  "fonts",
+  {},
+  `
+  try { await Promise.race([document.fonts.ready, pause(1000)]); } catch {}
+  return JSON.stringify({});
+`,
+);
+
+/** Send the window down to `y`, in the page's CSS px, in one step. */
+function scrollExpression(y: number): string {
+  return inPage("scroll", { y }, "jump(args.y); return JSON.stringify({ y: window.scrollY });");
+}
 
 const foundSchema = z.object({
   found: z.object({ x: z.number(), y: z.number(), name: z.string() }).nullable(),
@@ -1112,9 +1135,9 @@ function pngSize(bytes: Buffer): PictureSize | null {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-/** Load the page at a view's viewport and device scale, walk it, and read
- *  how it was laid out. */
-async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<z.infer<typeof layoutSchema>> {
+/** Open the page at a view's viewport and device scale and wait for its load
+ *  event. Resolves with when the event fired, by this process's clock. */
+async function openView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<number> {
   const { browser, sessionId } = ctx;
   await browser.send(
     "Emulation.setDeviceMetricsOverride",
@@ -1133,8 +1156,21 @@ async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: numb
   const navigated = navigateResultSchema.parse(await browser.send("Page.navigate", { url: ctx.url }, sessionId));
   if (navigated.errorText) throw new Error(`the page did not load (${navigated.errorText})`);
   await loaded;
+  return Date.now();
+}
+
+type Layout = z.infer<typeof layoutSchema>;
+
+async function layoutNow(ctx: ViewContext): Promise<Layout> {
+  return layoutSchema.parse(await ctx.browser.send("Page.getLayoutMetrics", {}, ctx.sessionId));
+}
+
+/** Load the page at a view's viewport and device scale, walk it, and read
+ *  how it was laid out. */
+async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<Layout> {
+  await openView(ctx, view, deviceScaleFactor);
   await walkPage(ctx, view);
-  return layoutSchema.parse(await browser.send("Page.getLayoutMetrics", {}, sessionId));
+  return layoutNow(ctx);
 }
 
 /**
@@ -1207,7 +1243,7 @@ interface PageSize {
   pageHeight: number;
 }
 
-function pageSize(layout: z.infer<typeof layoutSchema>, view: JobView): PageSize {
+function pageSize(layout: Layout, view: JobView): PageSize {
   const scale = Math.min(Math.max(layout.cssVisualViewport.scale, 0.1), 5);
   const contentHeight = Math.round(layout.cssContentSize.height * scale);
   return {
@@ -1335,7 +1371,7 @@ async function screenNow(ctx: ViewContext): Promise<z.infer<typeof screenSchema>
  */
 async function pictureScreen(ctx: ViewContext, view: JobView, file: string): Promise<Shot> {
   const { browser, sessionId } = ctx;
-  const size = pageSize(layoutSchema.parse(await browser.send("Page.getLayoutMetrics", {}, sessionId)), view);
+  const size = pageSize(await layoutNow(ctx), view);
   const screen = await screenNow(ctx);
   const shot = screenshotSchema.parse(
     await browser.send(
@@ -1460,6 +1496,35 @@ async function pictureAct(ctx: ViewContext, view: JobView, asked: JobAct, file: 
   }
 }
 
+/**
+ * Ruling 194: picture the page while it moves. It is loaded and not walked (a
+ * walk plays what moves on a page before the first picture of it), its fonts
+ * get a second, the window goes to `from` in one step, and the screen is
+ * pictured at each of the moments after it came into view: after the load
+ * event at the top of the page, after the step anywhere below. Each frame
+ * says when it was really taken.
+ */
+async function pictureMoving(ctx: ViewContext, view: JobView, files: readonly string[]): Promise<void> {
+  const loadedAt = await openView(ctx, view, 1);
+  await askPage(ctx, FONTS_EXPRESSION, z.object({}));
+  const size = pageSize(await layoutNow(ctx), view);
+  if (view.from >= size.pageHeight) {
+    ctx.pictures.ended.push({ view: view.id, pageHeight: size.pageHeight });
+    return;
+  }
+  let shownAt = loadedAt;
+  if (view.from > 0) {
+    await askPage(ctx, scrollExpression(view.from / size.scale), z.object({ y: z.number() }));
+    shownAt = Date.now();
+  }
+  for (const [frame, file] of files.entries()) {
+    const wait = shownAt + (MOVING_MOMENTS[frame] ?? 0) - Date.now();
+    if (wait > 0) await pause(wait);
+    const moment = Date.now() - shownAt;
+    ctx.pictures.shots.push({ ...(await pictureScreen(ctx, view, file)), moment });
+  }
+}
+
 /** The browser of the page being pictured, so a stop ends it too. */
 let current: Browser | null = null;
 
@@ -1559,6 +1624,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
         const files = pictureNames(view).map((name) => `${index + 1}-${name}.png`);
         const [first = ""] = files;
         if (view.act) await pictureAct(ctx, view, view.act, first);
+        else if (view.moving === true) await pictureMoving(ctx, view, files);
         else await pictureView(ctx, view, files);
       }
     } finally {
