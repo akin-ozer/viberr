@@ -23,8 +23,10 @@ import { z } from "zod";
  * at that viewport width, so one width is pictured and the other is not. A
  * screenshot is a real PNG of the clip it was asked for, at the clip's own
  * scale times the device scale the viewport was set to, as a browser draws
- * it; `fake-short-by:1` makes it that many px shorter, as a browser that
- * rounded a side the other way would.
+ * it, in a grey that changes every 2,000 px down the page and comes round
+ * again after ten, so two stretches of a page differ and a page of 20,000 px
+ * and more repeats itself; `fake-short-by:1` makes it that many px shorter,
+ * as a browser that rounded a side the other way would.
  *
  * A page also says, in its own text, what a browser would answer when the
  * child acts on it or reads it: `fake-<name>:<JSON>`, up to the next tag or
@@ -73,6 +75,11 @@ import { z } from "zod";
  * was answered), `inputs.jsonl` (each pointer and key event), `emulations.jsonl`
  * (each change of the emulated media, the cache and the line) and `asks.jsonl`
  * (each marked expression: its name and what it was asked with).
+ *
+ * A suite whose door refuses a loopback address stands a loopback server in
+ * for a name on the web with a `host:look.example=127.0.0.1:4100` rule, as a
+ * hosts file would: every fetch of that host goes to the server, under the
+ * host's own name, and the page still reports the address it was asked for.
  *
  * Behaviour is switched by {@link FAKE_BROWSER_MODE_ENV} on the SUITE's
  * process (an undeclared name, so it survives `filteredSpawnEnv`): a
@@ -144,15 +151,40 @@ let lateLeft = 0;
 /** When the last pointer or key event arrived. */
 let lastInputAt = 0;
 
+/** The names a suite's loopback server stands in for, as a hosts file would
+ *  name them: a \`host:look.example=127.0.0.1:4100\` rule each. */
+const hosts = new Map(rules.filter((rule) => rule.mode === "host").map((rule) => rule.needle.split("=")));
+
+/** Where an address is fetched from: itself, or the loopback server that
+ *  stands in for its host, asked under the host's own name. */
+function reach(url) {
+  try {
+    const asked = new URL(url);
+    const stood = hosts.get(asked.host);
+    if (stood) return { target: "http://" + stood + asked.pathname + asked.search, headers: { host: asked.host } };
+  } catch {
+    // Not an address: fetched as it is, and answered as one nothing is at.
+  }
+  return { target: url, headers: {} };
+}
+
 function get(url) {
   return new Promise((resolve) => {
-    http
-      .get(url, (res) => {
-        const chunks = [];
-        res.on("data", (chunk) => chunks.push(chunk));
-        res.on("end", () => resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks), headers: res.headers }));
-      })
-      .on("error", () => resolve({ status: 0, body: Buffer.alloc(0), headers: {} }));
+    const { target, headers } = reach(url);
+    const nothing = () => resolve({ status: 0, body: Buffer.alloc(0), headers: {} });
+    try {
+      http
+        .get(target, { headers }, (res) => {
+          const chunks = [];
+          res.on("data", (chunk) => chunks.push(chunk));
+          res.on("end", () => resolve({ status: res.statusCode || 0, body: Buffer.concat(chunks), headers: res.headers }));
+        })
+        .on("error", nothing);
+    } catch {
+      // An address this stand-in cannot fetch (https with no server stood in
+      // for it) is one nothing answers at.
+      nothing();
+    }
   });
 }
 
@@ -207,12 +239,14 @@ function chunk(type, data) {
   return Buffer.concat([head, data, crc]);
 }
 
-function png(width, height, padding) {
+function png(width, height, padding, top) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header[8] = 8; // bit depth; colour type 0 (grey) stays zero
-  const rows = Buffer.alloc(height * (1 + width), 200);
+  // One grey for each 2,000 px down the page, ten of them and round again:
+  // two parts of a page look different, and a page long enough repeats.
+  const rows = Buffer.alloc(height * (1 + width), 200 - (Math.floor(top / 2000) % 10) * 5);
   for (let y = 0; y < height; y += 1) rows[y * (1 + width)] = 0;
   const parts = [Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header)];
   if (padding > 0) parts.push(chunk("teXt", Buffer.alloc(padding, 120)));
@@ -451,7 +485,7 @@ function handle(message) {
         quietMs: Date.now() - lastRequestAt,
         sinceInputMs: Date.now() - lastInputAt,
       });
-      return reply({ data: png(width, height, padding).toString("base64") });
+      return reply({ data: png(width, height, padding, clip.y).toString("base64") });
     }
     case "Browser.close":
       reply({});

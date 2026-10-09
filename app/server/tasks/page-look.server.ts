@@ -162,19 +162,46 @@ interface KeptPicture {
   picture: WebPagePicture;
 }
 
+/** A stretch whose bytes the task already keeps: the page looks the same
+ *  there as in the source named, and a task keeps no bytes twice (ruling 82). */
+interface RepeatedStretch {
+  picture: WebPagePicture;
+  same: string;
+}
+
+/** What one width's stretches come to, as the note and the answer say it. */
+function stretchesSentence(stretches: readonly KeptPicture[], repeats: readonly RepeatedStretch[]): string {
+  const last = [...stretches.map((entry) => entry.picture), ...repeats.map((entry) => entry.picture)].reduce((a, b) => (b.to > a.to ? b : a));
+  const pictures = stretches.length === 1 ? "1 picture" : `${stretches.length} pictures`;
+  const once =
+    repeats.length === 0
+      ? ""
+      : ` ${repeats.length === 1 ? "1 more stretch looks" : `${repeats.length} more stretches look`} the same as one of them and ${repeats.length === 1 ? "is" : "are"} kept once.`;
+  return last.cut
+    ? `the first ${px(last.to)} px of a page ${px(last.pageHeight)} px long, in ${pictures}. The page runs on below them.${once}`
+    : `the whole page (${px(last.pageHeight)} px) in ${pictures}.${once}`;
+}
+
 /** The note that closes a look: where its pictures are and what moved. */
-function lookNote(address: string, at: string, kept: readonly KeptPicture[], motion: PageMotion | null): string {
+function lookNote(
+  address: string,
+  at: string,
+  kept: readonly KeptPicture[],
+  repeats: readonly RepeatedStretch[],
+  motion: PageMotion | null,
+): string {
   const lines = [`# How ${address} looked on ${at.slice(0, 10)}`, "", `Pictured by Viberr at ${at}, at the two widths a delivered page is pictured at.`, ""];
   for (const view of PAGE_CAPTURE_VIEWS) {
     const stretches = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "stretch");
     if (stretches.length === 0) continue;
-    const last = stretches.at(-1)!.picture;
-    lines.push(
-      `- ${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ` +
-        (last.cut
-          ? `the first ${px(last.to)} px of a page ${px(last.pageHeight)} px long, in ${stretches.length} pictures. The page runs on below them.`
-          : `the whole page (${px(last.pageHeight)} px) in ${stretches.length === 1 ? "1 picture" : `${stretches.length} pictures`}.`),
-    );
+    const same = repeats.filter((entry) => entry.picture.view === view.id);
+    lines.push(`- ${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ${stretchesSentence(stretches, same)}`);
+    for (const entry of stretches) {
+      lines.push(`  - ${entry.source.id}: ${px(entry.picture.from)} to ${px(entry.picture.to)} px.`);
+    }
+    for (const repeat of same) {
+      lines.push(`  - ${px(repeat.picture.from)} to ${px(repeat.picture.to)} px: the same as ${repeat.same}, to the byte.`);
+    }
     const frames = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "frame");
     if (frames.length > 0) {
       lines.push(
@@ -325,6 +352,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   const at = new Date().toISOString();
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
   const kept: KeptPicture[] = [];
+  const repeats: RepeatedStretch[] = [];
   try {
     for (const [index, picture] of answer.pictures.entries()) {
       const n = ordinalAmong(answer.pictures, index);
@@ -348,15 +376,18 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
         ctx.dataRoot,
       );
       // A frame whose bytes are already kept is a moment at which nothing had
-      // moved: the picture it equals stands for both.
+      // moved: the picture it equals stands for both. A stretch whose bytes
+      // are is a part of the page that looks the same as another, and is
+      // said, so the pictures kept still account for the whole page.
       if ("kept" in written) kept.push({ source: written.kept, picture });
+      else if ("already" in written && picture.kind === "stretch") repeats.push({ picture, same: written.already.id });
     }
     const note = writeTaskSource(
       projectSlug,
       taskKey,
       {
         name: `${host}-what-moved.md`,
-        data: Buffer.from(lookNote(url, at, kept, answer.motion)),
+        data: Buffer.from(lookNote(url, at, kept, repeats, answer.motion)),
         title: `${host}: where its pictures are, and what moved on it`,
         from: `${url}, read by Viberr's renderer on ${at.slice(0, 10)}`,
         by,
@@ -372,11 +403,8 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     for (const view of PAGE_CAPTURE_VIEWS) {
       const stretches = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "stretch");
       if (stretches.length === 0) continue;
-      const last = stretches.at(-1)!.picture;
-      parts.push(
-        `${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ` +
-          (last.cut ? `the first ${px(last.to)} px of ${px(last.pageHeight)}.` : `the whole page, ${px(last.pageHeight)} px.`),
-      );
+      const same = repeats.filter((entry) => entry.picture.view === view.id);
+      parts.push(`${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ${stretchesSentence(stretches, same)}`);
     }
     const frames = kept.filter((entry) => entry.picture.kind === "frame");
     if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.source.id))}.`);
