@@ -67,8 +67,9 @@ import { z } from "zod";
  * whole environment, the uid), `pages.jsonl` (one line per page load: the
  * address, the viewport, the HTML it was served, each sub-resource's status,
  * the motion it had been told to ask for), `shots.jsonl` (each screenshot's
- * clip, how many late requests were still to come and how long the network
- * had been quiet), `dialogs.jsonl` (each dialog it opened: its type and how it
+ * clip, how many late requests were still to come, how long the network had
+ * been quiet and how long ago the last pointer or key event arrived),
+ * `dialogs.jsonl` (each dialog it opened: its type and how it
  * was answered), `inputs.jsonl` (each pointer and key event), `emulations.jsonl`
  * (each change of the emulated media, the cache and the line) and `asks.jsonl`
  * (each marked expression: its name and what it was asked with).
@@ -140,6 +141,8 @@ let moved = null;
  *  requests it has still to make. */
 let lastRequestAt = 0;
 let lateLeft = 0;
+/** When the last pointer or key event arrived. */
+let lastInputAt = 0;
 
 function get(url) {
   return new Promise((resolve) => {
@@ -390,6 +393,7 @@ function handle(message) {
       return reply({});
     case "Input.dispatchMouseEvent": {
       evidence("inputs.jsonl", { method: message.method, ...message.params });
+      lastInputAt = Date.now();
       const at = [message.params.x, message.params.y];
       if (message.params.type === "mouseMoved") pointer = at;
       if (message.params.type === "mousePressed") {
@@ -402,6 +406,7 @@ function handle(message) {
     }
     case "Input.dispatchKeyEvent":
       evidence("inputs.jsonl", { method: message.method, ...message.params });
+      lastInputAt = Date.now();
       if ((message.params.type === "rawKeyDown" || message.params.type === "keyDown") && message.params.key === "Tab") {
         // One stop along the tab order; off the page after the last.
         focus = focus + 1 >= told("tab-order", []).length ? -1 : focus + 1;
@@ -437,7 +442,15 @@ function handle(message) {
       const width = Math.round(clip.width * clip.scale * metrics.deviceScaleFactor);
       const height = Math.round(clip.height * clip.scale * metrics.deviceScaleFactor) - declared("short-by", 0);
       const padding = modeFor(page.url, page.html) === "big" ? height * 1000 : 0;
-      evidence("shots.jsonl", { url: page.url, clip, width, height, late: lateLeft, quietMs: Date.now() - lastRequestAt });
+      evidence("shots.jsonl", {
+        url: page.url,
+        clip,
+        width,
+        height,
+        late: lateLeft,
+        quietMs: Date.now() - lastRequestAt,
+        sinceInputMs: Date.now() - lastInputAt,
+      });
       return reply({ data: png(width, height, padding).toString("base64") });
     }
     case "Browser.close":
@@ -518,6 +531,8 @@ const shotSchema = z.object({
   late: z.number(),
   /** How long the page had asked the network for nothing. */
   quietMs: z.number(),
+  /** How long ago the last pointer or key event arrived. */
+  sinceInputMs: z.number(),
 });
 export type FakeBrowserShot = z.infer<typeof shotSchema>;
 

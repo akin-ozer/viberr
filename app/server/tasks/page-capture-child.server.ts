@@ -58,6 +58,11 @@ import { z } from "zod";
  *    `box`): laid out in a viewport of that size and cut to it from the top
  *    left, as a PNG of exactly the box times its scale. That one is never
  *    retaken shorter: a picture of another size is not the one asked for.
+ *  - **Or shows it in a state** (ruling 194, a view with `act`): after the
+ *    load and the walk it presses Tab, presses a control or puts the pointer
+ *    on one, with the key and pointer events a reader's own hands send, and
+ *    pictures the one screen the window then shows. An act that cannot be
+ *    done is said in the report and costs the page nothing else.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -274,6 +279,21 @@ const SET_PAGE_NAME = ".viberr-render.html";
 /** After its window is asked to close, how long a browser has before its
  *  group is killed. */
 const CLOSE_GRACE_MS = 2_000;
+/** The longest name and the longest sentence a report carries. A page's own
+ *  words reach the report only through these: they are its author's text. */
+const NAME_MAX = 80;
+const SENTENCE_MAX = 200;
+/** How many controls an act that found none names, and how much of each
+ *  one's words. */
+const ACT_NAMES_MAX = 12;
+const ACT_NAME_MAX = 40;
+/** How long what an act started gets before the screen is pictured: a focus
+ *  ring's or a hover's transition, and after a press a menu's or a panel's. */
+const AFTER_POINTER_MS = 400;
+const AFTER_PRESS_MS = 700;
+/** The longest reason an act carries: the name asked for, and every control
+ *  the page named in its place. */
+const ACT_ERROR_MAX = SENTENCE_MAX + ACT_NAMES_MAX * (ACT_NAME_MAX + 4);
 
 /**
  * The stylesheet a markdown file is set in. System colours only, so the page
@@ -736,6 +756,159 @@ function browserArgs(profile: string, port: number): string[] {
   ];
 }
 
+// -------------------------------------------------------- inside the page
+
+/** What an in-page expression is asked with. */
+type PageArgs = { [key: string]: string | number | boolean };
+
+/**
+ * What every expression below starts with, in the page's own JavaScript.
+ *
+ *  - `visible`: laid out with a box that is not empty, and not hidden.
+ *  - `words`: what a control is called. Its `aria-label`, else its text, else
+ *    its `value`, its `title` or the `alt` of a picture in it. A form field's
+ *    text is what was typed into it, so a field is called by its label, its
+ *    placeholder, its title or its name.
+ *  - `kind`: what a control is, in a word: its `role`, else "link" for an
+ *    `a`, "button" for a button-like `input`, "field" for any other, else its
+ *    tag.
+ */
+const PAGE_HELPERS = `
+const flat = (text) => String(text == null ? "" : text).replace(/\\s+/g, " ").trim();
+const visible = (el) => {
+  const box = el.getBoundingClientRect();
+  return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== "hidden";
+};
+const tagOf = (el) => el.tagName.toLowerCase();
+const words = (el) => {
+  const label = flat(el.getAttribute("aria-label"));
+  if (label) return label;
+  if (el.matches("input:not([type=button]):not([type=submit]):not([type=reset]):not([type=image]), select, textarea")) {
+    const named = el.labels && el.labels.length > 0 ? flat(el.labels[0].innerText) : "";
+    return named || flat(el.getAttribute("placeholder") || el.getAttribute("title") || el.getAttribute("name"));
+  }
+  const text = flat(el.innerText || el.textContent);
+  if (text) return text;
+  const picture = el.querySelector("img[alt]");
+  return flat(el.value || el.getAttribute("title") || (picture ? picture.getAttribute("alt") : "") || el.getAttribute("alt"));
+};
+const kind = (el) => {
+  const given = flat(el.getAttribute("role")).split(" ")[0].replace(/[^a-z]/gi, "").slice(0, 20);
+  if (given) return given;
+  const tag = tagOf(el);
+  if (tag === "a") return "link";
+  if (tag === "input") {
+    const type = (el.getAttribute("type") || "text").toLowerCase();
+    if (type === "button" || type === "submit" || type === "reset" || type === "image") return "button";
+    return type === "checkbox" || type === "radio" ? type : "field";
+  }
+  return tag === "textarea" ? "field" : tag;
+};
+const centre = (el) => {
+  const boxes = Array.from(el.getClientRects()).filter((box) => box.width > 0 && box.height > 0);
+  const box = boxes[0] || el.getBoundingClientRect();
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+const KEPT = Symbol.for("viberr.kept");
+`;
+
+/**
+ * An expression to run in the page: `body` is the body of an async function
+ * that is handed `args` and the helpers above and returns JSON text. It opens
+ * with a comment that names it and what it is asked with. A browser ignores
+ * the comment, and the suite's stand-in browser, which runs no page, answers
+ * by it (`test-support/fake-browser.ts`). The arguments are written with no
+ * bare slash, so nothing in them can end the comment early.
+ */
+function inPage(name: string, args: PageArgs, body: string): string {
+  const given = JSON.stringify(args).replaceAll("/", "\\/");
+  return `/* viberr:${name} ${given} */ (async (args) => {${PAGE_HELPERS}${body}})(${given})`;
+}
+
+/** The controls an act looks among, and the ones a pointer is tried on. */
+const CONTROLS =
+  'a, button, summary, [role="button"], [role="link"], [role="menuitem"], [role="tab"], ' +
+  'input[type="button"], input[type="submit"], label, [tabindex]';
+
+/**
+ * Find the control an act names, scroll it to the middle of the screen and
+ * say where its centre is (the first line's, for a link that wraps). What it
+ * is named by is read as a CSS selector first (the first visible match; text
+ * that is no selector is no error), then as words: the visible control whose
+ * own words are exactly these, whatever the case, else the one with the
+ * fewest words that holds them.
+ *
+ * One bare word is read as words first. `Menu`, `Details` and `Search` are
+ * each a selector too, of the `menu`, `details` and `search` elements, and a
+ * page that has one would have its list pressed where its button was meant.
+ * Nothing found answers with what the controls there are called.
+ */
+function findExpression(what: string): string {
+  return inPage(
+    "find",
+    { what },
+    `
+  const controls = Array.from(document.querySelectorAll(${JSON.stringify(CONTROLS)})).filter(visible);
+  const wanted = args.what.toLowerCase();
+  const named = () => controls.find((el) => words(el).toLowerCase() === wanted) || null;
+  const holding = () => {
+    let best = null;
+    let fewest = Infinity;
+    for (const el of controls) {
+      const said = words(el).toLowerCase();
+      const count = said.split(" ").length;
+      if (said.includes(wanted) && count < fewest) {
+        best = el;
+        fewest = count;
+      }
+    }
+    return best;
+  };
+  const selected = () => {
+    try {
+      return Array.from(document.querySelectorAll(args.what)).find(visible) || null;
+    } catch {
+      return null;
+    }
+  };
+  const el = /^[a-z][a-z0-9]*$/i.test(args.what) ? named() || holding() || selected() : selected() || named() || holding();
+  if (!el) {
+    const names = [];
+    for (const control of controls) {
+      const said = words(control).slice(0, ${ACT_NAME_MAX});
+      if (said && !names.includes(said)) names.push(said);
+    }
+    return JSON.stringify({ found: null, names: names.slice(0, ${ACT_NAMES_MAX}), more: names.length > ${ACT_NAMES_MAX} });
+  }
+  el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+  const at = centre(el);
+  return JSON.stringify({ found: { x: at.x, y: at.y, name: kind(el) + ' "' + words(el).slice(0, ${ACT_NAME_MAX}) + '"' } });
+`,
+  );
+}
+
+/** What holds keyboard focus: nothing while it is on the page itself. */
+const FOCUS_EXPRESSION = inPage(
+  "focus",
+  {},
+  `
+  const el = document.activeElement;
+  if (!el || el === document.body || el === document.documentElement) return JSON.stringify({ on: null });
+  return JSON.stringify({ on: { name: kind(el) + ' "' + words(el).slice(0, ${ACT_NAME_MAX}) + '"' } });
+`,
+);
+
+/** Where the window is scrolled to, and the address it is at. */
+const SCREEN_EXPRESSION = inPage("screen", {}, "return JSON.stringify({ x: window.scrollX, y: window.scrollY, href: location.href });");
+
+const foundSchema = z.object({
+  found: z.object({ x: z.number(), y: z.number(), name: z.string() }).nullable(),
+  names: z.array(z.string()).optional(),
+  more: z.boolean().optional(),
+});
+const focusSchema = z.object({ on: z.object({ name: z.string() }).nullable() });
+const screenSchema = z.object({ x: z.number(), y: z.number(), href: z.string() });
+
 /**
  * Run in the page before it is pictured: wait for its fonts, walk it from the
  * top to the end of the stretch in viewport steps, come back, and let what
@@ -765,6 +938,14 @@ function walkExpression(view: JobView): string {
 const navigateResultSchema = z.looseObject({ errorText: z.string().optional() });
 const walkResultSchema = z.looseObject({
   result: z.looseObject({ value: z.string().optional().catch(undefined) }).optional(),
+});
+/** What an in-page expression came to: the text it returned, or what the
+ *  page threw under it. */
+const evaluatedSchema = z.looseObject({
+  result: z.looseObject({ value: z.string().optional().catch(undefined) }).optional(),
+  exceptionDetails: z
+    .looseObject({ exception: z.looseObject({ description: z.string().optional().catch(undefined) }).optional() })
+    .optional(),
 });
 const layoutSchema = z.looseObject({
   cssContentSize: z.looseObject({ width: z.number(), height: z.number() }),
@@ -809,6 +990,15 @@ function noteRequest(asked: Asked, url: string, origin: string): void {
   asked.hosts.add(parsed.host);
 }
 
+/** What picturing a page has come to so far. Filled as each picture is
+ *  taken, so a page that fails part way still reports the ones before. */
+interface Pictures {
+  shots: Shot[];
+  /** The views with nothing at `from`: no picture, and no failure either. */
+  ended: Ended[];
+  acts: Act[];
+}
+
 interface ViewContext {
   browser: Browser;
   sessionId: string;
@@ -817,11 +1007,33 @@ interface ViewContext {
   origin: string;
   out: string;
   maxBytes: number;
+  pictures: Pictures;
 }
 
 const pause = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 /** A number of px as a sentence prints it. */
 const count = (n: number): string => n.toLocaleString("en-US");
+
+/** Text as a report carries it: one line of at most `most` characters, with
+ *  nothing in it that only a terminal would act on. */
+function clip(text: string, most: number): string {
+  return Array.from(text.replace(/[\p{Cc}\s]+/gu, " ").trim()).slice(0, most).join("");
+}
+
+/** Run an in-page expression and read the JSON text it answers with. A page
+ *  that throws under it, or answers with anything else, is an error. */
+async function askPage<T>(ctx: ViewContext, expression: string, schema: z.ZodType<T>): Promise<T> {
+  const evaluated = evaluatedSchema.parse(
+    await ctx.browser.send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ctx.sessionId),
+  );
+  if (evaluated.exceptionDetails) {
+    const [said = ""] = (evaluated.exceptionDetails.exception?.description ?? "").split("\n");
+    throw new Error(clip(said, SENTENCE_MAX) || "the page threw while it was being read");
+  }
+  const text = evaluated.result?.value;
+  if (text === undefined) throw new Error("the page gave no answer while it was being read");
+  return schema.parse(JSON.parse(text));
+}
 
 /** Resolves at the session's next load event. */
 function nextLoad(browser: Browser, sessionId: string): Promise<void> {
@@ -968,6 +1180,29 @@ async function pictureBox(ctx: ViewContext, view: JobView, scale: number, file: 
   };
 }
 
+/** How a page is laid out at a view, in the picture's own px: what the screen
+ *  shows, after a phone has shrunk a page it lays out wider than itself. */
+interface PageSize {
+  /** Under 1 when a phone shrank the page. */
+  scale: number;
+  contentWidth: number;
+  contentHeight: number;
+  /** The content's height, and never less than one screen: a page shorter
+   *  than the screen is still pictured as one screen. */
+  pageHeight: number;
+}
+
+function pageSize(layout: z.infer<typeof layoutSchema>, view: JobView): PageSize {
+  const scale = Math.min(Math.max(layout.cssVisualViewport.scale, 0.1), 5);
+  const contentHeight = Math.round(layout.cssContentSize.height * scale);
+  return {
+    scale,
+    contentWidth: Math.round(layout.cssContentSize.width * scale),
+    contentHeight,
+    pageHeight: Math.max(contentHeight, view.height),
+  };
+}
+
 /** Picture the page at one view. The stretch starts at `view.from`, is never
  *  less than one screen and never more than the view's cap. Heights and
  *  widths are in the picture's own px: what the screen shows, after a phone
@@ -978,12 +1213,7 @@ async function pictureBox(ctx: ViewContext, view: JobView, scale: number, file: 
 async function pictureView(ctx: ViewContext, view: JobView, file: string): Promise<Shot | Ended> {
   if (view.box) return pictureBox(ctx, view, view.box.scale, file);
   const { browser, sessionId } = ctx;
-  const layout = await loadView(ctx, view, 1);
-  const scale = Math.min(Math.max(layout.cssVisualViewport.scale, 0.1), 5);
-  const contentWidth = Math.round(layout.cssContentSize.width * scale);
-  const contentHeight = Math.round(layout.cssContentSize.height * scale);
-  // A page shorter than the screen is still pictured as one screen.
-  const pageHeight = Math.max(contentHeight, view.height);
+  const { scale, contentWidth, contentHeight, pageHeight } = pageSize(await loadView(ctx, view, 1), view);
   if (view.from >= pageHeight) return { view: view.id, pageHeight };
   let height = Math.min(pageHeight - view.from, view.maxHeight);
   for (;;) {
@@ -1022,6 +1252,157 @@ async function pictureView(ctx: ViewContext, view: JobView, file: string): Promi
   }
 }
 
+/**
+ * Where the window stands and the address it is at. A press may have sent the
+ * page to another document, which ends the reading under it, so it is taken
+ * again on the document that loaded.
+ */
+async function screenNow(ctx: ViewContext): Promise<z.infer<typeof screenSchema>> {
+  for (let attempt = 1; ; attempt += 1) {
+    const moved = nextLoad(ctx.browser, ctx.sessionId);
+    try {
+      return await askPage(ctx, SCREEN_EXPRESSION, screenSchema);
+    } catch (error) {
+      if (!ctx.browser.alive || attempt >= WALK_ATTEMPTS) throw error;
+      await Promise.race([moved, pause(MOVE_WAIT_MS)]);
+    }
+  }
+}
+
+/**
+ * Picture the screen as it stands: one viewport, at the window's own scroll
+ * position, with whatever holds focus, lies under the pointer or was opened
+ * still so. Asked for inside the viewport on purpose: a capture beyond it
+ * fires `resize` in the page twice (measured, Chrome 153), and a menu that
+ * closes when its window is resized would be pictured shut.
+ */
+async function pictureScreen(ctx: ViewContext, view: JobView, file: string): Promise<Shot> {
+  const { browser, sessionId } = ctx;
+  const size = pageSize(layoutSchema.parse(await browser.send("Page.getLayoutMetrics", {}, sessionId)), view);
+  const screen = await screenNow(ctx);
+  const shot = screenshotSchema.parse(
+    await browser.send(
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        captureBeyondViewport: false,
+        clip: { x: screen.x, y: screen.y, width: view.width / size.scale, height: view.height / size.scale, scale: size.scale },
+      },
+      sessionId,
+    ),
+  );
+  const bytes = Buffer.from(shot.data, "base64");
+  if (bytes.length > ctx.maxBytes) throw new Error("the picture of one screen of it is too large to keep");
+  const png = pngSize(bytes);
+  if (!png) throw new Error("the browser returned a picture that is not a PNG");
+  writeFileSync(path.join(ctx.out, file), bytes);
+  const from = Math.round(screen.y * size.scale);
+  return {
+    view: view.id,
+    width: png.width,
+    height: png.height,
+    from,
+    contentHeight: size.contentHeight,
+    contentWidth: size.contentWidth,
+    scale: size.scale,
+    cut: from + png.height < size.pageHeight,
+    file,
+  };
+}
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+/** A real pointer event at a point of the screen, in the page's own CSS px
+ *  (a phone's shrunk page takes them unscaled: measured, Chrome 153). */
+async function pointer(ctx: ViewContext, type: "mouseMoved" | "mousePressed" | "mouseReleased", at: Point): Promise<void> {
+  const params: CdpParams =
+    type === "mouseMoved" ? { type, x: at.x, y: at.y } : { type, x: at.x, y: at.y, button: "left", clickCount: 1 };
+  await ctx.browser.send("Input.dispatchMouseEvent", params, ctx.sessionId);
+}
+
+/** One press of Tab as a keyboard sends it, the key going down and coming up,
+ *  so `:focus-visible` holds as it does for someone who tabs to a control. */
+async function pressTab(ctx: ViewContext): Promise<void> {
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await ctx.browser.send("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 }, ctx.sessionId);
+  }
+}
+
+/** The control an act names: where its centre is on the screen and what it
+ *  is. Throws, with what the controls there are called, when there is none. */
+async function findControl(ctx: ViewContext, what: string): Promise<Point & { name: string }> {
+  const answer = await askPage(ctx, findExpression(what), foundSchema);
+  if (answer.found) return { x: answer.found.x, y: answer.found.y, name: clip(answer.found.name, NAME_MAX) };
+  const names = (answer.names ?? []).map((name) => clip(name, ACT_NAME_MAX)).filter((name) => name !== "");
+  const called = `nothing at this width is called "${clip(what, NAME_MAX)}"`;
+  if (names.length === 0) throw new Error(`${called}, and it shows no control`);
+  const listed = names.slice(0, ACT_NAMES_MAX).map((name) => `"${name}"`);
+  const more = answer.more === true || names.length > ACT_NAMES_MAX;
+  throw new Error(`${called}. The controls on it: ${listed.join(", ")}${more ? ", ..." : ""}`);
+}
+
+type JobAct = NonNullable<JobView["act"]>;
+
+/** Do what a view's act says, each step given its time, and say what was
+ *  done: Tab first, then the press, then the hover. */
+async function act(ctx: ViewContext, asked: JobAct): Promise<string> {
+  const did: string[] = [];
+  if (asked.tab !== undefined) {
+    for (let press = 0; press < asked.tab; press += 1) await pressTab(ctx);
+    await pause(AFTER_POINTER_MS);
+    const focus = await askPage(ctx, FOCUS_EXPRESSION, focusSchema);
+    const presses = asked.tab === 1 ? "1 press" : `${asked.tab} presses`;
+    did.push(`${presses} of Tab: focus is on ${focus.on ? clip(focus.on.name, NAME_MAX) : "nothing"}`);
+  }
+  if (asked.press !== undefined) {
+    const control = await findControl(ctx, asked.press);
+    await pointer(ctx, "mouseMoved", control);
+    await pointer(ctx, "mousePressed", control);
+    await pointer(ctx, "mouseReleased", control);
+    await pause(AFTER_PRESS_MS);
+    // A link to another site leaves the page server, and what would be
+    // pictured is the browser's own error page. One that moves within the
+    // page, or to another file of the task, is pictured where it led.
+    const screen = await screenNow(ctx);
+    if (!screen.href.startsWith(`${ctx.origin}/`)) throw new Error("the press sent the browser to another address");
+    did.push(`pressed ${control.name}`);
+  }
+  if (asked.hover !== undefined) {
+    const control = await findControl(ctx, asked.hover);
+    await pointer(ctx, "mouseMoved", control);
+    await pause(AFTER_POINTER_MS);
+    did.push(`the pointer is on ${control.name}`);
+  }
+  return clip(did.join("; "), SENTENCE_MAX);
+}
+
+/**
+ * Ruling 194: show the page in a state. The page is loaded and walked as for
+ * any picture, then the act is done on it, back at the top, and the screen is
+ * pictured as it stands. An act that cannot be done (no such control, a press
+ * that left the page) is that view's own outcome, never the page's failure:
+ * it is said in the report, no picture is taken for the view, and the page's
+ * other views are still pictured.
+ */
+async function pictureAct(ctx: ViewContext, view: JobView, asked: JobAct, file: string): Promise<void> {
+  await loadView(ctx, view, 1);
+  try {
+    const done = await act(ctx, asked);
+    ctx.pictures.shots.push(await pictureScreen(ctx, view, file));
+    ctx.pictures.acts.push({ view: view.id, done, error: null });
+  } catch (caught) {
+    // A browser that ended is the page's failure, as at any other view.
+    if (!ctx.browser.alive) throw caught;
+    // The one sentence that runs past a sentence's length is the list of
+    // what the controls are called, which has its own bounds.
+    const why = caught instanceof Error ? caught.message : String(caught);
+    ctx.pictures.acts.push({ view: view.id, done: null, error: clip(why, ACT_ERROR_MAX) });
+  }
+}
+
 /** The browser of the page being pictured, so a stop ends it too. */
 let current: Browser | null = null;
 
@@ -1032,9 +1413,8 @@ const sessionSchema = z.looseObject({ sessionId: z.string() });
  *  time limit. Never rejects. */
 async function picturePage(job: Job, server: PageServer, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
-  const shots: Shot[] = [];
-  const ended: Ended[] = [];
-  const acts: Act[] = [];
+  const pictures: Pictures = { shots: [], ended: [], acts: [] };
+  const { shots, ended, acts } = pictures;
   const dialogs = { count: 0 };
   const report = (error: string | null): PageReport => ({
     file: page.file,
@@ -1113,14 +1493,19 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
         browser.send("Page.handleJavaScriptDialog", { accept: leaving }, sessionId).catch(() => {});
       }
     });
-    const ctx: ViewContext = { browser, sessionId, url, origin: server.origin, out: job.out, maxBytes: job.maxBytes };
+    const ctx: ViewContext = { browser, sessionId, url, origin: server.origin, out: job.out, maxBytes: job.maxBytes, pictures };
     try {
       await browser.send("Page.enable", {}, sessionId);
       await browser.send("Network.enable", {}, sessionId);
       await browser.send("Audits.enable", {}, sessionId);
       for (const view of job.views) {
         const [name] = pictureNames(view);
-        const pictured = await pictureView(ctx, view, `${index + 1}-${name}.png`);
+        const file = `${index + 1}-${name}.png`;
+        if (view.act) {
+          await pictureAct(ctx, view, view.act, file);
+          continue;
+        }
+        const pictured = await pictureView(ctx, view, file);
         if ("pageHeight" in pictured) ended.push(pictured);
         else shots.push(pictured);
       }

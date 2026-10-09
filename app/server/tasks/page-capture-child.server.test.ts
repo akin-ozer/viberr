@@ -616,6 +616,115 @@ describe("the page capture's renderer child (ruling 194)", () => {
     ]);
   });
 
+  it("does what a view's act says with real key and pointer events, gives what that started its time, and pictures the screen where the window then stands", async () => {
+    const b = bench({
+      "page.html": [
+        "<p>fake-height:3000</p>",
+        '<p>fake-find:{"Menu":[120,40,"button"],"Docs":[300,60,"link"]}</p>',
+        '<p>fake-controls:[["a","Docs"],["a","Blog"],["a","Pricing"]]</p>',
+        "<p>fake-tab-order:[0,1,2]</p>",
+        // A pressed or focused control may be further down: the window
+        // follows it.
+        "<p>fake-scrolled:340</p>",
+      ].join("\n"),
+    });
+    const report = await b.run({
+      pages: ["page.html"],
+      views: [
+        DESKTOP,
+        // One id, another kind: the act's picture has a name of its own.
+        { ...DESKTOP, act: { press: "Menu" } },
+        { ...DESKTOP, id: "keys", act: { tab: 3 } },
+        { ...PHONE, act: { hover: "Docs" } },
+      ],
+    });
+    expect(report.pages[0]).toMatchObject({
+      error: null,
+      acts: [
+        { view: "desktop", done: 'pressed button "Menu"', error: null },
+        { view: "keys", done: '3 presses of Tab: focus is on link "Pricing"', error: null },
+        { view: "phone", done: 'the pointer is on link "Docs"', error: null },
+      ],
+    });
+    // One screen each, starting where the window was left, in a file named
+    // for the act. CANARY: picture an act as a stretch from the view's `from`
+    // and each comes back 3,000 px tall from the top, the menu out of sight.
+    expect(report.pages[0]!.shots.map((shot) => [shot.file, shot.from, shot.height, shot.cut])).toEqual([
+      ["1-desktop.png", 0, 3000, false],
+      ["1-desktop-a.png", 340, 800, true],
+      ["1-keys-a.png", 340, 800, true],
+      ["1-phone-a.png", 0, 844, true],
+    ]);
+    expect(pngSize(path.join(b.out, "1-desktop-a.png"))).toEqual({ width: 1280, height: 800 });
+    expect(b.browser.shots().slice(1).map((shot) => shot.clip)).toEqual([
+      { x: 0, y: 340, width: 1280, height: 800, scale: 1 },
+      { x: 0, y: 340, width: 1280, height: 800, scale: 1 },
+      { x: 0, y: 0, width: 390, height: 844, scale: 1 },
+    ]);
+    // Real events, at the centre the page gave for the control. CANARY: leave
+    // `mousePressed` out and a real page's menu never opens; send Tab as a
+    // lone `keyUp` and focus never moves (the stand-in moves it on the key
+    // going down, as Chromium does).
+    const tab = { method: "Input.dispatchKeyEvent", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 };
+    expect(b.browser.inputs()).toEqual([
+      { method: "Input.dispatchMouseEvent", type: "mouseMoved", x: 120, y: 40 },
+      { method: "Input.dispatchMouseEvent", type: "mousePressed", x: 120, y: 40, button: "left", clickCount: 1 },
+      { method: "Input.dispatchMouseEvent", type: "mouseReleased", x: 120, y: 40, button: "left", clickCount: 1 },
+      { ...tab, type: "rawKeyDown" },
+      { ...tab, type: "keyUp" },
+      { ...tab, type: "rawKeyDown" },
+      { ...tab, type: "keyUp" },
+      { ...tab, type: "rawKeyDown" },
+      { ...tab, type: "keyUp" },
+      { method: "Input.dispatchMouseEvent", type: "mouseMoved", x: 300, y: 60 },
+    ]);
+    // What the act started gets its time before the picture: a menu's
+    // transition, a focus ring's. CANARY: picture at once and each of these
+    // is a few ms.
+    const [pressed, tabbed, hovered] = b.browser.shots().slice(1).map((shot) => shot.sinceInputMs);
+    expect(pressed).toBeGreaterThanOrEqual(700);
+    expect(tabbed).toBeGreaterThanOrEqual(400);
+    expect(hovered).toBeGreaterThanOrEqual(400);
+  });
+
+  it("keeps an act that cannot be done as that view's own outcome: no picture, the reason with what the controls there are called, and the page's other views still pictured", async () => {
+    const names = ["Docs", "Sign in", "A control whose name runs past the forty characters a list keeps", ...Array.from({ length: 11 }, (_, at) => `Link ${at + 4}`)];
+    const b = bench({
+      "page.html": [
+        `<p>fake-names:${JSON.stringify(names)}</p>`,
+        // A link to another site: pressed, it takes the browser off the page.
+        '<p>fake-find:{"Away":[300,200,"link","chrome-error://chromewebdata/"]}</p>',
+      ].join("\n"),
+    });
+    const report = await b.run({
+      pages: ["page.html"],
+      views: [{ ...DESKTOP, id: "menu", act: { press: "Menu" } }, { ...DESKTOP, id: "away", act: { press: "Away" } }, PHONE],
+    });
+    // CANARY: let an act's failure reject the page's work, as a failed load
+    // does, and the page carries the reason as its own `error` with the
+    // phone never pictured.
+    expect(report.pages[0]).toMatchObject({
+      error: null,
+      acts: [
+        {
+          view: "menu",
+          done: null,
+          // Twelve names at most, each cut at forty characters, and a mark
+          // that there are more.
+          error:
+            'nothing at this width is called "Menu". The controls on it: "Docs", "Sign in", ' +
+            '"A control whose name runs past the forty", "Link 4", "Link 5", "Link 6", "Link 7", "Link 8", "Link 9", ' +
+            '"Link 10", "Link 11", "Link 12", ...',
+        },
+        // CANARY: picture the screen without asking where the press left the
+        // browser and this is a picture of the browser's own error page.
+        { view: "away", done: null, error: "the press sent the browser to another address" },
+      ],
+    });
+    expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
+    expect(existsSync(path.join(b.out, "1-menu-a.png"))).toBe(false);
+  });
+
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
     // A view is one kind of picture: a box, a whole page, an act or a moving
     // screen.
