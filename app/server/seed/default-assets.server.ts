@@ -272,6 +272,11 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 268 (2026-10-10): before the guide had "Work a person looks at"
+    // (what Viberr pictures and measures, the look an approval owes, the look
+    // a task keeps, a page with no repository delivered as files) and said a
+    // task has a price.
+    "e9766677fe0e282ae0662b4ccc2ee69e90ebca9e1115703b6baf8a7b9ae55480",
     // The rulings compaction (2026-10-09): before the ruling numbers this
     // text cites were renumbered.
     "c58a20c65f3171b88b81d086ae2a8a84bfb39362494a61b8544de0761be5885b",
@@ -613,6 +618,11 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    // Ruling 178 (2026-10-10): before the manual said how work that is looked
+    // at is made: pictured and measured at both widths before it is handed
+    // over, made to a kept look and never to the thing, with the product on
+    // its demo data and nothing stated that is not on record.
+    "dabe7985106e69d4351cc6d7feec4a11ab42ee65f15cacc3d8bbf7a16093b3bb",
     // Ruling 135 (pass 40, F40-67): before the reporting rules said what
     // belongs on another task goes in the outcome's `relay` entries, never in
     // an attachment or a report for a person to copy over.
@@ -675,6 +685,11 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 178 (2026-10-10): before the manual said how work that is looked
+    // at is judged: the whole page at both widths, every kept picture of the
+    // look it is made to, the states a still picture hides, what Viberr
+    // measured, and findings that name what is seen.
+    "9e5360754136f8feeeb5a3c14813e3ac4dbf8a49e2145edc26e619896e0ddbc9",
     // Ruling 218 (2026-10-09): before the guardrails had a record that grows
     // searched for a later entry on what the work states.
     "6703e3624becd424684c32a912b403fddf5d71994023d706fdac6613d724def7",

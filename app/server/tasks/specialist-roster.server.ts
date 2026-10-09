@@ -289,7 +289,7 @@ export const OTHER_TASK_FILES_SENTENCE =
  * cannot see a broken table or a layout that falls apart on a phone.
  */
 export const PAGE_CAPTURE_SENTENCE =
-  " A file here that is a page (.html, .htm, .md, .markdown) can be looked at as a reader sees it: `capture_page` with its name hands you the picture at a desktop and a phone width. Look before you deliver a page, and judge the picture as well as the source when you review one. A page must carry what it needs or point at files saved beside it: a capture loads nothing from the network.";
+  " A file here that is a page (.html, .htm, .md, .markdown) can be looked at as a reader sees it: `capture_page` with its name hands you the picture at a desktop width (1280 px) and a phone width (390 px), and shows a control pressed, under the pointer or holding focus, the page with reduced motion asked for, and its first screen while it moves. `measure_page` says what Viberr measures of every delivered page. Look and measure before you deliver a page, and judge the picture as well as the source when you review one. A page must carry what it needs or point at files saved beside it: a capture loads nothing from the network.";
 
 /**
  * Ruling 217(b): why the workspace contract lets a run read the task's
