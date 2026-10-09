@@ -17,6 +17,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_MAX_OPTIONS,
   OPERATOR_PACKET_OPTION_KINDS,
   operatorAskForRepository,
   operatorOpenPacket,
@@ -428,7 +429,11 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           // default set. Null → use the packet type's default options.
           packetOptions: {
             type: ["array", "null"],
-            description: "For open_packet ONLY: 2 to 4 options the human chooses from, mark exactly one recommended; null to use the packet type's defaults.",
+            // Ruling 202: the cap Claude's `open_decision_packet` states,
+            // refused by the writer both doors share.
+            description:
+              `For open_packet ONLY: 2 to ${OPERATOR_PACKET_MAX_OPTIONS} options the human chooses from, mark exactly one recommended; null to use the packet type's defaults. ` +
+              `More than ${OPERATOR_PACKET_MAX_OPTIONS} is refused, not trimmed, and no packet opens: keep the choices that are really different and put the rest in \`reason\`.`,
             items: {
               type: "object",
               additionalProperties: false,
@@ -650,8 +655,10 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  * Normalize the Codex operator's AUTHORED packet options (P11-27) into the shape
  * `operatorOpenPacket` expects, or null when it supplied nothing usable (empty,
  * or every option lacked a title) — the caller then falls back to the type's
- * default set. Caps at 4 options and ensures exactly one is marked recommended
- * (the first, if the model marked none or several).
+ * default set. Ensures exactly one is marked recommended (the first, if the
+ * model marked none or several). It keeps every titled option: a list past
+ * ruling 202's cap is refused whole by the packet writer both backends share
+ * (`operatorOpenPacketDisclosed`), never cut here.
  */
 export function authoredPacketOptions(
   authored:
@@ -679,10 +686,12 @@ export function authoredPacketOptions(
     | null,
 ): OperatorPacketOptionInput[] | null {
   if (!authored || authored.length === 0) return null;
-  // Filter+cap FIRST, then locate the recommended within the KEPT set — an
+  // Filter FIRST, then locate the recommended within the KEPT set — an
   // earlier empty-title option (dropped here) would otherwise shift the raw
-  // index and mark the wrong kept option recommended.
-  const kept = authored.filter((o) => o.title.trim() !== "").slice(0, 4);
+  // index and mark the wrong kept option recommended. Ruling 202: no cut. A
+  // `.slice(0, 4)` here opened a four-option card from a five-option plan, and
+  // nobody, the operator or the person, learned a choice had gone.
+  const kept = authored.filter((o) => o.title.trim() !== "");
   if (kept.length === 0) return null;
   const recIdx = kept.findIndex((o) => o.recommended);
   return kept.map((o, i) => {
@@ -966,7 +975,8 @@ export async function executeCodexPlan(
               packetType,
               title: a.text,
               // P11-27: honor the operator's authored options when it supplied
-              // a usable set (2–4); else fall back to the type's defaults.
+              // a usable set; else fall back to the type's defaults. More than
+              // four is refused by the writer below (ruling 202).
               options: authoredPacketOptions(a.packetOptions) ?? defaultPacketOptions(packetType),
             };
             if (a.reason) packet.body = a.reason;

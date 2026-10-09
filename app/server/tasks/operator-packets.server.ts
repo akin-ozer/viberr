@@ -527,6 +527,29 @@ export const OPERATOR_PACKET_OPTION_KINDS = PACKET_OPTION_KINDS.filter(
   (kind) => !isRepositoryOptionKind(kind),
 );
 
+/**
+ * Ruling 202: the most options an operator may author on one decision packet,
+ * the "2 to 4" both backends' guidance asks for. A longer list is refused
+ * whole by `authoredOptionsRefusal`, on Claude's `open_decision_packet` and a
+ * Codex plan's `open_packet` alike, and never cut: a decision card is the one
+ * surface where a dropped option is a choice the person never learns they had.
+ */
+export const OPERATOR_PACKET_MAX_OPTIONS = 4;
+
+/** Ruling 202: the refusal both operator doors give an authored option list
+ *  past `OPERATOR_PACKET_MAX_OPTIONS`, or null when it is within it. */
+export function authoredOptionsRefusal(count: number): OperatorActionResult | null {
+  if (count <= OPERATOR_PACKET_MAX_OPTIONS) return null;
+  return {
+    // `noop`, as for any malformed option: no policy refused it.
+    outcome: "noop",
+    message:
+      `A decision packet offers at most ${OPERATOR_PACKET_MAX_OPTIONS} options, and this one had ${count}. ` +
+      "Nothing was opened and no option was dropped: keep the choices that are really different, " +
+      "put the rest in the packet's body, and open it again.",
+  };
+}
+
 /** `agent_runs.backend` is NOT NULL with a CHECK; `agent_profile_id` is read
  *  as nullable because a row that names no profile must not sink the lookup. */
 const lastAgentRunSchema = z.object({

@@ -788,6 +788,44 @@ describe("Codex structured operator completion", () => {
     expect(task().packet!.title).toBe("Which endpoint should this target?");
   });
 
+  it("ruling 202: a plan's fifth packet option refuses the step, and no four-option card opens in its place", async () => {
+    // CANARY: put `.slice(0, 4)` back in `authoredPacketOptions` and a card
+    // with the first four opens, and nobody learns the fifth choice existed.
+    await start();
+    const option = (title: string) => ({
+      kind: "custom",
+      title,
+      detail: null,
+      recommended: title === "a",
+    });
+    adapter.finish(
+      store,
+      JSON.stringify({
+        reasoning: "",
+        actions: [
+          {
+            tool: "open_packet",
+            profileId: null,
+            delivers: null,
+            toStageId: null,
+            packetType: "input",
+            text: "Which database?",
+            reason: "Five candidates fit.",
+            packetOptions: ["a", "b", "c", "d", "the fifth"].map(option),
+          },
+        ],
+      }),
+      "finished",
+    );
+    await eventually(() => {
+      const narration = task().timeline.find((e) => e.text.includes("not carried out in full"));
+      expect(narration, `no refusal was narrated; the packet is ${JSON.stringify(task().packet?.options)}`).toBeDefined();
+      expect(narration!.text).toContain("at most 4 options, and this one had 5");
+      expect(narration!.text).toContain("no option was dropped");
+    });
+    expect(task().packet).toBeNull();
+  });
+
   /**
    * F39-10 (pass 39, live on ax-clone AX-9): the same misblame, reached through
    * a DIFFERENT door. `update-task-branch` was granted `direct` on that board

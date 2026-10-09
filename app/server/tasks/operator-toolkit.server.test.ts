@@ -1303,6 +1303,43 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
 });
 
 /**
+ * Ruling 202 on the operator's two doors: Claude's `open_decision_packet`
+ * opened a card with all five options a Codex plan's `open_packet` cut to four.
+ * Both now meet one cap in the writer they share, and refuse past it by name.
+ * The Codex door's half is operator-run.server.test.ts's.
+ */
+describe("buildOperatorToolkit — open_decision_packet refuses a fifth option (ruling 202)", () => {
+  it("ruling 202: refuses five options by name, writing nothing, and opens four", async () => {
+    // CANARY: drop `authoredOptionsRefusal` from `operatorOpenPacketDisclosed`
+    // and five open here while a Codex plan's five are refused.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { tools } = storeToolkit(store);
+    const packet = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet;
+    const ask = (titles: string[]) =>
+      callToolText(tools, "open_decision_packet", {
+        packetType: "input",
+        title: "Which database?",
+        options: titles.map((title, i) => ({ kind: "custom", title, recommended: i === 0 })),
+      });
+
+    expect(await ask(["a", "b", "c", "d", "the fifth"])).toBe(
+      "[noop] A decision packet offers at most 4 options, and this one had 5. Nothing was opened " +
+        "and no option was dropped: keep the choices that are really different, put the rest in " +
+        "the packet's body, and open it again.",
+    );
+    expect(packet()).toBeNull();
+
+    expect(await ask(["a", "b", "c", "d"])).toContain("[done]");
+    expect(packet()!.options.map((o) => o.t)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+/**
  * Ruling 83: the operator reads what the task took on either backend. Claude
  * calls `get_task`; Codex calls nothing and is handed the snapshot in its
  * prompt. Both are one `operatorSnapshot`, so both carry one figure. What the

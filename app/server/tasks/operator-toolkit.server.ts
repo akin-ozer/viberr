@@ -61,7 +61,9 @@ import {
   operatorSnapshot,
 } from "./operator-snapshot.server";
 import {
+  authoredOptionsRefusal,
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_MAX_OPTIONS,
   OPERATOR_PACKET_OPTION_KINDS,
   operatorAskForRepository,
   operatorOpenPacket,
@@ -311,6 +313,12 @@ export async function operatorOpenPacketDisclosed(
   authority: OperatorAuthority,
   consultedProfileIds: readonly string[],
 ): Promise<OperatorActionResult> {
+  // Ruling 202: an operator's option list past the cap is refused whole, here
+  // where both backends' doors meet, so neither can cut it. The escalations
+  // the server composes for itself open through `operatorOpenPacket` and are
+  // not held to it.
+  const overCap = authoredOptionsRefusal(input.options.length);
+  if (overCap) return overCap;
   const body = `${input.body ?? ""}${consultationDisclosure(ctx, input.projectSlug, consultedProfileIds)}`;
   const disclosed: OperatorOpenPacketInput = { ...input };
   if (body) disclosed.body = body;
@@ -1021,7 +1029,11 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
                   ),
               }),
             )
-            .describe("The 2-4 resolvable options; exactly one recommended."),
+            .describe(
+              `The 2-${OPERATOR_PACKET_MAX_OPTIONS} resolvable options; exactly one recommended. ` +
+                `More than ${OPERATOR_PACKET_MAX_OPTIONS} is refused, not trimmed: keep the choices ` +
+                "that are really different and put the rest in `body`.",
+            ),
         },
         async (args) => {
           const input: OperatorOpenPacketInput = {

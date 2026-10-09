@@ -373,11 +373,13 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
     ]);
   });
 
-  it("caps at 4 and defaults the first when none is marked", () => {
+  it("keeps every titled option and defaults the first when none is marked", () => {
+    // Ruling 202: a list past the cap is refused whole by the shared writer,
+    // never cut here (operator-run.server.test.ts owns the refusal).
     const out = authoredPacketOptions(
       ["a", "b", "c", "d", "e"].map((t) => ({ kind: "custom" as const, title: t, recommended: false })),
     );
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(5);
     expect(out!.filter((o) => o.recommended)).toHaveLength(1);
     expect(out![0].recommended).toBe(true);
   });
