@@ -1698,25 +1698,29 @@ export async function resolvePacket(
   // say the spent window is over — the specialist's "The window has reset …,
   // or the Codex account changed: send @dev back to continue" and the
   // operator's "The usage window has reset …, or I switched the Codex account:
-  // re-run" — are the person's statement that the instance's exhaustion record
-  // is stale. Nothing else retires that record: it is cleared only by a run
-  // that COMPLETES on the backend, and the dispatch hold stops any run from
-  // starting until the recorded instant passes, so the option resolved, the
-  // operator was re-queued, its dispatch was held again and the stated remedy
-  // was overridden by the record it contradicts. That matters most when the
-  // record is wrong: a reset time the provider gave as a bare clock reading is
-  // resolved to the next occurrence, so an observation past that time parks the
-  // account until tomorrow. The option names the backend it asserts about
+  // re-run" — are the person's statement that the exhaustion record is stale.
+  // The record is the task owner's (ruling 160(a)): the account every run on
+  // the task bills (ruling 137(a)), so the one the next dispatch is held on.
+  // Nothing else retires that record: it is cleared only by a run billed to
+  // that account that COMPLETES on the backend, and the dispatch hold stops any
+  // run from starting until the recorded instant passes, so the option
+  // resolved, the operator was re-queued, its dispatch was held again and the
+  // stated remedy was overridden by the record it contradicts. That matters
+  // most when the record is wrong: a reset time the provider gave as a bare
+  // clock reading is resolved to the next occurrence, so an observation past
+  // that time parks the account until tomorrow. The option names the backend it asserts about
   // (`run-failure-remedy.server.ts`); no other kind carries one but
   // `retry_other_backend`, which names the OTHER backend and is handled above.
+  const recordOwner = existing.parsed.frontmatter.ownerUserId;
   if (
     (option.kind === "request_edit" || option.kind === "block_on_policy") &&
-    option.backend
+    option.backend &&
+    recordOwner
   ) {
     const { clearBackendQuotaExhaustion } = await import(
       "~/server/runtimes/backend-quota.server"
     );
-    clearBackendQuotaExhaustion(db, option.backend);
+    clearBackendQuotaExhaustion(db, option.backend, recordOwner);
   }
 
   // R20-1 (F20-5): every settled decision consumes the packet approval. Holds

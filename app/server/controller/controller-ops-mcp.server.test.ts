@@ -387,7 +387,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       const { healthSnapshot } = await import("~/server/ops/health-snapshot.server");
       expect(healthSnapshot(app.db).quota.find((q) => q.backend === "codex")!.credentialRefused?.credentialLabel).toBeNull();
     } finally {
-      clearBackendCredentialRefusal(app.db, "codex");
+      clearBackendCredentialRefusal(app.db, "codex", ids.nonMember);
     }
   });
 
@@ -445,15 +445,15 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       recordBackendQuotaExhaustion,
     } = await import("~/server/runtimes/backend-quota.server");
     recordBackendCredentialRefusal(app.db, "codex", {
-      credentialUserId: null,
-      credentialLabel: null,
+      credentialUserId: ids.nonMember,
+      credentialLabel: "Non Member",
       providerText: "The provider reported: refresh token was already used",
       runId: "run_auth_probe",
       observedAt: new Date().toISOString(),
     });
     recordBackendQuotaExhaustion(app.db, "claude", {
-      credentialUserId: null,
-      credentialLabel: null,
+      credentialUserId: ids.nonMember,
+      credentialLabel: "Non Member",
       resetsAt: null,
       resetsAtPrecision: null,
       providerText: "The provider reported: You've hit your usage limit",
@@ -486,8 +486,8 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       expect(body.degraded).not.toContain("credential:codex");
       expect(body.degraded).not.toContain("quota:claude");
     } finally {
-      clearBackendCredentialRefusal(app.db, "codex");
-      clearBackendQuotaExhaustion(app.db, "claude");
+      clearBackendCredentialRefusal(app.db, "codex", ids.nonMember);
+      clearBackendQuotaExhaustion(app.db, "claude", ids.nonMember);
     }
   });
 

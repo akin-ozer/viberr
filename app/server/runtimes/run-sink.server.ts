@@ -774,14 +774,16 @@ export function createRunSink(
       const written = persistOrDrain(() => {
         patchRun(db, spec.runId, patch);
       });
-      // D5: a run that COMPLETED on this backend is proof the account is not
-      // refusing work any more — the real run IS the re-probe (ruling 160), so
-      // the exhaustion flag is retired here rather than by a synthetic check.
-      // Only on `finished`: an interrupted or errored run proves nothing.
-      if (written && state === "finished") {
-        clearBackendQuotaExhaustion(db, effectiveBackend);
+      // D5: a run that COMPLETED on this backend is proof the account it billed
+      // is not refusing work any more — the real run IS the re-probe (ruling
+      // 149), so that account's exhaustion flag is retired here rather than by
+      // a synthetic check. Only that account's (ruling 160(a)): another
+      // person's window says nothing about this run. Only on `finished`: an
+      // interrupted or errored run proves nothing.
+      if (written && state === "finished" && principal.credentialUserId) {
+        clearBackendQuotaExhaustion(db, effectiveBackend, principal.credentialUserId);
         // F32-4: the same completed run proves the credential is accepted.
-        clearBackendCredentialRefusal(db, effectiveBackend);
+        clearBackendCredentialRefusal(db, effectiveBackend, principal.credentialUserId);
       }
       if (written) publishState(state);
     },

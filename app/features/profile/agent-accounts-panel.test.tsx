@@ -498,7 +498,7 @@ describe("AgentAccountsPanel", () => {
     expect(note.textContent).toContain("The account's organization does not allow Claude Code (oauth_org_not_allowed).");
     expect(note.textContent).toContain("last refusal Viberr observed on this account");
     expect(note.textContent).toContain("not proof the account works");
-    expect(note.textContent).toContain("any completed Claude run retires it");
+    expect(note.textContent).toContain("any completed Claude run on this account retires it");
     // Ruling 160(b): the card names the second retirement, the one the remedy
     // asks for, so a person who connects another account is not told the old
     // account's verdict still stands.
@@ -506,7 +506,7 @@ describe("AgentAccountsPanel", () => {
     const window_ = container.querySelector('[data-refusal="quota"]')!;
     expect(window_.textContent).toContain("Spent as of");
     expect(window_.textContent).toContain("reopens");
-    expect(window_.textContent).toContain("Any completed Codex run retires this notice");
+    expect(window_.textContent).toContain("Any completed Codex run on this account retires this notice");
     expect(window_.textContent).toContain("as does switching to or connecting a different Codex account here");
   });
 

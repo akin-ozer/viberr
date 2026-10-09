@@ -662,7 +662,8 @@ describe("InsightsPage", () => {
    * F32-4 (pass 32): a REJECTED credential is a different fact from a spent
    * window — the backend cannot run anything until a person fixes it — and it
    * outranks a utilization reading the same backend reported earlier. The row
-   * names its provenance (a refused run) and what retires it (a completed run).
+   * names its provenance (a refused run) and what retires it (a completed run
+   * on that account).
    */
   it("says the credential was refused, above any earlier reading, and names what clears it", () => {
     const { getByText, queryByText } = renderPage(
@@ -696,7 +697,7 @@ describe("InsightsPage", () => {
       "?backend=codex",
     );
     expect(getByText("Credential refused")).toBeTruthy();
-    expect(getByText(/clears when a run on this backend completes/)).toBeTruthy();
+    expect(getByText(/clears when a run on that account completes/)).toBeTruthy();
     // The stale 20% reading does not get to reassure anyone.
     expect(queryByText("20%")).toBeNull();
   });
@@ -737,14 +738,19 @@ describe("InsightsPage", () => {
    * refusal record outranked every later measurement the backend reported —
    * one momentary refusal pinned the row at "usage limit reached" / 100% while
    * the provider was answering runs again. A reading observed after the
-   * refusal is fresher evidence from the same provider and wins.
+   * refusal is fresher evidence from the same provider and wins, but only
+   * about the same account (ruling 160(a)): another person's run answering
+   * says nothing about whether this account's window reopened.
    */
   it.each([
     // An hour after the refusal: the window is demonstrably open.
-    { observedAt: "2026-08-31T10:00:00.000Z", refusalStands: false },
+    { observedAt: "2026-08-31T10:00:00.000Z", readingBy: "u_arda", refusalStands: false },
     // BEFORE the refusal — stale, and the refusal is what happened next.
-    { observedAt: "2026-08-31T08:00:00.000Z", refusalStands: true },
-  ])("V4: a reading observed at $observedAt against a 09:00 refusal", ({ observedAt, refusalStands }) => {
+    { observedAt: "2026-08-31T08:00:00.000Z", readingBy: "u_arda", refusalStands: true },
+    // CANARY: drop the account comparison from `superseded` and Murat's
+    // later reading hides Arda's spent window.
+    { observedAt: "2026-08-31T10:00:00.000Z", readingBy: "u_murat", refusalStands: true },
+  ])("V4: a reading observed at $observedAt by $readingBy against Arda's 09:00 refusal", ({ observedAt, readingBy, refusalStands }) => {
     const { queryByText, container } = renderPage(
       withQuota(
         {
@@ -756,11 +762,11 @@ describe("InsightsPage", () => {
             resetsAt: null,
             isUsingOverage: false,
             observedAt,
-            credentialUserId: null,
+            credentialUserId: readingBy,
             credentialLabel: null,
           },
           credentialRefused: null,
-          exhausted: REFUSED,
+          exhausted: { ...REFUSED, credentialUserId: "u_arda", credentialLabel: "Arda" },
           readingWindowReset: false,
         },
         [{ rateLimitType: "five_hour", utilization: 0.12, resetsAt: null, reset: false }],

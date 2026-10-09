@@ -556,21 +556,34 @@ describe("describeRunFailure", () => {
       const { recordBackendQuotaExhaustion } = await import(
         "~/server/runtimes/backend-quota.server"
       );
-      recordBackendQuotaExhaustion(store.db, "claude", {
-        credentialUserId: null,
-        credentialLabel: null,
+      const spent = {
+        credentialUserId: store.users.murat.id,
+        credentialLabel: "Murat",
         resetsAt: Math.floor(Date.now() / 1000) + 3 * 60 * 60,
-        resetsAtPrecision: "prose",
+        resetsAtPrecision: "prose" as const,
         providerText: "You've hit your usage limit… try again at 2:27 AM.",
         runId: "run_x",
         observedAt: new Date().toISOString(),
+      };
+      const describeSpawnRefusal = () =>
+        describe_(store, {
+          role: "specialist",
+          agentHandle: "jc-developer",
+          // No resetsAt on the facts at all.
+          failure: failure("quota", { windowRejected: true, window: "five_hour" }),
+        });
+      // Ruling 160(a): another person's dated window is not when the owner's
+      // account reopens. CANARY: read the store for every account and Murat's
+      // instant becomes Arda's wait.
+      recordBackendQuotaExhaustion(store.db, "claude", spent);
+      expect(describeSpawnRefusal().options.some((o) => o.kind === "wait_for_window")).toBe(false);
+
+      recordBackendQuotaExhaustion(store.db, "claude", {
+        ...spent,
+        credentialUserId: store.users.arda.id,
+        credentialLabel: "Arda",
       });
-      const d = describe_(store, {
-        role: "specialist",
-        agentHandle: "jc-developer",
-        // No resetsAt on the facts at all.
-        failure: failure("quota", { windowRejected: true, window: "five_hour" }),
-      });
+      const d = describeSpawnRefusal();
       // CANARY: drop `storedQuotaResetIso` and this is false — the fix is inert
       // on the only failure that produces it.
       expect(d.options[0]).toMatchObject({ kind: "wait_for_window", recommended: true });

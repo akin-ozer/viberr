@@ -445,8 +445,8 @@ describe("/profile agent accounts (ruling 137)", () => {
       const murat = await backendsOf(murId);
       expect(murat.map((b) => b.lastRefusal)).toEqual([null, null]);
     } finally {
-      quota.clearBackendCredentialRefusal(app.db, "claude");
-      quota.clearBackendQuotaExhaustion(app.db, "codex");
+      quota.clearBackendCredentialRefusal(app.db, "claude", ardaId);
+      quota.clearBackendQuotaExhaustion(app.db, "codex", ardaId);
     }
   });
 

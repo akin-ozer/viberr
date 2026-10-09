@@ -1082,10 +1082,10 @@ describe("a change of the account in use retires the refusal observed on the pre
       observedAt: new Date().toISOString(),
     };
   }
-  function rejected(userId: string | null): BackendCredentialRefusal {
+  function rejected(userId: string, label = "Arda Test"): BackendCredentialRefusal {
     return {
       credentialUserId: userId,
-      credentialLabel: userId ? "Arda Test" : null,
+      credentialLabel: label,
       providerText:
         "The account's organization does not allow Claude Code (oauth_org_not_allowed).",
       runId: "run_refused",
@@ -1151,7 +1151,7 @@ describe("a change of the account in use retires the refusal observed on the pre
     expect(getBackendCredential(db, actor.userId, "codex")).toBeNull();
   });
 
-  it("ruling 160: another person's record, and one naming nobody, survive this person's change", () => {
+  it("ruling 160: another person's records survive this person's change", () => {
     const murat = insertUser(db, {
       id: "u_murat",
       email: "murat@viberr.dev",
@@ -1159,12 +1159,14 @@ describe("a change of the account in use retires the refusal observed on the pre
       role: "member",
     });
     recordBackendQuotaExhaustion(db, "claude", spentWindow(murat.id, "Murat Test"));
-    recordBackendCredentialRefusal(db, "claude", rejected(null));
+    recordBackendCredentialRefusal(db, "claude", rejected(murat.id, "Murat Test"));
+    recordBackendQuotaExhaustion(db, "claude", spentWindow(actor.userId));
 
     signIn("claude", "console");
 
+    // This person's record went with their account; Murat's account did not
+    // change, so his records still stand beside it (ruling 160(a)).
     expect(observed("claude").exhausted?.credentialUserId).toBe(murat.id);
-    expect(observed("claude").credentialRefused).not.toBeNull();
-    expect(observed("claude").credentialRefused?.credentialUserId).toBeNull();
+    expect(observed("claude").credentialRefused?.credentialUserId).toBe(murat.id);
   });
 });

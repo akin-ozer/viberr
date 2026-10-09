@@ -502,18 +502,23 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
   // utilization reading this backend reported AFTER that moment is fresher
   // evidence from the same provider, so it wins: the refusal is history by
   // then, and showing it would pin the row at 100% while the backend is
-  // demonstrably answering runs again.
-  const refusal =
-    exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt) ? exhausted : null;
+  // demonstrably answering runs again. Only a reading about the SAME account
+  // (ruling 160(a)): another person's run answering says nothing about
+  // whether this account's window has reopened.
+  const superseded =
+    exhausted != null &&
+    reading?.credentialUserId === exhausted.credentialUserId &&
+    observedAfter(reading.observedAt, exhausted.observedAt);
+  const refusal = exhausted && !superseded ? exhausted : null;
 
   let rows: ReactNode;
   if (credentialRefused) {
     // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state: no
     // run on this backend can start until someone fixes it, whatever the
     // utilization window says. It is its own record (the failed run and the
-    // provider's sentence) and is cleared by a run that completes on the
-    // backend or by the named account being replaced or disconnected (ruling
-    // 160(b)); the row says exactly that.
+    // provider's sentence) and is cleared by a run on that account that
+    // completes or by the named account being replaced or disconnected
+    // (ruling 160(b)); the row says exactly that.
     rows = <CredentialRefusedRow name={name} refused={credentialRefused} hydrated={hydrated} />;
   } else if (refusal) {
     rows = <RunRefusalRow name={name} refusal={refusal} hydrated={hydrated} />;
@@ -545,7 +550,7 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
           : `No ${name} run has reported a reading yet.`}{" "}
         Near 100%, new runs may be refused until the window resets.
         {refusal && !credentialRefused
-          ? " “Usage limit reached” comes from a run the provider refused, not from a reported figure; it clears when a run on this backend completes, when the account it names changes, when the window it names has passed, or when the backend reports a newer reading."
+          ? " “Usage limit reached” comes from a run the provider refused, not from a reported figure; it clears when a run on that account completes, when the account changes, when the window it names has passed, or when that account reports a newer reading."
           : ""}
       </p>
     </section>
@@ -592,7 +597,7 @@ function CredentialRefusedRow({
         <span className="quota-fill full" />
       </span>
       <span className="quota-meta" title={refused}>
-        from a refused run · clears when a run on this backend completes or the account changes
+        from a refused run · clears when a run on that account completes or the account changes
         {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
             extra; touch, keyboard and screen readers get the same sentence
             from `.vh`. */}

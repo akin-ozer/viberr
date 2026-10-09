@@ -963,9 +963,11 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 94).
   attempts cannot become a queue of duplicate runs at reopen. A hold is not a decision
   packet and costs no operator turn; a scheduled occurrence that lands on a hold retires
   `held-quota`. Resolving the quota or auth packet's option that states the window has
-  reset (or that the account changed) retires the instance's exhaustion record for that
-  backend: the option promises the agent continues now, and only a completed run would
-  otherwise clear it (ruling 131).
+  reset (or that the account changed) retires the task owner's exhaustion record for that
+  backend: the option promises the agent continues now, and only a completed run on that
+  account would otherwise clear it (ruling 131). Records are kept per account (ruling
+  160(a)), so another person's refusal never holds this task's dispatch and another
+  person's completed run never lifts its hold.
 
 ## 10. Delivery
 

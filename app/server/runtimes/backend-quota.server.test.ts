@@ -168,12 +168,15 @@ describe("backendDispatchHold (ruling 151)", () => {
     ).toBeNull();
   });
 
-  it("ruling 151: the hold is about the account it names, so another person's dispatch is not held; a record naming nobody holds everyone", () => {
+  it("ruling 151: the hold is about the account it names, so another person's dispatch is not held; a refusal naming nobody holds nobody", () => {
     const db = ctx.makeDb();
     recordBackendQuotaExhaustion(db, "codex", exhaustion());
     expect(backendDispatchHold(db, "codex", { nowMs, credentialUserId: "u_someone_else" })).toBeNull();
+    // Ruling 160(a): a refusal is filed under the account it billed, and a run
+    // that billed nobody has none, so it is not kept and holds no one.
+    // CANARY: file it under the backend alone and it holds every dispatch.
     recordBackendQuotaExhaustion(db, "codex", exhaustion({ credentialUserId: null, credentialLabel: null }));
-    expect(backendDispatchHold(db, "codex", { nowMs, credentialUserId: "u_someone_else" })).not.toBeNull();
+    expect(backendDispatchHold(db, "codex", { nowMs, credentialUserId: "u_someone_else" })).toBeNull();
   });
 
   it("no record, no hold", () => {

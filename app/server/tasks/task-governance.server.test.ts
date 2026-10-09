@@ -856,11 +856,14 @@ describe("resolvePacket kind matrix", () => {
     // The specialist quota packet's "The window has reset …, or the Codex
     // account changed: send @dev back to continue" and the operator's "…: re-run"
     // are the person's statement that the stored record is stale. Nothing else
-    // retires it — only a run that COMPLETES on the backend clears it, and the
-    // dispatch hold stops any run from starting until the recorded instant
-    // passes — so the option resolved, the dispatch was held again and the
-    // stated remedy was overridden by the record it contradicts. Canary: drop
-    // the `clearBackendQuotaExhaustion` call from `resolvePacket`.
+    // retires it — only a run billed to that account that COMPLETES on the
+    // backend clears it, and the dispatch hold stops any run from starting
+    // until the recorded instant passes — so the option resolved, the dispatch
+    // was held again and the stated remedy was overridden by the record it
+    // contradicts. The record is the task owner's, the account the task's runs
+    // bill (ruling 160(a)); another person's stands. Canary: drop the
+    // `clearBackendQuotaExhaustion` call from `resolvePacket`, or clear by the
+    // backend alone and Murat's hold lifts too.
     const store = setupProjectedStore(ctx);
     const quotaPacket: TaskPacket = {
       ...PACKET,
@@ -875,7 +878,7 @@ describe("resolvePacket kind matrix", () => {
         { kind: "redirect", t: "Redirect with sharper guidance", d: "", rec: false },
       ],
     };
-    withTask(store, { stage: "review", waiting: "human" }, quotaPacket);
+    withTask(store, { stage: "review", waiting: "human", ownerUserId: store.users.arda.id }, quotaPacket);
     const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
       "~/server/runtimes/backend-quota.server"
     );
@@ -889,7 +892,14 @@ describe("resolvePacket kind matrix", () => {
       observedAt: new Date().toISOString(),
     };
     recordBackendQuotaExhaustion(store.db, "codex", record);
+    recordBackendQuotaExhaustion(store.db, "codex", {
+      ...record,
+      credentialUserId: store.users.murat.id,
+      credentialLabel: "Murat",
+      runId: "run_murat",
+    });
     const hold = { credentialUserId: store.users.arda.id };
+    const muratHold = { credentialUserId: store.users.murat.id };
     expect(backendDispatchHold(store.db, "codex", hold)).not.toBeNull();
 
     await resolvePacket(
@@ -899,12 +909,12 @@ describe("resolvePacket kind matrix", () => {
       { dataRoot: store.dataRoot },
     );
     expect(backendDispatchHold(store.db, "codex", hold)).toBeNull();
-
+    expect(backendDispatchHold(store.db, "codex", muratHold)).not.toBeNull();
   });
 
   it("an option that asserts nothing about quota names no backend and leaves the record standing", async () => {
     const store = setupProjectedStore(ctx);
-    withTask(store, { stage: "review", waiting: "human" }, PACKET);
+    withTask(store, { stage: "review", waiting: "human", ownerUserId: store.users.arda.id }, PACKET);
     const { recordBackendQuotaExhaustion, backendDispatchHold } = await import(
       "~/server/runtimes/backend-quota.server"
     );

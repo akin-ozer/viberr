@@ -267,9 +267,10 @@ function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label
             Refused by the provider on{" "}
             <LocalDayDotTime iso={refusal.observedAt} />:{" "}
             {refusal.providerText} This is the last refusal Viberr
-            observed on this account; any completed {label} run retires
-            it, as does switching to or connecting a different {label}{" "}
-            account here, so its absence is not proof the account works.
+            observed on this account; any completed {label} run on this
+            account retires it, as does switching to or connecting a
+            different {label} account here, so its absence is not proof the
+            account works.
           </>
         ) : (
           <>
@@ -279,9 +280,9 @@ function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label
                 ; reopens <LocalDayDotTime iso={refusal.resetsAt} />
               </>
             ) : null}
-            . Any completed {label} run retires this notice, as does
-            switching to or connecting a different {label} account here;
-            until then, runs billed to this account are refused.
+            . Any completed {label} run on this account retires this
+            notice, as does switching to or connecting a different {label}{" "}
+            account here; until then, runs billed to this account are refused.
           </>
         )}
       </span>

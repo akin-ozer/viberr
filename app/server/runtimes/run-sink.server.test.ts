@@ -9,6 +9,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import type { EmittedLine, RunSpec } from "./adapter.server";
 import {
+  backendDispatchHold,
   latestBackendRateLimits,
   parseQuotaResetAt,
 } from "./backend-quota.server";
@@ -95,8 +96,9 @@ function emitted(
   return { raw, display, facts: {}, occurredAt };
 }
 
-/** A run row + a sink over it. `threadId` is only ever passed when a test needs
- *  a SECOND run on the same task (one thread holds one run row). */
+/** A run row + a sink over it, billed to Arda (every run that reaches a
+ *  provider bills someone, ruling 137). `threadId` is only ever passed when a
+ *  test needs a SECOND run on the same task (one thread holds one run row). */
 function sinkFor(runId: string, threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
@@ -110,6 +112,7 @@ function sinkFor(runId: string, threadId = "primary") {
     sdk: "Claude Agent SDK",
     agentProfileId: "dev",
     state: "queued",
+    credentialUserId: store.users.arda.id,
   });
   return createRunSink(store.db, spec(runId));
 }
@@ -939,11 +942,14 @@ describe("ruling 160(a): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
     kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,
   });
-  function principalSink(runId: string) {
+  /** A run billed to `userId` (Arda unless named; null bills nobody).
+   *  `threadId` only when a test needs a second run on the task (one thread
+   *  holds one run row). */
+  function principalSink(runId: string, userId: string | null = store.users.arda.id, threadId = "primary") {
     upsertRun(store.db, {
-      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary", role: "developer", kind: "primary",
+      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId, role: "developer", kind: "primary",
       backend: "claude", model: "sonnet", sdk: "Claude Agent SDK", agentProfileId: "dev", state: "queued",
-      credentialUserId: store.users.arda.id,
+      credentialUserId: userId,
     });
     return createRunSink(store.db, spec(runId));
   }
@@ -1008,7 +1014,7 @@ describe("ruling 160(a): structured refusals and the principal", () => {
     }
   });
 
-  it("a credential refusal names the account it billed, and a run with no principal names none", () => {
+  it("a credential refusal names the account it billed, and a run with no principal records none", () => {
     const runId = `run_auth_p_${randomBytes(6).toString("hex")}`;
     const sink = principalSink(runId);
     sink.markRunning();
@@ -1023,16 +1029,75 @@ describe("ruling 160(a): structured refusals and the principal", () => {
       rmSync(rawLogPath("claude", runId), { force: true });
     }
 
-    // The record is the latest refusal's: a run that billed nobody names
-    // nobody, not the account the earlier refusal named.
+    // A run that billed nobody reached no provider (ruling 137(b)), so there is
+    // no account its refusal is about: it records nothing, and Arda's stands.
+    // CANARY: drop the principal guard from `recordBackendCredentialRefusal`
+    // and the bare run files a record under no account that names nobody.
     const bare = `run_auth_np_${randomBytes(6).toString("hex")}`;
-    const sink2 = sinkFor(bare, "primary-r1");
+    const sink2 = principalSink(bare, null, "primary-r1");
     sink2.markRunning();
     try {
-      sink2.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
-      expect(quotaFor().credentialRefused!.credentialUserId).toBeNull();
+      sink2.line(emitted({ t: "10:00:01", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
+      expect(quotaFor().credentialRefused).toMatchObject({ credentialUserId: store.users.arda.id, runId });
     } finally {
       rmSync(rawLogPath("claude", bare), { force: true });
+    }
+  });
+
+  /**
+   * Rulings 151 and 160: a refusal is a record about the account its run
+   * billed, so another person's run on the same backend can neither replace it
+   * nor retire it. Both records used to be one `instance_settings` slot per
+   * backend: Murat's refusal overwrote Arda's, which lifted her dispatch hold
+   * (the record now named somebody else), and Murat's next completed run
+   * deleted whatever the slot held, Arda's credential refusal included.
+   * CANARY: key the records by backend alone again and Arda's hold lifts the
+   * moment Murat is refused; clear them by backend alone in `finalize` and it
+   * lifts when Murat's next run finishes.
+   */
+  it("one person's refusal is neither replaced nor retired by another person's run on the same backend", () => {
+    const arda = store.users.arda.id;
+    const murat = store.users.murat.id;
+    const nowMs = Date.parse("2026-09-07T09:10:00.000Z");
+    const nowIso = new Date(nowMs).toISOString();
+    const refuse = (sink: ReturnType<typeof principalSink>, observedAt: string, resetsAt: string) => {
+      sink.markRunning();
+      sink.line(emitted({
+        t: "09:00:00", ev: "err", tag: "run·error·quota",
+        text: "The Claude account is over its usage quota: its five hour window is spent.",
+        failure: facts({ windowRejected: true, window: "five_hour", resetsAt }),
+      }, "{}", observedAt));
+      sink.line(emitted({
+        t: "09:00:01", ev: "err", tag: "run·error·auth", text: "refused\n\nThe provider reported: token revoked",
+      }, "{}", observedAt));
+      sink.finalize({ outcome: "error", effectiveBackend: "claude" });
+    };
+    const holdFor = (userId: string) => backendDispatchHold(store.db, "claude", { nowMs, credentialUserId: userId });
+    const ardaRun = `run_arda_${randomBytes(6).toString("hex")}`;
+    const muratRun = `run_murat_${randomBytes(6).toString("hex")}`;
+    const muratOk = `run_murat_ok_${randomBytes(6).toString("hex")}`;
+    try {
+      refuse(principalSink(ardaRun, arda), "2026-09-07T09:00:00.000Z", "2026-09-07T11:50:00.000Z");
+      refuse(principalSink(muratRun, murat, "murat-1"), "2026-09-07T09:05:00.000Z", "2026-09-07T12:30:00.000Z");
+
+      // Murat's refusal is his own record; Arda's still holds her dispatches.
+      expect(holdFor(arda)?.until).toBe(Date.parse("2026-09-07T11:50:00.000Z"));
+      expect(holdFor(murat)?.until).toBe(Date.parse("2026-09-07T12:30:00.000Z"));
+
+      // Murat's next run completes: it proves HIS account answers again.
+      const ok = principalSink(muratOk, murat, "murat-2");
+      ok.markRunning();
+      ok.finalize({ outcome: "finished", effectiveBackend: "claude" });
+
+      expect(holdFor(murat)).toBeNull();
+      expect(holdFor(arda)?.until).toBe(Date.parse("2026-09-07T11:50:00.000Z"));
+      // The instance-wide read (Insights, health) still shows Arda's standing
+      // refusals, naming her and the run they were read off.
+      const row = quotaFor(nowIso);
+      expect(row.credentialRefused).toMatchObject({ credentialUserId: arda, runId: ardaRun });
+      expect(row.exhausted).toMatchObject({ credentialUserId: arda, runId: ardaRun });
+    } finally {
+      for (const id of [ardaRun, muratRun, muratOk]) rmSync(rawLogPath("claude", id), { force: true });
     }
   });
 });

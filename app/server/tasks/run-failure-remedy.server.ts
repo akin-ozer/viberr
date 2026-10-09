@@ -102,14 +102,21 @@ function windowWord(window: string | null | undefined): string {
  * `RunFailureFacts.resetsAt` is set only from a machine `rate_limit_event` the
  * provider sent during the run. A Codex refusal at spawn time sends no such
  * event — but its SENTENCE names the date, the quota store parses it
- * (`parseQuotaResetAt`) and keeps it on the backend's exhaustion record. That
- * record is the same one Insights and the Profile page render, so reading it
- * here makes the packet agree with every other surface rather than inventing a
- * second source of truth. An expired record is already dropped by the reader.
+ * (`parseQuotaResetAt`) and keeps it on the exhaustion record of the account
+ * the run billed. That record is the same one Insights and the Profile page
+ * render, so reading it here makes the packet agree with every other surface
+ * rather than inventing a second source of truth. Only the owner's own record
+ * (ruling 160(a)): another person's window says nothing about when this
+ * account reopens. An expired record is already dropped by the reader.
  */
-function storedQuotaResetIso(db: DatabaseSync, backend: RealBackend): string | null {
+function storedQuotaResetIso(
+  db: DatabaseSync,
+  backend: RealBackend,
+  ownerUserId: string | null,
+): string | null {
+  if (!ownerUserId) return null;
   try {
-    const row = latestBackendRateLimits(db).find((r) => r.backend === backend);
+    const row = latestBackendRateLimits(db, undefined, ownerUserId).find((r) => r.backend === backend);
     const seconds = row?.exhausted?.resetsAt ?? null;
     if (seconds === null || !Number.isFinite(seconds)) return null;
     return new Date(seconds * 1000).toISOString();
@@ -139,7 +146,7 @@ export function describeRunFailure(
   // store when the facts are silent, or the wait this ruling added never
   // appears on the packet it was written for — which is what the first deploy
   // proved, live, on a board with four stalled tasks.
-  const resetsAt = facts?.resetsAt ?? storedQuotaResetIso(db, input.backend);
+  const resetsAt = facts?.resetsAt ?? storedQuotaResetIso(db, input.backend, input.ownerUserId);
   const resetLabel = formatResetLabel(resetsAt);
   const ownerRecord = input.ownerUserId ? findUserById(db, input.ownerUserId) : null;
   const owner = ownerRecord ? { userId: ownerRecord.id, name: ownerRecord.name } : null;

@@ -603,7 +603,9 @@ since", "reset <time>", and the old window's warning and overage words dropped. 
 read "92% of five hour · resets 03:30" hours after 03:30 on an idle instance.
 
 The backend quota panel names whose account a refusal or an exhaustion was recorded on
-(`credentialLabel`, ruling 160(a)). That is org-admin information: it names a person's
+(`credentialLabel`, ruling 160(a)): the records are kept per account, the panel shows the
+latest of each kind still standing on any account, and an exhaustion yields to a later
+reading only from the same account. That is org-admin information: it names a person's
 provider account state, so it reaches this page, the signed-in `instance_health` read and
 the person's own Profile card, and never the unauthenticated health body. A reading, a
 refusal and an exhaustion all retire when the account they describe changes
@@ -735,13 +737,14 @@ Two routes in, both the vendor's own:
   out with no undo short of a fresh sign-in.
 
 **The last refusal Viberr observed** (ruling 160(a)). A connected card also reads the
-quota store (`latestBackendRateLimits`) and shows, ONLY when the record's
-`credentialUserId` is the viewer, a `risk` pill "refused by the provider · <when>" with
+viewer's own records from the quota store (`latestBackendRateLimits` for one person: the
+records are kept per account) and shows, ONLY when the record's `credentialUserId` is the
+viewer, a `risk` pill "refused by the provider · <when>" with
 the provider's own sentence in a "Last refusal" row, or a neutral "usage window spent ·
 reopens <when>" pill with a "Usage window" row. The copy says what the pill is: the last
-refusal Viberr observed on this account, which any completed run on that backend
+refusal Viberr observed on this account, which any completed run on this account
 retires, so the absence of a pill is not proof the account works. Another person's
-refusal, or a record written before principals were stored, never appears on this card.
+refusal never appears on this card, and another person's run never retires this one.
 The record is evidence about the account that was billed, so a change of the account the
 viewer's runs bill on that backend retires it too (ruling 160): a
 confirmed sign-in, a pasted key the vendor accepted, a switch, the disconnect of the

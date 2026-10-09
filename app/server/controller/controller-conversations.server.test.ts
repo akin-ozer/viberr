@@ -1028,8 +1028,8 @@ describe("ruling 156(a): the controller's note for a refused turn", () => {
     } finally {
       // The sink records a quota or an auth refusal against the backend off
       // these lines (D5, F32-4); every case starts without one.
-      clearBackendQuotaExhaustion(app.db, "claude");
-      clearBackendCredentialRefusal(app.db, "claude");
+      clearBackendQuotaExhaustion(app.db, "claude", ownerId);
+      clearBackendCredentialRefusal(app.db, "claude", ownerId);
     }
   }
 

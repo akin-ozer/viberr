@@ -285,7 +285,8 @@ with every window it reported in `windows`, shortest first), and the plan window
 run's own CLI reports at `system/init` (ruling 161(a): §2.4), into
 `backendRateLimit.<backend>` (read back with each listed window aged on its own reset,
 ruling 161(c)); a quota-refused failure
-(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>` when the terminal
+(terminal tag ending `·quota`) records `backendQuotaExhausted.<backend>.<credentialUserId>`
+when the terminal
 line's `failure.windowRejected` says the provider rejected the window OR the provider's
 own sentence names a spent limit (`session | weekly | monthly | usage limit`, never
 transient rate-limit wording), with only the PROVIDER half of the line as its evidence and
@@ -300,27 +301,37 @@ an undated exhaustion expires after 6 h. **The dispatch hold** (ruling 151):
 `backendDispatchHold(db, backend, { credentialUserId })` is the one read a dispatch makes
 before it spends anything; it stands while the stored exhaustion has not passed its reset
 instant (no grace: the hold trusts the provider's instant) or, when none was named, for
-`UNDATED_HOLD_MS` (30 min) after the refusal, and only for the account the record names
-(ruling 151; a record naming nobody holds every dispatch on the backend). See §4.1. The
+`UNDATED_HOLD_MS` (30 min) after the refusal, and it reads only the record kept for the
+account the dispatch would bill (ruling 151), so another person's refusal never holds it.
+See §4.1. The
 recovery-option builders read the same hold, so `retry_other_backend` is never offered
 onto a backend already known to be spent (ruling 131). Ruling 160(a): every record
 (reading, exhaustion, credential refusal) names the account it billed (`credentialUserId`,
-`credentialLabel`, the run's principal under ruling 137); one latest record per backend,
-and a completed run by ANY person retires an exhaustion or refusal. A change to the named
+`credentialLabel`, the run's principal under ruling 137). The reading is one latest record
+per backend; the exhaustion and the credential refusal are one record per ACCOUNT, kept
+under the person the run billed (`backendQuotaExhausted.<backend>.<credentialUserId>`,
+`backendCredentialRefused.<backend>.<credentialUserId>`; the person stands for their account
+in use, ruling 138), so one person's refusal never replaces another's, a run that billed
+nobody records none, and only a run billed to the same account that completes on the
+backend retires them. A read for one person (`latestBackendRateLimits(db, nowIso, userId)`:
+the Profile card, the stored reset a failure's packet quotes) returns that person's records
+and the reading only when it is theirs; an unscoped read (Insights, both health reads)
+returns, per kind, the latest record still standing on any account. A change to the named
 person's credential on that backend (a confirmed sign-in, a pasted key, a disconnect, an
 account removal) retires all three records that name them, the utilization reading
 included (rulings 160(b) and 161, `retireBackendRecordsFor`): a new account's window has no
 relation to the old one's. A person resolving a quota or auth packet's option that states
 the window has reset or the account changed (the option carries the backend) clears the
-exhaustion too (ruling 131, `clearBackendQuotaExhaustion`). The principal reaches Insights
+task owner's exhaustion too (ruling 131, `clearBackendQuotaExhaustion`). The principal reaches Insights
 (org admin), `instance_health` (signed in) and the person's own Profile card; it is
 stripped from the unauthenticated `/resources/health` body. Insights renders both; "no
-reading yet" is neutral; a refused row says whose account, and a reading row names the
+reading yet" is neutral; an exhaustion yields to a later reading only from the same
+account; a refused row says whose account, and a reading row names the
 hour of its reset. The Profile card (`getProfileBackends` → `lastRefusal`, `usage`) shows
 the viewer's OWN records only: a `risk` "refused by the provider · <when>" pill with the
 provider's sentence, or a neutral "usage window spent · reopens <when>" pill, each stated
-as the last refusal Viberr observed, retired by any completed run or by connecting a
-different account there (ruling 160(b)); and the utilization reading (ruling 161), shown only
+as the last refusal Viberr observed, retired by a completed run on that account or by
+connecting a different account there (ruling 160(b)); and the utilization reading (ruling 161), shown only
 when it names the viewer and was observed after the current connection, with its age, "not
 reported" for a missing figure (never 0%), a clamped percentage, and no row on a Codex
 card until one of the person's runs has made a model call (ruling 161(b)). A reading observed after an exhaustion hides the
@@ -1031,7 +1042,8 @@ counts its run as still holding the folder (`activeRunCount`). On a controller t
 compaction still runs before the finalize, and an operator's session is never compacted.
 `finalize` lets the first
 terminal writer win (only that writer stamps `finishedAt`) and, on `finished`, clears the
-backend's quota-exhaustion and credential-refusal records. A callback that throws goes
+quota-exhaustion and credential-refusal records of the account the run billed on that
+backend, and nobody else's (ruling 160(a)). A callback that throws goes
 through `noteCompletionEffectsLost`: waiting flips to human, a `continuity` timeline event
 is written and a `run.completion.effects_lost` audit row lets boot recovery replay the
 effects (§8).
@@ -1374,7 +1386,8 @@ operator bursts under it (ruling 172; ui/surfaces.md).
   of the Codex operator's plan), the controller's `run_agent_on_task` surfaces it as the
   tool's refusal text, and a scheduled occurrence retires `held-quota` (§4.5). A hold is
   not a decision packet and costs no operator turn. The record behind it is retired by a
-  run that COMPLETES on the backend and by two other things: a person resolving the quota
+  run billed to the same account that COMPLETES on the backend (another person's run
+  retires nothing of it, ruling 160(a)) and by two other things: a person resolving the quota
   or auth packet's option that states the window has reset or the account changed
   (`run-failure-remedy.server.ts` names the backend on that option; `resolvePacket` clears
   it), because the option promises the agent continues now and the record would otherwise

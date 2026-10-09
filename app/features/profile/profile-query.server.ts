@@ -77,8 +77,8 @@ export interface ProfileMembership {
  * Ruling 160(a) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
  * person's OWN account, for their Agent-accounts card. Live, every run on an
  * account was refused with a 403 while the card said "connected · verified".
- * A completed run on the backend by anyone retires the record, so the absence
- * of a refusal is not proof the account works; the card says so.
+ * A completed run on this account retires the record, so the absence of a
+ * refusal is not proof the account works; the card says so.
  */
 export interface ProfileBackendRefusal {
   /** `credential`: the provider rejected the account; `quota`: a usage window
@@ -212,8 +212,9 @@ function ownReading(
 }
 
 /** The record is this person's only when the run it was read off billed them
- *  (`credentialUserId`, ruling 137): another person's refusal, or a record
- *  written before principals were stored, is never shown on this card. */
+ *  (`credentialUserId`, ruling 137): the row is read for this person alone
+ *  (ruling 160(a)), so another person's refusal is never on it, and the check
+ *  below is the card's own second gate. */
 function ownRefusal(row: BackendQuotaRow | undefined, userId: string): ProfileBackendRefusal | null {
   const refused = row?.credentialRefused;
   if (refused && refused.credentialUserId === userId) {
@@ -261,8 +262,10 @@ function getProfileBackends(
   db: DatabaseSync,
   userId: string,
 ): ProfileBackend[] {
-  // One read of the quota store for both cards (ruling 160(a)).
-  const limits = new Map(latestBackendRateLimits(db).map((row) => [row.backend, row]));
+  // One read of the quota store for both cards, of this person's records only
+  // (ruling 160(a)): their own refusals, and the reading only when it is theirs,
+  // so a colleague's newer reading never supersedes this person's refusal.
+  const limits = new Map(latestBackendRateLimits(db, undefined, userId).map((row) => [row.backend, row]));
   return PROFILE_BACKENDS.map((backend) => {
     const health = userBackendHealth(db, userId, backend);
     const accounts = listBackendAccounts(db, userId, backend);

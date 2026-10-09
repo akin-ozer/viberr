@@ -290,7 +290,7 @@ describe("/resources/health — honest status (gap 17)", () => {
       // Profile already render it per person.
       expect(JSON.stringify(ready.body)).toContain("authentication_failed");
     } finally {
-      clearBackendCredentialRefusal(db, "claude");
+      clearBackendCredentialRefusal(db, "claude", "u_selin");
     }
   });
 

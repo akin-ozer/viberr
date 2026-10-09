@@ -1249,7 +1249,7 @@ describe("run-agent intent — the one manual dispatch (auto-engage)", () => {
       const schedule = after.schedules.find((x) => x.status === "pending" && x.action === "run-agent");
       expect(schedule).toMatchObject({ profileId: "developer", prompt: "Pick up the lint debt" });
     } finally {
-      clearBackendQuotaExhaustion(app.db, "codex");
+      clearBackendQuotaExhaustion(app.db, "codex", ids.arda);
     }
   });
 

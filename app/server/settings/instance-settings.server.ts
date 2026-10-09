@@ -9,7 +9,7 @@ import { recordAudit, type AuditActor } from "~/server/audit/audit-recorder.serv
  *
  * The store is generic so the next instance knob is a key, not a column — the
  * concurrency cap below is one such knob, and the backend-quota observations
- * (backend-quota.server) are another. The three accessors are EXPORTED for that
+ * (backend-quota.server) are another. The four accessors are EXPORTED for that
  * reason: every other keyed reader/writer of this table goes through them, so
  * the tolerant-parse and upsert rules live in exactly one place.
  */
@@ -52,6 +52,33 @@ export function getSetting<S extends z.ZodType>(
   }
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+/** Every setting whose key starts with `prefix`, parsed by `schema`, for a
+ *  family of keys (backend-quota's one record per account, ruling 160(a)).
+ *  Tolerant the way `getSetting` is: a corrupt or mismatched row is skipped. */
+export function listSettings<S extends z.ZodType>(
+  db: DatabaseSync,
+  prefix: string,
+  schema: S,
+): z.infer<S>[] {
+  const rows = z.array(rowSchema).parse(
+    db
+      .prepare(`SELECT value_json FROM instance_settings WHERE substr(key, 1, ?) = ?`)
+      .all(prefix.length, prefix),
+  );
+  const values: z.infer<S>[] = [];
+  for (const row of rows) {
+    let value: unknown;
+    try {
+      value = JSON.parse(row.value_json);
+    } catch {
+      continue;
+    }
+    const parsed = schema.safeParse(value);
+    if (parsed.success) values.push(parsed.data);
+  }
+  return values;
 }
 
 export function setSetting(

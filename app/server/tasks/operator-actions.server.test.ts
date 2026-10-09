@@ -595,8 +595,8 @@ describe("operatorDispatchAgent", () => {
     );
     const resetsAt = Math.round(Date.now() / 1000) + 3600;
     recordBackendQuotaExhaustion(store.db, "claude", {
-      credentialUserId: null,
-      credentialLabel: null,
+      credentialUserId: store.users.arda.id,
+      credentialLabel: "Arda",
       resetsAt,
       resetsAtPrecision: "clock",
       providerText: "5-hour limit reached",
