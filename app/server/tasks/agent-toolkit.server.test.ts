@@ -834,7 +834,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       toAgent: false,
       evidence: null,
     });
-    // One report of 90,000 characters, a third of them three bytes wide.
+    // One report of some 93,000 characters, one in twenty three bytes wide.
     const alone = "2026-10-09T03:00:00.001Z";
     const report = `## Review\n\n${"A finding, with its passage quoted. 記録 ".repeat(2_400)}\n\nSENTINEL-AT-THE-END`;
     // A report beside its one-line quality marker, written in one instant.
@@ -848,10 +848,19 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const twins = "2026-10-09T03:00:00.003Z";
     const first = `FIRST ${"alpha ".repeat(8_000)}END-OF-THE-FIRST`;
     const second = `SECOND ${"beta ".repeat(11_000)}END-OF-THE-SECOND`;
+    // Three under one stamp: a note, a report of emoji (two code units and
+    // four bytes each) longer than two pages, and one of 9,000 characters.
+    const triple = "2026-10-09T03:00:00.004Z";
+    const short = "A note.";
+    const long = `x${"🚀".repeat(20_000)}END-OF-THE-LONG`;
+    const middle = `${"A middle entry. ".repeat(560)}END-OF-THE-MIDDLE`;
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
       // The file holds entries newest first, so the last written is listed first.
       timeline: [
+        entry(triple, "comment", "Middle", middle),
+        entry(triple, "comment", "Long", long),
+        entry(triple, "comment", "Short", short),
         entry(twins, "comment", "Second", second),
         entry(twins, "comment", "First", first),
         entry(pair, "quality", "Changes requested", marker),
@@ -889,6 +898,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(bytes(head.text)).toBeLessThanOrEqual(32_000);
     expect(bytes(head.text)).toBeGreaterThan(31_990);
     expect(head.text.length).toBeLessThan(32_000);
+    // What a reader pages by leads the answer and the text closes it: an
+    // output cut from the middle keeps its head. CANARY: print `nextOffset`
+    // after 32,000 bytes of text, where the cut falls.
+    const raw = await text({ occurredAt: alone });
+    for (const field of ['"truncated"', '"characters"', '"nextOffset"']) {
+      expect(raw.indexOf(field), field).toBeGreaterThan(0);
+      expect(raw.indexOf(field), field).toBeLessThan(raw.indexOf('"text"'));
+    }
     // And the pages after it, to the end. CANARY: ignore `offset` and every
     // read is the first page again; leave `nextOffset` out and a reader is
     // told the entry is cut and handed nothing to pass back, as before.
@@ -941,8 +958,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(verdictHead.characters).toBe(verdict.length);
     // Together they are one page, filled. CANARY: give each entry a page of
     // its own and two long entries come back as 64,000 bytes in one answer;
-    // share the page by characters and an entry of three-byte characters is
-    // handed a third of what the page holds.
+    // share the page by characters and this verdict, whose characters are
+    // three bytes wide, is handed two thirds of what the page holds.
     expect(bytes(verdictHead.text) + bytes(marker)).toBeLessThanOrEqual(32_000);
     expect(bytes(verdictHead.text) + bytes(marker)).toBeGreaterThan(31_990);
     // `offset` alone reads on in the one entry long enough to reach it, with a
@@ -977,8 +994,11 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const secondRest = await read({ occurredAt: twins, entry: 2, offset: cut });
     expect(secondRest.entry).toBe(2);
     expect(both.entries[1]!.text + secondRest.text).toBe(second.slice(0, secondRest.nextOffset ?? second.length));
-    // Past the first entry's end, the second is the only one that reaches.
+    // Past the first entry's end, the second is the only one that reaches,
+    // and an entry that ends exactly at the offset does not reach it.
+    // CANARY: count an entry as long as the offset among those that run past.
     expect((await read({ occurredAt: twins, offset: first.length + 10 })).entry).toBe(2);
+    expect((await read({ occurredAt: twins, offset: first.length })).entry).toBe(2);
     expect(await text({ occurredAt: twins, offset: second.length + 10 })).toBe(
       `[noop] None of the 2 entries on VIB-3 that carry the stamp \`${twins}\` runs to offset ${(second.length + 10).toLocaleString("en-US")}: the longest reads as ${second.length.toLocaleString("en-US")} characters.`,
     );
@@ -995,10 +1015,44 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
     expect((await read({ occurredAt: alone, entry: 1 })).text).toBe(head.text);
 
-    // Every page reaches a Codex run whole (ruling 624): what the tool
-    // answers, printed as an agent prints a tool result, is under the 10,000
-    // tokens (bytes / 4) its output is cut to from the middle. CANARY: put the
-    // page back at 40,000 characters and each of these is over.
+    // Three entries under one stamp: the page is split shortest first, so the
+    // two short ones come whole and the long one takes what is left. A first
+    // read and then each cut entry's `nextOffset` recover every character.
+    // CANARY: split the page into equal parts and the long entry is handed a
+    // third of it while the other two leave most of theirs unused.
+    const tripleRead = z
+      .object({ shared: z.string(), entries: z.array(page.omit({ occurredAt: true })) })
+      .parse(JSON.parse(await text({ occurredAt: triple })));
+    expect(tripleRead.shared).toContain("3 entries were written with this stamp");
+    expect(tripleRead.entries.map((e) => [e.entry, e.title, e.truncated])).toEqual([
+      [1, "Short", false],
+      [2, "Long", true],
+      [3, "Middle", false],
+    ]);
+    expect(tripleRead.entries[2]!.text).toBe(middle);
+    expect(tripleRead.entries.reduce((sum, e) => sum + bytes(e.text), 0)).toBeLessThanOrEqual(32_000);
+    expect(tripleRead.entries.reduce((sum, e) => sum + bytes(e.text), 0)).toBeGreaterThan(31_980);
+    let longText = tripleRead.entries[1]!.text;
+    let longNext = tripleRead.entries[1]!.nextOffset;
+    for (let i = 0; longNext !== undefined && i < 10; i += 1) {
+      const more = await read({ occurredAt: triple, offset: longNext });
+      expect(more.entry).toBe(2);
+      // No page starts or ends on half an emoji. CANARY: cut a page at the
+      // byte count and a pair is split across two pages.
+      expect(more.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+      expect(bytes(more.text)).toBeLessThanOrEqual(32_000);
+      longText += more.text;
+      longNext = more.nextOffset;
+    }
+    expect(longText).toBe(long);
+    expect(tripleRead.entries[1]!.text).not.toMatch(/[\uD800-\uDBFF]$/);
+
+    // These pages of prose reach a Codex run whole (ruling 624): what the
+    // tool answers, printed as an agent prints a tool result, is under the
+    // 10,000 tokens (bytes / 4) its output is cut to from the middle. A page
+    // of code or of JSON prints longer, here as in the attachment reader.
+    // CANARY: put the page back at 40,000 characters and the first four of
+    // these are over.
     const printed = (answer: string) => Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text: answer }] })) / 4;
     const calls: Record<string, string | number>[] = [
       { occurredAt: alone },
@@ -1015,7 +1069,9 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // leave its description at "in full", and no run sends `offset`.
     const tool = tools.read_timeline_entry!;
     expect(tool.description).toContain(
-      "A long entry comes in pages of up to 32,000 bytes: a read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, " +
+      "A long entry comes in pages of up to 32,000 bytes, sized to reach you whole (ruling 624): read and print one page per call, " +
+        "because a Codex run's tool output is cut from the middle above about 40,000 bytes. " +
+        "A read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, " +
         "which you pass back as `offset` to read on, until a read is not `truncated`. " +
         "Entries that share a stamp share the first page and are numbered (`entry`); `entry` reads one of them alone, a whole page of it.",
     );

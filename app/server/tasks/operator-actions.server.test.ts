@@ -4865,6 +4865,20 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
       .parse(JSON.parse(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, 10)));
     expect(fromFurtherIn.text).toBe(entry.text.slice(10));
     expect(fromFurtherIn.correction).toBeUndefined();
+    // The reader holds its own floors, whatever door called it. CANARY: rest
+    // on the doors' schemas, and a negative offset reads from the entry's
+    // end, a fraction comes back as the next offset and a fraction for
+    // `entry` throws.
+    const wholeNumber = "[noop] `offset` is a whole number from 0, in characters: the `nextOffset` a truncated read returned.";
+    for (const offset of [-1, 1.5, Number.NaN]) {
+      expect(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, offset)).toBe(wholeNumber);
+    }
+    expect(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, 0, 1.5)).toBe(
+      "[noop] `entry` is a whole number from 1: the number a first read gives an entry that shares its stamp.",
+    );
+    expect(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, 0, 0)).toBe(
+      `[noop] One entry on VIB-1 carries the stamp \`${entry.occurredAt}\`: \`entry\` can only be 1, or left out.`,
+    );
   });
 
   it("refuses a knowledge base no run on the task was given, and a passage the document does not hold exactly", async () => {

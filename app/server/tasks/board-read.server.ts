@@ -629,21 +629,31 @@ function entryActor(entry: TaskFileEvent): string {
  */
 function entryPage(entry: TaskFileEvent, offset: number, bytes: number, numbered: number | null): TimelineEntryReading {
   const end = pageEnd(entry.text, offset, bytes);
-  const reading: TimelineEntryReading = {
+  const more = end < entry.text.length;
+  // Everything a reader pages by stands before the text. A page of code or of
+  // JSON prints longer than a page of prose, and a Codex run's output is cut
+  // from the middle past its limit (ruling 624): what leads the answer
+  // survives the cut, and what trails a long text may not.
+  const which: Pick<TimelineEntryReading, "entry"> = {};
+  if (numbered !== null) which.entry = numbered;
+  const from: Pick<TimelineEntryReading, "offset"> = {};
+  if (offset > 0) from.offset = offset;
+  const rest: Pick<TimelineEntryReading, "characters" | "nextOffset"> = {};
+  if (offset > 0 || more) rest.characters = entry.text.length;
+  if (more) rest.nextOffset = end;
+  return {
+    ...which,
     type: entry.type,
     actor: entryActor(entry),
     title: entry.title,
+    ...from,
     // Reported, never hidden: a clipped entry that reads as complete is how a
     // model states a half-read report as fact, the very failure this tool
     // exists to end.
-    truncated: end < entry.text.length,
+    truncated: more,
+    ...rest,
     text: entry.text.slice(offset, end),
   };
-  if (numbered !== null) reading.entry = numbered;
-  if (offset > 0) reading.offset = offset;
-  if (end < entry.text.length) reading.nextOffset = end;
-  if (offset > 0 || end < entry.text.length) reading.characters = entry.text.length;
-  return reading;
 }
 
 const count = (n: number) => n.toLocaleString("en-US");
@@ -732,6 +742,15 @@ export async function readTimelineEntry(
   });
   if (!file) {
     return `[noop] No task ${taskKey} in this project.`;
+  }
+  // Ruling 707: every door refuses these before they get here, and the reader
+  // does not rest on that: a negative offset read from an entry's end, a
+  // fraction came back as the next offset, and a fraction for `entry` threw.
+  if (!Number.isInteger(offset) || offset < 0) {
+    return "[noop] `offset` is a whole number from 0, in characters: the `nextOffset` a truncated read returned.";
+  }
+  if (entry !== undefined && !Number.isInteger(entry)) {
+    return "[noop] `entry` is a whole number from 1: the number a first read gives an entry that shares its stamp.";
   }
   const wanted = occurredAt.trim();
   // Every writer puts its entry at the head of the file, so the reverse of

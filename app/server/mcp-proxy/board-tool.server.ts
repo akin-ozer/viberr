@@ -59,7 +59,8 @@ export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Om
  * `truncated` with nothing to pass back.
  */
 export const TIMELINE_ENTRY_PAGES_SENTENCE =
-  `A long entry comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes: a read that stops short says \`truncated\`, gives the entry's length in \`characters\` and gives \`nextOffset\`, which you pass back as \`offset\` to read on, until a read is not \`truncated\`. ` +
+  `A long entry comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. ` +
+  "A read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, which you pass back as `offset` to read on, until a read is not `truncated`. " +
   "Entries that share a stamp share the first page and are numbered (`entry`); `entry` reads one of them alone, a whole page of it.";
 
 /** Ruling 707: the two arguments a page takes, on every door. */
@@ -107,6 +108,7 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
       entry: { type: "integer", minimum: 1, description: READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION },
     },
     required: ["occurredAt"],
+    additionalProperties: false,
   },
   annotations: { title: "Read one timeline entry in full", ...READ_ONLY },
 };
@@ -341,8 +343,12 @@ export const taskAttachmentArgsSchema = z.object({
 });
 export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
-/** `read_timeline_entry`'s arguments, parsed where the gateway receives the call. */
-export const timelineEntryArgsSchema = z.object({
+/** `read_timeline_entry`'s arguments, parsed where the gateway receives the call.
+ *  Ruling 707: strict, as the tool's Claude twins are (ruling 296). Two of its
+ *  arguments now choose which text comes back, and an argument this door
+ *  dropped (`nextOffset` for `offset`, `page` for anything) answered the first
+ *  page again as a good read, which a run in a loop took for the next one. */
+export const timelineEntryArgsSchema = z.strictObject({
   occurredAt: z.string(),
   taskKey: z.string().optional(),
   offset: z.number().int().min(0).optional(),
@@ -563,8 +569,35 @@ export function pageCaptureArgsRefusal(): CallToolResult {
   );
 }
 
-/** The answer to arguments that are not the tool's. */
+/** One argument of a board tool, as its published schema declares it. */
+const boardArgumentSchema = z.object({ type: z.string().optional(), minimum: z.number().optional() });
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: readonly string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The answer to arguments that are not the tool's, read off the schema the
+ * tool publishes: each argument by what it takes. Ruling 707: it used to say
+ * every argument is text, which was true until a reader took `offset`; a run
+ * told a number is text sends `"32000"` and is refused again (the trap
+ * {@link pageCaptureArgsRefusal} names). A tool that refuses an argument it
+ * does not declare says so, and one that requires an argument names it.
+ */
 export function boardArgsRefusal(tool: Tool): CallToolResult {
-  const fields = Object.keys(tool.inputSchema.properties ?? {});
-  return textResult(`${tool.name} takes ${fields.map((name) => `\`${name}\``).join(", ")} as text. Nothing was read.`, true);
+  const texts: string[] = [];
+  const numbers: string[] = [];
+  for (const [name, declared] of Object.entries(tool.inputSchema.properties ?? {})) {
+    const argument = boardArgumentSchema.parse(declared);
+    if (argument.type === "integer") numbers.push(`\`${name}\` as a whole number from ${argument.minimum ?? 0}`);
+    else texts.push(`\`${name}\``);
+  }
+  const parts = [...numbers];
+  if (texts.length > 0) parts.unshift(`${listed(texts)} as text`);
+  const takes = listed(parts);
+  const strict = tool.inputSchema.additionalProperties === false ? ", and nothing else" : "";
+  const required = (tool.inputSchema.required ?? []).map((name) => `\`${name}\``);
+  const needs = required.length > 0 ? `; ${listed(required)} ${required.length > 1 ? "are" : "is"} required` : "";
+  return textResult(`${tool.name} takes ${takes}${strict}${needs}. Nothing was read.`, true);
 }

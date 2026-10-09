@@ -527,11 +527,46 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     }
     expect(joined).toBe(longReport);
     expect((await readPage({ entry: 2 })).text).toBe("**Validation:** failing.");
-    // A fraction is no offset, here as on Claude.
-    expect((await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: longAt, offset: 1.5 } })).isError).toBe(true);
+    // What this door refuses, it refuses in words a run can act on: each
+    // argument by what it takes. It used to say every argument is text, and a
+    // run told a number is text sends "32000" and is refused again.
+    // CANARIES: take a fraction, a negative offset or `entry: 0`; say "as
+    // text" of the two numbers.
+    const refusedWith = async (name: string, args: Record<string, string | number>) => {
+      const result = await client.callTool({ name, arguments: args });
+      expect(result.isError, JSON.stringify(args)).toBe(true);
+      return z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    };
+    const entryRefusal =
+      "read_timeline_entry takes `occurredAt` and `taskKey` as text, `offset` as a whole number from 0 and `entry` as a whole number from 1, " +
+      "and nothing else; `occurredAt` is required. Nothing was read.";
+    const badPages: Record<string, string | number>[] = [{ offset: 1.5 }, { offset: -1 }, { offset: "32000" }, { entry: 0 }, { entry: 1.5 }, { entry: "1" }];
+    for (const bad of badPages) {
+      expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, ...bad })).toBe(entryRefusal);
+    }
+    // An argument the tool does not declare is refused, as on Claude (ruling
+    // 296), and no longer dropped: a run that passed back `nextOffset` under
+    // its own name, or asked for `page: 2`, was answered the first page again
+    // as a good read. CANARY: parse this door's arguments loosely.
+    expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, nextOffset: 31_976 })).toBe(entryRefusal);
+    expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, entry: 1, page: 2 })).toBe(entryRefusal);
+    // The same sentence builder answers for the other readers of this server.
+    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", offset: "5" })).toBe(
+      "read_task_attachment takes `name`, `taskKey` and `delivery` as text and `offset` as a whole number from 0; `name` is required. Nothing was read.",
+    );
+    expect(await refusedWith("read_task_source", { id: "S1", page: 2 })).toBe(
+      "read_task_source takes `id`, `taskKey` and `find` as text and `offset` as a whole number from 0, and nothing else. Nothing was read.",
+    );
+    expect(await refusedWith("read_board", { taskKey: 5 })).toBe("read_board takes `taskKey` as text. Nothing was read.");
     const listedEntry = (await client.listTools()).tools.find((tool) => tool.name === "read_timeline_entry");
     expect(listedEntry?.description).toContain("A long entry comes in pages of up to 32,000 bytes");
+    expect(listedEntry?.description).toContain("read and print one page per call");
     expect(Object.keys(listedEntry?.inputSchema.properties ?? {})).toEqual(["occurredAt", "taskKey", "offset", "entry"]);
+    // Whole numbers with their floors, and nothing undeclared, as the model is told.
+    expect(listedEntry?.inputSchema).toMatchObject({
+      additionalProperties: false,
+      properties: { offset: { type: "integer", minimum: 0 }, entry: { type: "integer", minimum: 1 } },
+    });
     expect(z.object({ offset: z.object({ description: z.string() }), entry: z.object({ description: z.string() }) }).parse(listedEntry?.inputSchema.properties)).toMatchObject({
       offset: { description: expect.stringContaining("the `nextOffset` a truncated read returned") },
       entry: { description: expect.stringContaining("counted from 1 in the order they were written") },

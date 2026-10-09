@@ -335,40 +335,58 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
     const at = "2026-10-09T03:20:00.000Z";
     const report = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
-    const reviewer = { kind: "agent" as const, backend: "claude" as const, profileId: "reviewer", roleHint: "Reviewer" };
-    await updateTaskFile({ projectSlug: SLUG, taskKey: "VIB-148", dataRoot: app.dataRoot }, (parsed) => {
-      // Newest first: the marker was written after its report.
-      parsed.timeline.unshift(
-        { occurredAt: at, type: "quality", actor: reviewer, title: "Changes requested", text: "**Validation:** failing.", toAgent: false, evidence: null },
-        { occurredAt: at, type: "comment", actor: reviewer, title: "Review verdict", text: report, toAgent: false, evidence: null },
-      );
+    const task = { projectSlug: SLUG, taskKey: "VIB-148", dataRoot: app.dataRoot };
+    const note = (title: string, text: string) => ({
+      occurredAt: at,
+      type: "note" as const,
+      actor: { kind: "operator" as const },
+      title,
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+    // Newest first: the second note was written after the report.
+    await updateTaskFile(task, (parsed) => {
+      parsed.timeline.unshift(note("A note beside it", "One line."), note("A long report", report));
     });
     rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
-    const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
-    const read = async (args: Record<string, JsonValue>) =>
-      page.parse(JSON.parse(await call(ids.viewer, "read_timeline_entry", { taskKey: "VIB-148", at, ...args })));
-    let part = await read({ entry: 1 });
-    expect(part.truncated).toBe(true);
-    let whole = part.text;
-    // Bounded, so a door that drops `offset` fails here and does not spin.
-    for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
-      part = await read({ entry: 1, offset: part.nextOffset });
-      whole += part.text;
+    try {
+      const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
+      const read = async (args: Record<string, JsonValue>) =>
+        page.parse(JSON.parse(await call(ids.viewer, "read_timeline_entry", { taskKey: "VIB-148", at, ...args })));
+      let part = await read({ entry: 1 });
+      expect(part.truncated).toBe(true);
+      let whole = part.text;
+      // Bounded, so a door that drops `offset` fails here and does not spin.
+      for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
+        part = await read({ entry: 1, offset: part.nextOffset });
+        whole += part.text;
+      }
+      expect(whole).toBe(report);
+      expect((await read({ entry: 2 })).text).toBe("One line.");
+      // The copy a model is handed says so: the description and both arguments.
+      const toolkit = await toolkitAs(ids.viewer);
+      const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
+      const argument = z.object({ description: z.string(), type: z.string(), minimum: z.number() });
+      const fields = z
+        .object({ properties: z.object({ offset: argument, entry: argument }) })
+        .parse(published.get("read_timeline_entry")).properties;
+      expect(fields.offset.description).toContain("the `nextOffset` a truncated read returned");
+      expect(fields.entry.description).toContain("counted from 1 in the order they were written");
+      // Whole numbers with their floors, as the model is told. CANARY: declare
+      // either as any number.
+      expect([fields.offset.type, fields.offset.minimum, fields.entry.type, fields.entry.minimum]).toEqual(["integer", 0, "integer", 1]);
+      const listed = (await (await connectedClient((await toolkitAs(ids.viewer)).mcpServers.viberr_controller)).listTools()).tools;
+      const described = listed.find((t) => t.name === "read_timeline_entry")?.description;
+      expect(described).toContain("A long entry comes in pages of up to 32,000 bytes");
+      expect(described).toContain("`entry` reads one of them alone, a whole page of it.");
+    } finally {
+      // The fixture is shared by the tests after this one.
+      await updateTaskFile(task, (parsed) => {
+        parsed.timeline = parsed.timeline.filter((e) => e.occurredAt !== at);
+      });
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
     }
-    expect(whole).toBe(report);
-    expect((await read({ entry: 2 })).text).toBe("**Validation:** failing.");
-    // The copy a model is handed says so: the description and both arguments.
-    const toolkit = await toolkitAs(ids.viewer);
-    const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
-    const fields = z
-      .object({ properties: z.object({ offset: z.object({ description: z.string() }), entry: z.object({ description: z.string() }) }) })
-      .parse(published.get("read_timeline_entry")).properties;
-    expect(fields.offset.description).toContain("the `nextOffset` a truncated read returned");
-    expect(fields.entry.description).toContain("counted from 1 in the order they were written");
-    const listed = (await (await connectedClient((await toolkitAs(ids.viewer)).mcpServers.viberr_controller)).listTools()).tools;
-    const described = listed.find((t) => t.name === "read_timeline_entry")?.description;
-    expect(described).toContain("A long entry comes in pages of up to 32,000 bytes");
-    expect(described).toContain("`entry` reads one of them alone, a whole page of it.");
   });
 
   /**

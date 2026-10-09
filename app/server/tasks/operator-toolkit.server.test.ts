@@ -1038,6 +1038,10 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const fields = z.toJSONSchema(tool.inputSchema).properties;
     expect(fields?.offset).toHaveProperty("description", expect.stringContaining("the `nextOffset` a truncated read returned"));
     expect(fields?.entry).toHaveProperty("description", expect.stringContaining("counted from 1 in the order they were written"));
+    // Whole numbers with their floors, as the model is told. CANARY: declare
+    // either as any number.
+    expect(fields?.offset).toMatchObject({ type: "integer", minimum: 0 });
+    expect(fields?.entry).toMatchObject({ type: "integer", minimum: 1 });
   });
 
   /**
