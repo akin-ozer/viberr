@@ -70,44 +70,138 @@ import { z } from "zod";
  * declared packages, and nothing in the app imports it.
  */
 
-const jobSchema = z.object({
-  /** The folder the page and its sibling files are served from. */
-  root: z.string().min(1),
-  /** The names `root` holds, when it is a folder this process may pass
-   *  through and not list; absent when it can read the listing itself. */
-  names: z.array(z.string()).optional(),
-  /** Where the pictures and the report go. */
-  out: z.string().min(1),
-  /** A scratch folder for the browser's profile, one below it per page. */
-  profile: z.string().min(1),
-  /** The browser executable. */
-  browser: z.string().min(1),
-  pages: z.array(z.object({ file: z.string().min(1), kind: z.enum(["html", "markdown", "svg"]) })),
-  views: z.array(
-    z.object({
-      id: z.string().min(1),
-      width: z.number().int().positive(),
-      height: z.number().int().positive(),
-      /** The tallest picture this view takes. */
-      maxHeight: z.number().int().positive(),
-      mobile: z.boolean(),
-      /** Where on the page the picture starts, in px from the top. */
-      from: z.number().int().nonnegative(),
-      /** Set for a picture of an exact size: the view is one box, `width` by
-       *  `height` CSS px from the page's top left, and `scale` is how many
-       *  picture px draw one CSS px. Absent for a stretch of the page. */
-      box: z.object({ scale: z.number().positive() }).optional(),
-    }),
-  ),
-  /** How long one page gets for all its views, browser start included. */
-  pageTimeoutMs: z.number().int().positive(),
-  /** The largest PNG a view may be; over it a stretch is retaken shorter and
-   *  a box, which has one size, is not kept. */
-  maxBytes: z.number().int().positive(),
+const pageSchema = z.object({
+  /** A task file's name. For a page on the web, the label its report
+   *  carries. */
+  file: z.string().min(1),
+  kind: z.enum(["html", "markdown", "svg", "web"]),
+  /** With `web`: the http or https address to open. */
+  url: z.string().optional(),
 });
+type JobPage = z.infer<typeof pageSchema>;
+
+const actSchema = z.object({
+  /** So many presses of Tab, from the top of the page. */
+  tab: z.number().int().positive().optional(),
+  /** A control to press: its visible words, or a CSS selector. */
+  press: z.string().trim().min(1).optional(),
+  /** A control to put the pointer on, named the same way. */
+  hover: z.string().trim().min(1).optional(),
+});
+
+const viewSchema = z.object({
+  id: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  /** The tallest picture this view takes. */
+  maxHeight: z.number().int().positive(),
+  mobile: z.boolean(),
+  /** Where on the page the picture starts, in px from the top. */
+  from: z.number().int().nonnegative(),
+  /** Set for a picture of an exact size: the view is one box, `width` by
+   *  `height` CSS px from the page's top left, and `scale` is how many
+   *  picture px draw one CSS px. Absent for a stretch of the page. */
+  box: z.object({ scale: z.number().positive() }).optional(),
+  /** Picture the page from `from` down to its end, in stretches of up to
+   *  `maxHeight`, at most `stretches` of them (one when it names none). */
+  whole: z.boolean().optional(),
+  stretches: z.number().int().positive().optional(),
+  /** Ask the page for reduced motion before it loads. Goes with any kind. */
+  reduce: z.boolean().optional(),
+  /** Do this on the loaded page, then picture the screen as it stands. */
+  act: actSchema.optional(),
+  /** Picture the screen at `from` at three moments while it moves. */
+  moving: z.boolean().optional(),
+});
+type JobView = z.infer<typeof viewSchema>;
+
+/** When a moving view is pictured, in ms after its screen came into view. */
+const MOVING_MOMENTS = [250, 1_000, 3_000];
+
+/**
+ * The pictures a view writes, as their names in `out` without the page's
+ * number and the extension: `<view>` for a stretch or a box, `-s2`, `-s3` for
+ * the further stretches of a whole page, `-m1` to `-m3` for the frames of a
+ * moving screen, `-a` for an act.
+ */
+function pictureNames(view: JobView): string[] {
+  if (view.act) return [`${view.id}-a`];
+  if (view.moving === true) return MOVING_MOMENTS.map((_, at) => `${view.id}-m${at + 1}`);
+  const further = view.whole === true ? (view.stretches ?? 1) - 1 : 0;
+  return [view.id, ...Array.from({ length: further }, (_, at) => `${view.id}-s${at + 2}`)];
+}
+
+/** A page on the web's address, when it is one a browser is sent to. */
+function webAddress(url: string | undefined): URL | null {
+  if (url === undefined || !URL.canParse(url)) return null;
+  const address = new URL(url);
+  return address.protocol === "http:" || address.protocol === "https:" ? address : null;
+}
+
+/**
+ * What is wrong with a job as a whole, which no one key shows. A view is one
+ * kind of picture (a stretch, a box, a whole page, an act or a moving screen),
+ * an act names something to do, and no two views write one picture: two of
+ * one id and one kind would, and so would a stretch, a box and a whole page
+ * of one id, whose first pictures share a name. A page on the web is opened
+ * with the network open, so it shares no job, and so no browser, with a task
+ * page, and it is never a box.
+ */
+function jobFaults(pages: readonly JobPage[], views: readonly JobView[]): string[] {
+  const faults: string[] = [];
+  const written = new Set<string>();
+  for (const view of views) {
+    const kinds = [view.box ? "a box" : "", view.whole === true ? "a whole page" : "", view.act ? "an act" : "", view.moving === true ? "moving" : ""].filter(
+      (kind) => kind !== "",
+    );
+    if (kinds.length > 1) faults.push(`the view ${view.id} is ${kinds.join(" and ")} at once`);
+    if (view.act && view.act.tab === undefined && view.act.press === undefined && view.act.hover === undefined) {
+      faults.push(`the act of the view ${view.id} names no tab, press or hover`);
+    }
+    for (const name of pictureNames(view)) {
+      if (written.has(name)) faults.push(`two views write the picture ${name}`);
+      written.add(name);
+    }
+  }
+  const web = pages.filter((page) => page.kind === "web");
+  if (web.length > 0 && web.length < pages.length) faults.push("a page on the web shares a job with a task page");
+  for (const page of web) {
+    if (!webAddress(page.url)) faults.push(`the page ${page.file} has no http or https address`);
+  }
+  if (web.length > 0 && views.some((view) => view.box)) faults.push("a page on the web is asked for as a box");
+  return faults;
+}
+
+const jobSchema = z
+  .object({
+    /** The folder the page and its sibling files are served from. */
+    root: z.string().min(1),
+    /** The names `root` holds, when it is a folder this process may pass
+     *  through and not list; absent when it can read the listing itself. */
+    names: z.array(z.string()).optional(),
+    /** Where the pictures and the report go. */
+    out: z.string().min(1),
+    /** A scratch folder for the browser's profile, one below it per page. */
+    profile: z.string().min(1),
+    /** The browser executable. */
+    browser: z.string().min(1),
+    pages: z.array(pageSchema),
+    views: z.array(viewSchema),
+    /** How long one page gets for all its views, browser start included. */
+    pageTimeoutMs: z.number().int().positive(),
+    /** The largest PNG a view may be; over it a stretch is retaken shorter and
+     *  a box, which has one size, is not kept. */
+    maxBytes: z.number().int().positive(),
+    /** Measure each page too (the report's `measured`). */
+    measure: z.boolean().optional(),
+    /** The accessibility engine's script (axe-core's `axe.min.js`), by its
+     *  absolute path. Without it that one check is reported as not run. */
+    axe: z.string().min(1).optional(),
+  })
+  .superRefine((job, issues) => {
+    for (const message of jobFaults(job.pages, job.views)) issues.addIssue({ code: "custom", message });
+  });
 type Job = z.infer<typeof jobSchema>;
-type JobPage = Job["pages"][number];
-type JobView = Job["views"][number];
 
 /** One picture as the report states it. */
 interface Shot {
@@ -126,6 +220,11 @@ interface Shot {
   scale: number;
   /** The page runs on below the picture. */
   cut: boolean;
+  /** The picture's name in `out`, exactly as written. */
+  file: string;
+  /** On a frame of a moving view: how many ms after its screen came into
+   *  view it was taken. */
+  moment?: number;
 }
 
 /** A width at which the page is over before the stretch asked for starts. */
@@ -135,12 +234,22 @@ interface Ended {
   pageHeight: number;
 }
 
+/** What a view's act came to: what it did, or why it could not. One of the
+ *  two is set. */
+interface Act {
+  view: string;
+  done: string | null;
+  error: string | null;
+}
+
 /** One page as the report states it. */
 interface PageReport {
   file: string;
   shots: Shot[];
   /** The views with nothing at `from`: no picture, and no failure either. */
   ended: Ended[];
+  /** One entry per view that carried an act. */
+  acts: Act[];
   /** How many script dialogs the page opened, each dismissed. */
   dialogs: number;
   /** Hosts the page asked the network for, and how many addresses in all. */
@@ -847,6 +956,7 @@ async function pictureBox(ctx: ViewContext, view: JobView, scale: number, file: 
     contentWidth: Math.round(layout.cssContentSize.width),
     scale: 1,
     cut: contentHeight > view.height,
+    file,
   };
 }
 
@@ -894,6 +1004,7 @@ async function pictureView(ctx: ViewContext, view: JobView, file: string): Promi
         contentWidth,
         scale,
         cut: view.from + height < pageHeight,
+        file,
       };
     }
     // Too large to hand to an agent: half as tall, down to one screen.
@@ -915,11 +1026,13 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   const asked: Asked = { hosts: new Set(), urls: new Set() };
   const shots: Shot[] = [];
   const ended: Ended[] = [];
+  const acts: Act[] = [];
   const dialogs = { count: 0 };
   const report = (error: string | null): PageReport => ({
     file: page.file,
     shots,
     ended,
+    acts,
     dialogs: dialogs.count,
     asked: [...asked.hosts].slice(0, REPORT_LIST_MAX),
     askedCount: asked.urls.size,
@@ -998,7 +1111,8 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
       await browser.send("Network.enable", {}, sessionId);
       await browser.send("Audits.enable", {}, sessionId);
       for (const view of job.views) {
-        const pictured = await pictureView(ctx, view, `${index + 1}-${view.id}.png`);
+        const [name] = pictureNames(view);
+        const pictured = await pictureView(ctx, view, `${index + 1}-${name}.png`);
         if ("pageHeight" in pictured) ended.push(pictured);
         else shots.push(pictured);
       }

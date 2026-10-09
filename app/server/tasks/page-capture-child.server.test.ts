@@ -27,6 +27,10 @@ const shotSchema = z.object({
   contentWidth: z.number(),
   scale: z.number(),
   cut: z.boolean(),
+  /** The picture's name in the out folder. */
+  file: z.string(),
+  /** On a frame of a moving view: ms after the screen came into view. */
+  moment: z.number().optional(),
 });
 const reportSchema = z.object({
   pages: z.array(
@@ -34,6 +38,8 @@ const reportSchema = z.object({
       file: z.string(),
       shots: z.array(shotSchema),
       ended: z.array(z.object({ view: z.string(), pageHeight: z.number() })),
+      /** One per view that carried an act: what it did, or why it could not. */
+      acts: z.array(z.object({ view: z.string(), done: z.string().nullable(), error: z.string().nullable() })),
       dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
@@ -52,6 +58,18 @@ interface View {
   mobile: boolean;
   from: number;
   box?: { scale: number };
+  whole?: boolean;
+  stretches?: number;
+  reduce?: boolean;
+  act?: { tab?: number; press?: string; hover?: string };
+  moving?: boolean;
+}
+
+/** A page on the web, as a job names one: the label its report carries and
+ *  the address to open. */
+interface WebPage {
+  file: string;
+  url?: string;
 }
 
 const DESKTOP: View = { id: "desktop", width: 1280, height: 800, maxHeight: 4800, mobile: false, from: 0 };
@@ -76,7 +94,10 @@ interface Bench {
   out: string;
   browser: FakeBrowser;
   run(input: {
+    /** Task files, by name. */
     pages: string[];
+    /** Pages on the web, after the task files. */
+    web?: WebPage[];
     views?: View[];
     mode?: string;
     pageTimeoutMs?: number;
@@ -102,10 +123,13 @@ function bench(files: Record<string, string>): Bench {
         out,
         profile: path.join(dir, "profile"),
         browser: browser.executable,
-        pages: input.pages.map((file) => ({
-          file,
-          kind: file.endsWith(".md") ? "markdown" : file.endsWith(".svg") ? "svg" : "html",
-        })),
+        pages: [
+          ...input.pages.map((file) => ({
+            file,
+            kind: file.endsWith(".md") ? "markdown" : file.endsWith(".svg") ? "svg" : "html",
+          })),
+          ...(input.web ?? []).map((page) => ({ ...page, kind: "web" })),
+        ],
         views: input.views ?? [DESKTOP, PHONE],
         pageTimeoutMs: input.pageTimeoutMs ?? 20_000,
         maxBytes: input.maxBytes ?? 3_750_000,
@@ -129,7 +153,14 @@ function bench(files: Record<string, string>): Bench {
             reject(new Error(`the child ended with ${code}: ${stderr}`));
             return;
           }
-          resolve(reportSchema.parse(JSON.parse(readFileSync(report, "utf8"))));
+          // A report the suite cannot read fails the test at once: thrown
+          // from this handler it would leave the promise open until the
+          // test's own timeout.
+          try {
+            resolve(reportSchema.parse(JSON.parse(readFileSync(report, "utf8"))));
+          } catch (error) {
+            reject(error);
+          }
         });
       });
     },
@@ -311,7 +342,17 @@ describe("the page capture's renderer child (ruling 194)", () => {
       views: [{ ...DESKTOP, maxHeight: 2000, from: 2000 }],
     });
     expect(second.pages[0]!.shots).toEqual([
-      { view: "desktop", width: 1280, height: 2000, from: 2000, contentHeight: 5000, contentWidth: 1280, scale: 1, cut: true },
+      {
+        view: "desktop",
+        width: 1280,
+        height: 2000,
+        from: 2000,
+        contentHeight: 5000,
+        contentWidth: 1280,
+        scale: 1,
+        cut: true,
+        file: "1-desktop.png",
+      },
     ]);
     expect(stretch.browser.shots()[0]!.clip).toEqual({ x: 0, y: 2000, width: 1280, height: 2000, scale: 1 });
     const last = await stretch.run({ pages: ["long.html"], views: [{ ...DESKTOP, maxHeight: 2000, from: 4000 }] });
@@ -383,7 +424,19 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(twice.pages[0]).toMatchObject({
       error: null,
       // The page's size is in the box's own CSS px, whatever it was drawn at.
-      shots: [{ view: "desktop", width: 2400, height: 1260, from: 0, contentHeight: 630, contentWidth: 1200, scale: 1, cut: false }],
+      shots: [
+        {
+          view: "desktop",
+          width: 2400,
+          height: 1260,
+          from: 0,
+          contentHeight: 630,
+          contentWidth: 1200,
+          scale: 1,
+          cut: false,
+          file: "1-desktop.png",
+        },
+      ],
     });
     expect(pngSize(path.join(b.out, "1-desktop.png"))).toEqual({ width: 2400, height: 1260 });
     // The page itself is loaded at device scale 2, so what it draws by its
@@ -400,7 +453,17 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // and this page is told it is on a 0.5x screen.
     const half = await b.run({ pages: ["cover.html"], views: [box(1201, 631, 0.5)] });
     expect(half.pages[0]!.shots).toEqual([
-      { view: "desktop", width: 601, height: 316, from: 0, contentHeight: 631, contentWidth: 1201, scale: 1, cut: false },
+      {
+        view: "desktop",
+        width: 601,
+        height: 316,
+        from: 0,
+        contentHeight: 631,
+        contentWidth: 1201,
+        scale: 1,
+        cut: false,
+        file: "1-desktop.png",
+      },
     ]);
     expect(b.browser.pages().at(-1)!.metrics).toEqual({ width: 1201, height: 631, deviceScaleFactor: 1, mobile: false });
     expect(b.browser.shots().at(-1)!.clip).toEqual({ x: 0, y: 0, width: 1201, height: 631, scale: 0.5 });
@@ -411,7 +474,17 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // of `pictureView`) and this comes back 900 px tall.
     const long = await b.run({ pages: ["long.html"], views: [box(1200, 630, 1)] });
     expect(long.pages[0]!.shots).toEqual([
-      { view: "desktop", width: 1200, height: 630, from: 0, contentHeight: 900, contentWidth: 1400, scale: 1, cut: true },
+      {
+        view: "desktop",
+        width: 1200,
+        height: 630,
+        from: 0,
+        contentHeight: 900,
+        contentWidth: 1400,
+        scale: 1,
+        cut: true,
+        file: "1-desktop.png",
+      },
     ]);
     expect(b.browser.shots().at(-1)!.clip).toEqual({ x: 0, y: 0, width: 1200, height: 630, scale: 1 });
 
@@ -526,5 +599,46 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // A browser of its own per page: the one that hung was not reused.
     expect(b.browser.launches()).toHaveLength(3);
     expect(new Set(b.browser.launches().map((launch) => launch.argv.find((arg) => arg.startsWith("--user-data-dir=")))).size).toBe(3);
+  });
+
+  it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
+    // A view is one kind of picture: a box, a whole page, an act or a moving
+    // screen.
+    { what: "a view that is a box and a whole page at once", views: [{ ...box(1200, 630, 1), whole: true }] },
+    { what: "a view that carries an act and is moving", views: [{ ...DESKTOP, act: { tab: 1 }, moving: true }] },
+    { what: "an act that names nothing to do", views: [{ ...DESKTOP, act: {} }] },
+    // A picture's name is the view's id and its kind, so two of one id and
+    // one kind would write one file.
+    { what: "two views of one id and one kind", views: [DESKTOP, { ...DESKTOP, from: 800 }] },
+    {
+      what: "a stretch and a whole page of one id, whose first pictures have one name",
+      views: [DESKTOP, { ...DESKTOP, whole: true }],
+    },
+    // A page on the web is opened with the network open, so its browser is
+    // never a task page's.
+    { what: "a page on the web among task pages", web: [{ file: "site", url: "http://127.0.0.1:9/" }], views: [DESKTOP] },
+    { what: "a page on the web with no address", pages: [], web: [{ file: "site" }], views: [DESKTOP] },
+    {
+      what: "a page on the web at an address that is not http or https",
+      pages: [],
+      web: [{ file: "site", url: "file:///etc/hosts" }],
+      views: [DESKTOP],
+    },
+    {
+      what: "a page on the web as a box",
+      pages: [],
+      web: [{ file: "site", url: "http://127.0.0.1:9/" }],
+      views: [box(1200, 630, 1)],
+    },
+  ])("refuses a job that asks for $what", async ({ pages, web, views }) => {
+    const b = bench({ "page.html": "<p>one line</p>" });
+    // CANARY: drop the job schema's check of what its views and pages are
+    // together (`jobFaults`) and each of these jobs is pictured or opened:
+    // the first as a plain stretch, the fourth twice into `1-desktop.png`.
+    await expect(b.run({ pages: pages ?? ["page.html"], web, views })).rejects.toThrow(
+      "the child ended with 2: usage: page-capture-child.server.ts < job.json",
+    );
+    // Refused whole, before any browser is started.
+    expect(b.browser.launches()).toEqual([]);
   });
 });
