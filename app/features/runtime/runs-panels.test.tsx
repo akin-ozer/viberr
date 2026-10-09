@@ -102,6 +102,18 @@ describe("LiveRunPanel", () => {
     expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5");
   });
 
+  // Ruling 153. Owns: the strip says the effort a run was given beside its
+  // model. Breaks if the Runtime cell stops printing `effort`.
+  it("names the effort beside the model when the run was given one (ruling 153)", () => {
+    const { container } = render(
+      <LiveRunPanel runtime={[mkRun({ effort: "high" })]} onViewLogs={() => {}} onInterrupt={() => {}} canInterrupt interrupting={false} />,
+    );
+    const runtime = [...container.querySelectorAll(".run-cell")].find(
+      (c) => c.querySelector(".lbl")?.textContent === "Runtime",
+    );
+    expect(runtime?.querySelector(".val")?.textContent).toBe("claude-sonnet-4-5 · high");
+  });
+
   it("ruling 311: the Elapsed clock's digits land well inside its one-second tick", () => {
     // number-flow's own roll is a 900 ms spring, so the seconds were mid-roll
     // nine tenths of every second: two glyphs half in view, read as "03:1"

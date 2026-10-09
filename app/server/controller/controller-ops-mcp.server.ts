@@ -301,6 +301,8 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     role: string;
     backend: RunBackend;
     model: string;
+    /** Ruling 153: the effort the backend was given; null when none was set. */
+    effort: string | null;
     state: RunState;
     phase: string | null;
     step: string | null;
@@ -331,6 +333,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
       role: row.role,
       backend: row.backend,
       model: row.model,
+      effort: row.effort,
       state: row.state,
       // Ruling 257's pair: the phase is the strip's header and the step is what
       // the run is doing this second.

@@ -608,6 +608,8 @@ describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
         taskKey: z.string().nullable(),
         state: z.string(),
         agent: z.string(),
+        model: z.string(),
+        effort: z.string().nullable(),
       }).loose(),
     ),
   });
@@ -625,6 +627,7 @@ describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
       agentName: "dev",
       backend: "claude",
       model: "claude-opus-4-8",
+      effort: "high",
       sdk: "claude-agent-sdk",
       state: "running",
     });
@@ -658,6 +661,11 @@ describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
     expect(body.runs.map((r) => r.runId)).toContain(LIVE_RUN);
     expect(body.runs.map((r) => r.runId)).not.toContain(PROJECT_RUN);
     expect(body.runs.every((r) => r.state === "running" || r.state === "queued")).toBe(true);
+    // Ruling 153: a run is listed with the model and the effort it was given,
+    // so a comparison of two settings reads the runs and not the deployment.
+    // CANARY: drop `effort` from `runRow` and the reply no longer parses.
+    const live = body.runs.find((r) => r.runId === LIVE_RUN);
+    expect([live?.model, live?.effort]).toEqual(["claude-opus-4-8", "high"]);
     // The point of the tool: the id it hands back is usable, in one hop.
     const log = parsed(
       RUN_LOG_REPLY,

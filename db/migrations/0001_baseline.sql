@@ -707,6 +707,10 @@ CREATE TABLE "agent_runs" (
   kind TEXT NOT NULL CHECK (kind IN ('operator', 'primary', 'reviewer', 'controller')),
   backend TEXT NOT NULL CHECK (backend IN ('claude', 'codex')),
   model TEXT NOT NULL,
+  -- Ruling 153: the reasoning effort the run's backend was given, in that
+  -- backend's own tiers. NULL when nothing was set and the vendor's default
+  -- applied (a Claude run with no effort), and on rows from before the column.
+  effort TEXT,
   session_id TEXT,
   sdk TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL CHECK (state IN
