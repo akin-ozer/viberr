@@ -60,6 +60,15 @@ export function runTmpEnv(dir: string) {
 }
 
 /**
+ * `<root>/<runId>`: the temporary directory a run is given when it launches.
+ * The one derivation `prepareRunTmp` makes and the run's disclosure names
+ * before launch (ruling 217(d)'s file-tool roots).
+ */
+export function runTmpDirFor(runId: string): string {
+  return path.join(runTmpRoot(), assertPathSafeRunId(runId));
+}
+
+/**
  * Make the run's temporary directory and return its path. What a crashed
  * predecessor of the same id left is removed first, as the person: a run starts
  * clean and never inherits. Throws when the root is not the server's own
@@ -67,10 +76,8 @@ export function runTmpEnv(dir: string) {
  * one and says so.
  */
 export function prepareRunTmp(runId: string, person: AgentLaunch | null): string {
-  const root = runTmpRoot();
-  passThroughDirForAgents(root);
-  // `<root>/<runId>`: one run's temporary directory.
-  const dir = path.join(root, assertPathSafeRunId(runId));
+  passThroughDirForAgents(runTmpRoot());
+  const dir = runTmpDirFor(runId);
   removeAgentTreeSync(dir, person);
   mkdirSync(dir);
   shareDirWithAgents(dir);

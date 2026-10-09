@@ -197,6 +197,7 @@ import {
   type ResolvedResourceInputs,
 } from "~/server/runtimes/run-inputs.server";
 import { fileWriteRoots } from "~/server/runtimes/file-tool-policy.server";
+import { runTmpDirFor } from "~/server/runtimes/run-tmp.server";
 import { joinedPrompt, type RunPrompt, sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import { specialistCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { errorMessage, toError } from "~/shared/errors";
@@ -1571,9 +1572,16 @@ async function dispatchAgentRun(
         deniedTools: disallowedTools,
         toolkit: toolkit?.toolNames ?? null,
         // Ruling 217(d): what the Claude adapter's hook confines the file tools to.
+        // The temp directory is the one this run is given when it launches
+        // (ruling 141(c)); one that cannot be made is said on its console.
         fileWriteRoots:
           backend === "claude"
-            ? fileWriteRoots(disallowedTools, runInput.attachmentsWritableDir, runInput.scratchDir)
+            ? fileWriteRoots(
+                disallowedTools,
+                runInput.attachmentsWritableDir,
+                runInput.scratchDir,
+                runTmpDirFor(runId),
+              )
             : null,
       }),
       promptChars: prompt.length,
@@ -2092,8 +2100,9 @@ export interface ResumeConfinement {
    *  fields (it composes the prompt) and passes the whole thing to
    *  `recordRunInputs` once `resumeRun` has minted the run id — which ruling
    *  167 made true; this sentence asserted it for two days while the field had
-   *  no reader at all. */
-  runInputs: ResolvedResourceInputs;
+   *  no reader at all. It takes that id because the file tools' roots name the
+   *  resumed run's own temp directory, `<root>/<runId>` (ruling 217(d)). */
+  runInputsFor: (runId: string) => ResolvedResourceInputs;
   /** C02-R3 (pass 32): the task's attachments drop, when the profile holds
    *  `attach-evidence-references` — re-armed on resume exactly as the fresh
    *  run mounts it — the path the "Posting files" section promises. Absent
@@ -2365,7 +2374,7 @@ export async function resolveResumeConfinement(
     const confinement: ResumeConfinement = {
       disallowedTools,
       env,
-      runInputs: resolvedResourceInputs({
+      runInputsFor: (runId) => resolvedResourceInputs({
         cwd: cloneDir,
         repo: projectRepo(ctx, input.projectSlug),
         workspaceRefresh: undefined,
@@ -2386,7 +2395,7 @@ export async function resolveResumeConfinement(
         toolkit: toolkit?.toolNames ?? null,
         fileWriteRoots:
           input.backend === "claude"
-            ? fileWriteRoots(disallowedTools, attachmentsWritableDir, scratchDir)
+            ? fileWriteRoots(disallowedTools, attachmentsWritableDir, scratchDir, runTmpDirFor(runId))
             : null,
       }),
     };
@@ -2419,7 +2428,7 @@ export async function resolveResumeConfinement(
       // P19-G11: the disclosure states the withheld posture rather than going
       // silent — "this run's profile could not be resolved" is exactly the kind
       // of thing a human reading the console needs to be told.
-      runInputs: resolvedResourceInputs({
+      runInputsFor: () => resolvedResourceInputs({
         cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey, support),
         repo: projectRepo(ctx, input.projectSlug),
         workspaceRefresh: undefined,

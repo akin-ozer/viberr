@@ -21,9 +21,13 @@ import { capabilityById } from "~/shared/capabilities";
  * (`$766.63` reads `66.63`).
  *
  * Such a run keeps the three tools, and a PreToolUse hook refuses a call whose
- * target is outside the attachments folder and the temp directory, with a
- * sentence naming both. The checkout stays out of their reach, which is what
- * the withheld grant is about, and NotebookEdit stays denied. On a board with
+ * target is outside the attachments folder and the run's own temp directory
+ * (ruling 141(c): `<root>/<runId>`, its `$TMPDIR`, where the prompt tells it to
+ * keep temporary files), with a sentence naming both. A run whose temp
+ * directory could not be made starts without one and says so, and its tools
+ * use the server's shared temp directory, which is then its `$TMPDIR` too.
+ * The checkout stays out of their reach, which is what the withheld grant is
+ * about, and NotebookEdit stays denied. On a board with
  * no repository there is no checkout, and the workspace contract calls the
  * run's working directory the task's scratch (ruling 199), so the tools write
  * it too; a run on a board with a repository never has its working directory
@@ -42,16 +46,22 @@ export const DROP_FILE_TOOLS = ["Edit", "MultiEdit", "Write"] as const;
  * nothing changes: the grants leave the tools alone, or the run has no
  * attachments folder. `scratchDir` is the run's working directory when its
  * task has no checkout (a board with no repository), and absent otherwise.
+ * `runTmpDir` is the run's own temp directory (`spec.tmpDir` at launch,
+ * `runTmpDirFor` in the disclosure before it); absent, the run has none and
+ * the server's shared one stands in, as it does for the run's processes.
  * The one derivation the adapter's hook and the run's disclosure share.
  */
 export function fileWriteRoots(
   denied: readonly string[] | undefined,
   attachmentsDir: string | null | undefined,
   scratchDir: string | null | undefined,
-  tempDir: string = tmpdir(),
+  runTmpDir: string | null | undefined,
 ): string[] | null {
   if (!attachmentsDir || !denied) return null;
   if (!DROP_FILE_TOOLS.every((tool) => denied.includes(tool))) return null;
+  // Ruling 141(c): the run's own `$TMPDIR`, never the whole of the server's
+  // temp directory, which every run of every person shares.
+  const tempDir = runTmpDir || tmpdir();
   return scratchDir ? [attachmentsDir, scratchDir, tempDir] : [attachmentsDir, tempDir];
 }
 

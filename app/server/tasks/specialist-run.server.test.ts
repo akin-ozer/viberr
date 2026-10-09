@@ -12,7 +12,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -57,6 +56,7 @@ import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/file
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
+import { runTmpDirFor } from "~/server/runtimes/run-tmp.server";
 import {
   getRun,
   listRunLines,
@@ -126,6 +126,8 @@ import { promisify } from "node:util";
 
 let ctx: TestDbContext;
 let store: TestStore;
+/** The id a resumed run is minted under, for its disclosure (`runInputsFor`). */
+const RESUMED = "run_resumed";
 
 /** End a run on VIB-1 the way a person's Stop does. */
 const stopRun = (runId: string) =>
@@ -4306,7 +4308,7 @@ describe("granted skills reach a Claude run NATIVELY (pass-18)", () => {
     );
     // Ruling 144: the resumed inputs carry no sandbox row at all — Viberr
     // confines neither backend, and the denied-tool list is the disclosure.
-    expect(confinement.runInputs).not.toHaveProperty("sandbox");
+    expect(confinement.runInputsFor(RESUMED)).not.toHaveProperty("sandbox");
   });
 
   it("C32-2 (pass 32): a SUPPORTING checkout's base refs are refreshed from the project mirror, not frozen at the delivering checkout's clone-time origin", async () => {
@@ -5499,7 +5501,7 @@ describe("P19-G11 — the run records what it was given", () => {
       { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend: "claude", delivers: true },
     );
     expect(confinement.mcpToolDenials).toEqual([{ server: "gh", tools: ["merge_pull_request"] }]);
-    expect(confinement.runInputs.mcp.writeToolsDenied).toEqual([
+    expect(confinement.runInputsFor(RESUMED).mcp.writeToolsDenied).toEqual([
       { server: "gh", tools: ["merge_pull_request"] },
     ]);
 
@@ -6055,12 +6057,12 @@ describe("P19-G11 — the run records what it was given", () => {
         delivers: true,
       },
     );
-    expect(confinement.runInputs.knowledge).toEqual(["house-style"]);
-    expect(confinement.runInputs.unresolvedResources.map((r) => r.name)).toContain(
+    expect(confinement.runInputsFor(RESUMED).knowledge).toEqual(["house-style"]);
+    expect(confinement.runInputsFor(RESUMED).unresolvedResources.map((r) => r.name)).toContain(
       "house-style",
     );
-    expect(confinement.runInputs.tools.denied).toEqual(confinement.disallowedTools);
-    expect(confinement.runInputs.delivers).toBe(true);
+    expect(confinement.runInputsFor(RESUMED).tools.denied).toEqual(confinement.disallowedTools);
+    expect(confinement.runInputsFor(RESUMED).delivers).toBe(true);
   });
 
   it("ruling 217(d): a Claude run that posts files records its file tools as confined, not denied, and with no repository its working directory beside them (ruling 199)", async () => {
@@ -6077,6 +6079,10 @@ describe("P19-G11 — the run records what it was given", () => {
     // fresh path (the repository block lists the working directory), or drop
     // the support root from `taskScratchDir` (a supporting resume is handed the
     // deliverer's root).
+    //
+    // Ruling 141(c): the temp root is the run's own `$TMPDIR`, `<root>/<runId>`,
+    // never the server's shared temp directory. Canary: drop `runTmpDirFor`
+    // from either path and its list ends in the shared one.
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     const postsFiles = (backend: "claude" | "codex") => ({
@@ -6097,10 +6103,11 @@ describe("P19-G11 — the run records what it was given", () => {
     const taskRoot = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1");
     const drop = path.join(taskRoot, "attachments");
     const scratch = path.join(taskRoot, "workspace");
-    const fresh = inputsLine(await assignAndRun())!;
+    const freshRun = await assignAndRun();
+    const fresh = inputsLine(freshRun)!;
     expect(lastRunSpec()!.workdir).toBe(scratch);
     expect(lastRunSpec()!.scratchDir).toBe(scratch);
-    expect(fresh.tools.fileWriteRoots).toEqual([drop, scratch, tmpdir()]);
+    expect(fresh.tools.fileWriteRoots).toEqual([drop, scratch, runTmpDirFor(freshRun)]);
     expect(fresh.tools.denied).toContain("NotebookEdit");
     expect(fresh.tools.denied).not.toContain("Write");
 
@@ -6112,34 +6119,35 @@ describe("P19-G11 — the run records what it was given", () => {
       );
     const claude = await resume("claude");
     expect(claude.scratchDir).toBe(scratch);
-    expect(claude.runInputs.tools.fileWriteRoots).toEqual([drop, scratch, tmpdir()]);
-    expect(claude.runInputs.tools.denied).not.toContain("Write");
+    expect(claude.runInputsFor(RESUMED).tools.fileWriteRoots).toEqual([drop, scratch, runTmpDirFor(RESUMED)]);
+    expect(claude.runInputsFor(RESUMED).tools.denied).not.toContain("Write");
     // The adapter is still handed the grants' whole denylist, and confines from it.
     expect(claude.disallowedTools).toContain("Write");
     // A supporting agent's scratch is its own root, never the deliverer's.
     const supporting = await resume("claude", false);
     const ownRoot = path.join(scratch, "support", "dev");
     expect(supporting.scratchDir).toBe(ownRoot);
-    expect(supporting.runInputs.tools.fileWriteRoots).toEqual([drop, ownRoot, tmpdir()]);
+    expect(supporting.runInputsFor(RESUMED).tools.fileWriteRoots).toEqual([drop, ownRoot, runTmpDirFor(RESUMED)]);
 
     // With a repository the working directory is a checkout, out of the tools'
     // reach whether or not the clone succeeded (here it cannot).
     writeProject(store.dataRoot, { ...fm, repo: "acme/widgets", agents: [postsFiles("claude")] });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const withRepo = inputsLine(await assignAndRun())!;
+    const withRepoRun = await assignAndRun();
+    const withRepo = inputsLine(withRepoRun)!;
     expect(lastRunSpec()!.scratchDir).toBeUndefined();
-    expect(withRepo.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(withRepo.tools.fileWriteRoots).toEqual([drop, runTmpDirFor(withRepoRun)]);
     const resumedWithRepo = await resume("claude");
     expect(resumedWithRepo.scratchDir).toBeUndefined();
-    expect(resumedWithRepo.runInputs.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(resumedWithRepo.runInputsFor(RESUMED).tools.fileWriteRoots).toEqual([drop, runTmpDirFor(RESUMED)]);
 
     // Codex: the write posture is advisory (ruling 183), nothing is confined,
     // and the row keeps every entry the grants deny.
     writeProject(store.dataRoot, { ...fm, agents: [postsFiles("codex")] });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     const codex = await resume("codex");
-    expect(codex.runInputs.tools.fileWriteRoots).toBeUndefined();
-    expect(codex.runInputs.tools.denied).toContain("Write");
+    expect(codex.runInputsFor(RESUMED).tools.fileWriteRoots).toBeUndefined();
+    expect(codex.runInputsFor(RESUMED).tools.denied).toContain("Write");
   });
 
   it("says so when a resumed run's profile cannot be resolved at all", async () => {
@@ -6156,11 +6164,11 @@ describe("P19-G11 — the run records what it was given", () => {
         delivers: true,
       },
     );
-    expect(confinement.runInputs.unresolvedResources[0]?.name).toBe("vanished");
-    expect(confinement.runInputs.unresolvedResources[0]?.reason).toContain(
+    expect(confinement.runInputsFor(RESUMED).unresolvedResources[0]?.name).toBe("vanished");
+    expect(confinement.runInputsFor(RESUMED).unresolvedResources[0]?.reason).toContain(
       "fully withheld",
     );
-    expect(confinement.runInputs.tools.denied.length).toBeGreaterThan(0);
+    expect(confinement.runInputsFor(RESUMED).tools.denied.length).toBeGreaterThan(0);
   });
 
   it("records which granted skills MOUNTED natively and which rode the prompt", async () => {

@@ -2095,11 +2095,12 @@ describe("Claude Code's auto-memory (ruling 141(b))", () => {
 
 /**
  * Ruling 217(d): a run that posts files keeps its file tools, confined by a
- * PreToolUse hook to the attachments folder and the temp directory. Live on
- * AWSC-4..7 every Claude run of the AWS calculator board read "No such tool
+ * PreToolUse hook to the attachments folder and the run's temp directory. Live
+ * on AWSC-4..7 every Claude run of the AWS calculator board read "No such tool
  * available: Write" and wrote its deliverable through a shell heredoc. The
  * folder and checkout below do not exist: the hook decides on the path, so a
- * directory outside the temp root needs no disk.
+ * directory outside the temp root needs no disk. `SPEC` carries no `tmpDir`,
+ * a run whose own could not be made, so the server's shared one stands in.
  */
 describe("the file tools of a run that posts files (ruling 217(d))", () => {
   /** A result-maker as the resolver denies it: evidence granted, repo-write withheld. */
@@ -2196,6 +2197,23 @@ describe("the file tools of a run that posts files (ruling 217(d))", () => {
     }
     expect((await call(hook, "Write", `${SCRATCH}/../task.md`)).hookSpecificOutput?.permissionDecisionReason).toContain(
       `where the files you post on the task go, and \`${SCRATCH}\` and \`${tmpdir()}\` for scratch.`,
+    );
+  });
+
+  it("writes the run's own temp directory, not the server's shared one (ruling 141(c))", async () => {
+    // Each run's `$TMPDIR` is `<root>/<runId>`, and the prompt tells it to keep
+    // temporary files there. The hook named the server's temp directory
+    // instead, so with `VIBERR_RUN_TMP_ROOT` outside it the run's own was
+    // refused, and by default every run could write the whole shared one.
+    // Canary: leave `spec.tmpDir` out of the adapter's `fileWriteRoots` call.
+    const RUN_TMP = "/srv/viberr-runs/run_1";
+    const { options } = await started({ ...POSTS_FILES, tmpDir: RUN_TMP });
+    const hook = fileHookOf(options)!;
+    expect(await call(hook, "Write", `${RUN_TMP}/scratch.mjs`)).toEqual({});
+    const shared = await call(hook, "Write", path.join(tmpdir(), "vib564", "scratch.mjs"));
+    expect(shared.hookSpecificOutput?.permissionDecision).toBe("deny");
+    expect(shared.hookSpecificOutput?.permissionDecisionReason).toContain(
+      `where the files you post on the task go, and \`${RUN_TMP}\` for scratch.`,
     );
   });
 

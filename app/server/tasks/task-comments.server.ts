@@ -1025,12 +1025,11 @@ export async function commentToAgent(
     resumeOutcomeKey = confinement?.outcomeKey;
     triggered = "resumed";
     // Ruling 167: the disclosure the fresh path writes, on the resumed run too.
-    // `resolveResumeConfinement` has always returned `runInputs` for exactly
-    // this and its docstring has always said the caller "passes the whole thing
-    // to `recordRunInputs` once `resumeRun` has minted the run id" — nobody
-    // did, and the field had no reader anywhere in the app. The four fields it
-    // does not own are all in scope here, because this function composes the
-    // prompt.
+    // `resolveResumeConfinement` returns `runInputsFor` for exactly this, and
+    // the caller "passes the whole thing to `recordRunInputs` once `resumeRun`
+    // has minted the run id": the id names the run's own temp directory among
+    // its file tools' roots (ruling 217(d)). The four fields it does not own
+    // are all in scope here, because this function composes the prompt.
     if (confinement) {
       const resumedRow = getRun(db, runId);
       if (resumedRow) {
@@ -1042,7 +1041,7 @@ export async function commentToAgent(
           backend: resumeBackend,
           dataRoot: ctx.dataRoot,
           inputs: {
-            ...confinement.runInputs,
+            ...confinement.runInputsFor(runId),
             promptChars: followUp.length,
             anchor: anchor ?? null,
             spendCapUsd: getMaxRunSpendUsd(db),

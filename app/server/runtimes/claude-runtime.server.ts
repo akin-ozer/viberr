@@ -1503,11 +1503,17 @@ function assembleClaudeOptions(
   //   - specialist: deny the git/gh commands for capabilities the profile
   //     withholds (push / PR / merge), computed upstream.
   // Ruling 217(d): a run that posts files keeps its file tools when its grants
-  // withhold them; the hook below confines them to where its posting goes.
+  // withhold them; the hook below confines them to where its posting goes and
+  // to the run's own temp directory (ruling 141(c)), made by now.
   const writeRoots =
     spec.kind === "operator" || spec.kind === "controller"
       ? null
-      : fileWriteRoots(spec.disallowedTools, spec.attachmentsWritableDir, spec.scratchDir);
+      : fileWriteRoots(
+          spec.disallowedTools,
+          spec.attachmentsWritableDir,
+          spec.scratchDir,
+          spec.tmpDir,
+        );
   const denied = [
     // `Skill` leaves the base list for a run that mounted granted skills:
     // denying it would remove the tool from the model's context entirely
