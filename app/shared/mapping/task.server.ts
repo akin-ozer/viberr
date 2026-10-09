@@ -34,7 +34,7 @@ export function parseTaskLabels(labelsJson: string): string[] {
   }
 }
 
-/** Ruling 225: the pending occurrences of `schedules_json`, at this read
+/** Ruling 45: the pending occurrences of `schedules_json`, at this read
  *  boundary and through a schema, for the same reason labels are — a corrupt
  *  value yields no time rather than throwing on a loader path. Only `dueAt`
  *  and `status` are read; the rest of the occurrence belongs to the schedule
@@ -92,9 +92,9 @@ export type TaskProjectionRow = {
   priority: TaskPriority;
   labels_json: string;
   due_date: string | null;
-  /** Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim JSON. */
+  /** Ruling 55 (pass 34): the task file's `blockedBy` list, verbatim JSON. */
   blocked_by_json: string;
-  /** Ruling 225: the task file's `schedules` list, verbatim JSON. Read only to
+  /** Ruling 45: the task file's `schedules` list, verbatim JSON. Read only to
    *  answer WHEN a clock-resting task picks itself back up — the projected
    *  `waiting` already answers WHETHER. */
   schedules_json: string;
@@ -115,10 +115,10 @@ export type TaskProjectionRow = {
   repo: string | null;
   pr_json: string | null;
   github_json: string | null;
-  /** Ruling 53/88: the delivered revision's head sha, NULL before delivery. */
+  /** Ruling 97: the delivered revision's head sha, NULL before delivery. */
   work_revision_sha: string | null;
   goal: string;
-  /** Ruling 503: the epic this task belongs to (NULL when in none). */
+  /** Ruling 272: the epic this task belongs to (NULL when in none). */
   epic_id: string | null;
   packet_json: string | null;
   /** Pending operator recommendations on the task file (F7-NOTIF1). */
@@ -171,7 +171,7 @@ export interface AgentRender {
   verdictCapable?: boolean;
 }
 
-/** Operator cell render (ruling 16: stage id stored). */
+/** Operator cell render (ruling 295: stage id stored). */
 export interface OperatorRender {
   name: "Operator";
   assignedAtStageId: string;
@@ -184,7 +184,7 @@ export interface OperatorRender {
 
 export interface PacketRender {
   /** F10-09: the packet's id (spread from the file by `mapPacket`), which a
-   *  notification about it names (ruling 547). Absent on a packet written
+   *  notification about it names (ruling 75). Absent on a packet written
    *  before ids. */
   id?: string;
   type: "input" | "blocked";
@@ -196,10 +196,10 @@ export interface PacketRender {
   body: string;
   observations: PacketObservation[];
   options: PacketOption[];
-  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+  /** Ruling 63: an `edit_goal` decision was confirmed and the packet waits
    *  for the edited goal to land. */
   awaiting?: "goal_edit";
-  /** Ruling 138: which option was chosen, by whom and when — what a reload
+  /** Ruling 63: which option was chosen, by whom and when — what a reload
    *  renders as decided and rebuilds the goal draft from. */
   decided?: TaskPacket["decided"];
   /** F35-6: the goal text the decided `edit_goal` option asks for, composed
@@ -209,15 +209,15 @@ export interface PacketRender {
    *  packet waits. Present exactly when `awaiting` is `goal_edit` and a
    *  decision is recorded; absent otherwise. */
   goalDraft?: string;
-  /** Ruling 471: the title of the option a plain acceptance (Accept, a stage
+  /** Ruling 316: the title of the option a plain acceptance (Accept, a stage
    *  move into the terminal stage, an applied acceptance card) ANSWERS this
    *  decision with. Absent when that acceptance withdraws it (F32-11). Derived
    *  here by `acceptanceAnswerOf`, the predicate the server's write uses, so
    *  the accept dialog reads the loader's answer and never guesses. */
   acceptAnswersWith?: string;
-  /** Ruling 471: the same for a forced acceptance (the Force accept button). */
+  /** Ruling 316: the same for a forced acceptance (the Force accept button). */
   forceAnswersWith?: string;
-  /** Ruling 478(e) (F40-31): the agent a person's answer to this packet goes
+  /** Ruling 68 (F40-31): the agent a person's answer to this packet goes
    *  back to, by name: set on an agent's question (`askedBy`), which
    *  `resolvePacket` routes to the asker rather than to the operator. The
    *  card names the answer box after it. Absent on every other packet. */
@@ -234,14 +234,14 @@ export type DisplayReadiness =
   | "accepted"
   | "merged"
   | "agent_working"
-  /** Ruling 138: a decided `edit_goal` packet owes a goal edit. */
+  /** Ruling 63: a decided `edit_goal` packet owes a goal edit. */
   | "goal_edit_pending"
-  /** Ruling 349: the agent carrying the task is parked behind the instance's
+  /** Ruling 44: the agent carrying the task is parked behind the instance's
    *  concurrent-run cap — nothing is streaming yet. Derived by `withLiveRun`
    *  from the run row, which is the only surface that holds the fact. */
   | "agent_queued";
 
-/** Ruling 349: what a live run row says about the run carrying a task. */
+/** Ruling 44: what a live run row says about the run carrying a task. */
 export type LiveRunState = "queued" | "running";
 
 /** Board-card / summary shape. `readiness` is always the canonical stored enum
@@ -260,13 +260,13 @@ export interface TaskSummary {
    * "Waiting on me" chip + per-card badge read this, member-scoped, instead of
    * the project-wide `waiting === "human"` enum. */
   waitingOnMe?: boolean;
-  /** Ruling 349: the state of the run carrying this task, when one is live —
+  /** Ruling 44: the state of the run carrying this task, when one is live —
    *  `queued` behind the concurrent-run cap or `running`. Loader-annotated from
    *  the run rows (the projection has no run context); null when no run is
    *  live, undefined where no loader annotated it. */
   liveRun?: LiveRunState | null;
   /**
-   * Ruling 225 (F37-45): when this task rests on a clock (`waiting:
+   * Ruling 45 (F37-45): when this task rests on a clock (`waiting:
    * "schedule"`), the instant it picks itself back up — so the card can say
    * so instead of naming a person who has nothing to do. Null for every other
    * waiting state, INCLUDING a task that carries a pending schedule while a
@@ -279,7 +279,7 @@ export interface TaskSummary {
   priority: TaskPriority;
   labels: string[];
   dueDate: string | null;
-  /** Ruling 131 (pass 34): what this task waits on, each entry resolved to its
+  /** Ruling 55 (pass 34): what this task waits on, each entry resolved to its
    *  state at READ time by the query layer (`dependencyResolver`, once per
    *  query), never by this mapper and never cached. Empty when the task waits
    *  on nothing. */
@@ -338,11 +338,11 @@ export interface TaskSummary {
   /** P13-D-28: GitHub review verdict on an OPEN PR — feeds the review pill.
    *  Null = no PR / settled PR / never read / nothing outstanding. */
   prReview: PrReviewState | null;
-  /** Ruling 187 (pass 37): `pushed` says whether the REMOTE has the commit,
+  /** Ruling 236 (pass 37): `pushed` says whether the REMOTE has the commit,
    *  stamped by the reconciler from a complete compare. Absent = not judged,
    *  which is neither answer and must render as neither. */
   commits: { sha: string; msg: string; pushed?: boolean }[];
-  /** Ruling 179 (pass 36, F36-7): commits on the branch that are NOT this
+  /** Ruling 315 (pass 36, F36-7): commits on the branch that are NOT this
    *  task's (no `[KEY]` prefix) — the moved head a person must see where the
    *  acceptance decision is made. Empty when none were recorded. */
   otherCommits: { sha: string; msg: string }[];
@@ -350,19 +350,19 @@ export interface TaskSummary {
   /** R15-15 / F31-6: a PR found on this task's branch that this task did NOT
    *  open — the branch-collision signature. Null = no collision recorded. */
   unownedPr: number | null;
-  /** Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits
+  /** Ruling 234 (pass 35, U35-8): origin's copy of the branch carries commits
    *  this task did not author, as the reconciler last recorded it. The archive
    *  ceremony's delete-branch disclosure names it. Null = the head is this
    *  task's, or was never read. */
   foreignHead: ForeignBranchHead | null;
   /**
-   * Ruling 53 + ruling 88 — the DELIVERED revision's head sha, or null before
+   * Ruling 97 — the DELIVERED revision's head sha, or null before
    * delivery.
    *
    * The board's acceptance ceremony (board-accept-confirm.tsx `AcceptOnBoardConfirm`) is
-   * the same dialog the task page renders, and ruling 53 requires it to disclose
-   * what it accepts; ruling 88 then makes the confirmed click echo that
-   * disclosure back for the server to compare against the live task. A board
+   * the same dialog the task page renders, and must disclose what it accepts;
+   * the confirmed click echoes that disclosure back for the server to compare
+   * against the live task. A board
    * card holds nothing but this summary, so the ceremony had to disclose "No
    * delivered revision recorded." on every task — and the server refused the
    * resulting `"none"` echo as stale on any task that HAD delivered, i.e. a
@@ -382,7 +382,7 @@ export interface TaskSummary {
    */
   workRevisionSha?: string | null;
   goal: string;
-  /** Ruling 503: the epic this task belongs to (`epic-3`), or null. Optional
+  /** Ruling 272: the epic this task belongs to (`epic-3`), or null. Optional
    *  like `acceptance` above: `mapTaskProjectionRow` always sets it, and an
    *  absent value reads as "in no epic". The epic's title and colour are read
    *  from the project's epics where a surface draws them (`listEpics`). */
@@ -395,7 +395,7 @@ export interface TaskSummary {
   updatedAt: string | null;
   /** Sparse board-order rank (null → fall back to the task-key number). */
   boardRank: number | null;
-  /** Store-relative path — the UI renders this real path (ruling 3). */
+  /** Store-relative path — the UI renders this real path (ruling 15(a)). */
   filePath: string;
 }
 
@@ -443,7 +443,7 @@ function unaccountedChecks(checks: PrChecks): number {
 }
 
 /**
- * Ruling 276 (pass 37, F37-109): has GitHub's check state ever been READ for
+ * Ruling 237 (pass 37, F37-109): has GitHub's check state ever been READ for
  * this PR?
  *
  * `prRefSchema` keeps the two apart on purpose — an absent `checks` key is
@@ -458,16 +458,16 @@ export function prChecksRead(pr: PrRef | null): boolean {
   return pr?.checks !== undefined && pr.checks !== null;
 }
 
-/** Ruling 360: the refused read, as the GitHub view's data and the
- *  controller's `get_github_state` carry it (no pill prints it, ruling 491). */
+/** Ruling 237: the refused read, as the GitHub view's data and the
+ *  controller's `get_github_state` carry it (no pill prints it). */
 export interface PrChecksUnread {
   status: number | null;
   message: string;
-  /** Ruling 496: when this refusal was first seen, not the last pass that met it. */
+  /** Ruling 236: when this refusal was first seen, not the last pass that met it. */
   at: string;
 }
 
-/** Ruling 360: the refusal stands only while nothing was ever read; a summary
+/** Ruling 237: the refusal stands only while nothing was ever read; a summary
  *  (even `total: 0`) outranks it, and the reconciler drops the key then. */
 export function mapPrChecksUnread(pr: PrRef | null): PrChecksUnread | null {
   if (!pr || prChecksRead(pr) || !pr.checksUnread) return null;
@@ -514,7 +514,7 @@ export function mapPrReview(pr: PrRef | null): PrReviewState | null {
  *  a settled (merged/closed) PR's conflict state is moot. Same state gate as
  *  {@link mapPrReview}.
  *
- *  Ruling 405: and only while the verdict still belongs to the head that is
+ *  Ruling 242: and only while the verdict still belongs to the head that is
  *  live. A "conflicts" pill painted over the commit that RESOLVED the conflict
  *  is the same lie the acceptance gate used to tell, one surface over, so both
  *  read the pin (`conflictingPrBlockedReason` is the gate). GitHub recomputes
@@ -637,7 +637,7 @@ function mapOperatorRef(
  *        R21-8 was written against the one value the report happened to show.
  *    Both now read "agent working". `blocked` and `inconsistency_risk_detected`
  *    never yield — a run does not answer those (R21-8, unchanged) — with one
- *    exception, ruling 157 (F35-8): a stored `blocked` with no open packet and
+ *    exception, ruling 54 (F35-8): a stored `blocked` with no open packet and
  *    no dependency list is a HOLD (the `hold_runtime_debug` decision, the
  *    refused arm of a collision ceremony), and a hold is what a person's
  *    operator run or a dispatch lifts on the record. While an agent carries
@@ -645,7 +645,7 @@ function mapOperatorRef(
  *    lifts it, so a card never says blocked and agent working together. The
  *    caller decides `carriedHold` from the STORED readiness and the
  *    dependency list, so a diagnostics floor (derived `blocked` over a stored
- *    `ready`) and a dependency hold (ruling 131's floor) keep reading
+ *    `ready`) and a dependency hold (ruling 55's floor) keep reading
  *    `blocked`, and a `blocked` packet keeps the withdrawal paths as its lift.
  *
  * 2. A HUMAN OWES AN ANSWER. An `input` packet ("Decision required" / an
@@ -657,7 +657,7 @@ function mapOperatorRef(
  *    the reassertion path out of lift 1: the human's turn outranks a run that
  *    is still winding down.
  *
- * Deriving here rather than per-surface is the point (rulings 12/14: a mapping
+ * Deriving here rather than per-surface is the point (rulings 237/297: a mapping
  * is never forked per surface). Both lifts used to live in the components —
  * one of them copy-pasted across three render sites with two different gates —
  * so extending either meant finding every copy, and a new surface inherited
@@ -667,13 +667,13 @@ function mapOperatorRef(
  * The STORED readiness, the acceptance gate and the board attention filter all
  * read `readiness`, never `displayReadiness`, and are untouched. Lift 2's
  * demand reaches the attention filter through the open packet itself, which
- * it reads beside `waiting` (ruling 477(a), `board-filters.ts`).
+ * it reads beside `waiting` (ruling 46, `board-filters.ts`).
  */
 function deriveDisplayReadiness(
   readiness: Readiness,
   waiting: Waiting,
   packet: TaskPacket | null,
-  /** Ruling 157: the stored value is `blocked` and the task waits on no
+  /** Ruling 54: the stored value is `blocked` and the task waits on no
    *  dependency, so a stored block with no packet is a hold a run outranks. */
   carriedHold: boolean,
 ): DisplayReadiness {
@@ -686,7 +686,7 @@ function deriveDisplayReadiness(
   ) {
     return "agent_working";
   }
-  // Ruling 138: a decided `edit_goal` packet owes a goal edit — that wins over
+  // Ruling 63: a decided `edit_goal` packet owes a goal edit — that wins over
   // `input_required` and over a stored `blocked` (saving the goal lifts the
   // blocked gate with it), but never over an agent carrying the task.
   if (packet?.awaiting === "goal_edit" && waiting !== "agent") {
@@ -713,13 +713,13 @@ function mapPacket(packet: TaskPacket | null): PacketRender | null {
       ? packet.options[packet.decided.optionIndex]
       : undefined;
   if (chosen) render.goalDraft = goalDraftForOption(chosen);
-  // Ruling 471: which option each direct acceptance answers, set only when it
+  // Ruling 316: which option each direct acceptance answers, set only when it
   // answers one, so a packet no acceptance answers ships no extra bytes.
   const accept = acceptanceAnswerOf(packet, "accept");
   if (accept) render.acceptAnswersWith = accept.option.t;
   const force = acceptanceAnswerOf(packet, "force");
   if (force) render.forceAnswersWith = force.option.t;
-  // Ruling 478(e): the same predicate `resolvePacket` routes on.
+  // Ruling 68: the same predicate `resolvePacket` routes on.
   if (packet.kind === AGENT_QUESTION_PACKET_KIND && packet.askedBy?.trim()) {
     render.answerTo = render.from;
   }
@@ -791,7 +791,7 @@ export function mapTaskProjectionRow(
     /** Resolved owner render shape (null when unowned/unknown). */
     owner: ActorRender | null;
     accepted: boolean;
-    /** Ruling 131: the row's `blockedBy` list resolved by the caller. */
+    /** Ruling 55: the row's `blockedBy` list resolved by the caller. */
     blockedBy: DependencyRender[];
   },
 ): TaskSummary {
@@ -821,7 +821,7 @@ export function mapTaskProjectionRow(
           row.readiness,
           row.waiting,
           columns.packet,
-          // Ruling 157: a hold is a STORED block with no dependency list; the
+          // Ruling 54: a hold is a STORED block with no dependency list; the
           // derived column may say `blocked` over a stored `ready` when a
           // diagnostic floors it, and that is not a hold a run may outrank.
           row.stored_readiness === "blocked" && context.blockedBy.length === 0,
@@ -872,9 +872,9 @@ export function mapTaskProjectionRow(
 }
 
 /**
- * Ruling 349 (pass 38, F38-3): the display state reads the run row when the
+ * Ruling 44 (pass 38, F38-3): the display state reads the run row when the
  * task waits on an agent. `markWaitingAgent` writes `waiting: "agent"` for a
- * run the concurrency cap PARKED as much as for one that started (ruling 311
+ * run the concurrency cap PARKED as much as for one that started (ruling 166
  * fixed the timeline sentence and the operator's reply, not this), so the
  * board card said "agent working" with a pulsing dot, the hero said the same
  * and the rail read "Agent work" while the console said "queued" and the
@@ -893,4 +893,20 @@ export function withLiveRun<T extends TaskSummary>(
       ? "agent_queued"
       : task.displayReadiness;
   return { ...task, liveRun, displayReadiness };
+}
+
+/**
+ * Ruling 166: why the queued run carrying a task waits, for the task page's
+ * "Agent queued" title, built from the task's run rows as the console's footer
+ * builds its own. A queued row's step, when it has one, is what the run waits
+ * for before a slot: the summary of its session's last run, still being
+ * compacted (ruling 175). A row with no step waits for a slot, and while any
+ * of the task's parked runs does, the sentence names the cap.
+ */
+export function queuedRunWait(rows: readonly { state: string; step: string | null }[]): string {
+  const parked = rows.filter((r) => r.state === "queued");
+  const step = parked.every((r) => r.step !== null) ? parked[0]?.step : null;
+  return step
+    ? `Queued, ${step}; then it starts when a slot frees.`
+    : "Behind the instance's concurrent-run cap; it starts when a slot frees.";
 }

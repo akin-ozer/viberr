@@ -46,7 +46,7 @@ import {
  * orchestration: which modal/confirm is open, which row is busy, and the
  * governed submissions. The pieces live in `resource-helpers.ts`,
  * `resource-modals.tsx`, `agent-template-modal.tsx` and `resource-rows.tsx`.
- * Ruling 700(e) split the panel again along the task-page recipe: its state
+ * Ruling 13(b) split the panel again along the task-page recipe: its state
  * and posts live in `resources-panel-actions.ts` (hooks), and what it reads
  * off that state, the removal confirm's copy among it, in
  * `resources-panel-derive.ts`.
@@ -82,7 +82,7 @@ export function ResourcesPanel({
     skills: Record<string, number>;
   };
   stages: StageDef[];
-  /** Ruling 618: the agent editor's Custom stages, by project. */
+  /** Ruling 326: the agent editor's Custom stages, by project. */
   projectStages: ProjectCustomStages[];
 }) {
   const [modal, setModal] = useState<ResourceModal | null>(null);

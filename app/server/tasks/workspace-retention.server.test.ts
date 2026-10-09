@@ -116,7 +116,7 @@ describe("reclaimTerminalTaskWorkspaces", () => {
     expect(existsSync(middle)).toBe(true);
   });
 
-  describe("ruling 485: as the task's person, never as the server", () => {
+  describe("ruling 140: as the task's person, never as the server", () => {
     /** Directories a test made unwritable, handed back before cleanup. */
     const locked: string[] = [];
     afterEach(() => {
@@ -176,7 +176,7 @@ describe("reclaimTerminalTaskWorkspaces", () => {
       expect(existsSync(path.join(unowned, "viberr", "chunk.bin"))).toBe(true);
     });
 
-    it("ruling 691: what a cut render left in a finished task's capture scratch goes the same way, and an in-flight task's stays", () => {
+    it("ruling 194: what a cut render left in a finished task's capture scratch goes the same way, and an in-flight task's stays", () => {
       // The page renderer's scratch is `.captures/` in the task's own
       // directory, beside the workspace, and holds a browser profile only its
       // uid can enter when a restart cut the render. CANARY: reclaim

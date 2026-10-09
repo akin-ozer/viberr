@@ -55,7 +55,7 @@ function file(
 }
 
 /**
- * Ruling 266 (pass 37, F37-96): the controller can read what a pull request
+ * Ruling 265 (pass 37, F37-96): the controller can read what a pull request
  * CHANGED. Asked to judge three open PRs it had a filename list and a line
  * count, and said so: "I can commission a review; I cannot check one."
  */
@@ -104,7 +104,7 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
   });
 
   /**
-   * Ruling 268 (pass 37, F37-98). The first version budgeted RAW patch
+   * Ruling 265 (pass 37, F37-98). The first version budgeted RAW patch
    * characters against 120 KB. The reply is JSON, where every newline in a diff
    * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way
    * out. Live, PR #32's four files came back as 83,196 bytes with
@@ -264,12 +264,12 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
 });
 
 /**
- * Ruling 484 (pass 40, F40-54): the task page's Changes panel reads the same
+ * Ruling 246 (pass 40, F40-54): the task page's Changes panel reads the same
  * diff for a person, BOUND to the delivered revision. `pulls/{n}/files` always
  * describes the PR's current head, so without the bind a person noting lines
  * for the deliverer could be reading a push nobody delivered.
  */
-describe("ruling 484: a diff read bound to a head", () => {
+describe("ruling 246: a diff read bound to a head", () => {
   const DETAIL_ROUTE = "GET /repos/akin-ozer/viberr/pulls/7";
 
   it("reads the files when the pull request is at that head", async () => {

@@ -31,7 +31,7 @@ import { errorMessage, toError } from "~/shared/errors";
  * Branch sync (Phase 7): task-key execution branches
  * (`vib-142-attach-workspace`) created from the project default branch via
  * the git refs API, plus the real compare data (ahead/behind) the sync
- * pill derives from (ruling 12: merged > behind > synced — never from
+ * pill derives from (ruling 237: merged > behind > synced — never from
  * `validation === "failing"` like the mock).
  *
  * Idempotent by design: an existing branch is SUCCESS (`created: false`);
@@ -53,14 +53,14 @@ export function taskBranchName(taskKey: string): string {
 }
 
 /**
- * Ruling 122 — how many names the allocator will try before giving up. The
+ * Ruling 228 — how many names the allocator will try before giving up. The
  * first is the canonical key; the rest carry a random suffix, so six is far
  * past the point where a collision is chance rather than a bug.
  */
 const BRANCH_NAME_ATTEMPTS = 6;
 
 /**
- * Ruling 122 — the suffix that makes a reused task key harmless. Four hex
+ * Ruling 228 — the suffix that makes a reused task key harmless. Four hex
  * characters off `randomBytes`, not a counter: a counter has to READ the
  * neighbours to know it is next, and the thing being avoided is precisely a
  * name whose history this data root cannot see.
@@ -76,11 +76,11 @@ function taskBranchCandidate(taskKey: string, attempt: number): string {
 }
 
 /**
- * Ruling 122 — is this branch name already spoken for on the remote?
+ * Ruling 228 — is this branch name already spoken for on the remote?
  *
  * "Taken" is a REF **or any pull request ever opened on the name** (owner,
  * 2026-09-03). The PR half is the load-bearing one: task keys restart at 1 on a
- * new data root (ruling 34), so `vib-1` on GitHub can still carry a previous
+ * new data root (ruling 228), so `vib-1` on GitHub can still carry a previous
  * instance's merged PR while no ref exists at all — which is exactly the state
  * that used to raise a branch collision, stop the operator and demand a human
  * decision for a delivery that then succeeded on the first press (pass 33,
@@ -147,7 +147,7 @@ export type BranchAllocation =
   | { status: "network_unavailable"; message: string };
 
 /**
- * Ruling 122 — pick the task's branch name once, on first creation.
+ * Ruling 228 — pick the task's branch name once, on first creation.
  *
  * The canonical `taskBranchName` wins whenever it is free. When it is not, the
  * task gets `<key>-<4 hex>` instead of colliding, and the caller persists the
@@ -185,7 +185,7 @@ async function allocateTaskBranchName(
 // -------------------------------------------------------------- compare
 
 /** One compare commit: the short sha and first line the file records, plus
- *  (ruling 132) the full sha and parents the drift classifier reads. */
+ *  (ruling 239) the full sha and parents the drift classifier reads. */
 export interface BranchCompareCommit {
   sha: string;
   fullSha: string;
@@ -210,13 +210,13 @@ export interface BranchCompare {
    */
   droppedCommits: number;
   /**
-   * Ruling 494 (pass 40, F40-70): the branch head this compare read (full sha),
+   * Ruling 238 (pass 40, F40-70): the branch head this compare read (full sha),
    * or null when GitHub's answer does not name it (see {@link comparedHeadSha}).
    * A count is only ever true of the head it was counted on, and a push can move
    * the branch a second after the read.
    */
   headSha: string | null;
-  /** Ruling 494: the base tip this compare read (`base_commit`), or null when
+  /** Ruling 238: the base tip this compare read (`base_commit`), or null when
    *  the answer did not carry it. */
   baseSha: string | null;
 }
@@ -230,7 +230,7 @@ const ghCompareCommitSchema = z.object({
     .object({ message: z.string().optional().catch(undefined) })
     .optional()
     .catch(undefined),
-  /** Ruling 132: the parent shas, so a merge commit can be told from an
+  /** Ruling 239: the parent shas, so a merge commit can be told from an
    *  authored one. Tolerated entry by entry; an unreadable list reads as none. */
   parents: z
     .array(z.object({ sha: z.string() }).nullable().catch(null))
@@ -238,7 +238,7 @@ const ghCompareCommitSchema = z.object({
     .catch(undefined),
 });
 
-/** Ruling 494: a commit the compare names by its sha alone (`base_commit`,
+/** Ruling 238: a commit the compare names by its sha alone (`base_commit`,
  *  `merge_base_commit`); absent when the answer did not carry one. */
 const ghCommitRefSchema = z
   .object({ sha: z.string().min(1) })
@@ -264,7 +264,7 @@ const ghCompareSchema = z
       .array(ghCompareCommitSchema.nullable().catch(null))
       .optional()
       .catch(undefined),
-    /** Ruling 494: what names the head the compare read. Each degrades to
+    /** Ruling 238: what names the head the compare read. Each degrades to
      *  absent on drift, and an absent one leaves the head unknown. */
     total_commits: z.number().optional().catch(undefined),
     base_commit: ghCommitRefSchema,
@@ -273,7 +273,7 @@ const ghCompareSchema = z
   .catch({});
 
 /**
- * Ruling 494 (pass 40, F40-70): the branch head a `base...head` compare read.
+ * Ruling 238 (pass 40, F40-70): the branch head a `base...head` compare read.
  * GitHub's answer does not name the head outright, so it is read from what the
  * answer does carry, and never guessed:
  *  - `identical`: the head IS the base tip (`base_commit`);
@@ -372,7 +372,7 @@ export async function getBranchCompare(
         status: result.data.status ?? "identical",
         commits,
         droppedCommits,
-        // Ruling 494: from the status GitHub SENT, never the "identical" the
+        // Ruling 238: from the status GitHub SENT, never the "identical" the
         // line above defaults a missing one to.
         headSha: comparedHeadSha({
           status: result.data.status,
@@ -426,14 +426,14 @@ export function taskCommits(
   taskKey: string,
 ): { sha: string; msg: string }[] {
   const prefix = `[${taskKey.toLowerCase()}]`;
-  // Ruling 132: the `{sha, msg}` projection lives HERE, so `github.commits`
+  // Ruling 239: the `{sha, msg}` projection lives HERE, so `github.commits`
   // keeps its shape while the compare itself carries `fullSha` and `parents`.
   return commits
     .filter((c) => c.msg.toLowerCase().startsWith(prefix))
     .map((c) => ({ sha: c.sha, msg: c.msg }));
 }
 
-/** Sync pill derivation (ruling 12): merged > behind > synced. */
+/** Sync pill derivation (ruling 237): merged > behind > synced. */
 export type BranchSyncState = "merged" | "behind_main" | "synced";
 
 export function deriveSyncState(input: {
@@ -587,7 +587,7 @@ export type EnsureBranchResult =
     }
   | GithubContextFailure
   | { status: "task_not_found" }
-  /** Ruling 128: the default branch had no ref and Viberr could not create
+  /** Ruling 227: the default branch had no ref and Viberr could not create
    *  it. A positive "no base" — the delivery gate refuses to push on it. */
   | { status: "bootstrap_failed"; defaultBranch: string; reason: string }
   | { status: "scope_violation"; scope: string; violationId: string }
@@ -637,7 +637,7 @@ async function ensureTaskBranch(
   /** The branch the task's is cut from and compared with. */
   let base = gh.defaultBranch;
 
-  // Ruling 122: a task that has never had a branch gets one ALLOCATED here —
+  // Ruling 228: a task that has never had a branch gets one ALLOCATED here —
   // the canonical key when it is free, `<key>-<4 hex>` when a ref or any past
   // pull request already speaks for that name. A task that already carries a
   // `branch:` keeps it verbatim, so nothing in flight is renamed.
@@ -692,7 +692,7 @@ async function ensureTaskBranch(
       return { status: "auth_failed", message: existing.message };
     }
     if (isMissingRefAnswer(existing)) {
-      // 2. Resolve the default branch head… Ruling 128: when it has no ref
+      // 2. Resolve the default branch head… Ruling 227: when it has no ref
       //    (an empty repository, or one whose only refs are task branches),
       //    Viberr creates it FIRST, so a task branch is never the repository's
       //    first ref. Only a positive "could not create it" refuses; a probe
@@ -714,7 +714,7 @@ async function ensureTaskBranch(
         if (bootstrap.status === "scope_violation") return bootstrap;
         if (bootstrap.status === "auth_failed") return bootstrap;
         if (bootstrap.status === "network_unavailable") return bootstrap;
-        // Ruling 670: the project may have just taken the repository's own
+        // Ruling 227: the project may have just taken the repository's own
         // default branch, so the base is the one the bootstrap names.
         base = bootstrap.defaultBranch;
         baseRef = await gh.client.request(
@@ -751,7 +751,7 @@ async function ensureTaskBranch(
       );
       if (createRef.ok) {
         created = true;
-        // Ruling 480: a ref created through the token proves `repo` here.
+        // Ruling 220: a ref created through the token proves `repo` here.
         markWriteScopeProven(db, gh.patId, gh.repo, "branch");
       } else if (
         createRef.kind === "http" &&
@@ -828,7 +828,7 @@ async function ensureTaskBranch(
           type: "note",
           actor: { kind: "system", systemId: "policy-engine" },
           title: null,
-          text: `Branch \`${branch}\` allocated: \`${canonical}\` is already spoken for on GitHub (a ref or a past pull request), ruling 122.`,
+          text: `Branch \`${branch}\` allocated: \`${canonical}\` is already spoken for on GitHub (a ref or a past pull request), ruling 228.`,
           toAgent: false,
           evidence: null,
         },

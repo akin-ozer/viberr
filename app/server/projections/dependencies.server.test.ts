@@ -21,9 +21,8 @@ import {
 import { candidateRefusal } from "~/shared/dependency-candidates";
 
 /**
- * Ruling 131 (pass 34): every `blockedBy` entry resolves at READ time from the
- * projections, a task key to its own state. Ruling 503 retired the second
- * spelling, a goal link, with the goal chains.
+ * Ruling 55 (pass 34): every `blockedBy` entry names a task and resolves at
+ * READ time from the projections to that task's own state.
  *
  * Canary: map an archived task to `open` and the dead cases below fail.
  */
@@ -42,7 +41,7 @@ function seed(store: TestStore) {
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
-describe("resolveDependencies (ruling 131)", () => {
+describe("resolveDependencies (ruling 55)", () => {
   it("resolves task keys: open at a working stage, done at the terminal stage, failed when archived, missing when unknown", () => {
     const store = setupTestStore(ctx);
     seed(store);
@@ -60,7 +59,7 @@ describe("resolveDependencies (ruling 131)", () => {
     expect(resolveDependencies(store.db, store.slug, ["nope"])[0]?.state).toBe("missing");
   });
 
-  it("ruling 503: a goal-link spelling handed to the resolver reads missing, never open", () => {
+  it("ruling 55: a goal-link spelling handed to the resolver reads missing, never open", () => {
     // The chains are gone, so nothing can answer `goal-1 link 2`. The file
     // schema already drops the spelling with a diagnostic; a caller that still
     // passes it must see a wait that can never clear, not a live one.
@@ -96,14 +95,14 @@ describe("resolveDependencies (ruling 131)", () => {
 });
 
 /**
- * Ruling 300 (pass 37, F37-135): what answering a decision RELEASES.
+ * Ruling 263 (pass 37, F37-135): what answering a decision RELEASES.
  *
  * The controller read three decision cards and worked out by hand, across two
  * turns, that five tasks sat behind them: "the one number that should order a
  * decision queue does not exist, so the ordering depends on whoever happens to
  * have walked the graph recently."
  */
-describe("tasksReleasedBy (ruling 300)", () => {
+describe("tasksReleasedBy (ruling 263)", () => {
   function chain(store: TestStore) {
     // A → B → C, plus D which also waits on something that can never clear.
     writeTask(store.dataRoot, store.slug, {
@@ -128,7 +127,7 @@ describe("tasksReleasedBy (ruling 300)", () => {
     const store = setupTestStore(ctx);
     chain(store);
     /**
-     * Ruling 336: still the whole chain — CANARY: stop after the direct
+     * Ruling 263: still the whole chain — CANARY: stop after the direct
      * dependents and VIB-3 disappears, which is the number the controller had
      * to compute by hand — but split by WHEN, because the two are not the same
      * event.
@@ -163,14 +162,14 @@ describe("tasksReleasedBy (ruling 300)", () => {
 });
 
 /**
- * Ruling 548: the Details panel's Blocked by picker lists the project's other
+ * Ruling 59: the Details panel's Blocked by picker lists the project's other
  * tasks and bars each one the writer would refuse as a new entry, so a person
  * reads the refusal on the row before Save instead of in a toast after it.
  * The writer is the oracle: a bar that disagrees with `setTaskDependencies`
  * offers a task Save then refuses, or hides one it would take, and the
  * sentence the picker says for it is the one Save throws.
  */
-describe("listDependencyCandidates (ruling 548)", () => {
+describe("listDependencyCandidates (ruling 59)", () => {
   it("lists every other task newest first, barred exactly where the writer refuses it, in the writer's words", async () => {
     // CANARY: walk only the direct waiters and VIB-5, two hops behind VIB-1,
     // reads free while the writer refuses it; skip archived tasks' lists and

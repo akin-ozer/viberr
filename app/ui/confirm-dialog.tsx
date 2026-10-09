@@ -17,10 +17,10 @@ import { useDialog } from "~/ui/use-dialog";
  * one grammar, an outcome-naming `confirmLabel` (never a bare "Remove"), reusing
  * the existing `.confirm-card` chrome and `useDialog` behaviors (Escape,
  * backdrop-click close, focus trap, focus restore). `org-settings`' `ConfirmDelete`
- * delegates here (C6); the D6 sites render it directly. Ruling 458(f) moved the
+ * delegates here (C6); the D6 sites render it directly. Ruling 297 moved the
  * hand-written copies of this card here too: the user disable, the credential
  * removal, the KB browser's delete and replace, and the agent profile delete.
- * Home's projection-rebuild confirm stays hand-written under ruling 457 (see
+ * Home's projection-rebuild confirm stays hand-written under ruling 11 (see
  * `RebuildConfirm`).
  */
 export function ConfirmDialog({
@@ -40,7 +40,7 @@ export function ConfirmDialog({
 }: {
   title: string;
   body: ReactNode;
-  /** Ruling 419(c): a field the decision carries, such as the optional reason a
+  /** Ruling 287: a field the decision carries, such as the optional reason a
    *  knowledge-base correction's undo records. Rendered under the body, so
    *  the consequence is read before anything is typed. */
   children?: ReactNode;
@@ -68,14 +68,14 @@ export function ConfirmDialog({
   className?: string;
   /** Unmounts the dialog: after Cancel, and after a confirm's exit too. */
   onCancel: () => void;
-  /** The mutation only. The dialog closes itself afterwards (ruling 459). */
+  /** The mutation only. The dialog closes itself afterwards (ruling 287). */
   onConfirm: () => void;
 }) {
-  // Ruling 459: the confirm leaves the way Cancel does. `commit` runs
+  // Ruling 287: the confirm leaves the way Cancel does. `commit` runs
   // onConfirm, then the animated close, which calls onCancel to unmount, so a
   // caller's onConfirm does not clear its own state (onCancel does that).
   const { ref, close, commit } = useDialog(onCancel);
-  // Ruling 458(k): the WAI-ARIA alertdialog pattern — the body is the dialog's
+  // Ruling 287(d): the WAI-ARIA alertdialog pattern — the body is the dialog's
   // description, so a screen reader reads the consequence with the title
   // instead of only the title.
   const bodyId = useId();

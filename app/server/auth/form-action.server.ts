@@ -13,7 +13,7 @@ import { requireAuth } from "./require-user.server";
  *   const { refused, db, formData, actor, intent } = await requireFormAction(request);
  *   if (refused) return refused;
  *
- * Ruling 457 (RV-1): the refusal used to be a thrown 403. React Router sends a
+ * Ruling 11 (RV-1): the refusal used to be a thrown 403. React Router sends a
  * thrown fetcher error to the route's error boundary without revalidating, so
  * a tab whose session changed in another tab (a sign-in again gives it a new
  * id, and root's csrf token is the old one's) lost the page, and with it the
@@ -39,7 +39,7 @@ export async function requireFormAction(request: Request) {
 }
 
 /** What an action answers when it refuses: the sentence a person reads, and
- *  the form field it is about when it is about one (ruling 514). */
+ *  the form field it is about when it is about one (ruling 288). */
 interface ActionRefusal {
   ok: false;
   error: string;

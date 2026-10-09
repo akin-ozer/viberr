@@ -89,7 +89,7 @@ const FETCH_TIMEOUT_MS = 300_000;
 const MERGE_TIMEOUT_MS = 60_000;
 
 /**
- * Ruling 134(c) (pass 34, F34-11): origin's copy of the TASK BRANCH, related
+ * Ruling 241 (pass 34, F34-11): origin's copy of the TASK BRANCH, related
  * to the workspace head from the workspace's own history (the remote ref is
  * fetched, so `merge-base --is-ancestor` has the object). `current`: origin
  * carries the workspace head. `behind`: origin's head is an ancestor of the
@@ -107,11 +107,11 @@ export type RemoteBranchState =
 
 export type UpdateBranchResult =
   /** The branch now carries the base. `commits` is how many base commits it was
-   *  missing. Ruling 132: `mergeSha` is the merge commit the refresh created and
+   *  missing. Ruling 239: `mergeSha` is the merge commit the refresh created and
    *  `baseSha` the base tip it merged (both read BEFORE the push, so a merge is
-   *  never published unrecorded). Ruling 134(c): `remoteBefore` is origin's copy
+   *  never published unrecorded). Ruling 241: `remoteBefore` is origin's copy
    *  as it stood before this update and `remote` as the push left it
-   *  (`current` by construction: the push published HEAD). Ruling 439: `onto`
+   *  (`current` by construction: the push published HEAD). Ruling 239: `onto`
    *  is the branch head the merge was made on, its first parent. */
   | {
       status: "updated";
@@ -125,7 +125,7 @@ export type UpdateBranchResult =
       remote: RemoteBranchState;
     }
   /** Idempotent no-op on the BASE: nothing on the base that the branch does not
-   *  have. `remote` still reports origin's copy of the branch (ruling 134(c)):
+   *  have. `remote` still reports origin's copy of the branch (ruling 241):
    *  "already up to date with main" must never pronounce a lagging branch done. */
   | { status: "already_current"; branch: string; base: string; remote: RemoteBranchState }
   /**
@@ -140,7 +140,7 @@ export type UpdateBranchResult =
       base: string;
       files: string[];
       detail?: string;
-      /** Ruling 475: the base tip the merge was attempted against (full sha),
+      /** Ruling 129: the base tip the merge was attempted against (full sha),
        *  so "the same conflict" is the same files against the same base
        *  commit. Absent when it could not be read. */
       baseSha?: string;
@@ -149,12 +149,12 @@ export type UpdateBranchResult =
    * The remote branch holds commits this workspace does not (non-fast-forward)
    * — a HISTORY divergence, never a credential problem (B-GH1/F15-15). The
    * local merge is rolled back and nothing is force-pushed (R18-4).
-   * Ruling 475: `remoteHeadSha` is origin's head that refused the push, as
+   * Ruling 129: `remoteHeadSha` is origin's head that refused the push, as
    * read before the merge; absent when it could not be read.
    */
   | { status: "push_conflict"; branch: string; base: string; reason: string; remoteHeadSha?: string }
   /**
-   * Ruling 159(b), pass 35 review: the workspace tree carries Viberr's own
+   * Ruling 229, pass 35 review: the workspace tree carries Viberr's own
    * store layout, so this door refuses too. The delivery push is not the only
    * one that publishes the branch — this one pushes the whole workspace HEAD,
    * so every commit made since the last delivery rides along, the delivery
@@ -164,8 +164,8 @@ export type UpdateBranchResult =
    */
   | { status: "store_layout"; branch: string; files: string[]; reason: string }
   /**
-   * Ruling 428: a file this branch changes is leased to another task, so this
-   * door refuses as the delivery push does (ruling 245). It publishes the
+   * Ruling 241: a file this branch changes is leased to another task, so this
+   * door refuses as the delivery push does (ruling 60). It publishes the
    * whole workspace head, so unpushed work rides along; live on ax-clone
    * AX-22's refresh at 00:11 published its rework while AX-20 held
    * `internal/controller/task.go`. Nothing is merged and nothing is pushed.
@@ -204,7 +204,7 @@ function isMissingRemoteRef(stderr: string): boolean {
 }
 
 /**
- * Ruling 134(c): fetch origin's copy of the task branch and relate it to the
+ * Ruling 241: fetch origin's copy of the task branch and relate it to the
  * workspace head LOCALLY. `ls-remote` alone cannot answer `behind` vs
  * `diverged` (that needs the remote head OBJECT), and a head pushed from
  * another workspace is exactly the case the answer matters for. R-seams-1:
@@ -372,7 +372,7 @@ export async function updateWorkspaceBranchFromBase(
       };
     }
 
-    // Ruling 159(b): "viberr must never publish its own store layout into a
+    // Ruling 229: "viberr must never publish its own store layout into a
     // customer repository, whatever an agent did" — and this is the second
     // door that publishes the branch. It pushes the whole workspace HEAD, so a
     // stray folder the delivery refusal left committed on the local branch
@@ -401,9 +401,9 @@ export async function updateWorkspaceBranchFromBase(
       };
     }
 
-    // Ruling 428: the lease gate, at the same seam and read the same way as
-    // the delivery push's (the BRANCH's files, ruling 353; the resolved list,
-    // ruling 245(b)). Before the fetch and the merge, like the store-layout
+    // Ruling 241: the lease gate, at the same seam and read the same way as
+    // the delivery push's (the BRANCH's files and the resolved list,
+    // ruling 60). Before the fetch and the merge, like the store-layout
     // check above: a refusal costs no network and leaves nothing to roll back.
     const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
     if (leases.length > 0) {
@@ -493,7 +493,7 @@ export async function updateWorkspaceBranchFromBase(
             );
           }
 
-          // 1b. Origin's copy of the TASK branch (ruling 134(c)). A separate fetch:
+          // 1b. Origin's copy of the TASK branch (ruling 241). A separate fetch:
           //    a refspec naming a ref origin does not have fails the whole fetch,
           //    and a never-pushed branch is a normal state here, not a failure.
           const remote = await readRemoteBranchState(
@@ -550,7 +550,7 @@ export async function updateWorkspaceBranchFromBase(
               repoDir,
               ...identity,
               "merge",
-              // Ruling 132: every refresh is a real merge commit, so the drift
+              // Ruling 239: every refresh is a real merge commit, so the drift
               // classifier can tell a base refresh (a two-parent commit recorded in
               // `baseRefreshes`) from authored work. A fast-forward would leave
               // nothing to record.
@@ -602,7 +602,7 @@ export async function updateWorkspaceBranchFromBase(
                 files,
               };
               if (detail) conflict.detail = detail;
-              // Ruling 475: the base commit this conflict is against, so a
+              // Ruling 129: the base commit this conflict is against, so a
               // second conflict can be told apart from the one already sent to
               // the delivering agent. Read after the abort; best-effort.
               const conflictBaseRes = await exec(
@@ -628,7 +628,7 @@ export async function updateWorkspaceBranchFromBase(
           }
 
           // 3b. The merge commit and the base tip, read BEFORE the push (ruling
-          //    132): a merge that cannot be recorded is not published. An unreadable
+          //    239): a merge that cannot be recorded is not published. An unreadable
           //    sha resets to `preSha` exactly like a failed push.
           const mergeShaRes = await exec("git", ["-C", repoDir, "rev-parse", "HEAD"], {
             cwd: repoDir,
@@ -707,12 +707,12 @@ export async function updateWorkspaceBranchFromBase(
                   `the remote branch \`${branch}\` holds commits that are not in this ` +
                   `workspace (non-fast-forward), so the update was rolled back, not forced`,
               };
-              // Ruling 475: which of origin's heads refused it, when known.
+              // Ruling 129: which of origin's heads refused it, when known.
               if ("headSha" in remote) pushConflict.remoteHeadSha = remote.headSha;
               return pushConflict;
             }
             const detail = redactGitOutput(pushRes.stderr, { token });
-            // Ruling 144(c), the sibling this was never threaded through: GitHub's
+            // Ruling 221(a), the sibling this was never threaded through: GitHub's
             // refusal of a workflow-file push for a token without the `workflow`
             // scope is a SCOPE fact, not a generic push failure. The delivery push
             // classifies it and names the remedy; this one dropped it in the

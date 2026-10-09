@@ -10,7 +10,7 @@ import { requireVisibleProject } from "./project-visibility.server";
 
 /**
  * GET /projects/:slug/tasks/:key/changes — the Changes panel's read (ruling
- * 484): the delivered revision's files and patches from its pull request,
+ * 315): the delivered revision's files and patches from its pull request,
  * `?path=` for one file the panel's read left out for size.
  *
  * Membership, the task page's own gate (`requireVisibleProject`: a non-member
@@ -26,7 +26,7 @@ export function shouldRevalidate(): boolean {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   // A 401, not `requireUser`'s login redirect: a fetcher follows a redirect as
-  // a navigation (the bell's lesson, ruling 457).
+  // a navigation (the bell's lesson, ruling 11).
   const ctx = await authenticate(request);
   if (!ctx || ctx.pwresetRequired) {
     throw data("Sign in to read this task's changes.", { status: 401 });

@@ -20,13 +20,13 @@ import { editDiff, type EditDiff } from "./edit-diff";
 
 /**
  * What the run panels read off a run and its console before they draw
- * (ruling 700(e), the large-component split of `runs-panels.tsx` on the task
+ * (ruling 13(b), the large-component split of `runs-panels.tsx` on the task
  * page's recipe): the Agent logs footer's sentence and the retry it offers,
  * what the console box says about its own history, a console line's shapes
  * and a wait row's figures. Pure functions of the run and the store's thread,
  * no React; a panel or a row calls each at most once per render.
  *
- * Ruling 457: backend labels and count plurals are spelled inline here, as in
+ * Ruling 11: backend labels and count plurals are spelled inline here, as in
  * `runs-panels.tsx`, not through `BACKEND_LABEL` / `countLabel` (why:
  * shared/text/backend-label.ts, shared/text/plural.ts).
  */
@@ -70,14 +70,14 @@ export function retryOffer(
   // streaming — so a contributor (and everyone during a concurrent run) was told
   // a quota failure was a "continuity error — see the blocked packet", pointing
   // at a packet that need not exist. Only the BUTTON is grant-gated now.
-  // Ruling 350: the CLASS describes the run whatever its kind. The kind gate
+  // Ruling 166: the CLASS describes the run whatever its kind. The kind gate
   // that used to sit here was for the retry clause, which keeps its own gate
   // below (`retryOffered`); on the class it sent an operator drive or a
   // controller turn refused for `unavailable` to the unclassified sentence —
   // "continuity error; see the blocked packet" — and a controller turn has no
   // packet at all.
   const backendUnavailable = cur.state === "error" && !!cur.failedBackendUnavailable;
-  // Ruling 127: the retry OFFER needs somebody to bill, which is a different
+  // Ruling 137: the retry OFFER needs somebody to bill, which is a different
   // question from why this run failed. The projection withholds `altBackend`
   // when the run had no principal at all (an unowned task), and `retryBackends`
   // is the task owner's live connection set — the same question the blocked
@@ -90,7 +90,7 @@ export function retryOffer(
     (retryBackends?.includes(altBackend) ?? false);
   const canRetryBackend = retryPossible && canDispatch;
   const altLabel = altBackend === "codex" ? "Codex" : "Claude";
-  // Ruling 127: the offer, and when there is none, WHY there is none. A run
+  // Ruling 137: the offer, and when there is none, WHY there is none. A run
   // that failed on quota with an owner who never connected the other backend
   // gets no button on any surface (the blocked packet withholds
   // `retry_other_backend` for the same reason), so the console names the
@@ -115,7 +115,7 @@ export function retryOffer(
 /** The Agent logs footer: what the shown run is doing, or how it ended. */
 export function logsFooter(cur: RunView, hydrated: boolean, offer: RetryOffer): string {
   if (cur.state === "running") {
-    // A controller turn's record is its transcript (ruling 99), not a task.
+    // A controller turn's record is its transcript (ruling 247), not a task.
     return cur.kind === "controller"
       ? "streaming: raw output stays here as evidence, never in the transcript"
       : "streaming: raw output stays here as evidence, never in the task record";
@@ -124,7 +124,7 @@ export function logsFooter(cur: RunView, hydrated: boolean, offer: RetryOffer): 
     // UI-57: a QUEUED run is not an idle thread. The strip renders only for
     // `running`, so a queued run used to show a "queued" pill next to the
     // footer "thread alive — no run executing", which contradicted it.
-    // Ruling 701: a queued run's step, when it has one, is what it waits for
+    // Ruling 175: a queued run's step, when it has one, is what it waits for
     // in place of a slot (the summary of its session's last run).
     return `queued: ${cur.step ?? "waiting for a runtime slot"}; output appears once it starts`;
   }
@@ -140,11 +140,11 @@ export function logsFooter(cur: RunView, hydrated: boolean, offer: RetryOffer): 
  *  happened rather than "resumable". */
 function interruptedFooter(cur: RunView): string {
   if (cur.interruptedBy) {
-    // Ruling 350: the row knows WHO stopped it and whether a session
+    // Ruling 166: the row knows WHO stopped it and whether a session
     // existed — not whether the task still takes a run. Both live
     // person-interrupts on this instance were closure interrupts
-    // (ruling 177 refuses every re-run on a closed task) and the
-    // footer promised "resumable" on each; ruling 207(g)'s note
+    // (ruling 52 refuses every re-run on a closed task) and the
+    // footer promised "resumable" on each; ruling 154's note
     // already says "there is no thread to resume" when no session
     // was reported, and the footer said the opposite beside it.
     return cur.sid
@@ -153,7 +153,7 @@ function interruptedFooter(cur: RunView): string {
   }
   if (cur.interruptedReason !== "restart") return "interrupted; the thread stays resumable";
   if (cur.kind === "controller") return "interrupted by a restart; the conversation carries a note";
-  // Ruling 338: this said "the operator was re-invoked", and the
+  // Ruling 166: this said "the operator was re-invoked", and the
   // panel holds no fact about whether one was. Recovery stamps
   // the identical row state on a re-invoked orphan and on one
   // its crash-loop guard REFUSED to re-invoke
@@ -170,7 +170,7 @@ function interruptedFooter(cur: RunView): string {
   // SHOP-34/35/38 sat two and a half hours until a human
   // commented by hand.
   //
-  // This is ruling 198's defect surviving in the second surface
+  // This is ruling 163(c)'s defect surviving in the second surface
   // a person opens when a run stops. The panel knows the run was
   // cut by a restart and nothing more, so that is all it says —
   // and it points at the record that does know. A stronger
@@ -182,12 +182,12 @@ function interruptedFooter(cur: RunView): string {
 
 /** A run or turn that finished. */
 function finishedFooter(cur: RunView, hydrated: boolean): string {
-  // Ruling 148: a missing timestamp is said by leaving the clause
+  // Ruling 291: a missing timestamp is said by leaving the clause
   // out, not by a "−" mid-sentence — "run finished at −;" read as a
   // broken template rather than as the fact. Same treatment as
   // `SessionIdChip` in runs-panels.tsx, and worse here because the glyph
   // landed inside a sentence instead of in a value slot.
-  // Ruling 419(d): a controller conversation is not re-engaged,
+  // Ruling 321: a controller conversation is not re-engaged,
   // it is continued, and the way to do that is the composer.
   if (cur.kind === "controller") {
     return (
@@ -200,7 +200,7 @@ function finishedFooter(cur: RunView, hydrated: boolean): string {
     : "run finished; thread can be re-engaged";
 }
 
-/** Ruling 130(a): the SENTENCE follows the classified failure for every run
+/** Ruling 155(a): the SENTENCE follows the classified failure for every run
  *  kind; the retry clause follows the OFFER. */
 function failedFooter(cur: RunView, offer: RetryOffer): string {
   const provider = cur.backend === "codex" ? "Codex" : "Claude";
@@ -219,7 +219,7 @@ function failedFooter(cur: RunView, offer: RetryOffer): string {
         ? `${provider} could not be reached from this deployment: the connection failed before the provider answered; nothing about the account is wrong, check the network path and retry in a few minutes${retryClause}`
         : `${provider} could not serve this run: the provider was overloaded or failed on its side; nothing about the account is wrong, retry in a few minutes${retryClause}`;
     case "max_budget":
-      // Ruling 175 / ruling 350: the pill above already says "cut off ·
+      // Ruling 159 / ruling 166: the pill above already says "cut off ·
       // spending cap"; the footer said "continuity error" beneath it.
       return "cut off by the instance's spending cap (Instance settings → Max spend per Claude run): not a task failure; continue the run or raise the cap";
     case "max_turns":
@@ -227,13 +227,13 @@ function failedFooter(cur: RunView, offer: RetryOffer): string {
     case "idle_timeout":
       return "stopped after producing nothing for the whole idle window: the run hung, it did not fail; re-run it";
     case "tool_loop":
-      // Ruling 598: the error line names the call and its answer.
+      // Ruling 158(b): the error line names the call and its answer.
       return "stopped for sending one tool call and getting the same answer again and again (the error line names both): redirect it with what the tool said";
     case "session_missing":
       return "the provider session this run tried to resume no longer exists; a fresh run re-anchored on the task record is the recovery";
   }
   if (offer.backendUnavailable) {
-    // Ruling 127: the same `run·unavailable` classification now
+    // Ruling 137: the same `run·unavailable` classification now
     // also covers "the account this run bills has not connected
     // the backend", so the footer states the CLASS and lets the
     // run's own error line (which names the person and the
@@ -246,7 +246,7 @@ function failedFooter(cur: RunView, offer: RetryOffer): string {
     // account).
     return `${provider} could not run this (quota, rate limit, or an account that cannot run it)${retryClause}`;
   }
-  // Ruling 350: only a specialist's failure raises the packet the
+  // Ruling 166: only a specialist's failure raises the packet the
   // old sentence pointed at; an operator drive or a controller
   // turn is sent to the record it does have.
   return cur.kind === "primary" || cur.kind === "reviewer"
@@ -256,7 +256,7 @@ function failedFooter(cur: RunView, offer: RetryOffer): string {
 
 // ------------------------------------------------------- the console box
 
-/** Ruling 457 (owner decision 2): what the console says while a thread the
+/** Ruling 300 (owner decision 2): what the console says while a thread the
  *  page did not carry lines for fills itself with one request, or once that
  *  request failed; null once the thread is in. */
 export function historyNotice(thread: ThreadView | null): { ev: "meta" | "err"; text: string | null } | null {
@@ -284,15 +284,15 @@ export function olderNote(older: OlderLogState): string {
  */
 export interface LineParts {
   chip: ToolChip | null;
-  /** Ruling 499: an edit drawn as its diff. */
+  /** Ruling 168: an edit drawn as its diff. */
   diff: EditDiff | null;
-  /** Ruling 499: a to-do list drawn as its steps. */
+  /** Ruling 168: a to-do list drawn as its steps. */
   todos: TodoSnapshot | null;
   /** The file a call read, when no diff names it. */
   path: string | null;
-  /** Ruling 366(d): what the one-line summary cut, if anything worth a click. */
+  /** Ruling 168: what the one-line summary cut, if anything worth a click. */
   hidden: HiddenArguments | null;
-  /** Ruling 366(d): Bash's description, for the row itself. */
+  /** Ruling 168: Bash's description, for the row itself. */
   note: string | null;
   files: FileChangeChip[] | null;
   code: ConsoleCodeBlock | null;
@@ -307,12 +307,12 @@ export interface LineParts {
 
 export function lineParts(display: LogLine, open: boolean): LineParts {
   const chip = toolChip(display);
-  // Ruling 499: an edit drawn as its diff, a to-do list as its steps. What
+  // Ruling 168: an edit drawn as its diff, a to-do list as its steps. What
   // they draw in full is no longer cut from the row.
   const diff = editDiff(display);
   const todos = consoleTodos(display);
   const path = diff ? null : filePathOf(display);
-  // Ruling 366(d): what the one-line summary cut, if anything worth a click,
+  // Ruling 168: what the one-line summary cut, if anything worth a click,
   // and Bash's description for the row itself.
   const hidden = hiddenArguments(display, diff?.drawn ?? todos?.drawn ?? []);
   const note = commandNote(display);
@@ -338,7 +338,7 @@ export function lineParts(display: LogLine, open: boolean): LineParts {
   };
 }
 
-/** A wait row's figures, read off the last heartbeat it folded (ruling 366(e)). */
+/** A wait row's figures, read off the last heartbeat it folded (ruling 284(e)). */
 export interface WaitFacts {
   last: LogLine;
   who: ToolIdentity;

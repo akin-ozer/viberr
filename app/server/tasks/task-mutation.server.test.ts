@@ -45,16 +45,17 @@ import type {
   Recommendation,
 } from "~/schemas/task-file.schema";
 
-/** Ruling 361: every notice names its actor; the tests here are about routing. */
+/** Ruling 74: every notice names its actor; the tests here are about routing. */
 const TEST_FROM = { kind: "system" as const, name: "Test" };
 
 /**
  * The task-mutation SUBSTRATE (`task-mutation.server.ts`) — the three helpers
  * every governed write path threads. It was carved out of
  * `task-actions.server.ts` to break a real import cycle, and
- * `task-actions.server.ts` re-exported all of it until ruling 654 split it, so
+ * `task-actions.server.ts` re-exported all of it until the family split
+ * (ruling 13(a)), so
  * until this file existed NOTHING imported the module by name: its guards could
- * be deleted and every gate would stay green (ruling 65 — "an owner ruling
+ * be deleted and every gate would stay green (ruling 8 — "an owner ruling
  * whose guard cannot go red is a ruling that gets reverted in silence").
  *
  * The two things worth guarding here:
@@ -338,7 +339,7 @@ describe("notifyTaskWatchers — who counts as a watcher", () => {
     // What the inbox renders. A row that loses its project/task refs is
     // unclickable (B-FD6). `occurredAt` is passed through when the caller has
     // the real event time and stamped by the writer when it does not — never
-    // left blank. Ruling 361 (pass 38, F38-15): this test used to require the
+    // left blank. Ruling 74 (pass 38, F38-15): this test used to require the
     // writer to stamp "Operator" on a notice that named nobody — 816 rows on
     // the live instance (every reviewer verdict, every dependency release)
     // named the Operator for things it never did. The notice now MUST name
@@ -786,7 +787,7 @@ describe("stageDisplayName", () => {
 
 describe("terminalStageIdFor", () => {
   it("reads the terminal stage id from the project file, and answers null for a project it cannot read", () => {
-    // Ruling 137: the packet writers withdraw a `transition` card into THIS
+    // Ruling 99: the packet writers withdraw a `transition` card into THIS
     // stage along with the accept card, and the operator's transition routing
     // keys off it. A stage id that did not come from the file (a hard-coded
     // "done") would miss a board whose last stage is named otherwise; a throw
@@ -924,7 +925,7 @@ describe("recordRecommendationWithdrawal", () => {
 });
 
 /**
- * Ruling 140(b) (pass 34, U34-11): the seat-change notifier never writes a row
+ * Ruling 50 (pass 34, U34-11): the seat-change notifier never writes a row
  * to the person who performed the act, and fails OPEN when the store refuses.
  */
 describe("notifyOwnerSeatChange", () => {
@@ -945,7 +946,7 @@ describe("notifyOwnerSeatChange", () => {
     const row = listNotifications(store.db, store.users.murat.id).find((n) => n.kind === "ownership")!;
     expect(row.title).toBe("Arda handed you JC-3");
     expect(row.taskKey).toBe("JC-3");
-    // Ruling 497: the row opens the `assign` event that recorded the change.
+    // Ruling 75: the row opens the `assign` event that recorded the change.
     // Canary: drop `href` from the notifier — the row opens the task's top.
     expect(
       store.db.prepare(`SELECT href FROM notifications WHERE id = ?`).get(row.id),

@@ -23,8 +23,8 @@ export function StageMeter({
   stages,
   dist,
 }: {
-  /** The project's OWN stage list (ruling 15); `color` is a preset NAME the
-   *  sheet turns into paint (ruling 364). */
+  /** The project's OWN stage list (ruling 47); `color` is a preset NAME the
+   *  sheet turns into paint (ruling 279). */
   stages: { id: string; name: string; color: string }[];
   dist: Record<string, number>;
 }) {
@@ -118,7 +118,7 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           </span>
         </>
       )}
-      {/* Ruling 625: "quiet" is the stat a narrow row drops (app.css, 1100px
+      {/* Ruling 280: "quiet" is the stat a narrow row drops (app.css, 1100px
           tier), so the decision count beside it, the row's one demand, stays. */}
       {p.running === 0 && total > 0 && (
         <>
@@ -126,7 +126,7 @@ function ProjectStats({ p }: { p: HomeProjectCard }) {
           <span className="pj-quiet">quiet</span>
         </>
       )}
-      {/* Ruling 625: a decision that waits on you is blue everywhere (amber is
+      {/* Ruling 277: a decision that waits on you is blue everywhere (amber is
           an agent's question), in the outline tier the board's chip wears. */}
       {p.waiting > 0 && (
         <Pill kind="info" sm quiet dot>

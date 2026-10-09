@@ -39,7 +39,7 @@ const TOKEN_RE = /^[A-Za-z][\w-]*/;
  * role handles ({@link isRoleMentionHandle}) and offers each of the
  * {@link BACKEND_MENTION_HANDLES} per project.
  *
- * The base stays one literal on purpose (ruling 457): it ships in the client's
+ * The base stays one literal on purpose (ruling 11): it ships in the client's
  * mention-spans chunk, and the lists below are server-only exports the client
  * build drops, so none of them adds a byte to that budgeted closure.
  */
@@ -75,7 +75,7 @@ export function isRoleMentionHandle(
 }
 
 /**
- * The instance controller's handle (ruling 99). It is not reserved on a task
+ * The instance controller's handle (ruling 247). It is not reserved on a task
  * (no task resolver routes it), but it never maps to a person either, so the
  * mention fan-out skips it with the reserved handles.
  */
@@ -90,7 +90,7 @@ function boundaryAfter(ch: string | undefined): boolean {
 }
 
 export function findMentionSpans(text: string, names: string[]): MentionSpan[] {
-  // Ruling 457 (CS-5): every span starts at an `@`, so a text without one has
+  // Ruling 11 (CS-5): every span starts at an `@`, so a text without one has
   // none — answered before the name list is built and sorted, which the
   // composer's per-keystroke transform and every server resolver pay for.
   if (!text.includes("@")) return [];

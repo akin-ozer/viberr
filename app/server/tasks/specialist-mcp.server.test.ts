@@ -100,7 +100,7 @@ interface HeldChild {
 }
 
 /**
- * Ruling 700(b): children that hold their handshake until the test ends it, so
+ * Ruling 190: children that hold their handshake until the test ends it, so
  * a test decides which probe finishes when. `aliveAtSpawn` records, at each
  * spawn, how many children were alive (spawned and not yet killed by the
  * probe) counting the new one.
@@ -174,7 +174,7 @@ function addMcp(
   ).run(`mcp_${name}`, name, transport, target, sealedCred, now, now);
 }
 
-/** Ruling 176: mark a registry row's write tools, as the editor's save does. */
+/** Ruling 188: mark a registry row's write tools, as the editor's save does. */
 function markWriteTools(
   db: ReturnType<typeof setupTestStore>["db"],
   name: string,
@@ -215,7 +215,7 @@ describe("resolveSpecialistMcpServersDetailed (item-1: MCP wiring)", () => {
     expect(resolveSpecialistMcpServersDetailed(store.db, [name]).servers).toEqual({ [name]: config });
   });
 
-  it("ruling 107: every name on the ONE reserved list resolves to nothing, even as a registry row", () => {
+  it("ruling 269: every name on the ONE reserved list resolves to nothing, even as a registry row", () => {
     const store = setupTestStore(ctx);
     // Every name Viberr's own tooling owns, written STRAIGHT into SQLite — the
     // path the save-time refusal cannot reach: a hand-written row, a restored
@@ -241,7 +241,7 @@ describe("resolveSpecialistMcpServersDetailed (item-1: MCP wiring)", () => {
   });
 
   /**
-   * Ruling 310. Both run prompts used to answer "why is my granted server not
+   * Ruling 190. Both run prompts used to answer "why is my granted server not
    * here?" with one hardcoded sentence — "no such server is in the org
    * registry" — asserting a cause neither had checked. The resolver had already
    * produced the real one, and `UnresolvedMcpGrant.reason` documents itself as
@@ -255,7 +255,7 @@ describe("resolveSpecialistMcpServersDetailed (item-1: MCP wiring)", () => {
    * This binds the two ends: the resolver states a reason, and the renderer
    * prints THAT reason rather than a sentence of its own.
    */
-  it("ruling 310: an unresolved grant carries a reason, and the prompt prints that reason", () => {
+  it("ruling 190: an unresolved grant carries a reason, and the prompt prints that reason", () => {
     const store = setupTestStore(ctx);
     const resolved = resolveSpecialistMcpServersDetailed(store.db, ["ghost-server"]);
     expect(resolved.servers).toEqual({});
@@ -334,7 +334,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     ]);
   });
 
-  describe("ruling 461: a credentialed server is mounted through Viberr's gateway", () => {
+  describe("ruling 191: a credentialed server is mounted through Viberr's gateway", () => {
     beforeAll(async () => {
       await startMcpGateway({ port: 0 });
     });
@@ -478,7 +478,7 @@ describe("resolveSpecialistMcpServersDetailed", () => {
     expect(row.lastError).toContain("Cannot find module 'ajv'");
   });
 
-  it("ruling 606: a mount the probe caught mid-install is dropped for this run and installs in the background", async () => {
+  it("ruling 190: a mount the probe caught mid-install is dropped for this run and installs in the background", async () => {
     // Live 2026-09-30: the run's probe gave up on `uvx …@latest` after 20 s
     // while it was still downloading, killed it, and every later run did the
     // same, so no run got the server until a person pressed Retest.
@@ -563,12 +563,12 @@ describe("resolveSpecialistMcpServersDetailed", () => {
 });
 
 /**
- * Ruling 176 (amends 39): a withheld repo-write grant denies the tools an admin
+ * Ruling 188 (amends 39): a withheld repo-write grant denies the tools an admin
  * MARKED, per server, on both transports: the SDK's per-tool policy rides the
  * HTTP config, and every marked name comes back as a denial for `startRun` to
  * turn into a `disallowedTools` name (Claude) or `disabled_tools` (Codex).
  */
-describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176)", () => {
+describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 188)", () => {
   it("a withheld run gets the HTTP per-tool policy and a denial for each transport", () => {
     const store = setupTestStore(ctx);
     addMcp(store.db, "gh-http", "HTTP", "https://mcp.example/gh");
@@ -634,7 +634,7 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
 });
 
 /**
- * Ruling 700(b): the run-start stdio pre-flight runs two handshakes at a time
+ * Ruling 190: the run-start stdio pre-flight runs two handshakes at a time
  * instead of one after another, starts them in mount order and applies their
  * verdicts in mount order, so the mounted set, the registry rows, the warn
  * lines and `unresolved` are what the serial check left for the same verdicts.
@@ -643,7 +643,7 @@ describe("resolveSpecialistMcpServersDetailed — marked write tools (ruling 176
  * probing, can overwrite a Retest pressed meanwhile, and a failed credential
  * re-seal is logged before the verdicts rather than among them.
  */
-describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 700(b))", () => {
+describe("verifyStdioMcpMountsForRun: the bounded pre-flight (ruling 190)", () => {
   /** A probe clock no test here reaches: each handshake ends when the test ends it. */
   const timeoutMs = 10_000;
   /**

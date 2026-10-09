@@ -15,10 +15,10 @@ import { textResult } from "~/server/runtimes/strict-tool.server";
 import { toError } from "~/shared/errors";
 
 /**
- * The refusal machinery every controller-side MCP shares (ruling 107).
+ * The refusal machinery every controller-side MCP shares (ruling 269).
  *
  * The controller mounts two in-process servers — `viberr_controller` (the
- * governed CRUD toolkit, ruling 99) and `viberr_ops` (read-only diagnostics) —
+ * governed CRUD toolkit, ruling 247) and `viberr_ops` (read-only diagnostics) —
  * and they must refuse in ONE voice: `[denied] <the guard's own sentence>` for
  * an authority refusal, a uniform not-visible sentence for a read the asker may
  * not have, `[error]` for anything unexpected. Two copies of that voice would
@@ -44,7 +44,7 @@ export type ControllerToolText = {
 };
 
 /**
- * Ruling 677: the most text one controller tool reply carries, in characters.
+ * Ruling 260: the most text one controller tool reply carries, in characters.
  *
  * The Claude CLI checks an MCP result in two steps (read from the bundle of
  * its 2.1.284): a text result whose length is at most four times half its
@@ -64,7 +64,7 @@ const CONTROLLER_REPLY_MAX_CHARS = 50_000;
 const LINE_BREAK_REACH = 4_000;
 
 /**
- * Ruling 677: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_CHARS}
+ * Ruling 260: a reply a turn can carry. One within {@link CONTROLLER_REPLY_MAX_CHARS}
  * is returned as it is. A longer one is cut at the last line break that fits
  * (or, when none is near, where the room ends), and its first line says so,
  * with the sizes, before anything else is read: a head the model can use and
@@ -116,7 +116,7 @@ export interface ControllerToolGuards {
    *  same not-visible shape. Org admins pass via the audited override. */
   requireVisible: (slug: string, what: string) => void;
   /** Wrap a handler: AppError → [denied]/[error] text the model relays. A
-   *  handler answers in text, or (ruling 533) in text and a picture. */
+   *  handler answers in text, or (ruling 79) in text and a picture. */
   run: (
     fn: () => Promise<string | ControllerToolText> | string | ControllerToolText,
   ) => () => Promise<ControllerToolText>;
@@ -165,7 +165,7 @@ export function controllerToolGuards(
     return async (): Promise<ControllerToolText> => {
       try {
         const answer = await fn();
-        // Ruling 677: no reply leaves here longer than a turn carries.
+        // Ruling 260: no reply leaves here longer than a turn carries.
         if (answer instanceof Object) {
           return {
             content: answer.content.map((part) =>

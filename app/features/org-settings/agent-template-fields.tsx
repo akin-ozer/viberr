@@ -9,7 +9,7 @@ import type { ContextGrants, StageEligibility } from "./agent-template-draft";
 
 /**
  * The global agent-template editor's fields that carry its logic (ruling
- * 700(e), the split of `agent-template-modal.tsx`): the backend pick, the
+ * 13(b), the split of `agent-template-modal.tsx`): the backend pick, the
  * default eligible stages with the Custom stages list, and the loadable
  * context with its missing chips. Each takes the slot its markup held in the
  * editor and calls no hook of its own (StageRow keeps the one id it always
@@ -17,7 +17,7 @@ import type { ContextGrants, StageEligibility } from "./agent-template-draft";
  * tree, are what they were. The editor owns the draft and hands it in.
  */
 
-/** Ruling 618: one row of the Custom stages list, a project's own stages under
+/** Ruling 326: one row of the Custom stages list, a project's own stages under
  *  its name and task key, or the stored ids no board has. The row is a named
  *  group, so a chip that reads "To do" is heard with the project it is on. */
 function StageRow({
@@ -50,7 +50,7 @@ function StageRow({
 
 /** Grants pointing at a resource this org no longer has, rendered removable —
  *  the same red `missing` chip the project profile modal uses (P14-KM-10).
- *  Exported for the controller settings panel (ruling 106), so the missing
+ *  Exported for the controller settings panel (ruling 270), so the missing
  *  treatment — class, copy, a11y state — has ONE implementation here.
  *
  *  F19-5: a missing chip only renders BECAUSE the id is still in the grant list,
@@ -135,7 +135,7 @@ export function BackendField({
 }
 
 /** Default eligible stages: the default workflow's chips, then the Custom
- *  stages list (ruling 618), paged three projects at a time. */
+ *  stages list (ruling 326), paged three projects at a time. */
 export function EligibleStagesField({
   stages,
   eligibility,
@@ -183,7 +183,7 @@ export function EligibleStagesField({
             actually makes rather than one it cannot. */}
         <span className="fhint">Done is closed by a human, never by an agent</span>
       </span>
-      {/* Ruling 618 (2026-10-01): the stages a project's own board
+      {/* Ruling 326 (2026-10-01): the stages a project's own board
           adds were echoed only once a profile already stored one, as a
           pressed chip after the defaults that repeated "not in the default
           workflow". They are offered now, grouped by the project whose board

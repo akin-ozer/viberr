@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Ruling 481(c) (F40-51): notifications that reach a tab nobody is looking at.
+ * Ruling 74 (F40-51): notifications that reach a tab nobody is looking at.
  *
  * Notifications stay in-app (docs/product/overview.md: no mailer, no push
  * service). What changed is that an open Viberr tab now says so when it is not

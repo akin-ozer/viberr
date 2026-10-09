@@ -6,7 +6,7 @@ import { NumberTicker } from "./number-ticker";
 import { expectWithinBudget } from "../../test-support/perf-ratchet";
 
 /**
- * Ruling 457 (LIVE-7 / CSS-2): the console footer's event count is a
+ * Ruling 11 (LIVE-7 / CSS-2): the console footer's event count is a
  * NumberTicker, and a streaming run retargets it by one on every line. The
  * frame loop set a new float on every animation frame for the whole two
  * seconds, so React committed about 125 times for a figure that changed once
@@ -66,7 +66,7 @@ function retarget(to: number) {
   return { commits, texts: [...texts], final: el.textContent };
 }
 
-describe("NumberTicker commits (ruling 457)", () => {
+describe("NumberTicker commits (ruling 11)", () => {
   it("a +1 commits once for the retarget and once for the digit", () => {
     const { commits, texts, final } = retarget(201);
     // The same look: it still lands on the target, through every figure between.

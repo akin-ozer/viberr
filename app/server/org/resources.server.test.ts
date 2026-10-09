@@ -65,7 +65,7 @@ type FakeMcpReply = { jsonrpc: "2.0"; id: number } & {
 
 /**
  * A fake stdio MCP server: answers the JSON-RPC `initialize` and `tools/list`
- * handshake with `tools` tools — no real process spawned. `names` (ruling 176)
+ * handshake with `tools` tools — no real process spawned. `names` (ruling 188)
  * names them; otherwise they are `t0`, `t1`, …
  */
 function fakeMcpSpawn(tools: number, names?: readonly string[]): McpSpawn {
@@ -232,7 +232,7 @@ const httpRpcRequest = z
 /**
  * A fake Streamable-HTTP MCP endpoint that answers the REAL handshake
  * (P13-LV-10) the way the SDK client the probe now speaks through expects it
- * (ruling 461): the request's own id echoed, a full `initialize` result, 202
+ * (ruling 191): the request's own id echoed, a full `initialize` result, 202
  * for a notification, 405 for the standalone GET stream. `sseFramed` returns
  * the body as an SSE `data:` line, which is what a real MCP server does when
  * the client accepts text/event-stream.
@@ -442,12 +442,12 @@ describe("skills", () => {
     expect(listSkills(db, ctx)).toHaveLength(1);
   });
 
-  // Ruling 183 (pass 36, F36-2): every SKILL.md writer refuses a body that is
+  // Ruling 186 (pass 36, F36-2): every SKILL.md writer refuses a body that is
   // not a skill, by name, and never rewrites it. Live, the controller sent the
   // body JSON-escaped twice and two skills landed on disk as ONE line of
   // literal `\n`; the mount then took the whole escaped text as the
   // description and Codex agents read it as-is.
-  describe("ruling 183: a SKILL.md body is validated before it is written", () => {
+  describe("ruling 186: a SKILL.md body is validated before it is written", () => {
     it("refuses a body with no real newline and literal \\n sequences, naming the remedy, and writes nothing", async () => {
       // Canary: drop the escaped-newline branch of assertSkillBodyWellFormed.
       const { db, dataRoot, ctx } = setup();
@@ -575,7 +575,7 @@ describe("skills", () => {
     const onDisk = path.join(skillDirPath("api-design", dataRoot), "SKILL.md");
     expect(readFileSync(onDisk, "utf8")).toBe("# precious content");
     expect(updated.skill.summary).toBe("Updated summary.");
-    // Ruling 183 retired the explicit clear flag that used to blank the file
+    // Ruling 186 retired the explicit clear flag that used to blank the file
     // here: an empty SKILL.md is not a skill, and no writer produces one.
   });
 
@@ -683,19 +683,19 @@ describe("skills", () => {
 });
 
 /**
- * Ruling 278 (pass 37, F37-111): found live. `kb-conventions` spawned
+ * Ruling 188 (pass 37, F37-111): found live. `kb-conventions` spawned
  * `@modelcontextprotocol/server-filesystem` pointed at
  * `/data/kb/shopify-clone-conventions` — the project's rulings knowledge base,
  * which Viberr injects into every run on that board. Fourteen tools, nothing
  * withheld, granted to three profiles, two of them reviewers: a reviewer could
  * rewrite the rules it is judged against.
  *
- * Ruling 176's write-tool marking would not have closed it — marked tools are
+ * Ruling 188's write-tool marking would not have closed it — marked tools are
  * withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and an
  * agent that runs a test suite holds it. Viberr owns this directory, so it can
  * see the overlap and say so.
  */
-describe("ruling 278: an MCP pointed inside Viberr's own store is named", () => {
+describe("ruling 188: an MCP pointed inside Viberr's own store is named", () => {
   it("finds the store paths in a stdio command, and only those", () => {
     const root = dbCtx.makeTempDir();
     const cmd = (args: string) => storePathsInMcpTarget(args, root);
@@ -724,7 +724,7 @@ describe("ruling 278: an MCP pointed inside Viberr's own store is named", () => 
     const note = mcpStoreAccessNote(["/data/kb/shopify-clone-conventions"])!;
     // CANARY: shorten the note to "this server can write Viberr's store" and
     // the reader loses the two facts that make it actionable — what an agent
-    // can do with it, and that ruling 176's marking is not the answer.
+    // can do with it, and that ruling 188's marking is not the answer.
     expect(note).toContain("/data/kb/shopify-clone-conventions");
     expect(note).toContain("rules its own reviewers judge it against");
     expect(note).toContain("execute-code-or-write-repo");
@@ -734,12 +734,11 @@ describe("ruling 278: an MCP pointed inside Viberr's own store is named", () => 
 describe("mcp servers", () => {
   it("refuses every name Viberr's own in-process servers own", async () => {
     const { db } = setup();
-    // P13-KM-12 / ruling 107: a row under one of these names is unusable (every
+    // P13-KM-12 / ruling 269: a row under one of these names is unusable (every
     // resolver skips it) AND shadows the mount key of a server the product
     // attaches itself, so it is refused at save rather than accepted dead. The
     // hyphen spellings are what a Codex run would see. CANARY: refuse from a
-    // private copy of the list and the names reserved since (rulings 585 and
-    // 589) save as dead rows.
+    // private copy of the list and the names reserved since (ruling 216) save as dead rows.
     for (const name of RESERVED_MCP_NAMES) {
       await expect(
         saveMcpServer(
@@ -927,7 +926,7 @@ describe("MCP probe crash-safety, honesty, and teardown (pass 20)", () => {
     const { db } = setup();
     // A credential under 8 chars is refused outright — it never reaches the row.
     // Canary: drop the `< 8` guard in saveMcpServer → this no longer throws.
-    // Ruling 514: the refusal names the credential field, so the editor says
+    // Ruling 288: the refusal names the credential field, so the editor says
     // it there (drop `field` and it reads at the form's foot).
     await expect(
       saveMcpServer(
@@ -1505,14 +1504,14 @@ describe("resource reference integrity", () => {
     expect(grantsOf(dataRoot, "scout")).not.toContain("billing-api");
   });
 
-  /** The `resource` an action's newest audit row carries (ruling 681). */
+  /** The `resource` an action's newest audit row carries (ruling 34). */
   const resourceOf = (db: ReturnType<typeof setup>["db"], action: string) =>
     listAuditEvents(db, { action })[0]?.details?.resource;
 
   // CANARY: ask `auditedResource` after `updateResourceReferences` dropped the grants,
   // in any of the three deletes, and its row names a board no agent of which
   // held the resource.
-  it("ruling 681: a delete's row names the boards that held it, asked before their grants are dropped", async () => {
+  it("ruling 34: a delete's row names the boards that held it, asked before their grants are dropped", async () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Throwaway", refresh: "manual" }, ACTOR, ctx);
     const { skill } = await saveSkill(db, { name: "old-craft", summary: "Old craft.", body: "# old" }, ACTOR, ctx);
@@ -1557,7 +1556,7 @@ describe("resource reference integrity", () => {
   // is saved, and the three saves that change nothing a run is given (a
   // refresh mode, a skill's summary sent with the body its editor loaded, a
   // server saved as it was) land on the board's Activity.
-  it("ruling 681: a rename's row names the boards under the name it took, and a save that changes nothing a run is given names none", async () => {
+  it("ruling 34: a rename's row names the boards under the name it took, and a save that changes nothing a run is given names none", async () => {
     const { db, dataRoot, ctx } = setup();
     const { kb } = await saveKnowledgeBase(db, { name: "Old rules", refresh: "manual" }, ACTOR, ctx);
     const { skill } = await saveSkill(db, { name: "old-craft", summary: "Old craft.", body: "# old" }, ACTOR, ctx);
@@ -1622,13 +1621,13 @@ describe("resource reference integrity", () => {
 
 describe("MCP credentials and transports", () => {
   /**
-   * Ruling 461: the probe connects through the client the MCP gateway holds a
+   * Ruling 191: the probe connects through the client the MCP gateway holds a
    * run's upstream with, so "up" on a credentialed server means up with its
    * credential over the transport the run's calls will take. The raw
    * Streamable-HTTP handshake it replaced called a legacy SSE server
    * "endpoint answered 405" — a server every run then reached fine.
    */
-  it("ruling 461: a credentialed legacy-SSE server is probed up through the gateway's upstream client", async () => {
+  it("ruling 191: a credentialed legacy-SSE server is probed up through the gateway's upstream client", async () => {
     const { db } = setup();
     const upstream = await startSseUpstream("s3cret-sse");
     try {
@@ -1647,7 +1646,7 @@ describe("MCP credentials and transports", () => {
     }
   });
 
-  it("ruling 461: a Streamable HTTP server that refuses the stored credential reads 'authentication rejected'", async () => {
+  it("ruling 191: a Streamable HTTP server that refuses the stored credential reads 'authentication rejected'", async () => {
     const { db } = setup();
     const upstream = await startHttpUpstream("the-right-token");
     try {
@@ -1840,7 +1839,7 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
     });
   });
 
-  it("ruling 142: withholds Viberr's own configuration, which a third-party command has no business reading", async () => {
+  it("ruling 141(a): withholds Viberr's own configuration, which a third-party command has no business reading", async () => {
     // U34-7 (pass 34): the container's NODE_ENV=production and PORT rode
     // into every stdio MCP child through this same base (and into every
     // agent shell, where they broke the project's own tooling). A registered
@@ -1871,12 +1870,12 @@ describe("mcpSpawnEnv (third-party command isolation)", () => {
 });
 
 /**
- * Ruling 176 (amends 39): discovery PROPOSES, the admin DECIDES. A probe stores
+ * Ruling 188 (amends 39): discovery PROPOSES, the admin DECIDES. A probe stores
  * the names its listing carried; the marked write tools are whatever the admin
  * saved, audited when they change, and never touched by a save that does not
  * carry the list (the controller's tool, a re-test).
  */
-describe("ruling 176: an org MCP server's write tools", () => {
+describe("ruling 188: an org MCP server's write tools", () => {
   const LISTING = ["get_issue", "create_pull_request", "merge_pull_request", "list_commits"];
   const STDIO = { name: "github", transport: "stdio", target: "npx -y gh-mcp", cred: "" };
 
@@ -1927,7 +1926,7 @@ describe("ruling 176: an org MCP server's write tools", () => {
     expect(none.mcp.writeToolsReviewed).toBe(true);
 
     const audits = listAuditEvents(db, { action: "org.mcp.tool_policy.changed" });
-    // Ruling 681: a change to a server that exists names the boards given it.
+    // Ruling 34: a change to a server that exists names the boards given it.
     const resource = { kind: "mcp", key: "github", boards: [] };
     expect(audits.map((a) => a.details)).toEqual(
       expect.arrayContaining([

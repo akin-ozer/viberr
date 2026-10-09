@@ -18,7 +18,7 @@ export interface AppErrorOptions {
   userMessage?: string;
   /** Structured, secret-free context (ids, field names — never values of secrets). */
   details?: AppErrorDetails;
-  /** The form field a refusal is about, when it is about one (ruling 514):
+  /** The form field a refusal is about, when it is about one (ruling 288):
    *  the action answers it beside the error, so the form says it there. */
   field?: string;
   cause?: unknown;

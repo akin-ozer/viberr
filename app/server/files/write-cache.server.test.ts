@@ -10,13 +10,13 @@ import { freshestContent, writeAndRemember } from "./write-cache.server";
 /**
  * The stale-read shield that every canonical file writer (task.md, project.md,
  * epics/*.md) reads through. Nothing imported it before pass 33, so the guard
- * could be deleted and every gate would stay green — ruling 65: a ruling whose
+ * could be deleted and every gate would stay green — ruling 8: a ruling whose
  * guard cannot go red gets reverted in silence.
  *
  * What it really promises is narrow, and these tests hold it to exactly that:
  * a read that disagrees with what THIS process last wrote to the same absolute
  * path is repaired ONLY while the path still shows the file that write put
- * there or the file it replaced (ruling 513). It is not a cache, not a
+ * there or the file it replaced (ruling 18). It is not a cache, not a
  * write-back buffer and not a lock — any other writer wins however soon after
  * ours it lands, and an unstattable path is never repaired at all.
  *
@@ -90,7 +90,7 @@ describe("freshestContent — the read-your-own-writes repair", () => {
     // permanently (VIB-1). Canaries: return `diskContent` at the end of
     // freshestContent (every row); leave the identity our write put there out
     // of the remembered ones (rows 1 and 3) or the one it replaced (row 2).
-    // Row 3 is ruling 513's second half: the repair reads no clock. The mtime
+    // Row 3 is ruling 18's second half: the repair reads no clock. The mtime
     // window this module used to keep compared the file's stamp with
     // `Date.now()` at the write, so a container clock behind the host's by
     // more than 100 ms switched the repair off; bring any such comparison
@@ -135,7 +135,7 @@ describe("freshestContent — the read-your-own-writes repair", () => {
   ];
 
   it.each(otherWriters)("another writer wins however soon after ours it lands: %s", (_writer, write) => {
-    // Ruling 513. The shield must not turn into a write-back cache that
+    // Ruling 18. The shield must not turn into a write-back cache that
     // reverts a restore, a person editing task.md or a test's re-seed to what
     // the app last wrote. The 100 ms window this module used to keep reverted
     // every writer inside it, and comparing contents cannot tell row 1 from a
@@ -206,7 +206,7 @@ describe("freshestContent — the read-your-own-writes repair", () => {
 
   it("names the file by its caller's own key: projectSlug for project.md, epicId for an epic", () => {
     // Three writers share one module; a warn that called every id "taskKey"
-    // would be ungreppable during the next incident. Ruling 503: the epic
+    // would be ungreppable during the next incident. Ruling 17: the epic
     // writer took the goal writer's place.
     const project = path.join(dir, "project.md");
     const epic = path.join(dir, "epic-1.md");

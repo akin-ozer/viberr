@@ -15,7 +15,7 @@ import {
 import { rebuildAll, rebuildPath, rebuildTaskFile } from "./rebuilder.server";
 
 /**
- * Ruling 457: the write path's projection cost, counted in SQL statements
+ * Ruling 21: the write path's projection cost, counted in SQL statements
  * and WAL commits (findings SRV-3, SRV-4, CS-6).
  */
 
@@ -54,7 +54,7 @@ function timeline(store: TestStore, count: number): TaskFileEvent[] {
 }
 
 
-describe("projection write cost (ruling 457)", () => {
+describe("projection write cost (ruling 21)", () => {
   it("SRV-3: the project.md rebuild after a task-key allocation", async () => {
     const store = setupTestStore(ctx);
     for (let n = 1; n <= 30; n += 1) {

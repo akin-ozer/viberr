@@ -4,7 +4,7 @@ import { countLabel } from "~/shared/text/plural";
 
 /**
  * What the Agent resources tab reads off its state before it draws (ruling
- * 700(e), the split of `resources-panel.tsx`): which editor or removal
+ * 13(b), the split of `resources-panel.tsx`): which editor or removal
  * confirm is open, the row an open MCP editor reads, and what a removal
  * says it takes. Pure functions, no React.
  */
@@ -37,7 +37,7 @@ function grantTail(templates: number, projects: number): string {
   return ` The grant is dropped from ${parts.join(" and ")}.`;
 }
 
-/** Ruling 469: the row as the page holds it NOW, so a sign-in that lands in
+/** Ruling 192: the row as the page holds it NOW, so a sign-in that lands in
  *  the other tab (the callback publishes, this page revalidates) reads
  *  "signed in" in the open editor. */
 export function liveMcp(item: McpView | null, mcps: McpView[]): McpView | null {

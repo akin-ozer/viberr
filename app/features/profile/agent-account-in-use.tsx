@@ -26,7 +26,7 @@ import type {
 } from "./profile-query.server";
 
 /**
- * An agent account card with an account in use (ruling 700(e), the split of
+ * An agent account card with an account in use (ruling 13(b), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe): the picker, that
  * account's health, usage and last refusal, its controls, and what the
  * picker's menu opens. Hook-free: the card owns the state and the picker owns
@@ -44,7 +44,7 @@ export function AccountInUse({
   card: CardControls;
 }) {
   const { health, accounts, limits, usage } = data;
-  // Ruling 130(d) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
+  // Ruling 160(a) (pass 34, F34-1): the last refusal Viberr OBSERVED on this
   // person's own account. The card used to say "connected · verified" while
   // every run on the account was refused with a 403.
   const lastRefusal = data.lastRefusal;
@@ -56,7 +56,7 @@ export function AccountInUse({
   const confirming = accounts.find((account) => account.id === card.confirmDisconnect);
   return (
     <>
-      {/* Ruling 616: which account runs bill is the picker's to say and
+      {/* Ruling 323: which account runs bill is the picker's to say and
           to change; the line under it is that account's health. */}
       <AccountPicker
         label={label}
@@ -83,7 +83,7 @@ export function AccountInUse({
             again on your Profile → Agent accounts", which is THIS card: so
             the card has to carry the sign-in it names, or the only way out
             of a wiped runtime volume would be to guess that Disconnect
-            comes first. Ruling 507: into THIS account's own home, when it
+            comes first. Ruling 138: into THIS account's own home, when it
             is a sign-in; a pasted key never goes missing. */}
         {!health.available && health.kind === "login" && (
           <SignInButtons account={active.id} lead={false} card={card} />
@@ -92,14 +92,14 @@ export function AccountInUse({
       </div>
       <AccountRename account={active} card={card} />
 
-      {/* Ruling 616: the person's other accounts on this backend, opened
+      {/* Ruling 323: the person's other accounts on this backend, opened
           from the picker's menu, which is also where switching to one
           lives. Each is renamed, signed in again or disconnected where it
           stands: making one the account in use only to disconnect it
           would bill any run that started in between. */}
       {card.managing && others.length > 0 ? <OtherAccounts others={others} card={card} /> : null}
 
-      {/* Ruling 616: opened from the picker's menu, which says when the
+      {/* Ruling 323: opened from the picker's menu, which says when the
           ceiling leaves no room for another. */}
       {card.adding ? <AddAccount kept={accounts.length} card={card} /> : null}
       {confirming && (
@@ -178,8 +178,8 @@ function AccountPills({
           ) : null}
         </Pill>
       ) : null}
-      {/* Ruling 294: the reading this person's own runs reported. Ruling
-          146(a) already said readings "are already rendered per person on
+      {/* Ruling 161: the reading this person's own runs reported. Ruling
+          161 already said readings "are already rendered per person on
           Insights ... and on Profile, which is where a fact about
           somebody's account belongs" — Profile never rendered one, so
           this closes a drift rather than opening a disclosure. Scoped to
@@ -210,7 +210,7 @@ function RefusalReset({ refusal }: { refusal: ProfileBackendRefusal }) {
   );
 }
 
-/** Ruling 294: the usage reading's note, what it is and how old. */
+/** Ruling 161: the usage reading's note, what it is and how old. */
 function UsageNote({
   usage,
   label,
@@ -232,7 +232,7 @@ function UsageNote({
         last figure a run reported and not a live reading: it moves when
         a run reports another.
         {usage.resetsAt && usage.windowReset ? (
-          // Ruling 481(d) (F40-50): past tense once the reset has
+          // Ruling 161(c) (F40-50): past tense once the reset has
           // passed. "The window resets 03:30" at 09:00 claimed a
           // closed window was about to reopen.
           <>
@@ -252,7 +252,7 @@ function UsageNote({
   );
 }
 
-/** Ruling 130(d): the last refusal Viberr observed on the account in use. */
+/** Ruling 160(a): the last refusal Viberr observed on the account in use. */
 function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label: string }) {
   return (
     <div className="pol-note after last" data-refusal={refusal.kind}>
@@ -267,9 +267,10 @@ function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label
             Refused by the provider on{" "}
             <LocalDayDotTime iso={refusal.observedAt} />:{" "}
             {refusal.providerText} This is the last refusal Viberr
-            observed on this account; any completed {label} run retires
-            it, as does switching to or connecting a different {label}{" "}
-            account here, so its absence is not proof the account works.
+            observed on this account; any completed {label} run on this
+            account retires it, as does switching to or connecting a
+            different {label} account here, so its absence is not proof the
+            account works.
           </>
         ) : (
           <>
@@ -279,9 +280,9 @@ function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label
                 ; reopens <LocalDayDotTime iso={refusal.resetsAt} />
               </>
             ) : null}
-            . Any completed {label} run retires this notice, as does
-            switching to or connecting a different {label} account here;
-            until then, runs billed to this account are refused.
+            . Any completed {label} run on this account retires this
+            notice, as does switching to or connecting a different {label}{" "}
+            account here; until then, runs billed to this account are refused.
           </>
         )}
       </span>
@@ -289,7 +290,7 @@ function RefusalNote({ refusal, label }: { refusal: ProfileBackendRefusal; label
   );
 }
 
-/** Ruling 616: the other accounts' management, each where it stands. */
+/** Ruling 323: the other accounts' management, each where it stands. */
 function OtherAccounts({ others, card }: { others: ProfileBackendAccount[]; card: CardControls }) {
   const { backend } = card;
   return (
@@ -321,7 +322,7 @@ function OtherAccounts({ others, card }: { others: ProfileBackendAccount[]; card
           const on = readableDate(account.health.connectedAt);
           return (
             <div className="conn-row" key={account.id} data-account={account.id}>
-              {/* Ruling 515: the name and its facts, then the buttons
+              {/* Ruling 323: the name and its facts, then the buttons
                   under them, as the account in use reads above. The
                   name keeps one line; the title holds all of it when
                   a narrow row ends it in an ellipsis. */}
@@ -352,7 +353,7 @@ function OtherAccounts({ others, card }: { others: ProfileBackendAccount[]; card
   );
 }
 
-/** Ruling 616: another account, through the same sign-in and paste methods;
+/** Ruling 323: another account, through the same sign-in and paste methods;
  *  `kept` is how many the person has now. */
 function AddAccount({ kept, card }: { kept: number; card: CardControls }) {
   const { backend } = card;
@@ -390,7 +391,7 @@ function AddAccount({ kept, card }: { kept: number; card: CardControls }) {
   );
 }
 
-/** Ruling 481(b): what a Disconnect asks first, and who runs bill after it. */
+/** Ruling 323: what a Disconnect asks first, and who runs bill after it. */
 function DisconnectConfirm({
   account,
   kept,

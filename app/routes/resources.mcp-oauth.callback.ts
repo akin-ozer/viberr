@@ -8,7 +8,7 @@ import { pageTitle } from "~/shared/page-title";
 
 /**
  * GET /resources/mcp-oauth/callback — where an MCP server's authorization
- * server sends the admin's browser back after consent (ruling 469).
+ * server sends the admin's browser back after consent (ruling 192).
  *
  * The admin started the sign-in from the MCP editor in Instance settings,
  * which opened the authorization URL in a new tab; that tab lands here. An

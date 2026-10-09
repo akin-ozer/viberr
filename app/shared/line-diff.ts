@@ -1,5 +1,5 @@
 /**
- * Ruling 499: what two texts keep and what changed between them, for the run
+ * Ruling 168: what two texts keep and what changed between them, for the run
  * console's edit diff: the lines an agent's `Edit` replaced, and inside a
  * changed line the words. Myers' O(ND) difference ("An O(ND) Difference
  * Algorithm and Its Variations", 1986) over any token list, after matching the

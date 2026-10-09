@@ -22,7 +22,7 @@ import { errorMessage } from "~/shared/errors";
 import { OAUTH_NEEDS_SIGN_IN, OAUTH_SIGN_IN_EXPIRED } from "./upstream.server";
 
 /**
- * Ruling 469: the ruling-461 gateway carries an OAuth sign-in's access token
+ * Ruling 192: the ruling-191 gateway carries an OAuth sign-in's access token
  * upstream exactly as it carries a pasted credential — in the server process,
  * never in the run's config — and renews it when the server answers 401,
  * mid-run, without the run noticing. A renewal the server refuses reaches the
@@ -96,7 +96,7 @@ async function runClient(): Promise<{ client: Client; config: string; runToken: 
   };
 }
 
-describe("the gateway and an OAuth sign-in (ruling 469)", () => {
+describe("the gateway and an OAuth sign-in (ruling 192)", () => {
   it("sends the access token upstream and never puts a token in the run's config", async () => {
     const { client, config } = await runClient();
     const called = textResult.parse(await client.callTool({ name: "whoami", arguments: {} }));
@@ -159,7 +159,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     }
   });
 
-  describe("an upstream authorization refusal names a read-only grant (ruling 486)", () => {
+  describe("an upstream authorization refusal names a read-only grant (ruling 192)", () => {
     const SENTENCE =
       "This connection's sign-in granted read-only scopes (194); an admin must sign it in again with write scopes in Instance settings → Agent resources.";
 
@@ -227,7 +227,7 @@ describe("the gateway and an OAuth sign-in (ruling 469)", () => {
     expect(server.calls).toEqual(["whoami"]);
   });
 
-  describe("the connection's grant tool (ruling 486, F40-66)", () => {
+  describe("the connection's grant tool (ruling 192, F40-66)", () => {
     const WRITES = ["workers-kv-storage.write", "workers-scripts.write"];
 
     /** The grant tool's answer as the run's client reads it, and as it came. */

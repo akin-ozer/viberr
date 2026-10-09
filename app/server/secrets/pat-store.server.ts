@@ -58,7 +58,7 @@ export interface PatMetadata {
   lastValidatedAt: string | null;
   /** Cached last validator run (tolerant parse; null when absent/invalid). */
   validation: PatValidation | null;
-  /** Ruling 480: what each repository proved about the token (see
+  /** Ruling 220: what each repository proved about the token (see
    *  `RepoScopeProof`); empty until one has. */
   repoScopes: RepoScopeProof[];
 }
@@ -162,7 +162,7 @@ export function getPatMetadata(
  * callers validate the replacement BEFORE calling this). Clears the cached
  * validation; callers record the fresh one via `recordPatValidation`. A new
  * token is a new grant, so every repository's proof goes with the old one
- * (ruling 480).
+ * (ruling 220).
  */
 export function replacePatToken(
   db: DatabaseSync,
@@ -257,7 +257,7 @@ export function getPatToken(
 // ------------------------------------------------ per-repository evidence
 
 /**
- * Ruling 480 (F40-43): the required scopes whose evidence is about ONE
+ * Ruling 220 (F40-43): the required scopes whose evidence is about ONE
  * repository. A fine-grained token is granted per repository, and the
  * validator proves these two against the repository it was asked about (the
  * `permissions` block, the pulls probe), so a verdict on one repository says
@@ -337,7 +337,7 @@ function proofsJson(proofs: RepoScopeProof[]): string | null {
 /**
  * Caches a validator run on the PAT row (validation_json + timestamp), and
  * folds what it learned about a repository into that repository's proof
- * (ruling 480, `repoScopesAfter`).
+ * (ruling 220, `repoScopesAfter`).
  */
 export function recordPatValidation(
   db: DatabaseSync,
@@ -366,7 +366,7 @@ const WRITE_PROOF = {
 } satisfies Record<RepoWrite, { scopes: readonly string[]; note: string }>;
 
 /**
- * F27-U2 / F28-U2, ruling 480: a real, SOLICITED write to GitHub proves the
+ * F27-U2 / F28-U2, ruling 220: a real, SOLICITED write to GitHub proves the
  * scopes it needed, on the repository it went to. A branch created, a branch
  * pushed or the initial commit prove `repo`; a pull request opened proves
  * `pull_request:write`; a merge proves both. Validation deliberately never
@@ -514,7 +514,7 @@ export interface ScopeChip {
 }
 
 /**
- * Ruling 144 (pass 34, G34-2): an ADVISORY about the credential that never
+ * Ruling 221(a) (pass 34, G34-2): an ADVISORY about the credential that never
  * fails validation and never renders as a missing chip. Today's one advisory:
  * a classic token whose published scope list lacks `workflow`, which GitHub
  * refuses for a push touching `.github/workflows/*`; or an open `workflow`
@@ -528,7 +528,7 @@ export interface CredentialAdvisory {
   text: string;
 }
 
-/** Ruling 144(a): the advisories a validation and the open violations imply. */
+/** Ruling 221(a): the advisories a validation and the open violations imply. */
 export function credentialAdvisories(
   validation: PatValidation | null,
   openViolations: readonly { scope: string; taskKey: string | null }[],
@@ -551,9 +551,9 @@ export function credentialAdvisories(
       text: "This classic token has no workflow scope, so it cannot push changes under .github/workflows/. Grant it on GitHub if a task will ship CI, then use Re-check scopes on the project's GitHub page.",
     });
   }
-  // Ruling 360 (pass 38, F38-14): the check-runs read GitHub refused with this
+  // Ruling 237 (pass 38, F38-14): the check-runs read GitHub refused with this
   // token. Not a missing REQUIRED scope — merging never needed it — but the
-  // reason the checks are not shown (ruling 491 dropped the "checks not
+  // reason the checks are not shown (ruling 315 dropped the "checks not
   // readable" pill; the project's own gates carry the verification).
   // F39-5: the same list the timeline writer reads, so "advisory" cannot mean
   // one thing on the card and another on the record.
@@ -583,21 +583,21 @@ export interface ProjectCredentialHealth {
   masked: string | null;
   lastValidatedAt: string | null;
   validation: PatValidation | null;
-  /** Ruling 480 (F40-45): the Instance-settings connection whose token this
+  /** Ruling 222 (F40-45): the Instance-settings connection whose token this
    *  is, so the card can send an instance admin to that connection's Update
    *  token (the only place a token is replaced). Absent when no connection
    *  holds the bound PAT, and on a project with none: an absent key costs the
-   *  settings payload nothing (ruling 457). */
+   *  settings payload nothing (ruling 11). */
   connectionId?: string;
   requiredScopes: string[];
   /** One chip per required scope — feed straight into `.scope-chips`. Ruling
-   *  480: a repository-scoped scope's chip reads THIS project's repository's
+   *  220: a repository-scoped scope's chip reads THIS project's repository's
    *  proof (`repoScopeProofsOf`), never another repository's, and never the
    *  "assumed" a connection-level Re-check leaves on the token. */
   scopes: ScopeChip[];
   /** Open violations for the project (newest first). */
   openViolations: ReturnType<typeof listScopeViolations>;
-  /** Ruling 144(a): advisories, never verdicts (see `CredentialAdvisory`). */
+  /** Ruling 221(a): advisories, never verdicts (see `CredentialAdvisory`). */
   advisories: CredentialAdvisory[];
 }
 
@@ -630,7 +630,7 @@ const credentialPolicyDisplaySchema = z
   .catch({ credentialLabel: "", masked: "", requiredScopes: [] });
 
 /** The project's display policy (null when it declares none) and the
- *  repository its repository-scoped chips are about (ruling 480). */
+ *  repository its repository-scoped chips are about (ruling 220). */
 interface ProjectCredentialFacts {
   policy: CredentialPolicyDisplay | null;
   repo: string | null;
@@ -658,7 +658,7 @@ function readCredentialPolicy(
 /** `id` is `github_connections`' TEXT primary key. */
 const connectionIdRow = z.object({ id: z.string() });
 
-/** The connection holding a PAT, if one does (ruling 480, F40-45). */
+/** The connection holding a PAT, if one does (ruling 222, F40-45). */
 function connectionIdOf(db: DatabaseSync, patId: string): string | null {
   const row = connectionIdRow.safeParse(
     db.prepare(`SELECT id FROM github_connections WHERE pat_id = ?`).get(patId),
@@ -670,7 +670,7 @@ function connectionIdOf(db: DatabaseSync, patId: string): string | null {
  * One required scope's chip. An open violation wins (the caller checks it
  * first). A classic token's `header` verdict answers for every repository. A
  * repository-scoped scope otherwise reads the proof of the PROJECT's
- * repository (ruling 480): a probe or a write there is proof, and a verdict
+ * repository (ruling 220): a probe or a write there is proof, and a verdict
  * the token earned anywhere else (or nowhere, on a connection-level Re-check)
  * leaves it "assumed", which the card renders as unproven.
  */
@@ -690,7 +690,7 @@ function scopeChip(
 /**
  * The one server-derived credential fact the GitHub view, Settings card,
  * Activity and rail badge all consume (replaces the mock's `scopeGranted`
- * client boolean — ruling 5). Scope chips combine the cached validator
+ * client boolean — ruling 221). Scope chips combine the cached validator
  * verdicts with the open-violation overlay: an open violation for a scope
  * forces its chip to not-ok and carries the flagged task key.
  */

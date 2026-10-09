@@ -47,7 +47,7 @@ interface WatcherHandle {
   watcher: FSWatcher;
   fileTimers: Map<string, ReturnType<typeof setTimeout>>;
   dirTimers: Map<string, ReturnType<typeof setTimeout>>;
-  /** Ruling 218: the per-file rebuild RETRIES in flight, cancelled with the
+  /** Ruling 22: the per-file rebuild RETRIES in flight, cancelled with the
    *  rest so a retired watcher cannot rebuild against a retired root. */
   retryTimers: Map<string, ReturnType<typeof setTimeout>>;
   root: string;
@@ -130,7 +130,7 @@ function cancelAll(timers: Map<string, ReturnType<typeof setTimeout>>): void {
 
 /** Starts (or returns the already-running) projects-tree watcher. */
 /**
- * Ruling 218's retry ladder, per file, reset on the first success. Exported so
+ * Ruling 22's retry ladder, per file, reset on the first success. Exported so
  * the seam below can be documented against the real numbers; overridden only by
  * a test that would otherwise have to out-wait it (see `retryBackoffMs`).
  */
@@ -141,8 +141,8 @@ export function startFileWatcher(
     dataRoot?: string;
     db?: DatabaseSync;
     /**
-     * Override ruling 218's backoff ladder. A TEST seam, and it exists because
-     * the alternative failed twice: the ruling-218 canary has to wait for a
+     * Override ruling 22's backoff ladder. A TEST seam, and it exists because
+     * the alternative failed twice: the ruling-22 canary has to wait for a
      * retry to fire, and with the real 2s/5s/15s ladder a repair that lands just
      * after the second retry waits 15s more for the third. That is not a budget
      * you can pick, it is a race with production timing — the test was raised to
@@ -174,7 +174,7 @@ export function startFileWatcher(
   const fileTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const dirTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /**
-   * Ruling 218 (F37-38): a rebuild that failed is retried, because nothing else
+   * Ruling 22 (F37-38): a rebuild that failed is retried, because nothing else
    * will ever ask again.
    *
    * A projection is rebuilt when its file CHANGES. If that one rebuild fails —
@@ -202,7 +202,7 @@ export function startFileWatcher(
       const result = rebuildPath(resolveDb(), absPath, { dataRoot: root });
       // `rebuildPath` catches its own throw and reports `error` rather than
       // raising — both outcomes leave the row stale, so both retry. So does a
-      // project.md whose cascade left tasks behind (ruling 457): its row keeps
+      // project.md whose cascade left tasks behind (ruling 21): its row keeps
       // the sentinel, so rebuilding it again re-runs the cascade.
       if (result.action === "error" || result.failedTasks) {
         scheduleRetry(absPath);
@@ -298,7 +298,7 @@ export function startFileWatcher(
       const slug = segments[0]!;
       if (segments.length === 1) return reconcileProject(slug);
       if (segments[1] === "epics" && segments.length === 2) {
-        // Ruling 503: the epics dir vanished — prune its projected rows.
+        // Ruling 272: the epics dir vanished — prune its projected rows.
         const epics = z.array(epicIdRowSchema).parse(
           db
             .prepare(
@@ -336,7 +336,7 @@ export function startFileWatcher(
   const onFile = (eventPath: string) => {
     const absPath = path.resolve(watchedDir, eventPath);
     const base = path.basename(absPath);
-    // Ruling 503: `<slug>/epics/<id>.md` is the third canonical file kind.
+    // Ruling 17: `<slug>/epics/<id>.md` is the third canonical file kind.
     const isEpicFile =
       base.endsWith(".md") &&
       path.basename(path.dirname(absPath)) === "epics" &&

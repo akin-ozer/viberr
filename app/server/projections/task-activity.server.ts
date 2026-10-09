@@ -151,10 +151,10 @@ export interface QuietCheck {
   /** Terminal stage — accepted / merged, i.e. `isAcceptedDisplayState`. */
   terminal: boolean;
   runInFlight: boolean;
-  /** Ruling 131 (pass 34): the task waits on other work (`blockedBy` is
+  /** Ruling 55 (pass 34): the task waits on other work (`blockedBy` is
    *  non-empty). Such a task is held on purpose and is never "gone quiet". */
   held: boolean;
-  /** Ruling 225: when the task rests on a clock (`waiting: "schedule"`), the
+  /** Ruling 45: when the task rests on a clock (`waiting: "schedule"`), the
    *  instant that clock fires. Idle time is measured from THERE, not from the
    *  last timeline event — see `isQuiet`. */
   resumesAt?: string | null;
@@ -176,13 +176,13 @@ export interface QuietCheck {
  */
 export function isQuiet(input: QuietCheck): boolean {
   if (input.archived || input.terminal || input.runInFlight) return false;
-  // A task waiting on other work is holding, not stalling (ruling 131(a)).
+  // A task waiting on other work is holding, not stalling (ruling 55).
   if (input.held) return false;
   if (!input.lastActivityAt) return false;
   const at = Date.parse(input.lastActivityAt);
   if (!Number.isFinite(at)) return false;
   const now = Date.now();
-  // Ruling 225 (F37-45): a task resting on a clock has not stopped moving —
+  // Ruling 45 (F37-45): a task resting on a clock has not stopped moving —
   // it is between two moves, on purpose, and the gap can be hours (a quota
   // window). Measuring from its last timeline event would light the "no
   // activity" cue on the healthiest possible wait, which is the one thing this

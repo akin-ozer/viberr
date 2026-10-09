@@ -45,7 +45,7 @@ function ConnectionModal({
 }) {
   const [owner, setOwner] = useState(initial ? initial.owner : "");
   const [token, setToken] = useState("");
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => setDone(true));
   const checking = action.busy;
@@ -181,7 +181,7 @@ function ConnectionModal({
         </span>
         <div className="def-note">
           <Icon name="shield" />
-          {/* Ruling 480 (F40-43): the old copy promised "write dry-runs",
+          {/* Ruling 220 (F40-43): the old copy promised "write dry-runs",
               which run only when VIBERR_GITHUB_WRITE_PROBE is set, and a
               proof on attach that a connection Re-check then erased. */}
           <span>
@@ -205,7 +205,7 @@ function ConnectionModal({
 }
 
 /**
- * Ruling 463 (F40-6): what the TOKEN reaches, from `GET /user/repos`. The row
+ * Ruling 222 (F40-6): what the TOKEN reaches, from `GET /user/repos`. The row
  * used to say "3 public repos", the account's public count, which says
  * nothing about a fine-grained token granted a private repository. The list
  * is one disclosure away; a read that failed says why, and a connection saved
@@ -268,10 +268,10 @@ export function ConnectionsPanel({
 }: {
   connections: ConnectionRecord[];
 }) {
-  // Ruling 480 (F40-45): a project's credential card sends an instance admin
+  // Ruling 222 (F40-45): a project's credential card sends an instance admin
   // here with `?update=<connection id>`, since Update token is the one place a
   // token is actually replaced, and the link lands on that connection's modal.
-  // Ruling 532: Home's setup checklist sends one with `?add`, which lands on
+  // Ruling 322: Home's setup checklist sends one with `?add`, which lands on
   // the new connection's.
   const [searchParams] = useSearchParams();
   const [modal, setModal] = useState<{ item: ConnectionRecord | null } | null>(
@@ -285,7 +285,7 @@ export function ConnectionsPanel({
   const [confirm, setConfirm] = useState<ConnectionRecord | null>(null);
   const push = useToast();
   const rowAction = useOrgAction();
-  // Ruling 463: Re-check validates the stored token again and re-reads what
+  // Ruling 222: Re-check validates the stored token again and re-reads what
   // it reaches; its own fetcher so the row that asked shows it in flight.
   const recheckAction = useOrgAction();
   const [rechecking, setRechecking] = useBusyRow(recheckAction);
@@ -390,7 +390,7 @@ export function ConnectionsPanel({
                             {a.text}
                           </span>
                         ))}
-                        {/* Ruling 480 (F40-43): a fine-grained token is
+                        {/* Ruling 220 (F40-43): a fine-grained token is
                             proven per repository, so the line says where it
                             stands instead of promising a verification the
                             card then never showed. */}

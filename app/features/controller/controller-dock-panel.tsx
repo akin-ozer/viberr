@@ -14,17 +14,17 @@ import { addPickedFiles } from "~/ui/picked-files";
 import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
 
 /**
- * The OPEN controller dock's body (ruling 121): the context line, the replies
+ * The OPEN controller dock's body (ruling 256): the context line, the replies
  * waiting elsewhere, the transcript or the thread list, and the composer.
  *
- * Loaded on demand (ruling 457, FL-1). Root mounts the dock on every page, and
+ * Loaded on demand (ruling 11, FL-1). Root mounts the dock on every page, and
  * the transcript renders through the markdown pipeline, the heaviest thing the
  * dock needs, for a panel that starts closed. `controller-dock.tsx` keeps the
  * button, the panel's frame and header, and every piece of state, so closing
  * and reopening loses nothing; this module is only what the open panel draws,
  * and the button preloads it when a pointer or focus reaches it.
  *
- * Ruling 700(e): the body keeps its hooks and composes the regions in
+ * Ruling 13(b): the body keeps its hooks and composes the regions in
  * `controller-dock-panel-regions.tsx`, which call none.
  */
 
@@ -32,7 +32,7 @@ export interface DockPanelBodyProps {
   /** The view for the CURRENT scope, or null while it loads. */
   current: ControllerDockView | null;
   /** The shown thread's turn: the view's, with the step the dock's status
-   *  polled since (ruling 457, CTL-2). */
+   *  polled since (ruling 11, CTL-2). */
   turn: ConversationTurnState | null;
   /** Replies waiting in other threads (the one on screen is left out). */
   unseen: readonly UnseenReplyView[];
@@ -41,17 +41,17 @@ export interface DockPanelBodyProps {
   disabled: boolean;
   text: string;
   onText: (text: string) => void;
-  /** Sends the box, or the example the person clicked (ruling 314); ruling
-   *  527's `queue` waits behind a working turn instead of steering it. */
+  /** Sends the box, or the example the person clicked (ruling 319); ruling
+   *  319's `queue` waits behind a working turn instead of steering it. */
   onSubmit: (override?: string, mode?: SendMode) => void;
-  /** Ruling 527: the waiting messages' Send now and Retract post with it. */
+  /** Ruling 251: the waiting messages' Send now and Retract post with it. */
   csrf: string;
   /** Opens a thread of this scope in place. */
   onPick: (id: string) => void;
   /** A link out of the dock was followed: close without animating. */
   onLeave: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
-  /** Ruling 573: the files going with the next message, held by the shell. */
+  /** Ruling 258: the files going with the next message, held by the shell. */
   files: File[];
   onFiles: (update: (current: File[]) => File[]) => void;
   /** The body is on screen; focus may move into it (a lazy load lands after
@@ -77,7 +77,7 @@ export function DockPanelBody({
   files,
   onFiles,
 }: DockPanelBodyProps) {
-  // Ruling 419(d): the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // Ruling 319: the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55; the page's composer shares the rule).
   const sendHint = useModifierHint("↵");
   const queueHint = useModifierHint("⇧↵");
@@ -89,7 +89,7 @@ export function DockPanelBody({
     onMount();
   }, [onMount]);
 
-  // Ruling 573: picked, dropped or pasted files, refused as the server would.
+  // Ruling 319: picked, dropped or pasted files, refused as the server would.
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const addFiles = (incoming: readonly File[]) => {
     const next = addPickedFiles(files, incoming, MESSAGE_BATCH);
@@ -99,7 +99,7 @@ export function DockPanelBody({
   const { dropping, dropProps } = useFileDrop(addFiles, disabled);
 
   // Message entry motion: only a message that arrives while THIS conversation
-  // is already on screen animates (the page shares the rule, ruling 451(d)).
+  // is already on screen animates (the page shares the rule, ruling 284).
   const conversationId = current?.conversation?.id ?? null;
   const messages = current?.messages ?? [];
   const fresh = useFreshMessageIds(messages, conversationId);
@@ -107,16 +107,16 @@ export function DockPanelBody({
   // Scroll the transcript's own box, never the page underneath. This body
   // mounts on every open, and a fresh scroll container starts at scrollTop 0,
   // so an open places it too: the transcript came back scrolled to its oldest
-  // message (review finding 16). Ruling 476(c): the page's rule, so a reply
+  // message (review finding 16). Ruling 320: the page's rule, so a reply
   // that lands shows its first line, not its last.
   const scrollRef = useRef<HTMLDivElement>(null);
   // The thread list draws into the transcript's own box (DockBodyBox keeps
   // one <section>, which React updates in place), so the transcript comes back
   // at whatever offset the list left. `threadsOpen` in the follow key makes
-  // that return an open too, and the transcript is placed again. Ruling 572:
+  // that return an open too, and the transcript is placed again. Ruling 320:
   // the page's way back to the newest message, too.
   const jump = useTranscriptFollow(scrollRef, messages, fresh, working, `${conversationId ?? ""}:${threadsOpen}`);
-  // Ruling 476(d): a reply to the thread on screen is announced here; the
+  // Ruling 320: a reply to the thread on screen is announced here; the
   // announcer beside the button leaves this thread out while the panel is open.
   const said = useTurnAnnouncement(current?.controllerName ?? "Controller", messages, fresh, false);
 

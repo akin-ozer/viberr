@@ -15,7 +15,7 @@ import { loadProjectContext, type TaskActor, type TaskMutationContext } from "./
 import { actorProseName } from "./user-display-name.server";
 
 /**
- * Ruling 651: a Done epic's tasks leave the board together.
+ * Ruling 274: a Done epic's tasks leave the board together.
  *
  * Archiving files a task away (R14-3). A finished epic's tasks are finished
  * work, so one action files them all and the board keeps what is still

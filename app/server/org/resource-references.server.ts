@@ -181,8 +181,8 @@ async function rewriteProjects(
             definition: { ...definition, resources: nextResources },
           };
         });
-        // Ruling 672: the project's RULINGS knowledge base is a reference to
-        // the same folder (ruling 239), and a RENAME left it pointing at the
+        // Ruling 199: the project's RULINGS knowledge base is a reference to
+        // the same folder (ruling 208(a)), and a RENAME left it pointing at the
         // old name: every run then read no rulings at all, and a decision kept
         // there (that the board connects no repository) stopped standing. A
         // DELETE leaves the name as it is, as before: the project's settings
@@ -287,7 +287,7 @@ const GRANT_LIST = {
  *  interface: it is written into an audit row's `details`. */
 export type ResourceBoard = {
   project: string;
-  /** A knowledge base the board names as its rulings (ruling 239): every run
+  /** A knowledge base the board names as its rulings (ruling 208(a)): every run
    *  on the board reads it, whoever holds it. */
   rulings: boolean;
   /** The deployed agents that hold it, by name, the operator among them. */
@@ -306,7 +306,7 @@ export type AuditedResource = {
 };
 
 /**
- * Ruling 681: the boards whose runs are given one org resource right now, for
+ * Ruling 34: the boards whose runs are given one org resource right now, for
  * the audit row of a write to it.
  *
  * A knowledge base, a skill and an MCP server are kept for the instance, and a
@@ -341,7 +341,7 @@ export function auditedResource(
 }
 
 /**
- * Ruling 681: the boards an edit of one agent profile template reaches now.
+ * Ruling 34: the boards an edit of one agent profile template reaches now.
  * `changed` is what the edit changed, as a deployment's copy names each field.
  * A deployment of the profile is reached when it wrote no copy at all, or when
  * its copy leaves one of those fields to the template. A copy that holds them,

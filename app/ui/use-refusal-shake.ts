@@ -12,7 +12,7 @@ export interface RefusalShake {
 }
 
 /**
- * Ruling 451(g): a refusal box shakes once for each refusal (`.refused`), not
+ * Ruling 284: a refusal box shakes once for each refusal (`.refused`), not
  * once for each time it mounts.
  *
  * A refusal box is keyed on its refusal, so a second refused click mounts a

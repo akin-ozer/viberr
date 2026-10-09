@@ -188,7 +188,7 @@ const refusalKeys = new WeakMap<Refusal, string>();
 let refusalsSeen = 0;
 
 /**
- * Ruling 451(g): a React key that is new for every NEW refusal. The error box
+ * Ruling 284: a React key that is new for every NEW refusal. The error box
  * stays mounted across a second refused submission, so without a new key the
  * same sentence stood in place: nothing moved, and a `role="alert"` whose text
  * did not change is not announced again. Keyed on the refusal's identity, the
@@ -207,7 +207,7 @@ function refusalKey(refusal: Refusal | null | undefined): string | undefined {
 }
 
 /**
- * The error the card shows (ruling 700(e), read once per render by `Login`):
+ * The error the card shows (ruling 13(b), read once per render by `Login`):
  * the client's own refusal, else the action's unless the person dismissed
  * it. A dismissal stores WHICH result was dismissed (see SetNewPassword), so
  * a second refusal un-hides itself.
@@ -226,7 +226,7 @@ function shownError(
   );
 }
 
-/** Which of the card's posts is in flight (ruling 700(e), read once per render
+/** Which of the card's posts is in flight (ruling 13(b), read once per render
  *  by `Login`): a provider's sign-in, the local form's submission, or none. */
 function signInBusy(
   providerBusy: "github" | "google" | null,
@@ -428,7 +428,7 @@ function ProviderButtons({
   );
 }
 
-/** The SSO-first head of the sign-in card (ruling 700(e), the split of
+/** The SSO-first head of the sign-in card (ruling 13(b), the split of
  *  `Login`: hook-free, in the slot its `ssoConfigured &&` held): the provider
  *  buttons, the note for the one that is missing, the info box and the
  *  divider above the local form. `Login` renders it only while at least one
@@ -473,7 +473,7 @@ function SsoProviders({
   );
 }
 
-/** The local credentials form (ruling 700(e), the split of `Login`:
+/** The local credentials form (ruling 13(b), the split of `Login`:
  *  hook-free; `Login` keeps the fields' state, refs and handlers). */
 function LocalSignInForm({
   returnTo,
@@ -495,7 +495,7 @@ function LocalSignInForm({
   emailRef: RefObject<HTMLInputElement | null>;
   pwRef: RefObject<HTMLInputElement | null>;
   err: ShownError | null;
-  /** What the error box is keyed on (ruling 451(g)). */
+  /** What the error box is keyed on (ruling 284). */
   refusal: Refusal | null | undefined;
   busy: "github" | "google" | "local" | null;
   onSubmit: FormEventHandler<HTMLFormElement>;
@@ -543,7 +543,7 @@ function LocalSignInForm({
         />
       </div>
       {err && (
-        // Ruling 451(g): keyed on the refusal itself, so a second refused
+        // Ruling 284: keyed on the refusal itself, so a second refused
         // sign-in remounts the box (shake, re-announce) instead of leaving
         // the same sentence standing as if the click had been ignored.
         <div
@@ -782,5 +782,5 @@ export default function Login({
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/login");

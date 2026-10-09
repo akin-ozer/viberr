@@ -1,7 +1,7 @@
 import { pluralNoun } from "~/shared/text/plural";
 
 /**
- * Ruling 463: which repositories a GitHub connection's token reaches, in the
+ * Ruling 222: which repositories a GitHub connection's token reaches, in the
  * shape every surface renders (the Instance settings card, the controller's
  * `list_github_connections`). The server reads and stores it
  * (`app/server/org/connection-reach.server.ts`); this module is the

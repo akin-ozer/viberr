@@ -59,7 +59,7 @@ import {
  *    stored WIRE envelope (`{reason:"session_missing", session_id}`), never
  *    parsed out of display text (`run-projection.server.ts`). This panel used
  *    to scan `lines` and `raw` for it, which only worked while the page
- *    carried every group's window; ruling 457 ships console lines on a hard
+ *    carried every group's window; ruling 300 ships console lines on a hard
  *    load only, so the server finds the marker for it.
  *
  * Bounded by construction, and that is the retirement rule rather than a bug:
@@ -130,14 +130,14 @@ export function ContinuityRecoveryPanel({
   /** The per-task run projection (`runtime`) — one entry per agent group. */
   runtime: RunView[];
   /** The deployed profiles, so a supporting agent is not called a reviewer
-   *  unless its verdict gates acceptance (ruling 662). */
+   *  unless its verdict gates acceptance (ruling 292(b)). */
   agents?: readonly VerdictProfile[];
   /** Whether the viewer may start runs — decides whether the continuation note
    *  names the Execution profile panel, which only shows Run to that tier. */
   canRunAgents?: boolean;
   /** Select an agent group's thread, open the console and scroll it into view
    *  (`useLogSelection.onAgentLog`). Never the run card's `onViewLogs`: that
-   *  is a Show/Hide toggle (ruling 380), so on a running thread, whose console
+   *  is a Show/Hide toggle (ruling 311), so on a running thread, whose console
    *  is open by default, this door would close the console it names. */
   onOpenConsole?: (threadId: string) => void;
   /** The page's "Ask operator" signal — prefills and focuses the composer. */

@@ -63,7 +63,7 @@ import {
   type PrAdoptionRecordInput,
 } from "./pr-adoption-record.server";
 
-/** Ruling 135: the one field the never-pushed probe reads. */
+/** Ruling 243: the one field the never-pushed probe reads. */
 const commitShaSchema = z.object({ sha: z.string() }).loose();
 import {
   getProjectGithubContext,
@@ -117,9 +117,9 @@ import { countLabel } from "~/shared/text/plural";
  * frontmatter writers (files stay canonical, GitHub stays a projection —
  * format doc §"pr/github cache"), triggers incremental reprojection,
  * records provenance, and opens/resolves scope violations on 403-scope
- * failures (ruling 5 — violation rows carry their task).
+ * failures (ruling 221 — violation rows carry their task).
  *
- * Plus mergeTaskPr — the real merge behind accept_completion (ruling 7):
+ * Plus mergeTaskPr — the real merge behind accept_completion (ruling 62(a)):
  * PUT /pulls/{n}/merge with 405/409/403-scope mapped to typed results.
  * The VIB-142 scenario: a 403 opens (or reuses) the `pull_request:write`
  * violation and the caller renders the typed failure; the merge does NOT
@@ -132,7 +132,7 @@ import { countLabel } from "~/shared/text/plural";
 
 /**
  * The operator wake a divergence fires: `autoInvokeOperator` narrowed to the
- * triggers this module passes (ruling 475 added `pr-conflicting`, the flip of
+ * triggers this module passes (ruling 244 added `pr-conflicting`, the flip of
  * an open PR to conflicting). Typed here rather than imported so the
  * task-action-core dependency stays the runtime-only dynamic import it already is.
  */
@@ -145,7 +145,7 @@ type OperatorWake = (
 ) => Promise<void>;
 
 /**
- * Ruling 475 (F40-55 (a)): after a merge, when the other open review PRs are
+ * Ruling 244 (F40-55 (a)): after a merge, when the other open review PRs are
  * read again. GitHub computes mergeability asynchronously, so the first read
  * after the base moved usually answers "unknown" (and starts the computation);
  * a PR still unknown is read again after each later delay, and one GitHub has
@@ -160,7 +160,7 @@ export interface GithubActionContext {
   /** The pr-diverged operator wake below; injection hook for tests, same shape
    *  as `fetchImpl`. Defaults to the real `autoInvokeOperator`. */
   wakeOperator?: OperatorWake;
-  /** Ruling 136(c): the in-ceremony re-confirm inside `deleteTaskRemoteBranch`
+  /** Ruling 233: the in-ceremony re-confirm inside `deleteTaskRemoteBranch`
    *  runs a pass whose divergence NOTIFICATION must not fire (the ceremony is
    *  replacing the PR; telling every member "PR #N closed: KEY needs a
    *  decision" would be false). The timeline note still lands. */
@@ -180,7 +180,7 @@ export interface GithubActionContext {
    *  human-triggered "Update status" leaves it unset — someone is waiting for
    *  the whole board's truth, not a slice of it. */
   taskBudget?: number;
-  /** Ruling 475: the delays of the post-merge re-check of the project's other
+  /** Ruling 244: the delays of the post-merge re-check of the project's other
    *  open review PRs. Tests pass zeros; absent = {@link SIBLING_RECHECK_DELAYS_MS}. */
   siblingRecheckDelaysMs?: readonly number[];
 }
@@ -214,7 +214,7 @@ interface GithubProvenanceDetails {
    *  non-zero, so a complete list leaves no key at all. */
   commitsDropped?: number;
   sha?: string | null;
-  /** Ruling 494 (pass 40, F40-70): the branch head the compare read, and the
+  /** Ruling 238 (pass 40, F40-70): the branch head the compare read, and the
    *  base tip it read, on a `github.reconcile` row; null when GitHub's answer
    *  did not name one (or there was no compare). A row without `headSha`
    *  predates the ruling and reads as "head unknown". */
@@ -261,7 +261,7 @@ export type TaskReconcileResult =
       changed: boolean;
       sync: BranchSyncState;
       /** Null when GitHub could not find the branch or the base to compare.
-       *  Ruling 494: `headSha` is the branch head the compare read, null when
+       *  Ruling 238: `headSha` is the branch head the compare read, null when
        *  GitHub's answer did not name it. */
       compare: { aheadBy: number; behindBy: number; headSha: string | null } | null;
       pr: PrFacts | null;
@@ -352,7 +352,7 @@ function projectMemberIds(projectSlug: string, dataRoot: string | undefined): Re
 }
 
 /**
- * Ruling 496 (pass 40, F40-72): the `pr.checksUnread` record for a check-runs
+ * Ruling 236 (pass 40, F40-72): the `pr.checksUnread` record for a check-runs
  * read GitHub refused on this pass. `at` is when the refusal was first seen:
  * the same refusal again on the same PR (the caller passes that PR's cached
  * record, so the same number) with the same status and message keeps the
@@ -439,7 +439,7 @@ async function reconcileTaskUnlocked(
     compareResult.status === "ok" ? compareResult.compare : null;
 
   // 2. PR lookup (state/draft/merged + checks + change stats).
-  // Ruling 236: hand the linker the head our cached path list was read at, so
+  // Ruling 242: hand the linker the head our cached path list was read at, so
   // the changed-files call is skipped on every tick where the head has not
   // moved — which is almost all of them.
   let prResult = await findPrForBranch(
@@ -448,7 +448,7 @@ async function reconcileTaskUnlocked(
     branch,
     fm.pr?.paths?.headSha ?? null,
   );
-  // Ruling 160 (pass 35, F35-11): the branch listing answers `none` for a
+  // Ruling 232 (pass 35, F35-11): the branch listing answers `none` for a
   // closed PR whose branch has since advanced (F26), which is exactly what a
   // push landing after a person's close looks like. The task's OWN cached
   // number is then read directly, and a settled answer (closed, merged) is
@@ -497,15 +497,15 @@ async function reconcileTaskUnlocked(
   //     the reviews call once the PR is terminal.
   const cachedPr = pr && fm.pr?.number === pr.number ? fm.pr : null;
   const checks = pr ? (pr.checks ?? cachedPr?.checks ?? null) : null;
-  // Ruling 360: a refused read is a fact of its own. It rides through a pass
+  // Ruling 237: a refused read is a fact of its own. It rides through a pass
   // that read nothing like every other cached PR fact, and the first read that
-  // succeeds drops it. Ruling 496: the same refusal keeps its first `at`.
+  // succeeds drops it. Ruling 236: the same refusal keeps its first `at`.
   const checksUnread = checks
     ? null
     : pr?.checksUnread
       ? checksRefusal(pr.checksUnread, cachedPr?.checksUnread)
       : (cachedPr?.checksUnread ?? null);
-  // Ruling 360: a 403 on the check-runs read is the credential, exactly as a
+  // Ruling 237: a 403 on the check-runs read is the credential, exactly as a
   // 403 on the PR create is (pull_request:write) or on the compare (repo). It
   // opens the `checks:read` violation on the task — the connection card and
   // the task's timeline then say why CI is invisible — and a read that later
@@ -517,7 +517,7 @@ async function reconcileTaskUnlocked(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         scope: "checks:read",
-        // F39-5: `checks:read` is advisory (ruling 360 says merging never
+        // F39-5: `checks:read` is advisory (ruling 221 says merging never
         // needed it), so the picker writes the advisory sentence and a neutral
         // note rather than a violation under a shield.
         detail: scopeFlagText(
@@ -548,10 +548,10 @@ async function reconcileTaskUnlocked(
   const mergeableLive = mergeableMeasuredNow ? pr.mergeable : (cachedPr?.mergeable ?? null);
   const mergeable =
     prState === "review" || prState === "accepted" ? mergeableLive : null;
-  // Ruling 405: the head this verdict was measured on travels WITH it. A value
+  // Ruling 242: the head this verdict was measured on travels WITH it. A value
   // measured this pass is pinned to the head this pass read; a carried one
   // keeps the pin it already had, so a conflict cannot outlive the commit that
-  // resolved it. Same discipline `paths` has carried since ruling 236.
+  // resolved it. Same discipline `paths` already follows.
   const mergeableAt = mergeableMeasuredNow
     ? (pr.headSha ?? null)
     : (cachedPr?.mergeableAt ?? null);
@@ -606,7 +606,7 @@ async function reconcileTaskUnlocked(
   // re-delivery that catches the head up clears a stale record.
   const driftMeasurable = prState === "review" || prState === "accepted";
   let revisionDrift: PrRef["revisionDrift"] = null;
-  // Ruling 135 (pass 34, F34-11): the MIRROR of drift. `unpushed` is the record
+  // Ruling 243 (pass 34, F34-11): the MIRROR of drift. `unpushed` is the record
   // measured this pass (null = the delivered revision IS on the head);
   // `unpushedMeasured` false means the pass could not tell, and the cached
   // record for the SAME PR is carried forward instead of erased. A `verified`
@@ -633,7 +633,7 @@ async function reconcileTaskUnlocked(
       if (driftCompare.status === "ok") {
         const status = driftCompare.compare.status;
         if (status === "ahead" && driftCompare.compare.aheadBy > 0) {
-          // Ruling 132: classify the commits since the reviewed revision
+          // Ruling 239: classify the commits since the reviewed revision
           // (base commits, Viberr's own recorded merges, authored). An
           // unclassifiable pass carries the cached record forward or records
           // every commit as authored; it never writes "no drift" from silence.
@@ -665,9 +665,9 @@ async function reconcileTaskUnlocked(
           `/repos/${gh.repo}/commits/${reviewedSha}`,
           commitShaSchema,
         );
-        // Ruling 427: the commit read answers a well-formed sha it cannot find
-        // with 422 "No commit found for SHA", not 404 (ruling 223 found it on
-        // the acceptance probe). Asking the ref predicate here meant this
+        // Ruling 243: the commit read answers a well-formed sha it cannot find
+        // with 422 "No commit found for SHA", not 404 (found on the
+        // acceptance probe). Asking the ref predicate here meant this
         // record could never be written on the real API: live on ax-clone
         // AX-20's rework 7ce74b2 sat in the workspace while PR #13 carried
         // c5001a3, `unpushedRevision` stayed null, and the operator sent the
@@ -710,7 +710,7 @@ async function reconcileTaskUnlocked(
     // Each fact below is an OPTIONAL KEY, never a null one: absent means "not
     // read this pass" (so the writer omits it and the reader keeps the cached
     // value), which is a different claim from "read, and there is nothing".
-    // Ruling 496: the keys are set in `prRefSchema`'s order, then the loose
+    // Ruling 236: the keys are set in `prRefSchema`'s order, then the loose
     // ones, because `changed` below compares this object with the parsed file
     // as text and the parse returns that order. A key set out of it reads as a
     // change on every pass.
@@ -726,7 +726,7 @@ async function reconcileTaskUnlocked(
       owned.mergeable = mergeable;
       if (mergeableAt) owned.mergeableAt = mergeableAt;
     }
-    // Ruling 236: measured this pass wins; otherwise the SAME PR's cached list
+    // Ruling 242: measured this pass wins; otherwise the SAME PR's cached list
     // is carried, because a skipped read means "unchanged", not "unknown". A
     // list read for a DIFFERENT head than the one now live is dropped rather
     // than shown stale - `paths.headSha` is what makes that decidable.
@@ -737,23 +737,23 @@ async function reconcileTaskUnlocked(
         ? (cachedPr.paths ?? null)
         : null);
     if (carriedPaths) owned.paths = carriedPaths;
-    // Ruling 135: the head as GitHub reported it on THIS read. Before the
+    // Ruling 243: the head as GitHub reported it on THIS read. Before the
     // drift, as the schema orders them: set after it, a PR carrying a drift
-    // differed from its own file on every pass (ruling 496).
+    // differed from its own file on every pass (ruling 236).
     if (pr.headSha) owned.headSha = pr.headSha;
     // A measured drift wins; on a settled PR (nothing measured this pass) the
     // last measurement is carried forward for the SAME PR — see `driftMeasurable`.
     const carriedDrift =
       revisionDrift ?? (driftMeasurable ? null : (cachedPr?.revisionDrift ?? null));
     if (carriedDrift) owned.revisionDrift = carriedDrift;
-    // Ruling 135: the unpushed record: measured this pass, else the SAME PR's
+    // Ruling 243: the unpushed record: measured this pass, else the SAME PR's
     // cached record. `unpushedRevisionOf` refuses a record for a revision that
     // is no longer current, so carrying is never a lie about a later revision.
     const carriedUnpushed = unpushedMeasured
       ? unpushed
       : (cachedPr?.unpushedRevision ?? null);
     if (carriedUnpushed) owned.unpushedRevision = carriedUnpushed;
-    // Ruling 160 (pass 35, F35-11): a PR that just went `closed` without
+    // Ruling 232 (pass 35, F35-11): a PR that just went `closed` without
     // merging was closed by a person. The closure is stamped on the
     // TRANSITION (with the closer's login when GitHub names one), carried
     // forward for the same number while it stays closed, and dropped the
@@ -769,14 +769,14 @@ async function reconcileTaskUnlocked(
               answered: null,
             };
     }
-    // Ruling 474: the body the DELIVERY last wrote is not a fact this pass
+    // Ruling 236: the body the DELIVERY last wrote is not a fact this pass
     // reads, so the SAME PR carries it. Dropping it would make the next
     // delivery take a person's edit for Viberr's own text and overwrite it.
     if (cachedPr?.bodyWritten) owned.bodyWritten = cachedPr.bodyWritten;
     // Last, as the parse orders it (the schema's keys, then this loose one),
     // so an unchanged PR compares equal to its file and writes nothing.
     if (humanApproval) owned[PR_HUMAN_APPROVAL_KEY] = humanApproval;
-    // Ruling 484: what the review relay already relayed on this PR is not a
+    // Ruling 246: what the review relay already relayed on this PR is not a
     // fact this pass reads, so the SAME PR carries it (dropping it would relay
     // every review again). After `humanApproval`, the order the relay's own
     // write leaves them in.
@@ -816,7 +816,7 @@ async function reconcileTaskUnlocked(
   const deliveredThisBranch =
     ownsAPr || fm.pr !== null || activeWorkRevision(fm.workRevision)?.branch === branch;
   const provenBranchHead = deliveredThisBranch && !unownedPr;
-  // Ruling 161 (pass 35, U35-8): when the head is NOT proven this task's and
+  // Ruling 234 (pass 35, U35-8): when the head is NOT proven this task's and
   // origin holds something (a stranger's PR, or commits ahead of the base with
   // no delivery of this task behind them), record what origin holds, so the
   // archive ceremony's delete-branch disclosure can say "origin's <branch>
@@ -830,14 +830,14 @@ async function reconcileTaskUnlocked(
     compare && compare.commits.length > 0
       ? (compare.commits[compare.commits.length - 1]?.fullSha ?? null)
       : null;
-  // Ruling 161(a) draws the line the disclosure needs, and it is NOT
+  // Ruling 234 draws the line the disclosure needs, and it is NOT
   // `deliveredThisBranch`: a work revision is minted when the agent REPORTS,
   // before any push, so it says nothing about what origin holds. KNC-21 is the
   // whole shape — a revision minted on `knc-21`, the push refused
   // non-fast-forward, no pull request, and origin's `knc-21` carrying a
   // stranger's commit — and reading provenance off the report called that head
   // "proven this task's" and disclosed nothing. So the foreign-head test asks
-  // ruling 161's own question: did this task's revision LEAVE the workspace on
+  // ruling 234's own question: did this task's revision LEAVE the workspace on
   // THIS branch (a pull request tracks it, or the delivery push published its
   // head)? `deliveredThisBranch` keeps its F31-1/V5 meaning for the commit
   // footprint, which is a different question.
@@ -861,7 +861,7 @@ async function reconcileTaskUnlocked(
   // "not derived this pass", which leaves the cache below standing.
   const prefixCommits =
     compare && provenBranchHead ? taskCommits(compare.commits, fm.key) : null;
-  // Ruling 179 (pass 36, F36-7): the commits the prefix filter drops are the
+  // Ruling 315 (pass 36, F36-7): the commits the prefix filter drops are the
   // ones that move a reviewed head from outside — kept apart so the card can
   // show them as "not this task's" instead of hiding them.
   const otherCommits =
@@ -871,7 +871,7 @@ async function reconcileTaskUnlocked(
           .map((c) => ({ sha: c.sha, msg: c.msg }))
       : null;
   const existingCommits = existingGithub?.commits ?? [];
-  // Ruling 187 (pass 37, F37-8): a recorded commit is marked with whether the
+  // Ruling 236 (pass 37, F37-8): a recorded commit is marked with whether the
   // REMOTE has it, and every surface renders that — rather than the record
   // claiming a workspace-only commit as repository state.
   //
@@ -889,7 +889,7 @@ async function reconcileTaskUnlocked(
   // `pushedAt` yet), so "lost" is a claim this code cannot make. "Not on the
   // remote" is one it can, it is always true, and it is what the reader needs.
   //
-  // Ruling 187(b): …and only while the branch's work has NOT landed on the
+  // Ruling 236: …and only while the branch's work has NOT landed on the
   // base. `compare` is `base...branch`, an AHEAD-only list: a commit missing
   // from it is either absent from the branch OR present on BOTH, which is
   // exactly what a merge produces. Once the PR merges, the ahead-list goes
@@ -994,7 +994,7 @@ async function reconcileTaskUnlocked(
   // since the last cache), so a persistent divergence isn't re-announced each
   // reconcile.
   const prJustMerged = newPr?.state === "merged" && fm.pr?.state !== "merged";
-  // Ruling 160: the fact being announced is the CLOSURE, so the announcement
+  // Ruling 232: the fact being announced is the CLOSURE, so the announcement
   // fires the pass its RECORD is written, not the pass the state changes. The
   // two came apart on the very path a delivery takes: `performDelivery` runs
   // the workspace reconcile (a `gh pr view` in the agent's clone) before the PR
@@ -1043,7 +1043,7 @@ async function reconcileTaskUnlocked(
       : `**Note:** PR #${newPr!.number} now tracks ${fm.key}'s branch on GitHub, replacing closed PR #${fm.pr!.number}, so the closed-PR block is lifted.`
     : null;
 
-  // Ruling 179 (pass 36, F36-7): AUTHORED drift after a verdict voids it. The
+  // Ruling 240 (pass 36, F36-7): AUTHORED drift after a verdict voids it. The
   // verdicts bind to the WORK revision, and a foreign push moves the PR head
   // without touching it — so `validation` stayed healthy, the accept card
   // stayed applicable and nobody was told (live: an observer commit on hlc-7
@@ -1075,7 +1075,7 @@ async function reconcileTaskUnlocked(
     : null;
   const voidedRevisionSha = activeWorkRevision(fm.workRevision)?.headSha ?? null;
   const driftVoidText = authoredDriftVoidsVerdict
-    ? `**Revision moved after review (ruling 179):** PR #${newPr!.number}'s head is now \`${authoredDriftNow.headSha.slice(0, 7)}\`, ` +
+    ? `**Revision moved after review (ruling 240):** PR #${newPr!.number}'s head is now \`${authoredDriftNow.headSha.slice(0, 7)}\`, ` +
       `${describeRevisionDrift(authoredDriftNow).sentence}. The verdict on \`${(voidedRevisionSha ?? "").slice(0, 7)}\` no longer binds: ` +
       `the new head is the revision under review and needs a fresh verdict before ${fm.key} can be accepted.`
     : null;
@@ -1128,7 +1128,7 @@ async function reconcileTaskUnlocked(
     //    accept); when the PR MERGED out-of-band, accepting is exactly the right
     //    action, so that rec SURVIVES (the divergence text points the human at it).
     //  · assign_/run_ recs SURVIVE — doing more work is compatible with "rework".
-    // Ruling 162 (pass 35, F35-12 (d)): a PR that just FLIPPED to conflicting
+    // Ruling 95 (pass 35, F35-12 (d)): a PR that just FLIPPED to conflicting
     // withdraws the pending `accept_completion` offer too (the gate would
     // refuse the click it invites) and says so on the timeline with the
     // gate's own sentence.
@@ -1150,7 +1150,7 @@ async function reconcileTaskUnlocked(
           )
         : [];
     const supersededIds = new Set(supersededRecs.map((r) => r.id));
-    // Ruling 475 (F40-55 (b)): the open decision packet that offers the same
+    // Ruling 244 (F40-55 (b)): the open decision packet that offers the same
     // acceptance goes too. Filled inside the lock below.
     const withdrawnPacket: AcceptancePacketWithdrawalSlot = { withdrawn: null };
     // Everything above was decided from a snapshot taken BEFORE several awaited
@@ -1190,11 +1190,11 @@ async function reconcileTaskUnlocked(
             (current.state === "accepted" && applied.pr.state === "review");
           if (keepCurrent) {
             applied.pr = { ...applied.pr, state: current.state };
-            // Ruling 160: a closure travels with `closed` alone. A concurrent
+            // Ruling 232: a closure travels with `closed` alone. A concurrent
             // merge that wins here must not leave the merged PR carrying it.
             if (applied.pr.state !== "closed") delete applied.pr.closure;
           }
-          // Ruling 474: a delivery that rewrote the PR body during this pass's
+          // Ruling 236: a delivery that rewrote the PR body during this pass's
           // round trips recorded the body it wrote; the snapshot's older
           // record must not replace it.
           if (current.bodyWritten) {
@@ -1208,10 +1208,10 @@ async function reconcileTaskUnlocked(
         );
       }
       Object.assign(parsed.frontmatter, applied);
-      // Ruling 475 (F40-55 (b)): live on WEB-2 the accept packet stood for
+      // Ruling 244 (F40-55 (b)): live on WEB-2 the accept packet stood for
       // 26 minutes after WEB-4's merge had put PR #3 in conflict, still saying
       // "the PR is mergeable", and the owner found out when Accept was
-      // refused. Ruling 162(d) withdrew only the recommendation cards.
+      // refused. Ruling 95 withdrew only the recommendation cards.
       if (conflictText && !divergenceText) {
         withdrawnPacket.withdrawn = withdrawAcceptancePacket(
           parsed,
@@ -1219,7 +1219,7 @@ async function reconcileTaskUnlocked(
           POLICY_ENGINE_ACTOR,
         );
       }
-      // Ruling 179: re-checked under the lock — a delivery landing during
+      // Ruling 240: re-checked under the lock — a delivery landing during
       // this pass's round trips replaces the revision itself, and then the
       // moved head is that delivery's, not a stranger's.
       if (
@@ -1230,7 +1230,7 @@ async function reconcileTaskUnlocked(
         parsed.frontmatter.validation = deriveValidation(parsed.frontmatter);
       }
     });
-    // Ruling 497: when each note below was written, so the notice about it
+    // Ruling 75: when each note below was written, so the notice about it
     // opens on it (null: that note was not written on this pass).
     let collisionAt: string | null = null;
     let acceptedClosedAt: string | null = null;
@@ -1254,7 +1254,7 @@ async function reconcileTaskUnlocked(
       // only trace, and the owner learned of the block by visiting the page.
       // Same transition edge as the note, so a persisting collision never
       // re-notifies; suppressed on the branch-cleanup re-confirm pass (ruling
-      // 136(c)) like the divergence notices.
+      // 233) like the divergence notices.
       if (!ctx.suppressDivergenceNotice) {
         const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
         notifyTaskWatchers(
@@ -1385,7 +1385,7 @@ async function reconcileTaskUnlocked(
     }
     if (authoredDriftVoidsVerdict) {
       // The task returns to the stage where a verdict can be given (ruling
-      // 163's rework route, the authored-drift door), notifies the watchers
+      // 90's rework route, the authored-drift door), notifies the watchers
       // and wakes the operator below.
       const { returnChangedRevisionToReview } = await import("~/server/tasks/task-delivery.server");
       const { notifyTaskWatchers } = await import("~/server/tasks/task-mutation.server");
@@ -1398,7 +1398,7 @@ async function reconcileTaskUnlocked(
         { userId: actor.userId ?? "", label: actor.label ?? "system" },
         { via: "authored-drift" },
       );
-      // Ruling 482 (F40-52): the external head is what merges now, so the
+      // Ruling 104 (F40-52): the external head is what merges now, so the
       // project's gates run on it like on any delivered revision.
       const { requestProjectGatesQuietly } = await import(
         "~/server/tasks/project-gates.server"
@@ -1490,7 +1490,7 @@ async function reconcileTaskUnlocked(
     // transition edge as the notes — a persistent divergence never re-fires,
     // and a project with no operator deployed is a no-op inside.
     // U36-7 (pass 36): a NEW branch collision is a coordination event too —
-    // the ruling-50 `resolve_remote_collision` packet is operator-authored, and
+    // the ruling-233 `resolve_remote_collision` packet is operator-authored, and
     // nothing scheduled the turn that authors it (live it waited on an
     // unrelated completion wake).
     if (
@@ -1513,10 +1513,10 @@ async function reconcileTaskUnlocked(
         "pr-diverged",
       );
     } else if (conflictText) {
-      // Ruling 475 (F40-55 (b)): a flip to conflicting is a coordination event
+      // Ruling 244 (F40-55 (b)): a flip to conflicting is a coordination event
       // too. It used to write a note no agent reads (toAgent false) and wake
       // nobody, so the conflict was found by a person's refused Accept. The
-      // same trigger the refused acceptance uses (ruling 332): the operator's
+      // same trigger the refused acceptance uses (ruling 244): the operator's
       // `update_branch_from_base` then hands the conflict to the deliverer.
       const wake =
         ctx.wakeOperator ??
@@ -1531,7 +1531,7 @@ async function reconcileTaskUnlocked(
     }
   }
 
-  // Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
+  // Ruling 246 (pass 40, F40-54): a project member's GitHub review of the
   // delivered revision reaches the agent that delivered it, once. After this
   // pass's own write, because the relay records what it relayed on the same
   // `pr` block that write replaces; inside the task's reconcile lock, so two
@@ -1565,7 +1565,7 @@ async function reconcileTaskUnlocked(
 
   // DG-3: skip the no-change heartbeat row on poller ticks so provenance doesn't
   // grow unboundedly; still record every observation for a human-triggered reconcile.
-  // Ruling 187's sibling (pass 37, F37-9): the sync pill reads the newest
+  // Ruling 236's sibling (pass 37, F37-9): the sync pill reads the newest
   // observation row, and `changed` only compares the task FILE's `pr`/`github`
   // blocks — the compare verdict lives nowhere in them. So a pass whose only
   // change was "`main` moved" wrote no row, and the pill kept rendering the
@@ -1573,7 +1573,7 @@ async function reconcileTaskUnlocked(
   // audit row said `behind_main`. A verdict CHANGE is a change worth
   // recording; an unchanged verdict still writes nothing on a poller tick, so
   // the table stays bounded by real changes exactly as before.
-  // Ruling 494 (pass 40, F40-70): so is a compare of another head. The count
+  // Ruling 238 (pass 40, F40-70): so is a compare of another head. The count
   // is only true of the head it was read on, and `get_task` reads the newest
   // row's head to say so; a row that names none (written before the ruling)
   // is replaced by the first pass that names one.
@@ -1592,7 +1592,7 @@ async function reconcileTaskUnlocked(
       sync,
       aheadBy: compare?.aheadBy ?? null,
       behindBy: compare?.behindBy ?? null,
-      // Ruling 494: what the count was counted on.
+      // Ruling 238: what the count was counted on.
       headSha: comparedHead,
       baseSha: compare?.baseSha ?? null,
       prNumber: pr?.number ?? null,
@@ -1690,11 +1690,11 @@ async function reconcileTaskGuarded(
   }
 }
 
-/** Ruling 494: the doors that push a task branch and re-compare it. */
+/** Ruling 238: the doors that push a task branch and re-compare it. */
 export type PushVia = "delivery" | "branch-update";
 
 /**
- * Ruling 494 (pass 40, F40-70): a push that moved a task's branch re-compares
+ * Ruling 238 (pass 40, F40-70): a push that moved a task's branch re-compares
  * it before the push's caller returns.
  *
  * Live on WEB-16 (deploy 9, 2026-09-25) the poller compared GitHub's copy of
@@ -1763,7 +1763,7 @@ export function recompareAfterPush(
 }
 
 /**
- * Ruling 494: what a push's caller says about its re-compare. Every audience
+ * Ruling 238: what a push's caller says about its re-compare. Every audience
  * reads it (the operator's tool result, the timeline line a branch update
  * writes), so it states the fact and leaves the instruction to the doctrine:
  * the count as GitHub now reads it, or, when the re-compare did not happen,
@@ -1798,17 +1798,17 @@ export function pushRecompareSentence(
   return `Re-compared after the push: ${branch}${read ? ` at \`${read.slice(0, 7)}\`` : ""} is ${stands}.`;
 }
 
-/** Ruling 475: one open review PR the post-merge re-check visits. */
+/** Ruling 244: one open review PR the post-merge re-check visits. */
 const openSiblingRows = z.array(z.object({ task_key: z.string() }));
 
 /**
- * Ruling 475 (F40-55 (a)): re-read every OTHER open review PR of the project
+ * Ruling 244 (F40-55 (a)): re-read every OTHER open review PR of the project
  * right after Viberr merged one.
  *
  * Live on akinozer-com the owner accepted WEB-4 at 00:26:20 and Viberr merged
  * PR #2. Both PR #2 and WEB-2's PR #3 changed `package.json`, which Viberr
- * already knew (`pr.paths`, the review queue's ruling-236 chip, the operator's
- * ruling-413 `collisions`). Nothing re-read PR #3: the reconcile callers were
+ * already knew (`pr.paths`, the review queue's ruling-242 chip, the operator's
+ * ruling-116 `collisions`). Nothing re-read PR #3: the reconcile callers were
  * the five-minute poll, a PR open, a branch update and the branch-delete
  * confirm. At 00:27:54 the owner pressed Accept on WEB-2's still-open packet
  * and the acceptance-time refresh refused it.
@@ -1964,7 +1964,7 @@ export async function reconcileProject(
       )
       .all(projectSlug),
   );
-  // Ruling 177 (pass 36, F36-5): a task at the board's terminal stage is
+  // Ruling 52 (pass 36, F36-5): a task at the board's terminal stage is
   // closed whether or not a PR merged — a force-accepted task with no PR, or
   // one accepted as "merge pending", kept buying a compare of its deleted
   // branch every five minutes forever under the archived-OR-merged spelling.
@@ -2134,7 +2134,7 @@ const ghPrViewSchema = z
   .catch({});
 
 /**
- * THE real merge behind accept_completion (ruling 7). Merges the task's
+ * THE real merge behind accept_completion (ruling 62(a)). Merges the task's
  * cached PR via PUT /repos/{repo}/pulls/{n}/merge and returns typed
  * results — the caller (Phase 5 resolvePacket integration) renders
  * failures explicitly and must NOT flip the task to done unless this
@@ -2200,7 +2200,7 @@ export async function mergeTaskPr(
       return {
         status: "not_mergeable",
         prNumber,
-        // Ruling 291: merge the base IN. Viberr's own remedy is a merge, and a
+        // Ruling 230: merge the base IN. Viberr's own remedy is a merge, and a
         // rebase rewrites commits the pull request already published.
         message: `PR #${prNumber} conflicts with \`${gh.defaultBranch}\`. Merge \`${gh.defaultBranch}\` into the branch (never rebase it), then merge.`,
         mergeable,
@@ -2293,7 +2293,7 @@ export async function mergeTaskPr(
     // credentials (bypassing viberr's PAT) leaves no violation, so without this
     // the merge — the FIRST real use of the bound PAT — never clears "unproven".
     // Prove it on the credential that made THIS merge call (F28-U2b), by id.
-    // Ruling 480: on this repository, and `repo` too (the base branch moved).
+    // Ruling 220: on this repository, and `repo` too (the base branch moved).
     markWriteScopeProven(db, gh.patId, gh.repo, "merge");
     // R15-6: post-merge branch cleanup, per project policy (default ON). The
     // merge is done and recorded above — cleanup is housekeeping that must
@@ -2332,7 +2332,7 @@ export async function mergeTaskPr(
     } catch {
       // The branch survives; the next manual cleanup (or archive) can retry.
     }
-    // Ruling 475 (F40-55 (a)): this merge moved the base under every other
+    // Ruling 244 (F40-55 (a)): this merge moved the base under every other
     // open review PR of the project; read them again now rather than on the
     // next five-minute poll, or when a person's Accept is refused. Not
     // awaited: the merge is done, and the person's answer must not wait on
@@ -2350,7 +2350,7 @@ export async function mergeTaskPr(
   }
   // http failures
   if (merge.status === 405) {
-    // Ruling 162 (pass 35, F35-12 (a0)): GitHub refused a merge the cached
+    // Ruling 95 (pass 35, F35-12 (a0)): GitHub refused a merge the cached
     // `clean` had let past the gate (KNC-16: the base moved forty seconds
     // earlier). Re-read the pull so the CONFLICT lands on the file exactly as
     // the pre-merge detail read would have recorded it; GitHub's own sentence
@@ -2430,7 +2430,7 @@ export async function mergeTaskPr(
 
 // ------------------------------------------------------- branch deletion
 
-/** Ruling 136: WHY a remote-branch delete refused, typed so the collision
+/** Ruling 233: WHY a remote-branch delete refused, typed so the collision
  *  ceremony can decide from the reason instead of parsing the sentence. */
 export type BranchDeleteRefusal =
   | "no_actor"
@@ -2443,7 +2443,7 @@ export type BranchDeleteRefusal =
   | "network";
 
 export type BranchDeleteResult =
-  /** Ruling 161 (pass 35, U35-8): `remoteSha` is the head origin held when the
+  /** Ruling 233 (pass 35, U35-8): `remoteSha` is the head origin held when the
    *  ref was read just before the DELETE, null when GitHub did not answer
    *  the read. The audit and the archive's two-sha row name it. */
   | { status: "deleted"; branch: string; remoteSha: string | null }
@@ -2461,7 +2461,7 @@ export type BranchDeleteResult =
       prNumber?: number;
     };
 
-/** Ruling 161: the one field the pre-delete ref read consumes. */
+/** Ruling 233: the one field the pre-delete ref read consumes. */
 const refHeadSchema = z.object({ object: z.object({ sha: z.string().min(1) }) }).loose();
 
 /**
@@ -2509,7 +2509,7 @@ export async function deleteTaskRemoteBranch(
     };
   }
   if (fm.pr && (fm.pr.state === "review" || fm.pr.state === "accepted")) {
-    // Ruling 136(c) (pass 34, F34-10/F34-11): the cache is refreshed by the
+    // Ruling 233 (pass 34, F34-10/F34-11): the cache is refreshed by the
     // five-minute poller, so a PR closed on GitHub seventy seconds earlier
     // still read `review` here (JC-3) and the ceremony refused a delete GitHub
     // would have allowed. Re-confirm against GitHub BEFORE refusing, with the
@@ -2576,7 +2576,7 @@ export async function deleteTaskRemoteBranch(
   // separator. For today's task-key branches this is byte-identical to what it
   // already sent, so the working path cannot regress.
   const refPath = encodeRefPath(`heads/${branch}`);
-  // Ruling 161 (pass 35, U35-8): read the head the ref holds BEFORE deleting
+  // Ruling 233 (pass 35, U35-8): read the head the ref holds BEFORE deleting
   // it, so the record names what was removed from origin (KNC-21's audit
   // named the local head while the deleted ref held a foreign commit). A read
   // GitHub does not answer records null; it never blocks the delete.
@@ -2630,7 +2630,7 @@ export async function deleteTaskRemoteBranch(
   // GitHub answers "Reference does not exist" with a 422 — someone already
   // cleaned it up. That is the state the human asked for, reported honestly.
   //
-  // Ruling 207(d): 422 is NOT a synonym for "gone". GitHub also answers 422
+  // Ruling 233: 422 is NOT a synonym for "gone". GitHub also answers 422
   // "Reference cannot be deleted: …" when a branch-protection rule or a
   // repository ruleset restricts deletions, and the ref is still there. The old
   // classifier read every 422 as `already_gone`, so the timeline, the audit row
@@ -2663,7 +2663,7 @@ export async function deleteTaskRemoteBranch(
 /** Outcome of the F31-6 branch-collision remedy. `cleared` means the stale
  *  remote ref is gone (and the recorded unowned PR is closed or closing) —
  *  the caller may re-deliver; `refused` names the step that stood in the way. */
-/** Ruling 136: the delete's typed reason, plus the ceremony's own two. */
+/** Ruling 233: the delete's typed reason, plus the ceremony's own two. */
 export type CollisionRefusal = BranchDeleteRefusal | "no_branch" | "no_context";
 
 export type RemoteCollisionResult =

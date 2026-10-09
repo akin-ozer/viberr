@@ -7,7 +7,7 @@ import { toError } from "~/shared/errors";
 import { taskWorkspaceGit } from "./workspace-git.server";
 import { refreshWorkspaceFromMirror, type WorkspaceRefreshInput } from "./workspace-refresh.server";
 
-/** Ruling 468: the bootstrap's actor, as the branch preparation names it. */
+/** Ruling 227: the bootstrap's actor, as the branch preparation names it. */
 const DELIVERY_ACTOR: AuditActor = { userId: null, label: "system:delivery" };
 
 export interface UnbornCheckoutInput {
@@ -30,17 +30,17 @@ export type UnbornCheckoutOutcome =
   | "unchanged";
 
 /**
- * Ruling 468 (F40-12): the operator's checkout of an EMPTY repository is
+ * Ruling 227 (F40-12): the operator's checkout of an EMPTY repository is
  * initialized, never handed to a person.
  *
- * Ruling 128 already creates the default branch's first commit, but only when
- * a task branch is prepared, which is a delivering dispatch. The operator runs
+ * `ensureDefaultBranch` also creates the default branch's first commit when a
+ * task branch is prepared, which is a delivering dispatch. The operator runs
  * before any dispatch: live, WEB-1's first operator run cloned `akin-ozer/
  * website`, found an unborn `main`, and opened a packet asking the owner to
  * "push one initial commit (a README)". This is the other path that needs the
  * base: a checkout whose HEAD has no commit asks GitHub for the base through
  * the same bootstrap (idempotent: a branch that exists writes nothing), then
- * moves the unborn checkout onto it through ruling 129's refresh, which
+ * moves the unborn checkout onto it through ruling 195's refresh, which
  * refuses a checkout with staged changes or files the move would overwrite.
  *
  * One `git rev-parse` for every other checkout — as the task's person, like
@@ -104,7 +104,7 @@ export async function initializeUnbornCheckout(
       projectSlug: input.projectSlug,
       repo: input.repo,
       dir: input.dir,
-      // Ruling 670: the branch the bootstrap settled on, which is the
+      // Ruling 227: the branch the bootstrap settled on, which is the
       // repository's own once the project has taken it. The refresh moves an
       // unborn checkout onto it from whatever name it was cloned with.
       defaultBranch: base.defaultBranch,

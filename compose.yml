@@ -1,6 +1,6 @@
 services:
   app:
-    # Ruling 345: the build stamp the image declares is actually SUPPLIED here.
+    # Ruling 41: the build stamp the image declares is actually SUPPLIED here.
     # `build-info.server.ts` resolves identity from env first and says that env
     # "is the only source a container can have" — `.dockerignore` excludes
     # `.git`, so its file-reading fallback cannot fire in an image. The
@@ -33,7 +33,7 @@ services:
     # which layer dropped it; the process-group teardown in resources.server is
     # the belt to this brace.
     init: true
-    # Ruling 185 (pass 36): NO `security_opt: seccomp=unconfined` here. It was
+    # Ruling 144 (pass 36): NO `security_opt: seccomp=unconfined` here. It was
     # added for F36-1 — the Codex CLI confined a run with bubblewrap, which
     # needs an unprivileged user namespace Docker's builtin seccomp profile
     # refuses to the non-root app user, so every confined Codex run died at its
@@ -42,7 +42,7 @@ services:
     # profile. Chromium still needs --no-sandbox for the same namespace reason
     # and the image passes it (Dockerfile). Do not re-add this line without a
     # ruling: it lifts the profile for every process in the container.
-    # Ruling 504: optional, so a starter's bare `docker compose up` needs no
+    # Ruling 38: optional, so a starter's bare `docker compose up` needs no
     # `.env` at all. Without one, the two secrets are generated into the store
     # on first boot (app/server/config/instance-secrets.server.ts); a `.env`
     # that sets them wins.
@@ -54,7 +54,7 @@ services:
       # equivalents (VIBERR_DATA_ROOT=./data, NODE_ENV=development).
       NODE_ENV: production
       VIBERR_DATA_ROOT: /data
-      # No agent-backend credential is set here (ruling 127). Claude and Codex
+      # No agent-backend credential is set here (ruling 137). Claude and Codex
       # are connected PER PERSON in the app, on Profile → Agent accounts: a
       # hosted sign-in through the bundled vendor binary, or a pasted API key /
       # ChatGPT workspace access token sealed in the database. Each person's
@@ -62,7 +62,7 @@ services:
       # on the volume below, so it survives a recreate. An instance-wide key
       # would bill every run to whoever owns it, which is what the ruling
       # forbids.
-      # --- Controller configuration locks (ruling 108) ---
+      # --- Controller configuration locks (ruling 270) ---
       # The controller's skill / knowledge-base / MCP grants and its
       # instructions are LOCKED by default: the Controller settings tab shows
       # them read-only and a save that changes them is refused, org admins
@@ -75,7 +75,7 @@ services:
       VIBERR_UNLOCK_CONTROLLER_KB: "${VIBERR_UNLOCK_CONTROLLER_KB:-disabled}"
       VIBERR_UNLOCK_CONTROLLER_MCPS: "${VIBERR_UNLOCK_CONTROLLER_MCPS:-disabled}"
       VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS: "${VIBERR_UNLOCK_CONTROLLER_INSTRUCTIONS:-disabled}"
-      # Ruling 603: the host disk the free-space check measures beside the
+      # Ruling 40: the host disk the free-space check measures beside the
       # data root (the `/host-disk` mount below). An empty value in .env turns
       # it off, for a Linux host whose Docker storage is on another disk.
       VIBERR_HOST_DISK_PATH: "${VIBERR_HOST_DISK_PATH-/host-disk}"
@@ -86,11 +86,11 @@ services:
     volumes:
       # Everything stateful lives under the data root: canonical project/task
       # markdown, SQLite projections + app DB, run logs, KBs, and each person's
-      # agent-backend runtime home (runtimes/users/<userId>/…, ruling 127).
+      # agent-backend runtime home (runtimes/users/<userId>/…, ruling 137).
       # Back this up. Wiping it signs everyone out of Claude and Codex; they
       # reconnect on Profile → Agent accounts.
       #
-      # Ruling 460: a NAMED volume, not a host directory. Every agent process
+      # Ruling 38: a NAMED volume, not a host directory. Every agent process
       # runs as its person's own OS user, and what keeps it out of the
       # projection database and other people's sign-ins is file permissions —
       # which a macOS bind mount (`./docker-data`) does not enforce between
@@ -98,7 +98,7 @@ services:
       # store still on the bind mount boots `agentIsolation: degraded`. Moving
       # it once: `npm run store:to-volume` (docs/operations/deployment.md).
       - viberr-data:/data
-      # Ruling 603: an empty host directory, read-only, measured and never
+      # Ruling 40: an empty host directory, read-only, measured and never
       # read. On Docker Desktop the volume above lives in a sparse disk image
       # and reports the image's virtual size (940.8 GB free while the Mac had
       # 19.9 GB, 2026-09-30); a bind mount reports the host disk itself.
@@ -114,7 +114,7 @@ services:
     # So the container can get a hard ceiling that the cap cannot overrun: set
     # VIBERR_CPUS in `.env` to roughly (cores - 3) on a machine someone also
     # works on, and some cores stay theirs. It is a CEILING, not a reservation:
-    # a quiet instance uses nothing. Unset, there is none (ruling 504): the
+    # a quiet instance uses nothing. Unset, there is none (ruling 38): the
     # fixed "7" this used to be made Docker refuse to start the container at
     # all on a host with fewer CPUs ("range of CPUs is from 0.01 to 4.00"),
     # which is a starter's first `up` on a small VM.
@@ -134,10 +134,10 @@ services:
     restart: unless-stopped
 
 volumes:
-  # Ruling 460: the store. Named `viberr-data` exactly (not project-prefixed),
+  # Ruling 38: the store. Named `viberr-data` exactly (not project-prefixed),
   # so the one-time move, the backup and the runbook can name it.
   #
-  # Ruling 504: Compose owns it, so a starter's first `up` creates it.
+  # Compose owns it, so a starter's first `up` creates it.
   # `docker compose down` keeps it; `docker compose down -v` deletes it, with
   # the canonical files, the database and everyone's sealed credentials and
   # sign-ins in it, as that flag asks.

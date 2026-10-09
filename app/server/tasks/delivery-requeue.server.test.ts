@@ -138,7 +138,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     expect(taskFm().recommendations).toHaveLength(0);
   });
 
-  it("C. ruling 357: a LIVE operator drive's own delivery queues no turn; it stamps the drive instead", async () => {
+  it("C. ruling 127: a LIVE operator drive's own delivery queues no turn; it stamps the drive instead", async () => {
     // CANARY: drop the `ctx.operatorRun` arm before the re-queue (the seam
     // fires once and the stamp is missing).
     deployDeliveryOperator(store, "full");
@@ -165,7 +165,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
 
   it("B. supervised does NOT re-trigger — but LEAVES an actionable next step (R19-4)", async () => {
     // VC-1's board: a person approves the move into Review (the Standard
-    // template's is `auto` since ruling 519, and files no card).
+    // template's is `auto` and files no card, ruling 126).
     approveReviewEntry(store);
     deployDeliveryOperator(store, "supervised");
     seedTask();
@@ -193,7 +193,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
   });
 
   it("C. a PR REUSE whose push pushed NOTHING (`up_to_date`) does not re-trigger, even under full autonomy", async () => {
-    // Ruling 134(b): a reuse that pushed nothing moved nothing.
+    // Ruling 127: a reuse that pushed nothing moved nothing.
     pushMock.mockResolvedValueOnce({ status: "up_to_date", branch: "vib-1", headSha: "a".repeat(40) });
     openTaskPrMock.mockResolvedValue({
       status: "ok",
@@ -218,7 +218,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
     expect(taskFm().recommendations).toHaveLength(0);
   });
 
-  it("C2. ruling 134(b): a reuse whose push MOVED the head re-queues exactly once", async () => {
+  it("C2. ruling 127: a reuse whose push MOVED the head re-queues exactly once", async () => {
     // Canary: revert the re-queue condition to `if (result.created)` and no run is queued.
     openTaskPrMock.mockResolvedValue({
       status: "ok",
@@ -268,16 +268,16 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
  */
 /**
- * Ruling 240 (F37-61, owner): a HELD task refuses delivery, the same way ruling
- * 186 made every dispatch door refuse it.
+ * Ruling 56 (F37-61, owner): a HELD task refuses delivery, the same way every
+ * dispatch door refuses it.
  *
- * Ruling 186's own live case is the argument: SHOP-2 was marked "Held until
+ * The ruling's own live case is the argument: SHOP-2 was marked "Held until
  * every entry is done" and a run "pushed a branch cut from a base that predated
  * the foundation it waited on". Publishing that branch to a review PR is
  * `performDelivery`, which had no `blockedBy` check at all — while the
  * operator's turn instruction told it the server refused this door.
  */
-describe("ruling 240 — a held task refuses delivery", () => {
+describe("ruling 56 — a held task refuses delivery", () => {
   it("refuses before anything is pushed, in the same words the dispatch gate uses", async () => {
     deployDeliveryOperator(store, "full");
     seedTask({ blockedBy: ["VIB-2", "VIB-3"] });
@@ -336,13 +336,13 @@ describe("ruling 240 — a held task refuses delivery", () => {
 });
 
 /**
- * Ruling 647: a task delivered as the files its deliverer saved on it has no
- * branch or pull request to deliver (rulings 546, 550). Every delivered task of
+ * Ruling 102: a task delivered as the files its deliverer saved on it has no
+ * branch or pull request to deliver (rulings 235, 102). Every delivered task of
  * the AWS estimates board offered "Deliver branch & open PR", and a press would
  * have pushed the Calculator Builder's workspace and opened a review pull
  * request for a benchmark estimate.
  */
-describe("ruling 647: a task delivered as files has no branch to deliver", () => {
+describe("ruling 102: a task delivered as files has no branch to deliver", () => {
   it("refuses before anything is pushed, and says why on the task", async () => {
     deployDeliveryOperator(store, "full");
     seedTask({ deliveredAt: "2026-10-03T19:15:48.581Z" });
@@ -361,7 +361,7 @@ describe("ruling 647: a task delivered as files has no branch to deliver", () =>
     expect(outcome.status).toBe("failed");
     const failed = outcome.status === "failed" ? outcome : null;
     expect(failed?.message).toContain("VIB-1 is delivered as the files saved on it");
-    // Ruling 391's point, held here now: a finished files task is never told
+    // Ruling 235's point, held here now: a finished files task is never told
     // its work went missing or to run its agent again.
     expect(failed?.message).not.toContain("Re-run");
     expect(pushMock.mock.calls.length).toBe(pushesBefore);
@@ -408,14 +408,14 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   });
 
   /**
-   * Ruling 224 (F37-44). The decision IS that nothing runs until the window
+   * Ruling 157 (F37-44). The decision IS that nothing runs until the window
    * reopens; the schedule the resolution writes is what brings the operator
    * back. Live on SHOP-18 the re-invoke fired seven seconds after the decision
    * was recorded, was refused by the very quota the human had just chosen to
    * wait out, and opened a NEW packet asking the same question — so answering
    * the decision re-created it, in a loop.
    */
-  it("wait_for_window does NOT re-queue: the schedule is what comes back (ruling 224)", async () => {
+  it("wait_for_window does NOT re-queue: the schedule is what comes back (ruling 157)", async () => {
     deployDeliveryOperator(store, "supervised");
     seedTask(
       { stage: "impl", waiting: "agent", readiness: "blocked" },
@@ -462,9 +462,9 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
   });
 
   /**
-   * Ruling 230 (F37-50). The decision IS the wait, so the same rule as
+   * Ruling 66 (F37-50). The decision IS the wait, so the same rule as
    * `wait_for_window`: re-invoking the operator would pay a drive to rediscover
-   * the hold it was just told about (JC-9's five runs), and ruling 131(d)
+   * the hold it was just told about (JC-9's five runs), and ruling 115
    * refuses the held triggers at the door anyway.
    *
    * What makes this worth its own test rather than a line in a list: the hold
@@ -473,7 +473,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
    * `waiting: agent` — so an option titled "Hold SHOP-11 while…" produced the
    * record "SHOP-11 is unblocked", measured live at 04:12 UTC.
    */
-  it("block_on_dependencies records a REAL hold and does NOT re-queue (ruling 230)", async () => {
+  it("block_on_dependencies records a REAL hold and does NOT re-queue (ruling 66)", async () => {
     deployDeliveryOperator(store, "supervised");
     seedTask(
       { stage: "impl", waiting: "agent", readiness: "blocked" },
@@ -531,7 +531,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
     expect(runOp).not.toHaveBeenCalled();
   });
 
-  it("ruling 230: a hold that cannot be written says so and never un-resolves the decision", async () => {
+  it("ruling 66: a hold that cannot be written says so and never un-resolves the decision", async () => {
     // Found by accident — the test above failed this way first, because its
     // target did not exist. `setTaskDependencies` validates the refs, which is
     // right: a hold on a task that is not there releases on nothing. What must
@@ -604,7 +604,7 @@ describe("R20-1 — a settled recovery decision re-queues the operator", () => {
  * `waiting:human` with no recommendation, no packet and no chip while the
  * operator narrated "the task will move to Review; no further action needed".
  * That holds on a board where a person approves the move into Review; where
- * the move is `auto`, the operator makes it itself (ruling 519).
+ * the move is `auto`, the operator makes it itself (ruling 126).
  */
 describe("R19-4 — a supervised delivery always leaves something to act on", () => {
   it("G. a HUMAN delivery gets no card — the person who clicked Deliver is present", async () => {

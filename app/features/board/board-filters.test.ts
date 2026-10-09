@@ -102,12 +102,12 @@ describe("matchesBoardFilter", () => {
     ).toBe(true);
   });
 
-  // Ruling 477(a) (F40-27, live on akinozer.com): WEB-3 carried the Platform
+  // Ruling 46 (F40-27, live on akinozer.com): WEB-3 carried the Platform
   // Engineer's question ("connect Workers Builds"), its card said "waiting on
   // you", the head counted "1 waiting on a human", and this filter hid it. An
   // input packet leaves the STORED readiness `ready` (only `displayReadiness`
   // lifts), so the stored-enum clause never saw it.
-  it('"risk" matches a ready task holding an open question for a human (ruling 477(a))', () => {
+  it('"risk" matches a ready task holding an open question for a human (ruling 46)', () => {
     // The loader's WEB-3, field for field.
     const web3: FilterableTask = {
       ...base,
@@ -121,7 +121,7 @@ describe("matchesBoardFilter", () => {
     // finds it here too (their "Waiting on me" chip does not select it).
     expect(matchesBoardFilter({ ...web3, waitingOnMe: false }, "risk")).toBe(true);
     expect(matchesBoardFilter({ ...web3, waitingOnMe: false }, "human")).toBe(false);
-    // Ruling 91 stands: an agent carrying the task is not stuck.
+    // Ruling 44 stands: an agent carrying the task is not stuck.
     expect(matchesBoardFilter({ ...web3, waiting: "agent" }, "risk")).toBe(false);
     // And a ready human-next task with no question open is not held by one.
     expect(matchesBoardFilter({ ...web3, packet: null }, "risk")).toBe(false);

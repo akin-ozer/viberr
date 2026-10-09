@@ -62,7 +62,7 @@ function renderModal(
   return render(<Stub initialEntries={["/"]} />);
 }
 
-/** The "This board delivers" chip, by its first word (ruling 667). */
+/** The "This board delivers" chip, by its first word (ruling 224). */
 const deliversChip = (container: HTMLElement, word: "Software" | "Results") =>
   [...container.querySelectorAll<HTMLButtonElement>("button.pick-chip")].find((b) =>
     b.textContent!.trim().startsWith(word),
@@ -95,7 +95,7 @@ async function submitWith(
 describe("#14: the zero-connections note never hands a member a 403", () => {
   const orgSettingsLink = (container: HTMLElement) =>
     container.querySelector('a[href^="/org/settings"]');
-  /** Ruling 667: with no connection the dialog opens on a board that needs
+  /** Ruling 224: with no connection the dialog opens on a board that needs
    *  none, so the note stands behind the software choice. */
   const renderSoftware = (props: Parameters<typeof renderModal>[0]) => {
     const view = renderModal(props);
@@ -121,11 +121,11 @@ describe("#14: the zero-connections note never hands a member a 403", () => {
 });
 
 /**
- * Ruling 667: the dialog asks what the board delivers. Software needs a
+ * Ruling 224: the dialog asks what the board delivers. Software needs a
  * repository, as every project did; results needs none, and takes one only
  * when the person attaches it for the agents to read.
  */
-describe("ruling 667: a board that delivers results needs no repository", () => {
+describe("ruling 224: a board that delivers results needs no repository", () => {
   const repoField = (container: HTMLElement) => container.querySelector("#np-repo");
   const attachBox = (container: HTMLElement) =>
     [...container.querySelectorAll("label")]
@@ -183,7 +183,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
   });
 
   /**
-   * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+   * Ruling 224 (owner, 2026-10-06): "repoless boards should exist … at
    * creation". A software board says it will connect its repository later,
    * and is created with none.
    */
@@ -192,7 +192,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
       .find((l) => l.textContent!.includes("Connect the repository later"))
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]') ?? null;
 
-  it("ruling 672: a software board can connect its repository later: the fields go, the hint says what happens, and none is posted", async () => {
+  it("ruling 224: a software board can connect its repository later: the fields go, the hint says what happens, and none is posted", async () => {
     // CANARY: keep `needsRepo` true for every software board and the box
     // changes nothing, so a person with no repository yet cannot create one;
     // post the derived repository anyway and the board is bound to a name
@@ -211,7 +211,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
     expect(form.get("createRepository")).toBeNull();
   });
 
-  it("ruling 672: with no GitHub connection a software board is still creatable, once it says it connects later", async () => {
+  it("ruling 224: with no GitHub connection a software board is still creatable, once it says it connects later", async () => {
     // CANARY: block a software board on a connection whatever the box says
     // and an instance with no connection can only make a no-code board.
     const { form } = await submitWith({}, (c) => {
@@ -266,12 +266,12 @@ describe("N20-11: the repo field says the owner is fixed by the connection", () 
 });
 
 /**
- * Ruling 462 (F40-5): the modal offers the same choice as the controller's
+ * Ruling 225 (F40-5): the modal offers the same choice as the controller's
  * `create_project`: create the repository on GitHub when it does not exist,
  * private by default. The intent carries it as one field, and the success
  * toast says what became of the repository.
  */
-describe("ruling 462: the modal can ask for the repository to be created", () => {
+describe("ruling 225: the modal can ask for the repository to be created", () => {
   const box = (container: HTMLElement, label: string) =>
     [...container.querySelectorAll("label")]
       .find((l) => l.textContent!.includes(label))!
@@ -607,7 +607,7 @@ describe("the create request in flight", () => {
     });
     const create = primary(container);
     expect(create.textContent!.trim()).toBe("Create project");
-    // Ruling 459: the plus and the loader share one cell (GlyphSwap) and trade
+    // Ruling 284: the plus and the loader share one cell (GlyphSwap) and trade
     // on `data-copied`; at rest the plus shows and the loader rests hidden.
     const cell = create.querySelector(".copy-glyph")!;
     expect(cell.hasAttribute("data-copied")).toBe(false);

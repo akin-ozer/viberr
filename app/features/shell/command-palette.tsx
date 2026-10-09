@@ -24,7 +24,7 @@ const GROUP_LABEL = {
   agent: "Agents",
 } as const satisfies Record<CommandHitKind, string>;
 
-/** Ruling 625: a task is the open circle the board's To do wears, not a check
+/** Ruling 301: a task is the open circle the board's To do wears, not a check
  *  mark, which read every open task in the list as done. */
 const GROUP_ICON = {
   project: "board",
@@ -69,7 +69,7 @@ function groupHits(hits: CommandHit[]): HitGroup[] {
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const { ref, close } = useDialog(onClose);
   const navigate = useNavigate();
-  // Ruling 457: a failed search answers null (the route's `clientLoader`).
+  // Ruling 11: a failed search answers null (the route's `clientLoader`).
   const fetcher = useFetcher<SearchPayload | null>();
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);

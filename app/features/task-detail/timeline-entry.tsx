@@ -18,7 +18,7 @@ import { typedKind } from "./event-meta";
 import { EvidenceList, VerdictCard } from "./evidence-list";
 
 /**
- * The parts of one timeline entry (ruling 700(e), the split of `timeline.tsx`
+ * The parts of one timeline entry (ruling 13(b), the split of `timeline.tsx`
  * along the task page's recipe): its meta row, its body (a comment's card, a
  * gate run's table, a verdict's card or a typed event's text and evidence)
  * and the strip of files its run saved. `TimelineItem` keeps the entry's
@@ -30,7 +30,7 @@ import { EvidenceList, VerdictCard } from "./evidence-list";
 type OpenAttachment = ReturnType<typeof useAttachmentLightbox>;
 
 /**
- * Ruling 478(f) (F40-35): every entry sits under the Timeline's own h2, so the
+ * Ruling 313 (F40-35): every entry sits under the Timeline's own h2, so the
  * top heading its author wrote renders one level below it, and deeper levels
  * follow (`~/ui/markdown.tsx`).
  */
@@ -40,9 +40,8 @@ const ENTRY_HEADING_BASE = 3;
  * A comment body that clamps when it's very tall (long agent replies) so a
  * single answer can't dominate the timeline: `Collapsible` (`~/ui/collapsible`)
  * measures it and folds it behind Show more / Show less, the fold the
- * attachments panel shares (ruling 510). Ruling 522: the pictures under the
- * card fold with it, so the item holds the fold's state and says what they
- * hide (`more`).
+ * attachments panel shares. The pictures under the card fold with it, so the
+ * item holds the fold's state and says what they hide (`more`, ruling 314).
  */
 function CollapsibleComment({
   text,
@@ -166,8 +165,8 @@ export function TimelineEntryMeta({
   );
 }
 
-/** The entry's body: a comment's card, a gate run's note (ruling 493), a
- *  reviewer's verdict (ruling 526), or any other typed event. */
+/** The entry's body: a comment's card, a gate run's note, a reviewer's
+ *  verdict (ruling 313), or any other typed event. */
 export function TimelineEntryBody({
   ev,
   mentionNames,
@@ -251,7 +250,7 @@ function GateNoteBody({
 }) {
   return (
     <>
-      {/* Ruling 493: the header already says how the run ended and on
+      {/* Ruling 313: the header already says how the run ended and on
           which revision, and the table holds each gate with its log, so
           the note's own sentence is not said again. A run that could not
           execute keeps its reason. */}
@@ -287,10 +286,10 @@ function TypedEventBody({
           <strong>{ev.title}</strong>
         </div>
       )}
-      {/* Ruling 586: a long entry folds like a comment, behind its own
+      {/* Ruling 68: a long entry folds like a comment, behind its own
           Show more (a decision now carries the card it answered). */}
       <Collapsible className="tl-text md-body" contentKey={ev.text}>
-        {/* Ruling 478(a) (F40-30): typed-event text is markdown too. Its
+        {/* Ruling 313 (F40-30): typed-event text is markdown too. Its
             writers put the tool's own words in a fenced block ("What the
             checkout reported", "What the push reported") and separate
             paragraphs with blank lines; the inline-only RichText printed
@@ -310,14 +309,14 @@ function TypedEventBody({
           onAttachmentOpen={lightbox}
         />
       </Collapsible>
-      {/* Ruling 483 (F40-59): a proposal is a decision a person owes, and
+      {/* Ruling 267 (F40-59): a proposal is a decision a person owes, and
           the project's Controller page is where it is promoted or
-          dismissed and where its document opens. Ruling 498: a
+          dismissed and where its document opens. Ruling 210: a
           correction an agent wrote is reviewed and undone there; a
           person's undo (the one `kb_correction` a person writes) owes
           nothing. A plain string prop, never `useParams`: a router hook
           re-renders every memoised row on each router change (ruling
-          457, CS-3). */}
+          11, CS-3). */}
       {knowledgeHref &&
         (ev.type === "proposal" || (ev.type === "kb_correction" && ev.actor.kind !== "human")) && (
           <Link
@@ -340,7 +339,7 @@ function TypedEventBody({
 }
 
 /** The files the entry's run saved, as `TimelineItem` shows them now: the
- *  first row, or all of them once its fold is open (ruling 522). */
+ *  first row, or all of them once its fold is open (ruling 314). */
 export function TimelineEntryFiles({
   names,
   attachmentsBase,
@@ -382,7 +381,7 @@ export function TimelineEntryFiles({
         const ext = fileExtension(name);
         const label = ext.length > 0 && ext.length <= 5;
         return (
-          // Ruling 105 (+ addendum): a text-typed file opens the in-app
+          // Ruling 317 (+ addendum): a text-typed file opens the in-app
           // read-only viewer; any other kind the no-preview card with
           // its Download button.
           <a

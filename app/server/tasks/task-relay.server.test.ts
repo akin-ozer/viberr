@@ -39,7 +39,7 @@ import { applyAgentCompletionEffects } from "./agent-completion.server";
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**
- * Ruling 488 (F40-67): work on one task reaches another task in the same
+ * Ruling 71 (F40-67): work on one task reaches another task in the same
  * project, on the record. Live on WEB-9 a goal told the task to post its
  * deployed CPU numbers on WEB-8; nothing that works a task could write on
  * another one, so the Platform Engineer wrote two attachments "for WEB-8" and
@@ -170,7 +170,7 @@ const NUMBERS =
   "Deployed cron CPU: 5 ms and 6 ms of the 10 ms limit, 3/50 subrequests.\n\n" +
   "| run | cpu |\n|---|---|\n| 11:17Z | 5 ms |\n| 12:17Z | 6 ms |";
 
-describe("ruling 488: the operator's relay_to_task", () => {
+describe("ruling 135: the operator's relay_to_task", () => {
   it("posts on the target as the operator's comment with the source named, audits the relay, and writes one line on the source", async () => {
     // Canaries: drop the `task.relayed` audit row; drop the source task's
     // line; write the target's comment without the "From <task>" header.
@@ -227,7 +227,7 @@ describe("ruling 488: the operator's relay_to_task", () => {
       expect(startedRunSpecs().some((s) => s.kind === "operator" && s.taskKey === "VIB-2")).toBe(true);
     });
     const prompt = startedRunSpecs().find((s) => s.kind === "operator" && s.taskKey === "VIB-2")!.prompt;
-    expect(prompt).toContain('VIB-1 relayed this to you (ruling 488): the operator there posted it on this task\'s timeline as a comment headed "From VIB-1 (operator)"');
+    expect(prompt).toContain('VIB-1 relayed this to you (ruling 135): the operator there posted it on this task\'s timeline as a comment headed "From VIB-1 (operator)"');
     expect(prompt).toContain(NUMBERS);
     expect(prompt).toContain("never ask a person to copy it here or to confirm it arrived");
   });
@@ -273,13 +273,13 @@ describe("ruling 488: the operator's relay_to_task", () => {
 });
 
 /**
- * Ruling 538: a relay carries files. Live on the AWS calculator board the
+ * Ruling 71: a relay carries files. Live on the AWS calculator board the
  * benchmark tasks were planned to work from inventories saved on another
  * task (a spreadsheet, a screenshot), and nothing could put a file on another
  * task: the relay carried text, and each agent reads only its own task's
  * attachments.
  */
-describe("ruling 538: a relay carries files", () => {
+describe("ruling 71: a relay carries files", () => {
   const attachmentsOf = (key: string) => path.join(store.dataRoot, "projects", store.slug, "tasks", key, "attachments");
   function save(key: string, name: string, body: string): void {
     mkdirSync(attachmentsOf(key), { recursive: true });
@@ -336,12 +336,12 @@ describe("ruling 538: a relay carries files", () => {
 });
 
 /**
- * Ruling 557: the relay's other direction. Live when AWSC-3 (the benchmark
+ * Ruling 135: the relay's other direction. Live when AWSC-3 (the benchmark
  * design) was accepted, its operator had relayed nothing, a closed task's
  * operator starts no run, and AWSC-4 to AWSC-7 each asked the owner to attach
  * its input by hand.
  */
-describe("ruling 557: a task takes the files it works from", () => {
+describe("ruling 135: a task takes the files it works from", () => {
   const attachmentsOf = (key: string) => path.join(store.dataRoot, "projects", store.slug, "tasks", key, "attachments");
   function save(key: string, name: string, body: string): void {
     mkdirSync(attachmentsOf(key), { recursive: true });
@@ -377,7 +377,7 @@ describe("ruling 557: a task takes the files it works from", () => {
     expect(claim.attachments).toEqual(["sample-01-input.csv"]);
     expect(claim.text.split("\n", 1)[0]).toBe("**From VIB-3 (operator):**");
     // A relay's own header, so completion never credits a run on VIB-2 with
-    // the file (ruling 538). CANARY: head it otherwise and a deliverer finishing
+    // the file (ruling 71). CANARY: head it otherwise and a deliverer finishing
     // meanwhile claims the input as its delivery.
     const { isRelayComment } = await import("./task-relay.server");
     expect(isRelayComment(claim)).toBe(true);
@@ -390,11 +390,11 @@ describe("ruling 557: a task takes the files it works from", () => {
   });
 
   /**
-   * Ruling 675: the owner's AWSC-117 input, uploaded from a Mac, was stored
+   * Ruling 76: the owner's AWSC-117 input, uploaded from a Mac, was stored
    * with its name decomposed, and a rule that had each task take it would have
    * been refused on every task: "has no attachment X. It holds: X."
    */
-  it("ruling 675: takes a file stored decomposed by its composed name, and it lands and is claimed composed", async () => {
+  it("ruling 76: takes a file stored decomposed by its composed name, and it lands and is claimed composed", async () => {
     const composed = "Aidea _ İçerik ve Eğitim _ AWS Maliyet Teklifi.pdf";
     save("VIB-3", composed.normalize("NFD"), "the proposal");
     // CANARY: resolve the source byte for byte and this take is refused with
@@ -404,17 +404,17 @@ describe("ruling 557: a task takes the files it works from", () => {
     expect(timeline("VIB-2")[0]!.attachments).toEqual([composed]);
     // CANARY: land it under the name as typed and a name typed decomposed is
     // claimed under one form and stored under the other, so a run finishing
-    // meanwhile takes the file as its own (ruling 538).
+    // meanwhile takes the file as its own (ruling 71).
     save("VIB-3", "Çıktı.md".normalize("NFD"), "the output");
     expect(await take("VIB-2", "VIB-3", ["Çıktı.md".normalize("NFD")])).toMatch(/^\[done\] Took 1 file from VIB-3/);
     expect(readdirSync(attachmentsOf("VIB-2")).sort()).toEqual([composed, "Çıktı.md"].sort());
     expect(timeline("VIB-2")[0]!.attachments).toEqual(["Çıktı.md"]);
   });
 
-  it("ruling 675: never overwrites a file this task holds under the same name in the other Unicode form", async () => {
+  it("ruling 76: never overwrites a file this task holds under the same name in the other Unicode form", async () => {
     // CANARY: fold the target's names by case alone and a take by the
     // composed name skips the next-free-name branch, resolves to the
-    // decomposed file already here and replaces it (ruling 538: never).
+    // decomposed file already here and replaces it (ruling 71: never).
     const decomposed = "Müşteri Envanteri.csv".normalize("NFD");
     save("VIB-2", decomposed, "this task's own inventory");
     save("VIB-3", "Müşteri Envanteri.csv", "another task's inventory");
@@ -491,7 +491,7 @@ describe("ruling 557: a task takes the files it works from", () => {
   });
 });
 
-describe("ruling 488: a specialist's relay entries", () => {
+describe("ruling 202: a specialist's relay entries", () => {
   let runSeq = 0;
   /** A finished Platform Engineer run on VIB-1 whose outcome carries `relay`. */
   async function completeWithRelays(

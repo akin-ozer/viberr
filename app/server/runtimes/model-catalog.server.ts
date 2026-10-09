@@ -41,7 +41,7 @@ import { errorMessage } from "~/shared/errors";
  *      to the latest model of that tier the account can use (claude), or a
  *      small hand-maintained model list (codex, which has NO list endpoint).
  *   2. ENHANCED (claude only) — when the CALLER supplies a Claude
- *      `RunCredential` (ruling 127: the VIEWER's own, resolved by the route
+ *      `RunCredential` (ruling 137: the VIEWER's own, resolved by the route
  *      with `requireUser`), a lightweight `query()` + `.supportedModels()`
  *      returns the LIVE list for THAT account/subscription, mapped to the same
  *      shape, cached in-process with a short TTL. With no credential the
@@ -68,7 +68,7 @@ export interface CatalogModel {
   /** Effort levels valid for THIS model (subset of the backend efforts). */
   efforts?: string[];
   /** R20-3 (F20-4): set when the PROVIDER refused this model for this
-   *  deployment's account (learned from a real run's failure, ruling 19). The
+   *  deployment's account (learned from a real run's failure, ruling 149). The
    *  picker disables it and shows the reason; it clears on the next success. */
   unavailable?: { reason: string; markedAt: string };
 }
@@ -145,7 +145,7 @@ const CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 /** GPT-5.5's catalog entry stops at `xhigh`. */
 const CODEX_EFFORTS_TO_XHIGH = ["low", "medium", "high", "xhigh"] as const;
 
-// Ruling 687 (owner, 2026-10-07): GPT-6.1 Sol is listed FIRST, so it is the
+// Ruling 149 (owner, 2026-10-07): GPT-6.1 Sol is listed FIRST, so it is the
 // fallback default (`defaultModelFor("codex")` = `CODEX_MODELS[0]`, the
 // "default is the first model" invariant), which is what an operator, or any
 // profile, with no concrete Codex model resolves to. F20-33 had put Terra
@@ -243,7 +243,7 @@ const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
   // Default = the first available model (a changeable starting point): GPT-6.1
-  // Sol since ruling 687, see `CODEX_MODELS`.
+  // Sol (ruling 149), see `CODEX_MODELS`.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };
@@ -280,7 +280,7 @@ export function effortsFor(backend: RealBackend): readonly string[] {
 }
 
 /**
- * Ruling 139 (pass 34, G34-1): refuse an effort tier the backend does not
+ * Ruling 261 (pass 34, G34-1): refuse an effort tier the backend does not
  * list, BY NAME, at save time. `resolveRunEffort` clamps an unknown tier at
  * run time, which is the same silent substitution F21-13 closed for models:
  * the controller answered `[done]` for an `effort: "max"` it had stripped, and
@@ -301,7 +301,7 @@ export function assertEffortForBackend(backend: RealBackend, effort: string): vo
 }
 
 /**
- * Ruling 139: the F21-13 check, extracted so the controller's typed write
+ * Ruling 261: the F21-13 check, extracted so the controller's typed write
  * surfaces and the profile editor refuse a foreign model with ONE sentence.
  * Only a model the OTHER backend recognises is refused: the Claude catalogue is
  * open (a dated id or a live-only id passes), so "unknown here" alone is not
@@ -311,7 +311,7 @@ export function assertModelForBackend(backend: RealBackend, model: string): void
   const foreign = foreignModelBackend(backend, model);
   // Pass 34 review: Codex's list is CLOSED (`CODEX_MODELS`), and
   // `resolveRunModel` silently substitutes anything else at start — the same
-  // silent substitution ruling 139 refuses for effort. An id Codex does not
+  // silent substitution ruling 261 refuses for effort. An id Codex does not
   // list is refused here, by name, rather than stored and reported as what
   // runs. The foreign-model sentence (F21-13) wins when it applies: it names
   // the backend that DOES run the id, which is the more useful answer.
@@ -329,7 +329,7 @@ export function assertModelForBackend(backend: RealBackend, model: string): void
   );
 }
 
-// The dated-id rule lives in ~/shared/model-ids (ruling 106 review, D1): the
+// The dated-id rule lives in ~/shared/model-ids (ruling 270 review, D1): the
 // client model pickers must ask the SAME "would a run execute this verbatim?"
 // question, or an unlisted-but-valid stored id gets silently rewritten to the
 // catalog default on open and repinned on the next save.
@@ -493,7 +493,7 @@ export function resolveRunEffort(
  * catalog row's name whenever the cache holds the id ("Opus (1M context)" for
  * `opus[1m]`, pass 34 F34-7); else, for a family alias carrying a
  * context-window variant, the curated family name plus the variant ("Claude
- * Opus (1M context)", ruling 642), which is only the cold-process fallback;
+ * Opus (1M context)", ruling 35), which is only the cold-process fallback;
  * else the id itself
  * (a live-only or legacy value; the UI pairs that with a substitution flag).
  */
@@ -512,7 +512,7 @@ export function modelDisplayName(backend: RealBackend, model: string): string {
   return model;
 }
 
-/** Ruling 642: a context-window variant in the live catalog's words, "[1m]" as
+/** Ruling 35: a context-window variant in the live catalog's words, "[1m]" as
  *  "(1M context)"; one this cannot read stays as written. Insights printed
  *  "Claude Opus [1m]" whenever the process had not fetched the catalog yet. */
 function variantPhrase(variant: string): string {
@@ -536,7 +536,7 @@ export interface SdkModelInfo {
 interface CatalogDeps {
   /** Injected Claude SDK `query` (tests). Default: the real SDK, lazily loaded. */
   claudeQueryFn?: ClaudeQueryFn;
-  /** Ruling 127: the VIEWER's Claude credential, resolved by the caller
+  /** Ruling 137: the VIEWER's Claude credential, resolved by the caller
    *  (`runCredentialFor` after `requireUser`). Absent — the viewer has not
    *  connected Claude — means the curated list IS the answer; there is no
    *  instance account left to enumerate against. */
@@ -550,7 +550,7 @@ interface CatalogDeps {
    *  TTL live cache never freezes an availability mark. */
   db?: DatabaseSync;
   /** Pass 40 review (R-launcher-1): the viewer, whose own OS user the live
-   *  probe runs as when this server launches agents (ruling 460). Without it
+   *  probe runs as when this server launches agents (ruling 139). Without it
    *  (or without `db`) a launching server serves the curated catalog rather
    *  than run the probe as itself. */
   userId?: string;
@@ -583,9 +583,9 @@ const LIVE_TIMEOUT_MS = 15_000;
 interface CacheEntry {
   at: number;
   catalog: ModelCatalog;
-  /** Ruling 127: WHOSE account produced this list. A live catalog is what one
+  /** Ruling 137: WHOSE account produced this list. A live catalog is what one
    *  person's Claude subscription offers, so serving it to a second viewer
-   *  would show them models their own account may refuse. Ruling 507 narrows
+   *  would show them models their own account may refuse. Ruling 138 narrows
    *  "whose" to WHICH account: one person's work and personal subscriptions
    *  may offer different models, so the key is the account's own home, the
    *  identity `runCredentialFor` already hands us; a hit for a different one
@@ -621,8 +621,8 @@ export function resetModelCatalogCache(): void {
 
 /**
  * The model ids the LIVE catalog last offered for a backend (P13-RT-07).
- * Deliberately ignores the TTL — and, since ruling 127, whose account produced
- * the entry: the TTL governs when to REFETCH, and the owner governs what to
+ * Deliberately ignores the TTL — and whose account produced the entry
+ * (ruling 137): the TTL governs when to REFETCH, and the owner governs what to
  * SHOW; neither governs whether a value the picker already offered (and a
  * profile already stored) is a real model id. On a cold process the cache is
  * empty and validation falls back to the curated aliases + the dated-id shape,
@@ -687,7 +687,7 @@ async function realQueryFn(): Promise<ClaudeQueryFn> {
  * is allowed to use, and the host-isolation trio the adapter sets
  * (`settingSources`/`skills`/`plugins`).
  *
- * Ruling 127: that credential is the VIEWER's — their home and, if they pasted
+ * Ruling 137: that credential is the VIEWER's — their home and, if they pasted
  * one, their key, exactly as `runCredentialFor` assembles it for a run. The
  * probe spends nothing (listing models is free), but it does read a personal
  * account, so it reads the account of the person who asked.
@@ -706,7 +706,7 @@ function claudeProbeOptions(
   };
   // Pass 40 review (R-launcher-1): the probe runs the vendored CLI against the
   // viewer's own `claude-home` (their active account's home inside it, ruling
-  // 507), and a CLI whose OAuth token has expired
+  // 138), and a CLI whose OAuth token has expired
   // refreshes it and rewrites `.credentials.json` there (0600). Run as the
   // server, that left a `node:node` file the viewer's agent uid could not
   // read, and their next run failed as signed out. So it runs as the viewer,
@@ -801,7 +801,7 @@ export async function getModelCatalog(
   if (!credential) return stamp(curatedCatalog("claude"));
 
   // Serve a fresh cached live result — but only the one this viewer's own
-  // account produced (ruling 127).
+  // account produced (ruling 137).
   const cache = getCache();
   const hit = cache.get("claude");
   if (
@@ -813,7 +813,7 @@ export async function getModelCatalog(
   }
 
   // R-launcher-1: with isolation on, the probe runs as the viewer or not at
-  // all (ruling 460(h): never a silent fallback to the server's own user).
+  // all (ruling 139: never a silent fallback to the server's own user).
   let launch: AgentLaunch | null = null;
   if (launchesAgents()) {
     if (!deps.db || !deps.userId) {

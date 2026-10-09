@@ -25,7 +25,7 @@ import { SkipLink } from "~/ui/skip-link";
  * an overlay is open. This layout deliberately does NOT wrap Home or the
  * workspace: both mount the shortcut themselves, so nothing double-registers.
  *
- * **The app header (ruling 145).** The board's own Settings page sits under the
+ * **The app header (ruling 294).** The board's own Settings page sits under the
  * workspace topbar; the INSTANCE settings behind Home's Settings tiles sat
  * under nothing — no brand, no search, no bell, no account menu, and an in-page
  * back button doing the navigating. `PageTopbar` is that header, rendered here
@@ -63,7 +63,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         avatarTone: user.avatarTone,
       },
       // The same counts the workspace topbar and Home read, so the bell says
-      // the same thing on every surface. Ruling 457 (FL-4): the bell loads its
+      // the same thing on every surface. Ruling 300 (FL-4): the bell loads its
       // own list, and its popover discloses the cap.
       ...bellCounts(db, user.id),
     },
@@ -125,5 +125,5 @@ export default function PaletteShell({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/palette-shell");

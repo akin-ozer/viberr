@@ -12,8 +12,8 @@ import {
   capabilityPatchRefusal,
 } from "./capability-catalog";
 
-describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)", () => {
-  it("carries only runtime-consulted agent toggles (ruling 7 prune + generic-agents Collaboration)", () => {
+describe("CAP_MODAL_CATALOG (ruling 62(b) — id-based against the shared catalog)", () => {
+  it("carries only runtime-consulted agent toggles (ruling 62(b) prune + generic-agents Collaboration)", () => {
     // The toggleable catalog holds ONLY ids whose mode is consulted at runtime:
     // the repo-enforced delivery family, the Collaboration gates the
     // generic-agents plan (D10) and P13-D-26 promoted to real agent-toolkit
@@ -60,14 +60,14 @@ describe("CAP_MODAL_CATALOG (ruling 7 — id-based against the shared catalog)",
 });
 
 /**
- * Ruling 139 (pass 34, F34-2): `capabilityPatchRefusal` refuses by name,
+ * Ruling 261 (pass 34, F34-2): `capabilityPatchRefusal` refuses by name,
  * from the catalogue sets alone. Every governed id at a legal mode returns
  * null; everything else is named with the valid ids.
  *
  * Canary: validate against the UNION of both kinds' governed ids and the
  * "operator id on a specialist" case answers null.
  */
-describe("capabilityPatchRefusal (ruling 139)", () => {
+describe("capabilityPatchRefusal (ruling 261)", () => {
   it("every governed id at a legal mode returns null, for both kinds", () => {
     for (const id of MODAL_CAP_IDS) {
       const legal = id === "report-validation-verdict"

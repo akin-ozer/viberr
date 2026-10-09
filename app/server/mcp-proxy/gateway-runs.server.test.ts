@@ -34,6 +34,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { sealSecret } from "~/server/secrets/secret-box.server";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import { resolveBoardMcp, resolveKnowledgeMcp, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -43,21 +44,21 @@ import { runFailureReason } from "~/server/tasks/agent-reply.server";
 import { mcpGatewayStatus, startMcpGateway, stopMcpGateway } from "./gateway.server";
 
 /**
- * Ruling 461 through the run service: `startRun` is the one funnel that puts a
+ * Ruling 191 through the run service: `startRun` is the one funnel that puts a
  * run's token on its gateway mounts (both backends), and every path that ends
  * a run — the settle after success or failure, an interrupt, and an interrupt
  * of a run that never had a live handle — revokes it.
  */
 
 const SECRET = "cf-api-token-sentinel-runs";
-/** Ruling 690: a board mount's other inputs, for a run that reads the board
+/** Ruling 82: a board mount's other inputs, for a run that reads the board
  *  and may not save a file on its task. */
 const READS_ONLY = {
   keepsSources: false,
   webEgress: true,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
-/** Ruling 598(a): one call with one answer, 100 times within 60 seconds. */
+/** Ruling 158(b): one call with one answer, 100 times within 60 seconds. */
 const LOOP_REPEATS = 100;
 let ctx: TestDbContext;
 let store: TestStore;
@@ -159,7 +160,7 @@ const interrupt = (runId: string, taskKey = "VIB-1") =>
     { userId: store.users.arda.id, label: store.users.arda.email },
   );
 
-describe("startRun puts the run's token on its gateway mounts (ruling 461)", () => {
+describe("startRun puts the run's token on its gateway mounts (ruling 191)", () => {
   for (const backend of ["claude", "codex"] satisfies RealBackend[]) {
     it(`${backend}: a credentialed HTTP and stdio server are gateway mounts with ONE run token; the spec never holds the credential`, async () => {
       const { runId } = await startWithMounts(backend, { keepRunning: true });
@@ -191,7 +192,7 @@ describe("startRun puts the run's token on its gateway mounts (ruling 461)", () 
   }
 });
 
-describe("every path that ends a run revokes its token (ruling 461)", () => {
+describe("every path that ends a run revokes its token (ruling 191)", () => {
   it.each([
     { backend: "claude", outcome: "finished" },
     { backend: "codex", outcome: "error" },
@@ -216,7 +217,7 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
   });
 
   it("R-gateway-4: the completion compaction still lists the run's gateway servers, calls none, and the token dies after it", async () => {
-    // Ruling 376: the compaction replays the session with the run's own MCP
+    // Ruling 174: the compaction replays the session with the run's own MCP
     // servers, or its prefix misses the cache it exists to read. CANARY:
     // revoke first thing in `settleRun` again, and the compaction's listing
     // is refused 401.
@@ -285,7 +286,7 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
   });
 
   it("no live handle: a queued run interrupted before it ever started loses its token", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const first = await startWithMounts("claude", { keepRunning: true });
     expect(first.outcome).toBe("started");
     const queued = await startWithMounts("claude", { keepRunning: true, taskKey: "VIB-2" });
@@ -303,7 +304,7 @@ describe("every path that ends a run revokes its token (ruling 461)", () => {
   });
 });
 
-describe("ruling 585: the gateway answers a Codex run's knowledge server itself", () => {
+describe("ruling 216: the gateway answers a Codex run's knowledge server itself", () => {
   it("reads and corrects the knowledge bases the run holds, a private one included, and nothing else, while the run lives", async () => {
     // An agent on the project is not given `answer-keys`, as AWSC-97's
     // Inventory Analyst is not given the calculator research.
@@ -365,7 +366,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     expect(
       await call("correct_knowledge_doc", {
         kb: "answer-keys",
-        // Ruling 588: the document is `path`, as read_knowledge_doc names it.
+        // Ruling 210(a): the document is `path`, as read_knowledge_doc names it.
         path: "sample-01.md",
         replaces: "The expected total is 1234.56.",
         text: "The expected total is 1250.00.",
@@ -377,9 +378,9 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
     expect(entry).toMatchObject({ type: "kb_correction", actor: { kind: "agent", backend: "codex", profileId: "estimate-judge" } });
     await client.close();
 
-    // Ruling 648: the run is given `answer-keys`, so its board server reads
+    // Ruling 211: the run is given `answer-keys`, so its board server reads
     // the correction whole, though the entry quotes none of it for the agents
-    // that are not (ruling 568). Live on AWSC-97 the Estimate Judge, given the
+    // that are not (ruling 211). Live on AWSC-97 the Estimate Judge, given the
     // calculator research, could not read the evidence of a correction to it.
     // CANARY: drop `readerKbs` from the board session and this reads
     // `notQuoted`.
@@ -401,7 +402,7 @@ describe("ruling 585: the gateway answers a Codex run's knowledge server itself"
   });
 });
 
-describe("ruling 589: the gateway answers a Codex run's board server itself", () => {
+describe("ruling 216: the gateway answers a Codex run's board server itself", () => {
   it("reads the board, another task's verdict and one entry of the run's own task, while the run lives", async () => {
     // Live on AWSC-24 the Workflow Researcher, on Codex, could not read the
     // Judge's verdicts on the tasks it compared and used the operator's
@@ -436,7 +437,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
       ],
     });
     const answer = `1: Yes, the owner approves the redesign. ${"2: the address is app01's own. ".repeat(12).trim()}`;
-    // Ruling 707: a report longer than a page, beside its marker.
+    // Ruling 72: a report longer than a page, beside its marker.
     const longAt = "2026-09-29T11:30:00.000Z";
     const longReport = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
     const judge = { kind: "agent" as const, backend: "codex" as const, profileId: "estimate-judge", roleHint: "Estimate Judge" };
@@ -505,8 +506,8 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(entry.text).toBe(answer);
     const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
     expect(refused.isError).toBe(true);
-    // Ruling 707: a long entry in pages, through the door a Codex run has.
-    // This is the run a page was sized for (ruling 624): over about 40,000
+    // Ruling 213(d): a long entry in pages, through the door a Codex run has.
+    // This is the run a page was sized for (ruling 215): over about 40,000
     // bytes its tool output is cut from the middle. CANARY: drop `offset` or
     // `entry` on the way from this door to the reader, and a Codex run's
     // second read is the first page again.
@@ -528,8 +529,8 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(joined).toBe(longReport);
     expect((await readPage({ entry: 2 })).text).toBe("**Validation:** failing.");
     // What this door refuses, it refuses in words a run can act on: each
-    // argument by what it takes. It used to say every argument is text, and a
-    // run told a number is text sends "32000" and is refused again.
+    // argument by what it takes. A run told a number is text sends "32000"
+    // and is refused again.
     // CANARIES: take a fraction, a negative offset or `entry: 0`; say "as
     // text" of the two numbers.
     const refusedWith = async (name: string, args: Record<string, string | number>) => {
@@ -544,16 +545,16 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     for (const bad of badPages) {
       expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, ...bad })).toBe(entryRefusal);
     }
-    // An argument the tool does not declare is refused, as on Claude (ruling
-    // 296), and no longer dropped: a run that passed back `nextOffset` under
-    // its own name, or asked for `page: 2`, was answered the first page again
-    // as a good read. CANARY: parse this door's arguments loosely.
+    // An argument the tool does not declare is refused, as on Claude, never
+    // dropped (ruling 216): a run that passes back `nextOffset` under its own
+    // name, or asks for `page: 2`, is not answered the first page again as a
+    // good read. CANARY: parse this door's arguments loosely.
     expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, nextOffset: 31_976 })).toBe(entryRefusal);
     expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, entry: 1, page: 2 })).toBe(entryRefusal);
     // The other readers of this server hold to the same two rules: the
-    // attachment reader pages too, and it answered `nextOffset` under its own
-    // name with the first page again. CANARY: leave either parser loose, or
-    // either published schema silent on it.
+    // attachment reader pages too, and parsed loosely it would answer
+    // `nextOffset` under its own name with the first page again. CANARY:
+    // leave either parser loose, or either published schema silent on it.
     const attachmentRefusal =
       "read_task_attachment takes `name`, `taskKey` and `delivery` as text and `offset` as a whole number from 0, and nothing else; `name` is required. Nothing was read.";
     expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", offset: "5" })).toBe(attachmentRefusal);
@@ -584,7 +585,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
       offset: { description: expect.stringContaining("the `nextOffset` a truncated read returned") },
       entry: { description: expect.stringContaining("counted from 1 in the order they were written") },
     });
-    // Ruling 596: another task's entry, by the stamp read_board lists for it.
+    // Ruling 213: another task's entry, by the stamp read_board lists for it.
     // CANARY: bind the gateway's reader to the run's own task and this reads a miss.
     expect(z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" }))).timeline).toEqual([
       "2026-09-29T10:10:00.000Z · comment · agent:estimate-judge · Review verdict",
@@ -593,7 +594,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
       .object({ text: z.string() })
       .parse(JSON.parse(await call("read_timeline_entry", { taskKey: "VIB-2", occurredAt: "2026-09-29T10:10:00.000Z" })));
     expect(verdictEntry.text).toBe("## Verdict: approve, 95/100");
-    // Ruling 594: another task's file, read where it is; `read_board` names it.
+    // Ruling 214: another task's file, read where it is; `read_board` names it.
     const vib2 = taskAttachmentsDir(store.slug, "VIB-2", store.dataRoot);
     mkdirSync(vib2, { recursive: true });
     writeFileSync(path.join(vib2, "holdout-comparison.md"), "# Hold-outs\n\n## Exposure register\n");
@@ -603,7 +604,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     // CANARY: route read_task_attachment nowhere and this is refused.
     expect(await call("read_task_attachment", { taskKey: "VIB-2", name: "holdout-comparison.md" })).toContain("## Exposure register");
     expect(await call("read_task_attachment", { name: "holdout-comparison.md" })).toContain("[noop] VIB-1 has no attachment");
-    // Ruling 597: the file as a kept delivery held it. CANARY: drop `delivery`
+    // Ruling 198: the file as a kept delivery held it. CANARY: drop `delivery`
     // on the way to the reader and this reads the current text.
     keepDelivery(store.slug, "VIB-2", "2026-09-29T10:00:00.000Z", ["holdout-comparison.md"], store.dataRoot);
     writeFileSync(path.join(vib2, "holdout-comparison.md"), "# Hold-outs, reworked\n");
@@ -618,7 +619,7 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
   });
 });
 
-describe("ruling 690: a Codex run keeps and reads a task's sources through the board server", () => {
+describe("ruling 82: a Codex run keeps and reads a task's sources through the board server", () => {
   it("a Codex run that may post files keeps a source through the board server as its own agent and run, and one that may not is offered no keep_source", async () => {
     // The transport the server suites cannot reach: the mount carrying the
     // agent, tools/list per grant, the call routed with the gateway's own run
@@ -682,8 +683,8 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     expect(textOf(await keeper.client.callTool({ name: "read_task_source", arguments: { id: "S1" } }))).toContain(
       "t3.medium $0.0416 per hour",
     );
-    // Ruling 706: and searches it. The arguments are parsed strictly here
-    // (ruling 296). CANARY: declare `find` on the Claude twin alone and a
+    // Ruling 82: and searches it. The arguments are parsed strictly here
+    // (ruling 216). CANARY: declare `find` on the Claude twin alone and a
     // Codex run's search is refused as an argument the tool does not take.
     const sought = await keeper.client.callTool({
       name: "read_task_source",
@@ -736,7 +737,7 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
   });
 });
 
-describe("ruling 691: the gateway's board server pictures a page for a Codex run", () => {
+describe("ruling 194: the gateway's board server pictures a page for a Codex run", () => {
   it("a Codex run's board server lists capture_page and answers it with the same pictures and the saved paths", async () => {
     const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
     const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
@@ -876,7 +877,7 @@ describe("ruling 691: the gateway's board server pictures a page for a Codex run
   });
 });
 
-describe("ruling 598: a run that keeps sending one call and getting one answer is stopped", () => {
+describe("ruling 158(b): a run that keeps sending one call and getting one answer is stopped", () => {
   it("fails the run with the call and its answer as the cause, and lets a call whose answer changes run on", async () => {
     // Live on AWSC-49 the Estimate Judge's code-mode script sent one refused
     // correction 44,725 times in twenty minutes, reading the entry between

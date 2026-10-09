@@ -15,10 +15,10 @@ import {
  * Grouping + per-capability default modes drive the create/edit-profile
  * modal accordion and the CapabilityMatrixModal row groups. Capabilities a
  * profile holds that are OUTSIDE its kind's toggle set are preserved untouched
- * by the editor (pass-4 ruling 7 — advisory ids with no runtime consumer get
+ * by the editor (pass-4 ruling 62(a) — advisory ids with no runtime consumer get
  * no toggle; `group: null` in the unified catalog). The matrix files the
  * operator's own capabilities under "Operator actions" and the advisory lines
- * under its collapsed "Advisory only" list, never in the grid (ruling 479(a)).
+ * under its collapsed "Advisory only" list, never in the grid (ruling 184).
  */
 
 export type CapMode = "direct" | "recommend" | "human" | "off";
@@ -118,7 +118,7 @@ export const OPERATOR_CAP_DEFAULTS: Readonly<Record<string, CapMode>> =
  * authority beside the real ones. Both surfaces read the SAME stored grants
  * through the one server-side interpretation (`capabilitiesToActionLabels`).
  *
- * Ruling 479(a): the capability matrix partitions by this set too. Its grid is
+ * Ruling 184: the capability matrix partitions by this set too. Its grid is
  * the agent editor catalog plus an "Operator actions" group (the labels in this
  * set outside that catalog), and everything outside this set is an advisory
  * line, listed collapsed under the grid. So the grid, the panel's columns and
@@ -179,7 +179,7 @@ export interface ResCatalogGroup {
   /** `id` is the STORE KEY the grant is written as — a skill folder, an MCP
    *  registry name, a knowledge-base directory. `label` is what a human reads
    *  when the store keeps a separate display name for it; absent means the key
-   *  is the name. Ruling 106 settled this for the controller tab and the global
+   *  is the name. Ruling 270 settled this for the controller tab and the global
    *  template editor ("KBs displayed by name and stored by dir"); pass 33's
    *  U33-7 found the PROJECT editor was never brought along, so one concept had
    *  two vocabularies depending on which editor you opened. */
@@ -187,8 +187,8 @@ export interface ResCatalogGroup {
 }
 
 /**
- * Ruling 479(b): what the registry knows against one MCP server, when a run
- * would get none of its tools anyway: a sign-in it does not have (ruling 469),
+ * Ruling 184: what the registry knows against one MCP server, when a run
+ * would get none of its tools anyway: a sign-in it does not have (ruling 192),
  * a credential it cannot open, a last check that could not reach it. `note` is
  * the chip's word, `title` the sentence with the remedy. Absent claims nothing.
  */
@@ -209,7 +209,7 @@ export interface ResourceSelection {
 // catalog. The old mock `RES_CATALOG`/`RES_DEFAULTS` (pre-checked ids like
 // `repo-write` / "Coding standards" that resolved to no real resource) are gone.
 
-// ------------------------------------------ patch refusal (ruling 139)
+// ------------------------------------------ patch refusal (ruling 261)
 
 /** One capability patch as the controller's `update_agent_deployment` takes
  *  it: an id and the mode to set. */
@@ -241,7 +241,7 @@ const KIND_WORD = {
 } as const satisfies Record<CapabilityKind, string>;
 
 /**
- * Ruling 139 (pass 34, F34-2): the refusal sentence for a set of capability
+ * Ruling 261 (pass 34, F34-2): the refusal sentence for a set of capability
  * patches aimed at a deployment of `kind`, or null when every patch is legal.
  * Built ONLY from the catalogue sets already in this module, so it can never
  * drift from what the editor offers and what `grantsFor` persists:

@@ -3,7 +3,7 @@ import { isWriteScope, mcpSignInPhrase, summarizeMcpGrant, type McpOAuthView } f
 import { countLabel } from "~/shared/text/plural";
 
 /**
- * Ruling 486 (live verification 2026-09-25, F40-66): the one tool Viberr's MCP
+ * Ruling 192 (live verification 2026-09-25, F40-66): the one tool Viberr's MCP
  * gateway answers itself. A run's prompt carries only a summary of an OAuth
  * sign-in's grant ("384 scopes · 192 writes"), because listing every scope in
  * every prompt is bloat. That left an agent unable to tell whether the write it

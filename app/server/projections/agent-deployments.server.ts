@@ -9,7 +9,7 @@ import { getProject } from "./board-query.server";
 import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
 
 /**
- * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 7):
+ * Live agent-deployment projection (agents spec §3.3, ruling 62(a)):
  * engagement instances derived from task assignment records (operator /
  * specialist / reviewers in task_projections — PROFILE-ID keyed, never the
  * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so
@@ -19,7 +19,7 @@ import { deployedSpecialistBackends } from "~/server/agents/deployment-view.serv
  * derived from the engagement's OWN run row first and from the task's
  * `waiting` flag only when no run is in flight — `waiting === "agent"` is a
  * display flag about the task, not proof that THIS engagement is executing
- * (ruling 91's family: `liveRuns` is the only proof a run is in flight). Live,
+ * (ruling 44's family: `liveRuns` is the only proof a run is in flight). Live,
  * the roster called a Developer "working" for twenty minutes after its run had
  * finished because the operator's own turns kept the task agent-waiting, and
  * called a reviewer "anchored · on call" while it was the one running.
@@ -98,7 +98,7 @@ function engagementStatus(
     return engagement === "operator" ? "coordinating" : "working";
   }
   if (live === "queued") return "queued";
-  // Ruling 225: a clock rest reaches this line as `schedule` and lands on "on
+  // Ruling 45: a clock rest reaches this line as `schedule` and lands on "on
   // call", which is the honest word for it — the agent is not running and will
   // be invoked without anybody asking. The one thing it must not say is
   // "waiting on human", which is the branch below.
@@ -107,8 +107,8 @@ function engagementStatus(
 }
 
 /** Reviewer thread ids index into the task's supporting engagements
- *  (`reviewers_json`, written from `supportingEngagements(fm)`; ruling 98
- *  retired the `reviewers[]` slot) — "r0", "r1", …. Ruling 458(a): only the
+ *  (`reviewers_json`, written from `supportingEngagements(fm)`; ruling 180
+ *  retired the `reviewers[]` slot) — "r0", "r1", …. Ruling 153: only the
  *  `r` prefix is read. `c` was the consultant prefix until consultants became
  *  reviewers (5c13978d), and nothing has written it since. */
 function reviewerIndex(threadId: string): number {

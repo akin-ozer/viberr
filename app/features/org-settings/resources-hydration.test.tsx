@@ -10,7 +10,7 @@ import type { GagentView } from "~/server/org/gagents.server";
 import type { KbView, McpView, SkillView } from "~/server/org/resources.server";
 
 /**
- * Ruling 480 (F40-44): the Agent resources tab's hydration gate, the task
+ * Ruling 293 (F40-44): the Agent resources tab's hydration gate, the task
  * page's (`task-detail/hydration-determinism.test.tsx`) applied to
  * /org/settings?tab=resources.
  *
@@ -173,7 +173,7 @@ function rowText(root: ParentNode, name: string): string {
   return (row?.textContent ?? "").replace(/ /g, " ");
 }
 
-describe("ruling 480: the Agent resources tab hydrates clean across the zone and midnight pair", () => {
+describe("ruling 293: the Agent resources tab hydrates clean across the zone and midnight pair", () => {
   it("the server's markup depends on the timestamps alone", async () => {
     // Canary: build a row's stamp with `formatRelative` again (the old
     // `rel()`), and "29m ago" / "14h ago" land in the server's markup.

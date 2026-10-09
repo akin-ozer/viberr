@@ -6,7 +6,7 @@ import type { PacketArchiveDisclosure } from "./decision-packet";
 import { archiveCeremonyCopy } from "./decision-packet-derive";
 
 /**
- * The decision packet card's three ask-first ceremonies (ruling 700(e), the
+ * The decision packet card's three ask-first ceremonies (ruling 13(b), the
  * split of `decision-packet.tsx` along the task-page recipe): archive (with or
  * without the remote branch), discard the local branch, and clear a branch
  * collision. The card draws the one whose kind the pending option is, in the
@@ -32,7 +32,7 @@ interface CeremonyProps {
  * warn glyph and a close, a `packet-obs flush` body of what-happens rows, and a
  * foot of "Not yet" beside one danger commit.
  *
- * Rulings 20 (R15-1) and 53 (R18-7) hold every one-way write to ONE ceremony,
+ * Rulings 97 (R15-1) and 53 (R18-7) hold every one-way write to ONE ceremony,
  * and the three that live on this card were three shell-for-shell copies of it:
  * a change to the shared half (the close affordance, the foot layout, the
  * alertdialog contract) landed on whichever copy was open at the time. Each
@@ -70,7 +70,7 @@ function PacketDestructiveConfirm({
   /** The `.obs` rows stating what this resolution does and does not touch. */
   children: ReactNode;
 }) {
-  // Ruling 459: the commit leaves the way Cancel does (`commit`); onCancel
+  // Ruling 287: the commit leaves the way Cancel does (`commit`); onCancel
   // unmounts it after the exit.
   const { ref: panelRef, close, commit } = useDialog(onCancel);
   return (
@@ -125,12 +125,10 @@ function PacketDestructiveConfirm({
 /**
  * UX19-9 — an `archive_task` packet option asks first, like its sibling does.
  *
- * Ruling 17 makes this packet the ONLY place in the product that deletes a
- * remote branch ("Remote-branch deletion exists only as that packet
- * resolution"), and ruling 20 (R15-1) / ruling 53 (R18-7) established the
- * standard the rest of this page already meets: a one-way write states what it
- * destroys and offers a way out, at EVERY entry point — never from a generic
- * button. The task page confirmed the *reversible* archive (`ArchiveConfirm`,
+ * This option deletes a remote branch (`deleteTaskRemoteBranch`, ruling 233),
+ * and ruling 97 (R15-1, R18-7) sets the standard the rest of this page already
+ * meets: a one-way write states what it destroys and offers a way out, at
+ * EVERY entry point — never from a generic button. The task page confirmed the *reversible* archive (`ArchiveConfirm`,
  * which enumerates the open decision and the pending recommendations it
  * withdraws) and not the irreversible one, which committed a permanent GitHub
  * branch deletion from a button whose whole promise is "Confirm decision" and
@@ -141,7 +139,7 @@ function PacketDestructiveConfirm({
  * ceremony (accept-confirm.tsx — F31-C8: an earlier revision of this comment
  * named an `AcceptDisclosureProvider` context that never shipped): the shared
  * ceremony exists because FOUR surfaces can reach `acceptCompletion` and were
- * drifting apart (F19-3/F19-7). Ruling 17 gives branch deletion exactly one
+ * drifting apart (F19-3/F19-7). Archiving with branch deletion has exactly one
  * surface — this card — so there is nothing to keep in sync. It still wears the
  * `PacketDestructiveConfirm` shell above; local means "not routed through
  * accept-confirm.tsx", not "its own copy of the ceremony".
@@ -233,7 +231,7 @@ export function PacketArchiveConfirm({
 }
 
 /**
- * Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits this
+ * Ruling 234 (pass 35, U35-8): origin's copy of the branch carries commits this
  * task did not author (`PacketArchiveDisclosure.foreignHead`), and the
  * delete-branch dialog says so before the button, with the head sha and the
  * pull request standing on it when either is known. Only while a foreign
@@ -287,7 +285,7 @@ function ForeignHeadClause({
  * never-pushed workspace branch. It destroys commits, so it asks first, exactly
  * like its `archive_task` sibling above — but with a narrower promise: nothing
  * on GitHub changes (resolution refuses the moment the branch exists on the
- * remote, ruling 17). A local dialog for the same reason `PacketArchiveConfirm`
+ * remote, ruling 233). A local dialog for the same reason `PacketArchiveConfirm`
  * is one: this is the only surface that offers the discard.
  */
 export function PacketDiscardConfirm({
@@ -336,7 +334,7 @@ export function PacketDiscardConfirm({
           been, the discard is refused and the archive option is the path.)
         </span>
       </div>
-      {/* Ruling 161: a reported revision that never left the workspace goes
+      {/* Ruling 234: a reported revision that never left the workspace goes
           with the branch. Its verdicts stay as history, and nothing is under
           review afterwards. */}
       <div className="obs">
@@ -357,7 +355,7 @@ export function PacketDiscardConfirm({
  * The two ceremonies reach different server rules, so they say different
  * things (pass 34 review found one sentence used for both, and it was wrong
  * on each): an ARCHIVE still archives and only keeps the branch, and a
- * COLLISION resolution is not a deletion at all under ruling 136(b) — it
+ * COLLISION resolution is not a deletion at all under ruling 233 — it
  * pushes the delivered revision to that PR.
  */
 function OpenPrRow({

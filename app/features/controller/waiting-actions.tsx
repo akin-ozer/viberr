@@ -6,7 +6,7 @@ import { messageFileHref } from "./message-file-href";
 import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 
-/** What Send now and Retract answer (ruling 527). */
+/** What Send now and Retract answer (ruling 251). */
 export interface WaitingActionResult {
   ok: boolean;
   error?: string;
@@ -15,7 +15,7 @@ export interface WaitingActionResult {
   retracted?: string;
 }
 
-/** Ruling 527: where a message waits on the running turn, if it still does. */
+/** Ruling 251: where a message waits on the running turn, if it still does. */
 type WaitingState = "queued" | "steering";
 
 interface WaitingActionsProps {
@@ -26,13 +26,13 @@ interface WaitingActionsProps {
   /** The door that answers them: the dock's resource route. Absent, the
    *  page's own route. */
   action?: string;
-  /** Ruling 573: the files the message carries, handed back with its text. */
+  /** Ruling 258: the files the message carries, handed back with its text. */
   files?: readonly MessageFile[] | undefined;
   onRetracted: (text: string, files: readonly File[]) => void;
 }
 
 /**
- * Ruling 573: a waiting message's files as the composer holds them, read back
+ * Ruling 258: a waiting message's files as the composer holds them, read back
  * BEFORE the retract, since a retracted message takes its files with it.
  */
 async function fetchBack(files: readonly MessageFile[]): Promise<File[]> {
@@ -47,12 +47,12 @@ async function fetchBack(files: readonly MessageFile[]): Promise<File[]> {
 }
 
 /**
- * Ruling 527: what a message still waiting on the running turn lets its
+ * Ruling 251: what a message still waiting on the running turn lets its
  * sender do, on the page and in the dock. **Send now** takes a queued message
  * into the running turn at its next step (the server sends it next instead
  * when that turn can take no more). **Retract** takes back a message nothing
  * has read, queued or waiting to steer: it leaves the conversation and its
- * text goes back to the composer (ruling 573: its files to the tray). Rendered for the conversation's owner only;
+ * text goes back to the composer (ruling 258: its files to the tray). Rendered for the conversation's owner only;
  * the server re-checks both. A message that is not waiting renders nothing
  * and mounts no fetcher.
  */
@@ -77,7 +77,7 @@ function WaitingMessageActions({
 }: WaitingActionsProps & { state: WaitingState }): React.ReactNode {
   const fetcher = useFetcher<WaitingActionResult>();
   const push = useToast();
-  // Ruling 573: the files read back for a retract, until it answers.
+  // Ruling 258: the files read back for a retract, until it answers.
   const heldFiles = useRef<readonly File[]>([]);
   const [reading, setReading] = useState(false);
   useFetcherResult(fetcher, (result) => {
@@ -97,7 +97,7 @@ function WaitingMessageActions({
     body.set("intent", intent);
     body.set("conversationId", conversationId);
     body.set("messageId", messageId);
-    // The dock's door changes nothing the page under it renders (ruling 457,
+    // The dock's door changes nothing the page under it renders (ruling 11,
     // CTL-4, as its sends); the dock reloads on the `controller.updated` the
     // change publishes.
     fetcher.submit(body, action ? { method: "post", action, defaultShouldRevalidate: false } : { method: "post" });

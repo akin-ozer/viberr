@@ -11,7 +11,7 @@ import { useElapsed } from "./runs-helpers";
  * flight: React reported a hydration mismatch and the elapsed clock flickered.
  * The fix seeds `now` to `null` and installs the real clock only after mount,
  * which makes SSR and first-paint markup byte-identical by construction.
- * Ruling 457 (RF-9): the clock is the shared one (`~/ui/use-clock`), null on
+ * Ruling 11 (RF-9): the clock is the shared one (`~/ui/use-clock`), null on
  * the server and during hydration, so the contract holds for hydration while a
  * counter mounted later reads the real clock at once.
  *
@@ -75,7 +75,7 @@ describe("useElapsed determinism (F10-37)", () => {
     container.remove();
   });
 
-  it("ruling 457: a counter mounted after hydration reads the clock on its first render", () => {
+  it("ruling 11: a counter mounted after hydration reads the clock on its first render", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-20T12:00:30.000Z"));
     const seen: number[] = [];

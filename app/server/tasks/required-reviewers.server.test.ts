@@ -32,7 +32,7 @@ import {
 import { resolvePacket } from "./packet-resolution.server";
 
 /**
- * Ruling 178 (pass 36, G36-3): a project declares REQUIRED reviewers per review
+ * Ruling 89 (pass 36, G36-3): a project declares REQUIRED reviewers per review
  * stage in project.md, and the acceptance gate reads that rule.
  *
  * Before the rule, required-ness was emergent — `requiredReviewers(fm)` was
@@ -159,7 +159,7 @@ function seed(
   store: TestStore,
   patch: Partial<TaskFrontmatter>,
   packet: TaskPacket | null = null,
-  /** Ruling 385: what a run saved into `attachments/`, on the event that saved it. */
+  /** Ruling 81: what a run saved into `attachments/`, on the event that saved it. */
   timeline: TaskFileEvent[] = [],
 ): void {
   writeTask(store.dataRoot, store.slug, {
@@ -170,7 +170,7 @@ function seed(
   rebuildAll(store.db, { dataRoot: store.dataRoot });
 }
 
-/** Ruling 388: when the deliverer saved the report — the task's non-commit
+/** Ruling 84: when the deliverer saved the report — the task's non-commit
  *  delivery, and the identity its review binds to. */
 const REPORT_AT = "2026-09-22T06:23:28.646Z";
 
@@ -192,7 +192,7 @@ const RULE_SENTENCE =
   "Required reviewer Code Reviewer (project rule at Review) has not approved revision aaaaaaa. " +
   "Run the review at Review, or an admin can force-accept.";
 
-describe("ruling 178: a required reviewer the project declares gates acceptance", () => {
+describe("ruling 89: a required reviewer the project declares gates acceptance", () => {
   it("refuses acceptance while the declared reviewer has no verdict on the delivered revision, even though another reviewer approved", async () => {
     // Canary: drop the `requiredReviewerRefusals` gate from `acceptanceRefusalReasons`.
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
@@ -254,14 +254,14 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
   });
 
   /**
-   * Ruling 385 (owner, 2026-09-22; F39-12(c)), live on ax-clone AX-12. The task
+   * Ruling 81 (owner, 2026-09-22; F39-12(c)), live on ax-clone AX-12. The task
    * was a standalone upstream-fidelity check: the deliverer wrote a 27KB
    * report, attached it, committed nothing and opened no PR. The gate held on
    * git alone, so the project's own rule — "Reviewer reviews at Review" — owed
    * nothing, and the task reached an enabled one-click Accept with
    * `verdicts: []`. Any task whose deliverable is not a commit walked through.
    */
-  it("ruling 385: holds a report-only task — delivered work, no commit", () => {
+  it("ruling 81: holds a report-only task — delivered work, no commit", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(
       store,
@@ -279,7 +279,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     expect(reason).toContain("the work delivered on this task");
   });
 
-  it("ruling 385: the review queue agrees, so the two surfaces cannot drift", () => {
+  it("ruling 81: the review queue agrees, so the two surfaces cannot drift", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(
       store,
@@ -298,13 +298,13 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
   });
 
   /**
-   * Ruling 388 (F39-15). Ruling 385 held the task; nothing could satisfy the
+   * Ruling 84 (F39-15). Ruling 81 held the task; nothing could satisfy the
    * hold. `requiredReviewerApproved` keyed on `workRevision`, so with no commit
    * it returned false whatever the reviewer did — and the verdict writer would
    * not have stored an approval to read anyway. Live on AX-12 that was a dead
    * end with force-accept as the only door.
    */
-  it("ruling 388: an approval bound to the DELIVERY satisfies the hold", () => {
+  it("ruling 84: an approval bound to the DELIVERY satisfies the hold", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(
       store,
@@ -312,7 +312,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
         stage: "review",
         waiting: "human",
         deliveredAt: REPORT_AT,
-        // Ruling 531: engaged as every real review is. Without the reviewer's
+        // Ruling 81: engaged as every real review is. Without the reviewer's
         // engagement this passed while the engaged-reviewer gate still said
         // "No reviewed revision yet" to every files-only delivery.
         engagements: [DEVELOPER, REVIEWER_ENGAGEMENT],
@@ -340,7 +340,7 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     ).toBeNull();
   });
 
-  it("ruling 388: a LATER delivery stales the approval, like a new revision", () => {
+  it("ruling 84: a LATER delivery stales the approval, like a new revision", () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(
       store,
@@ -371,8 +371,8 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
     ).toContain("Required reviewer Code Reviewer");
   });
 
-  it("ruling 385: a person's own upload is an INPUT and holds nothing", () => {
-    // Ruling 379's human attachment writes a plain `note` with no list — an
+  it("ruling 81: a person's own upload is an INPUT and holds nothing", () => {
+    // Ruling 76's human attachment writes a plain `note` with no list — an
     // uploaded fixture is something the work reads, not something it produced.
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, { stage: "review", waiting: "human", noChanges: true }, null, [
@@ -429,12 +429,12 @@ describe("ruling 178: a required reviewer the project declares gates acceptance"
 });
 
 /**
- * Ruling 384's clause reads the review SUBJECT (ruling 388). A task whose
+ * Ruling 99's clause reads the review SUBJECT (ruling 84). A task whose
  * deliverable is a saved file has no commit revision, and keyed on the
  * revision alone its acceptance card said "No review verdict is recorded"
  * over the approval its reviewer had just given.
  */
-describe("ruling 384: the acceptance card's basis reads the review subject", () => {
+describe("ruling 99: the acceptance card's basis reads the review subject", () => {
   const RULES: RequiredReviewerView[] = [
     { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Reviewer" },
   ];
@@ -498,13 +498,13 @@ describe("ruling 384: the acceptance card's basis reads the review subject", () 
 });
 
 /**
- * Ruling 556. Live on AWSC-3 the operator made the Estimate Judge the
+ * Ruling 89. Live on AWSC-3 the operator made the Estimate Judge the
  * benchmark's deliverer on a board whose rule is "Estimate Judge reviews at
  * Review". A deliverer's verdict on its own delivery does not count (ruling
- * 555), so the task could never pass Review, and the gate kept saying "Run the
+ * 87), so the task could never pass Review, and the gate kept saying "Run the
  * review", which only started more delivering runs.
  */
-describe("ruling 556: the project's required reviewer cannot deliver", () => {
+describe("ruling 89: the project's required reviewer cannot deliver", () => {
   it("refuses to make it a task's deliverer", async () => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);
     seed(store, { stage: "review", engagements: [DEVELOPER] });
@@ -532,7 +532,7 @@ describe("ruling 556: the project's required reviewer cannot deliver", () => {
   it.each([
     ["with its files delivered", { deliveredAt: REPORT_AT }],
     // AWSC-3's shape: the files were saved but never recorded as delivered
-    // (ruling 555), which the gate read as "nothing to judge" and let through.
+    // (ruling 87), which the gate read as "nothing to judge" and let through.
     ["with nothing recorded as delivered", {}],
   ])("tells a task its own required reviewer delivers that the review cannot count, %s", (_case, delivered) => {
     const store = prepared([{ stageId: "review", profileId: "reviewer" }]);

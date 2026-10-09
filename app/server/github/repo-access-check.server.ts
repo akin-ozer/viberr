@@ -25,10 +25,10 @@ export type RepoAccessResult =
       remoteDefaultBranch: string | null;
       private: boolean;
       /**
-       * Ruling 468: the repository has no commit at all. Viberr creates the
-       * default branch's first commit itself before the first task branch
-       * (ruling 128's bootstrap), so this is a fact to state, not a failure.
-       * Absent on a result recorded before the ruling.
+       * Ruling 227(a): the repository has no commit at all. Viberr creates
+       * the default branch's first commit itself before the first task
+       * branch, so this is a fact to state, not a failure. Absent on an
+       * older recorded result.
        */
       empty?: boolean;
       /**
@@ -64,7 +64,7 @@ const ghRepoSchema = z
   .catch({});
 
 /**
- * Ruling 468 (F40-12): whether a repository has no commit at all. `size: 0`
+ * Ruling 227 (F40-12): whether a repository has no commit at all. `size: 0`
  * on `GET /repos/{r}` is only the cue (GitHub computes it lazily, so a fresh
  * repository with commits can read 0 too); the proof is the commits read,
  * which GitHub answers 409 "Git Repository is empty." on a repository with no

@@ -2,7 +2,7 @@ import type { RunBackend, RunKind } from "~/features/runtime/runtime-types";
 import type { CredentialKind } from "./backend-credentials.server";
 
 /**
- * Ruling 370: ONE home for every number that decides how much context a run
+ * Ruling 169: ONE home for every number that decides how much context a run
  * carries, when it is compacted, how long its prompt cache is assumed to live,
  * and when a resume is refused in favour of a fresh session — on both backends,
  * for all three run kinds. Nothing else in the tree may spell one of these
@@ -19,7 +19,7 @@ export type ContextBackend = RunBackend;
 
 /**
  * The context window past which the CLI is asked to compact MID-RUN, per
- * backend and run kind. Every entry is `null` since ruling 376 (owner,
+ * backend and run kind. Every entry is `null` (ruling 174; owner,
  * 2026-09-21, "drop it, model default"): the CLI compacts at its model's own
  * limit (near 967k on a native-1M Claude model, near the 258k window on
  * Codex), and the size a session carries between runs is bounded by
@@ -48,7 +48,7 @@ function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | nul
 
 /**
  * The env overlay a Claude run carries for its mid-run window: exactly one key
- * when the kind has a window, nothing otherwise (nothing, since ruling 376).
+ * when the kind has a window, nothing otherwise (no kind has one, ruling 174).
  * Codex takes its window through `config.toml` keys (`codexCompactionConfig`),
  * never the environment.
  */
@@ -61,9 +61,9 @@ export function contextWindowEnv(backend: ContextBackend, kind: RunKind): Record
 /**
  * The Codex CLI config keys a kind carries: the shared compaction prompt on
  * every specialist and controller run (it steers the mid-run compaction at
- * the model's own limit AND the completion compaction of ruling 376, both of
+ * the model's own limit AND the completion compaction of ruling 174, both of
  * which the CLI summarizes), plus the limit and its scope only for a kind
- * with a mid-run window (none, since ruling 376). Empty for the operator, so
+ * with a mid-run window (none any more). Empty for the operator, so
  * nothing is written that a reader could mistake for a decision.
  */
 export interface CodexCompactionConfig {
@@ -84,13 +84,13 @@ export function codexCompactionConfig(kind: RunKind): Partial<CodexCompactionCon
 }
 
 /**
- * Ruling 376 (owner, 2026-09-21): a session whose last prompt is larger than
+ * Ruling 174 (owner, 2026-09-21): a session whose last prompt is larger than
  * this is compacted at the END of its run, while its prefix is still in the
  * provider's cache — one warm full-history read plus a summary, instead of a
  * cold replay of the whole history on the next resume (200k written at the
  * 1-hour rate is $6; the compaction is about $0.70 and every later call reads
  * ~20k instead of ~200k). The session keeps its memory as the summary and
- * stays resumable; ruling 372's fresh start is the backstop for a large
+ * stays resumable; ruling 173's fresh start is the backstop for a large
  * session that never got compacted. 100k, the owner's number: the specialist
  * median peak is 108k, so the typical long run is compacted once, at its end.
  * Applies to a run that finished or errored; an interrupted run is left alone
@@ -99,8 +99,8 @@ export function codexCompactionConfig(kind: RunKind): Partial<CodexCompactionCon
 export const COMPACT_AT_COMPLETION_TOKENS = 100_000;
 
 /**
- * Ruling 701: how long a completion compaction may take before the run service
- * stops waiting for it. The session then stays as large as it was (ruling 372
+ * Ruling 175: how long a completion compaction may take before the run service
+ * stops waiting for it. The session then stays as large as it was (ruling 173
  * is its backstop), the compaction's process is stopped, and a run held for
  * that session starts. Measured compactions took one to two and a half
  * minutes; Codex's own exchange gives up at five.
@@ -123,7 +123,7 @@ export const COMPLETION_COMPACT_INSTRUCTIONS =
   "posted. Drop tool output and reasoning.";
 
 /**
- * Ruling 372: the size past which a session that has outlived its cache is
+ * Ruling 173: the size past which a session that has outlived its cache is
  * never replayed. Below it a resume re-writes cheaply; above it the whole
  * history is one cache write (the three first calls above 100k on this
  * instance wrote 298k, 911k and 929k, the last two after 71 minutes and 39
@@ -146,7 +146,7 @@ export const RESUME_FRESH_CONTEXT_TOKENS = 150_000;
  * first-turn cached ratio the sink now stores will settle it).
  *
  * The policy is the CLI's automatic choice: no forced TTL and no keep-alive
- * ping on either backend (ruling 374).
+ * ping on either backend (ruling 171).
  */
 export const CACHE_TTL_MS = {
   claude: { login: 60 * 60 * 1000, api_key: 5 * 60 * 1000, access_token: 5 * 60 * 1000 },
@@ -170,7 +170,7 @@ export interface ResumeVerdict {
 }
 
 /**
- * Ruling 372: whether a resume replays the stored session or starts fresh.
+ * Ruling 173: whether a resume replays the stored session or starts fresh.
  * Fresh exactly when the session is BOTH older than its cache TTL AND larger
  * than the replay threshold; either alone resumes as before (a small stale
  * session re-writes cheaply, a large warm one reads its prefix back).
@@ -206,7 +206,7 @@ export function resumeVerdict(input: {
 }
 
 /**
- * Ruling 369: a run's first model call started WARM when it read more of its
+ * Ruling 172: a run's first model call started WARM when it read more of its
  * prompt from the cache than it wrote into it, COLD otherwise. One rule, so the
  * sink's stored flag, the console chip and the Insights rate cannot disagree.
  */
@@ -214,7 +214,7 @@ export function startTemperature(cacheWrite: number, cacheRead: number): "warm" 
   return cacheRead > cacheWrite ? "warm" : "cold";
 }
 
-/** Ruling 369: a first call that wrote more than this is the Insights card's
+/** Ruling 172: a first call that wrote more than this is the Insights card's
  *  "large first write" — the replay-after-expiry shape the resume policy
  *  exists to remove. */
 export const FIRST_CALL_LARGE_WRITE_TOKENS = 100_000;
@@ -222,7 +222,7 @@ export const FIRST_CALL_LARGE_WRITE_TOKENS = 100_000;
 // ------------------------------------------- what Insights measures them by
 
 /**
- * Ruling 505: OpenAI's documented extended prompt-cache retention (24 hours,
+ * Ruling 172: OpenAI's documented extended prompt-cache retention (24 hours,
  * research S16). The Codex rows of `CACHE_TTL_MS` stay at ten minutes "until
  * measured"; this is the retention the measurement looks for. If Codex resumes
  * idle past ten minutes read their prefix back, the Codex TTL moves toward it.
@@ -230,12 +230,12 @@ export const FIRST_CALL_LARGE_WRITE_TOKENS = 100_000;
 const EXTENDED_CACHE_RETENTION_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Ruling 505: the idle edges Insights sorts resumes by, ascending: every TTL
+ * Ruling 172: the idle edges Insights sorts resumes by, ascending: every TTL
  * `CACHE_TTL_MS` assumes (five minutes, ten, an hour) and then the extended
  * retention. Derived rather than spelled, so a TTL the table gains or loses
  * moves the edges with it. Each bucket then says whether the sessions resumed
  * that long after their last run read their prefix back, which is the fact
- * ruling 372's verdict assumes and PLAN.md's Codex retention probe asked for.
+ * ruling 173's verdict assumes and PLAN.md's Codex retention probe asked for.
  */
 export const RESUME_IDLE_EDGES_MS: readonly number[] = [
   ...new Set(Object.values(CACHE_TTL_MS).flatMap((byKind): number[] => Object.values(byKind))),
@@ -243,7 +243,7 @@ export const RESUME_IDLE_EDGES_MS: readonly number[] = [
 ].sort((a, b) => a - b);
 
 /**
- * Ruling 505: how close together two operator starts must be for the second to
+ * Ruling 36: how close together two operator starts must be for the second to
  * count as part of a burst. A cache entry exists only once the first response
  * has begun, so an operator run that starts while another of the same prefix
  * (same project, seat and model) is still waiting for its first response writes
@@ -258,7 +258,7 @@ export const OPERATOR_BURST_WINDOW_MS = 60 * 1000;
 // ------------------------------------------------------ what compaction keeps
 
 /**
- * Ruling 371: the prompt Codex's summarizer is given instead of its default,
+ * Ruling 170: the prompt Codex's summarizer is given instead of its default,
  * shared by every Codex run with a window. It names what a Viberr run cannot
  * recover from the summary alone. Per-task facts (the task.md path, branch,
  * PR, knowledge bases) are NOT in it: they ride `developer_instructions`,
@@ -293,7 +293,7 @@ export interface SpecialistCompactAnchorInput {
 }
 
 /**
- * Ruling 371: what a specialist is told the moment its context has been
+ * Ruling 170: what a specialist is told the moment its context has been
  * compacted (a `SessionStart` hook on the `compact` source). Claude keeps the
  * system prompt — the persona and the knowledge-base indexes — untouched and
  * re-injects the skills the run invoked; what it drops is tool output,
@@ -325,7 +325,7 @@ export function specialistCompactAnchor(input: SpecialistCompactAnchorInput): st
   return lines.filter((line) => line !== "").join("\n");
 }
 
-/** The conversation anchor for a compacted controller session (ruling 373). */
+/** The conversation anchor for a compacted controller session (ruling 255). */
 export interface ControllerCompactAnchorInput {
   conversationId: string;
   userLabel: string;

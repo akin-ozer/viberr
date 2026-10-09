@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 
 /**
- * The Agents page's selection (ruling 700(e), the split of `agents-page.tsx`
+ * The Agents page's selection (ruling 13(b), the split of `agents-page.tsx`
  * along the task-page recipe): the open profile and the tab, held in the URL,
  * with the pick a roster click makes before its navigation lands. The page
  * calls it right after its fetcher, where this state and its effect always

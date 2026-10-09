@@ -10,7 +10,7 @@ import { ChangesPanel } from "./changes-slot";
 afterEach(cleanup);
 
 /**
- * Ruling 484 (pass 40, F40-54): the task page's Changes panel. A person saw
+ * Ruling 246 (pass 40, F40-54): the task page's Changes panel. A person saw
  * `Diff N files · +a −d` and nothing to read, and "approve each note in review"
  * could only happen on GitHub, where a rejected note never reached the agent.
  * The panel reads the delivered revision's patches and sends line notes to
@@ -71,7 +71,7 @@ const BIG_FILE: TaskChangesView = {
 };
 
 /** One `review-notes` note as the intent receives it; a note on several
- *  lines also names its first line and that line's side (ruling 509). */
+ *  lines also names its first line and that line's side (ruling 246). */
 const postedNotes = z.array(
   z.strictObject({
     path: z.string(),
@@ -128,7 +128,7 @@ async function open() {
   await screen.findByText("notes/one.md");
 }
 
-describe("ruling 484: the Changes panel", () => {
+describe("ruling 246: the Changes panel", () => {
   it("ships closed and reads nothing from GitHub until a person opens it", async () => {
     const { reads } = renderPanel();
     expect(screen.getByRole("heading", { name: "Changes" })).toBeTruthy();
@@ -249,12 +249,12 @@ describe("ruling 484: the Changes panel", () => {
 });
 
 /**
- * Ruling 509: a note may cover several lines of one hunk. The owner reviewed a
+ * Ruling 296: a note may cover several lines of one hunk. The owner reviewed a
  * runbook paragraph by paragraph and could only note one line at a time. The
  * VIEW's `notes/one.md` hunk draws, in order: removed line 1, new lines 1 and
  * 2 (added), new line 3 (context).
  */
-describe("ruling 509: a note on several lines", () => {
+describe("ruling 296: a note on several lines", () => {
   const num = (name: string) => screen.getByRole("button", { name });
   const selectedRows = (container: HTMLElement) =>
     [...container.querySelectorAll(".chg-row[data-sel]")].map(

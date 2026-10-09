@@ -1,5 +1,5 @@
 /**
- * A comment on a task (ruling 654): `appendComment`, a person's or the
+ * A comment on a task (ruling 13(a)): `appendComment`, a person's or the
  * operator's comment with its @mention fan-out; `commentToAgent`, a comment that
  * dispatches the agent it names and registers that run's completion; and the
  * answer a person's decision sends back to the agent that asked.
@@ -80,7 +80,7 @@ import {
 } from "./agent-completion.server";
 
 /**
- * Ruling 447 (O39-a): the actor other than the asker that a person's answer to
+ * Ruling 68 (O39-a): the actor other than the asker that a person's answer to
  * an agent's question names, if any: another deployed agent (by name or
  * @handle) or the operator. Such an answer is routing, which is the
  * operator's job: the asking agent, resumed with it, can only report that it
@@ -152,7 +152,7 @@ export function answerNamesAnotherActor(
  * Returns false when the answer could not be delivered (profile undeployed, no
  * resumable session, agent no longer resolvable), so the caller can fall back to
  * the operator hand-off rather than swallowing the human's decision. An asker
- * that is still running is owed the answer, not refused it (ruling 565): true.
+ * that is still running is owed the answer, not refused it (ruling 68): true.
  */
 export async function answerAskingAgent(
   db: DatabaseSync,
@@ -181,7 +181,7 @@ export async function answerAskingAgent(
     ).find((a: { id: string }) => a.id === input.profileId);
     if (!deployed) return false;
 
-    // Ruling 562: only an agent that can run on the task now is handed the
+    // Ruling 68: only an agent that can run on the task now is handed the
     // answer. Live on AWSC-6 the task had moved on to Estimate by the time Arda
     // answered the Cloud Solutions Architect's mapping question, and "Continue
     // from where you stopped" was posted to an agent that does not run there:
@@ -228,7 +228,7 @@ export async function answerAskingAgent(
       actor,
       ctx,
     );
-    // Ruling 565: an asker still running when its question is answered gets the
+    // Ruling 68: an asker still running when its question is answered gets the
     // answer when that run finishes: its completion delivers every comment the
     // single-flight guard refused (`deliverDeferredMention`). Live on AWSC-5
     // the Cloud Solutions Architect raised its packet and kept working, the
@@ -298,13 +298,13 @@ export async function appendComment(
      *  agent like `@dev` is mentioned — the reserved-handle regex alone would
      *  miss profile-name mentions). */
     forceToAgent?: boolean;
-    /** Ruling 484: a server-side writer's own record, applied in the SAME
+    /** Ruling 246: a server-side writer's own record, applied in the SAME
      *  locked write that appends the comment (the review relay stamps the
      *  GitHub ids it relayed, so a relay is recorded exactly when its comment
      *  is). Never set by a route. */
     alsoWrite?: (parsed: ParsedTaskFile) => void;
-    /** Ruling 573: the files the comment carries, already on the task; the
-     *  comment claims them (ruling 533(b)). Set by `commentToAgent` only. */
+    /** Ruling 76: the files the comment carries, already on the task; the
+     *  comment claims them. Set by `commentToAgent` only. */
     attachments?: readonly string[];
   },
   actor: TaskActor,
@@ -319,7 +319,7 @@ export async function appendComment(
   requireProjectMutable(loadProjectContext(ctx, input.projectSlug), "comment on this task");
 
   // Existence only: the locked write below reads and parses the file itself
-  // (ruling 457, CS-5 — this used to parse it a second time just to ask).
+  // (ruling 11, CS-5 — this used to parse it a second time just to ask).
   if (!existsSync(resolveTaskFilePath(taskRef(ctx, input.projectSlug, input.taskKey)))) {
     throw AppError.notFound(`Task ${input.taskKey} not found.`);
   }
@@ -349,7 +349,7 @@ export async function appendComment(
   // reaches nobody. A handle that names exactly one real person who is NOT a
   // member of this project is now a non-delivery too — it used to be a
   // notification that named the project, the task and the comment to someone the
-  // members-only 404 then refused (ruling 25 read backwards). Both reasons come
+  // members-only 404 then refused (ruling 27 read backwards). Both reasons come
   // from ONE seam so the author gets one note and a third reason lands there
   // rather than here.
   const nonDeliveryNote = mentionNonDeliveryNote(db, text, input.projectSlug);
@@ -383,7 +383,7 @@ export async function appendComment(
 
   // Mention fan-out (notification kind `mention`, contracts §4) — the shared
   // helper every comment writer (human AND agent) funnels through (NEW-4).
-  // Ruling 457 (CS-5): a comment with no `@` can mention nobody (every mention
+  // Ruling 11 (CS-5): a comment with no `@` can mention nobody (every mention
   // starts at one), so the author's name and tone the notification would carry
   // are not even looked up.
   let mentionedUserIds: string[] = [];
@@ -410,7 +410,7 @@ export async function appendComment(
     );
   }
 
-  // Ruling 457 (CS-5): no task summary here — every caller renders from its
+  // Ruling 11 (CS-5): no task summary here — every caller renders from its
   // own revalidation, and building one cost four statements and four file
   // reads per comment.
   return { toAgent, mentionedUserIds };
@@ -432,7 +432,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
   /**
    * Why an @operator mention did NOT start a run even though the commenter could
    * trigger one: `open-packet` (a decision packet is awaiting the human — resolve
-   * it first) or `closed` (ruling 177: the task is archived or at its terminal
+   * it first) or `closed` (ruling 52: the task is archived or at its terminal
    * stage — restore or reopen it). `blocked-by` is in the type because it is
    * `runOperator`'s, but a manual trigger never meets it. Null when the
    * operator run started normally or no operator was mentioned. Without this the
@@ -443,7 +443,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
   /**
    * A8 (pass 23): the comment is recorded BEFORE any run starts, so a SPECIALIST
    * run-start failure (single-flight conflict, a backend the task owner has not
-   * connected (ruling 127), stage ineligibility) used to throw out of here — the
+   * connected (ruling 137), stage ineligibility) used to throw out of here — the
    * commenter saw a bare error and could not tell their comment HAD posted. This
    * carries the reason the run did not start (the comment did), so the route
    * toasts "comment posted, run not started: <reason>" instead of an error that
@@ -453,7 +453,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * refusal signal.
    */
   runNotStarted: string | null;
-  /** Ruling 565: the run did not start because this agent is already running
+  /** Ruling 69: the run did not start because this agent is already running
    *  on the task, which is the one refusal viberr makes good on: that run's
    *  completion starts it on this comment (`deliverDeferredMention`). */
   deferred?: true;
@@ -499,11 +499,11 @@ async function noteMentionNotStarted(
 }
 
 /**
- * Ruling 573: a comment's files, checked before anything is written: the
+ * Ruling 76: a comment's files, checked before anything is written: the
  * `attach-file` tier, a task that is not archived, the upload's own rules for
- * a batch, and no name an agent run saved (ruling 388, as `attachTaskFile`).
+ * a batch, and no name an agent run saved (ruling 84, as `attachTaskFile`).
  * `append` puts them on the task and writes the comment that claims them,
- * under the claim that keeps a completing run from taking them (ruling 558),
+ * under the claim that keeps a completing run from taking them (ruling 77),
  * then audits each. The comment's text names them, so every reader of the
  * comment (an agent it wakes, a notification, a digest) learns what came.
  * Null when the comment carries no file.
@@ -528,7 +528,7 @@ function commentFiles(
     throw AppError.validation(`${input.taskKey} is archived. Restore it before attaching a file.`);
   }
   const names = checkAttachmentBatch(files, MESSAGE_BATCH);
-  // Ruling 675: composed, as `names` are and as the store resolves them.
+  // Ruling 76: composed, as `names` are and as the store resolves them.
   const agentSaved = new Set(
     existing.parsed.timeline.flatMap((e) => (e.actor.kind === "agent" ? (e.attachments ?? []).map(storedFileName) : [])),
   );
@@ -586,15 +586,15 @@ export async function commentToAgent(
      *  (it falls back to the operator), so no "Mention not started" note is
      *  written for it. Never set by a route. */
     relayed?: boolean;
-    /** Ruling 203: this comment is ALREADY on the timeline — viberr is keeping
+    /** Ruling 69: this comment is ALREADY on the timeline — viberr is keeping
      *  the promise it made when the agent was busy, not recording a new one.
      *  Skips the append (and its mention fan-out, which already happened) and
      *  skips the "Mention not started" note on a second failure, because the
      *  first attempt's note already says why. Never set by a route. */
     redelivered?: boolean;
-    /** Ruling 484: see `appendComment`. Never set by a route. */
+    /** Ruling 246: see `appendComment`. Never set by a route. */
     alsoWrite?: (parsed: ParsedTaskFile) => void;
-    /** Ruling 573: files the person sends with the comment. They land as the
+    /** Ruling 76: files the person sends with the comment. They land as the
      *  task's attachments, claimed by the comment, which names them. */
     files?: readonly { name: string; data: Uint8Array }[];
   },
@@ -614,7 +614,7 @@ export async function commentToAgent(
     resolveMentionedAgent,
     resumeWorkdir,
   } = await import("./agent-reply.server");
-  // Ruling 457 (CS-5): an agent is engaged only by an @handle, so a comment
+  // Ruling 11 (CS-5): an agent is engaged only by an @handle, so a comment
   // without an `@` skips both agent resolvers (each reads the project file and
   // every deployed profile) — the answer they would give, without the reads.
   const mayMention = input.text.includes("@");
@@ -742,7 +742,7 @@ export async function commentToAgent(
     // is picking the comment up (the reply would never come). The comment is
     // already recorded via `base`.
     if (result.refused) {
-      // Ruling 177 (pass 36, F36-4): a closed task refuses the mention's run;
+      // Ruling 52 (pass 36, F36-4): a closed task refuses the mention's run;
       // the comment stays on the record and the F35-5 note says the mention
       // went nowhere, with the same sentence the Run buttons show.
       if (result.refused === "closed") {
@@ -798,10 +798,10 @@ export async function commentToAgent(
       anchor = canonicalTaskAnchor({
         parsed: existing.parsed,
         stageName: stageName(project, existing.parsed.frontmatter.stage),
-        // Ruling 245: what another task owns right now, resolved as a fresh
+        // Ruling 60: what another task owns right now, resolved as a fresh
         // run's anchor resolves it, so a resumed run is warned off it too.
         fileLeases: activeFileLeases(input.projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-        // Ruling 482: what Viberr ran on the revision under review.
+        // Ruling 315: what Viberr ran on the revision under review.
         gates: project.gates,
       });
     } catch {
@@ -838,12 +838,12 @@ export async function commentToAgent(
   let runId: string;
   let triggered: "resumed" | "started";
   let resumeOutcomeKey: string | undefined;
-  /** Ruling 565: the single-flight guard refused it, so it is owed, not lost. */
+  /** Ruling 69: the single-flight guard refused it, so it is owed, not lost. */
   let deferred = false;
 
   // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure
   // (single-flight conflict, a backend the task owner has not connected (ruling
-  // 127), stage ineligibility) below used to throw straight out of here, so the
+  // 137), stage ineligibility) below used to throw straight out of here, so the
   // commenter saw only an error and could not tell their comment HAD posted.
   // Catch it and return the partial success — comment recorded, run not started,
   // reason attached — rather than throwing. (The operator @mention refusal is a
@@ -871,7 +871,7 @@ export async function commentToAgent(
       throw new AppError({
         code: ERROR_CODES.CONFLICT,
         status: 409,
-        // Ruling 203: this used to promise that the agent "will see the comment
+        // Ruling 69: this used to promise that the agent "will see the comment
         // when it next re-anchors". It carried no such comment: the anchor
         // holds the last five timeline events, clamped, and only a FRESH run
         // builds one — live, an owner's correction was eight events back
@@ -883,7 +883,7 @@ export async function commentToAgent(
       });
     }
     if (target.session) {
-    // Ruling 133 (pass 34): the resume door is stage-gated like every other
+    // Ruling 181 (pass 34): the resume door is stage-gated like every other
     // door. Inside the A8 try, so a supporting agent gets the honest partial
     // success (comment posted, `runNotStarted` names the refusal) while the
     // engaged deliverer resumes anywhere.
@@ -899,7 +899,7 @@ export async function commentToAgent(
       ctx.dataRoot,
       target.isPrimary ? undefined : { profileId: target.profileId },
     );
-    // Ruling 127: a resumed task run bills the task owner AS OF NOW — the
+    // Ruling 137: a resumed task run bills the task owner AS OF NOW — the
     // caller resolves the principal, `resumeRun` re-resolves nothing. When the
     // seat changed hands since the original run, `resumeRun` takes the existing
     // continuity-reset path: one fresh run re-anchored on task.md, with the
@@ -921,7 +921,7 @@ export async function commentToAgent(
       input.taskKey,
       resumeBackend,
     );
-    // Ruling 152(c) (pass 35, G35-4), cluster review: a resume IS a dispatch —
+    // Ruling 151 (pass 35, G35-4), cluster review: a resume IS a dispatch —
     // it spends the same provider window. This branch never reaches
     // `dispatchAgentRun`, so the hold was read for a fresh mention and skipped
     // for the far more common one: @mentioning the agent that is already
@@ -992,7 +992,7 @@ export async function commentToAgent(
       if (confinement.skillPlugin) resume.skillPlugin = confinement.skillPlugin;
       if (confinement.mcpServers) resume.mcpServers = confinement.mcpServers;
       if (confinement.systemPrompt) resume.systemPrompt = confinement.systemPrompt;
-      // Ruling 371: the compaction anchor is part of the confinement too.
+      // Ruling 170: the compaction anchor is part of the confinement too.
       if (confinement.compactAnchor) resume.compactAnchor = confinement.compactAnchor;
       // F7: re-arm the Codex outcome envelope so a resumed reviewer emits a
       // structured verdict/questions instead of falling back to the prose regex.
@@ -1003,10 +1003,12 @@ export async function commentToAgent(
       if (confinement.attachmentsWritableDir) {
         resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
       }
+      // Ruling 199: and the no-checkout scratch its file tools may write.
+      if (confinement.scratchDir) resume.scratchDir = confinement.scratchDir;
     }
     if (target.effort) resume.effort = target.effort;
     if (!resumePrincipal.ok) resume.principalRefusal = resumePrincipal.refusal;
-    // Ruling 544: what the resumed run will judge. A resume re-pins nothing:
+    // Ruling 153: what the resumed run will judge. A resume re-pins nothing:
     // the checkout is where the run it resumes left it, at that run's subject,
     // so a commit revision under review is that run's; files are read as they
     // stand, so a delivery of files is today's.
@@ -1022,13 +1024,12 @@ export async function commentToAgent(
     runId = resumed.runId;
     resumeOutcomeKey = confinement?.outcomeKey;
     triggered = "resumed";
-    // Ruling 343: the disclosure the fresh path writes, on the resumed run too.
-    // `resolveResumeConfinement` has always returned `runInputs` for exactly
-    // this and its docstring has always said the caller "passes the whole thing
-    // to `recordRunInputs` once `resumeRun` has minted the run id" — nobody
-    // did, and the field had no reader anywhere in the app. The four fields it
-    // does not own are all in scope here, because this function composes the
-    // prompt.
+    // Ruling 167: the disclosure the fresh path writes, on the resumed run too.
+    // `resolveResumeConfinement` returns `runInputsFor` for exactly this, and
+    // the caller "passes the whole thing to `recordRunInputs` once `resumeRun`
+    // has minted the run id": the id names the run's own temp directory among
+    // its file tools' roots (ruling 217(d)). The four fields it does not own
+    // are all in scope here, because this function composes the prompt.
     if (confinement) {
       const resumedRow = getRun(db, runId);
       if (resumedRow) {
@@ -1040,7 +1041,7 @@ export async function commentToAgent(
           backend: resumeBackend,
           dataRoot: ctx.dataRoot,
           inputs: {
-            ...confinement.runInputs,
+            ...confinement.runInputsFor(runId),
             promptChars: followUp.length,
             anchor: anchor ?? null,
             spendCapUsd: getMaxRunSpendUsd(db),
@@ -1101,7 +1102,7 @@ export async function commentToAgent(
     // now carries the same note + audit shape the ambiguous-handle branch
     // writes. A packet decision the server RELAYS through this door reports
     // to its resolver instead (`relayed`), which owns the follow-up.
-    // Ruling 203: a REDELIVERY that fails needs no second note — the first
+    // Ruling 69: a REDELIVERY that fails needs no second note — the first
     // attempt's note already names the agent and the reason, and repeating it
     // on every completion would turn one honest refusal into a drumbeat.
     if (!input.relayed && !input.redelivered) {
@@ -1129,7 +1130,7 @@ export async function commentToAgent(
   //    reads the reply and proposes the next step (fixes the old bug where an
   //    @mention dropped the verdict/reconcile and never re-engaged the operator).
   if (triggered === "resumed") {
-    // Ruling 157 (pass 35, F35-8): the lift belongs to every door that starts
+    // Ruling 54 (pass 35, F35-8): the lift belongs to every door that starts
     // work, and this branch is a door — it resumes the provider session
     // directly, so it never passes through `dispatchAgentRun`, where the
     // sibling lift sits. The KNC-25 shape is exactly this one: the hold exists

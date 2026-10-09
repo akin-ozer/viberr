@@ -4,7 +4,7 @@ import { logger } from "~/server/logging/logger.server";
 import { launchesAgents, reapAgentProcesses } from "./agent-isolation.server";
 
 /**
- * Ruling 174: a settled run leaves no live process behind, on either backend.
+ * Ruling 142: a settled run leaves no live process behind, on either backend.
  *
  * The vendor CLIs defeat a process-group kill on their own (measured on the
  * pinned Claude CLI, 2026-09-11). Claude Code starts every Bash command in a
@@ -23,9 +23,9 @@ import { launchesAgents, reapAgentProcesses } from "./agent-isolation.server";
  *
  * A process that removes the marker from its own environment escapes the
  * sweep. This is cleanup of what a run forgot, not a containment boundary: the
- * container and the server-owned delivery gate are (ruling 93).
+ * container and the server-owned delivery gate are (ruling 144).
  *
- * Ruling 460: in the image an agent runs as its person's own uid, so this
+ * Ruling 139: in the image an agent runs as its person's own uid, so this
  * server can neither read its environment nor signal it. The sweep then also
  * goes through the launcher (`--reap`, {@link AgentReap}), which finds and
  * signals agent processes by the same marker as root, and a launched group's
@@ -39,7 +39,7 @@ export function runMarkerEnv(runId: string) {
 }
 
 /**
- * Ruling 376: the completion compaction runs AFTER the run's own CLI has
+ * Ruling 174: the completion compaction runs AFTER the run's own CLI has
  * exited, under the same credential overlay — and the settle sweep that reaps
  * a run's leftovers by its marker five seconds after that exit would reap the
  * compaction too (live, 2026-09-21: both epilogues died by SIGTERM). So the
@@ -171,13 +171,13 @@ export interface ReapTargets {
   /** A process-group leader whose whole group is signalled as well — the
    *  Claude CLI, which leads its own group. */
   groupLeader?: number | null;
-  /** Ruling 460: the group leader is the agent launcher, which relays what it
+  /** Ruling 139: the group leader is the agent launcher, which relays what it
    *  receives to the agent's group; its hard kill is SIGUSR2, not SIGKILL. */
   launched?: boolean;
 }
 
 /**
- * Ruling 460: the sweep's reach into processes the server cannot see. An agent
+ * Ruling 139: the sweep's reach into processes the server cannot see. An agent
  * runs as its person's own uid, so `/proc/<pid>/environ` is closed to the
  * server and `kill` is refused; the launcher (`--reap`) finds and signals them
  * by marker as root. Resolves how many it signalled.

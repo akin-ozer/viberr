@@ -30,7 +30,7 @@ export type TaskEventRow = {
 };
 
 /** The evidence rows a completion/verdict event carries, as stored: what was
- *  checked, how it came out and whether it passed (ruling 526). */
+ *  checked, how it came out and whether it passed (ruling 16). */
 export interface EvidenceRowRender {
   label: string;
   /** Empty when the label says it all. */
@@ -56,11 +56,11 @@ export interface TimelineEventRender {
   /** Files the event's run saved into the task's attachments/ dir — names
    *  only, rendered as chips linking to the serving route. */
   attachments: string[] | null;
-  /** Ruling 493: a gate run's note read back into its rows (`gateNoteView`),
+  /** Ruling 313: a gate run's note read back into its rows (`gateNoteView`),
    *  absent on every other event. The rows carry the logs, so such an event's
    *  `evidence` is null and `attachments` keeps only a file no row links. */
   gates?: GateNoteView;
-  /** Ruling 526: a reviewer's verdict read back into its result, revision and
+  /** Ruling 313: a reviewer's verdict read back into its result, revision and
    *  whatever its sentence adds (`verdictNoteView`), absent on every other
    *  event. */
   verdict?: VerdictNoteView;
@@ -72,7 +72,7 @@ export function mapTaskEventRow(row: TaskEventRow): TimelineEventRender {
     const verdict = verdictNoteView(event);
     return verdict ? { ...event, verdict } : event;
   }
-  // Written by the gates' system actor (ruling 482(d)); the projection keys a
+  // Written by the gates' system actor (ruling 17); the projection keys a
   // system actor by its bare id (`rebuilder.server.ts`).
   if (row.type !== "note" || row.actor_kind !== "system" || row.actor_ref !== GATES_SYSTEM_ID) {
     return event;

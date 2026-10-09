@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { pinLivePose } from "./live-pose";
 
 /**
- * Ruling 453: a surface closed mid-entrance used to get no exit at all —
+ * Ruling 287: a surface closed mid-entrance used to get no exit at all —
  * Chrome starts no transition on a property a running CSS animation drives.
  * jsdom has no animations, so the live pose is stubbed; the browser half was
  * measured in Chrome (opacity .50 → 0 with no transition before, a transition

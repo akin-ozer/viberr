@@ -305,11 +305,11 @@ describe("searchWorkspace", () => {
 });
 
 /**
- * Ruling 503: the palette finds an epic by its name or its id, the way
+ * Ruling 325: the palette finds an epic by its name or its id, the way
  * Linear's finds a project, inside the same membership scope as every other
  * hit.
  */
-describe("searchWorkspace: epics (ruling 503)", () => {
+describe("searchWorkspace: epics (ruling 325)", () => {
   async function writeEpic(store: TestStore, id: string, title: string, status: EpicStatus, updatedAt: string) {
     await createEpicFile(
       { projectSlug: store.slug, epicId: id, dataRoot: store.dataRoot },

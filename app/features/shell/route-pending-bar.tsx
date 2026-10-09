@@ -5,7 +5,7 @@ import { useNavigation } from "react-router";
  * P13-D-36 (UX-8 / F13-04) — the app's only route-level pending indicator.
  *
  * React Router's navigation/fetcher pending state is the default loading mechanism
- * (docs/architecture/decisions.md, UI porting rules), and loading feedback keeps
+ * (docs/architecture/decisions.md, UI rules), and loading feedback keeps
  * layout stable. Before this,
  * `useNavigation` appeared in exactly two lines of the whole tree, both inside
  * `app/routes/login.tsx`: there was no HydrateFallback, no skeleton, and the one
@@ -29,8 +29,8 @@ import { useNavigation } from "react-router";
 /** Long enough that an ordinary client navigation completes unannounced.
  *  Exported with no importer on purpose: exported, the build inlines it at its
  *  one use; module-local, it ships as a variable, 6 B more raw and 1 to 9 B
- *  more gzip on every route closure the ruling-457 ratchet budgets (first
- *  measured for ruling 458(g); re-measured 2026-10-08). */
+ *  more gzip on every route closure the ruling-11 ratchet budgets (first
+ *  measured for ruling 11; re-measured 2026-10-08). */
 export const ROUTE_PENDING_DELAY_MS = 220;
 
 export function RoutePendingBar({

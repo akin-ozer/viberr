@@ -36,7 +36,7 @@ import type { ActionResult } from "./task-detail-hooks";
 import { WaitChip } from "./wait-chip";
 
 /**
- * Ruling 501: the task's Details panel (priority, labels, epic, due date and
+ * Ruling 309: the task's Details panel (priority, labels, epic, due date and
  * what the task waits on), drawn the way Linear's and GitHub's issue sidebars draw
  * their properties. Each value IS its control: a person who may edit
  * (`edit-task-meta`) clicks the value and edits that one property in a popover
@@ -46,11 +46,11 @@ import { WaitChip } from "./wait-chip";
  *
  * Every property has its own fetcher and posts only its own field (the route
  * leaves alone an axis the form does not carry), so a save touches exactly
- * what the person changed and shows its own work in flight (ruling 368). An
+ * what the person changed and shows its own work in flight (ruling 286). An
  * editor seeds from server truth each time it opens (the goal-editor rule),
  * and nothing reads as saved before the server answers: no optimistic UI for
  * governed state. The wait keeps its own form, intent and refusal (ruling
- * 131): a bad reference keeps its editor open beside the error.
+ * 55): a bad reference keeps its editor open beside the error.
  */
 
 type DetailProp = "priority" | "labels" | "epic" | "due" | "deps";
@@ -73,12 +73,12 @@ export function TaskDetailsPanel({
   canEdit: boolean;
   /** Labels already used in this project, offered as label autocomplete. */
   labelSuggestions?: string[];
-  /** Ruling 503: the project's epics, for the Epic row's menu. */
+  /** Ruling 325: the project's epics, for the Epic row's menu. */
   epics?: EpicOption[];
-  /** Ruling 241: reviewer questions the hold refused, put when it lifts. They
+  /** Ruling 66: reviewer questions the hold refused, put when it lifts. They
    *  belong under the wait because they ARE what happens when it ends. */
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
-  /** Ruling 548: the Blocked by picker's read, built by the route component.
+  /** Ruling 59: the Blocked by picker's read, built by the route component.
    *  Null offers no list; a key typed in full still goes in. */
   dependencyCandidatesUrl?: string | null;
 }) {
@@ -88,7 +88,7 @@ export function TaskDetailsPanel({
   const editable = canEdit && !task.archived;
   /** Null for a row that is read-only; otherwise whether its editor is open. */
   const openState = (prop: DetailProp) => (editable ? open === prop : null);
-  // Ruling 457: a revalidation decodes new arrays for the same labels and the
+  // Ruling 11: a revalidation decodes new arrays for the same labels and the
   // same wait. The rows are memoised on these and on primitives, so a task
   // that did not change re-renders none of them.
   const labels = useStableValue(task.labels);
@@ -121,7 +121,7 @@ export function TaskDetailsPanel({
           setOpen={setOpen}
         />
         {queuedQuestions.length > 0 && (
-          // Ruling 241: without this the only trace of a queued question is
+          // Ruling 66: without this the only trace of a queued question is
           // one timeline note, and a promise a person cannot see is the
           // defect this pass kept finding.
           <div className="kv-row prop-note" data-queued-questions={queuedQuestions.length}>
@@ -132,7 +132,7 @@ export function TaskDetailsPanel({
                 : `Viberr puts ${queuedQuestions.length} queued questions to `}
               {queuedQuestions
                 .map((q) => {
-                  // Ruling 232: a handle is a NAME. The reviewer's live
+                  // Ruling 70: a handle is a NAME. The reviewer's live
                   // profile name, falling back to its role and then to the
                   // profile id, so an undeployed profile still reads as
                   // something a person can act on.
@@ -217,7 +217,7 @@ function PropRow({
   prop: DetailProp;
   label: string;
   edit: EditState;
-  /** This property's own save is in flight (ruling 368). */
+  /** This property's own save is in flight (ruling 286). */
   busy: boolean;
   /** The editor's kind: a menu of choices, a form, or the calendar. */
   popup: "menu" | "form" | "calendar";
@@ -226,9 +226,9 @@ function PropRow({
   editor: (done: () => void) => ReactNode;
   rowData?: Record<`data-${string}`, number>;
   /** The pointer or the focus reached the trigger: an editor in its own
-   *  chunk starts fetching it (ruling 548). */
+   *  chunk starts fetching it (ruling 11). */
   onIntent?: () => void;
-  /** Ruling 548: for an editor, what stands before the trigger rather than in
+  /** Ruling 309: for an editor, what stands before the trigger rather than in
    *  it (the wait's chips, each with a remove cross, which a button cannot
    *  hold); the trigger is then the compact one after them. */
   lead?: ReactNode;
@@ -293,7 +293,7 @@ function PropRow({
               aria-haspopup={role}
               aria-expanded={open}
               aria-labelledby={`${labelId} ${valueId}`}
-              // Ruling 368: the trigger that started a save shows it. It stays
+              // Ruling 286: the trigger that started a save shows it. It stays
               // focusable while it works (a disabled control drops the
               // keyboard's place) and ignores presses until the server answers.
               aria-busy={busy || undefined}
@@ -491,7 +491,7 @@ function LabelsEditor({
 }
 
 /**
- * Ruling 503: the epic this task belongs to. The menu offers "No epic" and
+ * Ruling 325: the epic this task belongs to. The menu offers "No epic" and
  * every OPEN epic, with the current one kept even when it is closed, so the
  * person sees where the task stands before moving it. A pick posts the one
  * field (`set-task-epic`), and the server writes the move on the task's
@@ -671,7 +671,7 @@ let pickerModule: Promise<typeof import("./dependency-picker")> | null = null;
 let loadedPicker: (typeof import("./dependency-picker"))["DependencyPicker"] | null = null;
 
 /** Starts (once) fetching the wait editor's picker, its own chunk (ruling
- *  548). A failed fetch is forgotten, so the next intent retries. */
+ *  11). A failed fetch is forgotten, so the next intent retries. */
 function loadPicker(): Promise<typeof import("./dependency-picker")> {
   if (!pickerModule) {
     const pending = import("./dependency-picker");
@@ -691,17 +691,17 @@ function loadPicker(): Promise<typeof import("./dependency-picker")> {
 const preloadPicker = () => void loadPicker().catch(() => undefined);
 
 /** A task key in running text, kept whole: Chromium breaks "VIB-153" after its
- *  hyphen (ruling 520's `.hold-ref`). */
+ *  hyphen (ruling 309(a)'s `.hold-ref`). */
 const keyRef = (key: string) => <span className="hold-ref">{key}</span>;
 
 /** What the picker is told where no read is wired (a bare render). */
 const NO_TASK_LIST: DependencyCandidatesView = { ok: false, reason: "No task list is offered here." };
 
-/** Ruling 131: what the task waits on, each entry with its live state.
- *  Ruling 548: for an editor each entry's chip carries the Owner row's remove
+/** Ruling 55: what the task waits on, each entry with its live state.
+ *  Ruling 309: for an editor each entry's chip carries the Owner row's remove
  *  cross, which saves the wait without it at once, and the trigger is the plus
  *  after the chips. A cross that leaves nothing still open is the release
- *  (ruling 131(e)), so that one asks first, as the Owner row's does. */
+ *  (ruling 59), so that one asks first, as the Owner row's does. */
 const WaitRow = memo(function WaitRow({
   taskKey,
   candidatesUrl,
@@ -828,8 +828,8 @@ const WaitRow = memo(function WaitRow({
   );
 });
 
-/** The wait's own form (ruling 131): the FULL list, posted as its canonical
- *  refs. Ruling 548: its entries are chips with a remove cross and its field
+/** The wait's own form (ruling 55): the FULL list, posted as its canonical
+ *  refs. Ruling 59: its entries are chips with a remove cross and its field
  *  finds the project's tasks (`DependencyPicker`, loaded here as a chunk while
  *  the editor reads the tasks it offers); mounted each time the editor opens,
  *  so the draft and the tasks start from what the server holds now. */
@@ -857,7 +857,7 @@ function WaitEditor({
     if (candidatesUrl) void loadRead(candidatesUrl);
   }, [loadRead, candidatesUrl]);
   // The writer refuses the whole list while it holds an entry that can never
-  // complete (ruling 355), so the editor says so before Save does.
+  // complete (ruling 59), so the editor says so before Save does.
   const dead = draft.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
   const [Picker, setPicker] = useState(() => loadedPicker);
   const [chunkFailed, setChunkFailed] = useState(false);
@@ -935,7 +935,7 @@ function SaveRow({ busy, onCancel }: { busy: boolean; onCancel: () => void }) {
       <button type="button" className="btn sm" onClick={onCancel}>
         Cancel
       </button>
-      {/* Ruling 368: the save in flight shows itself here. */}
+      {/* Ruling 286: the save in flight shows itself here. */}
       <button type="submit" className="btn primary sm" disabled={busy} aria-busy={busy || undefined}>
         {busy && <Icon name="loader" className="spin" />}
         {busy ? "Saving…" : "Save"}

@@ -26,7 +26,7 @@ import type { ContinuityLossReason } from "~/server/runtimes/run-service.server"
  * plain GROUP BY over the runs table; nothing here writes, and the page that
  * renders it is org-admin gated.
  *
- * Ruling 635: the run figures are ONE backend's at a time (`runAnalytics`).
+ * Ruling 35: the run figures are ONE backend's at a time (`runAnalytics`).
  * Claude and Codex do not measure alike: only Claude's result envelope carries
  * a cost, their tokens are different models' tokens, and Codex reports no
  * cache write. A sum across them is a number about neither. The instance's own
@@ -62,7 +62,7 @@ export interface InsightsTotals {
 }
 
 /**
- * Ruling 308: one breakdown dimension, and what its window left out.
+ * Ruling 35: one breakdown dimension, and what its window left out.
  *
  * `rows` is the TOP_N kept (half the slots reserved for the busiest groups so a
  * cost view still shows where the work happens). `hidden` is how many groups
@@ -77,7 +77,7 @@ export interface Breakdown {
   /** Null when NO hidden group reported a cost, never 0 — the same rule
    *  `CountRow.cost` follows for the same reason. */
   hiddenCost: number | null;
-  /** The same rule for tokens (ruling 635). */
+  /** The same rule for tokens (ruling 35). */
   hiddenTokens: number | null;
 }
 
@@ -85,7 +85,7 @@ export interface CountRow {
   /** The group's key: a run kind, project slug, model id, profile id or
    *  `project/KEY` task, as the runs table holds it. */
   label: string;
-  /** Ruling 642: what the page prints for the group. A kind in the engagement
+  /** Ruling 35: what the page prints for the group. A kind in the engagement
    *  vocabulary the run consoles speak (UXV19-3), a project's and an agent's
    *  own name, a model's display name; a task keeps its key. */
   name: string;
@@ -94,7 +94,7 @@ export interface CountRow {
    *  the Claude result envelope carries a cost, so a Codex group's cost is
    *  UNKNOWN, not zero. */
   cost: number | null;
-  /** Ruling 635: input plus output tokens over the runs whose provider total
+  /** Ruling 35: input plus output tokens over the runs whose provider total
    *  landed (F35-1), or null when none in the group did. */
   tokens: number | null;
 }
@@ -107,27 +107,27 @@ export interface DailyPoint {
    *  cost (any Codex day) — rendered "not reported", never a dishonest $0.00.
    *  A gap-filled quiet day (no runs) is a real 0. */
   cost: number | null;
-  /** Ruling 635: the day's tokens, by `CountRow.tokens`' rule; a quiet day's
+  /** Ruling 35: the day's tokens, by `CountRow.tokens`' rule; a quiet day's
    *  is a real 0. */
   tokens: number | null;
 }
 
-/** Ruling 635: one backend's run count, which the switch names it with. */
+/** Ruling 35: one backend's run count, which the switch names it with. */
 export interface BackendRuns {
   backend: RunBackend;
   runs: number;
 }
 
 /**
- * Ruling 635: what one backend's runs are weighed in. Cost where the backend
+ * Ruling 35: what one backend's runs are weighed in. Cost where the backend
  * reported one at all, else tokens, the figure every backend reports. Read off
- * the rows, never off a list of which backend prices its runs (ruling 191): a
+ * the rows, never off a list of which backend prices its runs: a
  * Codex that starts reporting a cost is weighed in it the day it does.
  */
 export type RunMeasure = "cost" | "tokens";
 
 /**
- * F31-D6, as ruling 635 left it: the coordination runs' share of one backend's
+ * F31-D6, as ruling 35 left it: the coordination runs' share of one backend's
  * measure. Coordination is `operator` + `controller` (RunKind): machinery that
  * decides what the working agents do rather than doing the work, and both
  * carry real cost.
@@ -140,7 +140,7 @@ export interface CoordinationShare {
   /**
    * coordination / total; null when nothing was measured, or when a side's
    * runs reached the provider and put no figure into the measure at all
-   * (ruling 190: a side that was never observed is not a zero, whichever side
+   * (ruling 36: a side that was never observed is not a zero, whichever side
    * it is). A side with no run that reached the provider contributes a real
    * zero.
    */
@@ -148,7 +148,7 @@ export interface CoordinationShare {
   /** Per side, the runs that reached the provider: a turn, or a first call. */
   reached: { delivery: number; coordination: number };
   /**
-   * Of those, the ones that put no figure into the measure. Ruling 201 nulled
+   * Of those, the ones that put no figure into the measure. Ruling 36 nulled
    * the share when ANY run was silent, because across backends the silence was
    * systematic: every Codex run. Inside one backend it is incidental — a run
    * stopped before its result — so it is counted rather than suppressed, as
@@ -165,7 +165,7 @@ export interface CoordinationShare {
  * computed from the projections + audit trail the app already keeps; nothing
  * new is recorded. All-time (like the totals above), not windowed.
  *
- * Ruling 635: the instance's own record, so every backend's. (The coordination
+ * Ruling 35: the instance's own record, so every backend's. (The coordination
  * share F31-D6 kept here is a figure about runs, and moved to `RunAnalytics`.)
  */
 export interface OversightSummary {
@@ -175,13 +175,13 @@ export interface OversightSummary {
     activeTasks: number;
     clearTasks: number;
     pct: number | null;
-    /** Ruling 290: WHICH active tasks have no definite next actor. */
+    /** Ruling 37: WHICH active tasks have no definite next actor. */
     unclear: string[];
   };
   /** Of DELIVERED tasks — a delivered work revision or a recorded PR — how
    *  many carry BOTH the task branch and a recorded PR, the key↔branch↔PR
-   *  chain (ruling 143). An allocated branch alone is NOT a delivery: ruling
-   *  122 names the branch at first dispatch, before an agent has written
+   *  chain (ruling 37). An allocated branch alone is NOT a delivery: ruling
+   *  228 names the branch at first dispatch, before an agent has written
    *  anything, so counting it grew the denominator to every task that ever
    *  engaged a deliverer (pass 34, U34-9: "7 of 8 delivered tasks" while one
    *  of the eight had delivered nothing). The residue is deliberate: a
@@ -192,7 +192,7 @@ export interface OversightSummary {
     deliveredTasks: number;
     tracedTasks: number;
     pct: number | null;
-    /** Ruling 290: WHICH delivered tasks are untraced, not just how many. */
+    /** Ruling 37: WHICH delivered tasks are untraced, not just how many. */
     untraced: string[];
   };
   /** How long an operator-opened decision/blocked packet waits for the human,
@@ -211,13 +211,13 @@ export interface OversightSummary {
    *  managing. A project with the guardrail off contributes none: nothing is
    *  compacting there. */
   longTimelines: number;
-  /** Ruling 290: WHICH of them, capped — the count alone names no task to open.
-   *  The longest first (ruling 635). */
+  /** Ruling 37: WHICH of them, capped — the count alone names no task to open.
+   *  The longest first (ruling 35). */
   longTimelineKeys: string[];
 }
 
 /**
- * The backends that report a prompt-cache WRITE figure at all (ruling 395).
+ * The backends that report a prompt-cache WRITE figure at all (ruling 36).
  *
  * Claude reports `cache_creation_input_tokens` per call and it moves. Codex
  * declares `cache_write_input_tokens` in the SDK's own types — "the number of
@@ -230,7 +230,7 @@ export interface OversightSummary {
 const CACHE_WRITE_REPORTING_BACKENDS: readonly RunBackend[] = ["claude"];
 
 /**
- * Ruling 369: what the prompt cache did for one group of runs — by run kind,
+ * Ruling 36: what the prompt cache did for one group of runs — by run kind,
  * and by the kind of credential the runs billed (the TTL follows it).
  */
 export interface CacheRow {
@@ -247,7 +247,7 @@ export interface CacheRow {
    * Tokens written into the cache, or NULL when no run in this group is on a
    * backend that reports the figure at all.
    *
-   * Ruling 395 (F39-22): Codex declares `cache_write_input_tokens` and returns
+   * Ruling 36 (F39-22): Codex declares `cache_write_input_tokens` and returns
    * exactly 0 for it on every turn — 101 of 101 usage envelopes on the live
    * ax-clone instance, while the sibling field reported 67.2M tokens READ. The
    * column used to sum those zeros and print `0` with a `0.000` ratio beside a
@@ -263,26 +263,26 @@ export interface CacheRow {
   /** writeTokens / readTokens, null when nothing was read or nothing reports. */
   writeReadRatio: number | null;
   /** First calls that wrote more than `FIRST_CALL_LARGE_WRITE_TOKENS` — the
-   *  whole-history replay shape ruling 372 removes. */
+   *  whole-history replay shape ruling 173 removes. */
   largeFirstWrites: number;
   /** How many runs' writes were billed under each cache lifetime. */
   ttl: { fiveMinute: number; oneHour: number; mixed: number };
   /**
-   * Ruling 505: the mean first-call write, over the runs with a first call on
+   * Ruling 172: the mean first-call write, over the runs with a first call on
    * a backend that reports writes, so PLAN.md's baseline column ("avg
    * first-call write") reads off the stored rows. Null when no such run is in
-   * the group: ruling 395's rule, one column over.
+   * the group: ruling 36's rule, one column over.
    */
   avgFirstCallWrite: number | null;
-  /** Ruling 505: cache reads per run, over the runs that reached the provider
+  /** Ruling 36: cache reads per run, over the runs that reached the provider
    *  (the ones with a first call) and those runs' reads alone. Null with none. */
   readPerRun: number | null;
-  /** Ruling 505: the spread of each run's largest prompt, over the runs that
+  /** Ruling 172: the spread of each run's largest prompt, over the runs that
    *  carried a per-call figure (`peak_prompt_tokens > 0`). Null with none. */
   peakPrompt: PromptSpread | null;
 }
 
-/** Ruling 505: PLAN.md's "peak prompt (median · p90 · max)", in tokens. */
+/** Ruling 172: PLAN.md's "peak prompt (median · p90 · max)", in tokens. */
 export interface PromptSpread {
   median: number;
   /** Nearest rank: the smallest peak at least 90% of the runs stay within. */
@@ -290,7 +290,7 @@ export interface PromptSpread {
   max: number;
 }
 
-/** Ruling 505: the resumed first calls whose idle time fell in one bucket. */
+/** Ruling 172: the resumed first calls whose idle time fell in one bucket. */
 export interface ResumeCell {
   firstCalls: number;
   warmStarts: number;
@@ -299,18 +299,18 @@ export interface ResumeCell {
 }
 
 /**
- * Ruling 505: one backend and credential kind, the pair `CACHE_TTL_MS` is
+ * Ruling 172: one backend and credential kind, the pair `CACHE_TTL_MS` is
  * keyed on, with its resumes sorted by how long the session sat idle.
  */
 export interface ResumeRow {
   /** The credential kind (`login`): the backend is the page's switch
-   *  (ruling 635). */
+   *  (ruling 35). */
   label: string;
-  /** The TTL ruling 372's verdict assumes for this pair (`cacheTtlMs`). */
+  /** The TTL ruling 173's verdict assumes for this pair (`cacheTtlMs`). */
   assumedTtlMs: number;
   /** One cell per bucket of `ResumeSummary.edgesMs`, plus the open last one. */
   cells: ResumeCell[];
-  /** Resumes ruling 372 declined: a fresh session started instead of a
+  /** Resumes ruling 173 declined: a fresh session started instead of a
    *  replay (`stale_large_session`), counted from their start audit rows. */
   setAside: number;
 }
@@ -319,17 +319,17 @@ export interface ResumeSummary {
   /** The buckets' upper edges, ascending (`RESUME_IDLE_EDGES_MS`). */
   edgesMs: readonly number[];
   rows: ResumeRow[];
-  /** The size past which a stale session is set aside (ruling 372's line),
+  /** The size past which a stale session is set aside (ruling 173's line),
    *  so the card can name it. */
   freshContextTokens: number;
 }
 
 /**
- * Ruling 505: operator starts that came close behind another of the same
+ * Ruling 172: operator starts that came close behind another of the same
  * prefix. PLAN.md (PR 5) held back a gate serializing them until they were
  * counted: the cold ones here, and what their first calls wrote, are the most
  * such a gate could save. Claude only — Codex's cache does not cross threads
- * (ruling 375(c)), so no gate could make its second start warm.
+ * (ruling 146), so no gate could make its second start warm.
  */
 export interface OperatorBurstSummary {
   /** Claude operator runs that reached the provider (have a first call). */
@@ -349,28 +349,28 @@ export interface OperatorBurstSummary {
 export interface CacheSummary {
   byKind: CacheRow[];
   byCredentialKind: CacheRow[];
-  /** Ruling 635: whether this backend reports a cache-write figure at all
-   *  (ruling 395). When it does not, the write columns are left out whole
+  /** Ruling 35: whether this backend reports a cache-write figure at all
+   *  (ruling 36). When it does not, the write columns are left out whole
    *  rather than printed "not reported" in every cell. */
   reportsWrites: boolean;
   /** The line `largeFirstWrites` counts against, so the card can name it. */
   largeWriteTokens: number;
-  /** Ruling 505: resumes by idle time (PLAN.md's Codex retention probe). */
+  /** Ruling 172: resumes by idle time (PLAN.md's Codex retention probe). */
   resumes: ResumeSummary;
-  /** Ruling 505: operator bursts (PLAN.md's count before the gate). Null on a
-   *  backend whose cache does not cross threads (Codex, ruling 375(c)): no
+  /** Ruling 36: operator bursts (PLAN.md's count before the gate). Null on a
+   *  backend whose cache does not cross threads (Codex, ruling 146): no
    *  order of starts could make a second one warm, so there is no count. */
   operatorBursts: OperatorBurstSummary | null;
 }
 
-/** Ruling 635: one backend's runs, every figure read off them alone. */
+/** Ruling 35: one backend's runs, every figure read off them alone. */
 export interface RunAnalytics {
   backend: RunBackend;
   measure: RunMeasure;
   totals: InsightsTotals;
   /** F31-D6: the operator and controller runs' share of this backend's measure. */
   coordination: CoordinationShare;
-  /** Ruling 369: the prompt-cache record, all-time like the totals. */
+  /** Ruling 36: the prompt-cache record, all-time like the totals. */
   cache: CacheSummary;
   /** Terminal-outcome breakdown + the success rate over terminal runs. */
   outcomes: {
@@ -397,10 +397,10 @@ export interface RunAnalytics {
   byKind: Breakdown;
   byProject: Breakdown;
   byModel: Breakdown;
-  /** Ruling 308: cost and runs per TASK. Labelled `project/task` when the read
+  /** Ruling 35: cost and runs per TASK. Labelled `project/task` when the read
    *  is not scoped to one project, because a task key is project-local. */
   byTask: Breakdown;
-  /** Ruling 308: cost and runs per agent PROFILE — "which reviewer earns its
+  /** Ruling 35: cost and runs per agent PROFILE — "which reviewer earns its
    *  runs", which `byKind` cannot answer because every reviewer is one kind. */
   byProfile: Breakdown;
   /** Mean wall-clock duration of finished runs with both timestamps, in ms. */
@@ -410,17 +410,17 @@ export interface RunAnalytics {
   daily: DailyPoint[];
   /** The latest provider rate-limit reading for this backend. */
   quota: BackendQuotaRow;
-  /** Ruling 635: the windows that reading lists. */
+  /** Ruling 35: the windows that reading lists. */
   quotaWindows: QuotaWindow[];
   windowDays: number;
 }
 
 /**
- * Ruling 635: one usage window of a backend's latest reading, as the page draws
- * it — every window the reading lists (ruling 608: Codex's five-hour and
+ * Ruling 35: one usage window of a backend's latest reading, as the page draws
+ * it — every window the reading lists (ruling 161(b): Codex's five-hour and
  * weekly windows, Claude's plan windows), shortest first. A reading that lists
  * none is its binding window alone. `reset` marks a window whose own reset
- * instant has passed (ruling 612): its figure is history, and the page says so
+ * instant has passed (ruling 161(c)): its figure is history, and the page says so
  * rather than drawing it as current.
  */
 export interface QuotaWindow {
@@ -431,11 +431,11 @@ export interface QuotaWindow {
 }
 
 export interface InsightsSummary {
-  /** Ruling 635: the instance's own record, every backend's. */
+  /** Ruling 35: the instance's own record, every backend's. */
   oversight: OversightSummary;
-  /** Ruling 635: every backend with its run count, for the switch. */
+  /** Ruling 35: every backend with its run count, for the switch. */
   backends: BackendRuns[];
-  /** Ruling 635: each backend that ran, its runs read alone, in `backends`
+  /** Ruling 35: each backend that ran, its runs read alone, in `backends`
    *  order. The page's switch picks one in the browser, so changing it costs
    *  no request. */
   runs: RunAnalytics[];
@@ -469,7 +469,7 @@ const groupSchema = z.object({
   tokens: z.number().nullable(),
 });
 
-/** Ruling 642: a run kind as the run consoles name it (UXV19-3, `roleShort`):
+/** Ruling 35: a run kind as the run consoles name it (UXV19-3, `roleShort`):
  *  "primary" and "reviewer" are the rows' machinery, and "reviewer" is written
  *  for every non-delivering run, verdict or not. */
 const RUN_KIND_NAME = new Map([
@@ -491,7 +491,7 @@ function namesFrom(db: DatabaseSync, sql: string): Map<string, string> {
   );
 }
 
-/** Ruling 369: one grouped cache row as SQLite returns it; every SUM over a
+/** Ruling 36: one grouped cache row as SQLite returns it; every SUM over a
  *  boolean or a nullable column is nullable. */
 const cacheGroupSchema = z.object({
   label: z.string().nullable(),
@@ -505,16 +505,16 @@ const cacheGroupSchema = z.object({
   ttl_5m: z.number().nullable(),
   ttl_1h: z.number().nullable(),
   ttl_mixed: z.number().nullable(),
-  // Ruling 505: PLAN.md's baseline columns.
+  // Ruling 172: PLAN.md's baseline columns.
   first_write_sum: z.number().nullable(),
   first_write_runs: z.number().nullable(),
   first_call_reads: z.number().nullable(),
 });
 
-/** Ruling 505: one run's peak prompt, keyed by the group it falls in. */
+/** Ruling 172: one run's peak prompt, keyed by the group it falls in. */
 const peakRowSchema = z.object({ label: z.string().nullable(), peak: z.number() });
 
-/** Ruling 505: a run that replayed a session, beside the run before it. The
+/** Ruling 172: a run that replayed a session, beside the run before it. The
  *  two enums are the `agent_runs` CHECK constraints, which the TTL table is
  *  keyed on. */
 const resumeRowSchema = z.object({
@@ -522,7 +522,7 @@ const resumeRowSchema = z.object({
   prev_credential_kind: z.enum(["login", "api_key", "access_token"]).nullable(),
   started_at: z.string(),
   prev_finished_at: z.string().nullable(),
-  /** Ruling 701: the earlier run's last console line, which is the end of its
+  /** Ruling 36: the earlier run's last console line, which is the end of its
    *  completion compaction when it had one. Null when its lines were pruned. */
   prev_last_line_at: z.string().nullable(),
   first_call_warm: z.number().nullable(),
@@ -534,7 +534,7 @@ const setAsideSchema = z.object({
   runs: z.number(),
 });
 
-/** Ruling 505: a Claude operator start beside the one before it. */
+/** Ruling 172: a Claude operator start beside the one before it. */
 const operatorStartSchema = z.object({
   started_at: z.string(),
   prev_started_at: z.string().nullable(),
@@ -565,7 +565,7 @@ export interface InsightsFilter {
   projectSlug?: string;
 }
 
-/** Ruling 635: a read of runs is always one backend's. */
+/** Ruling 35: a read of runs is always one backend's. */
 export interface RunFilter extends InsightsFilter {
   backend: RunBackend;
 }
@@ -623,7 +623,7 @@ const govTaskSchema = z.object({
   branch: z.string().nullable(),
   pr_json: z.string().nullable(),
   work_revision_sha: z.string().nullable(),
-  // Ruling 407: read for its `commits` alone — whether this task's delivery
+  // Ruling 37: read for its `commits` alone — whether this task's delivery
   // was commit-shaped at all.
   github_json: z.string().nullable(),
   packet_json: z.string().nullable(),
@@ -631,7 +631,7 @@ const govTaskSchema = z.object({
   created_at: z.string().nullable(),
 });
 
-/** Ruling 407: the one field the commit-shape test reads. */
+/** Ruling 37: the one field the commit-shape test reads. */
 const githubCommitsSchema = z
   .object({ commits: z.array(z.unknown()).catch([]) })
   .transform((g) => g.commits)
@@ -713,7 +713,7 @@ function nearestRank(sorted: number[], p: number): number | null {
   return sorted[Math.min(sorted.length, Math.max(1, Math.ceil(p * sorted.length))) - 1]!;
 }
 
-/** Ruling 635: the instance's own record, so the scope is a project at most —
+/** Ruling 35: the instance's own record, so the scope is a project at most —
  *  never a backend, which tasks, packets and the audit trail do not have. */
 export function oversightSummary(
   db: DatabaseSync,
@@ -764,12 +764,12 @@ export function oversightSummary(
     const terminal = roles.get(t.project_slug)?.terminalId ?? null;
     return terminal == null || t.stage !== terminal;
   });
-  // Ruling 290 (F37-125): the NAMES, not just the counts. Every one of these
+  // Ruling 37 (F37-125): the NAMES, not just the counts. Every one of these
   // three numbers is a count of EXCEPTIONS — work that is untraceable, work
   // with no next actor, a record past the readability guardrail — and each one
   // withheld the only fact a person needs to act on it. "41 of 42 delivered
   // tasks carry branch + PR" is a traceability metric that will not say which
-  // task cannot be traced. Ruling 253 settled this shape for a knowledge base
+  // task cannot be traced. Ruling 205 settled this shape for a knowledge base
   // ("an agent cannot ask for a rule it cannot name"); a dashboard is the same
   // rule with a person reading it.
   const unclearTasks = active.filter(
@@ -777,21 +777,22 @@ export function oversightSummary(
   );
   const clearTasks = active.length - unclearTasks.length;
 
-  // 2. Key↔branch↔PR traceability over DELIVERED tasks: a delivered revision
-  // or a recorded PR. A branch alone is not a delivery — ruling 122 allocates
-  // the name at first dispatch, before any work exists (ruling 143, U34-9).
+  // 2. Key↔branch↔PR traceability over DELIVERED tasks (ruling 37): a
+  // delivered revision or a recorded PR. A branch alone is not a delivery —
+  // ruling 228 allocates the name at first dispatch, before any work exists
+  // (U34-9).
   //
-  // Ruling 407 (F39-34): a delivery that was never commit-shaped has no branch
-  // and no PR to carry, so counting it here states a demand that can NEVER be
-  // met — on finished work, in a metric whose whole point (ruling 290) is to
-  // name exceptions a person can act on. Live: ax-clone AX-12 delivered an
+  // Less `commitless` deliveries (F39-34): a delivery that was never
+  // commit-shaped has no branch and no PR to carry, so counting it here states
+  // a demand that can NEVER be met — on finished work, in a metric whose whole
+  // point is to name exceptions a person can act on. Live: ax-clone AX-12 delivered an
   // upstream-fidelity REPORT as 20 attachments, `noChanges: true`, zero
   // commits, force-accepted and Done; Insights read its `workRevision`, found
   // no PR, and reported "18 of 19 delivered tasks carry branch + PR" naming
-  // AX-12 as the one that does not. Ruling 391 settled that a report is
-  // delivered work and ruling 401 dropped the same task's "behind main" pill
-  // on the same reasoning, with the same predicate — terminal stage, no PR, no
-  // commits — which is reused here rather than re-derived. A task that DID
+  // AX-12 as the one that does not. A report is delivered work (ruling 81),
+  // and the branch pill reads `no_branch` for the same task (ruling 237) on
+  // the same predicate — terminal stage, no PR, no commits — which is reused
+  // here rather than re-derived. A task that DID
   // commit and never opened a PR is still untraceable and still counted.
   const commitless = (t: z.infer<typeof govTaskSchema>): boolean => {
     const terminal = roles.get(t.project_slug)?.terminalId ?? null;
@@ -888,7 +889,7 @@ export function oversightSummary(
       // — off by one against the only rule that decides.
       return threshold != null && t.event_count > threshold;
     })
-    // Ruling 635: the longest first. The card names eight, and in table order
+    // Ruling 35: the longest first. The card names eight, and in table order
     // those were the oldest tasks (AWSC-1 to AWSC-8 of 70), not the longest.
     .sort((a, b) => b.event_count - a.event_count);
 
@@ -922,7 +923,7 @@ export function oversightSummary(
 }
 
 /**
- * Ruling 290: how many exception KEYS a card names before it stops.
+ * Ruling 37: how many exception KEYS a card names before it stops.
  *
  * Enough that a small set is named in full — a dashboard's job is to point at
  * the thing — and few enough that a badly-drifted instance does not turn one
@@ -937,31 +938,31 @@ function namedKeys(rows: readonly { project_slug: string; task_key: string }[]):
 }
 
 /**
- * Ruling 505: the fresh start `resumeRun` records instead of a replay, in the
+ * Ruling 173: the fresh start `resumeRun` records instead of a replay, in the
  * run's start audit (`continuityReset`). Typed against the service's own
  * reason list, so a rename there fails here.
  */
 const STALE_SESSION_SET_ASIDE = "stale_large_session" satisfies ContinuityLossReason;
 
 /**
- * Ruling 369: the prompt-cache record of one backend's runs (ruling 635),
+ * Ruling 36: the prompt-cache record of one backend's runs (ruling 35),
  * grouped by run kind and by the credential kind the runs billed. Every figure
  * is a plain SUM over the columns the sink folded; the rates are taken over the
  * runs that HAVE a first call, so a refused run is neither warm nor cold.
  *
- * Ruling 505 adds what the prompt-cache plan asked the
+ * Ruling 172 adds what the prompt-cache plan asked the
  * page for and it lacked: the baseline table's own columns (the mean first-call
  * write, reads per run, the peak prompt's spread), resumes by idle time (the
- * Codex retention probe, and the check on every TTL ruling 372 assumes) and the
+ * Codex retention probe, and the check on every TTL ruling 173 assumes) and the
  * operator bursts the plan said to count before building a gate. All of it is
- * read off rows the sink already writes, so an instance's history since ruling
- * 369 answers at once.
+ * read off rows the sink already writes, so an instance's existing history
+ * answers at once.
  */
 function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
   const { clause, params, and } = scope(filter);
   const reportingPlaceholders = CACHE_WRITE_REPORTING_BACKENDS.map(() => "?").join(", ");
 
-  // Ruling 505: each run's peak prompt, keyed by the same group expression, for
+  // Ruling 172: each run's peak prompt, keyed by the same group expression, for
   // the spread; a run whose peak never landed carries no per-call figure.
   const peaksBy = (column: string): Map<string, number[]> => {
     const peaks = new Map<string, number[]>();
@@ -1031,7 +1032,7 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
         const firstCalls = r.first_calls ?? 0;
         const warmStarts = r.warm_starts ?? 0;
         const writeReportingRuns = r.write_reporting_runs ?? 0;
-        // Ruling 395: no reporting run behind the sum means there is no figure,
+        // Ruling 36: no reporting run behind the sum means there is no figure,
         // not a figure of zero.
         const writeTokens = writeReportingRuns > 0 ? (r.write_tokens ?? 0) : null;
         const readTokens = r.read_tokens ?? 0;
@@ -1049,7 +1050,7 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
             writeTokens !== null && readTokens > 0 ? writeTokens / readTokens : null,
           largeFirstWrites: r.large_first_writes ?? 0,
           ttl: { fiveMinute: r.ttl_5m ?? 0, oneHour: r.ttl_1h ?? 0, mixed: r.ttl_mixed ?? 0 },
-          // Ruling 505: the same rule as the write column — a mean of first
+          // Ruling 172: the same rule as the write column — a mean of first
           // writes only over runs whose backend reports a write at all.
           avgFirstCallWrite: firstWriteRuns > 0 ? (r.first_write_sum ?? 0) / firstWriteRuns : null,
           readPerRun: firstCalls > 0 ? (r.first_call_reads ?? 0) / firstCalls : null,
@@ -1070,9 +1071,9 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
 }
 
 /**
- * Ruling 505: resumes sorted by how long their session sat idle, per backend
+ * Ruling 36: resumes sorted by how long their session sat idle, per backend
  * and credential kind — the probe PLAN.md (PR 6) asked for before Codex's
- * ten-minute TTL moves, and the check on every TTL ruling 372's verdict
+ * ten-minute TTL moves, and the check on every TTL ruling 173's verdict
  * assumes (a warm cell past the assumed TTL says the TTL is too short, a cold
  * one inside it that the cache lapsed sooner).
  *
@@ -1081,19 +1082,19 @@ function cacheSummary(db: DatabaseSync, filter: RunFilter): CacheSummary {
  * fresh session is a new id, and an operator's is never reused). Its idle time
  * runs from the last call that touched the cache to its own start: the earlier
  * run's finish, or the last line of that run's console when that is later,
- * because a specialist's completion compaction (ruling 376) is written there
- * after the run has finished (ruling 701). The
+ * because a specialist's completion compaction (ruling 175) is written there
+ * after the run has finished (ruling 36). The
  * row is keyed by the kind the EARLIER run billed: its writes are what the
- * resume reads, and ruling 372 takes the TTL from it. Only resumes whose first
+ * resume reads, and ruling 173 takes the TTL from it. Only resumes whose first
  * call landed are counted; the set-aside column counts the fresh starts
- * ruling 372 made instead of a replay, from their start audit.
+ * made instead of a replay, from their start audit.
  */
 function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
   const { params, and } = scope(filter);
   const edgesMs = RESUME_IDLE_EDGES_MS;
   const rows = new Map<string, ResumeRow>();
   const rowFor = (backend: RunBackend, kind: CredentialKind | null): ResumeRow => {
-    // Ruling 635: the backend is the page's switch, so a row is named by the
+    // Ruling 35: the backend is the page's switch, so a row is named by the
     // credential kind alone (`unknown` for a run written before it was stored).
     const label = kind ?? "unknown";
     const known = rows.get(label);
@@ -1169,7 +1170,7 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
 }
 
 /**
- * Ruling 505: the operator bursts PLAN.md (PR 5) said to count before building
+ * Ruling 36: the operator bursts PLAN.md (PR 5) said to count before building
  * a gate that serializes them. A cache entry exists only once the first
  * response has begun, so an operator run that starts while another run of the
  * same prefix — same project, the same principal's account, the same model —
@@ -1179,8 +1180,8 @@ function resumeSummary(db: DatabaseSync, filter: RunFilter): ResumeSummary {
  * within `OPERATOR_BURST_WINDOW_MS` after the previous such start is in a
  * burst, and the cold ones among those, with what their first calls wrote, are
  * the most a gate could save. Codex is left out on purpose: its cache does not
- * cross threads (ruling 375(c)), so no order of starts makes a second one warm.
- * The re-measure behind ruling 369 found 1 cold start in the 141 operator
+ * cross threads (ruling 146), so no order of starts makes a second one warm.
+ * The re-measure behind ruling 36 found 1 cold start in the 141 operator
  * starts that came within five minutes of the one before, which is why the
  * gate waits on this count.
  */
@@ -1222,18 +1223,18 @@ function operatorBurstSummary(db: DatabaseSync, filter: RunFilter): OperatorBurs
 }
 
 /**
- * F31-D6 under ruling 635: the coordination runs' share of one backend's
+ * F31-D6 under ruling 35: the coordination runs' share of one backend's
  * measure. Coordination is `operator` + `controller` (RunKind), machinery that
  * decides what the working agents do; delivery is every other kind.
  *
- * Ruling 190 (F37-12), one backend at a time: a side whose runs reached the
+ * Ruling 36 (F37-12), one backend at a time: a side whose runs reached the
  * provider and put no figure in at all was never observed, and its zero is not
  * a measurement — "100%" for coordination when the delivery runs merely
  * reported nothing, or "0%" in the mirror. A run that never reached the
  * provider (no turn, no first call) is no evidence either way: it consumed
  * nothing, as U35-7 keeps a never-started run out of the completion rate. Live,
  * two Codex operator runs that errored in their first twelve seconds on day one
- * held Codex's share at "n/a" for good. Ruling 201's stricter test (null unless
+ * held Codex's share at "n/a" for good. Ruling 36's stricter test (null unless
  * EVERY run reported) guarded the cross-backend sum, where the silence was
  * systematic; inside one backend it is a stopped run here and there, and the
  * Cost and Tokens cards count it.
@@ -1285,7 +1286,7 @@ function coordinationShare(
 }
 
 /**
- * Ruling 635: every backend with its run count, in `BACKENDS` order, a
+ * Ruling 35: every backend with its run count, in `BACKENDS` order, a
  * backend that never ran included with 0: the switch names each backend the
  * instance can run, and an empty one is a real answer, not a missing option.
  */
@@ -1305,7 +1306,7 @@ export function backendRuns(db: DatabaseSync, filter: InsightsFilter = {}): Back
 }
 
 /**
- * Ruling 635: one backend's runs, every figure read off them alone.
+ * Ruling 35: one backend's runs, every figure read off them alone.
  *
  * Each figure is the one this backend's runs report, and nothing is summed
  * across backends: only Claude's result envelope carries a cost, a Codex token
@@ -1340,8 +1341,8 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
       .get(...params),
   );
 
-  // Ruling 635: the backend is weighed in cost when any of its runs reported
-  // one. Read off the rows (ruling 191): which backend prices its runs is a
+  // Ruling 35: the backend is weighed in cost when any of its runs reported
+  // one. Read off the rows: which backend prices its runs is a
   // fact about the data, not a list in the source.
   const measure: RunMeasure = totals.costed_runs > 0 ? "cost" : "tokens";
   const coordination = coordinationShare(db, filter, measure);
@@ -1381,14 +1382,14 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
   // to see what drives spend, and the breakdown is capped at TOP_N — a
   // run-first order could truncate away a rare but expensive outlier, keeping
   // eight cheap-but-frequent groups instead. Measure-first guarantees the top
-  // drivers always survive the cap. Ruling 635: the measure is cost where the
+  // drivers always survive the cap. Ruling 35: the measure is cost where the
   // backend reports one and tokens where it does not, so a Codex breakdown
   // leads with what its runs consumed instead of a column of nulls.
   // The cap is applied HERE rather than in SQL: SQLite's DESC ordering sorts a
   // NULL sum last, and grouping over the whole set is cheap (a label is a kind,
   // model, project, profile or task). The top by RUNS is unioned in so no group
   // is dropped purely for being unmeasured.
-  // Ruling 642: the names the page prints. An agent's is the one its newest run
+  // Ruling 35: the names the page prints. An agent's is the one its newest run
   // carried (`agent_name`, stamped at dispatch); a project's is its own.
   const agentNames = namesFrom(
     db,
@@ -1413,7 +1414,7 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
           )
           .all(...params),
       )
-      // Ruling 99: controller turns carry project_slug "" (instance scope) —
+      // Ruling 251: controller turns carry project_slug "" (instance scope) —
       // label them honestly instead of rendering a blank bar.
       .map((r) => {
         const label = r.label === "" ? "controller (instance)" : (r.label ?? "unknown");
@@ -1432,9 +1433,9 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
       kept.set(row.label, row);
     }
     const shown = [...kept.values()].sort((a, b) => weigh(b) - weigh(a) || b.runs - a.runs);
-    // Ruling 308: say what the window left out. A breakdown that shows eight
+    // Ruling 35: say what the window left out. A breakdown that shows eight
     // of thirty groups and says nothing reads as the whole instance, which is
-    // the same defect ruling 302 fixed on the timeline windows — and this one
+    // the same defect ruling 117 fixed on the timeline windows — and this one
     // is on the surface a person opens to decide where their money goes.
     const hiddenRows = rows.filter((r) => !kept.has(r.label));
     const hiddenSum = (pick: (r: CountRow) => number | null): number | null =>
@@ -1546,12 +1547,12 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
     byKind: group("kind", (kind) => RUN_KIND_NAME.get(kind) ?? kind),
     byProject: group("project_slug", (slug) => projectNames.get(slug) ?? slug),
     byModel: group("model", (model) => modelDisplayName(filter.backend, model)),
-    // Ruling 308: the two the controller asked for and could not answer —
+    // Ruling 35: the two the controller asked for and could not answer —
     // "what did SHOP-27 cost across eleven rework rounds" and "which reviewer
     // earns its runs". A task key is only unique inside its project, so an
     // unscoped read labels each row with the project it belongs to.
     // U39-22: a controller turn's `task_key` is its CONVERSATION id and its
-    // project is '' (ruling 99), so every turn read as a task named
+    // project is '' (ruling 251), so every turn read as a task named
     // "/cnv_tjVMn13JkW-0". They are one row, named for what they are.
     byTask: group(
       `CASE WHEN kind = 'controller' THEN 'controller conversations' ELSE ${
@@ -1570,7 +1571,7 @@ export function runAnalytics(db: DatabaseSync, nowIso: string, filter: RunFilter
 
 /**
  * The page's read: the instance's oversight, every backend's run count, and
- * each backend that ran, read alone (ruling 635).
+ * each backend that ran, read alone (ruling 35).
  */
 export function getInsightsSummary(db: DatabaseSync, nowIso: string): InsightsSummary {
   const backends = backendRuns(db);

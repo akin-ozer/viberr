@@ -30,7 +30,7 @@ import {
 } from "./agent-trees.server";
 
 /**
- * Ruling 485 (F40-62, live on WEB-5): a tree an agent can write is removed as
+ * Ruling 140 (F40-62, live on WEB-5): a tree an agent can write is removed as
  * its person, through the launcher, never by the server's own recursive
  * remove. Wrangler left 0700 `mkdtemp` directories in a supporting checkout;
  * the server's `rmSync` deleted what the group could (`.git` first), threw
@@ -112,7 +112,7 @@ function standInLauncher() {
   };
 }
 
-describe("a tree an agent writes is removed as its person (ruling 485)", () => {
+describe("a tree an agent writes is removed as its person (ruling 140)", () => {
   it("removes a checkout holding a directory the server cannot empty, through the launch as the person's uid", async () => {
     // CANARY: make `removeAgentTree` the server's `rmSync(target, {recursive,
     // force})` again and it throws EACCES on the tool's directory, half-way.
@@ -194,7 +194,7 @@ describe("a tree an agent writes is removed as its person (ruling 485)", () => {
   });
 });
 
-describe("rm's refusal, read (ruling 485)", () => {
+describe("rm's refusal, read (ruling 140)", () => {
   it("names the errno and the path from GNU and BSD rm alike", () => {
     expect(removalFailure("rm: cannot remove '/data/w/.wrangler/tmp/dev-1': Permission denied\n")).toBe(
       "EACCES on /data/w/.wrangler/tmp/dev-1",
@@ -209,7 +209,7 @@ describe("rm's refusal, read (ruling 485)", () => {
     expect(removalFailure("/usr/bin/rm: cannot remove '/x/f': Permission denied\n")).toBe("EACCES on /x/f");
   });
 
-  it("ruling 495: reads the server's rmdir of an emptied root the same way, GNU and BSD", () => {
+  it("ruling 140: reads the server's rmdir of an emptied root the same way, GNU and BSD", () => {
     expect(removalFailure("rmdir: failed to remove '/data/t/WEB-1/workspace': Directory not empty\n")).toBe(
       "ENOTEMPTY on /data/t/WEB-1/workspace",
     );
@@ -219,7 +219,7 @@ describe("rm's refusal, read (ruling 485)", () => {
 });
 
 /**
- * Ruling 495 (F40-71, live on deploy 10): what the SERVER wrote in a tree an
+ * Ruling 140 (F40-71, live on deploy 10): what the SERVER wrote in a tree an
  * agent can write, no agent pass could remove. The skill mount's copies sat in
  * folders the store gave 0755, so the person could not unlink their files, and
  * a finished task's workspace root is `node`'s, in a task directory only
@@ -229,7 +229,7 @@ describe("rm's refusal, read (ruling 485)", () => {
  * The plan's decisions are pinned against a stand-in view of the tree, which
  * each step's answer changes; the drivers below run the real binaries.
  */
-describe("the server opens its own residue and removes an emptied root it owns (ruling 495)", () => {
+describe("the server opens its own residue and removes an emptied root it owns (ruling 140)", () => {
   const WORKSPACE = "/data/projects/site/tasks/WEB-1/workspace";
   const RESIDUE = `${WORKSPACE}/.viberr-plugins/run_Jd1RlrxTUlUN/skills/sourced-content/SKILL.md`;
   const PERSON: AgentLaunch = { uid: AGENT_UID_FLOOR, launcher: "/usr/local/libexec/viberr-launch" };
@@ -432,7 +432,7 @@ describe("the server opens its own residue and removes an emptied root it owns (
     expect(left).toBeNull();
   });
 
-  it("with isolation off the plan is the one user's, as before: no server step of ruling 495", () => {
+  it("with isolation off the plan is the one user's, as before: no server step of ruling 140", () => {
     // CANARY: run the server's steps without a person too and the harness's
     // one user gets a chmod -P and an rmdir it never asked for.
     const { steps, left } = drive(tree(), null, (step, state) => {
@@ -473,7 +473,7 @@ describe("the server opens its own residue and removes an emptied root it owns (
  * its `chmod` changes nothing, since the person owns nothing here. The
  * server's own steps run as the suite's user, as they would as `node`.
  */
-describe("F40-71's trees, removed through the drivers (ruling 495)", () => {
+describe("F40-71's trees, removed through the drivers (ruling 140)", () => {
   function groupBoundLauncher() {
     const dir = ctx.makeTempDir("viberr-launcher-");
     const log = path.join(dir, "launch.log");
@@ -607,7 +607,7 @@ describe("F40-71's trees, removed through the drivers (ruling 495)", () => {
   }
 
   it("opens and removes nothing through a link the server made that an agent moved into a folder it writes", async () => {
-    // Review of ruling 495: an agent can move any link out of a checkout the
+    // Review of ruling 140: an agent can move any link out of a checkout the
     // server cloned (its folders are the group's) to `<workspace>/support`,
     // `.viberr-plugins` or `.gates`, and the check read only links an agent
     // uid owns. CANARY: flag only those again and the server's chmod opens

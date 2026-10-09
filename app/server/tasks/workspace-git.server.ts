@@ -19,17 +19,17 @@ import { serverGitEnv } from "./git-clone-auth.server";
  * Pass 40 review, R-seams-1: **the server never executes git with an
  * agent-writable repository as its working repository under its own uid.**
  *
- * Ruling 460 runs every agent as its person's own OS user and shares each
+ * Ruling 139 runs every agent as its person's own OS user and shares each
  * task's `workspace/` with the agent group (`node:viberr-agents` 2770), so an
  * agent can write any checkout's `.git`: a hook, `core.fsmonitor`, a filter
  * driver, a credential helper, `url.<x>.insteadOf`. The server then ran its own
  * git there as `node`, with `process.env` (the secret-encryption key, the
  * session secret) and, on a push, the project's PAT — so an agent could have
  * the server execute its code or send the PAT to a host of its choosing, and
- * nothing of ruling 460 held. The rule has two halves:
+ * nothing of ruling 196 held. The rule has two halves:
  *
  *  - **Local operations inside a workspace run as the person the work bills**
- *    (the task's owner, ruling 127), through the launcher exactly like their
+ *    (the task's owner, ruling 137), through the launcher exactly like their
  *    runs, with no credential in the environment: {@link taskWorkspaceGit}.
  *    What an agent planted then runs, if at all, as that person, which is
  *    authority their agent already had. With no launcher (the host dev server,
@@ -220,17 +220,17 @@ function noPerson(what: string): AppError {
     code: ERROR_CODES.RUN_UNAVAILABLE,
     status: 409,
     userMessage:
-      `The task's workspace could not be worked in as its person's own user (ruling 460, pass 40 review): ${what}. ` +
-      "Nothing ran; a workspace's git, and the removal of a tree in it (ruling 485), never falls back to the server's own user.",
+      `The task's workspace could not be worked in as its person's own user (ruling 196, pass 40 review): ${what}. ` +
+      "Nothing ran; a workspace's git, and the removal of a tree in it (ruling 140), never falls back to the server's own user.",
   });
 }
 
 /**
- * Who works in a task's workspace: the task's owner (ruling 127: the person the
+ * Who works in a task's workspace: the task's owner (ruling 137: the person the
  * task's runs bill) through the launcher when this server launches agents, and
  * null — the server's own user — when it does not. Its git runs as them
  * ({@link taskWorkspaceGit}), and so does the removal of a tree in it (ruling
- * 485, `removeAgentTree`). Throws a `run_unavailable` AppError when isolation
+ * 140, `removeAgentTree`). Throws a `run_unavailable` AppError when isolation
  * is on and there is nobody to run as (no task, no owner) or the person's home
  * cannot be prepared.
  */

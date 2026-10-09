@@ -20,7 +20,7 @@ import type { GithubContext } from "./github-context.server";
 import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
 
 /**
- * Ruling 128 (pass 34, Q34-2 / F34-4): Viberr bootstraps the default branch
+ * Ruling 227 (pass 34, Q34-2 / F34-4): Viberr bootstraps the default branch
  * of an empty repository itself, BEFORE a task's first branch.
  *
  * Live (JC-1 on an empty `akin-ozer/jira-clone`): the pre-dispatch branch hook
@@ -41,7 +41,7 @@ import { flagScopeViolation, policyViolationText } from "./scope-flag.server";
  *     default branch and restore the configured name as the repository default
  *     (the repair the owner approved live, Q34-3).
  *
- * Ruling 670: that repair is for a repository whose default on GitHub is a
+ * Ruling 227: that repair is for a repository whose default on GitHub is a
  * branch named for one of the project's tasks. It ran on every repository
  * that had refs and lacked the project's branch, so a project created while
  * GitHub was unreachable (written with `main`, unconfirmed), or one whose
@@ -81,7 +81,7 @@ export type EnsureDefaultBranchResult =
       /** `ref_from_branch_root`: whether the repository default was restored. */
       defaultRestored?: boolean;
     }
-  /** Ruling 670: the repository has a default branch of its own and the
+  /** Ruling 227: the repository has a default branch of its own and the
    *  project named one it does not have. Nothing was created on GitHub: the
    *  project names the repository's now, and `defaultBranch` is that one. */
   | { status: "adopted"; defaultBranch: string; was: string }
@@ -92,8 +92,8 @@ export type EnsureDefaultBranchResult =
 
 export interface EnsureDefaultBranchContext {
   dataRoot?: string;
-  /** Ruling 468: what waited on the base, for the timeline line. Omitted,
-   *  the task's branch (ruling 128's first caller). */
+  /** Ruling 227: what waited on the base, for the timeline line. Omitted,
+   *  the task's branch (its first caller). */
   before?: "task-branch" | "operator-checkout";
 }
 
@@ -140,9 +140,9 @@ async function rootCommitOf(
 }
 
 /**
- * Ruling 670: whether `branch` is named for a task of this project: a task's
+ * Ruling 227: whether `branch` is named for a task of this project: a task's
  * key in the form its branch takes (`taskBranchName`, the key lowercased), or
- * that followed by a suffix (ruling 122's `<key>-<4 hex>`, the older
+ * that followed by a suffix (ruling 228's `<key>-<4 hex>`, the older
  * `<key>-<title>`). An archived task's branch is still a task's.
  *
  * The name, never the `branch:` a task records, and without regard to case,
@@ -164,7 +164,7 @@ export function isTaskBranch(db: DatabaseSync, projectSlug: string, branch: stri
 }
 
 /**
- * Ruling 128 splits by EVIDENCE, not by failure: only a positive "there is no
+ * Ruling 227 splits by EVIDENCE, not by failure: only a positive "there is no
  * default ref and Viberr could not create it" refuses the push. A READ that did
  * not answer proves nothing about the repository's state, so it degrades to
  * `network_unavailable` — the status the pre-push gate lets through — and never
@@ -293,7 +293,7 @@ export async function ensureDefaultBranch(
           `Creating the initial commit on \`${base}\` was refused.`,
         );
       }
-      // Ruling 468: idempotent under a race. Two paths now bootstrap (the
+      // Ruling 227: idempotent under a race. Two paths now bootstrap (the
       // branch preparation and the operator's first checkout), and a second
       // PUT that lost to the first is refused by GitHub (the file exists, or
       // the branch moved). The branch existing is the outcome both wanted,
@@ -325,7 +325,7 @@ export async function ensureDefaultBranch(
         reason: `GitHub reports no default branch for \`${gh.repo}\` although it has refs.`,
       };
     }
-    // Ruling 670: the repair below is for a default branch named for a task.
+    // Ruling 227: the repair below is for a default branch named for a task.
     // Any other is the repository's own, and the project takes it.
     if (from !== base && !isTaskBranch(db, scope.projectSlug, from)) {
       return adoptRepositoryDefault(db, gh, scope, actor, ctx, from);
@@ -385,7 +385,7 @@ export async function ensureDefaultBranch(
   };
   if (scope.taskKey) audit.taskKey = scope.taskKey;
   recordAudit(db, audit);
-  // Ruling 480: the commit or the ref just made is a write through this token,
+  // Ruling 220: the commit or the ref just made is a write through this token,
   // so it proves `repo` on this repository.
   markWriteScopeProven(
     db,
@@ -423,7 +423,7 @@ export async function ensureDefaultBranch(
 }
 
 /**
- * Ruling 670: the repository has a default branch of its own, and the project
+ * Ruling 227: the repository has a default branch of its own, and the project
  * names one it does not have: never confirmed when the project was created
  * (the probe did not answer), or renamed on GitHub since. Creating the
  * project's name there and making it the default would rewrite somebody's

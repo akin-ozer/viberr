@@ -35,12 +35,12 @@ import { quotaWindowLabel } from "~/shared/text/quota-window";
  * read (`getInsightsSummary`); the page only formats and draws. Org-admin gated
  * at the route.
  *
- * Ruling 635: the instance's own record (delivery oversight) comes first and
+ * Ruling 35: the instance's own record (delivery oversight) comes first and
  * covers every backend. Below it the agent runs are read one backend at a time,
  * under a switch that names each backend with its run count: Claude and Codex
  * do not measure alike, so nothing on the page sums across them.
  *
- * Ruling 642 (owner: "be critical of the design that feels finished product no
+ * Ruling 324 (owner: "be critical of the design that feels finished product no
  * ai slop"): one surface language. Each band of figures is one panel whose
  * cells a hairline divides, sized to the count it holds so no row ends in a
  * hole; a figure reads label, number, one line of context, and no icon; the
@@ -54,7 +54,7 @@ function trimScaled(fixed: string): string {
 }
 
 /** Each unit starts where the one below would round up to 1,000 of itself, so
- *  nothing prints "1000.0M". Ruling 635: a backend's input passes a billion in
+ *  nothing prints "1000.0M". Ruling 324: a backend's input passes a billion in
  *  days, and "5361.5M" read as a typo. */
 function fmtTokens(n: number): string {
   if (n >= 999_950_000) return `${trimScaled((n / 1_000_000_000).toFixed(2))}B`;
@@ -71,7 +71,7 @@ function fmtPercent(rate: number | null): string {
   return rate === null ? "n/a" : `${Math.round(rate * 100)}%`;
 }
 
-/** A figure in its backend's measure (ruling 635): dollars, or tokens. Null is
+/** A figure in its backend's measure (ruling 35): dollars, or tokens. Null is
  *  "not reported", never a zero the data cannot vouch for. */
 function fmtMeasure(measure: RunMeasure, value: number | null): string {
   if (value === null) return "not reported";
@@ -85,7 +85,7 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
   // (docs/ui/surfaces.md §4).
   return (
     <main className="insights" data-screen-label="Insights">
-      {/* Ruling 625: Instance settings' header (ruling 145), one title step and
+      {/* Ruling 280: Instance settings' header (ruling 294), one title step and
           one lede. */}
       <div className="set-head">
         <div>
@@ -118,7 +118,7 @@ export function InsightsPage({ summary }: { summary: InsightsSummary }) {
 }
 
 /**
- * A search parameter the page reads in the browser (ruling 635's switch): the
+ * A search parameter the page reads in the browser (ruling 35's switch): the
  * loader reads none, so a choice is a URL rewrite with no request, replaced in
  * place like the board's filters, and a link holds it.
  */
@@ -143,7 +143,7 @@ function useSearchChoice<T extends string>(
 }
 
 /**
- * Ruling 635: one backend's runs. Everything from the switch down reads only
+ * Ruling 35: one backend's runs. Everything from the switch down reads only
  * that backend: its totals, its days, its usage limits, where its runs went and
  * its prompt cache. Each backend is weighed in what it reports
  * (`runs.measure`): cost on a backend that reports one, tokens on one that does
@@ -202,7 +202,7 @@ function Metric({
   sub?: string;
   /** A second line under `sub`: a disclosure the first line would bury. */
   note?: string;
-  /** Ruling 290: the exceptions this number counts, BY NAME. A card that
+  /** Ruling 37: the exceptions this number counts, BY NAME. A card that
    *  reports "41 of 42 delivered tasks carry branch + PR" and will not say
    *  which one cannot be traced has withheld the only fact a reader needs. */
   names?: readonly string[];
@@ -232,13 +232,13 @@ function Metric({
   );
 }
 
-/** Ruling 635: one backend's totals. Ruling 642: six figures, three to a row;
+/** Ruling 35: one backend's totals. Ruling 324: six figures, three to a row;
  *  the turn count rides under the run count it belongs to. */
 function RunTotals({ runs }: { runs: RunAnalytics }) {
   const name = BACKEND_LABEL[runs.backend];
   const { totals, outcomes } = runs;
   // A backend whose envelope carries no price is "not reported", never $0.00
-  // (ruling 395), and says so once, on this figure. A Claude run stopped before
+  // (ruling 36), and says so once, on this figure. A Claude run stopped before
   // its result reports no cost either, so the figure names the runs it leaves
   // out.
   const silentRuns = totals.runs - totals.costedRuns;
@@ -319,7 +319,7 @@ function RunTotals({ runs }: { runs: RunAnalytics }) {
 }
 
 /**
- * Ruling 635: Claude | Codex, each with its run count, so the split between
+ * Ruling 35: Claude | Codex, each with its run count, so the split between
  * them reads at a glance without a sum that means nothing.
  */
 function BackendSwitch({
@@ -352,8 +352,8 @@ function BackendSwitch({
 }
 
 /**
- * F31-D6 under ruling 635: the coordination runs' share of one backend's
- * measure. Ruling 190 still decides when there is no share: a side that RAN and
+ * F31-D6 under ruling 35: the coordination runs' share of one backend's
+ * measure. Ruling 36 still decides when there is no share: a side that RAN and
  * put no figure in at all was never observed, so "100%" or "0%" would be the
  * quotient of a gap. A stopped run here and there is the Cost and Tokens
  * figures' disclosure, beside this one.
@@ -396,9 +396,9 @@ function stoppedLabel(outcomes: RunAnalytics["outcomes"]): string {
  * Delivery-oversight outcomes (pass 29): the PRD's own measurable-outcome
  * criteria, finally measured (ownership/state clarity, key↔branch↔PR
  * traceability, blocked-decision latency and time-to-review) from the
- * projections and the audit trail the product already keeps. Ruling 635: the
+ * projections and the audit trail the product already keeps. Ruling 35: the
  * instance's own record, so it covers every backend and sits above the switch.
- * Ruling 642: four figures to a row, the long timelines across the band's foot.
+ * Ruling 324: four figures to a row, the long timelines across the band's foot.
  */
 function OversightBand({ oversight: g }: { oversight: OversightSummary }) {
   const wait = g.packetResolution;
@@ -482,15 +482,15 @@ function OversightBand({ oversight: g }: { oversight: OversightSummary }) {
  * The latest provider rate-limit reading for the chosen backend (pass 29):
  * approaching quota exhaustion is visible here BEFORE a run fails on it. A
  * backend with no reading renders neutral: this is an observation log, never a
- * probe. Ruling 635: one row per window the reading lists (ruling 608), so
+ * probe. Ruling 35: one row per window the reading lists (ruling 161(b)), so
  * Codex's five-hour window and its weekly one both show, each aged on its own
- * reset (ruling 612). Ruling 642: a row is the window's name and figure over a
+ * reset (ruling 161(c)). Ruling 324: a row is the window's name and figure over a
  * full-width track, its reset under it, so every track starts and ends on the
  * same lines.
  *
  * D5 (pass 31): the live reading channel was Claude-only, so a Codex account
  * that was ALREADY spent showed "no reading yet" while every run on it was
- * being refused. (Ruling 604 reads Codex's from its rollout, once a run makes a
+ * being refused. (Ruling 161(b) reads Codex's from its rollout, once a run makes a
  * model call.) A refused run is its own row state, rendered as what it is
  * ("from a refused run"), never merged into a utilization number.
  */
@@ -502,18 +502,23 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
   // utilization reading this backend reported AFTER that moment is fresher
   // evidence from the same provider, so it wins: the refusal is history by
   // then, and showing it would pin the row at 100% while the backend is
-  // demonstrably answering runs again.
-  const refusal =
-    exhausted && !observedAfter(reading?.observedAt, exhausted.observedAt) ? exhausted : null;
+  // demonstrably answering runs again. Only a reading about the SAME account
+  // (ruling 160(a)): another person's run answering says nothing about
+  // whether this account's window has reopened.
+  const superseded =
+    exhausted != null &&
+    reading?.credentialUserId === exhausted.credentialUserId &&
+    observedAfter(reading.observedAt, exhausted.observedAt);
+  const refusal = exhausted && !superseded ? exhausted : null;
 
   let rows: ReactNode;
   if (credentialRefused) {
     // F32-4 (pass 32): a REJECTED CREDENTIAL outranks every other state: no
     // run on this backend can start until someone fixes it, whatever the
     // utilization window says. It is its own record (the failed run and the
-    // provider's sentence) and is cleared by a run that completes on the
-    // backend or by the named account being replaced or disconnected (ruling
-    // 165); the row says exactly that.
+    // provider's sentence) and is cleared by a run on that account that
+    // completes or by the named account being replaced or disconnected
+    // (ruling 160(b)); the row says exactly that.
     rows = <CredentialRefusedRow name={name} refused={credentialRefused} hydrated={hydrated} />;
   } else if (refusal) {
     rows = <RunRefusalRow name={name} refusal={refusal} hydrated={hydrated} />;
@@ -545,14 +550,14 @@ function UsageLimits({ runs }: { runs: RunAnalytics }) {
           : `No ${name} run has reported a reading yet.`}{" "}
         Near 100%, new runs may be refused until the window resets.
         {refusal && !credentialRefused
-          ? " “Usage limit reached” comes from a run the provider refused, not from a reported figure; it clears when a run on this backend completes, when the account it names changes, when the window it names has passed, or when the backend reports a newer reading."
+          ? " “Usage limit reached” comes from a run the provider refused, not from a reported figure; it clears when a run on that account completes, when the account changes, when the window it names has passed, or when that account reports a newer reading."
           : ""}
       </p>
     </section>
   );
 }
 
-/* Ruling 700(e), the split of `UsageLimits`: the card's three kinds of row,
+/* Ruling 13(b), the split of `UsageLimits`: the card's three kinds of row,
    each hook-free in the list slot the card's branches filled (the card keeps
    `useHydrated` and hands its answer down), and what a window row reads off
    the reading, as pure functions. */
@@ -561,7 +566,7 @@ type QuotaReading = NonNullable<RunAnalytics["quota"]["reading"]>;
 
 const pctOf = (u: number) => Math.max(0, Math.min(100, Math.round(u * 100)));
 
-// D32-2 (ruling 4): the app's ONE date formatter, never the server locale's
+// D32-2 (ruling 293): the app's ONE date formatter, never the server locale's
 // `toLocaleString`. Every localized instant here is hydration-gated: rendered
 // during SSR it would be the SERVER's timezone, and React re-renders the page
 // rather than patching a text mismatch.
@@ -592,7 +597,7 @@ function CredentialRefusedRow({
         <span className="quota-fill full" />
       </span>
       <span className="quota-meta" title={refused}>
-        from a refused run · clears when a run on this backend completes or the account changes
+        from a refused run · clears when a run on that account completes or the account changes
         {/* Interface review 2026-09-24 (acce-5): the title is the pointer's
             extra; touch, keyboard and screen readers get the same sentence
             from `.vh`. */}
@@ -628,7 +633,7 @@ function RunRefusalRow({
       <span className="quota-meta" title={refused}>
         {[
           // Say where this came from. It is NOT a utilization reading the
-          // provider volunteered. Ruling 130(d): and WHOSE account it was.
+          // provider volunteered. Ruling 160(a): and WHOSE account it was.
           refusal.credentialLabel
             ? `from a refused run on ${refusal.credentialLabel}'s account`
             : "from a refused run",
@@ -660,7 +665,7 @@ function RunRefusalRow({
 
 /** What one window's row reads off the backend's reading. */
 function windowState(w: QuotaWindow, reading: QuotaReading) {
-  // Ruling 481(d): a window whose reset has passed keeps its row, in the
+  // Ruling 161(c): a window whose reset has passed keeps its row, in the
   // past tense, with no percentage and no bar.
   const pct = w.reset || w.utilization == null ? null : pctOf(w.utilization);
   // The provider's status and overage belong to the binding window. A
@@ -686,7 +691,7 @@ function windowMeta(
     w.reset ? "no reading since" : null,
     warning ? reading.status.replace(/^allowed_/, "").replaceAll("_", " ") : null,
     overage ? "overage" : null,
-    // Ruling 130(d): the HOUR when the provider sent one. Before
+    // Ruling 160(a): the HOUR when the provider sent one. Before
     // hydration, the timezone-neutral UTC day and clock, marked as
     // such (P07-I), so the first paint is honest either way.
     w.resetsAt != null
@@ -701,7 +706,7 @@ function windowMeta(
     .join(" · ");
 }
 
-/** One window the reading lists (ruling 635, ruling 642 above). */
+/** One window the reading lists (ruling 35, ruling 324 above). */
 function QuotaWindowRow({
   w,
   reading,
@@ -739,15 +744,15 @@ function QuotaWindowRow({
 }
 
 /** One column of the prompt-cache table: its head and its cell. `writes` marks
- *  a column made of a figure only some backends report (ruling 395), which
- *  ruling 635 leaves out whole on a backend that reports none. */
+ *  a column made of a figure only some backends report (ruling 36), which
+ *  ruling 35 leaves out whole on a backend that reports none. */
 interface CacheColumn {
   head: ReactNode;
   cell: (r: CacheRow) => ReactNode;
   writes?: true;
 }
 
-/** Ruling 642: the panel's one line, over every run the backend made. */
+/** Ruling 324: the panel's one line, over every run the backend made. */
 function cacheHeadline(cache: CacheSummary): string {
   const sum = (pick: (r: CacheRow) => number) => cache.byCredentialKind.reduce((n, r) => n + pick(r), 0);
   const firstCalls = sum((r) => r.firstCalls);
@@ -761,17 +766,17 @@ function cacheHeadline(cache: CacheSummary): string {
 }
 
 /**
- * Ruling 369: the prompt-cache record of the chosen backend's runs, by run kind
+ * Ruling 36: the prompt-cache record of the chosen backend's runs, by run kind
  * and by credential kind: the warm-start rate over the runs that have a first
  * call, the write/read ratio, the first calls that wrote more than the
  * large-write line, and how many runs' writes were billed under each cache
- * lifetime. Ruling 505 adds PLAN.md's baseline columns (the mean first write,
+ * lifetime. Ruling 172 adds PLAN.md's baseline columns (the mean first write,
  * reads per run, the peak prompt's median · p90 · max), and under the table the
  * resumes by idle time and the operator bursts. Every figure is on a `data-`
  * attribute so the DOM reads without the words; a rate with no first call
  * behind it prints "n/a", never 0%.
  *
- * Ruling 642: the panel says its headline in one line and folds the tables and
+ * Ruling 324: the panel says its headline in one line and folds the tables and
  * their definitions under it. They are a tuning instrument, and opened they
  * were the page's largest object.
  */
@@ -831,7 +836,7 @@ function CachePanel({ cache, backend }: { cache: CacheSummary; backend: RunBacke
     {
       head: "written",
       writes: true,
-      // Ruling 395: a group with no run on a backend that reports the figure
+      // Ruling 36: a group with no run on a backend that reports the figure
       // has no figure, and the rest of this page already says "not reported"
       // rather than printing a zero it cannot vouch for.
       cell: (r) => (
@@ -972,8 +977,8 @@ function CachePanel({ cache, backend }: { cache: CacheSummary; backend: RunBacke
 const NO_WRITE_FIGURE = "No run in this group is on a backend that reports a cache-write figure.";
 
 /**
- * Ruling 505: PLAN.md's "avg first-call write". A group with no run on a
- * backend that reports writes says so, as the write column does (ruling 395);
+ * Ruling 36: PLAN.md's "avg first-call write". A group with no run on a
+ * backend that reports writes says so, as the write column does;
  * one whose reporting runs never reached the provider has no mean to take.
  */
 function FirstWriteCell({ r }: { r: CacheRow }) {
@@ -1018,9 +1023,9 @@ function fmtSpanRange(lower: number, upper: number): string {
 }
 
 /**
- * Ruling 505: resumes by how long their session sat idle, one row per
+ * Ruling 172: resumes by how long their session sat idle, one row per
  * credential kind the earlier run billed (the TTL table is keyed on that kind
- * and the backend, which ruling 635's switch has chosen). A warm cell past the
+ * and the backend, which ruling 35's switch has chosen). A warm cell past the
  * row's assumed TTL says the cache outlived it, which is what PLAN.md's Codex
  * retention probe asks; a cold one inside it says the cache lapsed sooner. Each
  * bucket lies wholly inside or wholly past every TTL, because the edges are
@@ -1094,7 +1099,7 @@ function ResumeTable({ resumes }: { resumes: ResumeSummary }) {
 }
 
 /**
- * Ruling 505: the operator bursts PLAN.md said to count before building a gate
+ * Ruling 172: the operator bursts PLAN.md said to count before building a gate
  * that holds simultaneous starts back. The cold ones in a burst, and what their
  * first calls wrote, are the most such a gate could save.
  */
@@ -1143,7 +1148,7 @@ function taskHref(projectAndKey: string): string {
   return `/projects/${slug}/tasks/${key}`;
 }
 
-/** Ruling 642: the five breakdowns, one at a time, Agent first. */
+/** Ruling 324: the five breakdowns, one at a time, Agent first. */
 const DIMENSIONS = ["agent", "task", "model", "project", "kind"] as const;
 type Dimension = (typeof DIMENSIONS)[number];
 const DIMENSION_LABEL = {
@@ -1165,7 +1170,7 @@ function breakdownOf(runs: RunAnalytics, by: Dimension): Breakdown {
 /**
  * Where the backend's runs went, by one dimension at a time (`?by=`, read in
  * the browser like `?backend=`): a table of the group's name, its runs and its
- * measure. Ruling 642: the five cards each repeated "runs · cost" over a
+ * measure. Ruling 324: the five cards each repeated "runs · cost" over a
  * ragged two-column grid, and each bar measured RUNS beside rows ordered by the
  * MEASURE (F26-4's order), so a cheaper group's bar outgrew the dearer
  * one above it. A row's bar now sits behind its name and measures what the
@@ -1177,9 +1182,9 @@ function BreakdownPanel({ runs }: { runs: RunAnalytics }) {
   const { measure } = runs;
   const figure = (r: Breakdown["rows"][number]) => (measure === "cost" ? r.cost : r.tokens);
   const max = data.rows.reduce((m, r) => Math.max(m, figure(r) ?? 0), 0);
-  // Ruling 635: the task rows are `project/KEY`, each a link to its page,
+  // Ruling 324: the task rows are `project/KEY`, each a link to its page,
   // named by its key alone when every row is one project's: the prefix ruling
-  // 308 adds so two projects' A-1 stay apart wrapped every row onto two lines
+  // 35 adds so two projects' A-1 stay apart wrapped every row onto two lines
   // on an instance with one project.
   const projects = new Set(data.rows.flatMap((r) => (r.label.includes("/") ? [r.label.split("/")[0]] : [])));
   return (
@@ -1246,7 +1251,7 @@ function BreakdownPanel({ runs }: { runs: RunAnalytics }) {
           </tbody>
         </table>
       )}
-      {/* Ruling 308: the window says what it left out. Eight of thirty groups
+      {/* Ruling 35: the window says what it left out. Eight of thirty groups
           with nothing said reads as the whole instance, on the surface a
           person opens to decide where their money goes. The figure follows
           `CountRow`'s own rule: absent is "not reported", never 0. */}
@@ -1268,7 +1273,7 @@ function spokenMeasure(measure: RunMeasure, value: number | null): string {
 
 /**
  * A 30-day column chart of the backend's runs per day, its day's figures on
- * hover. Each column's height is its share of the busiest day. Ruling 642: the
+ * hover. Each column's height is its share of the busiest day. Ruling 324: the
  * head totals the window, the busiest day's count marks the top line, the
  * first, middle and last days label the base, and an empty day is the bare
  * baseline rather than a grey tick.
@@ -1299,7 +1304,7 @@ function DailyChart({ runs }: { runs: RunAnalytics }) {
         {/* Interface review 2026-09-24 (acce-5): a list, not role="img": an
             image's children are presentational, so the per-day counts and
             costs reached nobody but a hovering mouse. Each column says its
-            day in `.vh`. Ruling 634: the pointer's card (`.daily-tip`) shows
+            day in `.vh`. Ruling 324: the pointer's card (`.daily-tip`) shows
             the same figures the moment a column is hovered. */}
         <div
           className="daily-chart"

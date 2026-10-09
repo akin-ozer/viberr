@@ -169,7 +169,7 @@ describe("runMaintenancePass (gaps 15 + 20)", () => {
     expect(existsSync(workspace)).toBe(false);
   });
 
-  it("ruling 701: a finished run whose session is still being compacted holds its folder", () => {
+  it("ruling 175: a finished run whose session is still being compacted holds its folder", () => {
     // The compaction's CLI works in the run's folder after the run has
     // ended. CANARY: count live rows alone and a pass removes it under that
     // process.
@@ -281,7 +281,7 @@ describe("checkDiskPressure (gap 16)", () => {
    * real `statfs` and the status it acts on is the one the product computes.
    * `× 2` rather than `+ 1` so a concurrent write cannot cross the line. The
    * thresholds are read through `getEnv()`, which parses once per process, so
-   * pinning them drops the cached parse (ruling 458(c)).
+   * pinning them drops the cached parse (ruling 39).
    */
   function pinThresholds(
     dataRoot: string,

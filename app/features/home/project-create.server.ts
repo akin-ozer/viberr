@@ -89,8 +89,8 @@ export type PolicyPreset = "strict" | "balanced" | "auto";
  * - **strict** — a human gates every stage: the operator does NOT auto-advance
  *   before work starts. Every `auto` boundary short of the last stage becomes
  *   `approval`, so a human must approve triage→ready (and ready→impl) before an
- *   agent touches the repo, and the move into review too (ruling 519 made that
- *   one automatic everywhere else). Operator stays supervised.
+ *   agent touches the repo, and the move into review too (automatic
+ *   everywhere else, ruling 91). Operator stays supervised.
  * - **balanced** — the template defaults (the operator advances every boundary
  *   up to review under a supervised operator; review→done human).
  * - **auto** — the operator runs at FULL autonomy: it crosses the governed
@@ -124,10 +124,10 @@ const REPO_WRITE_CAPABILITY_IDS: readonly string[] = [
 ];
 
 /**
- * Ruling 667: the roster of a board that delivers results. Every specialist
+ * Ruling 199: the roster of a board that delivers results. Every specialist
  * is deployed with its repo-write grants explicitly off, the grants the AWS
  * calculator board's agents were built with, so its deliverer hands back the
- * files it saves on the task (ruling 535) and stays that way if a repository
+ * files it saves on the task (ruling 128) and stays that way if a repository
  * is attached later for the agents to read. An explicit `off` is the one mode
  * no layer reinterprets (B-AG1). The operator's own row is left alone.
  */
@@ -203,7 +203,7 @@ function presetAgents(
  * back to `main`, and the toast reported plain success. The failure surfaced
  * much later, when the first agent delivery could not push. The outcome was
  * REPORTED and creation went on, so a project could be made before its
- * repository existed. Ruling 671 (owner, 2026-10-06): a creation GitHub does
+ * repository existed. Ruling 225 (owner, 2026-10-06): a creation GitHub does
  * not confirm is refused (`reachProjectRepository`). The branch such a project
  * was written with was a guess, and `defaultBranch` is what keeps a push off
  * the repository's real default branch. A 10s timeout keeps the action from
@@ -229,7 +229,7 @@ type RepoProbe =
  *  individually tolerant and the object itself falls back to empty: an
  *  unreadable `permissions` or `size` reads as "unknown" and passes, and an
  *  unreadable `default_branch` reads as none, which creation refuses (ruling
- *  671). The `permissions` block (F20-15, the read-only
+ *  225). The `permissions` block (F20-15, the read-only
  *  proof of write access; only a PROVEN read-only repo is called out) is
  *  decoded and judged by pat-validator.server.ts's `repoPermissionsSchema` /
  *  `repoWritable`. */
@@ -237,7 +237,7 @@ const repoResponseSchema = z
   .object({
     default_branch: z.string().optional().catch(undefined),
     permissions: repoPermissionsSchema.optional().catch(undefined),
-    // Ruling 468: the cue for the empty-repository read below.
+    // Ruling 227: the cue for the empty-repository read below.
     size: z.number().optional().catch(undefined),
   })
   .catch({ default_branch: undefined, permissions: undefined, size: undefined });
@@ -269,13 +269,13 @@ async function probeRemoteRepo(
     if (!res.ok) return { status: "unreachable" };
     const data = repoResponseSchema.parse(await res.json());
     const defaultBranch = data.default_branch ?? null;
-    // Ruling 468 (F40-12): an EXISTING repository with no commit. Live,
+    // Ruling 227 (F40-12): an EXISTING repository with no commit. Live,
     // `akin-ozer/website` was accepted as `ok` with `default_branch: main`, and
     // the first operator run found an unborn `main` and asked the owner to push
     // a README. `size: 0` is the cue, the 409 on the commits read the proof.
     const empty = await repositoryIsEmpty(createGithubClient({ token, fetchImpl }), repo, data.size);
     // F20-14/F20-15: Change repository refuses a repo the credential can only
-    // read where the board writes it (ruling 669); the same check belongs at
+    // read where the board writes it (ruling 226); the same check belongs at
     // create time (live: creating against a read-only-visible repo was
     // silently accepted and failed only at first delivery).
     const canPush = repoWritable(data.permissions);
@@ -310,7 +310,7 @@ const githubFieldErrorsSchema = z
   .catch({ errors: [] });
 
 /**
- * Ruling 462: why GitHub would not create the repository, in words a person
+ * Ruling 225: why GitHub would not create the repository, in words a person
  * can act on. Every branch is thrown before `project.md` is written, so each
  * one can say that no project exists yet. Only the 422 also says nothing was
  * created: a 5xx or a dropped connection may have landed on GitHub's side, so
@@ -340,7 +340,7 @@ function repositoryRefusal(
 }
 
 /**
- * Ruling 462: create the repository a project is about to be bound to, when
+ * Ruling 225: create the repository a project is about to be bound to, when
  * the probe found none, through the connection's own token on the server.
  *
  * The account decides the endpoint: `POST /user/repos` when the connection's
@@ -404,7 +404,7 @@ async function createRepositoryWhenMissing(
     { body, retryServerError: false },
   );
   const made = `Created ${repo} on GitHub (${request.private ? "private" : "public"})`;
-  // Ruling 463's dated note (R-seams-4): the token that made the repository
+  // Ruling 222's dated note (R-seams-4): the token that made the repository
   // reaches it, so the connection's stored reach lists it from now on.
   const reachIt = (after: RepoProbe) =>
     recordCreatedRepositoryInReach(db, target.connectionId, {
@@ -460,7 +460,7 @@ function recordRepositoryCreated(
 
 /**
  * "New project" action (home spec §5.9/§5.10, §6.1): writes
- * projects/<slug>/project.md from the workflow template (ruling 15),
+ * projects/<slug>/project.md from the workflow template (ruling 47),
  * projects it, audits. The creator joins as project admin.
  *
  * The policy preset shapes REAL governance (S1): `strict` human-gates the
@@ -473,9 +473,9 @@ export interface CreateProjectInput {
   name: string;
   /** Task key prefix, 2–4 uppercase letters. */
   key: string;
-  /** Ruling 667: what the board delivers; `software` when left out. The
+  /** Ruling 224: what the board delivers; `software` when left out. The
    *  agents of a board that delivers results are deployed with repo-write
-   *  withheld. Ruling 672: either kind may start with no repository, `owner`
+   *  withheld. Either kind may start with no repository, `owner`
    *  and `repoName` both empty; a software board's agents keep repo-write for
    *  the one it connects later. */
   delivers?: BoardDelivers;
@@ -485,39 +485,39 @@ export interface CreateProjectInput {
   /** Repo name under the owner (already slugified by the modal). */
   repoName: string;
   policy: "strict" | "balanced" | "auto";
-  /** Ruling 99: the whole custom shape in one request (the controller's
+  /** Ruling 266: the whole custom shape in one request (the controller's
    *  create-project path; the New-project modal never sets it). Everything
    *  here composes BEFORE the single project.md write, so a refused shape
    *  creates nothing. */
   custom?: CustomProjectBlueprint;
-  /** Ruling 462: create `<owner>/<repoName>` on GitHub through the
+  /** Ruling 225: create `<owner>/<repoName>` on GitHub through the
    *  connection's token when the probe finds no such repository. Both doors
    *  (the controller's `create_project` and the New project modal) set it the
    *  same way; an existing repository makes it a no-op. */
   createRepository?: CreateRepositoryRequest;
-  /** Ruling 464: the roster a controller designed. Given, the project is
+  /** Ruling 266: the roster a controller designed. Given, the project is
    *  written with the operator plus exactly these deployments and no base
    *  Developer or Reviewer; absent (the New project modal), the base roster.
    *  Every entry is checked before anything is written. */
   agents?: RosterEntry[];
-  /** Ruling 464: the operator's own model and effort, checked the same way.
-   *  Ruling 545: and the backend they run on. */
+  /** Ruling 266: the operator's own model and effort, checked the same way,
+   *  and the backend they run on. */
   operator?: OperatorOverrides;
 }
 
-/** Ruling 545: the operator's overrides at creation, ruling 464's model and
- *  effort plus the backend they run on (the operator's own when omitted). */
+/** Ruling 266: the operator's overrides at creation, its model and effort
+ *  plus the backend they run on (the operator's own when omitted). */
 export interface OperatorOverrides extends DeployOverrides {
   backend?: RealBackend;
 }
 
-/** Ruling 464: one deployment of a designed roster — a global template by its
+/** Ruling 266: one deployment of a designed roster — a global template by its
  *  store key (as `deploy_agent` takes it), with optional model and effort. */
 export interface RosterEntry extends DeployOverrides {
   profileId: string;
 }
 
-/** Ruling 462: how a repository created with its project is made. */
+/** Ruling 225: how a repository created with its project is made. */
 export interface CreateRepositoryRequest {
   private: boolean;
   /** The repository's description on GitHub. */
@@ -544,24 +544,24 @@ export interface CreateProjectResult {
   slug: string;
   key: string;
   name: string;
-  /** Display path for the toast (ruling 3 — real store path). */
+  /** Display path for the toast (ruling 15(a) — real store path). */
   storePath: string;
-  /** Ruling 667: `<owner>/<name>`, or null for a project with no repository. */
+  /** Ruling 224: `<owner>/<name>`, or null for a project with no repository. */
   repo: string | null;
   /**
    * UI-09: what the repository probe found that a person has to act on, or
-   * null. Since ruling 671 that is one case: a repository the token can read
+   * null. Under ruling 225 that is one case: a repository the token can read
    * and cannot push to, which is created against all the same. The caller
    * states it instead of reporting a plain success.
    */
   repoWarning: string | null;
   /**
-   * Ruling 462: what a requested repository creation did, as a sentence (the
+   * Ruling 225: what a requested repository creation did, as a sentence (the
    * repository was created, or it already existed and was used as it is);
    * null when no creation was asked for.
    */
   repoNote: string | null;
-  /** Ruling 464: every deployment written, the operator first, with the model
+  /** Ruling 266: every deployment written, the operator first, with the model
    *  and effort each resolves to, so a reply can list what was deployed. */
   agents: DeployedAgentSummary[];
 }
@@ -602,7 +602,7 @@ export async function createProject(
 }
 
 /**
- * Ruling 653: what a new project is called, its key, and the repository it
+ * Ruling 32: what a new project is called, its key, and the repository it
  * is bound to, checked before anything else is judged or written. The New
  * project modal, the controller's `create_project` and a board import all
  * start here, so the three are refused for the same reasons in the same words.
@@ -613,7 +613,7 @@ export interface NewProjectIdentity {
   owner: string;
   repoName: string;
   /** `<owner>/<repoName>`, or null for a project that starts with no
-   *  repository (rulings 667 and 672). */
+   *  repository (ruling 224). */
   repo: string | null;
   /** What the board delivers, `software` when the request did not say. */
   delivers: BoardDelivers;
@@ -641,13 +641,9 @@ export function checkNewProjectIdentity(
   if (isReservedTaskPrefix(key)) throw AppError.validation(RESERVED_TASK_PREFIX_REFUSAL);
   const owner = input.owner.trim();
   const repoName = input.repoName.trim();
-  // Every project took a repository once (owner ruling 2026-07-17, which
-  // reversed F10): a board that delivers software hands its work over through
-  // GitHub, "and a repo-less one dead-ends the moment execution starts".
-  // Ruling 667 let a board that delivers results go without. Ruling 672
-  // (owner, 2026-10-06: "repoless boards should exist … at creation") lets
-  // every board start without: the dead end is gone, because the operator
-  // asks for a repository the first time a task needs one. So a repository is
+  // Ruling 224: every board may start without a repository (owner,
+  // 2026-10-06: "repoless boards should exist … at creation"), because the
+  // operator asks for one the first time a task needs it. So a repository is
   // named whole, connection and name, or not at all.
   if (Boolean(owner) !== Boolean(repoName)) {
     throw AppError.validation(
@@ -660,7 +656,7 @@ export function checkNewProjectIdentity(
       "There is no repository to create: name the GitHub connection and the repository, or leave `createRepository` out.",
     );
   }
-  // Ruling 671: for every repository, not only one to create. GitHub answers
+  // Ruling 225: for every repository, not only one to create. GitHub answers
   // `website?tab=readme` as `website`, so the probe would confirm one name and
   // the project be written with another.
   if (repo !== null && !GITHUB_REPO_NAME.test(repoName)) {
@@ -690,21 +686,21 @@ async function createProjectImpl(
 ): Promise<CreateProjectResult> {
   const identity = checkNewProjectIdentity(db, input);
   const { name } = identity;
-  // P13-AP-04 / owner ruling 2: the Standard 5-stage board is the ONLY preset.
+  // P13-AP-04 / P13 owner decision 2: the Standard 5-stage board is the ONLY preset.
   // The "Lightweight · 3 stages" template was deleted — it created a board
   // (`todo`/`doing`/`done`) that the preinstalled roster's governed stage ids
   // could never match, so no specialist was assignable. Custom boards are
   // edited in project settings, after creation, where the stage grants can be
   // adjusted alongside them.
   //
-  // Ruling 99: the controller's create-project path may carry the WHOLE custom
+  // Ruling 266: the controller's create-project path may carry the WHOLE custom
   // shape (stages, boundaries, members, description) in one request. The shape
   // is validated and composed here, before the single project.md write, so a
   // refused shape creates nothing. The template stays the default.
   const template = GOVERNED_TEMPLATE;
   const blueprint = resolveProjectBlueprint(db, input.custom, actor.userId);
-  // Ruling 464: the roster, every template and model/effort judged BEFORE the
-  // repository probe and creation below (ruling 462), so a refused roster
+  // Ruling 266: the roster, every template and model/effort judged BEFORE the
+  // repository probe and creation below (ruling 225), so a refused roster
   // leaves nothing on GitHub or on disk.
   const roster = resolveRoster(input, name, ctx.dataRoot);
   const reached = await reachProjectRepository(db, identity, input.createRepository, actor, ctx);
@@ -747,8 +743,8 @@ async function createProjectImpl(
     ],
     // Preinstall the default agent roster — the operator plus the base
     // specialists it can assign — so every project can run governed agent work.
-    // Ruling 464: a designed roster replaces the base specialists. Ruling
-    // 667: on a board that delivers results none of them may write a repository.
+    // Ruling 266: a designed roster replaces the base specialists. Ruling
+    // 199: on a board that delivers results none of them may write a repository.
     agents: presetAgents(
       input.policy,
       input.delivers === "results" ? withoutRepoWrite(roster) : roster,
@@ -756,7 +752,7 @@ async function createProjectImpl(
     // Ship the anti-noise guardrails ON — timeline compaction + chatter
     // rejection are product defaults (PRD's #1 risk), not opt-in.
     guardrails: DEFAULT_GUARDRAILS,
-    // Ruling 178: no required reviewer until a person or the controller
+    // Ruling 89: no required reviewer until a person or the controller
     // declares one; required-ness stays emergent (engaged verdict-capable
     // agents) until then.
     requiredReviewers: [],
@@ -783,15 +779,15 @@ async function createProjectImpl(
 }
 
 /**
- * Ruling 672: the way on from a repository GitHub does not confirm (ruling
- * 671). Creation still refuses to write one, and the person is not stopped:
+ * Ruling 224: the way on from a repository GitHub does not confirm (ruling
+ * 225). Creation still refuses to write one, and the person is not stopped:
  * the same project can be made with no repository now.
  */
 const START_WITHOUT_REPOSITORY =
   "A project can also start without a repository and connect it later.";
 
 /**
- * Ruling 672: what a board that delivers software is told when it is made
+ * Ruling 224: what a board that delivers software is told when it is made
  * with no repository. Its agents keep repo-write, so connecting one is all it
  * takes for tasks to ship as pull requests.
  */
@@ -799,15 +795,15 @@ const SOFTWARE_WITHOUT_REPOSITORY_NOTE =
   "It has no repository yet: tasks come back as files until one is connected. The operator asks for it the first time a task needs a pull request, and it can be attached any time in the project's settings.";
 
 /** What the repository probe (and, asked for, its creation) settled before
- *  anything is written: ruling 653 shares it with a board import. */
+ *  anything is written: ruling 32 shares it with a board import. */
 export interface ReachedRepository {
   /** The connection whose PAT the project is bound to; null for a project
-   *  with no repository (ruling 667), which binds none. */
+   *  with no repository (ruling 224), which binds none. */
   patId: string | null;
   defaultBranch: string;
   /** UI-09: what the probe found when it was not clean, or null. */
   repoWarning: string | null;
-  /** Ruling 462: what a requested creation did; ruling 468: an empty repository. */
+  /** Ruling 225: what a requested creation did; ruling 227: an empty repository. */
   repoNote: string | null;
   /** U33-2: the probe's reading, remembered once the project exists. */
   repoAccess: RepoAccessResult | null;
@@ -815,7 +811,7 @@ export interface ReachedRepository {
 
 /**
  * Resolve the selected connection, probe the repository with its token and,
- * when asked (ruling 462), create it. Everything here happens BEFORE any file
+ * when asked (ruling 225), create it. Everything here happens BEFORE any file
  * is written, so a refusal leaves nothing on disk.
  */
 export async function reachProjectRepository(
@@ -826,9 +822,9 @@ export async function reachProjectRepository(
   ctx: CreateProjectContext = {},
 ): Promise<ReachedRepository> {
   const { owner, repoName, repo, slug } = identity;
-  // Ruling 667: no repository, so no connection to resolve and nothing to
+  // Ruling 224: no repository, so no connection to resolve and nothing to
   // probe. `defaultBranch` keeps the schema's own fallback and names nothing.
-  // Ruling 672: a software board made with none says what that means, on
+  // A software board made with none says what that means, on
   // every door that reports a creation.
   if (repo === null) {
     return {
@@ -866,7 +862,7 @@ export async function reachProjectRepository(
     );
   }
   let probe = await probeRemoteRepo(token, repo, ctx.fetchImpl);
-  // Ruling 462: BEFORE project.md, so a refusal leaves nothing behind; the
+  // Ruling 225: BEFORE project.md, so a refusal leaves nothing behind; the
   // probe it hands back (the re-probe of a repository it just made) is the
   // one recorded below.
   let madeNow = false;
@@ -890,7 +886,7 @@ export async function reachProjectRepository(
     repoNote = made.note;
     madeNow = made.made;
   }
-  // Ruling 671: a repository GitHub did not confirm is not created against.
+  // Ruling 225: a repository GitHub did not confirm is not created against.
   // Each refusal is thrown before `project.md` is written, so each can say no
   // project exists. One Viberr made a moment ago is said to be there: asked
   // again, the project uses it as it is.
@@ -939,10 +935,10 @@ export async function reachProjectRepository(
     repoWarning = `The ${owner} connection's token can read ${repo} but cannot push to it. Agents won't be able to open branches or PRs there until it's granted write access.`;
   }
 
-  // Ruling 468: an empty repository is stated, not warned about: Viberr makes
-  // its first commit (ruling 128's bootstrap) before the first task branch.
-  // Its dated note (R-repo-2): not with a token that can only read, which
-  // GitHub refuses that commit; the fix is the token, and the note says so.
+  // Ruling 227(a): an empty repository is stated, not warned about: Viberr
+  // makes its first commit before the first task branch. Not with a token that
+  // can only read, which GitHub refuses that commit (R-repo-2); the fix is the
+  // token, and the note says so.
   if (repoAccess.status === "connected" && repoAccess.empty) {
     const empty = repoAccess.readOnly
       ? `${repo} is empty, and this connection's token can only read it, so Viberr cannot create its first commit on ${defaultBranch} yet. Once the token can push, Viberr makes that commit before the first task branch.`
@@ -1002,7 +998,7 @@ export async function writeNewProject(
   reprojectProject(db, ctx, slug);
 
   // Bind the selected connection's PAT to the project so credential health,
-  // branch creation, and PR sync work against the real repo. Ruling 667: a
+  // branch creation, and PR sync work against the real repo. Ruling 224: a
   // project with no repository has no connection to bind.
   if (reached.patId !== null) {
     setProjectCredential(db, { projectSlug: slug, patId: reached.patId }, actor);
@@ -1028,7 +1024,7 @@ export async function writeNewProject(
       key,
       repo: frontmatter.repo,
       ...project.details,
-      // Ruling 464: which roster was written, the base one or a designed one.
+      // Ruling 266: which roster was written, the base one or a designed one.
       agents: frontmatter.agents.map((a) => a.profileId),
     },
   });
@@ -1049,7 +1045,7 @@ export async function writeNewProject(
 }
 
 /**
- * Ruling 464 (pass 40, F40-7): the roster a project is written with. Absent
+ * Ruling 266 (pass 40, F40-7): the roster a project is written with. Absent
  * `agents`, the base one (operator, Developer, Reviewer), as every project
  * got before. Given, the operator plus exactly the listed deployments: a
  * controller that designed six specialists used to get the generic Developer
@@ -1097,11 +1093,11 @@ function resolveRoster(
   return withOperator(designed);
 }
 
-/** The operator's deployment with ruling 464's `operator: { model?, effort? }`
+/** The operator's deployment with ruling 266's `operator: { model?, effort? }`
  *  applied, each judged by name against the backend it will run on before
  *  anything is written. Only the fields given are written.
  *
- *  Ruling 545: that backend is the one asked for, else the operator's own.
+ *  Ruling 266: that backend is the one asked for, else the operator's own.
  *  Without the choice here a controller that designed a Codex operator was
  *  refused ("GPT-6 Luna is a Codex model. Claude cannot run it. Pick a model
  *  from the Claude list.") and had to create the project and switch the
@@ -1141,7 +1137,7 @@ function withOperatorOverrides(
   return { ...operator, definition };
 }
 
-// ------------------------------------------------- custom shape (ruling 99)
+// ------------------------------------------------- custom shape (ruling 266)
 
 /** The composed, validated custom blueprint ready for the frontmatter write. */
 interface ResolvedBlueprint {
@@ -1180,9 +1176,9 @@ function resolveProjectBlueprint(
         `A custom board carries ${CUSTOM_STAGE_MIN} to ${CUSTOM_STAGE_MAX} stages (got ${names.length}).`,
       );
     }
-    // Ruling 364: a colour is one of twenty preset NAMES or nothing. The name is
+    // Ruling 279: a colour is one of twenty preset NAMES or nothing. The name is
     // the whole value — the file stores it and the stylesheet paints it — so
-    // the door checks the name; ruling 352's hex/token contract is gone with
+    // the door checks the name; ruling 279's hex/token contract is gone with
     // the stored `slate`/`amber` it left drawing nothing.
     for (const s of custom.stages) {
       const color = s.color?.trim();

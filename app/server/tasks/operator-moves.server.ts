@@ -1,6 +1,6 @@
 /**
- * The operator moving a task forward (ruling 656): delivering it for review,
- * moving it between stages (with ruling 655's answer to a move nobody
+ * The operator moving a task forward (ruling 13(a)): delivering it for review,
+ * moving it between stages (with ruling 111's answer to a move nobody
  * confirms), and accepting a completion or writing its packet.
  */
 
@@ -62,7 +62,7 @@ type DeliveryAuditDetails = {
   status: string;
   /** Present only when a review PR actually exists. */
   prNumber?: number;
-  /** Ruling 134: the head the delivery left on the PR, and whether the push
+  /** Ruling 229: the head the delivery left on the PR, and whether the push
    *  (or the PR open) MOVED anything — `delivered` only. */
   headSha?: string | null;
   moved?: boolean;
@@ -103,7 +103,7 @@ export async function operatorDeliverForReview(
   if (!existing) {
     return { outcome: "noop", message: `Task ${input.taskKey} not found.` };
   }
-  // Ruling 134 (pass 34, F34-11): NO cached-state short-circuit. The old
+  // Ruling 229 (pass 34, F34-11): NO cached-state short-circuit. The old
   // "PR #N is already open for review; there is nothing to deliver" answered
   // before `performDelivery` ran, so every commit an agent made after the first
   // delivery (a reviewer-requested rework, a resolved base conflict, the whole
@@ -177,7 +177,7 @@ export async function operatorDeliverForReview(
   });
   switch (outcome.status) {
     case "delivered": {
-      // Ruling 134(a): the message names what MOVED. A reuse whose push moved
+      // Ruling 229: the message names what MOVED. A reuse whose push moved
       // the head says so with the sha; a reuse that pushed nothing is the one
       // honest noop, and it reads as one.
       const sha = outcome.headSha ? ` \`${outcome.headSha.slice(0, 7)}\`` : "";
@@ -188,7 +188,7 @@ export async function operatorDeliverForReview(
           : outcome.pushStatus === "up_to_date"
             ? `Nothing to push: PR #${outcome.prNumber} already carries${sha || " the workspace head"}.`
             : `Delivered: push skipped (${outcome.pushStatus}), reusing open review PR #${outcome.prNumber}.`;
-      // Ruling 494: where the pushed branch now stands against the base, as the
+      // Ruling 238: where the pushed branch now stands against the base, as the
       // compare the push ran says, or that it could not run one.
       return {
         outcome: "done",
@@ -206,11 +206,11 @@ export async function operatorDeliverForReview(
           `remote branch, and re-delivers this task's local work) or an ` +
           `\`archive_task\` option to abandon the task. A \`discard_branch\` option ` +
           `destroys this task's LOCAL commits: the refused push means the revision never ` +
-          `left the workspace, so it MAY be offered (ruling 161) when the person's choice is ` +
+          `left the workspace, so it MAY be offered (ruling 234) when the person's choice is ` +
           `to throw the local work away, never as the way to clear the remote.`,
       };
     case "scope_violation":
-      // Ruling 144: the remedy is a human's (grant the scope on GitHub, then
+      // Ruling 221(a): the remedy is a human's (grant the scope on GitHub, then
       // Re-check); the violation is already on the task and in the inbox.
       return {
         outcome: "noop",
@@ -220,7 +220,7 @@ export async function operatorDeliverForReview(
           `Do not ask an agent to push.`,
       };
     case "store_layout":
-      // Ruling 159: Viberr never publishes its own store layout into the
+      // Ruling 229: Viberr never publishes its own store layout into the
       // repository; the folder is a person's or the agent's to remove.
       return {
         outcome: "noop",
@@ -231,7 +231,7 @@ export async function operatorDeliverForReview(
           `attachments folder is outside the checkout; its prompt names the absolute path), then deliver again.`,
       };
     case "closed_by_human":
-      // Ruling 160: a person's close is a decision about the task, answered
+      // Ruling 232: a person's close is a decision about the task, answered
       // through the closed-PR recovery packet, never delivered around.
       return {
         outcome: "noop",
@@ -292,7 +292,7 @@ export async function operatorTransitionStage(
   // the first thing `operatorAcceptCompletion` does, so the refusal is
   // inherited here rather than duplicated (one gate read, one sentence).
   //
-  // Ruling 151 (pass 35, F35-2): the reroute now covers BOTH gates. Under
+  // Ruling 111 (pass 35, F35-2): the reroute now covers BOTH gates. Under
   // `direct` the bare move used to fall through to transitionStage's own
   // refusal ("reaches Done only by accepting completion"); acceptance has its
   // own capability, so the acceptance path answers here too.
@@ -305,7 +305,7 @@ export async function operatorTransitionStage(
     );
   }
   const name = stageDisplayName(ctx, input.projectSlug, input.toStageId);
-  // Ruling 655 (owner, 2026-09-27: "it shouldn't offer the packet as well"): a
+  // Ruling 111 (owner, 2026-09-27: "it shouldn't offer the packet as well"): a
   // move nobody confirms is never put to a person. The stage the task already
   // stands at is no move at all, and a card for it would sit beside the move
   // the operator already made. A jump the board does not declare, when every
@@ -332,7 +332,7 @@ export async function operatorTransitionStage(
       };
     }
   }
-  // Ruling 162 (pass 35, F35-12 (b), owner Q35-17): Merge means mergeable. A
+  // Ruling 95 (pass 35, F35-12 (b), owner Q35-17): Merge means mergeable. A
   // move INTO the acceptance stage (the stage with the edge into the terminal
   // one) is refused with the gate's own sentence while the review PR conflicts
   // with the base or lacks the delivered revision, so the task stays at the
@@ -345,7 +345,7 @@ export async function operatorTransitionStage(
     // task STATE, not a capability the project withheld.
     if (mergeEntry) return { outcome: "noop", message: mergeEntry };
   }
-  // Ruling 151 (owner, Q35-1): the boundary the project author declared is the
+  // Ruling 111 (owner, Q35-1): the boundary the project author declared is the
   // contract every human reads on the Policy page and in project.md, and a
   // grant cannot void it. `direct` crosses `auto` boundaries only; a declared
   // `approval` boundary ALWAYS files a recommendation a human applies, under
@@ -403,7 +403,7 @@ export async function operatorTransitionStage(
   // reach it only on a genuine rework move.
   if (isRework) move.rework = true;
   await transitionStage(db, move, OPERATOR_TASK_ACTOR, opCtx(ctx));
-  // Ruling 152(a) (pass 35, G35-5): the reply names the NEXT boundary so one
+  // Ruling 120 (pass 35, G35-5): the reply names the NEXT boundary so one
   // turn can walk consecutive `auto` boundaries instead of paying a fresh
   // operator turn per stage (KNC-1 took eight operator runs for a one-file
   // ADR). When the move lands on the acceptance boundary, the same turn files
@@ -415,7 +415,7 @@ export async function operatorTransitionStage(
     { projectSlug: input.projectSlug, taskKey: input.taskKey },
     authority,
   );
-  // Ruling 702: a move made to reach a delivering agent ends at the hand-off,
+  // Ruling 112: a move made to reach a delivering agent ends at the hand-off,
   // not at the next boundary. The forward sentence told an operator that had
   // just walked the task back to continue forward "when nothing here needs an
   // agent", and a run without `delivers: true` engages an agent that holds no
@@ -432,7 +432,7 @@ export async function operatorTransitionStage(
   };
 }
 
-/** Ruling 702: the agents of an engage stage as a sentence names them, each
+/** Ruling 112: the agents of an engage stage as a sentence names them, each
  *  with the profile id `run_agent` takes. */
 function engageNames(stage: EngageStage): string {
   return stage.agents.map((a) => `${a.name} (\`${a.id}\`)`).join(" or ");
@@ -448,7 +448,7 @@ function currentStageOf(
 }
 
 /**
- * Ruling 152(a): what the operator should do about the boundary AFTER the one
+ * Ruling 120: what the operator should do about the boundary AFTER the one
  * it just crossed, so a turn continues instead of ending at a stage whose only
  * work is another transition. Empty when the stage has no outbound edge.
  */
@@ -520,7 +520,7 @@ export async function foldAcceptanceRecommendation(
   const atBoundary =
     stage === roles.reviewId || workflow.some((w) => w.from === stage && w.to === terminalId);
   if (!atBoundary) return null;
-  // Ruling 521: the card the fold files is the operator's offer too, so it
+  // Ruling 130: the card the fold files is the operator's offer too, so it
   // waits for the completion packet. Refused here, a person's move re-invokes
   // the operator, whose turn writes the packet and then offers.
   const result = await operatorAcceptCompletion(
@@ -541,9 +541,9 @@ export async function foldAcceptanceRecommendation(
 /** Why moving `taskKey` to `toStageId` is an operator rework move, or null
  *  when it is not one. R7-4: a BACKWARD step to an earlier stage on a task
  *  whose latest review is `failing`, which the operator performs directly to
- *  route a rejected task back to the developer without a human. Rulings 163
- *  and 702 each add one narrower backward move, named where they are read
- *  below; `engage` is ruling 702's stage, with the agents that can be given
+ *  route a rejected task back to the developer without a human. Rulings 90
+ *  and 112 each add one narrower backward move, named where they are read
+ *  below; `engage` is ruling 112's stage, with the agents that can be given
  *  the delivery there, when that is the only thing that licenses the move. */
 function reworkMoveOf(
   ctx: TaskMutationContext,
@@ -566,7 +566,7 @@ function reworkMoveOf(
   if (validation === "failing") return { engage: null };
   const board = { stages, workflow: project.parsed.frontmatter.workflow };
   const deployed = listDeployedSpecialists(projectSlug, ctx);
-  // Ruling 702: a task that has no delivering agent and has delivered nothing
+  // Ruling 112: a task that has no delivering agent and has delivered nothing
   // may go back to a stage where one can be engaged. Same answer
   // `reworkStages` offers and `transitionStage` re-vets (`engageStagesFor`).
   const engage = engageStagesFor(
@@ -576,7 +576,7 @@ function reworkMoveOf(
     project.parsed.frontmatter.requiredReviewers,
   ).find((e) => e.stageId === toStageId);
   if (engage) return { engage };
-  // Ruling 163 (pass 35, F35-13): a revision that changed after a verdict is
+  // Ruling 90 (pass 35, F35-13): a revision that changed after a verdict is
   // rework by definition; the one backward move it licenses is INTO the review
   // stage, where the re-verdict can be given. Same predicate `transitionStage`
   // re-vets, and the same shape `reworkStages` offers.
@@ -586,7 +586,7 @@ function reworkMoveOf(
 }
 
 /**
- * Ruling 163 (pass 35, F35-13 (d)): the sentence naming the way back to the
+ * Ruling 90 (pass 35, F35-13 (d)): the sentence naming the way back to the
  * review stage for a task standing past it with a changed or failing
  * revision, or null when it does not apply. The operator's move is the first
  * remedy (`transition_stage` to the review stage, a rework move it performs
@@ -617,7 +617,7 @@ function reworkRemedySentence(
 }
 
 /**
- * Ruling 162: why the operator may not move `taskKey` INTO the acceptance
+ * Ruling 95: why the operator may not move `taskKey` INTO the acceptance
  * stage right now, or null. Reads `mergeReadinessRefusal`, the GitHub-fact
  * half of the acceptance gate, so the move and the acceptance refuse with one
  * sentence. Null for any other target stage.
@@ -640,7 +640,7 @@ function mergeStageEntryRefusal(
   const to = stageName(stages, reviewId);
   return (
     `${refusal} ${taskKey} stays at ${from}: ${to} is where acceptance happens, and the gate ` +
-    `would refuse it. Call update_branch_from_base, which routes the conflict (ruling 475), or ` +
+    `would refuse it. Call update_branch_from_base, which routes the conflict (ruling 129), or ` +
     `deliver the revision instead of moving the task.`
   );
 }
@@ -664,7 +664,7 @@ function operatorBoundaryFor(
   return w ? w.boundary : null;
 }
 
-/** Ruling 655: the stages a move from `fromStageId` passes through to reach
+/** Ruling 111: the stages a move from `fromStageId` passes through to reach
  *  `toStageId` along declared edges, ending with `toStageId`, when every edge
  *  on the way is `auto`; null when an edge on the way is not, or the edges
  *  never reach it (a backward move, a stage off the chain). */
@@ -702,7 +702,7 @@ function automaticStepsTo(
  *    operator: not the act, not the recommendation, not the audit trace of one.
  *  - **`human`** — "reserved for a human to perform". Same refusal, deliberately.
  *    A recommendation card is not a neutral note: applying one IS the acceptance
- *    (ruling 22 — the Apply click is the authorization), so a card would put the
+ *    (ruling 50 — the Apply click is the authorization), so a card would put the
  *    operator back in the acceptance path a `human` grant just removed it from.
  *    The Claude toolkit already withholds the `accept_completion` tool for BOTH
  *    modes and the Codex plan schema drops it for both; this keeps every other
@@ -732,13 +732,13 @@ function completionCapabilityRefusal(
 }
 
 /**
- * Ruling 492 (review, 2026-09-26): the refusal for an operator acceptance that
+ * Ruling 130 (review, 2026-09-26): the refusal for an operator acceptance that
  * would bury the follow-up it just offered, or null.
  *
  * The doctrine has the operator raise a post-merge proof's read as a
  * `create_task` option before it puts the task up for acceptance, and an
  * acceptance withdraws the open decision it does not answer (F32-11; the
- * operator's own answers none, ruling 471(b)). The first wording ended "Never
+ * operator's own answers none, ruling 100). The first wording ended "Never
  * hold this task back for that proof", so an operator that opened the option
  * and called `accept_completion` in the same turn withdrew it unanswered and
  * the read task was never created. Under supervised autonomy its acceptance
@@ -761,7 +761,7 @@ function followUpOptionRefusal(packet: TaskPacket | null, taskKey: string): stri
   return (
     `The open decision "${packet.title}" offers to create "${followUp.title}", which waits ` +
     `on ${taskKey}. Accepting now would withdraw that decision unanswered, so the follow-up ` +
-    `would never be created (ruling 492). Wait for a person to answer it; you are re-invoked ` +
+    `would never be created (ruling 130). Wait for a person to answer it; you are re-invoked ` +
     `when they do. Withdraw it with resolve_decision_packet first only if it is moot.`
   );
 }
@@ -779,7 +779,7 @@ export async function operatorAcceptCompletion(
   input: {
     projectSlug: string;
     taskKey: string;
-    /** Ruling 521: refuse unless the completion packet describes the work on
+    /** Ruling 130: refuse unless the completion packet describes the work on
      *  offer. Implied by a live operator drive; the fold sets it. */
     requirePacket?: boolean;
   },
@@ -845,7 +845,7 @@ export async function operatorAcceptCompletion(
       noChange,
     );
     if (refusal) {
-      // Ruling 163 (pass 35, F35-13 (d)): a task past the review stage whose
+      // Ruling 90 (pass 35, F35-13 (d)): a task past the review stage whose
       // revision changed or failed after a verdict names its way out, so the
       // operator never has to discover the gap (KNC-20's packet offered profile
       // surgery and force-accept; the working remedy was the stage move).
@@ -853,7 +853,7 @@ export async function operatorAcceptCompletion(
       return { outcome: "noop", message: remedy ? `${refusal} ${remedy}` : refusal };
     }
   }
-  // Ruling 492 (review): checked before BOTH branches, so neither a
+  // Ruling 130 (review): checked before BOTH branches, so neither a
   // full-autonomy acceptance nor a card a person could apply first withdraws
   // the follow-up read the operator offered. Read fresh: the no-change probe
   // above may have waited on GitHub.
@@ -862,7 +862,7 @@ export async function operatorAcceptCompletion(
     const refusal = followUpOptionRefusal(fresh?.parsed.packet ?? null, input.taskKey);
     if (refusal) return { outcome: "noop", message: refusal };
   }
-  // Ruling 521: the operator's offer carries its completion packet. Checked
+  // Ruling 130: the operator's offer carries its completion packet. Checked
   // after every acceptance gate, so an offer the gates refuse is refused with
   // their sentence, not with a request for a summary nobody can use yet. A
   // live drive (`ctx.operatorRun`) is the operator's own call, on either
@@ -891,10 +891,10 @@ export async function operatorAcceptCompletion(
     // wording keys on the DURABLE claim (unchanged by F28-L1, which only reorders
     // the acceptance GATE so a verified-empty completion is not refused).
     const isNoChange = noChangeApplies(file.parsed.frontmatter);
-    // Ruling 576: what such a task did change, named on the card.
+    // Ruling 130: what such a task did change, named on the card.
     const corrections = isNoChange ? standingKbCorrections(db, input.projectSlug, input.taskKey) : [];
     const requiredHere = readRequiredReviewers(input.projectSlug, ctx);
-    // Ruling 137: the offer binds to the revision it describes, so a later
+    // Ruling 99: the offer binds to the revision it describes, so a later
     // delivery can withdraw it by name and the card can say which one.
     const offer: RecommendationInput = {
       kind: "accept_completion",
@@ -912,7 +912,7 @@ export async function operatorAcceptCompletion(
       input.projectSlug,
       input.taskKey,
       offer,
-      // Ruling 384 (F39-12): the first clause is DERIVED, never asserted. The
+      // Ruling 99 (F39-12): the first clause is DERIVED, never asserted. The
       // card used to open "The review is clean and the work meets the goal" on
       // every acceptance offer — live on AX-12 that sentence sat on a task with
       // `verdicts: []`, `validation: none` and no reviewer ever engaged. The
@@ -1022,7 +1022,7 @@ export async function operatorAcceptCompletion(
 }
 
 /**
- * Ruling 521: write the completion packet, the operator's summary of the
+ * Ruling 130: write the completion packet, the operator's summary of the
  * finished work for the person who accepts it (`completion-packet.server.ts`).
  * It rides the acceptance grant, since it exists only to go with an
  * acceptance offer: an operator that may not offer acceptance has nothing to

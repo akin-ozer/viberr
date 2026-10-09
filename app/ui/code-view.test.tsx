@@ -6,9 +6,9 @@ import { CodeView } from "./code-view";
 
 afterEach(cleanup);
 
-/* Ruling 363: the code reader. Plain, numbered lines first; the grammar's
+/* Ruling 317: the code reader. Plain, numbered lines first; the grammar's
    tokens arrive later and replace them in place, text intact. */
-describe("CodeView (ruling 363)", () => {
+describe("CodeView (ruling 317)", () => {
   it("renders every line numbered and plain first, then the grammar's tokens as classes", async () => {
     const { container } = render(
       <CodeView text={"const x = 1;\n// two\n"} language="javascript" />,
@@ -63,7 +63,7 @@ describe("CodeView (ruling 363)", () => {
     expect(line).toContainEqual({ text: "// why", className: "tk-comment" });
   });
 
-  it("a diff's added and removed lines take the inserted and deleted families (ruling 508)", async () => {
+  it("a diff's added and removed lines take the inserted and deleted families (ruling 317)", async () => {
     const lines = await highlightCode("@@ -1 +1 @@\n-const b = 2;\n+const b = 3;", "diff");
     expect(lines).not.toBeNull();
     expect(lines![1]).toEqual([{ text: "-const b = 2;", className: "tk-deleted" }]);

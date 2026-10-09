@@ -7,7 +7,7 @@ import { cardStatus } from "~/features/board/card-status";
 import type { CreateEpicInput } from "~/server/tasks/epic-actions.server";
 
 /**
- * Ruling 503(e) through the real route modules: the Epics list and one
+ * Ruling 325 through the real route modules: the Epics list and one
  * epic's page (loaders and every intent they answer), the task page's Epic
  * menu (`set-task-epic`) and the board's epic filter. The markdown files are
  * the truth, so a write is checked on the file as well as on the page that
@@ -156,7 +156,7 @@ async function epicFile(epicId: string) {
   return readEpicFile({ projectSlug: SLUG, epicId, dataRoot: app.dataRoot })?.parsed;
 }
 
-describe("ruling 503(e): the Epics pages' loaders", () => {
+describe("ruling 325: the Epics pages' loaders", () => {
   it("the epics loader lists this project's epics, each with its progress, the stages and the members", async () => {
     const listed = await makeEpic(ids.arda, {
       title: "Loader lists me",
@@ -285,7 +285,7 @@ describe("ruling 503(e): the Epics pages' loaders", () => {
       scopeLabel: "This board",
     };
     expect((await epicPage(ids.murat, epicId)).plannedIn).toEqual(expected);
-    // An org admin may open anyone's conversation (ruling 100).
+    // An org admin may open anyone's conversation (ruling 27).
     expect((await epicPage(ids.arda, epicId)).plannedIn).toEqual(expected);
     // CANARY: drop the `canAccessConversation` check in `plannedConversation`
     // (epics-query.server.ts) and Selin is handed Murat's conversation.
@@ -294,7 +294,7 @@ describe("ruling 503(e): the Epics pages' loaders", () => {
   });
 });
 
-describe("ruling 503(e): the epic intents", () => {
+describe("ruling 325: the epic intents", () => {
   it("create-epic (Epics page) makes the epic the dialog describes", async () => {
     const made = acceptedSchema.parse(
       await postEpics(ids.selin, {
@@ -478,7 +478,7 @@ describe("ruling 503(e): the epic intents", () => {
   });
 });
 
-describe("ruling 503(e): the board's epic filter", () => {
+describe("ruling 325: the board's epic filter", () => {
   it("the loader ships each card's epic and the epic options; ?epic=<id> and ?epic=none select through them", async () => {
     const first = await makeTask("Filtered in, one");
     const second = await makeTask("Filtered in, two");
@@ -509,7 +509,7 @@ describe("ruling 503(e): the board's epic filter", () => {
   });
 });
 
-describe("ruling 651: archiving from the Epics pages", () => {
+describe("ruling 274: archiving from the Epics pages", () => {
   /** Put a task at the terminal stage through its file, the way a hand edit
    *  would: no hook fires. */
   async function closeToDone(taskKey: string): Promise<void> {
@@ -543,8 +543,8 @@ describe("ruling 651: archiving from the Epics pages", () => {
     expect((await epicFile(epicId))?.timeline[0]?.text).toBe(`Murat Yıldız archived ${first} and ${second}.`);
     // The board's card is archived: the board draws it under Archived only.
     expect((await board(ids.arda)).cards.find((c) => c.key === first)?.archived).toBe(true);
-    // CANARY: leave every archived row out of `progressByEpic` (the `continue`
-    // before ruling 651) and the Done epic counts nothing done.
+    // CANARY: leave every archived row out of `progressByEpic` (a `continue`
+    // there once did) and the Done epic counts nothing done (ruling 274).
     const listed = (await epicsPage(ids.arda)).epics.find((e) => e.id === epicId);
     expect(listed?.progress).toMatchObject({ total: 2, done: 2, archived: 2, archivedDone: 2 });
     // Again: nothing left to archive.

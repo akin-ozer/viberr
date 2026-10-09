@@ -80,11 +80,11 @@ import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
 
 /**
- * Ruling 691: **Viberr renders a delivered page and keeps the picture.**
+ * Ruling 86: **Viberr renders a delivered page and keeps the picture.**
  *
  * A board that delivers a report, an email template or a status page delivers
  * HTML or markdown, and every reader of it read the source: a person opens the
- * file as text (ruling 363 never serves stored HTML on the app origin), and a
+ * file as text (ruling 317 never serves stored HTML on the app origin), and a
  * reviewer agent reads its bytes. A broken table, a missing picture or a
  * layout that falls apart on a phone cannot be seen there.
  *
@@ -97,7 +97,7 @@ import { isRelayComment } from "./task-relay.server";
  *    nothing unless the delivery is still files under the task file's lock.
  *    An agent can ask for the same picture of any page on its task
  *    ({@link captureTaskPage}, the `capture_page` tool) before it delivers or
- *    while it reviews, and (ruling 698), given a size, for one picture of
+ *    while it reviews, and (ruling 194), given a size, for one picture of
  *    exactly that size of a page or an SVG drawing: how an agent that draws a
  *    diagram or a cover image gets its PNG.
  *  - **Off every request path, one at a time.** A serial queue for the whole
@@ -106,13 +106,13 @@ import { isRelayComment } from "./task-relay.server";
  *    one still waiting, and an agent's ask goes ahead of waiting deliveries.
  *  - **As whom.** The renderer (`page-capture-child.server.ts`) and its
  *    browser run a page's scripts with no sandbox, so they run as the task
- *    owner's agent user through the ruling 460 launcher, with
+ *    owner's agent user through the ruling 139 launcher, with
  *    `filteredSpawnEnv()` and the person's own `$HOME`; with isolation on and
  *    no owner nothing is rendered and the task says so. The server only writes
  *    a job, reads back PNG bytes it checks by their own header, and stores
  *    them through its own writer.
  *  - **Where the server writes.** No file inside a folder an agent can write
- *    (rulings 485 and 495), and no folder either. The renderer's scratch is
+ *    (ruling 140), and no folder either. The renderer's scratch is
  *    `.captures/<run>/<captureId>/` in the task's own directory, beside
  *    `deliveries/` and not under `workspace/`: `.captures/` and the run's
  *    folder are the server's own, passed through by the agent group and
@@ -157,7 +157,7 @@ const TOOL_STRETCH_PX = 2_000;
  *  px is taken in 0.13 s. */
 const BOX_MAX_PX = 16_000_000;
 
-/** Ruling 698: a picture of an exact size, as an agent asks for it: a box in
+/** Ruling 194: a picture of an exact size, as an agent asks for it: a box in
  *  CSS px, and how many picture px draw one of them. */
 interface PictureBox {
   width: number;
@@ -259,7 +259,7 @@ function renderer(): Renderer | PageCaptureStatus {
     return {
       available: false,
       configured: true,
-      reason: "the page renderer (ruling 691) is not installed in this deployment",
+      reason: "the page renderer (ruling 194) is not installed in this deployment",
     };
   }
   return { browser, child };
@@ -453,8 +453,8 @@ function reportText(text: string, max = REPORT_TEXT_MAX_CHARS): string {
 const reportName = (name: string): string => reportText(name, REPORT_NAME_MAX_CHARS);
 
 /** Remove one render's scratch, or a folder inside it: what the renderer
- *  wrote goes as the person who wrote it (ruling 485), and the emptied
- *  folder the server made goes with the server's `rmdir` (ruling 495). */
+ *  wrote goes as the person who wrote it, and the emptied folder the server
+ *  made goes with the server's `rmdir` (ruling 140(a)). */
 async function removeScratch(dir: string, launch: AgentLaunch | null): Promise<void> {
   try {
     await removeAgentTree(dir, launch);
@@ -469,7 +469,7 @@ async function removeScratch(dir: string, launch: AgentLaunch | null): Promise<v
  * removed unless the folder is the server's own directory, so never through a
  * link. The folder itself goes with the server's own `rmdir`, which walks
  * nothing and refuses a folder with anything in it: no agent can write in it
- * or beside it (ruling 485 is about the trees one can).
+ * or beside it (ruling 140 is about the trees one can).
  */
 async function removeCaptureHome(home: string, launch: AgentLaunch | null): Promise<void> {
   if (!isServersOwnDir(home)) return;
@@ -506,7 +506,7 @@ type CarriedFile = { bytes: number } | { tooLarge: true } | null;
 /**
  * Copy one kept file for the renderer, by descriptor at both ends: the source
  * opened without following a link, the copy made new (never over an entry and
- * never through one, ruling 552's rule for a write), readable by its group
+ * never through one, ruling 19's rule for a write), readable by its group
  * and writable by the server alone.
  */
 function carryFile(source: string, copy: string, room: number): CarriedFile {
@@ -559,7 +559,7 @@ interface Carried {
  * first, then the rest by name, within the limits.
  *
  * Throws when a folder or a file cannot be made so. Nothing is copied into a
- * folder that is not the server's own (ruling 495), and a file the renderer
+ * folder that is not the server's own (ruling 140), and a file the renderer
  * could not read would be pictured as missing from the delivery.
  */
 function carryDelivery(from: string, into: string, pages: readonly PageInput[]): Carried {
@@ -596,7 +596,7 @@ function carryDelivery(from: string, into: string, pages: readonly PageInput[]):
 }
 
 /** Remove the renderer's input folder. The server's own remove is the right
- *  one here and only here: no agent can write under it (ruling 485 is about
+ *  one here and only here: no agent can write under it (ruling 140 is about
  *  the trees one can). */
 function removeCaptureInput(inputRoot: string): void {
   try {
@@ -652,7 +652,7 @@ async function render(request: RenderRequest): Promise<Render> {
     // The last render kept here (the run's own last stretch) is replaced by
     // this one.
     for (const last of readdirSync(home)) await removeScratch(path.join(home, last), launch);
-    // Ruling 460: the renderer runs as the person's uid, so this one folder
+    // Ruling 15: the renderer runs as the person's uid, so this one folder
     // is the agents' to write. Made new, under a name nobody has been told
     // yet: `mkdir` refuses an entry that is already there, a link included.
     mkdirSync(scratch);
@@ -950,7 +950,7 @@ function deliveryPages(
       if (event.actor.kind === "human" || isRelayComment(event)) inputs.add(name);
     }
   }
-  // The deliverer's own, not every maker's (ruling 699): a picture's drawing
+  // The deliverer's own, not every maker's (ruling 81): a picture's drawing
   // is a page too, and must not be pictured ahead of the piece or in its place.
   const delivered = deliverersOwnFileNames(fm, timeline);
   const pages = files
@@ -988,7 +988,7 @@ function sourceRefusal(file: string, kind: PictureKind, bytes: number): SourceRe
 }
 
 /** The name the store keeps a page's picture under: trimmed and composed
- *  (`checkAttachmentUpload`, ruling 675), so two pages can come to one. Null
+ *  (`checkAttachmentUpload`, ruling 76), so two pages can come to one. Null
  *  for a name the store refuses, which the write itself then says. */
 function keptPictureName(file: string): string | null {
   try {
@@ -1484,7 +1484,7 @@ function boxReplyText(
 interface AskedPage {
   /** The name as the agent typed it, which the reply uses. */
   name: string;
-  /** The name the folder holds it under (ruling 675): what the renderer opens. */
+  /** The name the folder holds it under (ruling 76): what the renderer opens. */
   stored: string;
   kind: PictureKind;
   /** The exact size asked for, or null for the page in stretches. */
@@ -1669,7 +1669,7 @@ export function captureTaskPage(
       const stat = statSync(resolved);
       if (stat.isFile()) {
         size = stat.size;
-        // Ruling 675: found in either Unicode form, and rendered under the
+        // Ruling 76: found in either Unicode form, and rendered under the
         // spelling the folder holds, which is the one the renderer can open.
         stored = path.basename(resolved);
       }
@@ -1735,7 +1735,7 @@ export function captureTaskPage(
 
 /**
  * A run has ended: the pictures `capture_page` kept for it go, as the task's
- * person (ruling 485), whose agent user the renderer wrote them as. Called by
+ * person (ruling 140), whose agent user the renderer wrote them as. Called by
  * the completion pipeline for every run that ends; a run that asked for no
  * picture has no folder and costs one look. The folder is looked for through
  * no link: `.captures/` and the run's folder in it are each the server's own

@@ -9,13 +9,13 @@ import { projectGatesView } from "~/shared/project-gates";
 import type { OperatorPacketOptionInput } from "./operator-packets.server";
 
 /**
- * Ruling 489 (pass 40, F40-68): where a react chain's work stands, read from
+ * Ruling 119 (pass 40, F40-68): where a react chain's work stands, read from
  * what the server wrote rather than from what an agent said.
  *
  * Two readers. The react loop asks whether the task's head MOVED during the
  * hop that just finished: a reply that committed a new head (or whose head was
  * delivered in the meantime) is progress, a boundary like an approve (ruling
- * 362), so the depth count starts over. And when the depth cap still opens the
+ * 119), so the depth count starts over. And when the depth cap still opens the
  * stuck-loop packet, the packet says where the work stands: the last report,
  * the head and whether it is delivered, the last gate result, and, when a
  * committed head is not delivered, the one step left.
@@ -41,9 +41,9 @@ export interface HeadMove {
  * sha when a delivering run leaves a new tree behind (`nextWorkRevision`), and
  * a delivery push stamps `pushedAt` on the revision whose head origin now
  * carries. A head that reaches the revision only through Viberr's own base
- * refreshes mints nothing (ruling 439), and neither counts here. Two kinds are
+ * refreshes mints nothing (ruling 239), and neither counts here. Two kinds are
  * not the chain's progress: a `verified` revision is the base branch a
- * reviewer judged (it arrives with an approve, which ruling 362 already
+ * reviewer judged (it arrives with an approve, which ruling 119 already
  * counts), and an `external` one is a head somebody else pushed onto the pull
  * request.
  */
@@ -65,10 +65,10 @@ export function headMovedSince(
 }
 
 /**
- * Ruling 613: did this hop deliver the task's files?
+ * Ruling 119: did this hop deliver the task's files?
  *
  * A task whose deliverable is files is delivered by moving `deliveredAt`
- * (rulings 388 and 587), never by a work revision, so `headMovedSince` saw no
+ * (rulings 84 and 85), never by a work revision, so `headMovedSince` saw no
  * hop of it make progress. Live on AWSC-71 (2026-10-01) the Estimate Judge
  * asked for two small fixes, the Architect saved them and the Calculator
  * Builder delivered the files again, and the fourth hop opened "Work stalled:
@@ -109,7 +109,7 @@ export function taskHeadState(fm: {
   if (!rev || rev.kind === "verified") return { kind: "none" };
   const livePr = fm.pr && fm.pr.state !== "closed" && fm.pr.state !== "merged" ? fm.pr : null;
   const prNumber = livePr?.number ?? null;
-  // An `external` revision IS the pull request's head (ruling 179): somebody
+  // An `external` revision IS the pull request's head (ruling 240): somebody
   // pushed it there, so it is not waiting on a delivery.
   if (rev.kind === "external" || rev.pushedAt || (livePr && livePr.headSha === rev.headSha)) {
     return { kind: "delivered", sha: rev.headSha, prNumber };
@@ -184,7 +184,7 @@ export interface StuckLoopStandings {
 }
 
 /**
- * Ruling 489: the body of a depth-capped "Work stalled" packet, from the task
+ * Ruling 119: the body of a depth-capped "Work stalled" packet, from the task
  * as it stands after the reply. `replyText` is the reply that hit the cap;
  * `agentHandle` names who wrote it.
  */
@@ -203,14 +203,14 @@ export function stuckLoopStandings(input: {
   const excerpt = reportExcerpt(input.replyText);
   if (excerpt) parts.push(`The last report, from @${input.agentHandle}: “${excerpt}”`);
   const head = taskHeadState(input.fm);
-  // Ruling 613: a task delivered as files has no head to name; its delivery
-  // is the stamp a review binds to (`files:<deliveredAt>`, ruling 388).
+  // Ruling 119: a task delivered as files has no head to name; its delivery
+  // is the stamp a review binds to (`files:<deliveredAt>`, ruling 84).
   parts.push(
     head.kind === "none" && input.fm.deliveredAt
       ? `The task's files were last delivered at ${input.fm.deliveredAt}.`
       : headStateSentence(head),
   );
-  // Ruling 482: the last gate result on record. The view binds it to the head
+  // Ruling 315: the last gate result on record. The view binds it to the head
   // under review, so a run on an older revision reads as "not run yet" here.
   const gates = input.fm.gateRun ? projectGatesView(input.gates, input.fm) : null;
   if (gates) parts.push(`${gates.line}.`);

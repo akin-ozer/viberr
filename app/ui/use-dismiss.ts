@@ -40,7 +40,7 @@ export interface DismissOptions {
   /**
    * Whether the focus moving outside dismisses too. Default `false`. The
    * account menu's press that is still waiting for its chunk passes `true`: a
-   * Tab or a click elsewhere takes the press back (ruling 457).
+   * Tab or a click elsewhere takes the press back (ruling 11).
    */
   focus?: boolean;
 }

@@ -35,11 +35,11 @@ import {
  * Rendered only when the task has an open packet. The primary button's
  * label is the SELECTED option's title; resolution dispatches by option
  * INDEX (the server re-reads the packet and dispatches on the option's
- * stable `kind` — ruling 7, never the English title).
+ * stable `kind` — ruling 62(a), never the English title).
  *
  * F19-7: `onResolve` is NOT always a submit. An `accept_completion` option runs
  * the full acceptance contract including the real, irreversible PR merge, so the
- * page interposes the shared `AcceptConfirm` ceremony (ruling 20) on that one
+ * page interposes the shared `AcceptConfirm` ceremony (ruling 97) on that one
  * kind and replays this call's index + note only if the human confirms. Nothing
  * on this card should assume the click wrote anything.
  *
@@ -53,7 +53,7 @@ import {
  */
 
 /*
- * Ruling 700(e) split the card along the task-page recipe: its choice is one
+ * Ruling 13(b) split the card along the task-page recipe: its choice is one
  * hook (`usePacketChoice`, decision-packet-actions.ts), what it reads off the
  * packet and the viewer's tiers is pure functions (decision-packet-derive.ts),
  * and its regions and its three ask-first ceremonies are hook-free components
@@ -107,7 +107,7 @@ export interface PacketArchiveDisclosure {
    */
   openPr: number | null;
   /**
-   * Ruling 161 (pass 35, U35-8): origin's copy of the branch carries commits
+   * Ruling 234 (pass 35, U35-8): origin's copy of the branch carries commits
    * this task did not author, as the reconciler last recorded it
    * (`task.foreignHead`): the head sha when GitHub named one and the unowned
    * PR when one stands. The delete-branch dialog says so BEFORE the button:
@@ -120,7 +120,7 @@ export interface PacketArchiveDisclosure {
 }
 
 /**
- * Ruling 500 (AICSS's Approval Card): the packet's head. A tile in the packet's
+ * Ruling 312 (AICSS's Approval Card): the packet's head. A tile in the packet's
  * tone (amber for a question, coral for a block) with its glyph, the kind as
  * the card's title, and the attribution at the right. Attribution is a
  * whisper, not a badge: the boxed `.agent-glyph.op` (a filled 26px square) was
@@ -146,11 +146,11 @@ function PacketHead({ kind, from, blocked }: { kind: string; from: string; block
 interface DecisionPacketProps {
   packet: PacketRender;
   busy: boolean;
-  /** Ruling 529: a question asked while an agent keeps working on the task,
+  /** Ruling 312: a question asked while an agent keeps working on the task,
    *  which the work does not wait on. The card takes a quieter surface and
    *  says so in its first line. */
   aside?: boolean;
-  /** Ruling 521: the completion packet, drawn between the evidence and the
+  /** Ruling 316: the completion packet, drawn between the evidence and the
    *  options when one of them offers the task for acceptance. */
   completion?: ReactNode;
   /** Whether the viewer may RESOLVE this packet (admin|maintainer, or the task
@@ -178,20 +178,20 @@ interface DecisionPacketProps {
    *  authority the archive-with-branch-deletion needs). Same block-with-reason
    *  treatment as `canArchive`. */
   canDiscardBranch?: boolean;
-  /** Ruling 164 (pass 35, F35-14): whether the viewer holds
+  /** Ruling 131 (pass 35, F35-14): whether the viewer holds
    *  `force-accept-completion` (admin), the tier a `force_accept` option
    *  re-checks server-side with the Force accept button's own sentence. */
   canForceAccept?: boolean;
-  /** Ruling 164: whether the viewer holds `approve-transition`, the tier a
+  /** Ruling 131: whether the viewer holds `approve-transition`, the tier a
    *  `move_stage` option re-checks (it is the stage picker's own move). */
   canMoveStage?: boolean;
-  /** Ruling 672: whether the viewer holds `edit-policy`, the tier both
+  /** Ruling 65: whether the viewer holds `edit-policy`, the tier both
    *  answers to the repository question re-check. */
   canEditPolicy?: boolean;
   /** UX19-9: what an `archive_task` resolution destroys, for its confirm. */
   archiveDisclosure?: PacketArchiveDisclosure;
   /**
-   * Ruling 319: the other tasks this confirm also answers, in one sentence, or
+   * Ruling 65: the other tasks this confirm also answers, in one sentence, or
    * null when it answers only this one.
    *
    * A packet raised by a backend failure carries a `cause` naming the ACCOUNT
@@ -203,7 +203,7 @@ interface DecisionPacketProps {
    */
   alsoAnswers?: string | null;
   /**
-   * Ruling 324: per `create_task` option index, the tasks on this project whose
+   * Ruling 67: per `create_task` option index, the tasks on this project whose
    * title already looks like the one that option would create.
    *
    * A confirm here makes a real task under the person's own authority, and the
@@ -217,7 +217,7 @@ interface DecisionPacketProps {
    */
   createTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   onResolve: (optionIndex: number, note: string) => void;
-  /** Ruling 138: a DECIDED `edit_goal` packet has one way out — the goal
+  /** Ruling 63: a DECIDED `edit_goal` packet has one way out — the goal
    *  editor, opened prefilled with the chosen option's draft. */
   onEditGoal?: (draft: string) => void;
   /** Questionnaire packets (owner request 2026-08-20): resolve with the
@@ -230,10 +230,10 @@ interface DecisionPacketProps {
    *  needs a tier above theirs — the one case `requestPacketMaintainerDecision`
    *  exists for. Absent hides the affordance (a maintainer/admin already holds
    *  every tier, and a non-owner has no standing to route another's task).
-   *  Ruling 672: also present for a maintainer on the repository question,
+   *  Ruling 65: also present for a maintainer on the repository question,
    *  whose two answers are a project admin's. */
   onRequestMaintainer?: () => void;
-  /** Ruling 368: the escalation {@link onRequestMaintainer} sent is in flight,
+  /** Ruling 286: the escalation {@link onRequestMaintainer} sent is in flight,
    *  so its button says so instead of staying live and silent. */
   escalating?: boolean;
   onAsk: () => void;
@@ -279,7 +279,7 @@ export function DecisionPacket({
   const isBlocked = p.type === "blocked";
   const tone = packetTone(p);
 
-  // Ruling 138: a decided `edit_goal` packet reads as decided after a reload —
+  // Ruling 63: a decided `edit_goal` packet reads as decided after a reload —
   // the chosen option locked, no Confirm, and one control that opens the goal
   // editor exactly as the confirm did. A packet stamped `awaiting` before the
   // decision was recorded renders nothing special.
@@ -398,7 +398,7 @@ function OpenPacketContent({
   completion: ReactNode;
   aside: boolean;
 }) {
-  /** Ruling 478(e) (F40-31, F40-57): the agent this card's answer goes back
+  /** Ruling 68 (F40-31, F40-57): the agent this card's answer goes back
    *  to, when an agent asked. Nothing is preselected on its question
    *  (`initialChoice`). */
   const answerTo = p.answerTo;
@@ -406,14 +406,14 @@ function OpenPacketContent({
   const echoes = createTaskEchoes[choice.sel] ?? [];
 
   /**
-   * UX19-4, rewritten for ruling 160 (pass 35, F35-11) — the closed-PR recovery
+   * UX19-4, rewritten for ruling 232 (pass 35, F35-11) — the closed-PR recovery
    * packet enumerated rework / archive / archive-and-delete-the-branch and told
    * the reader that reopening the PR on GitHub was "also a valid path", while
    * the GitHub panel's "Deliver branch & open PR" sat directly ABOVE the card.
    * The note named that control, because it then opened a fresh review PR and
    * really did recover a mistaken close.
    *
-   * Ruling 160 closed that door on purpose: a pull request a person closed
+   * Ruling 232 closed that door on purpose: a pull request a person closed
    * without merging is a decision about the task, and `openTaskPr` answers
    * `closed_by_human` while `pr.closure.answered` is null — which is null for
    * exactly as long as this packet stands, since answering it IS what stamps it
@@ -471,7 +471,7 @@ function OpenPacketContent({
 
       {completion}
 
-      {/* Ruling 319: stated ABOVE the options, because it changes what
+      {/* Ruling 65: stated ABOVE the options, because it changes what
           picking one of them means. */}
       {alsoAnswers && (
         <p className="deny-note spaced" data-also-answers="">

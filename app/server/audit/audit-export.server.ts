@@ -21,7 +21,7 @@ export interface AuditExportFilters {
   /** Exact action match (e.g. "task.metadata.updated"). */
   action?: string;
   /**
-   * Ruling 279 (pass 37, F37-112): action PREFIX match (e.g. "task." for every
+   * Ruling 33 (pass 37, F37-112): action PREFIX match (e.g. "task." for every
    * task action). Kept separate from `action` because the CSV/JSON export's
    * contract is the exact one and must not change under it.
    */
@@ -84,7 +84,7 @@ export function queryAuditEventsForExport(
     params.push(filters.action);
   }
   if (filters.actionPrefix) {
-    // Ruling 279: LIKE with the wildcard only at the END, and the caller's own
+    // Ruling 33: LIKE with the wildcard only at the END, and the caller's own
     // `%` / `_` escaped, so a prefix cannot become a pattern.
     where.push("action LIKE ? ESCAPE '\\'");
     params.push(`${filters.actionPrefix.replace(/[\\%_]/g, "\\$&")}%`);

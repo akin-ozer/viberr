@@ -194,7 +194,7 @@ describe("reconcileTask", () => {
       title: "Attach execution workspace",
       checks: { total: 2, passing: 2, failing: 0, pending: 0 },
     });
-    // Ruling 187: each entry is stamped with whether the remote has it. These
+    // Ruling 236: each entry is stamped with whether the remote has it. These
     // came FROM the compare, so they are pushed.
     expect(fm.github?.commits).toEqual([
       { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate", pushed: true },
@@ -268,7 +268,7 @@ describe("reconcileTask", () => {
     // The two readable commits survive — the branch footprint is not emptied.
     expect(result).toMatchObject({ status: "reconciled", commits: 2 });
     const fm = readVib301(store)!.parsed.frontmatter;
-    // Ruling 187: this compare DROPPED an entry, so it is incomplete and no
+    // Ruling 236: this compare DROPPED an entry, so it is incomplete and no
     // commit is judged — an unjudged entry must not read as judged.
     expect(fm.github?.commits).toEqual([
       { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate" },
@@ -567,7 +567,7 @@ describe("reconcileTask", () => {
     expect(fm.github?.unownedPr ?? null).toBeNull();
   });
 
-  it("ruling 161 (U35-8): a head the task's record does not account for is written as github.foreignHead", async () => {
+  it("ruling 234 (U35-8): a head the task's record does not account for is written as github.foreignHead", async () => {
     // Canary: drop the `foreignHead` write in the reconciler and both records
     // below are absent; the archive dialog then cannot say what origin holds.
     const { store, actor } = setup({
@@ -590,7 +590,7 @@ describe("reconcileTask", () => {
 
     // 3. KNC-21 itself: the agent REPORTED a revision on this branch, the
     //    delivery push was refused non-fast-forward, and origin's branch holds
-    //    a stranger's commit. Ruling 161(a) is explicit that a reported head is
+    //    a stranger's commit. Ruling 234 is explicit that a reported head is
     //    not a delivered one, so this head is NOT proven the task's and the
     //    disclosure the archive dialog needs must be recorded. Canary: gate the
     //    record on `deliveredThisBranch` (which counts the report) and this is
@@ -659,7 +659,7 @@ describe("reconcileTask", () => {
 
     expect(result).toMatchObject({ status: "reconciled", commits: 2 });
     const fm = readVib301(store)!.parsed.frontmatter;
-    // Ruling 187: each entry is stamped with whether the remote has it. These
+    // Ruling 236: each entry is stamped with whether the remote has it. These
     // came FROM the compare, so they are pushed.
     expect(fm.github?.commits).toEqual([
       { sha: "a91f7c2", msg: "[VIB-301] add repo attach policy gate", pushed: true },
@@ -862,7 +862,7 @@ describe("reconcileTask", () => {
     expect(after).toBe(before); // byte-stable, no updatedAt churn
   });
 
-  it("merged PR → sync 'merged' beats behind (ruling 12 precedence)", async () => {
+  it("merged PR → sync 'merged' beats behind (ruling 237 precedence)", async () => {
     const { store, actor } = setup();
     const routes = happyRoutes();
     routes[`GET ${REPO_PATH}/compare/main...vib-301-workspace`] = {
@@ -959,11 +959,11 @@ describe("reconcileTask", () => {
     expect(fm.pr?.state).toBe("accepted");
   });
 
-  // Ruling 474: a delivery that rewrites the PR body during a pass's GitHub
+  // Ruling 236: a delivery that rewrites the PR body during a pass's GitHub
   // round trips records the body it wrote; the pass's older snapshot must not
   // put the previous record back (the next delivery would read Viberr's own
   // rewrite as a person's edit). Canary: drop the carry under the lock.
-  it("ruling 474: a body record a delivery writes mid-pass survives the pass", async () => {
+  it("ruling 236: a body record a delivery writes mid-pass survives the pass", async () => {
     const { store, actor } = setup();
     const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
     const before = { sha256: "a".repeat(64), revision: "oldhead" };
@@ -1241,7 +1241,7 @@ describe("reconcileTask", () => {
     await reconcileVib301(store, actor, fakeGithubFetch(routes).fetchImpl);
     const fm = readVib301(store)!.parsed.frontmatter;
     expect(fm.github?.commits).toEqual([
-      // Ruling 187: the carve-out's real case — the agent skipped the `[KEY]`
+      // Ruling 236: the carve-out's real case — the agent skipped the `[KEY]`
       // prefix so the filter found nothing, the cache is kept, AND the compare
       // proves both commits are genuinely on the branch.
       { sha: "a91f7c2", msg: "VIB-301: add repo attach policy gate", pushed: true },
@@ -1475,7 +1475,7 @@ describe("reconcileTask persists CI health and review state (P13-D-28)", () => {
     });
   });
 
-  it("ruling 360: a REFUSED check-runs read is persisted, flags `checks:read`, and the first successful read clears both", async () => {
+  it("ruling 237: a REFUSED check-runs read is persisted, flags `checks:read`, and the first successful read clears both", async () => {
     // CANARY: drop `owned.checksUnread` (the file stays silent) or the flag
     // (the credential never learns why CI is invisible).
     const { store, actor } = setup();
@@ -1635,10 +1635,10 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     return { store, actor };
   }
 
-  it("F28-U2a / ruling 480: a merge with NO open violation proves pull_request:write, and repo", async () => {
+  it("F28-U2a / ruling 220: a merge with NO open violation proves pull_request:write, and repo", async () => {
     const { store, actor } = setup(); // VIB-301 owns PR #318, PAT bound, NO violation
     // Give the bound PAT the state the connection's own Re-check leaves on a
-    // fine-grained token (ruling 480, F40-43): asked about no repository, so
+    // fine-grained token (ruling 220, F40-43): asked about no repository, so
     // BOTH scopes are assumed, "verified on first use".
     const bound = getProjectCredential(store.db, store.slug)!;
     recordPatValidation(store.db, bound.id, {
@@ -1656,7 +1656,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       headerScopes: null,
       detail: "Authenticated.",
     });
-    // Ruling 480: read as the card reads it, the project's repository's proof.
+    // Ruling 220: read as the card reads it, the project's repository's proof.
     const sourceOf = (id: string) =>
       getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === id)!
         .source;
@@ -1681,7 +1681,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
     );
     expect(result).toEqual({ status: "merged", prNumber: 318, sha: "mergesha02" });
     // The merge — the FIRST real use of the bound PAT — proved the scope, even
-    // though there was no violation to resolve. Ruling 480: merging moved the
+    // though there was no violation to resolve. Ruling 220: merging moved the
     // base branch (Contents write), so `repo` is proven on this repository too.
     // Canary: prove only `pull_request:write` on a merge (WRITE_PROOF.merge).
     expect(scopeSource()).toBe("probe");
@@ -1973,7 +1973,7 @@ describe("mergeTaskPr (the real merge behind accept_completion)", () => {
       "VIB-301",
     );
     expect(violation).not.toBeNull();
-    // Policy event written to THE VIOLATION'S OWN task (ruling 5).
+    // Policy event written to THE VIOLATION'S OWN task (ruling 221).
     const file = readVib301(store)!;
     expect(file.parsed.timeline[0]).toMatchObject({
       type: "policy",
@@ -2353,7 +2353,7 @@ describe("reconcileProject fan-out control", () => {
     expect(gh.callsTo(`GET ${REPO_PATH}/compare/main...vib-800`)).toHaveLength(0);
   });
 
-  it("ruling 177: a budgeted pass skips a task at the terminal stage even when its PR never merged", async () => {
+  it("ruling 52: a budgeted pass skips a task at the terminal stage even when its PR never merged", async () => {
     // F36-5 sub-item: a force-accepted task (Shipped, PR-less or PR open) kept
     // polling its deleted branch every 5 minutes forever because "terminal"
     // was spelled archived-OR-merged. Canary: put `archived = 1 OR merged` back
@@ -2519,12 +2519,12 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
     expect(readPrHumanApproval(readPr(store))).toBeNull();
   });
 
-  // Ruling 474: `pr.bodyWritten` is the delivery's record of the PR body it
+  // Ruling 236: `pr.bodyWritten` is the delivery's record of the PR body it
   // wrote, and no pass reads anything that could replace it. Canary: drop the
   // carry and the first pass erases it, so the next delivery would take a
   // person's edit for Viberr's own text. Canary: set the approval before the
   // carried key again and the second pass rewrites a file nothing changed.
-  it("ruling 474: the delivery's body record rides every pass, and an unchanged PR still writes nothing", async () => {
+  it("ruling 236: the delivery's body record rides every pass, and an unchanged PR still writes nothing", async () => {
     const { store, actor } = setupDelivered();
     const ref = { projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot };
     const bodyWritten = { sha256: "a".repeat(64), revision: "headsha318" };
@@ -2548,14 +2548,14 @@ describe("reconcileTask records the human PR approval (R19-B)", () => {
 });
 
 /**
- * Ruling 135 (pass 34, F34-11): the reconciler records the PR head and, when
+ * Ruling 243 (pass 34, F34-11): the reconciler records the PR head and, when
  * the delivered revision is not reachable from it, `pr.unpushedRevision`.
  * The PRIMARY arm is the never-pushed one: the compare's base is a LOCAL sha,
  * GitHub answers 404, and one direct commit read confirms the object is not
  * there at all. Canary: keep only the `ahead` arm of the drift compare and
  * every case below loses its record.
  */
-describe("ruling 135: the unpushed delivered revision", () => {
+describe("ruling 243: the unpushed delivered revision", () => {
   const REV = "rev0delivered";
   function seedOwned(opts: { unpushed?: PrRef["unpushedRevision"]; kind?: "delivered" | "verified" } = {}) {
     const pr: PrRef = { number: 318, state: "review", title: "Attach execution workspace" };
@@ -2580,7 +2580,7 @@ describe("ruling 135: the unpushed delivered revision", () => {
   const commitRoute = `GET ${REPO_PATH}/commits/${REV}`;
 
   it("PRIMARY: a 404 compare plus the commit read's 422 records `unknown` and the PR head", async () => {
-    // Ruling 427: this fixture used to answer the commit read with 404, which
+    // Ruling 243: this fixture used to answer the commit read with 404, which
     // is what the code believed and not what GitHub says. Probed live on
     // 2026-09-23 against akin-ozer/ax-clone for AX-20's never-pushed 7ce74b2:
     // the compare answered 404 "Not Found", the commit read 422 "No commit
@@ -2595,9 +2595,9 @@ describe("ruling 135: the unpushed delivered revision", () => {
     expect(fm.pr?.revisionDrift).toBeUndefined();
   });
 
-  it("ruling 427: a 422 that is not the missing-commit sentence measures nothing", async () => {
-    // 422 is GitHub's generic validation status (ruling 223 kept it scoped to
-    // this sentence); anything else carries the cached record forward.
+  it("ruling 243: a 422 that is not the missing-commit sentence measures nothing", async () => {
+    // 422 is GitHub's generic validation status, so only this sentence
+    // counts; anything else carries the cached record forward.
     const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
     const { run } = seedOwned({ unpushed: cached });
     const routes = happyRoutes();
@@ -2686,7 +2686,7 @@ describe("ruling 135: the unpushed delivered revision", () => {
 
 /**
  * F34-9 (pass 34): PR adoption is recorded. Adopting a PR Viberr did not open
- * (found on the branch with the delivered head, ruling 35) writes one `github`
+ * (found on the branch with the delivered head, ruling 231(a)) writes one `github`
  * event naming the PR, its head and the PR it replaces, an audit row
  * `github.pr.adopted`, and its own notification; a refresh of the same number
  * writes nothing; replacing a LIVE cached PR wakes the operator. Canaries:
@@ -2797,14 +2797,14 @@ describe("F34-9: PR adoption is recorded", () => {
 });
 
 /**
- * Ruling 132 (pass 34, F34-14): the reconciler classifies the commits since
+ * Ruling 239 (pass 34, F34-14): the reconciler classifies the commits since
  * the reviewed revision instead of counting them, so an operator's base
  * refresh (four base commits plus its recorded merge) is reported as a base
  * refresh and never as five unreviewed commits. Canaries: drop the
  * `branchOwn` membership test in `classifyRevisionDrift`; treat any two-parent
  * commit as clean; remove the base-compare completeness guard.
  */
-describe("ruling 132: drift is classified, not counted", () => {
+describe("ruling 239: drift is classified, not counted", () => {
   const REV = "rev0delivered";
   const HEAD = "headsha318";
   const M = "m".repeat(40);
@@ -2847,7 +2847,7 @@ describe("ruling 132: drift is classified, not counted", () => {
     const fm = await run(routes);
     expect(fm.pr?.revisionDrift).toEqual({ headSha: HEAD, authored: 0, baseRefresh: { merges: 1, commits: 4 } });
     // `github.commits` keeps its narrow shape: the compare reader's own fields
-    // (`fullSha`, `parents`) never reach the file — ruling 132. Ruling 187 adds
+    // (`fullSha`, `parents`) never reach the file — ruling 239. Ruling 236 adds
     // exactly one more, `pushed`, which is schema'd and deliberate; the guard
     // stays so a THIRD field cannot arrive by accident.
     expect(fm.github?.commits).toHaveLength(2);
@@ -2897,12 +2897,12 @@ describe("ruling 132: drift is classified, not counted", () => {
 });
 
 /**
- * Ruling 179 (pass 36, F36-7): authored drift after a verdict VOIDS it. Live:
+ * Ruling 240 (pass 36, F36-7): authored drift after a verdict VOIDS it. Live:
  * an observer commit on hlc-7 at Merge Approval — `pr.revisionDrift
  * {authored: 1}` was written, nothing woke, nothing notified, the accept card
  * stayed applicable and the Commits card (prefix-filtered) hid the commit.
  */
-describe("ruling 179: a PR head moved after the verdict voids it", () => {
+describe("ruling 240: a PR head moved after the verdict voids it", () => {
   const REV = "rev0delivered";
   const HEAD = "headsha318";
   const A0 = "a0".padEnd(40, "0");
@@ -2989,14 +2989,14 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     expect(fm.pr?.revisionDrift).toMatchObject({ headSha: HEAD, authored: 1 });
     expect(fm.recommendations).toEqual([]);
     // The foreign commit is on the record beside the task's own.
-    // Ruling 187: derived from the compare, so the remote demonstrably has it.
+    // Ruling 236: derived from the compare, so the remote demonstrably has it.
     expect(fm.github?.commits).toEqual([
       { sha: A0.slice(0, 7), msg: "[VIB-301] the work", pushed: true },
     ]);
     expect(fm.github?.otherCommits).toEqual([{ sha: X1.slice(0, 7), msg: "observer fixture: drift after review" }]);
     const note = parsed.timeline.find((e) => e.type === "note" && e.title === "Revision moved after review")!;
     expect(note).toBeDefined();
-    expect(note.text).toContain("ruling 179");
+    expect(note.text).toContain("ruling 240");
     expect(note.text).toContain("no longer binds");
     // Live 19:45Z: the drift sentence carries no terminal punctuation, so the
     // note read "…merges unreviewed The verdict on…". Canary: drop the period.
@@ -3012,7 +3012,7 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     expect(wakes).toEqual(["pr-diverged"]);
   });
 
-  it("ruling 482: the external head is gated like a delivered one", async () => {
+  it("ruling 104: the external head is gated like a delivered one", async () => {
     // CANARY: drop the gate request after `returnChangedRevisionToReview` in
     // reconcileTask and the moved head carries no gate record at all.
     const { store, run } = seedApproved();
@@ -3037,7 +3037,7 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
     const parsed = await run();
     expect(parsed.frontmatter.stage).toBe("impl");
     const move = parsed.timeline.find((e) => e.type === "transition")!;
-    expect(move.text).toContain("ruling 179");
+    expect(move.text).toContain("ruling 240");
     expect(move.actor).toMatchObject({ kind: "system", systemId: "policy-engine" });
     const rows = listAuditEvents(store.db, { action: "task.transition" }).filter((r) => r.taskKey === "VIB-301");
     expect(rows.at(-1)!.details).toMatchObject({ from: "review", to: "impl", boundary: "rework", via: "authored-drift" });
@@ -3062,12 +3062,12 @@ describe("ruling 179: a PR head moved after the verdict voids it", () => {
 });
 
 /**
- * Pass 35 S15: ruling 162 (F35-12 (a0) and (d)). The conflict the acceptance
+ * Pass 35 S15: ruling 95 (F35-12 (a0) and (d)). The conflict the acceptance
  * gate refuses on reaches the file from BOTH GitHub answers (the detail read
  * and the merge refusal), and a flip to conflicting withdraws the acceptance
  * offer the gate would refuse.
  */
-describe("pass 35 S15: ruling 162 in the reconciler", () => {
+describe("pass 35 S15: ruling 95 in the reconciler", () => {
   it("(d): a PR that flips to conflicting withdraws the pending accept_completion card with the gate's sentence on the timeline", async () => {
     // Canary: drop `conflictText` from the superseded filter.
     const { store, actor } = setup({
@@ -3143,17 +3143,17 @@ describe("pass 35 S15: ruling 162 in the reconciler", () => {
   });
 });
 
-// ------------------------------------------------- ruling 475 (F40-55)
+// ------------------------------------------------- ruling 244 (F40-55)
 
 /**
- * Ruling 475 (F40-55): live on akinozer-com the owner accepted WEB-4 at
+ * Ruling 244 (F40-55): live on akinozer-com the owner accepted WEB-4 at
  * 00:26:20 and Viberr merged PR #2. WEB-2's PR #3 changed the same
  * `package.json`. Nothing re-read PR #3 until the five-minute poll, the flip
  * to conflicting withdrew only the recommendation cards, and nobody was woken,
  * so the owner pressed Accept on WEB-2's still-open packet at 00:27:54 and was
  * refused.
  */
-describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to conflicting is acted on", () => {
+describe("ruling 244 (F40-55): a merge re-checks its siblings, and a flip to conflicting is acted on", () => {
   /** One recorded wake: which task, which trigger. */
   function wakeRecorder() {
     const wakes: string[] = [];
@@ -3320,10 +3320,10 @@ describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to con
   });
 });
 
-// ------------------------------------------------- ruling 160: pr.closure
+// ------------------------------------------------- ruling 232: pr.closure
 
 /**
- * Ruling 160 (pass 35, F35-11): a PR that went `closed` without merging was
+ * Ruling 232 (pass 35, F35-11): a PR that went `closed` without merging was
  * closed by a person. The reconciler, the one writer of the closure RECORD (the
  * workspace reconcile writes the closed state too, knowing neither), stamps the
  * closure with the closer GitHub names, carries it while the PR stays closed
@@ -3331,7 +3331,7 @@ describe("ruling 475 (F40-55): a merge re-checks its siblings, and a flip to con
  * assignment in the owned-PR assembly (first test), or copy it unconditionally
  * (third test).
  */
-describe("ruling 160: the reconciler records who closed the PR", () => {
+describe("ruling 232: the reconciler records who closed the PR", () => {
   const read = (store: TestStore) => readVib301(store)!.parsed.frontmatter.pr;
 
   it("the transition into closed stamps `closure` with the closer from the issue payload", async () => {
@@ -3378,7 +3378,7 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
 });
 
 /**
- * Ruling 187 (pass 37, F37-8): the cache never claims a commit the remote does
+ * Ruling 236 (pass 37, F37-8): the cache never claims a commit the remote does
  * not have, and a commit that vanished with its workspace is announced as lost.
  *
  * Live: SHOP-2's `github.commits` held `3aad6ff` — the agent's workspace
@@ -3390,7 +3390,7 @@ describe("ruling 160: the reconciler records who closed the PR", () => {
  * the run's workspace had been disposed, so it was not pending push, it was
  * gone.
  */
-describe("ruling 187: a workspace commit the remote does not have", () => {
+describe("ruling 236: a workspace commit the remote does not have", () => {
   type Store = ReturnType<typeof setup>["store"];
 
   /** The exact live shape: a remote whose only commit is unprefixed, so the
@@ -3509,7 +3509,7 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
    * prohibited lie, pointed the other way. It never fired live only because
    * Viberr deletes the branch after merging, and that delete is best-effort.
    */
-  it("ruling 187(b): a MERGED pr does not flip its commits to `not pushed`", async () => {
+  it("ruling 236: a MERGED pr does not flip its commits to `not pushed`", async () => {
     const { store, actor } = setup();
     seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
       prState: "merged",
@@ -3523,7 +3523,7 @@ describe("ruling 187: a workspace commit the remote does not have", () => {
     ]);
   });
 
-  it("ruling 187(b): an unjudged commit on a merged pr stays unjudged, never `false`", async () => {
+  it("ruling 236: an unjudged commit on a merged pr stays unjudged, never `false`", async () => {
     const { store, actor } = setup();
     seedCached(store, "3aad6ff", "[VIB-301] Define identity service slice", {
       prState: "merged",
@@ -3634,13 +3634,13 @@ describe("F37-9: a sync verdict that changes is recorded, even on a quiet poll",
 });
 
 /**
- * Ruling 494 (pass 40, F40-70): the row a pass writes names the head its
+ * Ruling 238 (pass 40, F40-70): the row a pass writes names the head its
  * compare read and the base tip it read, and a pass that compared another head
  * than the newest row names writes a row even on a quiet poll. Live on WEB-16
  * a row counted GitHub's copy of the branch 7 s before the delivery pushed a
  * head that carried `main`; nothing on it said which head it counted.
  */
-describe("ruling 494: the reconcile row names the head it compared", () => {
+describe("ruling 238: the reconcile row names the head it compared", () => {
   const MAIN = "m".repeat(40);
   const OLD = "a".repeat(40);
   const OTHER = "b".repeat(40);
@@ -3726,7 +3726,7 @@ describe("ruling 494: the reconcile row names the head it compared", () => {
     // `get_task` would read "head unknown" until something else changed.
     const { store, actor } = setup();
     await pass(store, actor, behindAt(OLD), false);
-    // The shape every row had before ruling 494: a count and no head.
+    // An older row's shape: a count and no head.
     store.db
       .prepare(
         `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)
@@ -3744,7 +3744,7 @@ describe("ruling 494: the reconcile row names the head it compared", () => {
 });
 
 /**
- * Ruling 496 (pass 40, F40-72): a pass over an unchanged GitHub writes nothing.
+ * Ruling 236 (pass 40, F40-72): a pass over an unchanged GitHub writes nothing.
  * Live on WEB-12 (deploy 10) the credential had no `checks:read`, every pass
  * stamped `checksUnread.at` anew, and each five-minute poll rewrote task.md,
  * reprojected it and wrote a `github.reconcile` row that differed from the last
@@ -3753,7 +3753,7 @@ describe("ruling 494: the reconcile row names the head it compared", () => {
  * before `headSha`, which the parse orders first, so a PR carrying a recorded
  * drift never compared equal to its own file.
  */
-describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
+describe("ruling 236 (F40-72): an unchanged pass writes nothing", () => {
   const REFUSED = "Resource not accessible by personal access token";
   const CHECK_RUNS = `GET ${REPO_PATH}/commits/headsha318/check-runs`;
   const REV = "rev0delivered";
@@ -3847,7 +3847,7 @@ describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
     expect(await pollAt(store, actor, T3, refused(404, reworded))).toMatchObject({ changed: true });
     expect(prOf(store)?.checksUnread).toEqual({ status: 404, message: reworded, at: T3 });
 
-    // Ruling 360: the first read that succeeds drops the refusal.
+    // Ruling 237: the first read that succeeds drops the refusal.
     expect(await pollAt(store, actor, T4, happyRoutes())).toMatchObject({ changed: true });
     expect(prOf(store)?.checksUnread).toBeUndefined();
     expect(prOf(store)?.checks).toMatchObject({ total: 2, passing: 2 });
@@ -3970,7 +3970,7 @@ describe("ruling 496 (F40-72): an unchanged pass writes nothing", () => {
 
   it("(b) a PR closed with a refused read keeps its closure and its refusal on the next pass", async () => {
     // Canaries: the refusal stamped on every pass; the closure stamped on
-    // every pass instead of on the transition (ruling 160).
+    // every pass instead of on the transition (ruling 232).
     const unpushedRevision = {
       revisionSha: REV,
       prHeadSha: "headsha318",

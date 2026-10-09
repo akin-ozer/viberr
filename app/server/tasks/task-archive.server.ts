@@ -1,5 +1,5 @@
 /**
- * Archiving a task and restoring it (ruling 654). Archiving is a disposition,
+ * Archiving a task and restoring it (ruling 13(a)). Archiving is a disposition,
  * not a delete: the task leaves the board's default view and the review queue,
  * its open decisions are withdrawn, and a restore puts it back where it stood.
  */
@@ -104,8 +104,8 @@ export async function setTaskArchived(
       ? ` ${withdrawn.join(", ")} ${withdrawn.length === 1 ? "was" : "were"} withdrawn. Restoring the task brings it back to a human, who can run the operator to reopen the decision.`
       : "";
 
-  // Ruling 664: a task restored at the terminal stage is finished work. Ruling
-  // 651 archives done tasks too, and restoring one said it was "waiting on a
+  // Ruling 52: a task restored at the terminal stage is finished work. Ruling
+  // 274 archives done tasks too, and restoring one said it was "waiting on a
   // human" with a next step to take, over work nobody has anything left to do
   // on (live: AWSC-3, restored at Done so a later run could take a file).
   const restoredDone =
@@ -128,7 +128,7 @@ export async function setTaskArchived(
     evidence: null,
   };
 
-  /** Ruling 547: the decision the archive withdrew, recorded by its note. */
+  /** Ruling 75: the decision the archive withdrew, recorded by its note. */
   let archivedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.frontmatter.archived = input.archived;
@@ -154,7 +154,7 @@ export async function setTaskArchived(
     } else {
       // A restored task is back in a human's hands — it has no agent in flight
       // and no decision object, so the honest wait state is "human". A done
-      // task waits on nobody (ruling 664).
+      // task waits on nobody (ruling 52).
       parsed.frontmatter.waiting = restoredDone ? "none" : "human";
     }
     parsed.timeline.unshift(event);
@@ -162,7 +162,7 @@ export async function setTaskArchived(
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
   markTaskPacketApprovalRead(db, input.projectSlug, input.taskKey);
   if (archivedPacket) followClosedDecision(db, input.projectSlug, input.taskKey, archivedPacket);
-  // Ruling 177 (pass 36): archiving closes the task — its live runs end too.
+  // Ruling 154 (pass 36): archiving closes the task — its live runs end too.
   if (input.archived) {
     await interruptLiveRunsOnClosure(db, ctx, input.projectSlug, input.taskKey, actor, {
       cause: "archive",
@@ -185,7 +185,7 @@ export async function setTaskArchived(
         : { stage: existing.parsed.frontmatter.stage },
   });
 
-  // Ruling 131(e): a dependent waiting on THIS task can never be released by
+  // Ruling 57: a dependent waiting on THIS task can never be released by
   // it now. Noted once on each dependent (and its watchers told) BEFORE the
   // archive returns, so the person who archived sees the consequence at once.
   if (input.archived) {
@@ -199,12 +199,12 @@ export async function setTaskArchived(
     }
   }
 
-  // Ruling 503: archiving the last OPEN task of an epic leaves every task in
+  // Ruling 55: archiving the last OPEN task of an epic leaves every task in
   // it done. Archiving a done task, or restoring one, completes nothing new.
   if (input.archived && !isTerminalStage(existing.parsed.frontmatter.stage, project.stages)) {
     maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
   }
-  // Ruling 131(e): a restore can satisfy a dependent's wait again.
+  // Ruling 57: a restore can satisfy a dependent's wait again.
   maybeReleaseDependents(db, ctx, input.projectSlug);
 
   return {

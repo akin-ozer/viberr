@@ -102,7 +102,7 @@ function schemeEndsAt(text: string, end: number): boolean {
 }
 
 /**
- * Ruling 690: whether a text holds what reads as a credential, by the two
+ * Ruling 82: whether a text holds what reads as a credential, by the two
  * shapes the scrub below removes on sight: a token by its prefix, and a
  * password in a URL's userinfo. A kept source is stored as it is and every
  * project member can open it, so the keep refuses on these rather than
@@ -129,24 +129,48 @@ export function readsAsCredential(text: string): boolean {
   return holdsUrlUserinfo(text);
 }
 
-/** ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
- *  `error:`/`hint:` when it thinks it has a TTY, and so do the vendor CLIs'
- *  sign-in prompts (`backend-login.server.ts` strips them with this too).
- *
- *  Global, so use it ONLY with `.replace`, which resets `lastIndex` itself;
- *  a `.test`/`.exec` on this shared instance would carry state between calls.
- *
- *  The leading ESC IS a control character, and matching it is the entire point
- *  of the pattern — the same waiver `C0_CONTROL_RE` below already carries.
- *  Stated rather than dodged: assembling ESC at runtime to hide it from the
- *  linter would buy nothing and cost the reader the pattern. */
-// eslint-disable-next-line no-control-regex
-export const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+/** ESC, which opens every ANSI escape sequence. */
+const ESC = "\u001b";
 
-/** C0 control characters that survive the line split (NUL, BEL, …). `\t` (	)
- *  is spared; `\r`/`\n` are consumed by the split, so they never reach here. */
-// eslint-disable-next-line no-control-regex
-const C0_CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f]/g;
+/** What follows ESC in a CSI sequence: `[`, the parameter bytes, the
+ *  intermediate bytes and one final byte (ECMA-48 §5.4). Anchored, and with no
+ *  global flag, so this shared instance carries no state between calls. */
+const CSI_BODY_RE = /^\[[0-9;?]*[ -/]*[@-~]/;
+
+/** Remove ANSI CSI escape sequences (`ESC [ … m` and friends): git colourises
+ *  `error:`/`hint:` when it thinks it has a TTY, and so do the vendor CLIs'
+ *  sign-in prompts (`backend-login.server.ts` strips them with this too). An
+ *  ESC that opens no CSI sequence is left for `stripControlChars`.
+ *
+ *  Ruling 7: the text is split on ESC rather than matched by a pattern holding
+ *  it, so no control character stands in a regular expression and no lint
+ *  rule is disabled for one. */
+export function stripAnsiCsi(text: string): string {
+  if (!text.includes(ESC)) return text;
+  const [head = "", ...rest] = text.split(ESC);
+  return (
+    head +
+    rest
+      .map((part) => {
+        const csi = CSI_BODY_RE.exec(part);
+        return csi ? part.slice(csi[0].length) : ESC + part;
+      })
+      .join("")
+  );
+}
+
+/** Remove the C0 control characters (U+0000 to U+001F) and DEL, except those
+ *  in `keep`, a tab or a line break the caller's text still needs. Ruling 7:
+ *  read by code, so no control character stands in a pattern. */
+export function stripControlChars(text: string, keep: string): string {
+  let out = "";
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if ((code <= 0x1f || code === 0x7f) && !keep.includes(ch)) continue;
+    out += ch;
+  }
+  return out;
+}
 
 /** The tail is where git states its verdict; the head is the command echo and,
  *  for a clone, the transfer progress. */
@@ -189,15 +213,16 @@ export function redactGitOutput(
 
   // Strip ANSI colour sequences before the split so a colourised `error:` line
   // is not spent on escape bytes.
-  out = out.replace(ANSI_CSI_RE, "");
+  out = stripAnsiCsi(out);
 
   // A bare CR is a line here too: git writes transfer progress as one physical
   // line rewritten with `\r`, and keeping it whole would spend the entire clamp
   // on "Receiving objects: 41%".
   const lines = out
     .split(/\r\n|\r|\n/)
-    // Strip any stray C0 control character left inside a line; `\t` is kept.
-    .map((l) => l.replace(C0_CONTROL_RE, "").trimEnd())
+    // Strip any stray C0 control character left inside a line; `\t` is kept,
+    // and `\r`/`\n` were consumed by the split.
+    .map((l) => stripControlChars(l, "\t").trimEnd())
     .filter((l) => l.trim() !== "");
   const kept = lines.slice(-MAX_DETAIL_LINES).join("\n").trim();
   // Clamp from the END, not the start: a clamp that drops git's verdict to keep
@@ -211,7 +236,7 @@ export function redactGitOutput(
  * R20-3 (F20-4): one redacted SENTENCE from a Claude/Codex provider failure,
  * for a packet observation line, a fenced timeline block and a log field.
  *
- * Ruling 69's argument transfers verbatim from git to the model runtimes: the
+ * Ruling 219's argument transfers verbatim from git to the model runtimes: the
  * credential never lives in argv (both adapters get it on the run's spawn env,
  * assembled per run from its credential principal), so the same value+pattern scrub plus
  * control-character stripping makes a provider's own complaint safe to surface.
@@ -220,7 +245,7 @@ export function redactGitOutput(
  * the LAST non-empty line (the provider states its verdict at the tail, same as
  * git — see MAX_DETAIL_CHARS's reasoning), and clamp shorter still, because the
  * consumers (a packet observation, the 240-char delivery-reason convention from
- * ruling 69) want one sentence, not eight lines.
+ * ruling 219) want one sentence, not eight lines.
  */
 export const PROVIDER_TEXT_CHARS = 240;
 

@@ -36,7 +36,7 @@ function grantByRole(roles: readonly ProjectRole[]) {
 
 export const RBAC_ROWS: readonly RbacRow[] = RBAC_DEFINITIONS.map((cap) => {
   const row: RbacRow = { action: cap.label, grant: grantByRole(cap.roles) };
-  // Ruling 309(a): the grant name stays short (sentences read it inline); the
+  // Ruling 26(b): the grant name stays short (sentences read it inline); the
   // table is where a person comes to learn the scope, so the table carries it.
   if ("covers" in cap) row.covers = cap.covers;
   return row;
@@ -73,7 +73,7 @@ export const TRANSITION_TO_DONE_EXCEPTION =
 export const TRANSITION_TO_DONE_CAPABILITY_ID = "transition-to-done";
 
 /** "Always reserved for humans" — rendered from the server invariant list
- * (ruling 2), never hard-coded UI strings.
+ * (ruling 26(a)), never hard-coded UI strings.
  *
  * P13-D-PRD-3: the rows used to be bare labels under an unqualified
  * "all profiles" pill. Every capability in the list is scoped to `agent`
@@ -100,7 +100,7 @@ export const ALWAYS_HUMAN_ROWS: readonly {
  *  runtime combination checked in operator-moves.server.ts. Exported with no
  *  importer on purpose: exported, the build inlines it at its one use;
  *  module-local, it ships as a variable, 4 B more on the budgeted profile
- *  closure (ruling 457's ratchet; measured for ruling 458(g)). */
+ *  closure (ruling 11's ratchet). */
 export const DIRECT_ACCEPT_CAPABILITY_ID = "completion-for-acceptance";
 
 export interface OperatorAutonomyState {

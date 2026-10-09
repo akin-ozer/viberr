@@ -17,7 +17,7 @@ import {
 } from "./controller-admin-panel";
 
 /**
- * Ruling 106 locks: the controller settings tab speaks the agent editor's
+ * Ruling 270 locks: the controller settings tab speaks the agent editor's
  * language — the model/effort CATALOG pickers instead of a free-text model
  * field, pick-chip resource grants with removable red `missing` chips instead
  * of checkbox lists, and KB grants displayed by name while stored by dir.
@@ -90,7 +90,7 @@ function renderPanel(
   overrides: Partial<ControllerConfigView> = {},
   mcps: string[] = ["qa-echo"],
   locks: ControllerSectionLocks = UNLOCKED,
-  /** Ruling 390: open grant requests the controller raised for itself. */
+  /** Ruling 271: open grant requests the controller raised for itself. */
   requests: ControllerGrantRequestView[] = [],
 ) {
   lastForm = null;
@@ -130,7 +130,7 @@ function renderPanel(
   return render(<Stub initialEntries={["/org/settings"]} />);
 }
 
-describe("ruling 390: grants the controller asked for and cannot make", () => {
+describe("ruling 271: grants the controller asked for and cannot make", () => {
   const REQUEST = {
     id: "rq_1",
     kind: "kb" as const,
@@ -139,7 +139,7 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
     askedAt: "2026-09-22T11:00:00.000Z",
     askedByLabel: "arda@viberr.dev · via controller",
     remedy:
-      "knowledge base grants are deployment-locked (ruling 108): set VIBERR_UNLOCK_CONTROLLER_KB=enabled and restart, then add it on the Controller tab. There is no in-app grant while the section is locked.",
+      "knowledge base grants are deployment-locked (ruling 270): set VIBERR_UNLOCK_CONTROLLER_KB=enabled and restart, then add it on the Controller tab. There is no in-app grant while the section is locked.",
   };
 
   it("names the resource, the reason and the deployment change, and offers no Grant button", () => {
@@ -150,7 +150,7 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
     expect(note.textContent).toContain("It carries the model rule Arda set");
     expect(note.textContent).toContain("VIBERR_UNLOCK_CONTROLLER_KB=enabled");
     expect(getByText(/asked for 1 grant it cannot make/i)).toBeTruthy();
-    // Ruling 108 put the grant outside the app, so a Grant control here would
+    // Ruling 270 put the grant outside the app, so a Grant control here would
     // promise what no code on this page can do. Decline is the one control,
     // because declining is an answer this page can record.
     const buttons = [...note.querySelectorAll("button")].map((b) => b.textContent);
@@ -179,10 +179,10 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
     expect(lastForm).not.toHaveProperty("skills");
   });
 
-  // Ruling 480 (F40-47): live it read "Asked 2026-09-24T20:25:54.327Z by …",
+  // Ruling 271 (F40-47): live it read "Asked 2026-09-24T20:25:54.327Z by …",
   // the stored UTC ISO with milliseconds, hours off from the audit rows on the
   // same page. Canary: interpolate `r.askedAt` again.
-  it("ruling 480: the request says when it was asked through the local primitive, never the stored ISO", () => {
+  it("ruling 271: the request says when it was asked through the local primitive, never the stored ISO", () => {
     const { container } = renderPanel({}, ["qa-echo"], LOCKED, [REQUEST]);
     const note = container.querySelector('[data-testid="controller-grant-requests"]')!;
     expect(note.textContent).not.toContain("2026-09-22T11:00:00.000Z");
@@ -199,7 +199,7 @@ describe("ruling 390: grants the controller asked for and cannot make", () => {
   });
 });
 
-describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
+describe("ControllerAdminPanel (ruling 270: agent-editor parity)", () => {
   it("picks the model from the catalog select, not a free-text field", async () => {
     const { container, getByText } = renderPanel();
     const select = container.querySelector<HTMLSelectElement>(
@@ -334,7 +334,7 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
   });
 
   /**
-   * Ruling 107: the built-in diagnostics server is disclosed in the MCP group
+   * Ruling 269: the built-in diagnostics server is disclosed in the MCP group
    * as a pinned chip. It is NOT a control — there is no grant row behind it and
    * nothing a save could change — so the panel must show it without offering a
    * toggle, and without letting it leak into the payload as a grant.
@@ -388,7 +388,7 @@ describe("ControllerAdminPanel (ruling 106: agent-editor parity)", () => {
   });
 });
 
-describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
+describe("ControllerAdminPanel (ruling 270: deployment locks)", () => {
   it("renders every locked section read-only, with the unlock note", async () => {
     const { container, getByText } = renderPanel({}, ["qa-echo"], LOCKED);
     // No grant chip is a control any more: the groups hold spans only (the
@@ -435,7 +435,7 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
     ]) {
       expect(note?.textContent).toContain(label);
     }
-    // Ruling 625: each variable is code, one mono token apiece, so an admin
+    // Ruling 280: each variable is code, one mono token apiece, so an admin
     // copies it whole. CANARY: print the four as one joined string again.
     const tokens = [...note!.querySelectorAll("code.mono")].map((c) => c.textContent);
     for (const envVar of Object.values(CONTROLLER_UNLOCK_ENV)) {
@@ -522,11 +522,11 @@ describe("ControllerAdminPanel (ruling 108: deployment locks)", () => {
 });
 
 /**
- * Ruling 459: a grant chip's check is always drawn, and the sheet fades it in
+ * Ruling 284: a grant chip's check is always drawn, and the sheet fades it in
  * on `.on`. It mounted and unmounted, so each toggle popped it in and widened
  * the chip by the glyph and its gap, re-wrapping every later chip in the row.
  */
-describe("ruling 459: a grant chip keeps its check as it toggles", () => {
+describe("ruling 284: a grant chip keeps its check as it toggles", () => {
   it("draws the check on a granted and an ungranted chip alike, and the same node trades in place", () => {
     // CANARY: put back `{granted.has(o.id) && <Icon name="check" />}` and the
     // ungranted chip has no check to fade in.

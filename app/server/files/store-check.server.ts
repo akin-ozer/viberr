@@ -54,7 +54,7 @@ export interface FileLocation {
 }
 
 export interface StoreFileCheck {
-  /** Store-relative path — the same string the task page shows (ruling 3). */
+  /** Store-relative path — the same string the task page shows (ruling 15(a)). */
   path: string;
   absPath: string;
   kind: StoreFileKind;
@@ -218,7 +218,7 @@ export function checkStore(
         files.push(checkFile(taskFile, "task", key, options.dataRoot));
       }
     }
-    // Ruling 503: epic files are canonical too. Without this walk a rescan
+    // Ruling 17: epic files are canonical too. Without this walk a rescan
     // reports `errors: 1` for an unreadable epic and NOTHING names the file —
     // the exact blind spot this module exists to close.
     for (const epicId of listEpicIds(slug, options.dataRoot)) {

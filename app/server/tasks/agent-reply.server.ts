@@ -268,17 +268,17 @@ function latestSessionRun(
 }
 
 /**
- * Ruling 262 (pass 37, F37-92): every agent handle a comment cannot reach, not
- * just the one a RUN would have gone to.
+ * Ruling 70 (F37-92): every agent handle a comment cannot reach, not just the
+ * one a RUN would have gone to.
  *
- * Ruling 252's stamp was computed from `resolveMentionedAgent`, a resolver
+ * The stamp was once computed from `resolveMentionedAgent`, a resolver
  * built to pick ONE target because `commentToAgent` needs exactly one agent to
  * start. Reused as a completeness report it under-reports in four ways, and the
- * first of them is the live comment that prompted ruling 252 in the first
+ * first of them is the live comment that prompted the stamp in the first
  * place: "@operator @platform-architect The funded amendment now exists as a
  * task". `@operator` is precedence 1, so the resolver returns the operator, the
  * stamp is skipped for being the operator, and @platform-architect is never
- * mentioned. Ruling 252 did not fix its own motivating example.
+ * mentioned. The stamp did not fix its own motivating example.
  *
  * The other three: a second specialist tagged alongside the first is dropped by
  * `specialists.find`; an ambiguous backend handle (`@claude` on a board with
@@ -296,7 +296,7 @@ export interface UnreachedAgents {
    *  it (`agentMentionHandle`, P14-RT-12), in the order the text tags them so
    *  the sentence reads back against the comment above it. */
   named: string[];
-  /** True when `@operator` was tagged. Excluded from the note (ruling 214): a
+  /** True when `@operator` was tagged. Excluded from the note (ruling 133): a
    *  controller turn's other writes wake the operator on their own, so claiming
    *  nothing reached it could be the false half of an honest sentence. */
   taggedOperator: boolean;
@@ -372,10 +372,10 @@ export function unreachedAgents(
 }
 
 /**
- * Ruling 252 (pass 37, F37-81): what a comment says when it tagged an agent
+ * Ruling 70 (pass 37, F37-81): what a comment says when it tagged an agent
  * that no comment can reach.
  *
- * Ruling 214 wrote this for the OPERATOR, because live on SHOP-10 the operator
+ * Ruling 133 wrote this for the OPERATOR, because live on SHOP-10 the operator
  * put a completeness question to "@Code Reviewer" in a comment, no reviewer
  * ever read it, and the stranded backstop then paused a task five others were
  * waiting behind. The reasoning was never operator-specific: a comment writes a
@@ -489,7 +489,7 @@ export function resolveMentionedAgent(
       return {
         profileId: "operator",
         name: authority.name,
-        // Ruling 518: the Operator has no role.
+        // Ruling 176: the Operator has no role.
         role: "",
         backend: authority.backend,
         model: authority.model,
@@ -663,7 +663,7 @@ export function fullReplyTextForRun(
 import { PROVIDER_TEXT_MARKER } from "~/shared/provider-marker";
 
 /** Classified failure classes for an errored run (F8 + R7-2 fail-fast).
- *  Ruling 130(a) (pass 34): the vocabulary lives in the client-safe leaf
+ *  Ruling 155(a) (pass 34): the vocabulary lives in the client-safe leaf
  *  `~/shared/run-failure` so the console's `LogLine.failure` can be typed
  *  without a server import; re-exported here for the task layer's importers. */
 import {
@@ -678,7 +678,7 @@ export interface RunFailure {
   text: string;
   /** R20-3: the provider's own redacted sentence, when the adapter sent one. */
   providerText?: string;
-  /** Ruling 130(a) (pass 34): the adapter's structured facts (reset instant,
+  /** Ruling 155(a) (pass 34): the adapter's structured facts (reset instant,
    *  window, API error code and status), read from the terminal line's
    *  `failure` record. Absent when the adapter attached none. */
   facts?: RunFailureFacts;
@@ -690,7 +690,7 @@ export interface RunFailure {
  * failure, a crashed tool). Returns null when the run logged no error line.
  * Classified into a short kind so the recovery packet can be specific.
  * "unavailable" is the R7-2 fail-fast class: no agent process ever started.
- * Under ruling 127 that means the run had no credential principal (an unowned
+ * Under ruling 137 that means the run had no credential principal (an unowned
  * task, or an owner whose account is gone) or that person had not connected the
  * backend, so there was nothing to spawn with.
  */
@@ -701,8 +701,8 @@ export function runFailureReason(
   const lines = listRunLines(db, runId).map((l) => l.display);
   let last: LogLine | null = null;
   for (const l of lines) {
-    // Ruling 599: the completion compaction runs after the run has ended and
-    // is never its failure (ruling 376). Live on AWSC-60 its "did not happen"
+    // Ruling 174: the completion compaction runs after the run has ended and
+    // is never its failure. Live on AWSC-60 its "did not happen"
     // line, tagged `run·compaction·failed`, displaced the usage-limit refusal
     // before it: the packet lost the reset instant and its wait option.
     if ((l.tag ?? "").startsWith("run·compact")) continue;
@@ -729,7 +729,7 @@ export function runFailureReason(
   // "authenticate"), so re-classifying the prose would drop codex quota/auth
   // failures to `unknown`. Backends that emit no class (plain err lines) still
   // fall through to the prose regexes below.
-  // Ruling 130(a): the adapter's typed record wins outright; the tag suffix
+  // Ruling 155(a): the adapter's typed record wins outright; the tag suffix
   // is the same fact for lines written before the record existed.
   if (last.failure) {
     return withProviderText({ kind: last.failure.kind, text, facts: last.failure }, providerText);
@@ -793,7 +793,7 @@ export function resumeWorkdir(
     const clone = path.join(scopedRoot, name);
     if (existsSync(path.join(clone, ".git"))) return clone;
   }
-  // Ruling 460 / 495(a): the resumed agent runs as its person and writes
+  // Ruling 15 / 140: the resumed agent runs as its person and writes
   // here, and its person removes the workspace. Shared first, like a run's
   // (`specialist-run`), so what is made below inherits the agents' group.
   shareDirWithAgentsOrWarn(workspaceRoot);

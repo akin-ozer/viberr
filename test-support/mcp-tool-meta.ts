@@ -56,7 +56,7 @@ export function toolLoading(
  * authority) and passes its `tools`; a name that is not there fails the test.
  */
 export async function callToolText(
-  tools: SdkMcpToolDefinition<any>[],
+  tools: SdkMcpToolDefinition[],
   toolName: string,
   args: Record<string, JsonValue>,
 ): Promise<string> {
@@ -72,7 +72,7 @@ export async function callToolText(
 }
 
 /**
- * Ruling 296: every tool's schema is a whole strict Zod object now, so a test
+ * Ruling 136: every tool's schema is a whole strict Zod object now, so a test
  * can no longer read a field off `inputSchema` as though it were the raw field
  * map the SDK's own `tool()` used to keep. It reads the PUBLISHED JSON Schema
  * instead, through a real MCP client, which is the copy a model is handed and
@@ -96,7 +96,7 @@ export async function publishedSchemas(
 }
 
 /**
- * Ruling 297: the instructions a server publishes, read the way a model
+ * Ruling 255: the instructions a server publishes, read the way a model
  * receives them — through `initialize`, not off the object we passed in.
  */
 export async function publishedInstructions(

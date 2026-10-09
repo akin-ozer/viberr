@@ -36,14 +36,14 @@ import { RELAY_MAX_ENTRIES, type RelayEntry } from "./task-relay.server";
 export interface AgentOutcomeChoice {
   title: string;
   detail?: string;
-  /** Ruling 478(e): choosing it needs the person's typed answer (a name, a
+  /** Ruling 68: choosing it needs the person's typed answer (a name, a
    *  URL, a value only they have), so the card asks for it and refuses the
    *  choice without it. */
   reply?: boolean;
 }
 
 /**
- * Ruling 692(c): what a question to a person is for, in the words every asking
+ * Ruling 202: what a question to a person is for, in the words every asking
  * channel carries (the Claude tool, the Codex outcome field, the run's
  * collaboration notes). Live, a writer asked nine questions before drafting and
  * seven of them were its own choices to make (the reader, the length, the tone,
@@ -54,7 +54,7 @@ export const ASK_HUMAN_ONLY_NOTE =
   "that is yours to make, make it and state it in your report as an assumption: never ask a " +
   "person to approve your own choices.";
 /**
- * Ruling 478(e) (F40-57, F40-31): what an agent is told about marking its
+ * Ruling 68 (F40-57, F40-31): what an agent is told about marking its
  * pick and asking for a typed answer, on both transports (`ask_human`'s schema
  * and the Codex envelope's). An unmarked list carries no recommendation: the
  * first option used to be "presented as suggested" whether the agent had a
@@ -88,7 +88,7 @@ export interface AgentOutcome {
    *  `attach-evidence-references` grant at the tool layer; already normalized
    *  (`normalizeEvidenceRows`) before it is staged. */
   evidence?: EvidenceRow[];
-  /** Ruling 488: text to post on OTHER tasks of the same project, at most
+  /** Ruling 202: text to post on OTHER tasks of the same project, at most
    *  {@link RELAY_MAX_ENTRIES}. The completion pipeline posts each through
    *  the relay door with this agent as the author. Kept whole here: the cap
    *  is applied (and anything past it named) where the entries are posted. */
@@ -96,7 +96,7 @@ export interface AgentOutcome {
 }
 
 /**
- * Ruling 488 (F40-67): what an agent is told about `relay`, on both
+ * Ruling 202 (F40-67): what an agent is told about `relay`, on both
  * transports (`report_outcome`'s schema and the Codex envelope's).
  */
 export const RELAY_FIELD_NOTE =
@@ -106,7 +106,7 @@ export const RELAY_FIELD_NOTE =
   "finish, as your comment headed with this task's key, wakes that task's operator, and records " +
   "the relay on this task. Never write it to an attachment or a report for a person to copy there. " +
   "When that task needs a FILE you saved on this task (an input it works from, a file it is to judge), " +
-  "name it in `files` (ruling 538): it lands on that task's attachments, where its agents read it. " +
+  "name it in `files`: it lands on that task's attachments, where its agents read it. " +
   "Refused: a task in another project, this task, a missing or closed task, a file this task does not hold.";
 
 /**
@@ -124,7 +124,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
   additionalProperties: false,
   required: ["summary", "verdict", "question", "evidence", "relay"],
   properties: {
-    // Ruling 488: Codex's channel for a relay, as `report_outcome` is Claude's.
+    // Ruling 202: Codex's channel for a relay, as `report_outcome` is Claude's.
     // The cap is stated, not declared: the completion pipeline posts the first
     // entries and names the rest, because an envelope is the agent's last word
     // and there is nobody left to refuse it to.
@@ -138,7 +138,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
         properties: {
           taskKey: { type: "string" },
           text: { type: "string" },
-          // Ruling 538: this task's attachments the relay carries; null for text alone.
+          // Ruling 71: this task's attachments the relay carries; null for text alone.
           files: { type: ["array", "null"], items: { type: "string" } },
         },
       },
@@ -150,7 +150,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
     // editor offered it to every profile regardless of backend. The completion
     // pipeline already reads `outcome.evidence` for both backends and gates it
     // on the same grant, so this is the whole gap.
-    // Ruling 526: what was checked, how it came out and whether it passed,
+    // Ruling 16: what was checked, how it came out and whether it passed,
     // the fields `report_outcome` declares.
     evidence: {
       type: ["array", "null"],
@@ -197,7 +197,7 @@ export const AGENT_OUTCOME_JSON_SCHEMA = {
         body: { type: ["string", "null"] },
         options: {
           type: ["array", "null"],
-          // U39-23 / ruling 478(e): the same convention `ask_human` states to
+          // U39-23 / ruling 68: the same convention `ask_human` states to
           // a Claude agent.
           description: `2-4 concrete answer choices. ${ASK_HUMAN_RECOMMEND_NOTE}`,
           items: {
@@ -275,14 +275,14 @@ const codexEnvelopeSchema = z.object({
     .transform((rows) => rows.filter((row) => row !== null))
     .optional()
     .catch(undefined),
-  // Ruling 488: a garbled entry costs that entry, never the report.
+  // Ruling 202: a garbled entry costs that entry, never the report.
   relay: z
     .array(
       z
         .object({
           taskKey: envelopeProse,
           text: envelopeProse,
-          // Ruling 538: a garbled list costs the files, never the relay.
+          // Ruling 71: a garbled list costs the files, never the relay.
           files: z.array(z.string()).nullable().optional().catch(null),
         })
         .nullable()
@@ -324,7 +324,7 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
       question.body = envelope.question.body;
     }
     if (envelope.question.options !== undefined) {
-      // Ruling 298: EVERY option the agent wrote. This used to cut at four,
+      // Ruling 202: EVERY option the agent wrote. This used to cut at four,
       // silently, and this path has nobody to refuse to -- the envelope is the
       // agent's last word, parsed after the run is over, so a refusal here
       // costs the whole outcome and a cut destroys a choice the person was
@@ -344,7 +344,7 @@ export function parseAgentOutcomeJson(text: string): AgentOutcome | null {
     const rows = normalizeEvidenceRows(envelope.evidence);
     if (rows) outcome.evidence = rows;
   }
-  // Ruling 488: every entry the agent wrote; the cap is the poster's.
+  // Ruling 202: every entry the agent wrote; the cap is the poster's.
   if (envelope.relay !== undefined && envelope.relay.length > 0) {
     outcome.relay = envelope.relay.map((r) =>
       r.files?.length
@@ -403,7 +403,7 @@ const stagedOutcomeSchema = z.object({
   evidence: z
     .array(z.object({ label: z.string(), result: z.string(), status: z.enum(EVIDENCE_STATUSES) }))
     .optional(),
-  // Ruling 488: a restart between the run and its completion keeps the relay.
+  // Ruling 202: a restart between the run and its completion keeps the relay.
   relay: z
     .array(z.object({ taskKey: z.string(), text: z.string(), files: z.array(z.string()).optional() }))
     .optional(),
@@ -540,7 +540,7 @@ export interface AgentCollab {
 }
 
 /**
- * Ruling 589: whether an engagement holds any collaboration grant. It is the
+ * Ruling 216: whether an engagement holds any collaboration grant. It is the
  * condition a Claude run's toolkit mounts `read_board` and `read_timeline_entry`
  * on, and a Codex run the gateway's board server: a profile with none reads no
  * more of the board than its own prompt holds (U11).
@@ -624,7 +624,7 @@ export const AGENT_QUESTION_PACKET_KIND = "Agent question";
 const RECOMMENDED_MARK = /\s*\(\s*recommended\s*\)\s*$/i;
 
 /**
- * Ruling 586: the entry that records a question when it is asked carries the
+ * Ruling 68: the entry that records a question when it is asked carries the
  * card itself: its body, its observations and its options, under `heading`.
  *
  * A packet leaves the task when it is answered. The entry for an agent's
@@ -669,7 +669,7 @@ export function buildAgentQuestionPacket(
   actorRef: FileActorRef,
   question: AgentOutcomeQuestion,
 ): TaskPacket {
-  // Ruling 298: no cut here either. The cap that belongs on an agent's live
+  // Ruling 202: no cut here either. The cap that belongs on an agent's live
   // question is declared on `ask_human`'s own schema, where exceeding it is
   // refused by name and the agent re-asks inside the same run.
   const choices = (question.options ?? []).map((o) => {
@@ -681,7 +681,7 @@ export function buildAgentQuestionPacket(
   // (Recommended)"), and the card already shows a `recommended` pill, so it
   // said so twice and carried the mark into the answer, the summon note and
   // the decision record. The mark says which option the agent recommends, so
-  // it decides the pill. Ruling 478(e) (F40-57): with no mark there is no
+  // it decides the pill. Ruling 68 (F40-57): with no mark there is no
   // pick. The first option used to get the pill regardless, and on WEB-5 the
   // agent had to post a comment disowning it.
   const recommended = choices.findIndex((c) => c.marked);
@@ -700,7 +700,7 @@ export function buildAgentQuestionPacket(
         // No choices: the answer IS the typed text, so it is required, and
         // nobody recommended anything. It goes back to the agent that asked
         // (the card's answer box says so by name); "the operator picks it up"
-        // was not where it went (ruling 478(e), F40-31).
+        // was not where it went (ruling 68, F40-31).
         {
           kind: "custom" as const,
           t: "Answer the question",

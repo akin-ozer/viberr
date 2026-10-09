@@ -8,7 +8,7 @@ import { linkSync, renameSync } from "node:fs";
  *
  * A hard link keeps the old inode alive across the write's rename, and
  * renaming it back changes neither its inode number, its size nor its mtime,
- * so the path shows exactly the file the write replaced (ruling 513).
+ * so the path shows exactly the file the write replaced (ruling 18).
  */
 export function staleViewOf(absPath: string) {
   const kept = `${absPath}.stale-view`;

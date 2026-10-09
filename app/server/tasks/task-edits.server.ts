@@ -1,5 +1,5 @@
 /**
- * A task's own fields, as a person or the operator changes them (ruling 654):
+ * A task's own fields, as a person or the operator changes them (ruling 13(a)):
  * creating a task, and editing its goal, title and metadata, and the files
  * attached to it.
  */
@@ -93,31 +93,31 @@ export interface CreateTaskInput {
   priority?: TaskPriority;
   labels?: string[];
   dueDate?: string | null;
-  /** Ruling 503: the epic the new task joins (`epic-3`), checked BEFORE a
+  /** Ruling 272: the epic the new task joins (`epic-3`), checked BEFORE a
    *  key is allocated like the wait below. Absent or null: in no epic. */
   epic?: string | null;
   /**
-   * Ruling 477(b) (F40-28): an automation creating the task on a person's
+   * Ruling 273 (F40-28): an automation creating the task on a person's
    * authority signs the creation's events itself, so the Activity stream's
    * Humans filter does not credit that person with a creation they never
    * made. The seat, the `task.created` audit row and its actor are unchanged.
-   * Ruling 503's goal-to-epic conversion is the one caller.
+   * Ruling 17's goal-to-epic conversion is the one caller.
    */
   signedBy?: { systemId: string; assignText: string };
-  /** Ruling 131: what the new task waits on, validated BEFORE a key is
+  /** Ruling 55: what the new task waits on, validated BEFORE a key is
    *  allocated so a refusal burns no key; the task is born held
    *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
   blockedBy?: readonly string[];
-  /** Ruling 140(a): the member to seat as owner at creation, checked by the
+  /** Ruling 48: the member to seat as owner at creation, checked by the
    *  same rule as a hand-off (`requireOwnable`) and written in the SAME
    *  task.md write, before the operator's `create` trigger. Absent: the
-   *  creator is seated (ruling 127). */
+   *  creator is seated (ruling 48). */
   ownerUserId?: string | null;
-  /** Ruling 533: the files the person filed the task with (an inventory, a
+  /** Ruling 76: the files the person filed the task with (an inventory, a
    *  screenshot, a spreadsheet). Checked before the key is allocated and
    *  saved before the operator's `create` trigger, so triage reads them. */
   attachments?: readonly { name: string; data: Uint8Array }[];
-  /** Ruling 255: the instant this creation happened. Every field and every
+  /** Ruling 72: the instant this creation happened. Every field and every
    *  timeline event it writes carries it, so the file's order is the
    *  arrangement and not a race between clock reads. Test seam only — the
    *  routes never pass it, and it defaults to now. */
@@ -159,7 +159,7 @@ export async function createTask(
     );
   }
   const stageId = stage.id;
-  // Ruling 127: only a HUMAN can be seated as owner — the seat is an account
+  // Ruling 137: only a HUMAN can be seated as owner — the seat is an account
   // to bill and a person to hold review authority. A controller-driven human
   // IS a human (the controller acts as them, with their user id); the operator
   // toolkit's placeholder actor is not, and neither is any other in-process
@@ -178,7 +178,7 @@ export async function createTask(
   // beside the other pre-allocation checks, and used verbatim below.
   const dueDate = normalizeCreateDueDate(input.dueDate);
 
-  // Ruling 140(a): a named owner is checked BEFORE the key is allocated, by
+  // Ruling 48: a named owner is checked BEFORE the key is allocated, by
   // the hand-off rule. The creator is the implicit first owner, so naming
   // themselves records the creator seat; an operator-authorized creation has
   // no person to seat and keeps its null seat.
@@ -200,14 +200,14 @@ export async function createTask(
     throw AppError.notFound("No Viberr user with that id.");
   }
 
-  // Ruling 131: validate the wait BEFORE the key is allocated — a refused
+  // Ruling 55: validate the wait BEFORE the key is allocated — a refused
   // reference must not burn a counter value.
   const blockedBy = input.blockedBy?.length
     ? validateDependencyRefs(db, { projectSlug: input.projectSlug, self: null, entries: input.blockedBy })
     : [];
-  // Ruling 503: and the epic, for the same reason.
+  // Ruling 272: and the epic, for the same reason.
   const epic = input.epic?.trim() ? requireEpicForNewTask(ctx, input.projectSlug, input.epic) : null;
-  // Ruling 533: and the files it is filed with, by the upload's own tier.
+  // Ruling 76: and the files it is filed with, by the upload's own tier.
   const filed = input.attachments ?? [];
   if (filed.length > 0) {
     requireAction(db, project, actor, "attach-file", "attach a file to a task");
@@ -226,7 +226,7 @@ export async function createTask(
   const frontmatter: TaskFrontmatter = {
     key,
     title,
-    // Ruling 388: nothing delivered yet.
+    // Ruling 84: nothing delivered yet.
     deliveredAt: null,
     stage: stageId,
     // No transition has happened yet — the previous stage is a fact only a
@@ -234,16 +234,16 @@ export async function createTask(
     previousStageId: null,
     heldAtStage: null,
     readiness: "input_required",
-    // Ruling 131(a): a task born waiting on other work owes nobody anything.
+    // Ruling 55: a task born waiting on other work owes nobody anything.
     waiting: blockedBy.length > 0 ? "none" : "human",
-    // Ruling 127: creation SEATS the creator as owner. Every agent run on a
+    // Ruling 137: creation SEATS the creator as owner. Every agent run on a
     // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
-    // cannot run agents at all — and the pre-127 default (`null`) meant every
+    // cannot run agents at all — and the old default (`null`) meant every
     // brand-new task was born unable to do the one thing it exists for, with
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and
     // has no account to bill; a human has to take that one.
-    // Ruling 140(a): a named owner is seated in this same write, before the
+    // Ruling 48: a named owner is seated in this same write, before the
     // operator's `create` trigger reads the file, so the first triage run
     // bills the named owner and is refused honestly when they have no
     // credential, instead of running once on the creator's account.
@@ -283,8 +283,8 @@ export async function createTask(
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
-  // reads the same however the seat was filled (ruling 127).
-  // Ruling 255: ONE creation is one instant. Every event this write puts on the
+  // reads the same however the seat was filled (ruling 48).
+  // Ruling 72: ONE creation is one instant. Every event this write puts on the
   // timeline carries the frontmatter's own `now`, so the file's order is the
   // deliberate arrangement and not a race between two `new Date()` calls.
   const signer: FileActorRef | null = input.signedBy
@@ -313,7 +313,7 @@ export async function createTask(
       ),
     ];
   }
-  // Ruling 533: the files the task was filed with are written BEFORE the task
+  // Ruling 76: the files the task was filed with are written BEFORE the task
   // file, so the operator's `create` trigger below reads a task whose input is
   // already on it, and the note that names them claims them for the person:
   // the attachments panel says who added each one, and no agent run is ever
@@ -345,7 +345,7 @@ export async function createTask(
       type: "note",
       actor: signer ?? (creator ? humanActorRef(db, creator) : { kind: "operator" }),
       title: "Waits on other work",
-      // Ruling 356(b): the note names a done entry as done, like every other
+      // Ruling 58: the note names a done entry as done, like every other
       // hold sentence — 4 of 56 creation notes on the instance had named a task
       // that was already Done at creation (BNB-26: "waiting on BNB-5, BNB-22"
       // with BNB-22 closed 95 s earlier).
@@ -362,7 +362,7 @@ export async function createTask(
     createInput.timeline = [waitNote, ...(createInput.timeline ?? [])];
   }
   if (epic) {
-    // Ruling 503: the same note `setTasksEpic` writes when a task joins later,
+    // Ruling 272: the same note `setTasksEpic` writes when a task joins later,
     // so the timeline says where the task sits however it got there.
     const epicTitle = readEpicFile({ projectSlug: input.projectSlug, epicId: epic, dataRoot: ctx.dataRoot })
       ?.parsed.frontmatter.title;
@@ -383,7 +383,7 @@ export async function createTask(
   reprojectProject(db, ctx, input.projectSlug);
   reprojectTask(db, ctx, input.projectSlug, key);
 
-  // Ruling 140(b): a creation that seats someone ELSE tells them, in the same
+  // Ruling 50: a creation that seats someone ELSE tells them, in the same
   // shape a hand-off uses; the audit row then says whether they were told.
   const createdDetails: NonNullable<AuditEventInput["details"]> = {
     title,
@@ -414,7 +414,7 @@ export async function createTask(
     taskKey: key,
     details: createdDetails,
   });
-  // Ruling 533: each filed file is on the audit log as an attachment, the row a
+  // Ruling 76: each filed file is on the audit log as an attachment, the row a
   // later upload writes, so a search for what a person attached finds both.
   for (const attachment of written) {
     recordAudit(db, {
@@ -428,8 +428,8 @@ export async function createTask(
     });
   }
   // L02-1: the note above promises "Viberr releases the list at once". Only the
-  // goal runner kept that promise, for the links it minted (ruling 358), and
-  // ruling 503 removed it; every other creation waited for the minute tick,
+  // goal runner kept that promise, for the links it minted (ruling 272), and
+  // ruling 273 removed it; every other creation waited for the minute tick,
   // which released the task as an ordinary hold with the false claims F39-65
   // removed. Nothing has awaited since the task was projected, so the tick
   // cannot take the file first. The release's own turn hands the task to its
@@ -443,7 +443,7 @@ export async function createTask(
       });
       return false;
     }));
-  // Ruling 503(b): the epic's history and its lead hear of a task made in it.
+  // Ruling 272: the epic's history and its lead hear of a task made in it.
   // The conversion's own tasks are named by its line on the epic instead.
   if (epic && !signer) {
     await noteTaskMadeInEpic(db, { projectSlug: input.projectSlug, epicId: epic, taskKey: key }, actor, ctx);
@@ -489,7 +489,7 @@ export async function updateTaskGoal(
     return { task: summaryOrThrow(db, input.projectSlug, input.taskKey), changed: false };
   }
 
-  /** Ruling 547: the awaiting packet this edit fulfils, and its record. */
+  /** Ruling 75: the awaiting packet this edit fulfils, and its record. */
   let clearedPacket: ClosedDecision | null = null;
   await updateTaskFile(taskRef(ctx, input.projectSlug, input.taskKey), (parsed) => {
     parsed.goal = goal;
@@ -600,17 +600,17 @@ export async function attachTaskFile(
       `${input.taskKey} is archived. Restore it before attaching a file.`,
     );
   }
-  // A file an agent run saved can be the work under review (ruling 388 binds
+  // A file an agent run saved can be the work under review (ruling 84 binds
   // a review to a deliverer's saved files by WHEN they were saved, not by
   // their bytes), so a person's upload never overwrites one: the approval
   // would stand on content no reviewer read. Their own files they may replace.
-  // Ruling 675: compared composed, as the store resolves the name, so the
+  // Ruling 76: compared composed, as the store resolves the name, so the
   // same name sent in the other Unicode form is still the agent's file.
   const name = storedFileName(input.name.trim());
   const agentSaved = existing.parsed.timeline.some(
     (e) => e.actor.kind === "agent" && (e.attachments ?? []).some((held) => storedFileName(held) === name),
   );
-  // Ruling 558: the name is held from before the file lands until the note
+  // Ruling 77: the name is held from before the file lands until the note
   // claims it, so a run completing meanwhile never takes it as its own, and a
   // note that cannot be written takes the file back up.
   const attachment = await withAttachmentClaims(
@@ -637,7 +637,7 @@ export async function attachTaskFile(
             "Agents on this task read it from the task's attachments.",
           toAgent: false,
           evidence: null,
-          // Ruling 533: the note claims the file for the person, so the panel says
+          // Ruling 77: the note claims the file for the person, so the panel says
           // who added it and a run in flight is never credited with it.
           attachments: [written.name],
         });
@@ -664,7 +664,7 @@ export async function attachTaskFile(
 }
 
 /**
- * Ruling 582: a project admin takes a file off a task's record.
+ * Ruling 80: a project admin takes a file off a task's record.
  *
  * Round 1 of the AWS calculator board left its answer key, `golden-files.md`,
  * in AWSC-3's attachments, where every agent's shell and every `read_board` of
@@ -697,7 +697,7 @@ export async function removeTaskAttachment(
     throw missing();
   }
   const reason = input.reason?.trim() || null;
-  // Ruling 675: a claim is this file's when it names it as the store finds it,
+  // Ruling 80: a claim is this file's when it names it as the store finds it,
   // in either Unicode form, so no tile is left that opens nothing. A folder
   // that holds both forms as two files keeps the other one's claims.
   const stored = path.basename(abs);
@@ -866,7 +866,7 @@ export async function setTaskMetadata(
 }
 
 /**
- * Ruling 295: the longest task title, and the length a refusal names.
+ * Ruling 49: the longest task title, and the length a refusal names.
  *
  * 200 characters is well past any title a person writes and short of the point
  * where a board card stops being scannable. There is no cap on creation today,
@@ -876,10 +876,10 @@ export async function setTaskMetadata(
 const TASK_TITLE_MAX_CHARS = 200;
 
 /**
- * Ruling 295 (pass 37, F37-130): a task's TITLE can be corrected.
+ * Ruling 49 (pass 37, F37-130): a task's TITLE can be corrected.
  *
  * It could not be, by anyone. `updateTaskGoal` writes the goal — the contract
- * every future run re-anchors on (ruling 189) — and nothing anywhere wrote the
+ * every future run re-anchors on (ruling 64) — and nothing anywhere wrote the
  * one-line summary of it. Not the controller, not the task page, not an
  * operator. A title was whatever it was at creation, permanently.
  *
@@ -894,7 +894,7 @@ const TASK_TITLE_MAX_CHARS = 200;
  *
  * There was no safety in the omission. A title is display prose: the KEY is the
  * stable reference (`SHOP-50`), the branch is derived from the key at first
- * dispatch (ruling 122), and a pull request is titled from the commit subject.
+ * dispatch (ruling 228), and a pull request is titled from the commit subject.
  * Nothing downstream is pinned to these words. So the gate is the goal's own —
  * a title and a goal are the same claim at two lengths, and it would be strange
  * for the shorter one to be harder to correct than the longer.
@@ -917,7 +917,7 @@ export async function updateTaskTitle(
     throw AppError.validation("A title of at least 3 characters is required.");
   }
   if (title.length > TASK_TITLE_MAX_CHARS) {
-    // Ruling 288's rule, one field over: a contract Viberr will not write half
+    // Ruling 131's rule, one field over: a contract Viberr will not write half
     // of. A title is the one string every board card, every review-queue row
     // and every epic's task list renders, so a silently cut one is wrong in
     // more places than a cut goal.

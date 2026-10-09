@@ -192,7 +192,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     ).toBe(false);
   });
 
-  it("ruling 546: no safety-net event for a task delivered as the files saved on it", async () => {
+  it("ruling 235: no safety-net event for a task delivered as the files saved on it", async () => {
     // Live on AWSC-2, a research task whose delivery is two files: the note
     // said the operator decides a push and a review PR. CANARY: drop
     // `deliveredAsFiles` from the condition and the note is written.
@@ -210,7 +210,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     ).toBe(false);
   });
 
-  it("ruling 667: no safety-net event on a project with no repository", async () => {
+  it("ruling 224: no safety-net event on a project with no repository", async () => {
     // A board that delivers results has no pull request to open, and the note
     // told its owner the operator was deciding a push and a review PR.
     // CANARY: drop the repository term from the condition and it is written.
@@ -229,7 +229,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
     ).toBe(false);
   });
 
-  it("ruling 576: no safety-net event for a task a reviewer verified has nothing to deliver", async () => {
+  it("ruling 235: no safety-net event for a task a reviewer verified has nothing to deliver", async () => {
     // Live on AWSC-11 the note told the owner the operator decides a push and
     // a review PR, 30 seconds after the reviewer's approval verified there was
     // nothing to deliver (R19-8). CANARY: drop `noChangeApplies` from the
@@ -262,7 +262,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
 });
 
 /**
- * Ruling 202 (F37-22). The stranded-operator backstop judges a drive by what it
+ * Ruling 121 (F37-22). The stranded-operator backstop judges a drive by what it
  * changed, and delivery changed nothing it could see: a drive whose single
  * action was `deliver_for_review` was recorded as having "held the stage
  * without advancing, dispatching, or opening a packet", and coordination was
@@ -272,7 +272,7 @@ describe("R15-2: transitionStage no longer auto-delivers on review entry", () =>
  * marked finished, and 111ms before that the settle had already called it a
  * hold.
  */
-describe("ruling 202: a delivering drive marks itself as having acted", () => {
+describe("ruling 121: a delivering drive marks itself as having acted", () => {
   it("stamps `delivered` on entry, whatever GitHub then answers", async () => {
     seed({ stage: "review", branch: "vib-1" });
     pushMock.mockResolvedValue({
@@ -299,15 +299,15 @@ describe("ruling 202: a delivering drive marks itself as having acted", () => {
   });
 
   /**
-   * Ruling 211(d) — the correction to 202's own fix, from the adversarial
+   * Ruling 121 — the correction to an earlier fix, from the adversarial
    * self-review. Stamping on ENTRY counted the arms that do nothing at all as
    * progress, so a nudged drive whose only action was a delivery that could
    * never leave the machine looked like it had moved: the stranded backstop
    * then skipped its durable `heldAtStage` marker and every later trigger
    * re-armed the nudge from scratch — F31-11's fourteen-drives loop, reached
-   * through the fix for ruling 202.
+   * through that fix.
    */
-  it("ruling 211(d): a delivery REFUSED before the remote is not progress", async () => {
+  it("ruling 121: a delivery REFUSED before the remote is not progress", async () => {
     seed({ stage: "review", branch: "vib-1" });
     pushMock.mockResolvedValue({
       status: "grant_withheld",
@@ -315,7 +315,7 @@ describe("ruling 202: a delivering drive marks itself as having acted", () => {
     });
     const ctx = dataCtx();
     ctx.operatorRun = { backend: "codex", autonomy: "supervised", reactDepth: 0 };
-    // CANARY: stamp on entry (ruling 202's first version) and this reads true —
+    // CANARY: stamp on entry (ruling 121's first version) and this reads true —
     // a drive that did nothing at all counts as having delivered.
     const outcome = await performDelivery(
       store.db,
@@ -356,7 +356,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(event!.text).toContain("`vib-1`");
   });
 
-  it("ruling 321: a conflict on the task's OWN open PR does not tell a person to delete it", async () => {
+  it("ruling 230: a conflict on the task's OWN open PR does not tell a person to delete it", async () => {
     /**
      * Live on SHOP-11, twice. A backend engineer rebased a branch that had an
      * open pull request, the delivery push was refused, and this event told
@@ -395,7 +395,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(text).toContain(DIVERGED_BRANCH_REMEDY);
   });
 
-  it("ruling 321: with no PR and no published head, the branch is an anonymous ref and says so", async () => {
+  it("ruling 230: with no PR and no published head, the branch is an anonymous ref and says so", async () => {
     // The counterweight — the case the old fixed sentence was written for is
     // still allowed to say "delete or rename it", because there is nothing on
     // the branch the product knows this task to have put there. A fix that
@@ -414,7 +414,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     expect(text).not.toContain("OWN review PR");
   });
 
-  it("ruling 321: a STRANGER's PR on the branch names the ceremony built for it", async () => {
+  it("ruling 230: a STRANGER's PR on the branch names the ceremony built for it", async () => {
     seed({
       stage: "review",
       branch: "vib-1",
@@ -663,7 +663,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     // after the PR opened.
     withCredential();
     github = fakeGithubFetch({
-      // Ruling 128: the delivery reads the base ref before pushing.
+      // Ruling 227: the delivery reads the base ref before pushing.
       "GET /repos/akin-ozer/viberr/git/ref/heads/main": { body: { object: { sha: "c".repeat(40) } } },
       "PATCH /repos/akin-ozer/viberr/pulls/232": { status: 200, body: { state: "closed" } },
       "DELETE /repos/akin-ozer/viberr/git/refs/heads/vib-1": { status: 204, body: "" },
@@ -798,7 +798,7 @@ describe("F15-15/B-GH1: performDelivery refuses a PR over a conflicted or failed
     {
       push: { status: "no_repo" as const, reason: "project has no repo" },
       outcome: "failed",
-      // Ruling 667: a standing state of a board that delivers results.
+      // Ruling 224: a standing state of a board that delivers results.
       says: "has no repository, so there is no branch to push and no review PR to open: a task here is delivered as the files its delivering agent saves on it",
     },
     {
@@ -902,7 +902,7 @@ describe("R15-2: the operator's deliver_for_review decision", () => {
   });
 
   /**
-   * Ruling 134 (pass 34, F34-11): the old pin here ("a live open PR makes
+   * Ruling 229 (pass 34, F34-11): the old pin here ("a live open PR makes
    * delivery a noop") WAS the bug. `operatorDeliverForReview` answered from
    * the cached `pr.state` before `performDelivery` ran, so rework on a task
    * with an open PR was never pushed. The push now runs; the ONLY honest noop
@@ -1206,7 +1206,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
-  it("ruling 135: an UNPUSHED delivered revision is refused BEFORE the conflict sentence", async () => {
+  it("ruling 243: an UNPUSHED delivered revision is refused BEFORE the conflict sentence", async () => {
     // Canary: swap the gate order in `acceptanceRefusalReason` (conflict
     // first) and the refusal names a rebase for a branch that only needs a push.
     seed({
@@ -1244,11 +1244,11 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(mergeMock).not.toHaveBeenCalled();
   });
 
-  it("ruling 135 + 223: a 404 compare, confirmed by GitHub's real 422 commit read, is a REFUSAL, not unverifiable", async () => {
+  it("ruling 243: a 404 compare, confirmed by GitHub's real 422 commit read, is a REFUSAL, not unverifiable", async () => {
     // Canary: restore the plain `unverifiable` return on `!cmp.ok` and the
     // never-pushed revision is accepted with an "unverified head" note.
     //
-    // Ruling 223 (F37-43): this fixture used to stub the commit read as a 404
+    // Ruling 243 (F37-43): this fixture used to stub the commit read as a 404
     // carrying GitHub's 422 SENTENCE — a status the endpoint does not return
     // for a well-formed unknown SHA. The test passed and the guard could never
     // fire on the real API. Live on SHOP-17 that merged the revision the
@@ -1280,7 +1280,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     expect(fm().frontmatter.stage).toBe("review");
     expect(mergeMock).not.toHaveBeenCalled();
 
-    // The commit exists on GitHub: the 404 compare is unexplained. Ruling 226
+    // The commit exists on GitHub: the 404 compare is unexplained. Ruling 243
     // (owner, 2026-09-14): that no longer merges. GitHub answered the pull and
     // refused only the comparison, so the repository is reachable, the merge
     // would land, and what would land is unknown.
@@ -1419,15 +1419,15 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   });
 
   it("A9: an UNVERIFIABLE head that still merges records the caveat in the completion event", async () => {
-    // A9's own case, narrowed by ruling 226 to what it always described:
-    // GitHub is UNREACHABLE, so the containment check cannot run — and the
+    // A9's own case, as ruling 243 keeps it: GitHub is UNREACHABLE, so the
+    // containment check cannot run — and the
     // merge attempt is subject to the same unreachability, which is what made
     // "the merge's own honesty covers it" true here. Acceptance proceeds and
     // the record must say the check did not run. Canary: drop the A9 branch in
     // applyAcceptanceWrite and the completion event reads like a verified accept.
     //
     // The case where GitHub ANSWERS the pull and refuses only the comparison is
-    // ruling 226's, and is tested as a refusal above.
+    // ruling 243's, and is tested as a refusal above.
     healthySeed();
     withCredential();
     github = fakeGithubFetch({
@@ -1451,15 +1451,15 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   });
 
   /**
-   * Ruling 226 (owner, 2026-09-14) — the surviving half of F37-43.
+   * Ruling 243 (owner, 2026-09-14) — the surviving half of F37-43.
    *
-   * Ruling 135 built the guard for a PR head that is not the reviewed revision,
-   * and ruling 223 made it reachable against GitHub's real 422. What stayed was
+   * The guard for a PR head that is not the reviewed revision was built
+   * first, then made reachable against GitHub's real 422. What stayed was
    * A9's trade: a head that could not be VERIFIED still merged, with a note
    * naming the check that did not run rather than the consequence. Live, that
    * merged SHOP-17 at the revision its Code Reviewer had rejected.
    */
-  describe("ruling 235: a KNOWN unpushed head is recorded and handed to the operator", () => {
+  describe("ruling 96: a KNOWN unpushed head is recorded and handed to the operator", () => {
     const head = "f".repeat(40);
     const delivered = "a".repeat(40);
     /** The never-pushed shape: the compare 404s and GitHub's real 422 commit
@@ -1519,9 +1519,9 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       expect(note!.text).toContain(head.slice(0, 7));
 
       // And NOT a packet: a known mismatch is not a decision. The reviewed
-      // revision must be pushed, ruling 134 reserves pushing for the operator,
+      // revision must be pushed, ruling 126 reserves pushing for the operator,
       // so there is nothing for a person to choose. Only the UNVERIFIABLE case
-      // (ruling 226) asks.
+      // (ruling 243) asks.
       // `packet` is the signal, not `waiting`: a task sitting at the acceptance
       // boundary already waits on a human before anything here runs, so a
       // waiting-state assertion would pass whatever this code did.
@@ -1549,7 +1549,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
     });
   });
 
-  describe("ruling 226: a head GitHub would not compare is refused, not disclosed", () => {
+  describe("ruling 243: a head GitHub would not compare is refused, not disclosed", () => {
     const head = "f".repeat(40);
     const delivered = "a".repeat(40);
     /** GitHub answers the pull and refuses the comparison: reachable, mergeable,
@@ -1589,7 +1589,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       // again" option would have to be a `custom`, whose resolution sends the
       // task back to the agent side and re-queues the operator — re-running
       // this gate, refusing again, and re-opening this packet. Answering the
-      // decision would re-create it, which is ruling 224's fourth half. A
+      // decision would re-create it, which is ruling 157's fourth half. A
       // re-check needs no option at all: this packet does not block acceptance.
       expect(packet.options.map((o) => o.kind)).toEqual([
         "request_edit",
@@ -1903,7 +1903,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
     expect(fm().frontmatter.stage).toBe("review");
   });
 
-  it("ruling 686: packet acceptance on an UNVERIFIABLE head that still merges records the caveat, as the button's does (A9 on path 3)", async () => {
+  it("ruling 100: packet acceptance on an UNVERIFIABLE head that still merges records the caveat, as the button's does (A9 on path 3)", async () => {
     // The option made the same head check as the button and wrote a record
     // that read like a verified accept: "…and the review PR was merged."
     // CANARY: drop `unverifiedHeadNote` from the packet arm's write.
@@ -2000,7 +2000,7 @@ describe("gap 1: resolvePacket's accept_completion is the THIRD Done writer and 
   });
 });
 
-describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pushedAt", () => {
+describe("ruling 234 (pass 35, G35-6): the delivery push stamps workRevision.pushedAt", () => {
   const HEAD = "8c463b7".padEnd(40, "0");
   function seedReported(): void {
     seed({
@@ -2050,7 +2050,7 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
     expect(fm().frontmatter.workRevision?.pushedAt).toEqual(expect.any(String));
   });
 
-  describe("ruling 439: a pushed head that is Viberr's own base refresh", () => {
+  describe("ruling 239: a pushed head that is Viberr's own base refresh", () => {
     // Live on ax-clone AX-29 the refresh pushed `278c1ed` (the merge onto the
     // revision `4e6c47d`), and the delivery found origin `up_to_date` at that
     // merge.
@@ -2094,7 +2094,7 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
 });
 
 /**
- * Ruling 334 — a transient GitHub blip recorded as broken settings.
+ * Ruling 231(b) — a transient GitHub blip recorded as broken settings.
  *
  * Four `openTaskPr` statuses shared one remedy: "Fix the repository/credential
  * settings, then deliver again." For the transport one, that accuses a
@@ -2106,11 +2106,11 @@ describe("ruling 161 (pass 35, G35-6): the delivery push stamps workRevision.pus
  * same credential, same repo, nothing touched, and the retry was the operator's
  * own. A successful push to that same origin is recorded two minutes earlier.
  *
- * Ruling 128's comment twelve lines above this arm already states the rule —
+ * Ruling 231's comment twelve lines above this arm already states the rule —
  * never "unreachable" paired with "fix the credential settings (nothing is wrong
  * with them)" — and fixed only the `base_branch_missing` arm.
  */
-describe("ruling 334: an unreachable GitHub is not a broken credential", () => {
+describe("ruling 231(b): an unreachable GitHub is not a broken credential", () => {
   it("names the transport reason and does not accuse the settings", async () => {
     seed({ stage: "review", branch: "vib-1" });
     pushMock.mockResolvedValue({

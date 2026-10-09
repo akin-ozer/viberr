@@ -211,10 +211,10 @@ describe("readSkillBodies — ONE shared budget (C2)", () => {
 });
 
 /**
- * Ruling 183 (pass 36, F36-2): the one judgement every SKILL.md writer makes
+ * Ruling 186 (pass 36, F36-2): the one judgement every SKILL.md writer makes
  * before it writes. Refuse by name, never rewrite.
  */
-describe("assertSkillBodyWellFormed (ruling 183)", () => {
+describe("assertSkillBodyWellFormed (ruling 186)", () => {
   it("refuses an empty body", () => {
     expect(() => assertSkillBodyWellFormed("")).toThrowError(/empty/);
     expect(() => assertSkillBodyWellFormed(" \n\t")).toThrowError(/empty/);

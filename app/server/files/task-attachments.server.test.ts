@@ -174,11 +174,11 @@ describe("attachmentNamesSince (P21 — a run's own files)", () => {
   });
 });
 
-// Ruling 105 (owner ask 2026-08-31): the browser MCP's machine-stamped working
+// Ruling 78 (owner ask 2026-08-31): the browser MCP's machine-stamped working
 // files (page-*.yml aria snapshots, console-*.log dumps) land in the store
 // because --output-dir IS the store. They are pruned at run completion unless
 // the run cited the exact filename; visual evidence always stays.
-describe("browser working artifacts (ruling 105)", () => {
+describe("browser working artifacts (ruling 78)", () => {
   it("classifies machine-stamped non-visual outputs, and nothing else", () => {
     expect(isBrowserWorkingArtifact("page-2026-08-31T15-05-03-204Z.yml")).toBe(true);
     expect(isBrowserWorkingArtifact("console-2026-08-31T15-05-03-056Z.log")).toBe(true);
@@ -313,7 +313,7 @@ describe("writeTaskAttachment", () => {
     expect(countTaskAttachments("p1", "VIB-1", root)).toBe(0);
   });
 
-  it("ruling 574: stores a file of any kind, and serves one a browser could run only as a download", () => {
+  it("ruling 76: stores a file of any kind, and serves one a browser could run only as a download", () => {
     setRoot();
     // CANARY: put an extension check back in `checkAttachmentUpload` and a
     // person's `.tf` or `.docx` is refused before any agent could read it.
@@ -344,12 +344,12 @@ describe("writeTaskAttachment", () => {
 });
 
 /**
- * Ruling 552: every agent in the group can write a task's attachments folder
- * (ruling 460), so a name in it can be a link an agent planted to a file only
+ * Ruling 19: every agent in the group can write a task's attachments folder
+ * (ruling 15), so a name in it can be a link an agent planted to a file only
  * the server may read (another person's credentials, the store's state). No
  * reader of an attachment follows one, and no writer writes through one.
  */
-describe("ruling 675: an attachment's name across Unicode forms", () => {
+describe("ruling 76: an attachment's name across Unicode forms", () => {
   const composed = "İçerik ve Eğitim Üretim Teklifi.txt";
   const decomposed = composed.normalize("NFD");
   const text = (value: string) => new TextEncoder().encode(value);
@@ -391,7 +391,7 @@ describe("ruling 675: an attachment's name across Unicode forms", () => {
   });
 });
 
-describe("ruling 552: a link in the attachments folder is never followed", () => {
+describe("ruling 19: a link in the attachments folder is never followed", () => {
   function plant() {
     root = mkdtempSync(path.join(tmpdir(), "viberr-attach-"));
     const dir = path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
@@ -421,12 +421,12 @@ describe("ruling 552: a link in the attachments folder is never followed", () =>
 });
 
 /**
- * Ruling 558: a person's upload, a relay and a take put a file on a task for
+ * Ruling 77: a person's upload, a relay and a take put a file on a task for
  * someone other than a run. The name is held until the entry that claims it is
  * written, and the file lands with that claim or not at all: a file left on
  * the task unclaimed is the next completion's to credit to its run.
  */
-describe("ruling 558: a file put down for someone else", () => {
+describe("ruling 77: a file put down for someone else", () => {
   const dir = () => path.join(root, "projects", "p1", "tasks", "VIB-1", "attachments");
   const bytes = (body: string) => new TextEncoder().encode(body);
   const setRoot = () => {
@@ -499,11 +499,11 @@ describe("ruling 558: a file put down for someone else", () => {
 });
 
 /**
- * Ruling 574: a reader takes a file by its bytes, not its name. Any file whose
+ * Ruling 79: a reader takes a file by its bytes, not its name. Any file whose
  * head holds no NUL byte (git's own `-text` test) reads as text, and a binary
  * one is named, with what the reader takes instead.
  */
-describe("ruling 574: readTaskAttachment reads any text file", () => {
+describe("ruling 79: readTaskAttachment reads any text file", () => {
   it("reads a text file of any name, and names a binary one rather than guessing", () => {
     // CANARY: gate the text read on `READABLE_TEXT_EXTENSIONS` again and the
     // `.tf` is refused as an unknown kind.
@@ -524,7 +524,7 @@ describe("ruling 574: readTaskAttachment reads any text file", () => {
   });
 });
 
-describe("ruling 676: a text file's embedded files are named, not spelled out", () => {
+describe("ruling 79: a text file's embedded files are named, not spelled out", () => {
   it("reads a self-contained page as its markup, with each embedded image left out by its length", () => {
     // CANARY: read the bytes as text without `withoutEmbeddedFiles` and the
     // first page is base64 from its first line to its last, as it was for the
@@ -638,10 +638,10 @@ function onePagePdf(lines: readonly string[]): Uint8Array {
   return new TextEncoder().encode(pdf);
 }
 
-/** The image installs poppler (ruling 566); a host without it skips these. */
+/** The image installs poppler (ruling 42); a host without it skips these. */
 const hasPdftotext = spawnSync("pdftotext", ["-v"]).error === undefined;
 
-describe("ruling 629: a PDF attachment reads as its text", () => {
+describe("ruling 214: a PDF attachment reads as its text", () => {
   it.skipIf(!hasPdftotext)("reads a calculator export's lines, and names a PDF with no text layer", () => {
     // Live on AWSC-85 the Estimate Judge reviewed a delivery whose PDF export
     // it could not open: "the attachment reader does not parse its binary

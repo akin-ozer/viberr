@@ -10,7 +10,7 @@ import type { DatabaseSync } from "node:sqlite";
  * identical `INSERT` helper, and every read was raw SQL somewhere else again
  * (a feature module and — worse — a route loader). This module owns the write;
  * `provenance-query.server.ts` owns the read. A Viberr push of a task branch
- * writes `github.push` through it (ruling 494, `recompareAfterPush`).
+ * writes `github.push` through it (ruling 238, `recompareAfterPush`).
  *
  * Rows are append-only and never pruned by `applyRetention`, so `details` must
  * stay small and secret-free — ids, counts, paths, never tokens or file bodies.

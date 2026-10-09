@@ -120,13 +120,13 @@ describe("RBAC", () => {
     await expect(
       postAction(ids.selin, { intent: "kb-reindex", kbId: "kb_seed_arch" }),
     ).rejects.toMatchObject({ status: 403 });
-    // Ruling 463: Re-check spends GitHub calls, so it is behind the same gate.
+    // Ruling 222: Re-check spends GitHub calls, so it is behind the same gate.
     await expect(
       postAction(ids.selin, { intent: "connection-recheck", connectionId: "akin-ozer" }),
     ).rejects.toMatchObject({ status: 403 });
   });
 
-  it("ruling 463: connection-recheck reaches recheckConnection (a missing connection says so)", async () => {
+  it("ruling 222: connection-recheck reaches recheckConnection (a missing connection says so)", async () => {
     // CANARY: drop the `connection-recheck` case and the route answers
     // "Unknown action." instead. No connection exists, so nothing calls GitHub.
     const reply = await postAction(ids.arda, {
@@ -191,7 +191,7 @@ describe("users & access intents", () => {
   });
 
   it("duplicate domain whitelist is refused like the other invite intents", async () => {
-    // The seed allowlists no domain (ruling 688), so the first add is the one
+    // The seed allowlists no domain (ruling 28(c)), so the first add is the one
     // the duplicate is refused against.
     const first = await postAction(ids.arda, {
       intent: "invite-domain",
@@ -342,18 +342,18 @@ describe("resource + store intents", () => {
 });
 
 /**
- * Ruling 106 — controller-save persists the model AND the effort the panel's
+ * Ruling 270 — controller-save persists the model AND the effort the panel's
  * catalog pickers submit, as a first-class frontmatter key (no drift warning),
  * and a blank effort removes the key rather than storing "".
  */
-describe("controller-save (ruling 106)", () => {
+describe("controller-save (ruling 270)", () => {
   it("round-trips model + effort through the profile file without drift", async () => {
     const { resolveControllerConfig } = await import(
       "~/server/controller/controller-profile.server"
     );
     const before = resolveControllerConfig(app.dataRoot);
     expect(before.profilePresent).toBe(true);
-    // Ruling 108: the grant sections are deployment-locked by default, so this
+    // Ruling 270: the grant sections are deployment-locked by default, so this
     // save round-trips the STORED grants and edits only model + effort.
     const reply = await postAction(ids.arda, {
       intent: "controller-save",
@@ -411,13 +411,13 @@ describe("controller-save (ruling 106)", () => {
 });
 
 /**
- * Ruling 108 — the controller's grant sections and instructions are locked by
+ * Ruling 270 — the controller's grant sections and instructions are locked by
  * default, ORG ADMINS INCLUDED: only a deployment environment variable unlocks
  * a section. The test app sets none of them, so this suite runs against the
  * product default; the unlock paths set the `VIBERR_UNLOCK_CONTROLLER_*` env the
  * way a deployment does (`withEnv`, test-support/env.ts).
  */
-describe("controller config locks (ruling 108)", () => {
+describe("controller config locks (ruling 270)", () => {
   async function stored() {
     const { resolveControllerConfig } = await import(
       "~/server/controller/controller-profile.server"
@@ -640,14 +640,14 @@ describe("controller config locks (ruling 108)", () => {
 });
 
 /**
- * Ruling 390, amended 2026-09-23. Before this, a grant request never left
+ * Ruling 271, amended 2026-09-23. Before this, a grant request never left
  * `open`: `closeResourceRequest` had no caller outside tests. After an admin
  * granted the resource, the request stayed on this tab and in the controller's
  * own context, which told it that it did not have a knowledge base it was
  * reading. Now the Controller-tab save that leaves the resource granted closes
  * the request, and Decline closes it too. Both are audited and published.
  */
-describe("controller grant requests are answered in the app (ruling 390)", () => {
+describe("controller grant requests are answered in the app (ruling 271)", () => {
   const ASKER = {
     askedByUserId: "u_controller_asker",
     askedByLabel: "arda@viberr.dev · via controller",
@@ -715,7 +715,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
     );
     expect(await listedIds()).toEqual(expect.arrayContaining([asked.id, other.id]));
 
-    // The deployment unlocks the knowledge-base section (ruling 108), in its
+    // The deployment unlocks the knowledge-base section (ruling 270), in its
     // env as production reads it.
     await withEnv({ VIBERR_UNLOCK_CONTROLLER_KB: "enabled" }, async () => {
       const { result: reply, wire } = await published(() =>
@@ -780,7 +780,7 @@ describe("controller grant requests are answered in the app (ruling 390)", () =>
       "~/server/controller/controller-profile.server"
     );
     const before = resolveControllerConfig(app.dataRoot);
-    // The handbook is granted in the shipped profile (ruling 99). Nothing
+    // The handbook is granted in the shipped profile (ruling 247). Nothing
     // stopped the controller asking for it anyway, and the context line kept
     // telling it that it did not have a base it was reading.
     expect(before.kb).toContain("controller-handbook");
@@ -981,7 +981,7 @@ describe("R19-16 sign-in providers, configured in the app", () => {
   // CANARY: build callbackOrigin or the probe's redirectUri from request.url
   // again and, behind the TLS proxy, the card tells an admin to register, and
   // Google's probe sends, an http:// callback better-auth never sends; it
-  // sends BETTER_AUTH_URL's (ruling 687).
+  // sends BETTER_AUTH_URL's (ruling 28).
   it("shows and probes the callback under BETTER_AUTH_URL's origin, not the request's", async () => {
     const saved = await postAction(ids.arda, {
       intent: "oauth-save",

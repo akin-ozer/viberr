@@ -75,19 +75,19 @@ export interface StoreTarget {
    *  base's store directory, a skill's folder name. */
   key: string;
   /** The data root the folder is under, when it is not the default one: where
-   *  the boards that hold the resource are read (ruling 681). */
+   *  the boards that hold the resource are read (ruling 34). */
   dataRoot?: string;
 }
 
 /**
  * The audit row of one write into a store folder.
  *
- * Ruling 681: it says which resource was written (`resource.kind` and `key`;
+ * Ruling 34: it says which resource was written (`resource.kind` and `key`;
  * the row otherwise names only a row id and a path inside the folder) and
  * which boards' runs are given it at this moment (`resource.boards`), which is
  * what puts the write on those boards' Activity.
  *
- * A board's "no repository" ruling (ruling 672) is one board's own document,
+ * A board's "no repository" ruling (ruling 199) is one board's own document,
  * and its name carries the board's slug. Two boards can name one knowledge
  * base as their rulings, so a write to that document names its own board and
  * no other, whoever makes it: the decision's own writer, a person in Instance
@@ -182,7 +182,7 @@ export interface StoreFolderFile {
  * Every file under a store folder with its bytes, by the walk `scanStoreTree`
  * makes (no dot-names, no links, at most 32 deep): what a board file carries
  * of a skill or knowledge base, and what an import compares it with (ruling
- * 653). Missing folder → none.
+ * 32). Missing folder → none.
  */
 export function readStoreFolderFiles(absDir: string): StoreFolderFile[] {
   const out: StoreFolderFile[] = [];
@@ -380,9 +380,9 @@ export function writeStoreFiles(
   dirPath: string[],
   files: UploadFileInput[],
   actor: AuditActor,
-  /** Ruling 678: the task whose file this is a copy of, the name it took here
-   *  and whether it took a file's place, for the audit row; and (ruling 684)
-   *  what it is kept as. */
+  /** Ruling 267: the task whose file this is a copy of, the name it took here
+   *  and whether it took a file's place, for the audit row; and what it is
+   *  kept as. */
   copiedFrom?: { projectSlug: string; taskKey: string; name: string; as: string; replaced: boolean; kind: string },
 ): UploadResult {
   const base = sanitizeDirPath(dirPath);
@@ -394,7 +394,7 @@ export function writeStoreFiles(
   for (const file of cleaned) {
     const abs = path.join(target.rootAbs, ...base, ...file.parts);
     assertInsideRoot(target.rootAbs, abs);
-    // Ruling 183 (pass 36, F36-2): the skill's SKILL.md is judged with the
+    // Ruling 186 (pass 36, F36-2): the skill's SKILL.md is judged with the
     // other pre-flight checks, so a refusal writes NOTHING of the batch.
     if (isTheSkillMd(target, base, file.parts)) {
       assertSkillBodyWellFormed(file.data.toString("utf8"));
@@ -428,7 +428,7 @@ export function writeStoreFiles(
 
   if (cleaned.length > 0) {
     touchResource(db, target);
-    // Ruling 678: a copy of a task's file says which task it was copied from.
+    // Ruling 267: a copy of a task's file says which task it was copied from.
     const details: AuditDetails & { path?: string } = {
       path: base.join("/"),
       count: cleaned.length,
@@ -501,27 +501,27 @@ export function createStoreFolder(
 
 export interface StoreDocResult {
   path: string[];
-  /** Ruling 466: the document's size as written, in UTF-8 BYTES. It was
+  /** Ruling 18(b): the document's size as written, in UTF-8 BYTES. It was
    *  `body.length`, UTF-16 code units: live, an 8,220-byte document was
    *  reported and audited as "8,170 bytes". */
   bytes: number;
   /** An existing document was replaced rather than created (P14-UI-59). */
   replaced: boolean;
-  /** Ruling 466: the size in bytes of the document this write replaced or
+  /** Ruling 18(b): the size in bytes of the document this write replaced or
    *  appended to, measured on disk before the write; null when it created one.
-   *  "How many bytes a replace destroyed" (ruling 257) is this figure. */
+   *  "How many bytes a replace destroyed" (ruling 212) is this figure. */
   previousBytes: number | null;
-  /** Ruling 466 (F40-13): with `append`, the bytes this call added. */
+  /** Ruling 18(b) (F40-13): with `append`, the bytes this call added. */
   appendedBytes?: number;
 }
 
-/** Ruling 466: a size in bytes is a UTF-8 byte count, never a string length. */
+/** Ruling 18(b): a size in bytes is a UTF-8 byte count, never a string length. */
 export function utf8Bytes(text: string): number {
   return Buffer.byteLength(text, "utf8");
 }
 
 /**
- * Ruling 305: the version of a store document, for an optimistic write.
+ * Ruling 212(a): the version of a store document, for an optimistic write.
  *
  * Hashed from the FILE, not from `readStoreDoc`'s text, because that reader
  * caps at 256 KB and a version computed from a truncated read would say two
@@ -537,10 +537,14 @@ export function storeDocVersion(target: StoreTarget, nodePath: string[]): string
 }
 
 /** The version of a document's bytes: what `storeDocVersion` reports and what
- *  a replace names (rulings 305 and 663). */
+ *  a replace names (rulings 212(a) and 18(c)). */
 function docVersionOf(bytes: Buffer): string {
   return sha256Hex(bytes).slice(0, 12);
 }
+
+/** How much of a document the editor opens; a replace of a longer file is
+ *  refused (ruling 212). */
+const EDITOR_READ_MAX_BYTES = 256 * 1024;
 
 /** Read one store text doc for the editor (`null` when absent). A doc the
  *  editor cannot round-trip safely is refused by TYPE rather than reported as
@@ -549,13 +553,13 @@ function docVersionOf(bytes: Buffer): string {
 export function readStoreDoc(
   target: StoreTarget,
   nodePath: string[],
-  maxBytes = 256 * 1024,
+  maxBytes = EDITOR_READ_MAX_BYTES,
 ): { text: string; truncated: boolean } | null {
   const parts = sanitizeDirPath(nodePath);
   if (parts.length === 0) return null;
   const abs = path.join(target.rootAbs, ...parts);
   assertInsideRoot(target.rootAbs, abs);
-  // Ruling 246 (F37-75): EXISTENCE before TYPE. The other order answers a path
+  // Ruling 260 (F37-75): EXISTENCE before TYPE. The other order answers a path
   // this store has never held with a complaint about its file extension, which
   // names a cause that is not the reason and invites the caller to rename the
   // thing and try again. Live, the controller asked for `make/stack.mk` — a
@@ -570,7 +574,7 @@ export function readStoreDoc(
     );
   }
   const size = statSync(abs).size;
-  // Ruling 466: the cap is in BYTES, as its name and `truncated` say. It used
+  // Ruling 18(b): the cap is in BYTES, as its name and `truncated` say. It used
   // to slice characters, so a non-ASCII document could read back whole while
   // `truncated` (measured in bytes) said it was cut. A cut that lands inside a
   // multi-byte character drops the partial character rather than decoding it
@@ -585,7 +589,7 @@ export function readStoreDoc(
 
 /**
  * Create or replace one text document inside a store folder (P13-LV-06,
- * owner ruling 3; extended by P14 owner ruling R14-4).
+ * P13 owner decision 3; extended by P14 owner ruling R14-4).
  *
  * Knowledge bases could only be filled by upload / folder-drop / "Add from
  * GitHub", even though skills have a full in-app SKILL.md editor and the KB
@@ -609,7 +613,7 @@ export function writeStoreDoc(
   opts: {
     overwrite?: boolean;
     /**
-     * Ruling 466 (F40-13): add `body` to the END of the document, creating it
+     * Ruling 18(b) (F40-13): add `body` to the END of the document, creating it
      * when absent. The bytes sent are concatenated EXACTLY: nothing is trimmed
      * and no separator is inserted, so a part boundary may fall inside a
      * table, a list or a fenced block and the result is the text the caller
@@ -619,22 +623,24 @@ export function writeStoreDoc(
      */
     append?: boolean;
     /**
-     * Ruling 637: the write replaces one passage (`editKbPassage`). The audit
+     * Ruling 212(b): the write replaces one passage (`editKbPassage`). The audit
      * row names the passage and what replaced it, so what an edit changed is
      * on the record and not only in the editor's transcript.
      */
     edit?: { replaced: string; text: string };
     /**
-     * Ruling 663: the version this replace read (`storeDocVersion`). A replace
+     * Ruling 18(c): the version this replace read (`storeDocVersion`). A replace
      * that names one is refused once the file is no longer that version, so a
      * write made meanwhile (an agent's correction, another person's save) is
-     * not wiped by a save that never saw it. The document editor sends it;
-     * the controller checks its own (ruling 305).
+     * not wiped by a save that never saw it. It is also refused when the file
+     * is longer than the editor opens, since that save never saw its tail
+     * (ruling 212). The document editor sends it; the controller checks its
+     * own (ruling 212(a)).
      */
     replaces?: string;
     /**
-     * Ruling 681: the task whose correction, or whose correction's undo, this
-     * write is (ruling 498). That task's timeline already says so, so its
+     * Ruling 34: the task whose correction, or whose correction's undo, this
+     * write is (ruling 210). That task's timeline already says so, so its
      * board's Activity does not show the write a second time.
      */
     onTask?: { projectSlug: string; taskKey: string };
@@ -682,9 +688,19 @@ export function writeStoreDoc(
         "reopen the document, and make it again on top of what is there now.",
     );
   }
+  // Ruling 212: the version is hashed from the whole file, but the editor
+  // that read it was given only its first 256 KB, so a replace from that read
+  // would delete the tail its writer never saw.
+  if (previous && opts.replaces !== undefined && previous.length > EDITOR_READ_MAX_BYTES) {
+    throw AppError.validation(
+      `${[...base, withExt].join("/")} is over the 256 KB the editor opens, so it held only the ` +
+        "first part, and saving that would delete the rest. Nothing was written, and your text is " +
+        "still here. Edit the file on disk, or upload the whole file again with your change.",
+    );
+  }
   const sent = Buffer.from(body, "utf8");
   const written = opts.append && previous ? Buffer.concat([previous, sent]) : sent;
-  // Ruling 183: the document editor is a SKILL.md writer too.
+  // Ruling 186: the document editor is a SKILL.md writer too.
   if (isTheSkillMd(target, base, [withExt])) assertSkillBodyWellFormed(written.toString("utf8"));
   mkdirSync(dirAbs, { recursive: true });
   writeFileSync(abs, written);
@@ -693,7 +709,7 @@ export function writeStoreDoc(
   const appendedBytes = opts.append ? sent.length : undefined;
   const details: AuditDetails = {
     path: [...base, withExt].join("/"),
-    // Ruling 466: UTF-8 bytes, the figure `ls -l` and the result agree on.
+    // Ruling 18(b): UTF-8 bytes, the figure `ls -l` and the result agree on.
     bytes: written.length,
     replaced,
   };

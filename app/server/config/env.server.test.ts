@@ -44,14 +44,14 @@ describe("parseEnv", () => {
   });
 
   /**
-   * Ruling 127: agent backends authenticate PER PERSON. The nine
+   * Ruling 137: agent backends authenticate PER PERSON. The nine
    * deployment-wide credential variables are gone from the schema, and this
    * gate is what stops one creeping back in — a declared key would be an
    * instance credential every run could bill to whoever owns it, which is the
    * whole thing the ruling forbids. An ambient value must be ignored, not
    * carried through.
    */
-  it("declares no deployment-wide agent-backend credential (ruling 127)", () => {
+  it("declares no deployment-wide agent-backend credential (ruling 137)", () => {
     const removed = [
       "ANTHROPIC_API_KEY",
       "CLAUDE_CODE_OAUTH_TOKEN",
@@ -157,11 +157,11 @@ describe("parseEnv", () => {
 /**
  * C3 (pass 31) declared the runtime tuning knobs, which the app has always
  * honoured, so the validated surface stopped denying they existed. Ruling
- * 458(j): the schema also parses them, as 458(c) does for the C01-A6 knobs, so
+ * 39: the schema also parses them, as 458(c) does for the C01-A6 knobs, so
  * a value their call sites used to replace with the default in silence fails
  * boot instead.
  */
-describe("the runtime tuning knobs (ruling 458(j))", () => {
+describe("the runtime tuning knobs (ruling 39)", () => {
   it("applies the documented defaults when unset or empty", () => {
     const keys = [
       "VIBERR_CLAUDE_MAX_TURNS",
@@ -232,15 +232,15 @@ describe("the runtime tuning knobs (ruling 458(j))", () => {
 });
 
 /**
- * Ruling 458(c): the C01-A6 knobs are the schema's to parse. Their modules used
+ * Ruling 39: the C01-A6 knobs are the schema's to parse. Their modules used
  * to read `process.env` and run the default for a value that did not parse, so
  * a mistyped threshold or interval was silently ignored. The schema now applies
  * the same `Number()` coercion and the same defaults, and a value outside what
  * the modules accepted fails boot with the rest of the invalid variables.
- * Ruling 458(i): the two periods are set in seconds, at most a day, and the
+ * Ruling 39: the two periods are set in seconds, at most a day, and the
  * `_MS` names they replace are refused with the new name.
  */
-describe("the C01-A6 knobs (rulings 458(c) and 458(i))", () => {
+describe("the C01-A6 knobs (ruling 39)", () => {
   const PERIODS = [
     "VIBERR_MAINTENANCE_INTERVAL_SECONDS",
     "VIBERR_DISK_CHECK_INTERVAL_SECONDS",
@@ -464,7 +464,7 @@ describe("no undeclared VIBERR_* env reads (C01-A6)", () => {
     expect(undeclared).toEqual([]);
   });
 
-  // Ruling 458(c) moved the five C01-A6 knobs off raw reads and onto
+  // Ruling 39 moved the five C01-A6 knobs off raw reads and onto
   // `getEnv()`, so the declared keys are held to `.env.example` too: a knob the
   // schema parses must stay documented once no raw read names it any more.
   it("documents every declared key and every raw process.env.VIBERR_* read in .env.example", () => {

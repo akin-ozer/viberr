@@ -5,7 +5,7 @@ import { prettySize } from "~/shared/text/byte-size";
 import { messageFileHref } from "./message-file-href";
 
 /**
- * Ruling 573: the files a person sent with a message, under its words, on the
+ * Ruling 258: the files a person sent with a message, under its words, on the
  * page and in the dock. A picture shows as itself; any other file as the
  * composer tray's chip (name and size), so what was sent looks like what was
  * attached. Each opens the file in a new tab from the conversation's own

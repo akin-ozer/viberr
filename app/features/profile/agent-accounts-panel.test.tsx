@@ -14,7 +14,7 @@ import type {
 import { clientLoaderOver, unreachable } from "../../../test-support/client-data";
 
 /**
- * Profile → Agent accounts, rendered (ruling 127).
+ * Profile → Agent accounts, rendered (ruling 137).
  *
  * The card states are asserted as a reader meets them: not connected, signing
  * in (including while a credential already works), connected, a connection
@@ -74,7 +74,7 @@ function backend(
       name === "claude"
         ? { signIn: ["claudeai", "console"], paste: ["api_key"] }
         : { signIn: ["device"], paste: ["api_key", "access_token"] },
-    // What the loader sends (ruling 507): the connected account, active.
+    // What the loader sends (ruling 138): the connected account, active.
     accounts:
       health.kind === null
         ? []
@@ -206,7 +206,7 @@ describe("AgentAccountsPanel", () => {
     expect(field.autocomplete).toBe("new-password");
     expect(getByText(/stored sealed, never shown again/)).toBeTruthy();
 
-    // Ruling 147: Save stays enabled on an empty field and REFUSES the click
+    // Ruling 288: Save stays enabled on an empty field and REFUSES the click
     // with the sentence the server would have thrown, the field marked and
     // focused, and nothing submitted.
     const save = getByText("Save API key").closest("button")!;
@@ -237,7 +237,7 @@ describe("AgentAccountsPanel", () => {
     });
   });
 
-  it("refuses an empty workspace access token in the server's own words (ruling 147)", () => {
+  it("refuses an empty workspace access token in the server's own words (ruling 288)", () => {
     const { getByText, getByRole, container } = renderPanel(BOTH_UNCONNECTED);
     fireEvent.click(getByText("Use a workspace access token"));
     const field = container.querySelector<HTMLInputElement>(
@@ -340,7 +340,7 @@ describe("AgentAccountsPanel", () => {
     expect(steps[0]!.getAttribute("data-state")).toBe("current");
     expect(steps[1]!.getAttribute("data-state")).toBe("current");
 
-    // Ruling 147: Submit is enabled on the empty field and REFUSES the click
+    // Ruling 288: Submit is enabled on the empty field and REFUSES the click
     // with the server's own sentence, the field marked and focused, and no
     // request made.
     const submitBtn = getByText("Submit code").closest("button")!;
@@ -424,7 +424,7 @@ describe("AgentAccountsPanel", () => {
     expect(getByText("unverified")).toBeTruthy();
     expect(getByText(/verified /)).toBeTruthy();
 
-    // Ruling 149: dropping the stored credential is destructive, so the
+    // Ruling 278: dropping the stored credential is destructive, so the
     // control carries the danger label. Canary: drop `danger` from the
     // Disconnect className in `ManageButtons` (agent-accounts-regions.tsx).
     const disconnect = Array.from(
@@ -432,7 +432,7 @@ describe("AgentAccountsPanel", () => {
     ).find((button) => button.textContent === "Disconnect")!;
     expect(disconnect.textContent).toContain("Disconnect");
     expect(Array.from(disconnect.classList)).toContain("danger");
-    // Ruling 481(b) (F40-49): the press asks first. It used to post the
+    // Ruling 323 (F40-49): the press asks first. It used to post the
     // disconnect (the vendor logout and the credential's deletion) at once.
     // Canary: submit from the button's onClick again and `lastSubmit` is set
     // before the dialog exists.
@@ -451,7 +451,7 @@ describe("AgentAccountsPanel", () => {
     fireEvent.click(
       getByText("Disconnect Claude", { selector: ".confirm-actions button.btn.danger" }),
     );
-    // Ruling 507: a disconnect names the account it removes.
+    // Ruling 138: a disconnect names the account it removes.
     expect(lastSubmit).toEqual({
       intent: "backend-disconnect",
       backend: "claude",
@@ -459,7 +459,7 @@ describe("AgentAccountsPanel", () => {
     });
   });
 
-  it("ruling 130(d): a connected card shows the last refusal Viberr observed on the account, or a spent window as a neutral pill", () => {
+  it("ruling 160(a): a connected card shows the last refusal Viberr observed on the account, or a spent window as a neutral pill", () => {
     // Canary: remove the `lastRefusal` render branch and both pills vanish.
     const { container } = renderPanel([
       backend("claude", {
@@ -498,19 +498,19 @@ describe("AgentAccountsPanel", () => {
     expect(note.textContent).toContain("The account's organization does not allow Claude Code (oauth_org_not_allowed).");
     expect(note.textContent).toContain("last refusal Viberr observed on this account");
     expect(note.textContent).toContain("not proof the account works");
-    expect(note.textContent).toContain("any completed Claude run retires it");
-    // Ruling 165: the card names the second retirement, the one the remedy
+    expect(note.textContent).toContain("any completed Claude run on this account retires it");
+    // Ruling 160(b): the card names the second retirement, the one the remedy
     // asks for, so a person who connects another account is not told the old
     // account's verdict still stands.
     expect(note.textContent).toContain("as does switching to or connecting a different Claude account here");
     const window_ = container.querySelector('[data-refusal="quota"]')!;
     expect(window_.textContent).toContain("Spent as of");
     expect(window_.textContent).toContain("reopens");
-    expect(window_.textContent).toContain("Any completed Codex run retires this notice");
+    expect(window_.textContent).toContain("Any completed Codex run on this account retires this notice");
     expect(window_.textContent).toContain("as does switching to or connecting a different Codex account here");
   });
 
-  it("ruling 130(d): no refusal, no pill and no note", () => {
+  it("ruling 160(a): no refusal, no pill and no note", () => {
     const { container } = renderPanel([
       backend("claude", { lastRefusal: null }),
       backend("codex"),
@@ -620,7 +620,7 @@ describe("AgentAccountsPanel", () => {
   it("offers the sign-in it tells the person to use when the credential file is gone", () => {
     // The health sentence for this state ends "Sign in again on your Profile →
     // Agent accounts", which is this card: it has to carry that sign-in — into
-    // THAT account's own home (ruling 507), not a new one.
+    // THAT account's own home (ruling 138), not a new one.
     const { getByText } = renderPanel([
       backend("claude", {
         health: {
@@ -715,7 +715,7 @@ describe("AgentAccountsPanel", () => {
   });
 
   /**
-   * Ruling 457, test audit L14-29: a poll from a signed-out tab used to
+   * Ruling 11, test audit L14-29: a poll from a signed-out tab used to
    * navigate it to /login. It now answers 401 with the conventions' error
    * body, and that body reaches this card as the poll's answer; the page's
    * next navigation asks for the sign-in. A poll the server can't answer at
@@ -793,7 +793,7 @@ describe("the usage-window reset renders at the precision it has", () => {
 });
 
 /**
- * Ruling 294 (pass 37, F37-129): the sign-in link is copyable, and the account's
+ * Ruling 161 (pass 37, F37-129): the sign-in link is copyable, and the account's
  * own usage reading is on the card.
  *
  * The owner asked for both. The link half exists because opening it here only
@@ -801,7 +801,7 @@ describe("the usage-window reset renders at the precision it has", () => {
  * session, and often it is not; until now the only way to move the URL was to
  * right-click an anchor whose href is a 300-character OAuth redirect.
  */
-describe("ruling 294: copy the sign-in link", () => {
+describe("ruling 137: copy the sign-in link", () => {
   const CONNECTED_CLAUDE = {
     ...connectedHealth("claude"),
     verifiedAt: "2026-09-15T09:00:00.000Z",
@@ -889,7 +889,7 @@ describe("ruling 294: copy the sign-in link", () => {
     // morning reading as current.
     expect(getByText(/Observed/)).toBeTruthy();
     expect(getByText(/not a live reading/)).toBeTruthy();
-    // Runs report readings as they work (Codex's on each call, ruling 604), so
+    // Runs report readings as they work (Codex's on each call, ruling 161(b)), so
     // it is not "only when another run finishes".
     expect(getByText(/it moves when a run reports another/)).toBeTruthy();
     expect(getByText(/running on overage/)).toBeTruthy();
@@ -919,7 +919,7 @@ describe("ruling 294: copy the sign-in link", () => {
   });
 
   /**
-   * Ruling 481(d) (F40-50): once the reading's own window has reset, the card
+   * Ruling 161(c) (F40-50): once the reading's own window has reset, the card
    * stops presenting it as current. It used to keep "92% of five hour" and
    * "The window resets 03:30" in the present tense hours after 03:30.
    *
@@ -927,7 +927,7 @@ describe("ruling 294: copy the sign-in link", () => {
    * (agent-accounts-derive.ts; the percentage comes back) or in `UsageNote`
    * (agent-account-in-use.tsx; the present tense comes back).
    */
-  it("words a reading whose window has reset in the past tense, with no percentage (ruling 481)", () => {
+  it("words a reading whose window has reset in the past tense, with no percentage (ruling 161)", () => {
     const { getByText, queryByText, container } = renderPanel([
       backend("claude", {
         health: CONNECTED_CLAUDE,
@@ -964,7 +964,7 @@ describe("ruling 294: copy the sign-in link", () => {
 });
 
 /**
- * Ruling 507: one account of several on a backend, as the loader lists it:
+ * Ruling 138: one account of several on a backend, as the loader lists it:
  * a Claude sign-in by default, connected and verified on 2026-09-01.
  */
 type Account = NonNullable<ProfileBackend["accounts"]>[number];
@@ -1010,7 +1010,7 @@ function withAccounts(
   });
 }
 
-/** Ruling 616: a card's account picker, named by its label and the account
+/** Ruling 323: a card's account picker, named by its label and the account
  *  in use ("Runs use Work Claude sign-in (claude.ai)"). */
 function pickerFor(view: RenderResult, accountName: string): HTMLElement {
   return view.getByRole("button", { name: (name) => name.startsWith(`Runs use ${accountName} `) });
@@ -1022,7 +1022,7 @@ function accountRow(view: RenderResult, accountName: string): HTMLElement {
 }
 
 /**
- * Ruling 368: both cards share one fetcher, so every control went `disabled`
+ * Ruling 286: both cards share one fetcher, so every control went `disabled`
  * for the whole wait with its resting label, the one that was pressed
  * included: it painted the .45 refused step and said nothing while the server
  * started the sign-in. The request is read off the fetcher (its intent, its
@@ -1032,7 +1032,7 @@ function accountRow(view: RenderResult, accountName: string): HTMLElement {
  * `cardRequest` (agent-accounts-derive.ts) and the other card's button claims
  * the work too.
  */
-describe("ruling 368: the account request in flight", () => {
+describe("ruling 286: the account request in flight", () => {
   function renderHeld(backends: ProfileBackend[]) {
     const Stub = createRoutesStub([
       {
@@ -1088,7 +1088,7 @@ describe("ruling 368: the account request in flight", () => {
     expect(submitCode.hasAttribute("aria-busy")).toBe(false);
   });
 
-  // Ruling 616: the switch is sent from the picker's menu, so the picker is
+  // Ruling 323: the switch is sent from the picker's menu, so the picker is
   // the control that shows it, and it names the account in use until the
   // loader says otherwise (no optimistic switch).
   // CANARY: stop handing the picker the account its switch names
@@ -1118,14 +1118,14 @@ describe("ruling 368: the account request in flight", () => {
 
 
 /**
- * Rulings 507 and 616: a person may keep several accounts per backend. The
+ * Rulings 138 and 323: a person may keep several accounts per backend. The
  * card leads with the one runs use, as a picker whose menu lists every
  * account, the one in use checked, and switches to the one chosen (no
  * sign-in). The same menu adds another account and opens the others'
  * management, where each is renamed, signed in again or disconnected without
  * first becoming the one in use.
  */
-describe("rulings 507 and 616: several accounts on one backend", () => {
+describe("rulings 138 and 323: several accounts on one backend", () => {
   const claudeWith = (accounts: Account[], overrides: Partial<ProfileBackend> = {}) =>
     withAccounts("claude", accounts, overrides);
 
@@ -1626,7 +1626,7 @@ describe("rulings 507 and 616: several accounts on one backend", () => {
     expect(keyField(), "the key form, after the loads").toBeNull();
   });
 
-  it("renames in place, and refuses a name too long in the store's own words (ruling 147)", () => {
+  it("renames in place, and refuses a name too long in the store's own words (ruling 288)", () => {
     const view = renderPanel([claudeWith([WORK, PERSONAL]), backend("codex")]);
     const { container, getByLabelText, getByRole, queryByRole } = view;
     chooseAction(view, "Work", "Manage other accounts");

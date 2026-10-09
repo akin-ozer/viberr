@@ -85,20 +85,20 @@ export type PushWorkspaceResult =
       status: "pushed";
       branch: string;
       commits: number;
-      /** Ruling 134: the workspace head the push published (full sha), or null
+      /** Ruling 229: the workspace head the push published (full sha), or null
        *  when git could not name HEAD (the push still ran). */
       headSha: string | null;
-      /** Ruling 134: origin's head for the branch BEFORE the push (full sha),
+      /** Ruling 229: origin's head for the branch BEFORE the push (full sha),
        *  or null when the branch did not exist on origin or could not be read. */
       remoteHeadBefore: string | null;
-      /** Ruling 144: the files under `.github/workflows/` this push changed, as
+      /** Ruling 221(a): the files under `.github/workflows/` this push changed, as
        *  GitHub measures them (from origin's head, or the base on a first push).
        *  `null` when history could not answer — an unmeasured push, which is
        *  not the same claim as a measured empty list. */
       workflowFiles: string[] | null;
     }
   /**
-   * Ruling 245: refused because this push changes a file another task LEASES.
+   * Ruling 60: refused because this push changes a file another task LEASES.
    * Nothing was pushed and no PR was opened — the same posture every other
    * pre-push refusal takes, so the branch is exactly as it was.
    */
@@ -112,7 +112,7 @@ export type PushWorkspaceResult =
       holder: string;
     }
   /**
-   * Ruling 144: a push of `.github/workflows/*` refused for the `workflow`
+   * Ruling 221(a): a push of `.github/workflows/*` refused for the `workflow`
    * scope. `before_push`: the bound classic token's published scopes lack it,
    * so the push was not attempted; `github`: GitHub itself refused it (any
    * token kind). Either way `performDelivery` opens the scope violation.
@@ -126,7 +126,7 @@ export type PushWorkspaceResult =
       reason: string;
     }
   /**
-   * Ruling 159 (pass 35, F35-10): the revision's tree carries Viberr's own
+   * Ruling 229 (pass 35, F35-10): the revision's tree carries Viberr's own
    * store layout (`projects/<slug>/tasks/...`), the path an older prompt named
    * store-relatively and an agent created inside its checkout. Viberr never
    * publishes its store layout into a customer repository, whatever an agent
@@ -139,7 +139,7 @@ export type PushWorkspaceResult =
       files: string[];
       reason: string;
     }
-  /** Ruling 134: origin already carries the workspace head; no push ran.
+  /** Ruling 229: origin already carries the workspace head; no push ran.
    *  The only honest noop for a delivery: the PR (if any) is up to date. */
   | { status: "up_to_date"; branch: string; headSha: string }
   /** B-GH1/F15-15: the remote branch holds commits the local delivery does not
@@ -187,7 +187,7 @@ export type PushWorkspaceResult =
       stderrExcerpt?: string;
     };
 
-/** Ruling 134: the pre-push read of origin's branch head. */
+/** Ruling 229: the pre-push read of origin's branch head. */
 const LS_REMOTE_TIMEOUT_MS = 30_000;
 /** Ceiling for the branch push itself (the one network step here). Shared with
  *  the branch-update path, which pushes the same branch the same way. */
@@ -296,7 +296,7 @@ export type PublishOutcome =
  * `stage` over git's transport — `git-upload-pack` runs as the person
  * (`workspaceUploadPack`), no credential in its environment — and pushed from
  * the stage with `askpassEnv`. `sha`, when known, is what is pushed: the head
- * the delivery read before it compared origin (ruling 134's `headSha`), never
+ * the delivery read before it compared origin (ruling 229's `headSha`), never
  * a head the branch was moved to after that read.
  */
 export async function publishFromWorkspace(input: {
@@ -335,7 +335,7 @@ export async function publishFromWorkspace(input: {
 }
 
 /**
- * Ruling 144(c): GitHub's refusal of a workflow-file push for a token without
+ * Ruling 221(a): GitHub's refusal of a workflow-file push for a token without
  * the `workflow` scope ("refusing to allow a Personal Access Token to create
  * or update workflow `.github/workflows/ci.yml` without `workflow` scope").
  * The base refresh's push reads it too (`update-branch.server.ts`).
@@ -345,12 +345,12 @@ export function isWorkflowScopeRejection(stderr: string): boolean {
 }
 
 /**
- * Ruling 144(b): the files under `.github/workflows/` a push changes, measured
+ * Ruling 221(a): the files under `.github/workflows/` a push changes, measured
  * as GitHub measures the ref update: from origin's current head for the
  * branch, and from the base branch only when the branch does not exist on
  * origin yet. A branch whose workflow file already reached origin is never
  * refused for a push that does not touch it. Unreadable history reads as
- * nothing (the push itself then answers, ruling 144(c)).
+ * nothing (the push itself then answers, ruling 221(a)).
  */
 async function changedWorkflowFiles(
   exec: Exec,
@@ -362,11 +362,11 @@ async function changedWorkflowFiles(
 }
 
 /**
- * Ruling 353 (pass 38, F38-7): every file this BRANCH changes relative to where
+ * Ruling 60 (pass 38, F38-7): every file this BRANCH changes relative to where
  * it forked from the default branch — `merge-base(origin/<default>, HEAD)..HEAD`,
  * merge commits excluded — which is what a lease is about ("one task owns a
- * shared file until it merges"). Ruling 245 read the PUSH's delta
- * (`remoteHead..HEAD`, ruling 144's shape), so a leased path that had already
+ * shared file until it merges"). Ruling 60 read the PUSH's delta
+ * (`remoteHead..HEAD`, ruling 221(a)'s shape), so a leased path that had already
  * reached origin before the lease was declared was never examined again: the
  * next docs-only push passed, and the acceptance ceremony, which has no lease
  * read, merged it. On this instance leases are declared while work is in
@@ -401,11 +401,11 @@ export async function changedFilesOnBranch(
 }
 
 /**
- * Ruling 245: every file this push would change, measured the same way ruling
- * 144 measures the workflow subset — origin's head for the branch, the base
+ * Ruling 60: every file this push would change, measured the same way ruling
+ * 221(a) measures the workflow subset — origin's head for the branch, the base
  * only on a first push. `pathspec` narrows it; omitted, it is the whole diff.
  *
- * `null` keeps ruling 144's meaning exactly: "history could not answer", which
+ * `null` keeps ruling 221(a)'s meaning exactly: "history could not answer", which
  * is NOT "nothing changed". A lease gate reading a degraded null as an empty
  * list would wave through the very delivery it exists to stop.
  */
@@ -431,18 +431,18 @@ async function changedFilesForPush(
   // no `origin/<default>`, an unreadable remote head), NOT "no workflow files
   // changed". An empty array is a MEASUREMENT; conflating the two let a
   // degraded read silently stand in for proof — the pre-push refusal skipped
-  // and, worse, ruling 144(c)'s resolution of a standing violation claimed
+  // and, worse, ruling 221(a)'s resolution of a standing violation claimed
   // nothing was pushed when nothing was measured.
   return listFrom(`origin/${defaultBranch}..HEAD`);
 }
 
-/** Ruling 159: the store's own layout for one project, as a tree prefix. */
+/** Ruling 229: the store's own layout for one project, as a tree prefix. */
 export function storeLayoutPrefix(projectSlug: string): string {
   return `projects/${projectSlug}/tasks/`;
 }
 
 /**
- * Ruling 159 (pass 35, F35-10): every path in the revision's tree that lies
+ * Ruling 229 (pass 35, F35-10): every path in the revision's tree that lies
  * under the store's own layout for this project. Read from HEAD itself
  * (`git ls-tree -r -z --name-only HEAD -- <prefix>`), not from a range: a path
  * that reached origin under an older prompt is still Viberr's layout in a
@@ -463,7 +463,7 @@ export async function storeLayoutFilesInTree(
     // byte — an accented screenshot an agent saved — comes back C-quoted as
     // `"projects/…/r\303\251sum\303\251.png"`, starting with a double quote.
     // The prefix filter then dropped it and the guard reported a clean tree:
-    // the one failure mode ruling 159(b) cannot have, because an empty list
+    // the one failure mode ruling 229 cannot have, because an empty list
     // means "no store layout" and lets the push go. `-z` also ends the need to
     // trim, so a name with leading or trailing spaces is reported verbatim.
     ["-C", repoDir, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", prefix],
@@ -566,7 +566,7 @@ async function commitsAheadOfDefault(
 }
 
 /** A local branch belonging to THIS task: the canonical `taskBranchName` form
- *  (`vib-1`) or any name that extends it with `-` — ruling 122's suffixed
+ *  (`vib-1`) or any name that extends it with `-` — ruling 228's suffixed
  *  allocation (`vib-1-3f9a`, `taskBranchCandidate` in branch-sync.server.ts)
  *  and the legacy `<key>-<slug>` form (`vib-1-normalize`) alike. */
 function isTaskBranchName(name: string, taskKey: string): boolean {
@@ -710,7 +710,7 @@ export interface PushWorkspaceBranchInput {
  * Push the task's workspace branch to origin using the project PAT. Returns a
  * typed result; never throws.
  *
- * Ruling 134 (pass 34, F34-11): delivery is defined by the REMOTE, not by a
+ * Ruling 229 (pass 34, F34-11): delivery is defined by the REMOTE, not by a
  * cached PR state. Before pushing, origin's head for the branch is read
  * (`git ls-remote --heads origin <branch>`, under the same askpass env as the
  * push): equal to the workspace HEAD → `up_to_date`, no push; otherwise the
@@ -879,7 +879,7 @@ export async function pushWorkspaceBranch(
       }
     }
 
-    // Ruling 159 (F35-10): a tree that carries the store's own layout is never
+    // Ruling 229 (F35-10): a tree that carries the store's own layout is never
     // pushed, whether the agent committed it or the auto-commit above just
     // did. Decided on HEAD's tree, before the commit count, so a branch that
     // already published the layout under an older prompt is refused too.
@@ -954,7 +954,7 @@ export async function pushWorkspaceBranch(
       const stopped = await withServerStage(
         { projectSlug, repo, dataRoot },
         async (stage): Promise<PushWorkspaceResult | null> => {
-          // Ruling 134: what does origin hold for this branch right now? Read
+          // Ruling 229: what does origin hold for this branch right now? Read
           // BEFORE the push so the delivery can say what moved, and skip the push
           // entirely when origin already carries the workspace head.
           const headSha = await revParse(exec, repoDir, "HEAD");
@@ -987,7 +987,7 @@ export async function pushWorkspaceBranch(
               });
             }
           }
-          // Ruling 144(b): the workflow files this push would change, measured
+          // Ruling 221(a): the workflow files this push would change, measured
           // as GitHub measures them (origin's head for the branch; the base only
           // on a first push). A classic token whose published list lacks
           // `workflow` is refused HERE, with the remedy named, before GitHub is
@@ -997,26 +997,26 @@ export async function pushWorkspaceBranch(
           pushedWorkflowFiles = workflowFiles;
           if (workflowFiles === null) {
             // Nothing to refuse on and nothing to prove with: the push goes ahead
-            // and GitHub's own answer classifies it (ruling 144(c)).
+            // and GitHub's own answer classifies it (ruling 221(a)).
             logger.info("could not measure the workflow files this push changes", {
               taskKey,
               branch,
             });
           }
-          // Ruling 245 (F37-74): a file another task LEASES is refused here, for
-          // ruling 144's own reason and at its own seam — this is the moment the
+          // Ruling 60 (F37-74): a file another task LEASES is refused here, for
+          // ruling 221(a)'s own reason and at its own seam — this is the moment the
           // change would become published history, and the last one at which
           // refusing costs nothing. Measured, never assumed: a `null` read means
           // history could not answer, and waving the push through on that would
           // defeat the gate, so an unmeasurable diff refuses nothing and says so in
-          // the log exactly as ruling 144(c) does.
+          // the log exactly as ruling 221(a) does.
           {
-            // Ruling 245(b): the RESOLVED list. A lease whose holder has merged or
+            // Ruling 60: the RESOLVED list. A lease whose holder has merged or
             // been archived binds nobody, and reading the raw frontmatter here let
             // a completed task fence off a file forever.
             const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
             if (leases.length > 0) {
-              // Ruling 353: the BRANCH's files, not this push's delta — a lease
+              // Ruling 60: the BRANCH's files, not this push's delta — a lease
               // declared after the path first reached origin still binds.
               const changed = await changedFilesOnBranch(exec, repoDir, defaultBranch);
               if (changed === null) {
@@ -1095,7 +1095,7 @@ export async function pushWorkspaceBranch(
           }
           const pushRes = published.result;
           if (!pushRes.ok) {
-            // Ruling 144(c): GitHub's own refusal of a workflow-file push, on any
+            // Ruling 221(a): GitHub's own refusal of a workflow-file push, on any
             // token kind, is a scope fact and never the generic failure bucket.
             if (isWorkflowScopeRejection(pushRes.stderr)) {
               logger.info("workspace branch push refused by GitHub: workflow scope", {
@@ -1174,7 +1174,7 @@ export async function pushWorkspaceBranch(
     if (localAhead === null) pushed.commitsUnknown = true;
     else pushed.commits = localAhead;
     logger.info("pushed workspace branch to origin", pushed);
-    // Ruling 480 (F40-43): GitHub accepted a push authenticated by this PAT,
+    // Ruling 220 (F40-43): GitHub accepted a push authenticated by this PAT,
     // which proves `repo` (Contents write) on this repository. The card said
     // "repo unproven (verified on first use)" through every push until now.
     if (credential) markWriteScopeProven(db, credential.id, repo, "push");
@@ -1211,9 +1211,9 @@ export async function pushWorkspaceBranch(
  * F20-6 (R20-2) — the outcome of discarding a task's LOCAL, never-pushed
  * workspace branch. `deleted` carries the sha it read before removing the ref
  * so the audit + timeline note can name exactly what was destroyed; `on_remote`
- * is the refusal that keeps ruling 17's promise (remote-branch deletion lives
+ * is the refusal that keeps ruling 233's promise (remote-branch deletion lives
  * only in the archive packet); `failed.reason` is git's own words, redacted
- * (ruling 69).
+ * (ruling 219).
  */
 export type DiscardBranchOutcome =
   | { status: "deleted"; branch: string; sha: string }
@@ -1230,7 +1230,7 @@ export type DiscardBranchOutcome =
  *
  * It touches ONLY the workspace clone and refuses the moment the branch exists
  * on origin: this is cleanup for a branch that was never pushed, not a
- * disposition, and remote deletion stays the archive packet's job (ruling 17).
+ * disposition, and remote deletion stays the archive packet's job (ruling 233).
  *
  * Best-effort like the rest of this module — a git failure becomes a typed
  * `failed` outcome, never a throw that could un-resolve the packet the caller
@@ -1241,7 +1241,7 @@ export async function discardLocalTaskBranch(input: {
   taskKey: string;
   branch: string;
   defaultBranch: string;
-  /** The project's PAT is resolved from here so the ruling-17 remote check can
+  /** The project's PAT is resolved from here so the ruling-233 remote check can
    *  actually answer on a PRIVATE repo. */
   db: DatabaseSync;
   dataRoot?: string;
@@ -1264,7 +1264,7 @@ export async function discardLocalTaskBranch(input: {
     const sha = await revParse(exec, repoDir, `refs/heads/${branch}`);
     if (sha === "") return { status: "not_found", branch };
 
-    // Ruling 17: only a never-pushed branch may be discarded here. `ls-remote
+    // Ruling 233: only a never-pushed branch may be discarded here. `ls-remote
     // --exit-code` exits 0 when origin carries the ref — that is the remote's
     // branch, and only the archive packet may delete it.
     //

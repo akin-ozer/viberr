@@ -6,15 +6,14 @@ import { z } from "zod";
 import { parse } from "yaml";
 
 /**
- * Ruling 504 (superseding 473): a starter's bare `docker compose up` is the
- * whole install.
+ * Ruling 38: a starter's bare `docker compose up` is the whole install.
  *
- * Ruling 473 declared the store volume `external`, so `docker compose down -v`
+ * The store volume was once declared `external`, so `docker compose down -v`
  * could never delete it. The price was that a fresh `up` failed with
  * `external volume "viberr-data" not found` until someone created the volume
- * by hand, and the README's quickstart never said to. The owner ruled for the
- * starter: Compose owns the volume. `down` keeps it and `down -v` deletes it,
- * because `-v` is an explicit request to.
+ * by hand, and the README's quickstart never said to. Compose owns the volume:
+ * `down` keeps it and `down -v` deletes it, because `-v` is an explicit
+ * request to.
  */
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const read = (rel: string) => readFileSync(path.join(ROOT, rel), "utf8");
@@ -40,7 +39,7 @@ function firstComposeBlock(markdown: string): string {
   );
 }
 
-describe("ruling 504: a starter's `docker compose up` is the whole install", () => {
+describe("ruling 38: a starter's `docker compose up` is the whole install", () => {
   const app = composeSchema.parse(parse(read("compose.yml")));
 
   it("mounts viberr-data, a volume Compose owns", () => {
@@ -64,10 +63,10 @@ describe("ruling 504: a starter's `docker compose up` is the whole install", () 
   });
 });
 
-describe("ruling 603: the free-space check sees the host disk", () => {
+describe("ruling 40: the free-space check sees the host disk", () => {
   const app = composeSchema.parse(parse(read("compose.yml")));
 
-  // Ruling 460 moved the store onto a named volume, and on Docker Desktop that
+  // Ruling 38 moved the store onto a named volume, and on Docker Desktop that
   // volume reports the VM disk image's virtual size: the check read 940.8 GB
   // free while the Mac had 19.9 GB. The host disk reaches the app only through
   // this mount and the env that names it.

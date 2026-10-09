@@ -6,7 +6,7 @@ import { RichText } from "./rich-text";
 
 afterEach(cleanup);
 
-describe("RichText (THE shared micro-format renderer, ruling 14)", () => {
+describe("RichText (THE shared micro-format renderer, ruling 297)", () => {
   it("renders **bold** and `code` from one pass", () => {
     const { container } = render(
       <RichText text="**Decision:** widen `pull_request:write` — ping @operator now" />,

@@ -178,7 +178,7 @@ describe("pr-diverged wakes the operator", () => {
     expect(invoked).toHaveLength(1);
   });
 
-  it("ruling 160 (F35-11): a push that moved the branch past the closed PR hides it from the branch listing; the cached number is read directly, the closure lands with the closer, and the wake fires once", async () => {
+  it("ruling 232 (F35-11): a push that moved the branch past the closed PR hides it from the branch listing; the cached number is read directly, the closure lands with the closer, and the wake fires once", async () => {
     // KNC-23 live: the owner closed PR #10, the operator's base refresh moved
     // the branch eleven seconds later, and the reconcile that followed found
     // nothing under the branch name (F26) and kept saying `review`.
@@ -246,7 +246,7 @@ describe("pr-diverged wakes the operator", () => {
   it("an unchanged happy-path reconcile never wakes the operator", async () => {
     // The task OWNS PR #318 (R15-15: the state `openTaskPr` leaves behind).
     // This case used to start with no `pr` and a stranger's open PR on the
-    // branch, which is not a linking but a branch collision (ruling 35 adopts
+    // branch, which is not a linking but a branch collision (ruling 231(a) adopts
     // only a delivered head) — and since U36-7 a NEW collision wakes the
     // operator, so the fixture has to be the steady state it claims to be.
     const { store, actor } = setup({
@@ -258,7 +258,7 @@ describe("pr-diverged wakes the operator", () => {
     expect(invoked).toHaveLength(0);
   });
 
-  it("U36-7: a NEW branch collision wakes the operator once, so the ruling-50 packet is authored on the next turn", async () => {
+  it("U36-7: a NEW branch collision wakes the operator once, so the ruling-233 packet is authored on the next turn", async () => {
     // Pass-36 live (HLC-10): the collision reached no inbox and woke nobody;
     // the `resolve_remote_collision` packet was authored only because the
     // developer's completion happened to invoke the operator 16 minutes later.
@@ -373,7 +373,7 @@ describe("the healing transition — a closed PR goes live again", () => {
     expect(collision!.text).toContain("#999");
     expect(collision!.text).toContain("the-del"); // the delivered sha, abbreviated
     // U36-7: the ONE wake here is the new collision's (so the operator authors
-    // the ruling-50 packet), never a healing wake — nothing was adopted.
+    // the ruling-233 packet), never a healing wake — nothing was adopted.
     expect(invoked).toEqual([{ projectSlug: store.slug, taskKey: "VIB-301", trigger: "pr-diverged" }]);
     await reconcile(store, actor, routesWithPr({ number: 999, state: "open", merged: false }));
     expect(invoked).toHaveLength(1);
@@ -394,7 +394,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
-    // Ruling 161: the fake answers no ref read, so the pre-delete head is null.
+    // Ruling 233: the fake answers no ref read, so the pre-delete head is null.
     expect(result).toEqual({ status: "deleted", branch: BRANCH, remoteSha: null });
     expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
 
@@ -413,7 +413,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
     });
-    // Ruling 136(c): the refusal is CONFIRMED against GitHub, which reports
+    // Ruling 233: the refusal is CONFIRMED against GitHub, which reports
     // the PR still open; nothing is written.
     const fake = fakeGithubFetch(livePrRoutes("open"));
     const result = await deleteTaskRemoteBranch(
@@ -461,14 +461,14 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
   });
 
   /**
-   * Ruling 207(d) (claim audit). GitHub answers 422 for two opposite outcomes:
+   * Ruling 233 (claim audit). GitHub answers 422 for two opposite outcomes:
    * "Reference does not exist" (the branch is gone) and "Reference cannot be
    * deleted: …" (a branch-protection rule or repository ruleset refused, and the
    * branch is still there). The classifier read the STATUS only, so a refusal
    * was recorded on the timeline, in the audit row and in the collision
    * ceremony as "already gone on GitHub. Nothing was left to clean up."
    */
-  it("ruling 207(d): a 422 REFUSAL is not 'already gone' — GitHub's own words are reported", async () => {
+  it("ruling 233: a 422 REFUSAL is not 'already gone' — GitHub's own words are reported", async () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "closed", title: "Attach execution workspace" },
     });
@@ -531,7 +531,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
   });
 });
 
-/** Ruling 136(c): the reads the in-ceremony re-confirm makes, for a PR GitHub
+/** Ruling 233: the reads the in-ceremony re-confirm makes, for a PR GitHub
  *  reports `open` or `closed`. */
 function livePrRoutes(state: "open" | "closed"): FakeRoutes {
   const pr = {
@@ -559,7 +559,7 @@ function livePrRoutes(state: "open" | "closed"): FakeRoutes {
 }
 
 /**
- * Ruling 136(c) (pass 34, F34-10/F34-11): every remote-branch delete
+ * Ruling 233 (pass 34, F34-10/F34-11): every remote-branch delete
  * re-confirms a cached open PR against GitHub before it can refuse, fails
  * closed on an unconfirmed state, and runs that pass with the divergence
  * notification and the operator wake suppressed. Canaries: decide from the
@@ -567,7 +567,7 @@ function livePrRoutes(state: "open" | "closed"): FakeRoutes {
  * still-open case deletes); proceed when the reconcile fails (the
  * unreachable case deletes); pass `ctx` through unchanged (the wake fires).
  */
-describe("ruling 136(c): the delete re-confirms a cached open PR", () => {
+describe("ruling 233: the delete re-confirms a cached open PR", () => {
   it("a cached open PR that GitHub reports CLOSED is re-confirmed and the ref deleted", async () => {
     const { store, actor } = setup({
       pr: { number: 318, state: "review", title: "Attach execution workspace" },
@@ -579,7 +579,7 @@ describe("ruling 136(c): the delete re-confirms a cached open PR", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
-    // Ruling 161: the fake answers no ref read, so the pre-delete head is null.
+    // Ruling 233: the fake answers no ref read, so the pre-delete head is null.
     expect(result).toEqual({ status: "deleted", branch: BRANCH, remoteSha: null });
     expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;
@@ -636,12 +636,12 @@ describe("ruling 136(c): the delete re-confirms a cached open PR", () => {
 });
 
 /**
- * Ruling 136(c): the archive door (`archive_task` + `deleteBranch`) inherits
+ * Ruling 233: the archive door (`archive_task` + `deleteBranch`) inherits
  * the live re-confirm and its sentence. Canary: drop the transport hook from
  * the archive door's delete context and the delete's reconcile reaches the
  * real network instead of the fake, so the closed-on-GitHub case never deletes.
  */
-describe("ruling 136(c): the archive door inherits the re-confirm", () => {
+describe("ruling 233: the archive door inherits the re-confirm", () => {
   const ARCHIVE_PACKET: TaskPacket = {
     type: "blocked",
     kind: "Blocked decision",

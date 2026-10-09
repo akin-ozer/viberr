@@ -3,7 +3,7 @@ import { ATTACHMENT_BATCH_MAX, MAX_UPLOAD_BYTES, MESSAGE_BATCH } from "~/shared/
 import { addPickedFiles, filesFromPaste } from "./picked-files";
 
 /**
- * Rulings 533 and 573: the decisions a composer makes about files before the
+ * Rulings 76 and 319: the decisions a composer makes about files before the
  * server sees anything, for the New task dialog and every chat alike: which
  * picks it keeps, and whether a paste is text or a file.
  */
@@ -15,7 +15,7 @@ function file(name: string, bytes = 4, type = ""): File {
 describe("addPickedFiles", () => {
   it("keeps a file of any kind, and names the first one the server would refuse", () => {
     // CANARY: drop the size check and `memory.dmp` is kept, to be refused by
-    // the server after the person pressed Send. Ruling 574: `main.tf` and
+    // the server after the person pressed Send. Ruling 76: `main.tf` and
     // `report.docx` are kept whatever their kind.
     const { files, problem } = addPickedFiles(
       [],

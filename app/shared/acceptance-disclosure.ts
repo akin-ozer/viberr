@@ -1,7 +1,7 @@
 import type { PrState, Validation } from "~/schemas/task-file.schema";
 
 /**
- * Ruling 88 (F21-2) — the acceptance disclosure ACKNOWLEDGMENT.
+ * Ruling 97 (F21-2) — the acceptance disclosure ACKNOWLEDGMENT.
  *
  * R15-1 consolidated every writer to Done behind one ceremony
  * (`accept-confirm.tsx`), and pass 21 found that the ceremony was **client
@@ -26,7 +26,7 @@ import type { PrState, Validation } from "~/schemas/task-file.schema";
  *     landed) — the human is looking at a screen that is no longer true, so the
  *     acceptance is refused and the ceremony has to be re-opened.
  *
- * One definition, imported by BOTH sides (rulings 12/14: never fork a mapping
+ * One definition, imported by BOTH sides (rulings 237/297: never fork a mapping
  * per surface) — the dialog builds the echo from the exact values it rendered,
  * and the server derives the comparison from the task file.
  */
@@ -60,9 +60,9 @@ function acceptanceDisclosureFields(disclosure: AcceptanceDisclosure) {
   };
 }
 
-/** Ruling 88 (F21-2): the acceptance ceremony's echo of what it displayed, on
+/** Ruling 97 (F21-2): the acceptance ceremony's echo of what it displayed, on
  *  the form an acceptance intent posts; nothing for an intent that has none. The task page's doors and the
- *  board's move onto Done post it alike (ruling 657). */
+ *  board's move onto Done post it alike (ruling 12). */
 export function setDisclosure(fd: FormData, disclosure: AcceptanceDisclosure | undefined): void {
   if (!disclosure) return;
   for (const [field, value] of Object.entries(acceptanceDisclosureFields(disclosure))) {
@@ -92,7 +92,7 @@ const VERDICT_VALUES: readonly Validation[] = [
  * strict: a half-filled or unrecognised echo is NOT a disclosure, and coercing
  * one into a default would re-open the hole this exists to close.
  *
- * Ruling 88 (F21-2): the route actions pass `null` THROUGH to the server rather
+ * Ruling 97 (F21-2): the route actions pass `null` THROUGH to the server rather
  * than swallowing it: it is the difference between "an HTTP caller sent no
  * acknowledgment" (refused — the bare POST F21-2 found accepting silently) and
  * "an in-process caller carries its own disclosure contract" (omitted).

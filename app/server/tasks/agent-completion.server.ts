@@ -1,10 +1,10 @@
 /**
- * What an agent run's end does to its task (ruling 654): `recordAgentCompletion`
+ * What an agent run's end does to its task (ruling 13(a)): `recordAgentCompletion`
  * writes the run's report, verdict and reply, and `applyAgentCompletionEffects`
  * carries out what follows (the operator's react, the stuck-loop packet, a
  * deferred @mention, the waiting flags). Also here: the holds a run or a person
  * lifts, and `operatorPromptAgent`, the operator's message to an agent. Two
- * calls reach upward and load their module when they run, as ruling 207(e)
+ * calls reach upward and load their module when they run, as ruling 13
  * does: a deferred @mention goes out through `commentToAgent`, and a packet a
  * person already decided is answered through packet resolution.
  */
@@ -18,7 +18,7 @@ import { countLabel } from "~/shared/text/plural";
 import { VERDICT_NOTE_TITLE, verdictNoteText } from "~/shared/verdict-note";
 import { QUESTION_LEAD } from "~/shared/timeline-leads";
 import { isRelayComment } from "./task-relay.server";
-// Ruling 489: where a react chain's work stands, read from the server's record.
+// Ruling 119: where a react chain's work stands, read from the server's record.
 import {
   deliverHeadOption,
   filesDeliveredSince,
@@ -207,7 +207,7 @@ function latestAgentReplyText(
 }
 
 /** Open one recovery packet when the bounded operator loop stalls. */
-/** Ruling 326: the same function, exported under a test-only name so the
+/** Ruling 123: the same function, exported under a test-only name so the
  *  fallback can be driven directly. Production callers use the private one. */
 
 /**
@@ -294,7 +294,7 @@ export function deliveredWorkEvidence(fm: {
   const changed = fm.github?.changed ?? null;
   const revision = activeWorkRevision(fm.workRevision);
   const branch = revision?.branch ?? fm.branch;
-  // Ruling 526: the size of the change is a reference, neither a pass nor a
+  // Ruling 16: the size of the change is a reference, neither a pass nor a
   // failure, with its two counts as the result the timeline colours.
   if (changed) {
     rows.push({
@@ -321,7 +321,7 @@ export function deliveredWorkEvidence(fm: {
 const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
 /**
- * Ruling 292: the longest verdict justification stored on a task, and the
+ * Ruling 88: the longest verdict justification stored on a task, and the
  * sentence that ships when it does not fit.
  *
  * 2,000 characters is a generous paragraph and a short essay, which is the
@@ -373,16 +373,16 @@ export async function recordAgentCompletion(
      *  captures). Stamped onto the same event that carries the evidence, so
      *  the producing message names its own files. */
     attachments?: string[] | null;
-    /** Ruling 555: the run was dispatched to deliver, so its files can be the
+    /** Ruling 87: the run was dispatched to deliver, so its files can be the
      *  delivery. */
     delivers: boolean;
   },
-  /** Ruling 237: reports whether this completion RAISED the review-deadlock
+  /** Ruling 94: reports whether this completion RAISED the review-deadlock
    *  packet. The caller needs it to decide whether to hand the task back to the
    *  operator — see the escalation arm in `applyAgentCompletionEffects`.
-   *  Ruling 544: and whether the verdict BOUND to a subject, which is what makes
-   *  an approval a boundary (ruling 362).
-   *  Ruling 691: and the `deliveredAt` stamp of the delivery this completion
+   *  Ruling 119: and whether the verdict BOUND to a subject, which is what makes
+   *  an approval a boundary.
+   *  Ruling 86: and the `deliveredAt` stamp of the delivery this completion
    *  stamped and kept, null when it stamped none. Its pages are not asked to
    *  be pictured here: whether the delivery is files or a revision is known
    *  only once the caller's delivery reconcile has run. */
@@ -405,7 +405,7 @@ export async function recordAgentCompletion(
   const suppressedReason = suppressedReplyReason(prepared);
   const hasEvidence = !!(evidence && evidence.length);
   // A reply whose BODY duplicates a mid-run comment does not re-post — but the
-  // dispatch-completion cc line (ruling 98 / R20-9) is content that comment
+  // dispatch-completion cc line (ruling 124 / R20-9) is content that comment
   // never carried, and its guaranteed @tag would otherwise never notify: the
   // reply fan-out below was gated on the reply POSTING, on the false premise
   // that a duplicate's mentions were already delivered. Fan out ONLY the handles
@@ -413,7 +413,7 @@ export async function recordAgentCompletion(
   // HERE, before the nothing-to-record early return, which the pure-dedup case
   // (the exact dispatch trigger: repeated body + cc line) hits.
   if (prepared.status === "event" && prepared.duplicatedText !== null) {
-    // Ruling 382: and the event records who it reached, so compaction keeps it.
+    // Ruling 20: and the event records who it reached, so compaction keeps it.
     await stampNotifiedRecipients(
       db,
       taskRef(ctx, projectSlug, taskKey),
@@ -446,9 +446,9 @@ export async function recordAgentCompletion(
   const roleDisplay =
     actorRef.kind === "agent" ? agentRoleDisplay(actorRef) : "Agent";
   let questionOpened = false;
-  /** Ruling 547: the question packet's id, which its notification names. */
+  /** Ruling 75: the question packet's id, which its notification names. */
   let questionPacketId: string | undefined;
-  // Ruling 137: the envelope's question packet withdraws the standing
+  // Ruling 99: the envelope's question packet withdraws the standing
   // acceptance offers on the record, inside the same locked write.
   const questionCause: OfferWithdrawalCause | null = question
     ? { kind: "packet", title: question.title.trim() }
@@ -460,7 +460,7 @@ export async function recordAgentCompletion(
   /** Set when the envelope's question could not open a packet (one already is)
    *  — recorded as a timeline note instead of being dropped (P13-RT-06). */
   let questionDeferred: string | null = null;
-  /** Ruling 237 (F37-57): the consecutive-objection escalation, written inside
+  /** Ruling 94 (F37-57): the consecutive-objection escalation, written inside
    *  the verdict's own lock and announced after it. A SLOT, the same idiom
    *  `questionWithdrawal` uses below, because a plain `let` assigned only
    *  inside the mutator reads to the compiler as never assigned at all — the
@@ -483,7 +483,7 @@ export async function recordAgentCompletion(
   // noted, rework still needed", NOT a pass.
   let title = "";
   let summary = "";
-  /** Ruling 497: when the verdict event was written, so its notice opens on it. */
+  /** Ruling 75: when the verdict event was written, so its notice opens on it. */
   let verdictAt: string | null = null;
   // R19-8 (F19-21, live VC-5): a verdict-capable reviewer approving a task that
   // has NOTHING to deliver had nothing to bind to — the verdict was dropped, the
@@ -500,16 +500,16 @@ export async function recordAgentCompletion(
   // engaged to deliver and no branch/PR/revision may ever have been linked. The
   // basis is proved by the same live, fail-closed probe acceptance uses.
   let noChangeMint: NoChangeVerification | null = null;
-  // Ruling 544: what this run was dispatched to judge. Its verdict binds only
+  // Ruling 84: what this run was dispatched to judge. Its verdict binds only
   // to that subject; undefined on a row that does not say (see
   // `reviewSubjectAtDispatch`), which binds to the subject at completion.
   const dispatchedOn = verdict ? reviewSubjectAtDispatch(getRun(db, runId)) : undefined;
   let verdictBound = false;
-  /** Ruling 691: the stamp of the delivery this completion stamps and keeps. */
+  /** Ruling 86: the stamp of the delivery this completion stamps and keeps. */
   let delivered: string | null = null;
-  /** Ruling 556: the verdict came from the agent that made what it judged. */
+  /** Ruling 245: the verdict came from the agent that made what it judged. */
   let ownWork = false;
-  /** Ruling 693: this objection repeats the reviewer's last one on a delivery
+  /** Ruling 83: this objection repeats the reviewer's last one on a delivery
    *  nobody has reworked since, so it sends nothing back a second time. */
   let unfoughtRepeat = false;
   if (verdict === "approve" && actorRef.kind === "agent") {
@@ -525,7 +525,7 @@ export async function recordAgentCompletion(
         (e) =>
           e.profileId === actorRef.profileId && !e.delivers && e.verdictCapable,
       ) &&
-      // Ruling 543: files another agent saved here are work, not "nothing to
+      // Ruling 101: files another agent saved here are work, not "nothing to
       // deliver"; the approval waits for them to be delivered.
       filesSavedByOtherAgents(preFile.timeline, actorRef.profileId).length === 0
     ) {
@@ -543,10 +543,10 @@ export async function recordAgentCompletion(
     let stampBefore: string | null = null;
     const written = await updateTaskFile(taskRef(ctx, projectSlug, taskKey), (parsed) => {
       stampBefore = parsed.frontmatter.deliveredAt ?? null;
-      // Ruling 587: read before this completion adds its own entries.
+      // Ruling 85: read before this completion adds its own entries.
       const delivered = deliveredFileNames(parsed.frontmatter, parsed.timeline);
       if (verdict) {
-        // Ruling 544: a delivery that landed while this run was reviewing is a
+        // Ruling 84: a delivery that landed while this run was reviewing is a
         // subject it never read, so its verdict binds to nothing.
         const subjectNow = reviewSubjectId(parsed.frontmatter);
         // A verification revision (R19-8) minted since the dispatch judges the
@@ -589,14 +589,14 @@ export async function recordAgentCompletion(
         // change) makes it stale automatically — no comment/stage-bounce
         // heuristic (F10-32). The derived `validation` cache is then recomputed
         // from the required reviewers' verdicts on the current revision.
-        // Ruling 161: a discarded revision is not a subject. A verdict must
+        // Ruling 234: a discarded revision is not a subject. A verdict must
         // never pin to a head that no longer exists, so it is recorded as
         // prose (the reply) and binds to nothing.
         //
-        // Ruling 388: but a task whose deliverable is a saved FILE does have a
+        // Ruling 84: but a task whose deliverable is a saved FILE does have a
         // subject, and used to fall into that same hole — the verdict was never
-        // stored, so `validation` stayed `none`, the rework route ruling 163
-        // licenses stayed shut, and after ruling 385 the required-reviewer gate
+        // stored, so `validation` stayed `none`, the rework route ruling 90
+        // licenses stayed shut, and the required-reviewer gate (ruling 81)
         // could never be satisfied either. Live on ax-clone AX-12 that was a
         // dead end: a reviewer returned request-changes on the report, and the
         // record said "**Validation:** none" in the same sentence.
@@ -604,7 +604,7 @@ export async function recordAgentCompletion(
         const subjectId = reviewSubjectId(parsed.frontmatter);
         const reviewerProfileId =
           actorRef.kind === "agent" ? actorRef.profileId : null;
-        // Ruling 556: a verdict never binds to the reviewer's own work. Handing
+        // Ruling 245: a verdict never binds to the reviewer's own work. Handing
         // delivery away does not make the files its deliverer saved someone
         // else's, and a review of them is still a review of its own.
         ownWork =
@@ -612,7 +612,7 @@ export async function recordAgentCompletion(
           reviewerProfileId === reviewSubjectAuthor(parsed.frontmatter, parsed.timeline);
         if (subjectId && reviewerProfileId && !moved && !ownWork) {
           verdictBound = true;
-          // Ruling 204: the overwrite keeps the latest verdict and would keep
+          // Ruling 92: the overwrite keeps the latest verdict and would keep
           // nothing else. A reviewer that returns the SAME result on the SAME
           // revision has reviewed twice, and that is the only signal saying the
           // deliverer could not move — precisely the case where no new revision
@@ -620,25 +620,25 @@ export async function recordAgentCompletion(
           const prior = parsed.frontmatter.verdicts.find(
             (v) => v.profileId === reviewerProfileId && v.revisionId === subjectId,
           );
-          // Ruling 242 (F37-69): a repeat verdict counts as a new ROUND only if
+          // Ruling 92 (F37-69): a repeat verdict counts as a new ROUND only if
           // a round was actually fought — the DELIVERER RAN between the two.
           //
-          // Ruling 204 is right that a deadlock mints no new revision, so the
+          // Ruling 92 is right that a deadlock mints no new revision, so the
           // count cannot key on revisions. It is the deliverer's RUN, not its
           // commit, that says a round happened: on SHOP-9 the deliverer ran and
           // reported it had nothing in scope to change, which is a round. What
-          // ruling 204 could not see is a repeat objection with no rework behind
-          // it at all — and ruling 237's own escalation question provokes
+          // ruling 92 could not see is a repeat objection with no rework behind
+          // it at all — and ruling 94's own escalation question provokes
           // exactly that. Live on SHOP-25 the reviewer was asked to name
           // everything it would still block on, answered completely, and
           // attached a `request_changes` to the same untouched revision 8ms
           // later. That took the count from 2 to 3 with nobody having reworked
           // anything, and re-raised the packet on top of the answer a person had
-          // just paid for. Ruling 237 forbids that verdict in its prompt, which
-          // is the construction ruling 186 refused; this is the part that
+          // just paid for. Ruling 94 forbids that verdict in its prompt, which
+          // is the construction ruling 56 refused; this is the part that
           // notices when the model does something else.
           //
-          // Ruling 416 (owner, 2026-09-23): a deliverer run the PROVIDER refused
+          // Ruling 92 (owner, 2026-09-23): a deliverer run the PROVIDER refused
           // fought no round. On ax-clone AX-19 a quota refusal three minutes into
           // the rework counted, and the reviewer's re-verdict on untouched code
           // raised "6 times running". A crash mid-work still counts.
@@ -648,25 +648,25 @@ export async function recordAgentCompletion(
             !deliverer ||
             deliveredRoundSince(db, projectSlug, taskKey, deliverer.profileId, prior.at);
           // A repeat of the same result KEEPS the rounds already fought on this
-          // revision when no new one was (ruling 416): it used to fall back to
+          // revision when no new one was (ruling 92): it used to fall back to
           // 1, so a question run answered on a revision that had already cost
           // two rounds took one of them off the deadlock count.
           const rounds =
             prior?.result === verdict ? (reworked ? prior.rounds + 1 : prior.rounds) : 1;
-          // Ruling 416: this objection has no rework behind it (the reviewer
+          // Ruling 92: this objection has no rework behind it (the reviewer
           // read the same untouched revision again), so it is an ANSWER on work
           // that has not moved, and the packet below must not recommend asking
           // for it a second time.
           const noReworkBehind = prior !== undefined && !reworked;
-          // Ruling 693: the same objection again with no round fought (the
+          // Ruling 83: the same objection again with no round fought (the
           // case `rounds` above keeps its count for) is titled apart, so what
           // a task took counts the work as sent back once, not twice.
           unfoughtRepeat =
             verdict === "request_changes" && prior?.result === "request_changes" && !reworked;
-          // Ruling 416(b): every same-result verdict on this revision, fought
+          // Ruling 92: every same-result verdict on this revision, fought
           // or not, so a later packet can tell the question was answered here.
           const reviews = prior?.result === verdict ? (prior.reviews ?? prior.rounds) + 1 : 1;
-          // Ruling 421 (F39-43): the run that returned this verdict was the one
+          // Ruling 93 (F39-43): the run that returned this verdict was the one
           // that put the completeness question, so this verdict IS the answer.
           // Keyed by run id and consumed here, so no later verdict inherits it.
           const asked = parsed.frontmatter.engagements.find(
@@ -679,9 +679,9 @@ export async function recordAgentCompletion(
             profileId: reviewerProfileId,
             revisionId: subjectId,
             result: verdict,
-            // Ruling 292: a verdict's justification is a STORED record a
+            // Ruling 88: a verdict's justification is a STORED record a
             // person reads on the task page, and it was a bare `.slice` -
-            // the write-side shape ruling 288 closed for a goal. The cut
+            // the write-side shape ruling 131 closed for a goal. The cut
             // stays (a verdict reason is a paragraph, not a report), and it
             // now says it was cut and where the whole of it is: the agent's
             // own report, on the same timeline, which is never truncated.
@@ -695,7 +695,7 @@ export async function recordAgentCompletion(
           if (answersQuestion || (prior?.result === verdict && prior.answers === "completeness")) {
             recorded.answers = "completeness";
           }
-          // Ruling 388: only a commit has a head sha to denormalize.
+          // Ruling 84: only a commit has a head sha to denormalize.
           if (rev) recorded.headSha = rev.headSha;
           parsed.frontmatter.verdicts = [
             ...parsed.frontmatter.verdicts.filter(
@@ -704,15 +704,15 @@ export async function recordAgentCompletion(
             ),
             recorded,
           ];
-          // Ruling 237 (F37-57): a SECOND consecutive objection from this same
+          // Ruling 94 (F37-57): a SECOND consecutive objection from this same
           // reviewer is a decision for a person, and viberr raises it rather
           // than asking the operator to. Read inside the lock, from the array
           // just written, and acted on after it — a packet write cannot happen
           // inside another file lock.
-          // Ruling 177 (F36-5): never a packet on a CLOSED task. A reviewer run
+          // Ruling 52 (F36-5): never a packet on a CLOSED task. A reviewer run
           // that finishes after its task was accepted, force-accepted or
           // archived still records its verdict — evidence is evidence — and
-          // ruling 177's own arm below says no coordination follows it. An
+          // ruling 52's own arm below says no coordination follows it. An
           // escalation asking a person to decide something about a shipped task
           // is exactly the packet that ruling refused, and `operatorOpenPacket`
           // refuses it by name; writing the packet here rather than through
@@ -734,24 +734,24 @@ export async function recordAgentCompletion(
                 packetId: newId("pkt"),
                 deadlock,
                 // The agent's NAME, never `roleDisplay`: the card writes it as
-                // an @handle, and ruling 232 is the standing rule that a handle
+                // an @handle, and ruling 70 is the standing rule that a handle
                 // is a name. "@Review & validation" names nobody and matches
                 // nothing a person can search for.
                 reviewerName: names.get(reviewerProfileId) ?? roleDisplay,
                 delivererName: delivererNameOf(parsed.frontmatter, names),
-                // Ruling 241: read inside the same locked write that raises the
+                // Ruling 66: read inside the same locked write that raises the
                 // packet, so the card's promise is built from the hold the
                 // resolution will meet — not one read a moment earlier.
                 heldBy: parsed.frontmatter.blockedBy,
-                // Ruling 416: an objection with no rework behind it is the
+                // Ruling 92: an objection with no rework behind it is the
                 // reviewer's answer on unchanged work, not a fresh round.
                 noReworkBehind,
                 revisionLabel: rev ? rev.headSha.slice(0, 7) : null,
-                // Ruling 421: this run put the completeness question.
+                // Ruling 93: this run put the completeness question.
                 askedWithThisReview: answersQuestion,
               });
               parsed.frontmatter.waiting = "human";
-              // Ruling 137 says a packet withdraws the standing acceptance
+              // Ruling 99 says a packet withdraws the standing acceptance
               // offers, and this packet needs no code for it: a
               // `request_changes` always derives `validation: "failing"`, and
               // the filter a few lines below already drops every
@@ -779,8 +779,8 @@ export async function recordAgentCompletion(
         // "… requested changes.") spends the one informative line on nothing.
         // Name the revision the verdict binds to instead — the fact a reader
         // needs next, and the one that makes a stale verdict visible.
-        // Ruling 543: a verdict on the files a result came back in binds to
-        // them (ruling 388), and the note says so rather than "no delivered
+        // Ruling 88: a verdict on the files a result came back in binds to
+        // them (ruling 84), and the note says so rather than "no delivered
         // revision", which read as a verdict that bound to nothing.
         const onRevision = rev
           ? ` on \`${rev.headSha.slice(0, 12)}\``
@@ -788,11 +788,11 @@ export async function recordAgentCompletion(
             ? " on the files delivered on this task"
             : "";
         if (moved) {
-          // Ruling 544: the verdict is the reviewer's judgment of what it read,
+          // Ruling 84: the verdict is the reviewer's judgment of what it read,
           // recorded in words; the task's review waits for a run on what is
           // delivered now. A question this run was asked is answered all the
-          // same (ruling 421), so it does not wait on a later run.
-          // Ruling 693: an objection that binds to nothing sends nothing back,
+          // same (ruling 93), so it does not wait on a later run.
+          // Ruling 83: an objection that binds to nothing sends nothing back,
           // and its title says so (as an approval's does), here and in the
           // two arms below.
           title =
@@ -808,7 +808,7 @@ export async function recordAgentCompletion(
           );
           if (asked?.question && asked.question.runId === runId) asked.question = null;
         } else if (ownWork) {
-          // Ruling 556: recorded in words, bound to nothing.
+          // Ruling 245: recorded in words, bound to nothing.
           title =
             verdict === "request_changes"
               ? VERDICT_NOTE_TITLE.changesNotCounted
@@ -823,7 +823,7 @@ export async function recordAgentCompletion(
             : unfoughtRepeat
               ? VERDICT_NOTE_TITLE.changesOnUnchangedWork
               : VERDICT_NOTE_TITLE.changesRequested;
-          // Ruling 583: with nothing delivered, the objection binds to nothing
+          // Ruling 245: with nothing delivered, the objection binds to nothing
           // and says so, as an approval with nothing to bind to does below.
           // On AWSC-19 the event read "Validation: none. Estimate Judge
           // requested changes." over a record that held no verdict at all.
@@ -850,7 +850,7 @@ export async function recordAgentCompletion(
           // actually judged — there is no "work" to have approved. The two
           // bases are different facts (no branch at all vs. a branch carrying
           // nothing), so the sentence must not state one for the other.
-          // Ruling 576: a task that corrected a knowledge base changed
+          // Ruling 245: a task that corrected a knowledge base changed
           // something, so the approval says what, and whether the reviewer
           // made it: then it verified the repository, not its own corrections.
           const corrections = noChangeMint ? standingKbCorrections(db, projectSlug, taskKey) : [];
@@ -869,7 +869,7 @@ export async function recordAgentCompletion(
                 : "Accepting completes this task with no changes.")
             : `${roleDisplay} approved the work${onRevision}.`;
         } else {
-          // Approved, but not yet cleared. Ruling 478(g) (F40-58): WHY decides
+          // Approved, but not yet cleared. Ruling 81 (F40-58): WHY decides
           // the words. "Rework still needed" is true only when another
           // required reviewer has requested changes (`failing`); while one has
           // simply not reported (`changed`), the same title told the owner's
@@ -930,13 +930,13 @@ export async function recordAgentCompletion(
         if (evidence && !verdict) replyEvent = { ...replyEvent, evidence };
         if (attachments && !verdict) replyEvent = { ...replyEvent, attachments };
         /**
-         * Ruling 317: TITLE it, because this comment is the only complete copy
+         * Ruling 88: TITLE it, because this comment is the only complete copy
          * of a justification the stored record is a clip of — and the two
          * fields that protect a comment from compaction were just moved OFF it,
          * three lines up, precisely BECAUSE there is a verdict.
          *
          * So the protection was exactly inverted: a deliverer's report carries
-         * evidence and is immune, while the verdict report — which ruling 292's
+         * evidence and is immune, while the verdict report — which ruling 88's
          * own marker calls "on this task's timeline, whole" — was the first
          * thing folded away. Live on SHOP-76 three of four rounds of review
          * reasoning were unrecoverable from canonical `task.md` while every
@@ -944,7 +944,7 @@ export async function recordAgentCompletion(
          */
         if (verdict) replyEvent = { ...replyEvent, title: VERDICT_REPORT_TITLE };
         parsed.timeline.unshift(replyEvent);
-        // Ruling 609: a run that ends by asking a person has not delivered.
+        // Ruling 85: a run that ends by asking a person has not delivered.
         if (!question) {
           stampNonCommitDelivery(
             parsed.frontmatter,
@@ -975,7 +975,7 @@ export async function recordAgentCompletion(
         };
         if (attachments) producing.attachments = attachments;
         parsed.timeline.unshift(producing);
-        // Ruling 609: a run that ends by asking a person has not delivered.
+        // Ruling 85: a run that ends by asking a person has not delivered.
         if (!question) {
           stampNonCommitDelivery(
             parsed.frontmatter,
@@ -1001,7 +1001,7 @@ export async function recordAgentCompletion(
         if (attachments) verdictEvent.attachments = attachments;
         parsed.timeline.unshift(verdictEvent);
         verdictAt = verdictEvent.occurredAt;
-        // Ruling 237: the escalation note goes ABOVE the verdict that caused
+        // Ruling 94: the escalation note goes ABOVE the verdict that caused
         // it, which means last, and with a stamp that cannot be older than what
         // it sits on.
         if (deadlockEscalation.packet) {
@@ -1067,7 +1067,7 @@ export async function recordAgentCompletion(
     });
     delivered = keepStampedDelivery(ctx, projectSlug, taskKey, stampBefore, written);
     reprojectTask(db, ctx, projectSlug, taskKey);
-    // Ruling 237 (F37-57): the packet itself was written inside the verdict's
+    // Ruling 94 (F37-57): the packet itself was written inside the verdict's
     // own lock above, so the objection and the escalation it raised can never
     // land apart. What is left is telling people — a decision nobody is
     // notified about waits exactly as long as it takes someone to open the task
@@ -1094,9 +1094,9 @@ export async function recordAgentCompletion(
           ptype: "input",
           title: `Decision needed: ${deadlockEscalation.packet.title}`,
           text: deadlockEscalation.packet.body,
-          // Ruling 497: the row opens the packet, where it is decided.
+          // Ruling 75: the row opens the packet, where it is decided.
           about: { decision: deadlockEscalation.packet.id },
-          // Ruling 237: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
+          // Ruling 94: `notifyTaskWatchers` stamps OPERATOR_NOTIFY_FROM on any
           // notice that names nobody, so leaving this off told the inbox the
           // Operator raised it — contradicting the card, which says
           // `from: policy-engine`, and contradicting the ruling, whose whole
@@ -1114,7 +1114,7 @@ export async function recordAgentCompletion(
     // directive explicitly instructs the agent to tag the commenter, so this
     // was the majority of agent @tags. Same helper/`from` shape as :1169.
     if (postsReplyEvent) {
-      // Ruling 382: and the event records who it reached, so compaction keeps it.
+      // Ruling 20: and the event records who it reached, so compaction keeps it.
       await stampNotifiedRecipients(
         db,
         taskRef(ctx, projectSlug, taskKey),
@@ -1174,7 +1174,7 @@ export async function recordAgentCompletion(
           actorRef: encodeActorRef(actorRef),
         },
       });
-      // F37-64: ruling 222 fixed ONE of the two question doors. Its words are
+      // F37-64: ruling 74 fixed ONE of the two question doors. Its words are
       // "the notification says WHO is asking … an agent's own question reached
       // the owner's inbox under the Operator's name and avatar, on the one
       // surface whose chip IS the 'who wants something from you' signal" — and
@@ -1190,14 +1190,14 @@ export async function recordAgentCompletion(
       const askNotice: TaskWatcherNotice = {
         projectSlug,
         taskKey,
-        // Ruling 481(a) (F40-48): the same `question` kind the Claude door
+        // Ruling 74 (F40-48): the same `question` kind the Claude door
         // writes (agent-toolkit.server.ts), with its own pill and toggle.
         kind: "question",
         title: `${roleDisplay} asks: ${question!.title.trim()}`,
         text: question!.body ?? "An engaged agent needs a human decision.",
-        // Ruling 497: the row opens the question's card, where it is answered.
+        // Ruling 75: the row opens the question's card, where it is answered.
         about: { decision: questionPacketId },
-        // Ruling 361: the asker by name; the Operator only when the operator asked.
+        // Ruling 74: the asker by name; the Operator only when the operator asked.
         from:
           actorRef.kind === "agent"
             ? { kind: "agent", backend: actorRef.backend, name: roleDisplay, role: roleDisplay }
@@ -1233,7 +1233,7 @@ export async function recordAgentCompletion(
           title,
           text: summary,
           about: verdictAt ? { event: verdictAt } : null,
-          // Ruling 361: the reviewer that judged, not the Operator — 673
+          // Ruling 74: the reviewer that judged, not the Operator — 673
           // "Review passed" notifications on this instance named the wrong agent.
           from:
             actorRef.kind === "agent"
@@ -1254,13 +1254,13 @@ export async function recordAgentCompletion(
       err: toError(error),
     });
   }
-  // Ruling 237: when the write above threw, nothing was escalated and the
+  // Ruling 94: when the write above threw, nothing was escalated and the
   // caller reacts exactly as it always did.
   return { escalated: deadlockEscalation.packet !== null, verdictBound, delivered };
 }
 
 /**
- * Ruling 544: what moved under a reviewer while it ran, in its verdict note's
+ * Ruling 84: what moved under a reviewer while it ran, in its verdict note's
  * words. `from` is the subject it was dispatched on (null when nothing had been
  * delivered), `rev` the task's active revision now (null when the delivery is
  * files).
@@ -1279,7 +1279,7 @@ function subjectMovedSentence(from: string | null, rev: WorkRevision | null): st
 }
 
 /**
- * Ruling 203 (F37-23): deliver the @mention that could not start while this
+ * Ruling 69 (F37-23): deliver the @mention that could not start while this
  * agent was running.
  *
  * The single-flight guard refuses a mention of an agent that already has a live
@@ -1297,7 +1297,7 @@ function subjectMovedSentence(from: string | null, rev: WorkRevision | null): st
  * this run started, cannot have started a run of its own — the single-flight
  * guard is the only thing that could have refused it.
  *
- * Ruling 205: EVERY such comment goes into ONE directive, not the oldest one
+ * Ruling 69: EVERY such comment goes into ONE directive, not the oldest one
  * into one run. The first draft delivered the oldest and claimed the rest would
  * "ride the next completion"; they cannot. The window is "newer than the run
  * that was busy", so the moment the oldest starts a redelivery run, the others
@@ -1379,14 +1379,14 @@ export async function deliverDeferredMention(
     { userId: oldest.userId, label: userDisplayName(db, oldest.userId) },
     ctx,
   );
-  // Ruling 211(b): the caller needs to know a delivery was OWED, not only
+  // Ruling 69: the caller needs to know a delivery was OWED, not only
   // whether one started — a refused redelivery leaves a written promise on the
   // record and, before this, nothing anywhere contradicted it.
   return { started: result.triggered !== null, pending: mine.length };
 }
 
 /**
- * Ruling 211(b): withdraw, on the record, a delivery promise that cannot be
+ * Ruling 69: withdraw, on the record, a delivery promise that cannot be
  * kept. `commentToAgent`'s single-flight refusal writes "Viberr starts it on
  * this comment as soon as that run finishes" onto the timeline; when the
  * completion hop cannot start that run — the task closed underneath it, the
@@ -1469,7 +1469,7 @@ export async function registerAgentCompletion(
   ctx: TaskMutationContext,
   input: AgentCompletionInput & {
     runId: string;
-    /** Ruling 248 (F37-77): the workspace checkout could not be provisioned, so
+    /** Ruling 87 (F37-77): the workspace checkout could not be provisioned, so
      *  this run executed with NO working tree. PERSISTED on the run row for the
      *  same reason as `outcomeKey` — the closure that would otherwise carry it
      *  dies with the process, and a recovered reviewer would have its report
@@ -1515,7 +1515,7 @@ export async function registerAgentCompletion(
 }
 
 /**
- * Ruling 159 (pass 35, F35-10): the evidence stamp above claims only files that
+ * Ruling 78 (pass 35, F35-10): the evidence stamp above claims only files that
  * reached the task's real `attachments/` dir. An agent under an older prompt
  * created `projects/<slug>/tasks/<key>/attachments` INSIDE its repository
  * checkout instead, so its file never reached the task page and a delivery
@@ -1593,7 +1593,7 @@ export async function applyAgentCompletionEffects(
    *  every other operator hand-off. */
   ctx: TaskActionContext,
   input: AgentCompletionInput & {
-    /** Ruling 211(c): set by boot recovery, which replays a run's lost effects
+    /** Ruling 163(d): set by boot recovery, which replays a run's lost effects
      *  possibly days later. The deferred-@mention redelivery is a promise made
      *  by the LIVE refusal and belongs to the live completion; replaying it from
      *  an old run's window would re-deliver a comment a human has since had
@@ -1603,13 +1603,13 @@ export async function applyAgentCompletionEffects(
   finished: { id: string; state: string },
 ): Promise<void> {
   const { fullReplyTextForRun } = await import("./agent-reply.server");
-  /** Ruling 237: this completion's own verdict raised the review-deadlock
+  /** Ruling 94: this completion's own verdict raised the review-deadlock
    *  packet, so the operator react at the end of this function is suppressed —
    *  see the arm that reads it. */
   let raisedDeadlockPacket = false;
-  /** Ruling 691: the stamp of the delivery this completion stamped and kept. */
+  /** Ruling 86: the stamp of the delivery this completion stamped and kept. */
   let stampedDelivery: string | null = null;
-  // Ruling 691: the run has ended, so the pictures `capture_page` kept for it
+  // Ruling 194: the run has ended, so the pictures `capture_page` kept for it
   // go with it. Never awaited and never a reason for the effects to fail.
   void removeRunPageCaptures(db, ctx, {
     projectSlug: input.projectSlug,
@@ -1632,18 +1632,18 @@ export async function applyAgentCompletionEffects(
   // same run can't be mistaken for it (corrupting no-progress detection).
   const thisRunRow = getRun(db, finished.id);
   const thisRunStartedAt = thisRunRow?.started_at ?? null;
-  // Ruling 211(a): the redelivery window must open when the single-flight guard
+  // Ruling 69: the redelivery window must open when the single-flight guard
   // STARTED refusing, not when the provider process launched. That guard keys on
   // `state IN ('running','queued')` (commentToAgent), which begins at the row's
   // INSERT — and a run admitted behind a concurrency cap sits queued for minutes
   // with no `started_at` at all. Using the launch instant dropped every comment
   // refused during that wait, silently, under a note promising delivery.
   const deferredWindowFrom = thisRunRow?.created_at ?? thisRunStartedAt;
-  // Ruling 690: the sources this run kept leave one entry on the timeline,
+  // Ruling 82: the sources this run kept leave one entry on the timeline,
   // for a finished, a failed and an interrupted run alike: what a run read is
   // on the task whatever became of the run. Written before the run's files
   // are listed and its reply lands, so the thread reads in the order things
-  // happened and the listing below (ruling 558) runs as it did. An entry that
+  // happened and the listing below (ruling 77) runs as it did. An entry that
   // cannot be written never fails the completion: the sources stay listed on
   // the page.
   try {
@@ -1681,7 +1681,7 @@ export async function applyAgentCompletionEffects(
         ctx.dataRoot,
       )
     : [];
-  // Ruling 558: read after the listing and before the timeline below, so a
+  // Ruling 77: read after the listing and before the timeline below, so a
   // file this run's window holds is either still held by the writer putting
   // it down for someone else, or already claimed on the timeline.
   const heldForOthers = attachmentClaimsInFlight(input.projectSlug, input.taskKey);
@@ -1716,7 +1716,7 @@ export async function applyAgentCompletionEffects(
   // profile's name, the exact posture the run layer had just withheld.
   let grants: { capabilityId: string; mode: "direct" | "recommend" | "human" | "off" }[] =
     withheldAgentGrants();
-  /** Ruling 488: the deployed profile's name, the author a relay names; null
+  /** Ruling 202: the deployed profile's name, the author a relay names; null
    *  for a vanished profile, whose relays are withheld like its grants. */
   let deployedName: string | null = null;
   if (input.profileId) {
@@ -1741,15 +1741,15 @@ export async function applyAgentCompletionEffects(
   const completionFile =
     readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed ?? null;
   const completionFm = completionFile?.frontmatter ?? null;
-  // Ruling 533: a file a PERSON attached while this run was in flight is in
+  // Ruling 77: a file a PERSON attached while this run was in flight is in
   // the run's mtime window too, and it is theirs: claiming it would name the
   // run as its author and, for a deliverer, move `deliveredAt` onto the
-  // person's input. Their note claims the name; the run does not. Ruling 538:
+  // person's input. Their note claims the name; the run does not. Ruling 71:
   // the same for a file a relay carried here from another task. A claim by
   // another RUN is not excluded: the deliverer claims its whole window even
-  // when a run beside it named one of its files (ruling 627 narrows what a run
+  // when a run beside it named one of its files (ruling 85 narrows what a run
   // that does not deliver claims, below).
-  // Ruling 675: each such name is taken as the file the folder holds for it.
+  // Ruling 76: each such name is taken as the file the folder holds for it.
   // A hold is taken under the name as checked, while an upload that replaces
   // a file stored decomposed keeps that file's own name, so the two can
   // differ in form; a folder holding both forms as two files keeps them apart.
@@ -1766,7 +1766,7 @@ export async function applyAgentCompletionEffects(
   const onTask = [
     ...new Set([...listTaskAttachmentNames(input.projectSlug, input.taskKey, ctx.dataRoot), ...runAttachmentsRaw]),
   ];
-  // Ruling 691: and a picture the record says Viberr's own render wrote. The
+  // Ruling 86: and a picture the record says Viberr's own render wrote. The
   // window's listing already left out the picture of every page the folder
   // holds; this is the one whose page has since left the task.
   const viberrs = recordedPageCaptures(completionFm?.pageCaptures);
@@ -1778,7 +1778,7 @@ export async function applyAgentCompletionEffects(
     input.profileId && completionFm
       ? completionFm.engagements.find((e) => e.profileId === input.profileId)
       : null;
-  // Ruling 555: a delivering run's reply is its delivery. A verdict in it is a
+  // Ruling 87: a delivering run's reply is its delivery. A verdict in it is a
   // verdict on its own work, which no review counts, and taking it as one filed
   // the run's files as evidence for it instead of as the delivery. Keyed on how
   // the run was DISPATCHED (`input.delivers`, the same flag the delivery
@@ -1836,7 +1836,7 @@ export async function applyAgentCompletionEffects(
       replyText = `${replyText}\n\ncc ${missing.join(" ")}`;
     }
   }
-  // Ruling 105 (owner ask 2026-08-31): the browser MCP writes its own WORKING
+  // Ruling 78 (owner ask 2026-08-31): the browser MCP writes its own WORKING
   // artifacts — `page-*.yml` aria snapshots, `console-*.log` dumps — into the
   // attachments store, because `--output-dir` IS that store. Tool transport was
   // posted to humans next to the screenshots and drowned the panel. Delete this
@@ -1845,7 +1845,7 @@ export async function applyAgentCompletionEffects(
   // marks a file as for-humans. Screenshots/PDFs and deliberately named files
   // are never pruned. Runs after replyText/outcome are FINAL so every citation
   // source exists, and before every consumer of the list so they all tell the
-  // same story. Two scoping guards (ruling-105 review, both CONFIRMED live):
+  // same story. Two scoping guards (ruling-78 review, both CONFIRMED live):
   //  · FINISHED runs only — an error/interrupted browsing run never got to
   //    cite anything, and its console dump is often its only diagnostic;
   //  · no prune while a SIBLING run is live on this task: the mtime window is
@@ -1863,7 +1863,7 @@ export async function applyAgentCompletionEffects(
       )
       .get(input.projectSlug, input.taskKey, finished.id) as { n: number }
   ).n;
-  // Ruling 627: another specialist run worked on this task while this one did,
+  // Ruling 85: another specialist run worked on this task while this one did,
   // still live or finished since this run started. The operator saves no file
   // into the attachments store itself (a relay's files are claimed by the
   // relay), so its runs are not counted.
@@ -1892,12 +1892,12 @@ export async function applyAgentCompletionEffects(
   ].join("\n");
   // The corpus covers every place an agent can cite: its own words, every
   // timeline text since the run started (mid-run comments, human directives),
-  // and — ruling 549 — the text of the files this run saved, where a deliverer
+  // and — ruling 78 — the text of the files this run saved, where a deliverer
   // of files cites its evidence.
   const citationCorpus = [
     ownWords,
     savedFilesText(input.projectSlug, input.taskKey, runSaved, ctx.dataRoot),
-    // Ruling 593: an entry cites a file in its evidence rows as well as its
+    // Ruling 78: an entry cites a file in its evidence rows as well as its
     // text, and an entry that claims a file keeps it. Live on AWSC-32 a
     // researcher's run was still going when the Estimate Judge's verdict
     // cited two browser snapshots in its evidence and claimed twenty; the
@@ -1918,7 +1918,7 @@ export async function applyAgentCompletionEffects(
           ctx.dataRoot,
         )
       : finished.state === "finished"
-        ? // Ruling 593: beside a live sibling nothing is deleted, and this run
+        ? // Ruling 78: beside a live sibling nothing is deleted, and this run
           // claims no working file it did not cite: the sibling decides the
           // rest when it completes, so no entry names a file that later goes.
           { kept: runSaved.filter((name) => !isBrowserWorkingArtifact(name) || citationCorpus.includes(name)), pruned: [] }
@@ -1937,12 +1937,12 @@ export async function applyAgentCompletionEffects(
       pruned: attachmentsPrune.pruned,
     });
   }
-  // Ruling 627: a run's files are found by mtime in a store every run on the
+  // Ruling 85: a run's files are found by mtime in a store every run on the
   // task writes to, so beside another specialist run the window holds that
   // run's files too. A run that does not deliver then claims only the files
   // its own words name, and never one the delivery already holds: under
-  // ruling 587 that claim would move the delivery onto this run's entry, and
-  // under ruling 556 make the subject this run's own work. Live on AWSC-80 the
+  // ruling 85 that claim would move the delivery onto this run's entry, and
+  // under ruling 245 make the subject this run's own work. Live on AWSC-80 the
   // Estimate Judge, told to save no file, finished nine seconds after the
   // Workflow Researcher saved the task's deliverable, and its comment claimed
   // that file. The deliverer claims its whole window as before: its claim is
@@ -1950,11 +1950,11 @@ export async function applyAgentCompletionEffects(
   const deliveredNow = completionFile
     ? deliveredFileNames(completionFile.frontmatter, completionFile.timeline)
     : new Set<string>();
-  // Ruling 699: a maker's own earlier file is in that set now, and its rework
+  // Ruling 81: a maker's own earlier file is in that set now, and its rework
   // beside another specialist run (a review that sent the text and a picture
   // back at once) would claim nothing and move nothing. A file this agent
   // saved before and its own words name is still its: only a name the
-  // deliverer's entries claim stays out, which is the case ruling 627 is for.
+  // deliverer's entries claim stays out, which is the case ruling 85 is for.
   const ownEarlier =
     completionFile && input.profileId
       ? filesClaimedBy(completionFile.timeline, new Set([input.profileId]))
@@ -1969,11 +1969,11 @@ export async function applyAgentCompletionEffects(
           (name) => ownWords.includes(name) && (!deliveredNow.has(name) || stillItsOwn(name)),
         )
       : attachmentsPrune.kept;
-  /** Ruling 362: this completion's RECORDED verdict was `approve` — a boundary
+  /** Ruling 119: this completion's RECORDED verdict was `approve` — a boundary
    *  for the react chain's depth count (the arm before the react decision). */
   let approvedThisReply = false;
   if (finished.state === "finished") {
-    // Ruling 248 (pass 37, F37-77): a run whose workspace could not be
+    // Ruling 87 (pass 37, F37-77): a run whose workspace could not be
     // provisioned READ NOTHING, so it judged nothing. Live on SHOP-5 the Code
     // Reviewer reported exactly that — envelope `verdict: null`, summary "No
     // content verdict recorded" — and viberr wrote `request_changes` onto the
@@ -1985,10 +1985,41 @@ export async function applyAgentCompletionEffects(
     // past a verdict that did not exist. The operator caught it, said so on the
     // task, and could not withdraw a packet the policy engine had raised.
     const readNothing = thisRunRow?.no_checkout === 1;
+    /**
+     * Ruling 87: a run told NOT to judge records no verdict, neither from its
+     * envelope nor from the prose fallback below.
+     *
+     * The withholding took the verdict TOOL away on the deadlock question and
+     * stopped there, which closed nothing: `verdictAuthorized` reads the
+     * ENGAGEMENT snapshot (correctly — a required reviewer whose live grant was
+     * removed must still be able to record), so the prose fallback ran anyway
+     * and manufactured the verdict the tool had just been taken away to
+     * prevent. The Codex envelope is the same hole by another door: its schema
+     * is static and requires `verdict`, so a withheld Codex run can fill it, and
+     * recorded it binds to the same revision and fights another round
+     * (ruling 92), which is the loop the question exists to break.
+     *
+     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
+     * verdict under its name 70 milliseconds later: "No verdict recorded — the
+     * directive said not to... I deliberately skipped `report_outcome` rather
+     * than omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The person answered the same deadlock
+     * packet three times for one question.
+     */
+    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority
     // (R1 — a developer's "tests pass" can't flip validation).
-    let verdict = verdictAuthorized && !readNothing ? (outcome?.verdict ?? null) : null;
+    let verdict =
+      verdictAuthorized && !readNothing && !verdictSilenced ? (outcome?.verdict ?? null) : null;
+    if (verdictAuthorized && verdictSilenced && outcome?.verdict) {
+      logger.info("withheld-verdict run emitted a verdict; discarded", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        verdict: outcome.verdict,
+      });
+    }
     if (!verdictAuthorized && outcome?.verdict) {
       // B-5 (pass 24): a Codex agent CAN fill the `verdict` field of its outcome
       // envelope even without the `report-validation-verdict` grant — the JSON
@@ -2020,26 +2051,9 @@ export async function applyAgentCompletionEffects(
     // converts "here is what I need before I can judge" into a judgement. The
     // no-verdict NOTE below already reads a question as "a legitimate no-verdict
     // outcome" (pass 24, C-4) — the classifier is its sibling and never learned
-    // it, which is this pass's most-found defect shape.
-    /**
-     * Ruling 316: a run told NOT to judge did not fall silent, so there is
-     * nothing here for the fallback to repair.
-     *
-     * Ruling 313 withheld the verdict TOOL on the deadlock question and stopped
-     * there, which closed nothing: `verdictAuthorized` reads the ENGAGEMENT
-     * snapshot (correctly — a required reviewer whose live grant was removed
-     * must still be able to record), so the prose fallback ran anyway and
-     * manufactured the verdict the tool had just been taken away to prevent.
-     *
-     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
-     * verdict under its name 70 milliseconds later: "No verdict recorded — the
-     * directive said not to... I deliberately skipped `report_outcome` rather
-     * than omitting it. (Note: last turn the system appears to have derived a
-     * `request_changes` entry from my comment anyway; I can't control that, but
-     * nothing new was authored by me.)" The person answered the same deadlock
-     * packet three times for one question.
-     */
-    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
+    // it, which is this pass's most-found defect shape. A run told NOT to judge
+    // (`verdictSilenced`, ruling 87) did not fall silent either, so there is
+    // nothing here for the fallback to repair.
     if (!verdict && verdictAuthorized && !readNothing && !outcome?.question && !verdictSilenced) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {
@@ -2096,10 +2110,10 @@ export async function applyAgentCompletionEffects(
     });
     if (recorded.escalated) raisedDeadlockPacket = true;
     stampedDelivery = recorded.delivered;
-    // Ruling 544: an approval that bound to nothing opened no gate.
+    // Ruling 119: an approval that bound to nothing opened no gate.
     approvedThisReply = verdict === "approve" && recorded.verdictBound;
     await warnStrayAttachmentsFolder(db, ctx, input, finished.id);
-    // Ruling 488 (F40-67): the report's relays, posted through the operator's
+    // Ruling 202 (F40-67): the report's relays, posted through the operator's
     // relay door with this agent as the author, after the report itself and
     // before the operator reacts, so its snapshot already reads "Relayed to …".
     if (outcome?.relay?.length) {
@@ -2152,11 +2166,13 @@ export async function applyAgentCompletionEffects(
       !!completionFm &&
       !!reviewStageId &&
       completionFm.stage === reviewStageId;
-    // Ruling 248: when the run had no working tree the note says THAT, because
+    // Ruling 87: when the run had no working tree the note says THAT, because
     // "re-run the review" is bad advice for a condition a re-run reproduces.
     // It fires even for a run that asked a question: the question reaches a
     // person as a packet, and the task's own record should still say plainly
-    // that the review did not happen and why.
+    // that the review did not happen and why. A run told not to judge
+    // (`verdictSilenced`) answered the question it was asked, so it gets no
+    // "re-run the review" note unless it had no tree to read.
     const noteText = readNothing
       ? "This review run had no checkout of the repository, so it read nothing and recorded no verdict. Validation is unchanged and acceptance stays gated. The workspace failure is on the server, not on the agent: fix that first, then run the review again."
       : "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.";
@@ -2164,6 +2180,7 @@ export async function applyAgentCompletionEffects(
       verdictAuthorized &&
       !verdict &&
       (!question || readNothing) &&
+      (!verdictSilenced || readNothing) &&
       atReviewStage &&
       !input.fromHumanDirective
     ) {
@@ -2195,7 +2212,7 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
-  // Ruling 203, moved EARLIER by ruling 211(b): a person's @mention refused by
+  // Ruling 69: a person's @mention refused by
   // the single-flight guard is delivered when the busy run completes —
   // whatever state it completed in. The call used to sit after the `error`
   // branch's return and after the closed-task branch's return, so a run that
@@ -2217,7 +2234,7 @@ export async function applyAgentCompletionEffects(
   } catch (error) {
     // A delivery that cannot start must never swallow the completion pipeline.
     // `deferredOwed` stays 0 here, so no withdrawal note follows — deliberate:
-    // a THROW means the count is unknown, and every cause ruling 211(b) names
+    // a THROW means the count is unknown, and every cause ruling 69 names
     // (closure, stage, credential) is a refusal, which returns `triggered:
     // null` with a real count instead of throwing. A throw here is a broken
     // disk or database, and this log line is the honest record of it.
@@ -2227,16 +2244,16 @@ export async function applyAgentCompletionEffects(
       err: toError(error),
     });
   }
-  // F37-66: ruling 211(b)'s withdrawal, written HERE — beside the attempt it
+  // F37-66: ruling 69's withdrawal, written HERE — beside the attempt it
   // reports on, and above every early return below it.
   //
   // The refusal wrote "Viberr starts it on this comment as soon as that run
   // finishes" onto the canonical record. When that cannot happen — the causes
-  // ruling 211(b) itself names: the task closed underneath it, the stage no
+  // ruling 69 itself names: the task closed underneath it, the stage no
   // longer admits the profile, a credential is gone — the promise has to be
   // withdrawn where it was made. It used to sit below the error branch's
-  // return, the closed-task branch's return and ruling 237's, which is the same
-  // placement bug ruling 211(b) had already fixed for the ATTEMPT and for the
+  // return, the closed-task branch's return and ruling 94's, which is the same
+  // placement bug ruling 69 had already fixed for the ATTEMPT and for the
   // same two branches: a task archived under a live run took the closed branch,
   // returned, and left the person's promise standing with nothing anywhere
   // contradicting it.
@@ -2258,7 +2275,7 @@ export async function applyAgentCompletionEffects(
         : failure.text
       : "";
     const providerText = failure?.providerText ?? "";
-    // Ruling 127 / 130(b): the remedy for a quota or credential refusal
+    // Ruling 137 / 156(a): the remedy for a quota or credential refusal
     // belongs to the credential principal, the task owner; the leaf names
     // them, their reset instant and Profile → Agent accounts. An unowned task
     // yields no owner sentence and no retry option.
@@ -2293,18 +2310,18 @@ export async function applyAgentCompletionEffects(
       }
     }
     const described = describeRunFailure(db, describeInput);
-    // Ruling 130(b): a classified refusal is worded ONCE, by the leaf. The
+    // Ruling 156(a): a classified refusal is worded ONCE, by the leaf. The
     // other kinds keep their own sentences below; `unavailable` is ruling
-    // 127's refusal sentence, already naming the person and the remedy. A
+    // 137's refusal sentence, already naming the person and the remedy. A
     // provider-side `overloaded` failure is worded by the leaf too: its remedy
     // (retry; nothing to fix) is the same one for operator and specialist.
-    // Ruling 595: so is a hung run, whose remedy is the same plain retry.
+    // Ruling 158(a): so is a hung run, whose remedy is the same plain retry.
     const classified =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
       failure?.kind === "overloaded" ||
       failure?.kind === "idle_timeout" ||
-      // Ruling 598: the leaf's sentence is the gateway's, naming the call.
+      // Ruling 158(b): the leaf's sentence is the gateway's, naming the call.
       failure?.kind === "tool_loop";
     const reasonText = classified
       ? described.reason
@@ -2312,7 +2329,7 @@ export async function applyAgentCompletionEffects(
         ? failText || `${backendLabel} could not run for this task's owner`
         : failure?.kind === "max_turns"
           ? `the ${backendLabel} run hit its turn cap and was CUT OFF mid-work, which is not a task failure (its partial report, if any, is above)`
-          // Ruling 175: the leaf words the cap and the spend from the typed
+          // Ruling 159: the leaf words the cap and the spend from the typed
           // record; the cut-off is not a task failure either.
           : failure?.kind === "max_budget"
             ? `the ${backendLabel} run reached the instance's spending cap${
@@ -2336,7 +2353,7 @@ export async function applyAgentCompletionEffects(
       // supported when using Codex with a ChatGPT account" instead of only
       // the generic runtime advice above.
       providerText ? `\n\nWhat the provider reported:\n\`\`\`\n${providerText}\n\`\`\`` : "";
-    // Ruling 333: EVIDENCE, not kind. The two cut-off kinds were exempted
+    // Ruling 156(a): EVIDENCE, not kind. The two cut-off kinds were exempted
     // because a cut run leaves work behind; a provider refusal on turn 48 is
     // the same cut-off, and the facts that prove it are already in scope.
     const outcomeClause =
@@ -2346,7 +2363,7 @@ export async function applyAgentCompletionEffects(
             turns: thisRunRow?.turns ?? 0,
             attachments: runAttachments.length,
           });
-    // Ruling 397: the lead is built by the shared helper the operator's snapshot
+    // Ruling 155: the lead is built by the shared helper the operator's snapshot
     // matches on, so the sentence and its matcher cannot drift apart.
     const lead = runDidNotCompleteLead(input.role, roleLabel);
     const failureText = classified
@@ -2380,7 +2397,7 @@ export async function applyAgentCompletionEffects(
     });
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // R20-3 (F20-4): a model the provider REFUSED for this account is marked
-    // unavailable from this real run's failure — no synthetic probe (ruling 19).
+    // unavailable from this real run's failure — no synthetic probe (ruling 149).
     // A quota/auth/crash failure never matches MODEL_UNSUPPORTED_RE, so only a
     // genuine "model not supported" verdict marks the row.
     if (providerText) {
@@ -2394,22 +2411,22 @@ export async function applyAgentCompletionEffects(
     }
     // Backend-level failure (quota / auth / no credential): the packet's
     // options come from the leaf (D4 retry-on-the-other-backend first when the
-    // task OWNER has it connected, ruling 127; the switch STICKS per F27-B1,
+    // task OWNER has it connected, ruling 137; the switch STICKS per F27-B1,
     // owner ruling 2026-08-24, via the retry run's per-engagement
     // `pinnedBackend`; else "send the agent back to continue"; redirect
     // present and not recommended). A hung run takes the leaf's set as well
-    // (ruling 595); any other kind keeps the stock set.
+    // (ruling 158(a)); any other kind keeps the stock set.
     const backendFailure =
       failure?.kind === "quota" ||
       failure?.kind === "auth" ||
       failure?.kind === "unavailable" ||
       failure?.kind === "overloaded";
     /**
-     * Ruling 315: a backend failure is an ACCOUNT's failure, not this task's.
+     * Ruling 65: a backend failure is an ACCOUNT's failure, not this task's.
      * Quota, auth and a missing credential take out every task running on the
      * same account at the same instant, and each one used to raise its own
      * identical packet. The key is what actually failed — the backend, the kind
-     * of failure, and whose account paid for the run (ruling 127's principal) —
+     * of failure, and whose account paid for the run (ruling 137's principal) —
      * so two tasks that failed for one reason agree on it with nothing
      * coordinating them.
      *
@@ -2430,7 +2447,7 @@ export async function applyAgentCompletionEffects(
         : `The ${input.role} ${roleLabel} run failed: ${endSentence(reasonText)}`,
     };
     if (classified) stuck.remedy = described.remedy;
-    // Ruling 595: a hung run takes the leaf's options too, which recommend
+    // Ruling 158(a): a hung run takes the leaf's options too, which recommend
     // running the same agent again rather than redirecting it.
     if (backendFailure || failure?.kind === "idle_timeout") stuck.options = described.options;
     if (accountCause) stuck.cause = accountCause;
@@ -2440,7 +2457,7 @@ export async function applyAgentCompletionEffects(
       { ...ctx, operatorAuthorized: true },
       stuck,
     );
-    // Ruling 602: a refusal in a window someone already decided.
+    // Ruling 65: a refusal in a window someone already decided.
     if (accountCause && escalation.status === "opened") {
       const { answerFromStandingDecision } = await import("./packet-resolution.server");
       await answerFromStandingDecision(db, ctx, {
@@ -2476,9 +2493,9 @@ export async function applyAgentCompletionEffects(
       text: classified
         ? `${input.role} run failed. ${described.reason}`
         : `${input.role} run failed: ${endSentence(reasonText)}`,
-      // Ruling 497: the row opens the failure's own event, which says why.
+      // Ruling 75: the row opens the failure's own event, which says why.
       about: { event: failedAt },
-      // Ruling 361: the agent whose run failed — the timeline's actor for the
+      // Ruling 74: the agent whose run failed — the timeline's actor for the
       // same event.
       from: { kind: "agent", backend: input.backend, name: input.role, role: input.role },
     };
@@ -2492,11 +2509,11 @@ export async function applyAgentCompletionEffects(
   // 1c. A SUCCESSFUL run withdraws a stale "work stalled" packet about this
   //     same agent (owner ruling 2026-07-18) — done BEFORE the operator reacts
   //     so its snapshot already sees the packet gone instead of asking a human
-  //     to dismiss it. Only a stall packet is ever touched (ruling 432).
+  //     to dismiss it. Only a stall packet is ever touched (ruling 123).
   if (finished.state === "finished") {
     // R20-3 (F20-4): a model that just RAN to completion is available, whatever
     // a stale unavailability row says. Clearing on a real success IS the
-    // re-probe — no separate mechanism (ruling 19).
+    // re-probe — no separate mechanism (ruling 149).
     const ranModel = getRun(db, finished.id)?.model ?? null;
     if (ranModel) clearModelMark(db, input.backend, ranModel);
     await withdrawSupersededStuckPacket(db, ctx, {
@@ -2541,7 +2558,7 @@ export async function applyAgentCompletionEffects(
   }
   // 3. (The verdict/question are recorded ATOMICALLY with the reply in step 1
   //    — there is no separate verdict write to race anything.)
-  // Ruling 691: the delivery, its kept copy and the reply are written by now,
+  // Ruling 86: the delivery, its kept copy and the reply are written by now,
   // and the reconcile above has minted the work revision if this run
   // committed. So the pictures are asked for here and not where the delivery
   // was stamped: on a board with a repository a first delivery is stamped
@@ -2568,11 +2585,11 @@ export async function applyAgentCompletionEffects(
     reactAutonomy = resolveOperatorAuthority(ctx, input.projectSlug, {}).autonomy;
     currentDepth = 0;
   }
-  /** Ruling 489(d): react hops since a person last acted. A run a person
+  /** Ruling 119: react hops since a person last acted. A run a person
    *  dispatched, or a drive a person's comment or packet answer started,
    *  carries none, so the count starts over there. */
   let chainHops = input.operatorRun?.reactHops ?? 0;
-  // Ruling 231 (F37-51): the react chain carries its DEPTH and its autonomy,
+  // Ruling 108 (F37-51): the react chain carries its DEPTH and its autonomy,
   // and no longer carries a BACKEND.
   //
   // It used to pin `input.operatorRun.backend` — the backend of the drive that
@@ -2628,7 +2645,7 @@ export async function applyAgentCompletionEffects(
   // was dispatched and one was not — a looping agent then bought an extra
   // operator react per source change. Strip the appended line from BOTH sides
   // of the comparison; it is bookkeeping, not progress.
-  // Ruling 177 (pass 36, F36-5): a run that finishes after its task CLOSED
+  // Ruling 52 (pass 36, F36-5): a run that finishes after its task CLOSED
   // (accepted, force-accepted or archived while it was live) has its report
   // recorded above — evidence is evidence — but wakes no operator, however it
   // was dispatched: the dispatch-completion contract's forced react is what
@@ -2664,9 +2681,9 @@ export async function applyAgentCompletionEffects(
       return;
     }
   }
-  // Ruling 237: the verdict recorded above raised the deadlock packet, so the
+  // Ruling 94: the verdict recorded above raised the deadlock packet, so the
   // task belongs to a person now. The react below is a MACHINE trigger
-  // (`agent-reply`), which ruling 195 records as deliberately NOT refused by an
+  // (`agent-reply`), which ruling 115 records as deliberately NOT refused by an
   // open packet: "a packet opened mid-work does NOT stop the machine triggers,
   // so the operator kept coordinating and dispatched a deliverer". That
   // carve-out is right for a packet the operator opened mid-run and can
@@ -2681,14 +2698,14 @@ export async function applyAgentCompletionEffects(
     });
     return;
   }
-  // Ruling 362 (pass 38, F38-16): an APPROVE is a boundary, so the depth count
+  // Ruling 119 (pass 38, F38-16): an APPROVE is a boundary, so the depth count
   // starts over at it.
   //
   // The cap exists for a chain that goes round without getting anywhere — the
   // operator re-prompting a specialist that keeps coming back with the same
   // objection. A reviewer's approve is the opposite: the gate it guards has
   // opened, and the operator's next move is the step behind it (Review → Verify
-  // and the verifier's dispatch, or the acceptance recommendation). Ruling 258
+  // and the verifier's dispatch, or the acceptance recommendation). Ruling 119
   // recognised one such boundary — the task being ACCEPTABLE — and skipped the
   // packet there, leaving the recommendation to the 15-minute sweep. Live on
   // BNB-16 the code reviewer approved the rework at Review with Verify still
@@ -2710,16 +2727,16 @@ export async function applyAgentCompletionEffects(
     });
     currentDepth = 0;
   }
-  // Ruling 489(d): an approve restarts the hop count as well, on 362's own
+  // Ruling 119: an approve restarts the hop count as well, on 362's own
   // argument: a stage cannot be approved twice, so the restart cannot loop.
   if (approvedThisReply) chainHops = 0;
-  // Ruling 489 (pass 40, F40-68): a reply that MOVED the task's head is a
+  // Ruling 119 (pass 40, F40-68): a reply that MOVED the task's head is a
   // boundary too, so the count starts over at it as it does at an approve.
   //
   // Live on WEB-8 the Site Engineer reported its rework done: the new head
   // 178dc22 merged main in, fixed every reviewer finding, and Viberr's gates
   // passed 6/6 on it a second later. The chain had spent its four hops on the
-  // ruling-475 conflict hand-off, the owner's rework decision and the rework,
+  // ruling-129 conflict hand-off, the owner's rework decision and the rework,
   // so the completion opened "Work stalled: pick a recovery path", whose
   // options all re-dispatched the work that had just finished. Neither
   // boundary this loop knew applied: it was not an approve (362), and the task
@@ -2737,7 +2754,7 @@ export async function applyAgentCompletionEffects(
     const moved = afterReply
       ? headMovedSince(afterReply.parsed.frontmatter.workRevision, hopStartedAt)
       : null;
-    // Ruling 613: on a task whose deliverable is files, the delivery stamp is
+    // Ruling 119: on a task whose deliverable is files, the delivery stamp is
     // the head, and a stamp this hop wrote is its progress.
     const filesDelivered =
       afterReply && !moved
@@ -2762,7 +2779,7 @@ export async function applyAgentCompletionEffects(
       currentDepth = 0;
     }
   }
-  // Ruling 489(d): the ceiling progress does not reset. The depth reset above
+  // Ruling 119: the ceiling progress does not reset. The depth reset above
   // unbounded the one loop that commits on every hop — the operator
   // re-dispatching a developer that commits each time, with no reviewer to
   // object — so every hop since a person last acted is counted here, and at
@@ -2777,7 +2794,7 @@ export async function applyAgentCompletionEffects(
       stripCcLine(prevReply),
       currentDepth,
     );
-  // Ruling 203 (F37-23): a person's @mention that landed while this agent was
+  // Ruling 69 (F37-23): a person's @mention that landed while this agent was
   // running was refused by the single-flight guard, and viberr told them the
   // agent would see it. This is where that promise is kept — ahead of the
   // operator's own react trigger below, for the same reason a queued human
@@ -2809,7 +2826,7 @@ export async function applyAgentCompletionEffects(
       !noProgress &&
       finished.state === "finished" &&
       currentDepth >= OPERATOR_REACT_DEPTH_CAP;
-    /** Ruling 489(d): the chain kept making progress and ran out of hops. */
+    /** Ruling 119: the chain kept making progress and ran out of hops. */
     const hopCapped = !!replyText && !noProgress && !depthCapped && hopCeilingReached;
     if (noProgress) {
       logger.info("operator react skipped: agent made no progress (repeated its reply)", {
@@ -2817,7 +2834,7 @@ export async function applyAgentCompletionEffects(
         runId: finished.id,
       });
     }
-    // Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+    // Ruling 119 (pass 37, F37-89): a chain that stopped because the work is
     // FINISHED did not get stuck, and must not be handed to a person as three
     // ways to redo it.
     //
@@ -2868,7 +2885,7 @@ export async function applyAgentCompletionEffects(
             ? `The coordination loop hit its ${OPERATOR_REACT_DEPTH_CAP}-cycle depth cap without reaching a boundary.`
             : `The chain made progress but ran ${OPERATOR_REACT_HOP_CEILING} hops without a person or a boundary.`,
       };
-      // Ruling 489: the capped packet says where the work stands — the report
+      // Ruling 119: the capped packet says where the work stands — the report
       // that hit the cap, the head and whether it is delivered, the last gate
       // result — and, over a committed head nobody delivered, recommends the
       // one step left. On WEB-8 its body carried nothing of the report, and
@@ -2920,7 +2937,7 @@ export async function applyAgentCompletionEffects(
     taskKey: input.taskKey,
     trigger: "agent-reply",
     reactDepth: currentDepth + 1,
-    // Ruling 489(d): every hop counts toward the ceiling, progress or not.
+    // Ruling 119: every hop counts toward the ceiling, progress or not.
     reactHops: chainHops + 1,
     backend: reactBackend,
     autonomy: reactAutonomy,
@@ -2956,7 +2973,7 @@ export async function clearWaitingToHuman(
     const fm = existing.parsed.frontmatter;
     const { getProject } = await import("~/server/projections/board-query.server");
     const stages = getProject(db, projectSlug)?.stages ?? [];
-    // Ruling 131(d): a task waiting on other work with nothing else pending
+    // Ruling 115: a task waiting on other work with nothing else pending
     // owes nobody anything either; "waiting on a human" would put a held task
     // on every human-decision surface with nothing to decide.
     const nothingPending = !existing.parsed.packet && fm.recommendations.length === 0;
@@ -2999,7 +3016,7 @@ export async function markWaitingAgent(
   }
 }
 
-/** Ruling 157 (pass 35, F35-8): who or what started the work that lifts a hold. */
+/** Ruling 54 (pass 35, F35-8): who or what started the work that lifts a hold. */
 export type HoldLiftCause =
   | {
       kind: "operator-run";
@@ -3011,9 +3028,9 @@ export type HoldLiftCause =
     }
   | { kind: "dispatch"; profileId: string; name: string; by: AuditActor | null };
 
-/** The hold shape (ruling 157): a stored `blocked` with no open packet and no
+/** The hold shape (ruling 54): a stored `blocked` with no open packet and no
  *  dependency list. An open `blocked` packet keeps the withdrawal paths as the
- *  only lift; a dependency list is ruling 131's own floor. */
+ *  only lift; a dependency list is ruling 55's own floor. */
 function isPacketlessHold(parsed: ParsedTaskFile): boolean {
   return (
     parsed.frontmatter.readiness === "blocked" &&
@@ -3023,7 +3040,7 @@ function isPacketlessHold(parsed: ParsedTaskFile): boolean {
 }
 
 /**
- * Ruling 157 (pass 35, F35-8): a hold ends when someone starts work.
+ * Ruling 54 (pass 35, F35-8): a hold ends when someone starts work.
  *
  * `hold_runtime_debug` (and the refused arm of a collision ceremony) stores
  * `readiness: blocked` with no packet, and nothing paired with that write: a
@@ -3104,7 +3121,7 @@ export async function liftHoldForRun(
 }
 
 /**
- * Ruling 216 (F37-36): a person's own operator run re-litigates the DELIBERATE
+ * Ruling 120 (F37-36): a person's own operator run re-litigates the DELIBERATE
  * STAGE hold, the way every other human re-litigation already does.
  *
  * `heldAtStage` is the stranded backstop's durable marker (V18): the operator
@@ -3198,9 +3215,9 @@ export async function operatorPromptAgent(
     /** The agent's @mention handle (e.g. its name), prepended to the prompt so
      *  the comment reads as directing the agent by name ("@dev implement …"). */
     handle: string;
-    /** Ruling 421: this directive puts the completeness question. */
+    /** Ruling 93: this directive puts the completeness question. */
     completeness?: boolean;
-    /** Ruling 583: the run records no verdict. */
+    /** Ruling 124: the run records no verdict. */
     noVerdict?: boolean;
   },
   ctx: TaskMutationContext = {},
@@ -3215,7 +3232,7 @@ export async function operatorPromptAgent(
   // The POSTED form carries the ambiguity disclosure; the run's directive stays
   // exactly what the operator wrote (S5-G3 — the note addresses the humans
   // reading the timeline, not the agent about to work).
-  // Ruling 232 amendment: no disclosure on a directive. It notifies nobody by
+  // Ruling 70 amendment: no disclosure on a directive. It notifies nobody by
   // declared audience, so a note whose remedy is "spell the tag differently"
   // points at the wrong cause.
   const commentText = withAmbiguityDisclosure(db, directive, undefined, "agent");
@@ -3231,7 +3248,7 @@ export async function operatorPromptAgent(
   await appendTimelineEvent(taskRef(opCtx, input.projectSlug, input.taskKey), comment);
   reprojectTask(db, opCtx, input.projectSlug, input.taskKey);
   // P14-GV-06 added this fan-out so a human @tagged inside an operator directive
-  // ("…coordinate with @Arda") was not silently dropped. Ruling 232 (owner,
+  // ("…coordinate with @Arda") was not silently dropped. Ruling 70 (owner,
   // 2026-09-14) reverses that for THIS writer: the comment's declared audience is
   // the agent, and pass 37 measured what the tags in it actually are — 19 of 49
   // mention notifications on the live instance came from directives whose @handle
@@ -3239,7 +3256,7 @@ export async function operatorPromptAgent(
   // question naming Stripe, Adyen, and Mock-only"), re-issued on every rework
   // round. The call stays, carrying the audience, so the rule lives at the one
   // fan-out seam, which notifies nobody for an agent audience.
-  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  // Ruling 20: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, input.projectSlug, input.taskKey),
@@ -3256,7 +3273,7 @@ export async function operatorPromptAgent(
 
   // 2. Trigger the agent's run with the operator's directive as its turn focus.
   const { isDispatchHeld, startAgentRun } = await import("./specialist-run.server");
-  // Ruling 263: the dispatch's own verdict travels back to the operator's tool
+  // Ruling 152: the dispatch's own verdict travels back to the operator's tool
   // reply, which used to say "started its run" for a refused one too.
   let started: StartAgentRunResult;
   try {
@@ -3276,7 +3293,7 @@ export async function operatorPromptAgent(
     // standing as a delivered hand-off. Live-caught: an orphaned
     // "@blog-writer Rework…" from a refused start read as "already prompted"
     // to every later operator turn, so nothing ever re-engaged the deliverer.
-    // Ruling 152(c) (pass 35, G35-4): a HOLD is not a refused start. The
+    // Ruling 151 (pass 35, G35-4): a HOLD is not a refused start. The
     // dispatcher already wrote its own "Dispatch held" note ("nothing was
     // dispatched and no decision is needed") and already scheduled a
     // `run-agent` occurrence carrying THIS directive, so a second note here

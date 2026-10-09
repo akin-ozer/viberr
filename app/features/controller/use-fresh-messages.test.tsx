@@ -6,8 +6,8 @@ import { useFreshMessageIds } from "./use-fresh-messages";
 afterEach(cleanup);
 
 /**
- * The entry-motion rule the dock and the controller page share (ruling 121,
- * ruling 451(d)): a message is fresh only if it arrived while its conversation
+ * The entry-motion rule the dock and the controller page share (ruling 256,
+ * ruling 284): a message is fresh only if it arrived while its conversation
  * was already on screen.
  */
 describe("useFreshMessageIds", () => {

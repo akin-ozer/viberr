@@ -65,7 +65,7 @@ function renderProfile(data: ProfileData = BASE) {
 }
 
 /** The GitHub identity panel alone. Several of its assertions name classes the
- *  Agent accounts panel (ruling 127) also uses, and a page-wide query would
+ *  Agent accounts panel (ruling 137) also uses, and a page-wide query would
  *  read that panel's state as this one's. */
 function githubPanel(getByText: (text: string) => HTMLElement): HTMLElement {
   return getByText("GitHub identity").closest(".panel")!;
@@ -132,10 +132,10 @@ describe("ProfilePage", () => {
     const { container, getByText, queryByText } = renderProfile();
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
-    // 9 routing rows (controller joined, ruling 99; dependencies, ruling 131;
-    // ownership, ruling 140; agent questions, ruling 481) + the desktop
-    // notifications row (ruling 481) + 2 appearance rows (theme, timeline
-    // default — ruling 148(c) removed the reduce-motion row).
+    // 9 routing rows (controller joined, ruling 247; dependencies, ruling 57;
+    // ownership, ruling 50; agent questions, ruling 74) + the desktop
+    // notifications row (ruling 74) + 2 appearance rows (theme, timeline
+    // default; ruling 323 has no reduce-motion row).
     expect(rows).toHaveLength(12);
     const toggles = container.querySelectorAll(".tgl[role='switch']");
     // The 9 category toggles and the desktop switch; nothing else on the page
@@ -159,7 +159,7 @@ describe("ProfilePage", () => {
     expect(queryByText("Decision packets for you notifications off")).toBeNull();
   });
 
-  it("MOUNTS the Appearance panel: theme seg and timeline default (ruling 148(c): no motion toggle)", () => {
+  it("MOUNTS the Appearance panel: theme seg and timeline default (ruling 323: no motion toggle)", () => {
     const { getByText, queryByText, container } = renderProfile();
     expect(getByText("Appearance & workspace")).toBeTruthy();
 
@@ -172,7 +172,7 @@ describe("ProfilePage", () => {
     fireEvent.click(getByText("Dark"));
     expect(lastTheme).toBe("dark");
 
-    // Ruling 148(c): the "Reduce motion" toggle is gone; the OS preference is
+    // Ruling 323: the "Reduce motion" toggle is gone; the OS preference is
     // the one reduced-motion signal.
     expect(container.querySelector(".tgl[aria-label='Reduce motion']")).toBeNull();
     expect(queryByText("Reduce motion")).toBeNull();
@@ -194,22 +194,22 @@ describe("ProfilePage", () => {
     // table (R8-2)
     // surfaces every enforced action. edit-task-meta (contributor+) is one of
     // the 16.
-    // Ruling 309(a): the same scope line the Policy table carries. This list is
+    // Ruling 26(b): the same scope line the Policy table carries. This list is
     // the one a person reads about THEMSELVES, so a maintainer learning they
     // hold "Edit task priority, labels & due date" has to also learn that the
     // grant releases held tasks. CANARY: drop `covers` from RBAC_ROWS.
-    // Ruling 503 added the epic a task is in to the same line.
+    // The same line names the epic a task is in.
     expect(
       getByText("the epic a task is in, and what it waits on, which releases it when cleared"),
     ).toBeTruthy();
-    // Ruling 379 added the `attach-file` row (contributor and above), and
-    // ruling 503 `manage-epics` (the same tiers), so a maintainer holds two more.
+    // A maintainer's 16 include `attach-file` (contributor and above, ruling
+    // 76) and `manage-epics` (the same tiers, ruling 26(b)).
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(16);
-    // Ruling 525 added `delete-controller-conversations`, which admins alone
-    // hold, so a maintainer is refused one more, and ruling 582
-    // `remove-from-record` one more again.
+    // A maintainer's 7 refusals include two that admins alone hold:
+    // `delete-controller-conversations` (ruling 26(b)) and `remove-from-record`
+    // (ruling 80).
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(7);
-    // Ruling 148: each cell says the fact. The check is aria-hidden, so a
+    // Ruling 291: each cell says the fact. The check is aria-hidden, so a
     // glyph-only pair announced nothing at all, and the denied "−" read as a
     // collapse control in the value slot.
     expect(container.querySelector(".rbac-yes")!.textContent).toContain("yes");
@@ -219,7 +219,7 @@ describe("ProfilePage", () => {
     expect(getByText("Policy → Human access")).toBeTruthy();
   });
 
-  it("mounts Agent accounts in the right column ABOVE GitHub identity (ruling 127)", () => {
+  it("mounts Agent accounts in the right column ABOVE GitHub identity (ruling 137)", () => {
     const { container, getByText, getAllByText } = renderProfile();
     expect(getByText("Agent accounts")).toBeTruthy();
     // Both backends read "Not connected" on a fresh account.
@@ -236,10 +236,10 @@ describe("ProfilePage", () => {
   it("GitHub identity: not-connected card with missing chips and a real Connect button", () => {
     const { getByText } = renderProfile();
     expect(getByText("GitHub identity")).toBeTruthy();
-    // Ruling 127: `.cred-warn` is no longer unique to this panel — the Agent
+    // Ruling 137: `.cred-warn` is no longer unique to this panel — the Agent
     // accounts cards above it use the same class for their unconnected state —
     // so these assertions are scoped to the GitHub panel rather than the page
-    // (and "not connected" is now every unconnected card's badge, ruling 148).
+    // (and "not connected" is now every unconnected card's badge, ruling 323).
     const github = githubPanel(getByText);
     expect(github.textContent).toContain("not connected");
     expect(github.querySelectorAll(".scope-chip.miss")).toHaveLength(2);
@@ -268,7 +268,7 @@ describe("ProfilePage", () => {
     expect(getByText(/GitHub sign-in isn't configured on this deployment/)).toBeTruthy();
   });
 
-  it("ruling 154: an admin-linked handle reads as such on an OAuth-less deployment, with no Connect", () => {
+  it("ruling 29: an admin-linked handle reads as such on an OAuth-less deployment, with no Connect", () => {
     const { getByText } = renderProfile({
       ...BASE,
       githubConfigured: false,
@@ -285,11 +285,11 @@ describe("ProfilePage", () => {
     expect(github.querySelector(".cred-warn")).toBeNull();
   });
 
-  // Ruling 154: the admin link is not confined to an OAuth-less deployment.
+  // Ruling 29: the admin link is not confined to an OAuth-less deployment.
   // Where GitHub sign-in IS configured, an unconnected local or Google account
   // with a linked handle takes the cred-card branch, whose warning used to deny
   // the very capability the line above grants.
-  it("ruling 154: a linked handle on a GitHub-configured deployment is not denied by the warning", () => {
+  it("ruling 29: a linked handle on a GitHub-configured deployment is not denied by the warning", () => {
     const { getByText } = renderProfile({
       ...BASE,
       githubConfigured: true,
@@ -305,20 +305,20 @@ describe("ProfilePage", () => {
     expect(github.querySelector(".cred-warn button.btn")!.textContent).toContain("Connect");
   });
 
-  it("GitHub identity: connected card offers Disconnect, behind a confirm (ruling 481(b))", () => {
+  it("GitHub identity: connected card offers Disconnect, behind a confirm (ruling 323)", () => {
     const { container, getByRole, getByText } = renderProfile({
       ...BASE,
       user: { ...BASE.user, githubConnected: true, idp: "github", githubHandle: "arda-kaya" },
     });
     expect(container.querySelector(".cred-ok")).toBeTruthy();
     expect(container.querySelectorAll(".scope-chip.miss")).toHaveLength(0);
-    // Ruling 149: disconnecting an identity is destructive, so the control
+    // Ruling 278: disconnecting an identity is destructive, so the control
     // carries the danger label. Canary: drop `danger` in `GithubStatus`
     // (profile-github.tsx).
     expect(
       Array.from(container.querySelector(".cred-ok button")!.classList),
     ).toContain("danger");
-    // Ruling 481(b) (F40-49): the press opens the shared confirm; nothing is
+    // Ruling 323 (F40-49): the press opens the shared confirm; nothing is
     // posted until it is confirmed. Canary: submit from the button again.
     fireEvent.click(container.querySelector(".cred-ok button")!);
     expect(lastSubmit).toBeNull();
@@ -377,7 +377,7 @@ describe("ProfilePage", () => {
     expect(view.queryByRole("alertdialog", { name: "Disconnect GitHub?" })).toBeNull();
   });
 
-  it("ruling 148(b): Change password is a row on the Profile card whose button opens a modal", () => {
+  it("ruling 323: Change password is a row on the Profile card whose button opens a modal", () => {
     const { container, getByText, queryByRole } = renderProfile();
     // No inline three-field form on the page, and no panel of its own.
     expect(container.querySelectorAll("input[type='password']")).toHaveLength(0);
@@ -395,7 +395,7 @@ describe("ProfilePage", () => {
     const save = dialog.querySelector<HTMLButtonElement>(".modal-foot .btn.primary")!;
     expect(save.textContent).toBe("Change password");
 
-    // Ruling 147: enabled on an incomplete form, and a submit is REFUSED with
+    // Ruling 288: enabled on an incomplete form, and a submit is REFUSED with
     // the first empty field marked and focused, no request made.
     expect(save.disabled).toBe(false);
     fireEvent.click(save);
@@ -456,13 +456,13 @@ describe("ProfilePage", () => {
 });
 
 /**
- * Ruling 368: Connect named its work ("Connecting…") but kept the GitHub glyph
+ * Ruling 286: Connect named its work ("Connecting…") but kept the GitHub glyph
  * and sat at the .45 refused step with a not-allowed cursor while better-auth
  * built the OAuth redirect. It is `aria-busy` now, the loader spinning.
  * Canary: drop `aria-busy={connectBusy || undefined}` in `GithubStatus`
  * (profile-github.tsx).
  */
-describe("ruling 368: GitHub Connect in flight", () => {
+describe("ruling 286: GitHub Connect in flight", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("reads Connecting…, busy, the loader spinning, until the redirect", () => {
@@ -481,7 +481,7 @@ describe("ruling 368: GitHub Connect in flight", () => {
 });
 
 /**
- * Ruling 481(c) (F40-51): Desktop notifications, the per-browser opt-in. The
+ * Ruling 74 (F40-51): Desktop notifications, the per-browser opt-in. The
  * browser's permission is asked for ONLY on the switch's press (never on a
  * render), the switch turns on only once the browser allowed it and showed a
  * notification, and a denial leaves it off with the reason on the row.
@@ -490,7 +490,7 @@ describe("ruling 368: GitHub Connect in flight", () => {
  * and the "not on render" assertion fails; record the opt-in before the
  * permission answers and the denied case turns the switch on.
  */
-describe("ruling 481(c): the Desktop notifications switch", () => {
+describe("ruling 74: the Desktop notifications switch", () => {
   class FakeNotification {
     static permission: NotificationPermission = "default";
     static answer: NotificationPermission = "granted";

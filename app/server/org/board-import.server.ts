@@ -37,7 +37,7 @@ import {
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { getProject, listProjects } from "~/server/projections/board-query.server";
 import { baseAgentDeployments } from "~/server/seed/agent-catalog.server";
-import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
+import { grantsValidationVerdict, grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { BoardDelivers } from "~/shared/board-delivers";
 import { errorMessage } from "~/shared/errors";
 import { slugify } from "~/shared/ids/slugify";
@@ -72,7 +72,7 @@ import {
 import { readStoreFolderFiles, writeStoreFiles } from "./store-files.server";
 
 /**
- * Ruling 653: IMPORT a board file as a new project, from Instance settings
+ * Ruling 32: IMPORT a board file as a new project, from Instance settings
  * (an org admin's door, like every other change to the instance's agent
  * resources). Two steps, one plan:
  *
@@ -156,7 +156,7 @@ export interface BoardImportPreview {
   stages: StageDef[];
   /** The rule into each stage after the first, in stage order. */
   workflow: { from: string; to: string; boundary: Boundary }[];
-  /** Ruling 667: `software` when an agent the board deploys may write a
+  /** Ruling 224: `software` when an agent the board deploys may write a
    *  repository, so the import needs one; `results` when none may, so the
    *  repository is optional. */
   delivers: BoardDelivers;
@@ -249,8 +249,8 @@ class NameClaims {
   /**
    * The first of `base`, `base 2`, `base 3`… whose key is free, claimed.
    * The key is the slug of the name (how every store writer keys a
-   * resource), so a knowledge base named "Release rulings 2" lands in
-   * `release-rulings-2`.
+   * resource), so a knowledge base named "Release rulings 26(a)" lands in
+   * `release-rulings-26(a)`.
    */
   claim(base: string): ClaimedName {
     for (let n = 1; ; n += 1) {
@@ -356,7 +356,7 @@ function checkBoard(board: BoardDefinition, problems: string[], notes: string[])
   const seen = new Set<string>();
   for (const d of board.agents) {
     if (seen.has(d.profileId)) problems.push(`board.md: the agent \`${d.profileId}\` is deployed twice.`);
-    // Ruling 99: the controller is the instance's own, never one of a
+    // Ruling 247: the controller is the instance's own, never one of a
     // board's agents.
     if (d.profileId === CONTROLLER_PROFILE_ID) {
       problems.push("board.md deploys `controller`, the instance's controller, which is never one of a board's agents.");
@@ -374,8 +374,17 @@ function checkBoard(board: BoardDefinition, problems: string[], notes: string[])
     else if (isTerminalStage(rule.stageId, board.stages)) {
       problems.push(`board.md: a required reviewer is set at ${stage.name}, the final stage; a review runs before it.`);
     }
-    if (!seen.has(rule.profileId)) {
+    const deployed = board.agents.find((d) => d.profileId === rule.profileId);
+    if (!seen.has(rule.profileId) || !deployed) {
       problems.push(`board.md: a required reviewer names the agent \`${rule.profileId}\`, which the board does not deploy.`);
+    } else if (!grantsValidationVerdict(deployed.capabilities)) {
+      // Ruling 17: the grant the Settings writer checks, by the same
+      // predicate. Without it the agent never approves, and acceptance of
+      // every delivered task waits on it until an admin force-accepts.
+      problems.push(
+        `board.md: a required reviewer names the agent \`${rule.profileId}\`, which the board deploys without ` +
+          "`report-validation-verdict`, so it could never give the approval acceptance waits on.",
+      );
     }
   }
   if (board.gates) {
@@ -691,7 +700,7 @@ function planBoardImport(db: DatabaseSync, file: BoardFileUpload, ctx: OrgSeedCo
 }
 
 /**
- * Ruling 667: what an imported board delivers, read off its own roster. The
+ * Ruling 224: what an imported board delivers, read off its own roster. The
  * file carries each deployment's grants as they were exported, so an agent
  * that may write a repository makes it a software board, which needs one.
  */
@@ -975,7 +984,7 @@ export async function importBoard(
     );
   }
   return withActionWatchdog(`import-board:${input.key || "?"}`, async () => {
-    // Ruling 667: a board none of whose agents writes a repository needs none.
+    // Ruling 224: a board none of whose agents writes a repository needs none.
     const identity = checkNewProjectIdentity(db, { ...input, delivers: plan.preview.delivers });
     const reached = await reachProjectRepository(db, identity, input.createRepository, actor, ctx);
     const renames: Renames = { kb: new Map(), skills: new Map(), mcps: new Map(), agents: new Map() };

@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { ConfirmDialog } from "./confirm-dialog";
 
 /**
- * Ruling 458(f) moved the hand-written plain confirms onto `ConfirmDialog`. Two
+ * Ruling 297 moved the hand-written plain confirms onto `ConfirmDialog`. Two
  * of them needed what the shared card did not carry: the KB browser's confirms
  * stack over the browser's own dialog (`over-modal`), and the agent profile
  * delete shows a glyph in its confirm button. Both are optional props, so the
@@ -40,7 +40,7 @@ describe("ConfirmDialog", () => {
     expect(dialog.className).toBe("confirm-card");
   });
 
-  it("is described by its body (ruling 458(k))", () => {
+  it("is described by its body (ruling 287(d))", () => {
     const { getByRole, getByText } = renderDialog();
     const dialog = getByRole("alertdialog", { name: "Remove the thing?" });
     const body = getByText("The thing goes away.");

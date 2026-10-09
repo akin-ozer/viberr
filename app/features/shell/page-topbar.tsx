@@ -10,7 +10,7 @@ import { UserMenu, type MenuUser } from "./user-menu";
  * render OUTSIDE the workspace layout (`/org/settings`, `/controller`,
  * `/insights`).
  *
- * Ruling 145 (owner, 2026-09-05). Every project surface, the board's own
+ * Ruling 294 (owner, 2026-09-05). Every project surface, the board's own
  * Settings included, sits under a header carrying the brand, the ⌘K search, the
  * bell and the account menu; Home carries the same one. The instance surfaces
  * behind Home's Settings tiles carried none of it: opening "Users & access" or
@@ -38,7 +38,7 @@ export function PageTopbar({
   title: string;
   user: MenuUser;
   theme: ThemePreference;
-  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 457). */
+  /** The bell's counts (`bellCounts`); the bell loads its own list (ruling 300). */
   unread: number;
   orphanUnread: number;
   /** The palette lives in the layout (one mount per surface), so the trigger

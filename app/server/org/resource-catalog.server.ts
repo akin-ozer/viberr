@@ -115,7 +115,7 @@ export function buildResourceCatalog(
 }
 
 /**
- * Ruling 479(b): why a run of any profile granting this server gets none of its
+ * Ruling 184: why a run of any profile granting this server gets none of its
  * tools, read from the registry row the Settings list renders (no secret box
  * is opened here). The order is the run resolver's
  * (`resolveSpecialistMcpServersDetailed`): an unreadable credential and a
@@ -132,7 +132,7 @@ function mcpRunWarning(m: McpView): ResItemWarning | null {
       title: `Runs do not mount ${m.name}: its stored credential can't be opened. An org admin re-enters it in Instance settings → Agent resources.`,
     };
   }
-  // Ruling 469: a pasted credential wins over a sign-in, and `mapMcp` reports
+  // Ruling 192: a pasted credential wins over a sign-in, and `mapMcp` reports
   // no sign-in status for such a row, so `oauth` here is the one that decides.
   if (m.oauth && m.oauth.status !== "signed_in") {
     const expired = m.oauth.status === "expired";

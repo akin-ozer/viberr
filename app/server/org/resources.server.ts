@@ -219,7 +219,7 @@ export interface KbView {
    * "folder missing" instead of pretending it is a normal empty KB.
    */
   folderExists: boolean;
-  /** Ruling 578: its folder is closed to every agent's shell (0700), so only
+  /** Ruling 209: its folder is closed to every agent's shell (0700), so only
    *  the runs it is granted to read it, through their knowledge tool. */
   private: boolean;
   /** "store://kb/<dir>" (no trailing slash — mock root prop contract). */
@@ -360,9 +360,9 @@ function getKnowledgeBase(
 }
 
 /**
- * Ruling 578: make a knowledge base private, or open it again. Private is its
+ * Ruling 209: make a knowledge base private, or open it again. Private is its
  * folder closed to group and others (0700, the server's alone); open is 0755,
- * what ruling 460(d) gives `kb/` itself. The flag is the folder's own mode, so
+ * what ruling 15(c) gives `kb/` itself. The flag is the folder's own mode, so
  * it needs no column, survives a backup, and no boot widens it: the layout
  * check sets `kb/` and never the folders inside it.
  */
@@ -386,7 +386,7 @@ export function setKnowledgeBasePrivacy(
       actor,
       subjectKind: "org_kb",
       subjectId,
-      // Ruling 681: who reads it changes, which the boards it is given to see.
+      // Ruling 34: who reads it changes, which the boards it is given to see.
       details: { dir, private: input.private, resource: auditedResource("kb", dir, ctx.dataRoot) },
     });
     publishResourceUpdated("kb", subjectId);
@@ -471,7 +471,7 @@ export async function saveKnowledgeBase(
       await updateResourceReferences("kb", renamedFrom, dir, ctx.dataRoot);
     }
   };
-  // Ruling 681: a rename changes the name every grant and a board's rulings
+  // Ruling 34: a rename changes the name every grant and a board's rulings
   // carry, so the boards that hold it see it. Asked by the OLD name, which the
   // grants still carry until the rewrite below. A save that only changes the
   // display name or the refresh mode changes nothing a run reads.
@@ -538,7 +538,7 @@ export async function deleteKnowledgeBase(
 ): Promise<{ toast: string }> {
   const kb = getKnowledgeBase(db, id, ctx);
   if (!kb) throw AppError.notFound("No such knowledge base.");
-  // Ruling 681: who held it, asked before the grants are dropped below.
+  // Ruling 34: who held it, asked before the grants are dropped below.
   const held = auditedResource("kb", kb.dir, ctx.dataRoot);
   rmSync(kbDirPath(kb.dir, ctx.dataRoot), { recursive: true, force: true });
   // P13-KM-07: drop the now-dangling grants instead of leaving every profile
@@ -717,31 +717,31 @@ export interface McpView {
    */
   heuristicWarmups: number;
   /**
-   * Ruling 176: the tools an admin marked as WRITE tools. Each is denied on
+   * Ruling 188: the tools an admin marked as WRITE tools. Each is denied on
    * every run whose `execute-code-or-write-repo` grant is withheld, and on
    * every operator run. Empty when none are marked; Viberr makes no claim about
    * the tools left unmarked.
    */
   writeTools: string[];
-  /** Ruling 176: whether an admin has saved this server's write-tool list at
+  /** Ruling 188: whether an admin has saved this server's write-tool list at
    *  all, so an empty list saved on purpose reads `true`. The editor pre-ticks
    *  the discovery suggestion only while this is false. */
   writeToolsReviewed: boolean;
-  /** Ruling 176: the tool names the last successful probe listed, offered in
+  /** Ruling 188: the tool names the last successful probe listed, offered in
    *  the editor. Null before any probe answered with a list. */
   discoveredTools: string[] | null;
-  /** Ruling 278: paths in this server's command that lie inside Viberr's own
+  /** Ruling 188: paths in this server's command that lie inside Viberr's own
    *  data root. Empty for an HTTP server and for a command that names none. */
   storePaths: string[];
   /**
-   * Ruling 469: where the connection stands on an OAuth sign-in — needs one,
+   * Ruling 192: where the connection stands on an OAuth sign-in — needs one,
    * signed in (until when, and whether it renews) or expired — or null when it
    * is not an OAuth connection. The public half only; the tokens never leave
    * the server.
    */
   oauth: McpOAuthView | null;
   /**
-   * Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+   * Ruling 192: the scope an admin asks the next OAuth sign-in for
    * ("Requested scopes"), space-joined; null asks for what the resource
    * advertises. What was GRANTED is `oauth.scope`.
    */
@@ -767,7 +767,7 @@ type McpRow = {
   oauth_requested_scope: string | null;
 };
 
-/** Ruling 176: the stored write-tool policy, `{ name, gate }` per marked tool.
+/** Ruling 188: the stored write-tool policy, `{ name, gate }` per marked tool.
  *  One gate kind for now: the repo-write grant it rides on. */
 const storedToolPolicySchema = z.array(
   z.object({ name: z.string(), gate: z.literal("repo-write") }),
@@ -804,7 +804,7 @@ function toolPolicyJson(names: readonly string[]): string {
 }
 
 /**
- * Ruling 176: an admin's write-tool list, checked and de-duplicated before it
+ * Ruling 188: an admin's write-tool list, checked and de-duplicated before it
  * can become a deny rule. A name outside the MCP spec's alphabet would be a
  * rule that matches nothing, so it is refused rather than stored.
  */
@@ -831,14 +831,14 @@ function checkedWriteTools(names: readonly string[]): string[] {
 }
 
 /** What `org.mcp.added` / `org.mcp.updated` record. `requestedScope`
- *  (ruling 486) only when the save set or changed it. */
+ *  (ruling 192) only when the save set or changed it. */
 type McpSaveAudit = {
   name: string;
   transport: string;
   renamed?: boolean;
   oauthDropped?: boolean;
   requestedScope?: string | null;
-  /** Ruling 653: registered by a board import, never probed. */
+  /** Ruling 189: registered by a board import, never probed. */
   unchecked?: boolean;
 } & AuditDetails;
 
@@ -849,7 +849,7 @@ function addedAudit(name: string, transport: string, requestedScope: string | nu
 }
 
 /**
- * Ruling 486(c): the "Requested scopes" an admin typed, as the next sign-in's
+ * Ruling 192: the "Requested scopes" an admin typed, as the next sign-in's
  * authorization request sends them (`parseRequestedScopes`). A token RFC 6749
  * does not allow would make the authorization server refuse the request, so
  * it is refused here, before anything is probed. Null clears the field.
@@ -869,7 +869,7 @@ function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * Ruling 278 (pass 37, F37-111): the paths in a stdio MCP's command that lie
+ * Ruling 188 (pass 37, F37-111): the paths in a stdio MCP's command that lie
  * inside VIBERR'S OWN store.
  *
  * Found live. `kb-conventions` spawned `@modelcontextprotocol/server-filesystem`
@@ -879,7 +879,7 @@ function sameNameSet(a: readonly string[], b: readonly string[]): boolean {
  * them reviewers. A reviewer could rewrite the rules it is judged against, and
  * the operator reads those rules on every turn.
  *
- * Ruling 176's marking would not have closed it: marked write tools are
+ * Ruling 188's marking would not have closed it: marked write tools are
  * withheld only from a run that WITHHOLDS `execute-code-or-write-repo`, and
  * every realistic holder of a filesystem MCP has it — a reviewer needs it to
  * run a test suite. So the guard is shaped for a read-only profile that barely
@@ -912,14 +912,14 @@ export function storePathsInMcpTarget(
   return hits;
 }
 
-/** Ruling 278: the sentence every surface uses for that overlap. */
+/** Ruling 188: the sentence every surface uses for that overlap. */
 export function mcpStoreAccessNote(paths: readonly string[]): string | null {
   if (paths.length === 0) return null;
   return (
     `This command is pointed at ${paths.join(", ")}, inside Viberr's own store. ` +
     "An agent holding this grant can read and (if the server offers write tools) " +
     "REWRITE the knowledge bases, skills and agent profiles Viberr injects into " +
-    "runs, including the rules its own reviewers judge it against. Ruling 176's " +
+    "runs, including the rules its own reviewers judge it against. Ruling 188's " +
     "write-tool marking does not cover this: it binds only on a run that withholds " +
     "execute-code-or-write-repo, and an agent that runs tests holds it. Grant this " +
     "server deliberately, or point it somewhere else."
@@ -949,9 +949,9 @@ function mapMcp(row: McpRow): McpView {
     writeTools: writeTools ?? [],
     writeToolsReviewed: writeTools !== null,
     discoveredTools: storedToolNames(row.tool_names_json),
-    // Ruling 278: computed from the stored command, so it cannot go stale.
+    // Ruling 188: computed from the stored command, so it cannot go stale.
     storePaths: row.transport === "stdio" ? storePathsInMcpTarget(row.target) : [],
-    // Ruling 469: the public half; reading it opens no box. A pasted
+    // Ruling 192: the public half; reading it opens no box. A pasted
     // credential wins when present (469(e)) — it is what a run mounts — so a
     // row holding one has no sign-in status to report (R-oauth-2).
     oauth: row.cred_ref ? null : mcpOAuthView(row.oauth_json),
@@ -966,10 +966,10 @@ function mapMcp(row: McpRow): McpView {
  * `ok`         — decrypted; use `token`.
  * `unreadable` — a credential IS configured and cannot be opened: a legacy
  *                plaintext ref, or a box no current/retired key opens.
- * `oauth`      — ruling 469: signed in with OAuth. There is no token to hand
+ * `oauth`      — ruling 192: signed in with OAuth. There is no token to hand
  *                over here: the gateway asks `mcpOAuthTokenSource` on every
  *                request, which renews it.
- * `signed_out` — ruling 469: the server asks for an OAuth sign-in it does not
+ * `signed_out` — ruling 192: the server asks for an OAuth sign-in it does not
  *                have (or its sign-in expired); `reason` says which, and a run
  *                is told it instead of meeting a 401 on every call.
  */
@@ -1005,7 +1005,7 @@ export function getMcpCredentialState(
     .prepare(`SELECT id, cred_ref FROM org_mcp_servers WHERE name = ?`)
     .get(name) as { id: string; cred_ref: string | null } | undefined;
   if (!row) return { state: "none" };
-  // Ruling 469(e): a static credential works exactly as before, and a sign-in
+  // Ruling 192: a static credential works exactly as before, and a sign-in
   // drops it, so a row never holds both.
   if (row.cred_ref) return openMcpCredential(db, row.id, name, row.cred_ref);
   const oauth = mcpOAuthCredential(db, row.id);
@@ -1232,8 +1232,8 @@ export function mcpSpawnEnv(
 
 /**
  * Spawn a registered stdio MCP command the way every server-side caller does:
- * the discovery probe, the warm-up and, since ruling 461, the MCP gateway's
- * upstream for a credentialed stdio server. One definition, so what a probe
+ * the discovery probe, the warm-up and the MCP gateway's upstream for a
+ * credentialed stdio server (ruling 191). One definition, so what a probe
  * measures is what a run's calls then reach.
  */
 export const spawnMcpProcess: McpSpawn = (command, args, token) => {
@@ -1292,14 +1292,14 @@ interface StdioDiscoveryFailure {
    *  CALLER can decide whether this is really a first run (it holds the row),
    *  so the probe reports it and stays DB-free. */
   firstRunInstaller?: boolean;
-  /** Ruling 469: an HTTP server probed with no credential answered the MCP
+  /** Ruling 192: an HTTP server probed with no credential answered the MCP
    *  authorization challenge; this is the metadata URL it named. The caller
    *  records it, so the row reads "needs sign-in". */
   signInChallenge?: string;
 }
 
 export type StdioDiscovery =
-  /** `toolNames` (ruling 176): the names the listing carried, for the editor's
+  /** `toolNames` (ruling 188): the names the listing carried, for the editor's
    *  write-tool suggestions; an entry without a string name is counted in
    *  `tools` and left out here. */
   | { kind: "up"; latencyMs: number; tools: number; toolNames: string[] }
@@ -1397,7 +1397,7 @@ export async function discoverStdioMcpTools(
      * "exited before responding", and the ImportError naming the exact symbol
      * was unrecoverable from the app at all.
      *
-     * Same shape as ruling 69 for git's stderr, and the same scrubber: the
+     * Same shape as ruling 219 for git's stderr, and the same scrubber: the
      * child is spawned WITH `MCP_CREDENTIAL` in its env (P13-KM-05), so a
      * server that dumps its environment while dying would otherwise print the
      * credential into a toast. `redactGitOutput` removes it BY VALUE — it is
@@ -1556,7 +1556,7 @@ export async function discoverStdioMcpTools(
 }
 
 /** The protocol version the stdio discovery handshake asks for. The HTTP probe
- *  negotiates through the SDK client instead (ruling 461). */
+ *  negotiates through the SDK client instead (ruling 191). */
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 
 /**
@@ -1582,7 +1582,7 @@ type McpHandshakeRequest =
 const mcpToolEntrySchema = z.object({ name: z.string() });
 
 /** The `tools/list` result envelope: every entry counts as a tool, and each
- *  reads as its name, or null when it carries no string name (ruling 176). */
+ *  reads as its name, or null when it carries no string name (ruling 188). */
 const mcpToolListSchema = z.object({
   tools: z.array(
     z.unknown().transform((entry) => mcpToolEntrySchema.safeParse(entry).data?.name ?? null),
@@ -1599,13 +1599,13 @@ const mcpToolListSchema = z.object({
  * runs the real handshake — `initialize`, `notifications/initialized`,
  * `tools/list` — and counts the tools.
  *
- * Ruling 461: through the SAME client the MCP gateway holds a run's upstream
+ * Ruling 191: through the SAME client the MCP gateway holds a run's upstream
  * with (`connectHttpUpstream`): Streamable HTTP, the legacy SSE transport when
  * the server answers that way, and the credential as `Authorization: Bearer`
  * (P13-KM-05). A credentialed server's green dot therefore means "up with its
  * credential, over the transport the run's calls will take".
  */
-/** Ruling 469: a probe that failed on the sign-in rather than the endpoint,
+/** Ruling 192: a probe that failed on the sign-in rather than the endpoint,
  *  which the toast states as itself instead of "unreachable". */
 function isSignInReason(reason: string): boolean {
   return reason === OAUTH_NEEDS_SIGN_IN || reason === OAUTH_SIGN_IN_EXPIRED;
@@ -1620,7 +1620,7 @@ async function discoverHttpMcpTools(
     token: options.token ?? null,
     timeoutMs: options.timeoutMs ?? 5000,
   };
-  // Ruling 469: a signed-in server is probed with its OAuth token, renewed
+  // Ruling 192: a signed-in server is probed with its OAuth token, renewed
   // the way the gateway renews it, so "up" is earned by the same sign-in.
   if (options.auth) connectOptions.auth = options.auth;
   if (options.fetchImpl) connectOptions.fetchImpl = options.fetchImpl;
@@ -1649,7 +1649,7 @@ async function discoverHttpMcpTools(
 }
 
 /** An MCP server's name, transport and command or endpoint as every writer
- *  stores them, with ruling 176's write-tool list when one was given. */
+ *  stores them, with ruling 188's write-tool list when one was given. */
 export interface McpDefinition {
   name: string;
   transport: "HTTP" | "stdio";
@@ -1661,7 +1661,7 @@ export interface McpDefinition {
  * The checks every MCP writer makes before it probes or writes anything,
  * refused by name: a name of two characters or more that is not reserved, a
  * command or endpoint, and write tools in the MCP alphabet. `saveMcpServer`
- * and a board import's `registerMcpServer` (ruling 653) share them.
+ * and a board import's `registerMcpServer` (ruling 189) share them.
  */
 export function checkedMcpDefinition(input: {
   name: string;
@@ -1693,7 +1693,7 @@ export function checkedMcpDefinition(input: {
 }
 
 /**
- * Ruling 653: register an MCP server a board import carries, WITHOUT checking
+ * Ruling 189: register an MCP server a board import carries, WITHOUT checking
  * it. A check spawns a stdio command or calls an endpoint, and an import must
  * not run a command or reach an address that arrived in a file: the import
  * dialog shows each one before anything is written, and the server's first
@@ -1758,11 +1758,11 @@ export async function saveMcpServer(
      *  `cred` still means "keep what is stored" — the UI never round-trips the
      *  sealed secret, so blank cannot mean "clear". */
     clearCred?: boolean;
-    /** Ruling 176: the tools to mark as write tools, the whole list. Absent
+    /** Ruling 188: the tools to mark as write tools, the whole list. Absent
      *  keeps what is stored (the controller's tool and any other caller that
      *  does not edit the list); an empty array is a reviewed "none". */
     writeTools?: readonly string[];
-    /** Ruling 486(c): the scopes the next OAuth sign-in asks for, as typed
+    /** Ruling 192: the scopes the next OAuth sign-in asks for, as typed
      *  (spaces, commas or newlines between them). Absent keeps what is
      *  stored; blank clears it (the resource's advertised scopes are sent). */
     requestedScopes?: string;
@@ -1793,7 +1793,7 @@ export async function saveMcpServer(
     // 5 chars. A sealed box (never round-tripped by the UI, but handled here) is
     // long by construction, so the floor only applies to fresh plaintext.
     if (!isSecretBox(rawCred) && rawCred.length < 8) {
-      // Ruling 514: about the credential, so the editor says it there.
+      // Ruling 288: about the credential, so the editor says it there.
       throw AppError.fieldValidation(
         "cred",
         "That credential is too short. Enter at least 8 characters, or leave it blank for no auth.",
@@ -1815,10 +1815,10 @@ export async function saveMcpServer(
   const requestedScope =
     input.requestedScopes === undefined ? undefined : checkedRequestedScope(input.requestedScopes);
 
-  // Ruling 469: a connection holds one credential. A sign-in drops a pasted
+  // Ruling 192: a connection holds one credential. A sign-in drops a pasted
   // token when it lands, so a pasted token over a live sign-in is refused
   // rather than silently shadowing it (the editor hides the field meanwhile,
-  // and drops what it held, ruling 514; an editor that has not seen the
+  // and drops what it held, ruling 192; an editor that has not seen the
   // sign-in yet shows this refusal at its credential field).
   const oauthBefore = input.id ? mcpOAuthCredential(db, input.id) : null;
   const signedIn = oauthBefore?.state === "signed_in";
@@ -1843,7 +1843,7 @@ export async function saveMcpServer(
   }
   const oauthAuth =
     signedIn && !repointed && input.id ? mcpOAuthTokenSource(db, input.id, target) : undefined;
-  // Ruling 486: a save leaves the sign-in's grant as it was, so the toast
+  // Ruling 192: a save leaves the sign-in's grant as it was, so the toast
   // names the grant the row already records.
   const oauthGrant = oauthAuth ? mcpGrantPhrase(before?.oauth?.scope) : null;
 
@@ -1875,7 +1875,7 @@ export async function saveMcpServer(
     transport === "stdio"
       ? await discoverStdioMcpTools(target, { ...options, token: plainCred })
       : await discoverHttpMcpTools(target, { ...options, token: plainCred, auth: oauthAuth });
-  // Ruling 469: only a probe that sent no credential of any kind can tell
+  // Ruling 192: only a probe that sent no credential of any kind can tell
   // whether the server asks for a sign-in.
   const probedBare = transport === "HTTP" && !cred && !oauthAuth;
   const checkedAt: string | null = now;
@@ -1883,7 +1883,7 @@ export async function saveMcpServer(
   const tools = disc.kind === "up" ? disc.tools : null;
   // R19-17: a failure keeps its reason on the row; a success CLEARS it, so a
   // stale explanation can never sit under a green dot.
-  // Ruling 469: an expired sign-in answers the challenge like one never made,
+  // Ruling 192: an expired sign-in answers the challenge like one never made,
   // and the row keeps saying which it is.
   const lastError =
     disc.kind === "up"
@@ -1948,7 +1948,7 @@ export async function saveMcpServer(
   if (id) {
     const existing = getMcpServer(db, id);
     if (!existing) throw AppError.notFound("No such MCP server.");
-    // Ruling 176: a probe that listed tools replaces the discovered names; one
+    // Ruling 188: a probe that listed tools replaces the discovered names; one
     // that failed keeps the last list (still the right thing to mark from),
     // unless the server was re-pointed, when the old command's list would
     // describe a server this row no longer is.
@@ -1978,12 +1978,12 @@ export async function saveMcpServer(
       up === 1 ? now : null,
       toolNames === null ? null : JSON.stringify(toolNames),
       effectiveWriteTools === undefined ? null : toolPolicyJson(effectiveWriteTools),
-      // Ruling 486(c): an absent field keeps what is stored; a stdio row
+      // Ruling 192: an absent field keeps what is stored; a stdio row
       // signs nothing in, so it asks for nothing.
       transport === "stdio" ? null : requestedScope === undefined ? existing.requestedScope : requestedScope,
       now, id,
     );
-    // Ruling 469: tokens never follow a row to another endpoint. And a
+    // Ruling 192: tokens never follow a row to another endpoint. And a
     // connection holds one credential: a pasted one (which wins, 469(e))
     // replaces what is left of a sign-in that is not live — "needs sign-in",
     // "expired", unreadable — whose status every surface would otherwise
@@ -2003,7 +2003,7 @@ export async function saveMcpServer(
     if (existing.name !== name) {
       await updateResourceReferences("mcps", existing.name, name, ctx.dataRoot);
     }
-    // Ruling 681: the boards whose agents are given this server see a change
+    // Ruling 34: the boards whose agents are given this server see a change
     // to it. Asked after the rename above rewrote the grants. A save names
     // them when it changed what a run reaches (the name, where it points, or
     // how it signs in); one that changed nothing of those says nothing.
@@ -2018,7 +2018,7 @@ export async function saveMcpServer(
     if (reachChanged) details.resource = held;
     if (existing.name !== name) details.renamedFrom = existing.name;
     if (oauthDropped) details.oauthDropped = true;
-    // Ruling 486(c): what the next sign-in asks for, when this save changed it.
+    // Ruling 192: what the next sign-in asks for, when this save changed it.
     if (requestedScope !== undefined && requestedScope !== existing.requestedScope) {
       details.requestedScope = requestedScope;
     }
@@ -2076,7 +2076,7 @@ export async function saveMcpServer(
     }
     publishResourceUpdated("mcp", id);
   }
-  // Ruling 469: what a bare probe learned about the sign-in, recorded once the
+  // Ruling 192: what a bare probe learned about the sign-in, recorded once the
   // row exists.
   if (probedBare && disc.kind === "down" && disc.signInChallenge) {
     recordMcpOAuthChallenge(db, id, disc.signInChallenge);
@@ -2105,7 +2105,7 @@ export async function saveMcpServer(
 }
 
 /**
- * Ruling 537: an MCP server named the way a person or the controller names
+ * Ruling 189: an MCP server named the way a person or the controller names
  * it: by its id or by its registry name, the key every grant uses.
  * `save_mcp_server` answers with the name, so a probe right after a save
  * passed the name and was told "No such MCP server." about a server that was
@@ -2153,7 +2153,7 @@ export async function testMcpServer(
   const credNote = opened.unreadable
     ? " · WARNING: its stored credential could not be read, so this check ran UNAUTHENTICATED and runs will not mount it"
     : "";
-  // Ruling 469: a signed-in server is probed with its sign-in; one that needs
+  // Ruling 192: a signed-in server is probed with its sign-in; one that needs
   // a sign-in it does not have says so instead of blaming the endpoint.
   const oauth = sealed?.cred_ref ? null : mcpOAuthCredential(db, id);
   const auth = oauth?.state === "signed_in" ? mcpOAuthTokenSource(db, id, existing.target) : undefined;
@@ -2176,7 +2176,7 @@ export async function testMcpServer(
     if (probedBare) clearMcpOAuthChallenge(db, id);
     const fresh = getMcpServer(db, id)!;
     const signIn = auth ? mcpSignInPhrase(fresh.oauth) : null;
-    // Ruling 486: what the sign-in may do ("read-only · 194 scopes"), since
+    // Ruling 192: what the sign-in may do ("read-only · 194 scopes"), since
     // "healthy" alone is also true of a grant that refuses every write.
     const grant = auth ? mcpGrantPhrase(fresh.oauth?.scope) : null;
     return {
@@ -2245,7 +2245,7 @@ export async function deleteMcpServer(
 ): Promise<{ toast: string }> {
   const existing = getMcpServer(db, id);
   if (!existing) throw AppError.notFound("No such MCP server.");
-  // Ruling 681: who held it, asked before the grants are dropped below.
+  // Ruling 34: who held it, asked before the grants are dropped below.
   const held = auditedResource("mcp", existing.name, ctx.dataRoot);
   db.prepare(`DELETE FROM org_mcp_servers WHERE id = ?`).run(id);
   // P13-KM-07: an MCP grant is a name reference like a KB/skill one.
@@ -2526,7 +2526,7 @@ export async function saveSkill(
     /** The SKILL.md text. On an EXISTING skill an empty body keeps the on-disk
      * content (E4: the modal round-trips a possibly-truncated read — empty
      * must never blank); a body that will be written is judged by
-     * `assertSkillBodyWellFormed` first (ruling 183), so a SKILL.md is never
+     * `assertSkillBodyWellFormed` first (ruling 186), so a SKILL.md is never
      * blanked either. */
     body: string;
     /** "files" (NEW creates only): the unified New-skill flow — register the
@@ -2566,14 +2566,14 @@ export async function saveSkill(
   }
 
   // E4 write policy for EXISTING skills, decided BEFORE the folder moves:
-  // - empty body → keep the on-disk SKILL.md (ruling 183 retired the explicit
+  // - empty body → keep the on-disk SKILL.md (ruling 186 retired the explicit
   //   clear flag: an empty SKILL.md is not a skill, so nothing may write one);
   // - non-empty body while the on-disk file exceeds the editor read cap →
   //   the submitted text is a truncated round-trip; refuse instead of
   //   silently destroying the tail of the file.
   const body = input.body ?? "";
   const keepExistingBody = Boolean(oldName) && body === "";
-  // Ruling 183 (pass 36, F36-2): a body that WILL be written is judged first —
+  // Ruling 186 (pass 36, F36-2): a body that WILL be written is judged first —
   // before the truncation check, the containment check and the rename — so a
   // refusal moves nothing and names the remedy.
   if (!keepExistingBody && !filesMode) assertSkillBodyWellFormed(body);
@@ -2615,7 +2615,7 @@ export async function saveSkill(
   // the store browser (upload / GitHub import / New document), so writing an
   // empty one here would only trigger the overwrite-confirm on that upload.
   //
-  // Ruling 681: whether the write changes the text. The editor sends back the
+  // Ruling 34: whether the write changes the text. The editor sends back the
   // body it loaded with every save, so a save of the summary alone rewrites
   // the file with what it already held. Read after the rename above, which
   // moved the folder, and whole: a body is refused above when the file on
@@ -2628,7 +2628,7 @@ export async function saveSkill(
   const updatedToast = keepExistingBody
     ? `Skill ${name} updated. Existing SKILL.md kept`
     : `Skill ${name} updated. SKILL.md rewritten`;
-  // Ruling 681: a save that changed SKILL.md's text or renamed the skill
+  // Ruling 34: a save that changed SKILL.md's text or renamed the skill
   // changes what the agents holding it are given, so the boards they are on
   // see it. Asked after the rename above rewrote the grants. A save that only
   // changed the summary changes nothing a run reads.
@@ -2697,7 +2697,7 @@ export async function deleteSkill(
 ): Promise<{ toast: string }> {
   const skill = getSkill(db, id, ctx);
   if (!skill) throw AppError.notFound("No such skill.");
-  // Ruling 681: who held it, asked before the grants are dropped below.
+  // Ruling 34: who held it, asked before the grants are dropped below.
   const held = auditedResource("skill", skill.name, ctx.dataRoot);
   rmSync(skillDirPath(skill.name, ctx.dataRoot), {
     recursive: true,
@@ -2768,7 +2768,7 @@ function storeUnder(ctx: OrgSeedContext): Pick<StoreTarget, "dataRoot"> {
 }
 
 /**
- * Ruling 483: the store target a knowledge base's DIRECTORY names, whether it
+ * Ruling 210: the store target a knowledge base's DIRECTORY names, whether it
  * has a metadata row or is a folder on disk only. A run knows its knowledge
  * bases by directory (the grant key its index heading prints), never by row id.
  */

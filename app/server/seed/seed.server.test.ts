@@ -60,9 +60,8 @@ describe("runSeed (clean-sheet product seed)", () => {
       userPrefs: 0,
     });
 
-    // The built-in catalog templates are on disk: the base roster's three, the
-    // library's Writer and Editor (ruling 692), and its Diagrammer and Cover
-    // Designer (ruling 699).
+    // The built-in catalog templates are on disk: the base roster's three and
+    // the library's Writer, Editor, Diagrammer and Cover Designer (ruling 179).
     expect(summary.agentProfiles).toBe(7);
     for (const id of ["operator", "developer", "reviewer", "writer", "editor", "diagrammer", "cover-designer"]) {
       expect(existsSync(agentProfileFilePath(id, dataRoot)), id).toBe(true);
@@ -221,7 +220,7 @@ describe("runSeed (clean-sheet product seed)", () => {
     const db = ctx.makeDb();
     const dataRoot = ctx.makeTempDir();
     await runSeed(db, { dataRoot });
-    // Ruling 127: the sign-ins live in each PERSON's own runtime home. A reset
+    // Ruling 137: the sign-ins live in each PERSON's own runtime home. A reset
     // that took those with it would sign everybody out of their own Claude and
     // Codex accounts — the P11-04 defect, one directory level deeper.
     const codexAuth = join(dataRoot, "runtimes", "users", "u_arda", "codex-home", "auth.json");
@@ -241,7 +240,7 @@ describe("runSeed (clean-sheet product seed)", () => {
     expect(existsSync(transcript)).toBe(false); // run log wiped
   });
 
-  it("--reset removes what the page renderer left in a task's .captures as the task's owner, before the server's own remove of projects/ (rulings 485, 691)", () => {
+  it("--reset removes what the page renderer left in a task's .captures as the task's owner, before the server's own remove of projects/ (rulings 140, 194)", () => {
     // A render a restart cut short leaves a browser profile in the task's
     // `.captures/`, written as the owner's agent uid. CANARY: remove only
     // TASK_SHARED_DIRS as the person and nothing is launched for it: the

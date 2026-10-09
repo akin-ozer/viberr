@@ -81,8 +81,8 @@ import { prPathOverlaps, type PrDiffPaths, type PrOverlap } from "~/shared/pr-ov
  * Rows are read-only projections; the queue performs zero mutations.
  */
 
-/** Ruling 236 / 413: the pairwise path intersection lives in
- *  `~/shared/pr-overlaps` (moved by ruling 475 so the accept dialog shares it). */
+/** Ruling 242 / 116: the pairwise path intersection lives in
+ *  `~/shared/pr-overlaps` (moved by ruling 244 so the accept dialog shares it). */
 
 export interface ReviewQueueRow {
   key: string;
@@ -106,12 +106,12 @@ export interface ReviewQueueRow {
   labels: string[];
   dueDate: string | null;
   waiting: Waiting;
-  /** Ruling 225: the instant a clock-resting row picks itself back up, so the
+  /** Ruling 45: the instant a clock-resting row picks itself back up, so the
    *  queue names the time instead of a person who owes nothing. */
   resumesAt: string | null;
   /** Pending packet header only — the queue reads kind + title, nothing else. */
   packet: { kind: string; title: string } | null;
-  /** Ruling 138: an `edit_goal` decision was confirmed and the packet waits
+  /** Ruling 63: an `edit_goal` decision was confirmed and the packet waits
    *  for the edited goal — the row's subline says so instead of re-offering
    *  the decision. */
   goalEditPending: boolean;
@@ -124,7 +124,7 @@ export interface ReviewQueueRow {
      *  and coerce everything else to "review", which silently swallowed
      *  `accepted` — R16-6's first-class "merge pending" — so `prStatePill`'s
      *  amber branch was structurally unreachable here even though the page
-     *  calls the one canonical map (ruling 12). Ruling 40 requires that
+     *  calls the one canonical map (ruling 237). Ruling 244 requires that
      *  difference to be visible on the board card AND this queue; a maintainer
      *  moving a task back out of the terminal stage reaches the state with no
      *  workflow re-wiring at all. */
@@ -136,16 +136,16 @@ export interface ReviewQueueRow {
      *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
      *  means never read, which is NOT "merges cleanly". */
     mergeable?: PrMergeable;
-    /** R17-1 (F17-L12) as amended by ruling 132 (pass 34): the WHOLE drift
-     *  record (authored count + base refresh), so the subline can print the
+    /** Ruling 239 (F17-L12): the WHOLE drift record (authored count + base
+     *  refresh), so the subline can print the
      *  canonical sentence. Absent when the head equals the reviewed revision. */
     revisionDrift?: RevisionDrift;
-    /** Ruling 135: the PR head as last read, and the CURRENT unpushed record
+    /** Ruling 243: the PR head as last read, and the CURRENT unpushed record
      *  (already filtered through `unpushedRevisionOf` against the row's own
      *  revision, so the subline can trust it). Absent = on the PR, or unread. */
     headSha?: string;
     unpushedRevision?: UnpushedRevision;
-    /** Ruling 236 (owner, 2026-09-14): the other OPEN review PRs in this project
+    /** Ruling 242 (owner, 2026-09-14): the other OPEN review PRs in this project
      *  whose changed paths intersect this one's, so the queue can say which
      *  merges will conflict which before a person finds out by pressing Accept.
      *  Measured live: merging SHOP-2 put four of six open PRs into CONFLICTING
@@ -197,14 +197,14 @@ export function getReviewQueue(
     viewerUserId: string;
     dataRoot?: string;
     /**
-     * Ruling 457: the project's LIVE tasks (archived ones dropped) in
+     * Ruling 11: the project's LIVE tasks (archived ones dropped) in
      * `listProjectTasks` order, when the caller already built them — the
      * workspace layout passes the board's list, so each load maps every task
      * once. Omitted, the queue lists them itself. Same rows either way, so the
      * rail badge and this queue stay one number (U35-5).
      */
     tasks?: readonly TaskActivitySummary[];
-    /** Ruling 457: the project row, when the caller already read it. */
+    /** Ruling 11: the project row, when the caller already read it. */
     project?: ProjectRecord | null;
   },
 ): ReviewQueueData {
@@ -273,21 +273,21 @@ export function getReviewQueue(
       // `merged`/`closed` (NEW-1: a coerced closed PR hid that the work was
       // rejected) and folded everything else into "review" — which made
       // `accepted` (merge pending) indistinguishable from an open PR on the
-      // one surface ruling 40 names alongside the board. The schema's own
+      // one surface ruling 244 names alongside the board. The schema's own
       // `.catch("review")` is what handles an unknown token, so there is
       // nothing left for a second coercion here to defend against.
       pr = { number: t.pr.number, state: t.pr.state };
       // Omitted rather than nulled when GitHub was never asked — the key's
       // absence is the "never read" signal the file format itself uses.
-      // Ruling 435: through the head pin (ruling 405), as the GitHub page and
+      // Ruling 242: through the head pin (ruling 315), as the GitHub page and
       // the task page read it; raw, the row's subline called a PR conflicting
       // after the push that resolved it.
       const mergeable = liveMergeable(t.pr);
       if (mergeable) pr.mergeable = mergeable;
-      // Ruling 132: the whole record rides through — projecting only a count
+      // Ruling 239: the whole record rides through — projecting only a count
       // here is what dropped `baseRefresh` before the row was built.
       if (t.pr.revisionDrift) pr.revisionDrift = t.pr.revisionDrift;
-      // Ruling 135: both fields ride through, or `prStateSub`'s branch is
+      // Ruling 243: both fields ride through, or `prStateSub`'s branch is
       // structurally unreachable (the same defect `mergeable` had, P14-LV-07).
       if (t.pr.headSha) pr.headSha = t.pr.headSha;
       const unpushed = unpushedRevisionOf(t.pr, t.workRevisionSha ?? null);
@@ -380,7 +380,7 @@ export function getReviewQueue(
       // (task-acceptance.server.ts): an operator-raised blocked decision is still
       // open, and accepting would bury it.
       (t.readiness === "blocked" && t.packet?.type === "blocked") ||
-        // Ruling 135: the delivered revision is not on the PR.
+        // Ruling 243: the delivered revision is not on the PR.
         unpushedRevisionBlockedReason(t.pr, t.workRevisionSha ?? null, t.key) !== null ||
         // P14-LV-07, via the SAME helper the server gate calls — a PR GitHub
         // cannot merge cannot be accepted.
@@ -397,7 +397,7 @@ export function getReviewQueue(
   // (`acceptanceStageBlockedReason`, task-acceptance.server.ts, whose predicate
   // this is); review work before the boundary is listed, never offered for
   // acceptance.
-  // Ruling 236: pairwise path intersection across the OPEN review PRs. Done
+  // Ruling 242: pairwise path intersection across the OPEN review PRs. Done
   // here, over rows already loaded, rather than in the UI: it is a question
   // about the project's pull requests, not about one card, and a surface that
   // recomputed it per row would need every other row anyway.

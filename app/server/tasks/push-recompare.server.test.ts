@@ -23,7 +23,7 @@ import type { TaskActionContext } from "./task-action-core.server";
 import { operatorAuthority } from "../../../test-support/operator-snapshot";
 
 /**
- * Ruling 494 (pass 40, F40-70): a push that moves a task's branch re-compares
+ * Ruling 238 (pass 40, F40-70): a push that moves a task's branch re-compares
  * it, and the compare names the head it read.
  *
  * Live on WEB-16 (deploy 9, 2026-09-25): at 21:25:48.527Z the poller compared
@@ -193,7 +193,7 @@ function rows(): { action: string; behindBy: number | null | undefined; headSha:
   });
 }
 
-describe("ruling 494: a push re-compares the branch it moved", () => {
+describe("ruling 238: a push re-compares the branch it moved", () => {
   it("push then read: a delivery through the reuse-an-open-PR path leaves the pushed head's count, and get_task reads 0", async () => {
     // CANARY: drop the post-push re-compare from `performDelivery`, and the
     // newest count is the older row's 6.
@@ -366,7 +366,7 @@ describe("ruling 494: a push re-compares the branch it moved", () => {
   });
 });
 
-describe("ruling 494: get_task names the head its count was counted on", () => {
+describe("ruling 238: get_task names the head its count was counted on", () => {
   const A = "a1a1a1a".padEnd(40, "1");
   const B = "b2b2b2b".padEnd(40, "2");
 

@@ -18,7 +18,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { removeTaskAttachment } from "./task-edits.server";
 
 /**
- * Ruling 582: a project admin takes a file off a task's record. Round 1 of the
+ * Ruling 80: a project admin takes a file off a task's record. Round 1 of the
  * AWS calculator board left its answer key in AWSC-3's attachments, where
  * every agent reads, and only a shell in the container could take it away.
  * Who may is the policy matrix's (`policy-rbac.server.test.ts`).
@@ -56,7 +56,7 @@ afterEach(() => {
   ctx.cleanup();
 });
 
-describe("removeTaskAttachment (ruling 582)", () => {
+describe("removeTaskAttachment (ruling 80)", () => {
   it("deletes the file, takes its name off every entry that claimed it, and says who removed it and why", async () => {
     seedTask(
       [
@@ -89,7 +89,7 @@ describe("removeTaskAttachment (ruling 582)", () => {
     expect(row!.details).toEqual({ name: "golden-files.md", bytes: 3000, reason: "the answer key" });
   });
 
-  it("ruling 675: removes a file named in either Unicode form, and its claims in both", async () => {
+  it("ruling 80: removes a file named in either Unicode form, and its claims in both", async () => {
     // CANARY: take the claim off by its bytes and an entry that named the
     // file in the other form keeps a tile that opens nothing.
     const composed = "Çözüm Anahtarı.md";
@@ -115,7 +115,7 @@ describe("removeTaskAttachment (ruling 582)", () => {
     expect(older!.attachments ?? []).toEqual([]);
   });
 
-  it.skipIf(diskFoldsUnicodeForms)("ruling 675: removing one of two files that differ only in Unicode form keeps the other's claims", async () => {
+  it.skipIf(diskFoldsUnicodeForms)("ruling 80: removing one of two files that differ only in Unicode form keeps the other's claims", async () => {
     // A folder can hold both: a person's upload stored decomposed before
     // names were composed, and a file a run's shell wrote under the composed
     // name. They are two files on the disk this runs on in production.

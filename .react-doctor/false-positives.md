@@ -20,20 +20,20 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   no-unknown-parameters / no-unsafe-dictionary-type / no-known-value-widening /
   no-conditional-empty-object-spread / no-chained-type-assertions) — react-doctor bundles
   an `anti-slop` plugin that DUPLICATES the repo's own `tools/oxlint/anti-slop` rules, so
-  its hits on `app/` code are the SAME accepted `npm run lint` baseline (oxlint-25),
-  triaged there, not here. The recurring shapes are all correct: `self-heal.server.ts`
+  its hits on `app/` code are the same rules `npm run lint` already enforces at zero
+  findings, triaged there, not here. The recurring shapes are all correct: `self-heal.server.ts`
   narrows a caught `unknown` throwable (`typeof`/`instanceof` is the only guard a thrown
   value allows) and copies dynamic `SELECT *` rows (`Record<string, unknown>` is the honest
   shape, guarded by a SAFETY comment); `boot.server.ts` / `specialist-run.server.ts`
   conditionally spread an optional log-context / view prop; `pr-open.server.ts` /
   `self-heal.server.ts` annotate an explicit anonymous return type. Do NOT contort correct
-  error-handling / dynamic-row / logging code to satisfy a second ruleset — keep the oxlint
-  count at its baseline instead. The `tools/oxlint/**` source that IMPLEMENTS these rules is
+  error-handling / dynamic-row / logging code to satisfy a second ruleset; `npm run lint`
+  is the gate, and it reports zero findings. The `tools/oxlint/**` source that IMPLEMENTS these rules is
   scoped out in doctor.config.ts (its AST visitors must use `unknown` params + runtime `typeof`).
 
 - `deslop/unused-export` — `DEFAULT_NUDGE` / `PROFILE_NUDGE_HOURS` in
-  app/features/profile/notification-prefs.ts — schema-only exports kept by ruling 13
-  for the future "re-ping unanswered decisions" feature. Verify the ruling-13 comment
+  app/features/profile/notification-prefs.ts — schema-only exports kept by ruling 30
+  for the future "re-ping unanswered decisions" feature. Verify the ruling-30 comment
   is still attached before suppressing.
 
 ### State, effects and refs
@@ -86,20 +86,20 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   parent, applied once per bump through a "seen" ref: timeline-actions.ts `ask`
   (`useCommentPost`: bump → prefill + focus) and task-main-sections.tsx `editGoalSignal`
   (`seenEditGoal`). Not duplicated prop state. Verify the once-per-bump ref. The same
-  shape keyed on the navigation: timeline-actions.ts's ruling 497 step (`useTimelineTab`'s
+  shape keyed on the navigation: timeline-actions.ts's ruling 302 step (`useTimelineTab`'s
   `steppedFor`, the `location.key` of the link that named an event) opens All once when
   the tab hides the event. Verify `steppedFor` is set whenever the target is found, not
   only when the step changes the tab (the "all" row of timeline-target.test.tsx).
 
 - `react-doctor/no-reset-all-state-on-prop-change` / `no-adjust-state-on-prop-change` —
-  decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 700(e))
+  decision-packet-actions.ts `usePacketChoice` (DecisionPacket's choice, ruling 13(b))
   `seededFrom`: when a replacement packet arrives with a new `id` (F10-09), the card re-seeds its own choice, note, repository answer, directive,
   refusal count and open ask-first step during render, guarded on `p.id !== seededFrom`,
   through the same `initialChoice` / `initialRepository` helpers its useState calls use.
   The rule's fix, `key={packet.id}` at the render site, is wrong here: the card renders the
   page's `completion` slot (CompletionPacket → the inline ChangesPanel → ChangesBody) inside
   its own subtree, so a remount would discard the reader's unsent line notes and open
-  draft, close the reader and read GitHub again (rulings 484(b), 521(d)), and unmount the
+  draft, close the reader and read GitHub again (rulings 246, 316), and unmount the
   control that held focus. A packet written before ids has none and never re-seeds. Verify
   `{completion}` still renders inside the card, the re-seed is still guarded on the id, and
   the F10-09 rows in task-disposition.test.tsx still cover each re-seeded field.
@@ -199,8 +199,8 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   packet observation/evidence lists (decision-packet, timeline evidence, evidence-list
   rows of one event in a deterministic status sort), and console-blocks TodoCard (an immutable snapshot per console line; Codex's `todo_list` is
   projected only when completed). For decision-packet options, index-based selection is
-  documented design: the decision records `decided.optionIndex` (ruling 138), and `kind`
-  (ruling 7) is non-unique. Verify the list is append-only or fixed-per-mount.
+  documented design: the decision records `decided.optionIndex` (ruling 63), and `kind`
+  (ruling 62(a)) is non-unique. Verify the list is append-only or fixed-per-mount.
 
 - `react-doctor/no-array-index-as-key` — positional parts of ONE immutable value, where
   position is the identity and parts repeat: tokens of a `.split()` or capturing regex
@@ -232,7 +232,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   first refusal), over one task's engagements (task-acceptance `refreshAndReview`, one per
   reviewer it starts) and over the page renderer's views (page-capture.server.ts
   `render`'s `views.find` per reported shot: the widths of PAGE_CAPTURE_VIEWS a run asked
-  for, at most two, or the one box it named, ruling 698). The
+  for, at most two, or the one box it named, ruling 194). The
   other way round, a loop over the renderer's widths: page-capture.server.ts
   `captureReplyText` runs `page.shots.find` and `page.ended.find` once per width of
   PAGE_CAPTURE_VIEWS (two per reply), over the page's reported shots and ends, which
@@ -264,7 +264,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   (revalidation-policy.ts `!due.includes(o)` in `flushLive`): both lists are the data
   events of one 300 ms debounce window (console lines record none) and `prune()` drops
   covered obligations at every flush. The ledger is in the root route's closure, and a
-  `Set` there cost 4 gzip bytes on every route against the bundle ratchet (ruling 457)
+  `Set` there cost 4 gzip bytes on every route against the bundle ratchet (ruling 11)
   for no measurable gain.
 
 - `react-doctor/js-set-map-lookups` / `js-index-maps` — not an array scan at all: the
@@ -309,14 +309,14 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   is re-invoked; and the fan-out is suppressed. The loop's in-order `answered` list feeds
   `carryOnAfterConnection` after it. Verify the arm still stops before
   `changeProjectRepo` when `fanOutOrigin` is set. And for org-users.server.ts
-  `deleteOrgUser`'s refresh of the projects it unbound (ruling 540): the user delete has
+  `deleteOrgUser`'s refresh of the projects it unbound (ruling 223): the user delete has
   already cascaded their `project_github_credentials` rows, so each `refreshRepoAccess`
   answers `no_pat_configured` without a GitHub call. Verify the loop still runs after
   `DELETE FROM users`.
 
 - `react-doctor/async-await-in-loop` — loops whose iterations are ordered, dependent
   mutations: the operator decision-plan executors (operator-run.server.ts and
-  operator-codex-plan.server.ts — the plan schema says actions run in order, ruling 430
+  operator-codex-plan.server.ts — the plan schema says actions run in order, ruling 118
   `pausedBy`), scope-violation resolution (pat-validator.server.ts,
   github-reconciler.server.ts, task-delivery.server.ts — read-modify-write of the same
   task.md across iterations), boot orphan-run recovery
@@ -327,24 +327,24 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   contracts (board-import `step()`, epic-archive's `try/finally`, template-propagation's
   stale-fingerprint throw), one-shot boot migrations (goal-epic-conversion,
   evidence-result-restore, review-entry-conversion), and GitHub per-token or poller-tick
-  loops (connections.server.ts per ruling 540, reconcile-poller's per-project budget,
+  loops (connections.server.ts per ruling 223, reconcile-poller's per-project budget,
   repo-health, github-reconciler's sibling PRs, pr-review-relay). Verify the dependency
   before suppressing; independent loops should still be parallelized.
 
 - `react-doctor/async-await-in-loop` — loops of agent, operator or controller starts
   (`startAgentRun`, `releaseTask`, `autoInvokeOperator`, and controller-continuation.server.ts
   `maybeContinueController`, whose follow-ups each start a turn, write an audit row and may
-  note the same task.md, one failure never holding back the next by ruling 685), kept serial. Not for the concurrent-run cap:
+  note the same task.md, one failure never holding back the next by ruling 259), kept serial. Not for the concurrent-run cap:
   `reserveRun` / `admitRun` (run-service.server.ts) check and take or park a slot with no
   await between, and a start resolves once its run is launched or parked, so a serial loop
-  neither enforces the cap nor bounds the turns that then run. Nor for ruling 241: its
+  neither enforces the cap nor bounds the turns that then run. Nor for ruling 66: its
   drain-then-operator order lives inside one release (`announceRelease`). What each start
   does await is its setup: the workspace clone, whose mirror work already queues on the
   project's mirror lock, and the stdio-MCP pre-flight (`verifyStdioMcpMountsForRun`),
   which spawns each mounted stdio server and, on a failure, writes the shared health row
   and drops the server from the run. Parallel starts would probe the same org stdio
   servers at once (every operator in a project mounts the same ones; reviewers do when
-  granted the same), the contention ruling 700(b) bounds within one run to two
+  granted the same), the contention ruling 190 bounds within one run to two
   handshakes at a time. Per loop: dependencies.server.ts `drainQueuedQuestions` must stay serial regardless.
   Queued questions can name the same reviewer twice; a supporting run's `cloneRepo`
   removes and re-clones its `workspace/support/<profileId>` checkout; `dispatchAgentRun`'s
@@ -354,7 +354,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   before `startRun` refuses it, where serially the check refuses it first ("Queued
   question not put"). `releaseDependents` and the dependency runner's per-project tick
   (`releaseDueDependents`): each release awaits its operator's start. The tick is ruling
-  131(e)'s once-a-minute backstop, never overlapped (`running`); the task-write hooks
+  57's once-a-minute backstop, never overlapped (`running`); the task-write hooks
   (`maybeReleaseDependents`) are the live release path, and `releaseTask` re-checks the
   wait under the lock, so a late sweep loses nothing. One project's slow start (a first
   clone can take minutes) holds later projects' backstop releases for as long as it
@@ -370,7 +370,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   page render or gate run left: page-capture.server.ts `render` (the `.captures/` folders of
   ended runs, then the asking run's own last render) and `removeCaptureHome`, and
   project-gates.server.ts `prepareGateCheckout` (`.gates/`). Each iteration is one
-  `removeAgentTree`, an `rm` through the launcher (ruling 485), so this is process I/O and
+  `removeAgentTree`, an `rm` through the launcher (ruling 140), so this is process I/O and
   not the governed-writer entry, but there is nothing to overlap: a gate run removes its
   own checkout when it ends, a delivery's render its scratch after the task write,
   `removeRunPageCaptures` a run's folder when the run ends, and each render empties its
@@ -412,7 +412,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 
 - `react-doctor/request-body-mass-assignment` — mcp-proxy/gateway.server.ts
   `{ ...request.params, _meta: upstreamMeta(...) }`: the `tools/call` pass-through of ruling
-  461(d). The SDK has already parsed `request.params` with `CallToolRequestSchema` (unknown
+  191. The SDK has already parsed `request.params` with `CallToolRequestSchema` (unknown
   keys stripped), the one server-set field `_meta` comes after the spread, the withheld
   check and write audit key on the same `params.name`, and the upstream credential rides
   the transport, never the params. Verify all four; a request body spread into a DB row or
@@ -443,7 +443,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/no-autofocus` — `autoFocus` on the first field of a just-opened
   modal/dialog (resources-panel KB/MCP/Skill/Agent modals; sso-panel ProviderModal inside
   `MiniModal`, a `useDialog` `<dialog>` the detector cannot see through). Deliberate,
-  correct dialog focus management (ruling 455(e)). Page-load autofocus is NOT covered by
+  correct dialog focus management (ruling 287). Page-load autofocus is NOT covered by
   this pattern — fix those.
 
 - `react-doctor/role-has-required-aria-props` — comment-composer-slot.tsx stand-in
@@ -464,7 +464,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   or the gap to the inner combobox input. Verify the handler only prevents default and
   focuses the input (keyboard users Tab to the input; its `onFocus` opens the list).
 
-- `react-doctor/prefer-html-dialog` — the controller dock panel: non-modal by ruling 121.
+- `react-doctor/prefer-html-dialog` — the controller dock panel: non-modal by ruling 318.
   Verify `aria-modal="false"` and no scrim, focus trap or scroll lock.
 
 - `react-doctor/no-img-without-dimensions` (`react-doctor design`) — thumbnails filling a
@@ -479,10 +479,10 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   app/ui/icon.tsx `storeIcon` (checks `name in ICON_PATHS`, the private table that
   `app.css.test.ts` reads from this file's source and `vite-config.test.ts` pins into the
   shell chunk), app/ui/pill.tsx `readinessLabel` / `validationLabel` / `validationQuiet`
-  (lookups into ruling 1's one vocabulary table, `READINESS_BY_VALUE` /
+  (lookups into ruling 44's one vocabulary table, `READINESS_BY_VALUE` /
   `VALIDATION_BY_VALUE`, that the pills render from), app/ui/markdown.tsx
   `sameMarkdownProps` (`Markdown`'s own `memo` comparator, measured by
-  `markdown.perf.test.ts`), and controller/controller-examples.tsx (rulings 419(g) and 516
+  `markdown.perf.test.ts`), and controller/controller-examples.tsx (rulings 319 and 256
   keep the examples and `ControllerExampleList` in one module). Every other flagged export
   lives in a sibling `.ts` module (the `initials.ts` / `avatar.tsx` pattern). Verify each
   still reads the private table or is still that `memo`'s comparator.
@@ -490,7 +490,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/rerender-memo-with-default-value` — `= []`/`= {}` prop defaults, each for
   its own reason. task-detail-page.tsx: the one route always supplies a never-`undefined`
   loader field, so the default fires only in bare test renders, and every memoised
-  consumer stabilises the value by content first (`useStableValue`, ruling 457(c)) because
+  consumer stabilises the value by content first (`useStableValue`, ruling 11) because
   each revalidation decodes new objects anyway; verify the route's prop and that consumers
   stabilise before memo/deps. board-page.tsx `epics`: the one route passes
   `loaderData.epics` (`listEpicChips`, a parsed array, never `undefined`), so the default
@@ -519,7 +519,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   `role="menu"` (`.menu-sep`) is the same markup as the user menu's Radix separator.
 
 - `react-doctor/design-no-vague-button-label` — "Done" closing a view whose actions save
-  as they happen (the store browser footer; the "Other accounts" section, ruling 616(b)'s
+  as they happen (the store browser footer; the "Other accounts" section, ruling 323's
   own word). An open draft is NOT saved by it. Done, like the header X, unmounts the store
   browser with its open document, and a save still in flight then lands with nothing to
   show its result; Escape and the card's Cancel drop the document too. The accounts
@@ -580,7 +580,7 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   LOGOUT_TIMEOUT_MS = 20 s) and the `removeAgentTree` steps. It is NOT a governed-writer
   loop (it fails that entry's no-exec check). A person with k login accounts waits up to
   k × 20 s when a vendor hangs. Nothing orders the accounts: each retires only its own
-  files (ruling 507), the logout → files → row order stays inside `retireAccount`, and
+  files (ruling 138), the logout → files → row order stays inside `retireAccount`, and
   `activeAccountChanged` runs after the loop. Kept serial for the owner's call: a rare
   admin action over at most 2 × MAX_ACCOUNTS_PER_BACKEND rows, and concurrent vendor
   logouts sharing the person's agent `$HOME` and the launcher's backend-home hand-back
@@ -598,15 +598,15 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   (`realignChainToStages`' stages × workflow, the preview's `stageName`, `NameClaims`
   walking colliding names), and parsing a board.md near the size limits already takes
   minutes. What would close it is a row or byte cap on board.md, a format change to
-  ruling 653's limits and file-formats.md §9 that needs the owner's ruling, starting
+  ruling 32's limits and file-formats.md §9 that needs the owner's ruling, starting
   with whether a hostile board file is in the threat model. Exports carry a handful of
   each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — none left.
-  Ruling 700(d) piloted the split on TaskDetailPage and ruling 700(e) rolled it out to
-  every other surface these two rules flagged (85 findings in 42 files): each surface's
+  Ruling 13(b)'s split covers TaskDetailPage and every other surface these two rules
+  flagged (85 findings in 42 files): each surface's
   posts became hooks its component still calls in the order its fetchers registered
   (`*-actions`), what it reads off its props became pure functions (`*-derive.ts`), and
   its regions became hook-free components in sibling modules, with the server and
   hydrated DOM byte-identical. A new finding of either rule is real, not a deferral:
-  split it the same way and record its measured cost under ruling 700(e).
+  split it the same way and record its measured cost under ruling 13(b).

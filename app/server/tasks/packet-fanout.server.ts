@@ -12,9 +12,9 @@ import { isRepositoryAskCause } from "~/shared/repository-ask";
 import type { TaskActor } from "./task-mutation.server";
 
 /**
- * Ruling 319 — one account failure, one decision.
+ * Ruling 65 — one account failure, one decision.
  *
- * Ruling 315 stamped `packet.cause` on every packet a BACKEND failure raises:
+ * Ruling 63 stamped `packet.cause` on every packet a BACKEND failure raises:
  * `backend:<backend>:<kind>:<credentialUserId>`, the thing that actually
  * failed. Its own field comment promised what the stamp was for — "packets that
  * share a cause resolve together: answering one applies the same option to
@@ -69,7 +69,7 @@ export const FANNED_OUT_OPTION_KINDS: ReadonlySet<PacketOptionKind> = new Set([
   "redirect",
   "hold_runtime_debug",
   "block_on_policy",
-  // Ruling 672: the repository question is asked about the BOARD, on whichever
+  // Ruling 65: the repository question is asked about the BOARD, on whichever
   // task met the need first, so both of its answers reach every task on the
   // board that asked. Neither writes anything on a sibling: the repository is
   // attached, or the ruling written, once, on the task the person answered.
@@ -180,7 +180,7 @@ export function causeFanOutDisclosure(
   if (siblings.length === 0) return null;
   const keys = joinKeys(siblings.map((s) => s.taskKey));
   const them = siblings.length === 1 ? "one other task" : `${siblings.length} other tasks`;
-  // Ruling 672: the repository question shares a cause too, and nothing
+  // Ruling 65: the repository question shares a cause too, and nothing
   // failed: the same question stands on each task.
   if (isRepositoryAskCause(cause)) {
     return (
@@ -252,9 +252,9 @@ export function fanOutArrivalText(input: {
 }
 
 /**
- * Ruling 602: one account window, one decision, for the rest of the window.
+ * Ruling 65: one account window, one decision, for the rest of the window.
  *
- * Ruling 319 answers the siblings that are open when a person decides. A run
+ * The siblings that are open when a person decides are answered then. A run
  * already in flight when the window closed is refused later, at its next
  * model call, and opens its own packet after the decision was made. Live on
  * AWSC-52 at 13:20 a Judge run was refused two minutes after Arda had chosen to

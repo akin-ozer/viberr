@@ -70,7 +70,7 @@ describe("taskBranchName", () => {
   });
 });
 
-describe("deriveSyncState (ruling 12: merged > behind > synced)", () => {
+describe("deriveSyncState (ruling 237: merged > behind > synced)", () => {
   it("maps the matrix", () => {
     expect(deriveSyncState({ prMerged: true, behindBy: 3 })).toBe("merged");
     expect(deriveSyncState({ prMerged: false, behindBy: 2 })).toBe("behind_main");
@@ -142,7 +142,7 @@ describe("getBranchCompare commit tolerance (F21-8)", () => {
     expect(result.compare.aheadBy).toBe(3);
   });
 
-  it("ruling 132: the reader carries the full sha and the parents, and `taskCommits` projects `{sha, msg}` only", async () => {
+  it("ruling 239: the reader carries the full sha and the parents, and `taskCommits` projects `{sha, msg}` only", async () => {
     // Canary: remove `parents` from the reader; leave the projection out of
     // `taskCommits` (the file would gain `fullSha` and `parents`).
     const result = await getBranchCompare(
@@ -193,12 +193,12 @@ describe("getBranchCompare commit tolerance (F21-8)", () => {
 });
 
 /**
- * Ruling 494 (pass 40, F40-70): a count is only true of the head it was
+ * Ruling 238 (pass 40, F40-70): a count is only true of the head it was
  * counted on, so the compare names the head it read. GitHub's answer does not
  * carry the head outright; `base_commit`, `merge_base_commit`, the commit list
  * and `total_commits` do, and a head they cannot name is null, never a guess.
  */
-describe("ruling 494: the compare names the head it read", () => {
+describe("ruling 238: the compare names the head it read", () => {
   const REPO = "akin-ozer/viberr";
   const MAIN = "m".repeat(40);
   const FORK = "f".repeat(40);
@@ -329,7 +329,7 @@ describe("ensureTaskBranch", () => {
       [`GET ${REPO_PATH}/git/ref/heads/main`]: {
         body: { object: { sha: "basesha00" } },
       },
-      // Ruling 122: the allocator asks whether any pull request ever used the
+      // Ruling 228: the allocator asks whether any pull request ever used the
       // name before it takes it. Nothing has.
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
       [`POST ${REPO_PATH}/git/refs`]: {
@@ -371,14 +371,14 @@ describe("ensureTaskBranch", () => {
     // free gets no allocation note — the note is for the suffixed case only.
     expect(created[0]!.details).toMatchObject({ canonical: branch, branch, suffixed: false });
     expect(file!.parsed.timeline.some((e) => e.text.includes("allocated:"))).toBe(false);
-    // Ruling 480 (F40-43): the ref this token just created proves `repo` on
+    // Ruling 220 (F40-43): the ref this token just created proves `repo` on
     // this repository. Canary: drop the `markWriteScopeProven(…, "branch")`.
     expect(
       getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === "repo"),
     ).toEqual({ id: "repo", ok: true, source: "probe" });
   });
 
-  it("ruling 122: takes a suffixed name when a past pull request used the canonical one", async () => {
+  it("ruling 228: takes a suffixed name when a past pull request used the canonical one", async () => {
     const store = setupWithCredential("VIB-210");
     const gh = fakeGithubFetch({
       // No ref anywhere: the canonical name is free as a REF and still taken.
@@ -435,11 +435,11 @@ describe("ensureTaskBranch", () => {
     expect(note!.type).toBe("note");
     expect(note!.actor).toEqual({ kind: "system", systemId: "policy-engine" });
     expect(note!.text).toBe(
-      `Branch \`${allocated}\` allocated: \`vib-210\` is already spoken for on GitHub (a ref or a past pull request), ruling 122.`,
+      `Branch \`${allocated}\` allocated: \`vib-210\` is already spoken for on GitHub (a ref or a past pull request), ruling 228.`,
     );
   });
 
-  it("ruling 122: takes a suffixed name when the canonical ref already exists", async () => {
+  it("ruling 228: takes a suffixed name when the canonical ref already exists", async () => {
     const store = setupWithCredential("VIB-211");
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/git/ref/heads/vib-211`]: {
@@ -465,7 +465,7 @@ describe("ensureTaskBranch", () => {
     expect(allocated).toMatch(/^vib-211-[0-9a-f]{4}$/);
   });
 
-  it("ruling 122: a 403 listing pull requests opens a repo scope violation", async () => {
+  it("ruling 228: a 403 listing pull requests opens a repo scope violation", async () => {
     const store = setupWithCredential("VIB-212");
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: {
@@ -515,7 +515,7 @@ describe("ensureTaskBranch", () => {
     }
     expect(gh.callsTo(`POST ${REPO_PATH}/git/refs`)).toHaveLength(0);
     expect(listAuditEvents(store.db, { action: "github.branch.created" })).toHaveLength(0);
-    // Ruling 480: a read wrote nothing, so it proves nothing.
+    // Ruling 220: a read wrote nothing, so it proves nothing.
     expect(
       getProjectCredentialHealth(store.db, store.slug).scopes.find((s) => s.id === "repo"),
     ).toMatchObject({ source: "unchecked" });
@@ -598,7 +598,7 @@ describe("ensureTaskBranch", () => {
       ),
     ).toEqual({ status: "no_pat_configured", repo: "akin-ozer/viberr" });
 
-    // Ruling 128: the default branch missing on the remote is BOOTSTRAPPED,
+    // Ruling 227: the default branch missing on the remote is BOOTSTRAPPED,
     // then the task branch is cut from it. (This case used to assert a typed
     // `default_branch_missing` that no caller consumed.) The base cannot be
     // created at all → `bootstrap_failed`.
@@ -631,13 +631,13 @@ describe("ensureTaskBranch", () => {
 });
 
 /**
- * Ruling 128 (pass 34, F34-4): on an EMPTY repository `ensureTaskBranch`
+ * Ruling 227 (pass 34, F34-4): on an EMPTY repository `ensureTaskBranch`
  * bootstraps `main` (an initial commit through the Contents API) and then cuts
  * the task branch from it, recording the bootstrap on the timeline and in the
  * audit log. Canary: restore the old 404 arm (return `bootstrap_failed`
  * without calling `ensureDefaultBranch`) and the PUT never runs.
  */
-describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
+describe("ruling 227: ensureTaskBranch bootstraps an empty repository", () => {
   it("creates `main` with an initial commit, then the task branch from it", async () => {
     const store = setupWithCredential("VIB-207", "vib-207");
     const ROOT = "d2e0fb0".padEnd(40, "0");
@@ -672,10 +672,10 @@ describe("ruling 128: ensureTaskBranch bootstraps an empty repository", () => {
 });
 
 /**
- * Ruling 670: when the bootstrap answers that the project took the
+ * Ruling 227: when the bootstrap answers that the project took the
  * repository's own default branch, that branch is the base from there on.
  */
-describe("ruling 670: ensureTaskBranch cuts the task branch from a default branch the project just took", () => {
+describe("ruling 227: ensureTaskBranch cuts the task branch from a default branch the project just took", () => {
   it("reads the adopted base, creates the task branch at its head and compares against it", async () => {
     // CANARY: keep reading the context's `main` after the bootstrap and the
     // preparation answers `bootstrap_failed`: "`main` still has no ref".

@@ -36,15 +36,15 @@ import { listKbCorrections } from "~/server/org/kb-corrections.server";
 import { isDocumentNavigation } from "~/server/http/single-fetch.server";
 
 /**
- * Loader data for the controller surfaces (ruling 99): the viewer's own
- * conversations (org admins may ask for everyone's, and so, ruling 525, may a
+ * Loader data for the controller surfaces (ruling 249): the viewer's own
+ * conversations (org admins may ask for everyone's, and so, ruling 26, may a
  * project admin on their project's page, as threads they can delete but not
  * read), the active transcript, live turn state, and — on the project surface
  * — the knowledge-base panel.
- * The goal chains it also carried became epics (ruling 503), which the Epics
+ * The goal chains it also carried became epics (ruling 273), which the Epics
  * pages read (`features/epics/epics-query.server.ts`).
  *
- * Ruling 121: the project surface lists the board's threads AND the threads
+ * Ruling 249: the project surface lists the board's threads AND the threads
  * anchored to its tasks (each item carries `taskKey`, rendered as a chip);
  * the instance surface lists instance threads only, as before.
  */
@@ -60,7 +60,7 @@ export interface ControllerSurfaceView {
   /** U39-29: the task keys the transcript names that this viewer can open,
    *  key to path. */
   taskLinks: TaskLinks;
-  /** Ruling 250: `phase`/`step` say what the live turn is doing, for the row
+  /** Ruling 257: `phase`/`step` say what the live turn is doing, for the row
    *  the person is watching. */
   turn: ConversationTurnState;
   /**
@@ -74,18 +74,19 @@ export interface ControllerSurfaceView {
   /** The viewer may stop the working turn: the conversation's owner or an org
    *  admin (`canInterruptControllerRun`, re-checked by the engine on submit). */
   canInterruptTurn: boolean;
-  /** Ruling 483 (F40-59): the open knowledge-base proposals agents filed from
-   *  this project's tasks before ruling 498. Project surface only. */
+  /** Ruling 267 (F40-59): the open knowledge-base proposals agents filed from
+   *  this project's tasks; nothing files one now (ruling 210(c)). Project
+   *  surface only. */
   proposals: KbProposalView[] | null;
-  /** Ruling 498: the knowledge-base corrections agents on this project's
+  /** Ruling 321: the knowledge-base corrections agents on this project's
    *  tasks wrote, newest first. Project surface only. */
   corrections: KbCorrectionsView | null;
   viewerOwnsActive: boolean;
   /** Reading every conversation of this scope (?all=1): an org admin, or
-   *  (ruling 525) a holder of `delete-controller-conversations` on this page's
+   *  (ruling 26) a holder of `delete-controller-conversations` on this page's
    *  project. */
   showingAll: boolean;
-  /** Ruling 525: who the "Show everyone's" link says the viewer is reading
+  /** Ruling 26: who the "Show everyone's" link says the viewer is reading
    *  as ("org admin", "project admin"); null when they may not. */
   showAllAs: string | null;
   viewerIsOrgAdmin: boolean;
@@ -109,7 +110,7 @@ export interface KbProposalView {
   docHref: string | null;
 }
 
-/** Ruling 498: one knowledge-base correction an agent wrote, as the project
+/** Ruling 321: one knowledge-base correction an agent wrote, as the project
  *  controller page lists it. The passages are clipped for the page; the
  *  document and the record hold them whole. */
 export interface KbCorrectionView {
@@ -143,25 +144,25 @@ export interface ConversationListItem {
   ownerLabel: string;
   own: boolean;
   lastMessageAt: string | null;
-  /** Ruling 121: the task this thread is anchored to, when it is. */
+  /** Ruling 249: the task this thread is anchored to, when it is. */
   taskKey: string | null;
   /** O39-d: the viewer's own thread holds a controller reply they have not
    *  seen. Never set on someone else's thread (?all=1). */
   unread: boolean;
-  /** The viewer may open it: its starter, or an org admin. Ruling 525: a
+  /** The viewer may open it: its starter, or an org admin. Ruling 250: a
    *  project admin's everyone's list also holds threads they may only
    *  delete, which carry no title and open nothing. */
   readable: boolean;
-  /** Ruling 525: the viewer may delete it (`mayDeleteConversation`). */
+  /** Ruling 26: the viewer may delete it (`mayDeleteConversation`). */
   canDelete: boolean;
-  /** Ruling 525: a turn of it is running, which deleting it stops first. */
+  /** Ruling 250: a turn of it is running, which deleting it stops first. */
   working: boolean;
 }
 
 /**
  * U33-8: which thread a visit to either controller page opens.
  *
- * The dock's continuity rule (ruling 121) is "the newest thread of the scope
+ * The dock's continuity rule (ruling 256) is "the newest thread of the scope
  * you are standing in"; the pages answered a blank composer instead, so one
  * person on one scope got two different answers from the two entry points.
  * Same rule here: no `?c=` opens this scope's newest thread, `?c=new` is the
@@ -193,7 +194,7 @@ function selectedConversationId(
 }
 
 /**
- * Ruling 483 (F40-59): what the owner is asked to decide about the project's
+ * Ruling 267 (F40-59): what the owner is asked to decide about the project's
  * knowledge. Live on WEB-1 the two proposals the operator filed were visible
  * only as timeline events that scrolled away, so nothing brought them back.
  */
@@ -219,7 +220,7 @@ function projectProposals(
   }));
 }
 
-/** Ruling 498: corrections the page lists before the rest are left to the
+/** Ruling 321: corrections the page lists before the rest are left to the
  *  audit log and to `get_project`. */
 const CORRECTIONS_SHOWN = 20;
 
@@ -229,7 +230,7 @@ function clipped(value: string, max: number): string {
 }
 
 /**
- * Ruling 498: what the board's agents changed in the knowledge every run
+ * Ruling 321: what the board's agents changed in the knowledge every run
  * reads, where the owner looks, with Undo. The owner stopped approving each
  * correction ("No human can approve all of these while inspecting them
  * thoroughly"); this list is what they read afterwards instead.
@@ -267,7 +268,7 @@ export function getControllerSurface(
     conversationId?: string | null;
     all?: boolean;
     dataRoot?: string;
-    /** Ruling 457 (owner decision 2): how much of the open thread's console
+    /** Ruling 300 (owner decision 2): how much of the open thread's console
      *  window to carry. The routes pass `shown` for a document load and
      *  `none` for a `.data` request; omitted, every window is carried. */
     console?: ConsoleShipping;
@@ -275,7 +276,7 @@ export function getControllerSurface(
 ): ControllerSurfaceView {
   const admin = isOrgAdmin(db, viewer.id);
   const scope = input.projectSlug ?? null;
-  // Ruling 525: the viewer's role on this page's project decides whether they
+  // Ruling 26: the viewer's role on this page's project decides whether they
   // may delete other people's threads about it, and so list them.
   const projectRole = scope
     ? (listProjectMembers(db, scope).find((m) => m.userId === viewer.id)?.role ?? null)
@@ -307,7 +308,7 @@ export function getControllerSurface(
       // "Something went wrong" page at HTTP 500 instead.
       throw data("Conversation not found.", { status: 404 });
     }
-    // Ruling 121 (review finding 22, and the page half of finding 3): a page
+    // Ruling 249 (review finding 22, and the page half of finding 3): a page
     // only opens the threads of its OWN scope. The instance page rendered a
     // task-anchored thread as "on the null board" and, worse, its composer
     // drove a turn whose context read belongs to a project this page never
@@ -326,7 +327,7 @@ export function getControllerSurface(
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const working = new Set(liveTurnConversationIds());
-  // Ruling 419(f): a person is named on this page the way the rest of the app
+  // Ruling 320: a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
   // controller's prompt keeps it: an address is unambiguous to a model), and
   // the transcript and the rail printed that address beside every message
@@ -347,7 +348,7 @@ export function getControllerSurface(
   }
   const messages = conversation ? listMessages(db, conversation.id) : [];
   return {
-    // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
+    // Ruling 137: a controller turn runs on the ASKER's own Claude account, so
     // "is the controller available" is a question about the person looking at
     // it — not about this deployment. Another member with Claude connected can
     // still converse while this viewer cannot.
@@ -361,8 +362,8 @@ export function getControllerSurface(
       const ownerLabel = nameOf(c.userId, c.userLabel);
       return {
         id: c.id,
-        // Ruling 525: a title is its starter's first words, which a project
-        // admin who may delete the thread may not read (ruling 99(d)).
+        // Ruling 250: a title is its starter's first words, which a project
+        // admin who may delete the thread may not read (ruling 249).
         title: readable ? c.title || "New conversation" : `${ownerLabel}'s conversation`,
         ownerLabel,
         own: c.userId === viewer.id,
@@ -384,7 +385,7 @@ export function getControllerSurface(
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : IDLE_TURN,
-    // Ruling 99: a controller run is stored at `project_slug = ''` with the
+    // Ruling 251: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.
     runtime: conversation
@@ -402,7 +403,7 @@ export function getControllerSurface(
   };
 }
 
-/** What both Controller pages load (ruling 99): `/controller` with
+/** What both Controller pages load (ruling 247): `/controller` with
  *  `projectSlug` null, `/projects/:slug/controller` with its slug. */
 export function controllerPageView(
   db: DatabaseSync,
@@ -415,7 +416,7 @@ export function controllerPageView(
     projectSlug,
     conversationId: selectedConversationId(db, url, { userId: viewer.id, projectSlug }),
     all: url.searchParams.get("all") === "1",
-    // Ruling 457 (owner decision 2): console lines on a document load only.
+    // Ruling 300 (owner decision 2): console lines on a document load only.
     console: isDocumentNavigation(request) ? "shown" : "none",
   });
 }

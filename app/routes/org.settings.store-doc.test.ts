@@ -6,15 +6,15 @@ import {
 } from "../../test-support/test-app";
 
 /**
- * Ruling 663 — the document editor saves against the version it read.
+ * Ruling 18(c) — the document editor saves against the version it read.
  *
  * `store-write-doc` was a blind whole-document replace: the editor sent back
  * the text it had loaded, edited, whatever had been written to the file since.
  * On the AWS board agents merge knowledge-base corrections during their runs
  * and a person hand-edits the same documents (the board's rulings §6), so a
  * correction merged while the editor was open would have been wiped by the
- * person's Save, under a success toast. The controller's replace has named
- * the version it read since ruling 305; this is the editor's half.
+ * person's Save, under a success toast. The controller's replace names the
+ * version it read (ruling 212(a)); this is the editor's half.
  */
 
 let app: AppTestContext;
@@ -53,7 +53,7 @@ const read = () => post({ intent: "store-read-doc", path: JSON.stringify([NAME])
 const save = (body: string, more: Record<string, string> = {}) =>
   post({ intent: "store-write-doc", path: JSON.stringify([]), name: NAME, body, ...more });
 
-describe("ruling 663: the document editor's save", () => {
+describe("ruling 18(c): the document editor's save", () => {
   it("is refused once the file is no longer the version it read, and the other write survives", async () => {
     expect((await save("ORIGINAL")).ok).toBe(true);
     // The editor opens the document: the read hands back its version.
@@ -79,5 +79,30 @@ describe("ruling 663: the document editor's save", () => {
     });
     expect(merged.ok).toBe(true);
     expect((await read()).text).toBe("ORIGINAL, corrected by an agent, edited by hand");
+  });
+
+  it("ruling 212: is refused when the editor was given only the first 256 KB, and the tail survives", async () => {
+    // The read stops at 256 KB but its version is hashed from the whole file,
+    // so a save of what the editor holds passed the version check and deleted
+    // the tail nobody had seen.
+    // CANARY: drop the size refusal in `writeStoreDoc` and this save lands,
+    // and the file's version moves.
+    const long = { path: JSON.stringify([]), name: "long-663.md" };
+    const body = "- a line of the document\n".repeat(12_000) + "## Tail\n\n- past 256 KB\n";
+    expect((await post({ intent: "store-write-doc", ...long, body })).ok).toBe(true);
+    const readLong = () => post({ intent: "store-read-doc", path: JSON.stringify([long.name]) });
+    const opened = await readLong();
+    expect(opened.text!.length).toBeLessThan(body.length);
+
+    const saved = await post({
+      intent: "store-write-doc",
+      ...long,
+      body: `${opened.text!}\n- an edit by hand`,
+      overwrite: "1",
+      version: opened.version!,
+    });
+    expect(saved.ok).toBe(false);
+    expect(saved.error).toMatch(/long-663\.md is over the 256 KB the editor opens.*Nothing was written/);
+    expect((await readLong()).version).toBe(opened.version);
   });
 });

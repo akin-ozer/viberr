@@ -42,12 +42,12 @@ const EVENT_META: EventMetaTable = {
   // agent re-anchored on a fresh session). Distinct from a neutral `note` so a
   // scanning supervisor sees that context was lost and recovered.
   continuity: { node: "quality", icon: "refresh", label: "Continuity reset" },
-  // Ruling 483 (F40-59): a proposed knowledge-base correction. Ruling 378 filed
+  // Ruling 267 (F40-59): a proposed knowledge-base correction. Ruling 210 filed
   // these as `quality`, so the one item in the record that asks the owner to
   // act read "Review verdict" and sat above a real verdict looking like a
   // failed review. It is a proposal: its own label, and the edit glyph.
   proposal: { node: "proposal", icon: "edit", label: "Proposal" },
-  // Ruling 498: a correction an agent wrote into a knowledge base (or a
+  // Ruling 210: a correction an agent wrote into a knowledge base (or a
   // person's undo of one). The same tint and glyph as the proposal it replaced,
   // named for what it touched: the title says corrected or undone.
   kb_correction: { node: "proposal", icon: "edit", label: "Knowledge base" },
@@ -85,9 +85,9 @@ const TYPED_KIND: TypedKindTable = {
   note: "neutral",
   quality: "neutral",
   continuity: "risk", // G8: amber warning tone
-  // Ruling 483: a decision a person owes, not a verdict and not a warning.
+  // Ruling 267: a decision a person owes, not a verdict and not a warning.
   proposal: "info",
-  // Ruling 498: a change to what every run reads, in the same tone.
+  // Ruling 210: a change to what every run reads, in the same tone.
   kb_correction: "info",
   transition: "info",
   blocked: "blocked",

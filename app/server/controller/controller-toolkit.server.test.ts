@@ -19,7 +19,7 @@ import {
 import { DONE_SIGNAL_RULE } from "~/server/tasks/done-signal.server";
 
 /**
- * Ruling 99 — the controller's permission matrix, driven arm by arm.
+ * Ruling 247 — the controller's permission matrix, driven arm by arm.
  *
  * The contract under test: the controller holds NO authority of its own.
  * Every tool call runs under the ASKING USER's live permissions — org role for
@@ -178,7 +178,7 @@ describe("the tool surface itself encodes the invariants", () => {
       "accept",
       "force",
       "resolve_packet",
-      // Ruling 251: list_decisions briefs the person and links the control;
+      // Ruling 263: list_decisions briefs the person and links the control;
       // no tool answers a decision.
       "answer_packet",
       "decide",
@@ -189,7 +189,7 @@ describe("the tool surface itself encodes the invariants", () => {
         `no tool may carry "${banned}"`,
       ).toEqual([]);
     }
-    // Ruling 464 amends "nothing deletes" by exactly one tool: taking a
+    // Ruling 248 amends "nothing deletes" by exactly one tool: taking a
     // specialist's deployment off a project's roster edits that roster (as
     // `update_stages op: remove` edits a board's stages); it deletes no
     // project, task, user, template or resource. Any other removal is a new
@@ -208,7 +208,7 @@ describe("the tool surface itself encodes the invariants", () => {
 });
 
 /**
- * Ruling 492 (F40-69): a done signal is something the task can show before
+ * Ruling 105 (F40-69): a done signal is something the task can show before
  * acceptance, and every door that writes a goal says so.
  *
  * Acceptance moves the task to Done and nothing sits after it, so a goal whose
@@ -217,10 +217,10 @@ describe("the tool surface itself encodes the invariants", () => {
  * links 9 and 11, carried by WEB-12 and WEB-7), and each needed a person or an
  * extra packet before it could finish. Its four goal doors said only
  * "deliverable plus the done signal", and `update_goal`'s goal field, which
- * `add_link` and `edit_link` write through, said nothing at all. Ruling 503
+ * `add_link` and `edit_link` write through, said nothing at all. Ruling 273
  * retired the two chain doors; the two task doors remain.
  */
-describe("ruling 492: every controller door that writes a goal carries the done-signal rule", () => {
+describe("ruling 105: every controller door that writes a goal carries the done-signal rule", () => {
   // The published description of a door's goal field, "" when the field has
   // none, so a door that lost its text fails by name instead of in the parse.
   const topGoal = z
@@ -233,7 +233,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     // since every door would then "contain" it.
     expect(DONE_SIGNAL_RULE).toContain("a done signal is something the task can show BEFORE acceptance");
     expect(DONE_SIGNAL_RULE).toContain("that proof goes in a follow-up read task that waits on this one");
-    // Ruling 503: planned work is tasks in an epic, never links of a chain.
+    // Ruling 273: planned work is tasks in an epic, never links of a chain.
     expect(DONE_SIGNAL_RULE).toContain(
       "is two tasks, in the same epic when it has one: the delivery task, and a read task whose `blockedBy` names it",
     );
@@ -241,7 +241,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     // Review (2026-09-26): the rule is true on every acceptance path. A
     // full-autonomy operator's acceptance leaves the PR "accepted, merge
     // pending", and a `blockedBy` wait is done when its task reaches Done,
-    // merged or not (the "ruling 492" suite in operator-actions.server.test.ts
+    // merged or not (the "ruling 105" suite in operator-actions.server.test.ts
     // walks that path). So the read exists before the acceptance and confirms
     // the merge itself.
     // CANARY: restore the first wording ("Acceptance merges the task's PR and
@@ -258,7 +258,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
     expect(DONE_SIGNAL_RULE).not.toContain("at this task's acceptance");
     const toolkit = await toolkitAs(ids.orgAdmin);
     // The copy a model is handed: the JSON Schema read through a real MCP
-    // client (ruling 296).
+    // client (ruling 136).
     const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
     const doors: [string, string][] = [
       ["create_task.goal", topGoal.parse(published.get("create_task"))],
@@ -271,7 +271,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
 });
 
 /**
- * Ruling 251 (pass 37, F37-80): the human-decision boundary stays, and stops
+ * Ruling 263 (pass 37, F37-80): the human-decision boundary stays, and stops
  * being a dead end.
  *
  * Live, the owner told the controller "I want to lean on you to finish this
@@ -282,7 +282,7 @@ describe("ruling 492: every controller door that writes a goal carries the done-
  * actionable — nothing let it even SEE what was waiting without calling
  * `get_task` on a task someone already suspected.
  */
-describe("list_decisions briefs the person and decides nothing (ruling 251)", () => {
+describe("list_decisions briefs the person and decides nothing (ruling 263)", () => {
   const PACKET_TASK = "VIB-142";
 
   async function openPacketOn(taskKey: string): Promise<void> {
@@ -326,7 +326,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
   }
 
-  it("ruling 707: read_timeline_entry reads a report longer than a page to its end, for the controller too", async () => {
+  it("ruling 213(e): read_timeline_entry reads a report longer than a page to its end, for the controller too", async () => {
     // The controller reads an agent's report before it tells a person what
     // it said, and one over 40,000 characters came back cut with nothing to
     // read on with. CANARY: drop `args.offset` or `args.entry` on the way to
@@ -398,17 +398,17 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 302, extended to the sibling it was first written without.
+   * Ruling 117, for the controller's `get_task` as for the operator's.
    *
-   * It fixed the OPERATOR's timeline window and left the controller's, which
-   * is the defect shape ruling 292's own comment had already named inside this
-   * pass's own fix: "a rule applied to one actor and not its sibling, which is
+   * A fix to the OPERATOR's timeline window once left the controller's, which
+   * is the defect shape a comment inside this pass's own fix had already
+   * named: "a rule applied to one actor and not its sibling, which is
    * this pass's own defect shape inside this pass's own fix." The controller
    * found it within the hour, on live work: "I read 5 of 121 entries on
    * SHOP-36 and 4 of 111 on SHOP-27, and coordinated from them. I can derive
    * the gap from `eventCount` minus what I got, but nothing prompts me to."
    */
-  it("ruling 302: get_task says how many entries the timeline HAS and how to widen the window", async () => {
+  it("ruling 117: get_task says how many entries the timeline HAS and how to widen the window", async () => {
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
     await updateTaskFile(
@@ -449,25 +449,25 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(wide.timelineOlder).toBeUndefined();
   });
 
-  it("ruling 597: get_task lists a task's kept deliveries, and read_task_attachment reads a file as one held it", async () => {
+  it("ruling 86: get_task lists a task's kept deliveries, and read_task_attachment reads a file as one held it", async () => {
     // CANARIES: leave `deliveries` off get_task and no stamp is offered; drop
     // `delivery` on the way to the reader and the rework comes back instead.
     const { mkdirSync } = await import("node:fs");
     const { taskAttachmentsDir, taskDir } = await import("~/server/files/file-store-root.server");
     const { keepDelivery } = await import("~/server/files/kept-deliveries.server");
-    const file = path.join(taskAttachmentsDir(SLUG, "VIB-148", app.dataRoot), "ruling-597-summary.md");
+    const file = path.join(taskAttachmentsDir(SLUG, "VIB-148", app.dataRoot), "ruling-86-summary.md");
     const stamp = "2026-09-29T23:35:25.588Z";
     mkdirSync(path.dirname(file), { recursive: true });
     try {
       writeFileSync(file, "Score of record: 75/100");
-      keepDelivery(SLUG, "VIB-148", stamp, ["ruling-597-summary.md"], app.dataRoot);
+      keepDelivery(SLUG, "VIB-148", stamp, ["ruling-86-summary.md"], app.dataRoot);
       writeFileSync(file, "Rework: 79/100");
       const read = z
         .object({ deliveries: z.array(z.object({ deliveredAt: z.string(), files: z.array(z.string()) })) })
         .parse(JSON.parse(await call(ids.maintainer, "get_task", { taskKey: "VIB-148" })));
-      expect(read.deliveries).toEqual([{ deliveredAt: stamp, files: ["ruling-597-summary.md"] }]);
+      expect(read.deliveries).toEqual([{ deliveredAt: stamp, files: ["ruling-86-summary.md"] }]);
       const attachment = (args: Record<string, JsonValue>) =>
-        call(ids.maintainer, "read_task_attachment", { taskKey: "VIB-148", name: "ruling-597-summary.md", ...args });
+        call(ids.maintainer, "read_task_attachment", { taskKey: "VIB-148", name: "ruling-86-summary.md", ...args });
       expect(await attachment({ delivery: stamp })).toContain("Score of record: 75/100");
       expect(await attachment({})).toContain("Rework: 79/100");
     } finally {
@@ -476,7 +476,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
-  it("ruling 690: read_task_source lists and opens a task's kept sources for a member, and tells a non-member the project is not visible", async () => {
+  it("ruling 82: read_task_source lists and opens a task's kept sources for a member, and tells a non-member the project is not visible", async () => {
     // The controller is who a person asks where a figure came from, and it
     // answers under that person's membership. CANARY: drop `requireVisible`
     // from the tool and a signed-in person who is no member of the project
@@ -512,7 +512,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
         title: "AWS EC2 on-demand pricing",
         text: "<html>t3.medium $0.0416 per hour</html>",
       });
-      // Ruling 706: and searches one. Asked to send a post back over a later
+      // Ruling 82: and searches one. Asked to send a post back over a later
       // entry of a 2 MB record, the controller found it by guessing at an
       // offset twice. CANARY: drop `args.find` on the way to the reader.
       const search = { taskKey: "VIB-148", id: "S1", find: "T3.MEDIUM $0.0416" };
@@ -546,12 +546,12 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 300 (pass 37, F37-135). The controller read three cards and worked
+   * Ruling 263 (pass 37, F37-135). The controller read three cards and worked
    * out by hand, across two turns, that five tasks sat behind them: "the one
    * number that should order a decision queue does not exist, so the ordering
    * depends on whoever happens to have walked the graph recently."
    */
-  it("ruling 300 (+336): every decision says what answering it releases, and when", async () => {
+  it("ruling 263 (+336): every decision says what answering it releases, and when", async () => {
     await openPacketOn(PACKET_TASK);
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
@@ -572,7 +572,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       );
       // CANARY: drop `releases` and the queue has no number to order by.
       //
-      // Ruling 336: still the whole chain, but split by WHEN. VIB-148's last
+      // Ruling 263: still the whole chain, but split by WHEN. VIB-148's last
       // wait is this packet's task, so it moves when that completes; VIB-151
       // waits on VIB-148, which must then be built, reviewed and accepted. The
       // controller predicted this over-count and named the check that settled
@@ -629,7 +629,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 271 (pass 37, F37-103): the card ALWAYS offers one more answer than
+   * Ruling 263 (pass 37, F37-103): the card ALWAYS offers one more answer than
    * the packet stores — a free-text directive, composed with the fixed choices
    * as their last choice. This tool listed the stored options and nothing
    * else, so the one tool whose job is to "brief the person fully" left out
@@ -640,7 +640,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * options are wrong' except to pick one of them." There was; it was the
    * choice under the ones it could see.
    */
-  it("briefs the free-text answer the card always offers (ruling 271)", async () => {
+  it("briefs the free-text answer the card always offers (ruling 263)", async () => {
     await openPacketOn(PACKET_TASK);
     try {
       const out = JSON.parse(await call(ids.orgAdmin, "list_decisions"));
@@ -706,7 +706,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 256 (pass 37, F37-86): the anchor belongs to the project it was
+   * Ruling 263 (pass 37, F37-86): the anchor belongs to the project it was
    * anchored IN.
    *
    * A conversation anchored to a task, asked about a DIFFERENT project, filtered
@@ -714,7 +714,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * "Nothing is waiting on a person here" — a false all-clear, from the one tool
    * whose entire job is to say what is waiting.
    */
-  it("ruling 256: an anchored task never filters another project's decisions", async () => {
+  it("ruling 263: an anchored task never filters another project's decisions", async () => {
     await openPacketOn(PACKET_TASK);
     try {
       const read = async (
@@ -752,9 +752,9 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     }
   });
 
-  it("ruling 578: private closes a knowledge base's folder to every agent's shell, and false opens it again", async () => {
+  it("ruling 267: private closes a knowledge base's folder to every agent's shell, and false opens it again", async () => {
     // Every agent of a person runs as that person's uid and can read `kb/`
-    // (ruling 460(d)): on the AWS calculator board the golden set, granted to
+    // (ruling 15(c)): on the AWS calculator board the golden set, granted to
     // the Estimate Judge alone, was 0775 on disk. CANARY: drop the privacy
     // call and the folder stays open while the reply calls it private.
     const { statSync } = await import("node:fs");
@@ -789,7 +789,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
    * Live, the controller's second KB document — 7,356 bytes of markdown with Go
    * snippets and tables — came back `InputValidationError: … could not be
    * parsed as JSON`. It recovered by re-emitting a shorter version, which cost
-   * it the whole document over again. Rulings 257 and 305 (the collision guard
+   * it the whole document over again. Rulings 212 and 212(a) (the collision guard
    * and the version check) exist to stop a whole-document REPLACE deleting text
    * the writer never read; an append deletes nothing, so it needs neither.
    */
@@ -827,7 +827,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       }),
     ) as { text: string };
     // CANARY: route append through the replace arm and the first section is
-    // gone — which is exactly the failure rulings 257/305 guard against.
+    // gone — which is exactly the failure rulings 212/212(a) guard against.
     expect(read.text).toContain("- Run every gate.");
     expect(read.text).toContain("- Strike the race gate.");
     expect(read.text.indexOf("Run every gate")).toBeLessThan(
@@ -863,13 +863,13 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 466 (F40-9, F40-13): an append adds EXACTLY the text sent, and every
+   * Ruling 18(b) (F40-9, F40-13): an append adds EXACTLY the text sent, and every
    * size the reply names is UTF-8 bytes. Live, the controller built a KB
    * document in parts; the tool trimmed each part and forced a blank line
    * between them, so a table whose rows straddled a part boundary split in
    * two, and a non-ASCII document was reported 50 bytes short.
    */
-  it("ruling 580: read_knowledge_base_doc returns a long document in pages, with where the next one starts", async () => {
+  it("ruling 215: read_knowledge_base_doc returns a long document in pages, with where the next one starts", async () => {
     // Live on the AWS calculator board the controller could not take in a
     // 94 KB document whole, and so could not safely change it. CANARY: return
     // the whole text again and the first page carries all of it.
@@ -898,7 +898,38 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     expect(second.nextOffset).toBeNull();
   });
 
-  it("ruling 637: edit_knowledge_base_doc changes one passage of a long document in place", async () => {
+  it("ruling 212: a document past 256 KB reads page by page to its end, so a replace never drops a tail it did not read", async () => {
+    // The version a replace names is hashed from the whole file, so the pages
+    // must reach the whole file too: pages that stopped at the store reader's
+    // 256 KB cap ended with `nextOffset: null`, and a replace built from them
+    // deleted everything past it under a version that matched.
+    // CANARY: read through `readStoreDoc`'s default cap again and the joined
+    // pages stop at 262,144 characters, without the tail.
+    const tail = "\n## Tail\n\n- the last ruling, past 256 KB\n";
+    const body = "- a ruling line\n".repeat(17_000) + tail;
+    const created = await call(ids.orgAdmin, "save_knowledge_base", {
+      name: "past-the-cap",
+      doc: { path: "rulings.md", content: body },
+    });
+    const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
+    expect(kb, created).toBeTruthy();
+    type Page = { text: string; characters: number; nextOffset: number | null };
+    const pages: string[] = [];
+    let offset: number | null = 0;
+    while (offset !== null && pages.length < 20) {
+      // SAFETY: `read_knowledge_base_doc` answers the JSON it built; these are its own fields.
+      const page = JSON.parse(
+        await call(ids.orgAdmin, "read_knowledge_base_doc", { id: kb!, path: "rulings.md", offset }),
+      ) as Page;
+      expect(page.characters).toBe(body.length);
+      pages.push(page.text);
+      offset = page.nextOffset;
+    }
+    expect(offset).toBeNull();
+    expect(pages.join("")).toBe(body);
+  });
+
+  it("ruling 212(b): edit_knowledge_base_doc changes one passage of a long document in place", async () => {
     // Live, three sentences into a 104 KB document cost a replace that cut it
     // to 19,587 bytes and eight appends that typed the rest back in. The tool
     // takes the KB's id, as every other KB tool does, and writes the document
@@ -928,7 +959,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     );
   });
 
-  it("ruling 466: two appends that split a table are one table, and the reply counts bytes", async () => {
+  it("ruling 18(b): two appends that split a table are one table, and the reply counts bytes", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", { name: "append-exact" });
     const kb = /id (kb_[\w-]+)/.exec(created)?.[1];
     expect(kb, created).toBeTruthy();
@@ -958,7 +989,7 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     // splits (the bytes differ).
     expect(read.text).toBe(first + second);
     expect(read.bytes).toBe(Buffer.byteLength(first + second));
-    // A replace names the bytes it destroyed, in bytes (ruling 257).
+    // A replace names the bytes it destroyed, in bytes (ruling 212).
     const replaced = await call(ids.orgAdmin, "save_knowledge_base", {
       id: kb!,
       name: "append-exact",
@@ -1026,14 +1057,14 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
   });
 
   /**
-   * Ruling 256 (F37-85): `get_project` reads leases the way the GATES read them.
+   * Ruling 60 (F37-85): `get_project` reads leases the way the GATES read them.
    *
-   * Ruling 247 made a lease whose holder has finished bind nobody, and wired it
-   * into the push and the canonical anchor — not into the read the controller
-   * uses. Live, the controller said so itself: "I cannot tell you from a direct
+   * A lease whose holder has finished binds nobody in the push and the
+   * canonical anchor, and the read the controller uses once missed that.
+   * Live, the controller said so itself: "I cannot tell you from a direct
    * read whether SHOP-11's lease had already self-released when it merged."
    */
-  it("ruling 256: get_project resolves leases and names the spent ones apart", async () => {
+  it("ruling 60: get_project resolves leases and names the spent ones apart", async () => {
     const { updateProjectFile, readProjectFile } = await import(
       "~/server/files/project-writer.server"
     );
@@ -1064,12 +1095,12 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
 });
 
 /**
- * Ruling 153 (pass 35, G35-1): the controller had no schedule tool at all, so
+ * Ruling 264 (pass 35, G35-1): the controller had no schedule tool at all, so
  * the one agent meant to set a project up could not do the wall-clock half of
  * it ("There is no scheduling tool in my set"). Both tools take the tier the
  * task page's schedule form needs (`run-agents`, maintainer+).
  */
-describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
+describe("schedule_task_action and cancel_task_schedule (ruling 264)", () => {
   interface TaskRead {
     schedules: { id: string; action: string; status: string; profileId: string | null }[];
   }
@@ -1108,7 +1139,7 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
     expect(audit).toMatchObject({ taskKey: "VIB-142", details: { scheduleId: entry.id } });
     expect(audit.actorLabel).toContain("via controller");
 
-    // get_task lists the pending entry (ruling 153).
+    // get_task lists the pending entry (ruling 264).
     // SAFETY: the tool answers the JSON it built; `schedules` is its own field.
     const read = JSON.parse(await call(ids.maintainer, "get_task", { taskKey: "VIB-142" })) as TaskRead;
     expect(read.schedules.map((s) => s.id)).toContain(entry.id);
@@ -1130,7 +1161,7 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
   });
 
   it("keeps the task page's bounds and schedules a deployed agent by name", async () => {
-    // Ruling 153: the controller schedules under the task page's bounds, through `scheduleDueMs`.
+    // Ruling 264: the controller schedules under the task page's bounds, through `scheduleDueMs`.
     expect(
       await call(ids.maintainer, "schedule_task_action", { taskKey: "VIB-142", agent: "operator" }),
     ).toBe("[error] Schedule between 1 minute and 28 days out.");
@@ -1168,7 +1199,7 @@ describe("schedule_task_action and cancel_task_schedule (ruling 153)", () => {
 });
 
 /**
- * Ruling 279 (pass 37, F37-112): `inspect_audit_log`'s headline said "action
+ * Ruling 33 (pass 37, F37-112): `inspect_audit_log`'s headline said "action
  * prefix" and its parameter said "Exact action id" — two descriptions of one
  * field, contradicting each other in the same tool, and the behaviour followed
  * the stricter one. Live, the controller filtered `action: "task."`, received
@@ -1276,7 +1307,7 @@ describe("instance scope: org-role gate on every management tool", () => {
         stages: ["impl"],
       },
     },
-    // Ruling 390. The KB is created only further down, so the admin's call
+    // Ruling 271. The KB is created only further down, so the admin's call
     // here stops at "Create it first" and records no ask.
     {
       tool: "request_resource_grant",
@@ -1290,7 +1321,7 @@ describe("instance scope: org-role gate on every management tool", () => {
       const denied = await call(ids.contributor, probe.tool, probe.args ?? {});
       expect(denied).toContain("[denied]");
       expect(denied).toContain("org admin");
-      // Ruling 99(b), P13-D-8 parity: the instance denial is audited under the asker.
+      // Ruling 247, P13-D-8 parity: the instance denial is audited under the asker.
       const audit = listAuditEvents(app.db, { action: "controller.authority.denied", limit: 1 })[0];
       expect(audit?.id).not.toBe(deniedBefore);
       expect(audit).toMatchObject({ actorUserId: ids.contributor, details: { scope: "instance" } });
@@ -1356,8 +1387,8 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 390 (F39-17). The controller cannot attach a resource to itself —
-   * ruling 108 makes that a deployment decision with no in-app override for
+   * Ruling 271 (F39-17). The controller cannot attach a resource to itself —
+   * ruling 270 makes that a deployment decision with no in-app override for
    * anyone — and live in pass 39 that left an owner's standing rule in a
    * knowledge base nobody had told the controller to read, with the ask
    * existing only as prose in a conversation about to end.
@@ -1412,12 +1443,12 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 483 (F40-59): an agent's knowledge-base proposal reaches the
+   * Ruling 267 (F40-59): an agent's knowledge-base proposal reaches the
    * controller through `get_project`, and the controller closes it with
    * `resolve_kb_proposal` when a person asks. Live on WEB-1 the controller had
    * no read of open proposals and no door that closed one.
    */
-  it("ruling 483: get_project lists the open proposals and resolve_kb_proposal promotes one, org admins only", async () => {
+  it("ruling 267: get_project lists the open proposals and resolve_kb_proposal promotes one, org admins only", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const { parseKbProposals } = await import("~/server/org/kb-proposals.server");
@@ -1430,7 +1461,7 @@ describe("instance scope: org-role gate on every management tool", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 498, and still standing in its document.
+    // A proposal no tool files now (ruling 210(c)), still standing in its document.
     const seeded = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",
@@ -1478,11 +1509,11 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 498: an agent's knowledge-base correction is written as it is made.
+   * Ruling 210: an agent's knowledge-base correction is written as it is made.
    * The controller reads a project's in `get_project` and undoes one when a
    * person asks, which notes the undo on the task that made it.
    */
-  it("ruling 498: get_project lists kbCorrections and undo_kb_correction puts the passage back, org admins only", async () => {
+  it("ruling 210: get_project lists kbCorrections and undo_kb_correction puts the passage back, org admins only", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const { mergeKbCorrection } = await import("~/server/org/kb-corrections.server");
@@ -1549,12 +1580,12 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 677: `get_project` carries each correction as an excerpt, so twenty
+   * Ruling 262: `get_project` carries each correction as an excerpt, so twenty
    * of them cannot outgrow the reply, and `read_kb_correction` reads one whole.
    * On the AWS calculator board the whole passages made the reply 93,696
    * characters, which the CLI refused on every turn that asked for it.
    */
-  it("ruling 677: get_project cuts a long correction to an excerpt, and read_kb_correction reads it whole for a member of its project", async () => {
+  it("ruling 262: get_project cuts a long correction to an excerpt, and read_kb_correction reads it whole for a member of its project", async () => {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
     const { mergeKbCorrection } = await import("~/server/org/kb-corrections.server");
@@ -1647,7 +1678,7 @@ describe("instance scope: org-role gate on every management tool", () => {
   });
 
   /**
-   * Ruling 462 (F40-5): asked to "create everything: the repo and project",
+   * Ruling 266 (F40-5): asked to "create everything: the repo and project",
    * the controller had no way to make the repository. `create_project` takes
    * `createRepository`, publishes it to the model, and hands it to the one
    * server function the New project modal also reaches.
@@ -1702,12 +1733,12 @@ describe("instance scope: org-role gate on every management tool", () => {
 });
 
 /**
- * Ruling 463 (F40-6): `create_project` refuses without a GitHub connection for
+ * Ruling 266 (F40-6): `create_project` refuses without a GitHub connection for
  * the repo owner, and none of the controller's tools listed connections. Live,
  * it wrote "Creating it also needs a GitHub connection for `akin-ozer` in
  * Instance settings, and I can't see whether that exists from here."
  */
-describe("ruling 463: list_github_connections", () => {
+describe("ruling 266: list_github_connections", () => {
   const TOKEN = "github_pat_ctl_reach_0000000000000000000000k3ui";
 
   it("names every connection's owner and what its token reaches, to a non-admin, with no token material", async () => {
@@ -1786,9 +1817,9 @@ describe("ruling 463: list_github_connections", () => {
     expect(create.description).toContain("call list_github_connections FIRST");
   });
 
-  it("ruling 667: create_project makes a board that delivers results with no repository, and says so in its reply", async () => {
+  it("ruling 224: create_project makes a board that delivers results with no repository, and says so in its reply", async () => {
     // The controller settles what a board delivers before it designs it
-    // (ruling 530), and until this ruling it still had to name a repository
+    // (ruling 268), and until this ruling it still had to name a repository
     // for a board that commits nothing. CANARY: keep `owner` and `repoName`
     // required in the tool's shape and the call never reaches the server;
     // drop `delivers` from the input it builds and the server asks for a
@@ -1811,12 +1842,12 @@ describe("ruling 463: list_github_connections", () => {
   });
 
   /**
-   * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+   * Ruling 224 (owner, 2026-10-06): "repoless boards should exist … at
    * creation", and "Users may manually ask to controller to change the board
    * behaviour to PRs as well." So the controller makes a software board with
    * no repository, and connects one to a board that has none.
    */
-  it("ruling 672: create_project makes a software board with no repository, and connect_project_repository connects one later", async () => {
+  it("ruling 224: create_project makes a software board with no repository, and connect_project_repository connects one later", async () => {
     // CANARY: keep a repository required of a software board and the first
     // call is refused; attach without the probe and a token that can only
     // read is accepted for a board whose Developer pushes; let the tool
@@ -1867,7 +1898,7 @@ describe("ruling 463: list_github_connections", () => {
     expect(projectOf().repo).toBe("later-owner/checkout");
   });
 
-  it("ruling 672: connect_project_repository is a project admin's, like the settings door it is", async () => {
+  it("ruling 224: connect_project_repository is a project admin's, like the settings door it is", async () => {
     // CANARY: gate it on visibility alone and a maintainer changes the
     // board's repository by asking the controller.
     const { readProjectFile, updateProjectFile } = await import("~/server/files/project-writer.server");
@@ -1895,13 +1926,13 @@ describe("ruling 463: list_github_connections", () => {
 });
 
 /**
- * Ruling 464 (F40-7): `create_project` wrote the base roster (operator, the
+ * Ruling 266 (F40-7): `create_project` wrote the base roster (operator, the
  * generic Developer with `open-review-pr` on, Reviewer) before the controller
  * deployed the six specialists it had designed, and the controller had no tool
  * that removes a deployment: it moved the two generic agents to Opus and asked
  * the owner to delete them by hand, while the operator could still engage them.
  */
-describe("ruling 464: the controller chooses a project's roster and can take an agent off", () => {
+describe("ruling 266: the controller chooses a project's roster and can take an agent off", () => {
   /** A claude specialist template in the store. */
   function writeTemplate(id: string, name: string) {
     writeFileSync(
@@ -2068,7 +2099,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   it("create_task and create_epic keep the not-visible posture for a non-member", async () => {
     const probes: { tool: string; args: Record<string, JsonValue> }[] = [
       { tool: "create_task", args: { title: "Should not land", goal: "Nor this." } },
-      // Ruling 503: the epic door, where create_goal's stood.
+      // Ruling 273: the epic door, where create_goal's stood.
       { tool: "create_epic", args: { title: "Should not land" } },
     ];
     for (const { tool, args } of probes) {
@@ -2124,7 +2155,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
       toStageId: "impl",
     });
     expect(denied).toContain("[denied]");
-    // Ruling 381: backward, so the controller is held to the same sentence the
+    // Ruling 47: backward, so the controller is held to the same sentence the
     // board's dialog collects — and the refusal comes AFTER the tier gate, so
     // the contributor above is still told about their role, not about a field.
     const mute = await call(ids.maintainer, "move_task", {
@@ -2262,7 +2293,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 252 (pass 37, F37-81). Ruling 214 gave the OPERATOR this sentence
+   * Ruling 70 (pass 37, F37-81). Ruling 133 gave the OPERATOR this sentence
    * after it put a completeness question to "@Code Reviewer" in a comment that
    * no reviewer ever read, and the stranded backstop paused a task five others
    * were waiting behind. The controller had the identical hazard and none of
@@ -2272,7 +2303,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
    * controller for Arda". The same words typed by that person on the task page
    * DO reach the agent.
    */
-  it("comment_on_task: an @tagged AGENT is disclosed as unreached (ruling 252)", async () => {
+  it("comment_on_task: an @tagged AGENT is disclosed as unreached (ruling 70)", async () => {
     await call(ids.projectAdmin, "comment_on_task", {
       taskKey: "VIB-142",
       text: "@reviewer Two standing facts for your next pass on this task.",
@@ -2293,14 +2324,13 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 262 (pass 37, F37-92). This is the LIVE text from SHOP-26 that
-   * motivated ruling 252 — and under ruling 252 alone it still carried no
-   * stamp. `resolveMentionedAgent` answers "which ONE agent would a run go
-   * to", and `@operator` is precedence 1, so it returned the operator, the
-   * stamp was skipped for being the operator, and @platform-architect was
-   * never mentioned. A ruling has to fix the case it was written for.
+   * Ruling 70 (pass 37, F37-92). This is the LIVE text from SHOP-26, which
+   * once carried no stamp: `resolveMentionedAgent` answers "which ONE agent
+   * would a run go to", and `@operator` is precedence 1, so it returned the
+   * operator, the stamp was skipped for being the operator, and
+   * @platform-architect was never mentioned.
    */
-  it("comment_on_task: @operator alongside an agent still discloses the agent (ruling 262)", async () => {
+  it("comment_on_task: @operator alongside an agent still discloses the agent (ruling 70)", async () => {
     await call(ids.projectAdmin, "comment_on_task", {
       taskKey: "VIB-142",
       text: "@operator @reviewer The funded amendment now exists as a task.",
@@ -2315,12 +2345,12 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     // goes back to silence, which is the shape that shipped live.
     expect(top.text).toContain("@reviewer is an agent");
     expect(top.text).toContain("nothing was sent to it");
-    // The operator is still excluded by name (ruling 214): a controller turn's
+    // The operator is still excluded by name (ruling 133): a controller turn's
     // other writes wake it on their own.
     expect(top.text).not.toContain("@operator is an agent");
   });
 
-  it("comment_on_task: EVERY tagged agent is named, not the first (ruling 262)", async () => {
+  it("comment_on_task: EVERY tagged agent is named, not the first (ruling 70)", async () => {
     await call(ids.projectAdmin, "comment_on_task", {
       taskKey: "VIB-142",
       text: "@reviewer @developer both of you should see the amendment.",
@@ -2393,14 +2423,14 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 263 (pass 37, F37-93). The tool's own description promises it
+   * Ruling 152 (pass 37, F37-93). The tool's own description promises it
    * "reports honestly whether a run started", and it answered `[done] … run
    * started on VIB-142 (codex)` for a dispatch that started nothing: the task
-   * owner has no Codex account, so ruling 127 turns the dispatch into a run ROW
+   * owner has no Codex account, so ruling 137 turns the dispatch into a run ROW
    * recording the refusal and no process at all. The person reading the
    * controller was told work had begun; the board showed an errored run.
    */
-  it("run_agent_on_task: a refused run is reported as refused, with the reason (ruling 263)", async () => {
+  it("run_agent_on_task: a refused run is reported as refused, with the reason (ruling 152)", async () => {
     const reply = await call(ids.maintainer, "run_agent_on_task", {
       taskKey: "VIB-142",
       agent: "developer",
@@ -2411,17 +2441,17 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     expect(reply).toContain("[refused]");
     expect(reply).not.toContain("run started");
     // The reason is the run's own sentence, not a restatement: the owner has no
-    // Codex account and this task's runs bill the owner (ruling 127).
+    // Codex account and this task's runs bill the owner (ruling 137).
     expect(reply).toContain("the task owner");
     expect(reply).toContain("Run it again once that is resolved.");
   });
 
   /**
-   * Ruling 583, amended. The controller had no `noVerdict` on its own dispatch
-   * door: on AWSC-25 it asked the task's operator to start the Estimate Judge
-   * with the verdict withheld, because it could not.
+   * Ruling 124: the controller's own dispatch door carries `noVerdict` too.
+   * Without it, on AWSC-25 the controller asked the task's operator to start
+   * the Estimate Judge with the verdict withheld, because it could not.
    */
-  it("ruling 583: run_agent_on_task withholds the verdict of a run that must not judge", async () => {
+  it("ruling 124: run_agent_on_task withholds the verdict of a run that must not judge", async () => {
     const withheld = () =>
       app.db
         .prepare(
@@ -2441,13 +2471,13 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 263's second half: R21-9's law on the one dispatch door that skipped
+   * Ruling 152's second half: R21-9's law on the one dispatch door that skipped
    * it. The task page and the operator's `run_agent` both write
-   * `@<agent> <prompt>` before the start (ruling 375 for the page); through
+   * `@<agent> <prompt>` before the start (ruling 69 for the page); through
    * the controller the directive went into the agent's prompt and nowhere
    * else, so the timeline showed a run appearing for no stated reason.
    */
-  it("run_agent_on_task: the directive is recorded on the timeline (ruling 263)", async () => {
+  it("run_agent_on_task: the directive is recorded on the timeline (ruling 152)", async () => {
     await call(ids.maintainer, "run_agent_on_task", {
       taskKey: "VIB-142",
       agent: "developer",
@@ -2477,14 +2507,14 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 272 (pass 37, F37-105): ruling 263 put R21-9's law on the SPECIALIST
-   * arm of `run_agent_on_task` and returned above it for the operator, so the
-   * one dispatch door still sending a human's words off the record was the
-   * operator half of the door ruling 263 had just fixed. The controller caught
-   * it three minutes after the deploy by counting the task's own comments
+   * Ruling 152 (pass 37, F37-105): a person's prompted dispatch records the
+   * directive on both arms of `run_agent_on_task`. The record once covered
+   * only the SPECIALIST arm and returned above it for the operator, so the
+   * operator half still sent a human's words off the record. The controller
+   * caught it three minutes after the deploy by counting the task's own comments
    * across two reads: "my directive is nowhere in the +1".
    */
-  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 272)", async () => {
+  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 152)", async () => {
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const handOffs = (key: string): string[] =>
       readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
@@ -2501,7 +2531,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
     });
     const after = handOffs("VIB-148");
     // CANARY: return above the appendComment for the operator arm again (as
-    // ruling 263 shipped) and the directive exists only inside the operator's
+    // ruling 152 shipped) and the directive exists only inside the operator's
     // prompt, where nobody watching the task can read it.
     expect(after.length).toBe(before + 1);
     expect(after[0]).toBe("@operator Check in on this task and say what is blocking it.");
@@ -2547,7 +2577,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 266 (pass 37, F37-96). Asked to say whether three open PRs should
+   * Ruling 265 (pass 37, F37-96). Asked to say whether three open PRs should
    * merge, the controller had `get_task`'s filename list and
    * `changed: {files: 4, add: 1528, del: 67}` and nothing else, and said so:
    * "my judgement on PR #32 rests on a four-line filename list… I can
@@ -2584,7 +2614,7 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
         args: { op: "rename", stageId: "impl", name: "In Progress" },
       },
       {
-        // Ruling 364: recolouring is the same governed edit as renaming.
+        // Ruling 279: recolouring is the same governed edit as renaming.
         tool: "update_stages",
         args: { op: "recolor", stageId: "impl", color: "rose" },
       },
@@ -2643,18 +2673,18 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
 });
 
 /**
- * Ruling 375 on the controller door. The task page's Run-an-agent control ran a
+ * Ruling 69 on the controller door. The task page's Run-an-agent control ran a
  * prompted dispatch twice: it recorded the prompt as the person's own
- * `@<agent>` comment AFTER the start, which put the comment inside ruling 203's
+ * `@<agent>` comment AFTER the start, which put the comment inside ruling 69's
  * window ("a human comment addressed to this agent, posted after this run
  * started"), so `deliverDeferredMention` handed the same words back to the agent
  * the moment its run finished. The route was fixed; `run_agent_on_task` wrote
  * the same comment in the same place and was not.
  */
-describe("ruling 375: a prompted run_agent_on_task runs once", () => {
+describe("ruling 69: a prompted run_agent_on_task runs once", () => {
   // Nothing above dispatches on VIB-151. It is Selin's task and a run bills the
-  // OWNER's accounts (ruling 127), so connecting hers leaves VIB-142 (Arda's)
-  // refused exactly as the ruling 263 cases above need it.
+  // OWNER's accounts (ruling 137), so connecting hers leaves VIB-142 (Arda's)
+  // refused exactly as the ruling 152 cases above need it.
   const TASK = "VIB-151";
 
   beforeAll(async () => {
@@ -2670,7 +2700,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
   }
 
   /** The fake runtime finishes on a microtask; its completion hook (ruling
-   *  203's window included) and the operator it re-invokes run after. Wait
+   *  69's window included) and the operator it re-invokes run after. Wait
    *  until nothing on the task is live, so no write lands after the case. */
   async function settled(): Promise<void> {
     const { listRunsForTaskRows } = await import("~/server/runtimes/run-store.server");
@@ -2689,7 +2719,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
       .parsed.timeline.filter((e) => e.type === "comment" && e.actor.kind === "human");
   }
 
-  it("records the directive before the run starts, so ruling 203's window never redelivers it", async () => {
+  it("records the directive before the run starts, so ruling 69's window never redelivers it", async () => {
     const prompt = "Controller check-in: reply with one sentence and stop.";
     const before = (await developerRuns()).length;
     const reply = await call(ids.maintainer, "run_agent_on_task", {
@@ -2712,7 +2742,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
       `directive at ${directive!.occurredAt}, run started at ${run.started_at}`,
     ).toBe(true);
 
-    // Ruling 203's completion hook, asked directly with this run's window:
+    // Ruling 69's completion hook, asked directly with this run's window:
     // nothing to redeliver, nothing started.
     const { deliverDeferredMention } = await import("~/server/tasks/agent-completion.server");
     const delivered = await deliverDeferredMention(
@@ -2726,7 +2756,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
   });
 
   it("a start that throws leaves the directive and, beside it, the person's note of why nothing ran", async () => {
-    // Ruling 186: a task waiting on other work is held, and the dispatch
+    // Ruling 56: a task waiting on other work is held, and the dispatch
     // chokepoint refuses it by throwing, before any run row exists.
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
@@ -2764,10 +2794,10 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
   });
 
   /**
-   * Ruling 452 (owner, 2026-09-24): a prompted dispatch refused because the
-   * agent is already running here. Recorded before the start (ruling 375), the
-   * directive sits inside that live run's window, so ruling 203 delivers it
-   * when the run finishes. The note said "No run started" and the reply said to
+   * Ruling 152 (owner, 2026-09-24): a prompted dispatch refused because the
+   * agent is already running here. Recorded before the start, the directive
+   * sits inside that live run's window, so it is delivered when the run
+   * finishes (ruling 69). The note said "No run started" and the reply said to
    * wait for the run and start another, and a caller who did delivered the
    * words twice.
    */
@@ -2804,7 +2834,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
     expect(note?.toAgent).toBe(false);
     expect((await developerRuns()).length).toBe(before + 1);
 
-    // The promise, kept: the held run finishes and ruling 203 starts the
+    // The promise, kept: the held run finishes and ruling 69 starts the
     // agent on the directive, once.
     release();
     for (let i = 0; i < 80 && (await developerRuns()).length < before + 2; i += 1) {
@@ -2819,7 +2849,7 @@ describe("ruling 375: a prompted run_agent_on_task runs once", () => {
   });
 });
 
-// ------------------------------------------------------------ ruling 121
+// ------------------------------------------------------------ ruling 260
 
 /** Build the toolkit AS one user with a task anchor and call one tool. */
 async function callAnchored(
@@ -2831,7 +2861,7 @@ async function callAnchored(
   return callToolText((await toolkitAs(userId, { taskKey })).tools, toolName, args);
 }
 
-describe("task anchoring (ruling 121)", () => {
+describe("task anchoring (ruling 260)", () => {
   it("defaults every task tool's key to the anchored task, and asks for one when there is none", async () => {
     expect(await call(ids.maintainer, "get_task", {})).toContain(
       "[error] Name the task (this conversation is not anchored to one).",
@@ -2898,14 +2928,14 @@ describe("task anchoring (ruling 121)", () => {
   });
 
   /**
-   * Ruling 295 (pass 37, F37-130), from the controller's own top-ranked gap:
+   * Ruling 49 (pass 37, F37-130), from the controller's own top-ranked gap:
    * "I cannot edit a task title - and the board is wrong right now because of
    * it. What I wanted: change six words in the title I wrote. What I did
    * instead: rewrote the entire 6,000-character goal." Nothing anywhere wrote
    * a title after creation, so the shorter of a task's two claims was the
    * harder to correct.
    */
-  it("ruling 295: update_task corrects the title on its own axis, and a refused title never hides a goal that wrote", async () => {
+  it("ruling 49: update_task corrects the title on its own axis, and a refused title never hides a goal that wrote", async () => {
     const { getTaskSummary } = await import("~/server/projections/task-query.server");
     // CANARY: drop the `title` branch and this is "[error] unknown field".
     expect(
@@ -3000,7 +3030,7 @@ describe("task anchoring (ruling 121)", () => {
     expect(mixed).toContain("Already set, nothing written: priority.");
   });
 
-  it("ruling 131: create_task and update_task set the wait; [noop] on an unchanged list; refusal by name; [] clears and releases; a viewer is refused", async () => {
+  it("ruling 55: create_task and update_task set the wait; [noop] on an unchanged list; refusal by name; [] clears and releases; a viewer is refused", async () => {
     // Canary: drop `blockedBy` from the empty-call guard (the wait-only
     // update answers "[error] Pass a goal…").
     const { getTaskSummary } = await import("~/server/projections/task-query.server");
@@ -3049,7 +3079,7 @@ describe("task anchoring (ruling 121)", () => {
     expect(listedAgain.find((t) => t.key === key)!.waitsOn).toEqual(["VIB-142 (open)"]);
   });
 
-  it("ruling 620: taking the last open entry off a wait releases the task, and the reply says so", async () => {
+  it("ruling 57: taking the last open entry off a wait releases the task, and the reply says so", async () => {
     // Live on aws-cost-calculator the reply read "blocked by (AWSC-73,
     // AWSC-74)" for two done tasks, the board still read blocked, and the
     // controller asked a person to clear both lists. CANARY: report the
@@ -3156,16 +3186,16 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 280 (pass 37, F37-113): `deploy_agent` said "No removal exists
+   * Ruling 260 (pass 37, F37-113): `deploy_agent` said "No removal exists
    * here." It is true of this toolkit and false of the product —
    * `deleteAgentProfile` removes a deployment from the project's Agents page.
    * A toolkit sentence that reads as a product statement is believed: the
    * controller, auditing this instance, found two dead deployments and wrote
    * "I cannot un-deploy them. The only lever is neutering a live deployment,
-   * which is a workaround, not a fix." Ruling 85's rule, on a new surface: a
+   * which is a workaround, not a fix." Ruling 110's rule, on a new surface: a
    * refusal that lists only workarounds hides the fix.
    */
-  it("ruling 280: deploy_agent names the removal path instead of denying one exists", async () => {
+  it("ruling 260: deploy_agent names the removal path instead of denying one exists", async () => {
     const toolkit = await toolkitAs(ids.projectAdmin);
     // SAFETY: `deploy_agent` is unconditionally registered on this toolkit —
     // the gate is on the CALL, not on whether the tool exists.
@@ -3175,7 +3205,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
     expect(def.description).not.toContain("No removal exists here");
     expect(def.description).toContain("Agents page");
     expect(def.description).toContain("Operator is a system profile");
-    // Ruling 464: the toolkit now holds the removal itself, and the sentence
+    // Ruling 248: the toolkit now holds the removal itself, and the sentence
     // names it instead of sending the person to do it by hand. CANARY:
     // restore "This toolkit does not remove a deployment".
     expect(def.description).toContain("remove_agent_deployment takes a deployment off again");
@@ -3183,13 +3213,13 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 264 (pass 37, F37-94): the deploy reply says which delivery posture
-   * it stored, because since ruling 156 the deploy COPIES the template's own
-   * grants. Live, the shipped `developer` template carries
+   * Ruling 183 (pass 37, F37-94): the deploy reply says which delivery posture
+   * it stored, because the deploy COPIES the template's own grants
+   * (ruling 177). Live, the shipped `developer` template carries
    * `execute-code-or-write-repo: direct`, so every deploy of it produced a
    * profile that can push to the repo under a reply promising the opposite.
    */
-  it("ruling 264: deploy_agent reports the delivery the template actually carries", async () => {
+  it("ruling 183: deploy_agent reports the delivery the template actually carries", async () => {
     // A template with repo write. `save_global_agent` has no capability field,
     // so the grants have to be written the way a shipped template carries them.
     writeFileSync(
@@ -3303,12 +3333,12 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 153 (pass 35, G35-2): the template's default model and effort are
-   * settable here, checked by name (ruling 139), and the reply states what a
+   * Ruling 261 (pass 35, G35-2): the template's default model and effort are
+   * settable here, checked by name, and the reply states what a
    * deploy will take. U35-1: the name is stored as the person meant it.
    * Canary: drop `model`/`effort` from the `SaveGagentInput` the tool builds.
    */
-  it("ruling 153 / U35-1: sets the template's model and effort by name, and decodes the name", async () => {
+  it("ruling 261 / U35-1: sets the template's model and effort by name, and decodes the name", async () => {
     const created = await call(ids.orgAdmin, "save_global_agent", {
       name: "Test &amp; CI Engineer",
       backend: "codex",
@@ -3347,13 +3377,13 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 156 (pass 35, F35-7): a library deploy COPIES the template's grants
+   * Ruling 177 (pass 35, F35-7): a library deploy COPIES the template's grants
    * onto `project.md` and a run mounts that copy, so a template grant never
    * reached a deployed project and the tool answered a bare `[done]`. The reply
    * is built from the result now: it names every copy that differs, what it
    * lacks, and the two doors. Canary: return the bare toast from the tool.
    */
-  it("ruling 156: names the diverged copy and how to update it, then copies the grants with propagate: true", async () => {
+  it("ruling 177: names the diverged copy and how to update it, then copies the grants with propagate: true", async () => {
     interface ProjectRead {
       agents: {
         profileId: string;
@@ -3407,7 +3437,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 277 (pass 37, F37-110): a deployment SNAPSHOTS the persona and the
+   * Ruling 177 (pass 37, F37-110): a deployment SNAPSHOTS the persona and the
    * summary as well as the grants (P13-AP-07), `propagate` rewrites only the
    * grants, and nothing compared the text — so `copiesDiffering: []` read as
    * "every copy is current" about copies that were not. Live: the controller
@@ -3415,7 +3445,7 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
    * not, checked the drift afterwards, read `[]`, and reported the job done
    * while the four agents running at that moment still mounted the old text.
    */
-  it("ruling 277: a persona edit that reaches no deployed copy says so", async () => {
+  it("ruling 177: a persona edit that reaches no deployed copy says so", async () => {
     // Self-contained: its own template, with a body, deployed before the edit.
     const ID = "persona-drift-probe";
     const created = await call(ids.orgAdmin, "save_global_agent", {
@@ -3462,14 +3492,14 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
 });
 
 /**
- * Ruling 139 (pass 34, F34-2): `update_agent_deployment` reads first and
+ * Ruling 261 (pass 34, F34-2): `update_agent_deployment` reads first and
  * refuses a catalogued value it cannot store BY NAME, with nothing written —
  * it used to answer `[done]` twelve times for capability ids that do not exist.
  * Each refusal's wording is `capabilityPatchRefusal`'s, pinned branch by branch
  * in capability-catalog.test.ts; the cases here prove the tool's side: it asks
  * for the deployment's own kind, checks the stages itself, and writes nothing.
  */
-describe("update_agent_deployment refuses catalogued values by name (ruling 139)", () => {
+describe("update_agent_deployment refuses catalogued values by name (ruling 261)", () => {
   async function refused(args: Record<string, JsonValue>): Promise<string> {
     const before = await projectMd();
     // The newest row: a refusal that wrote an audit row would have replaced it.
@@ -3519,11 +3549,11 @@ describe("update_agent_deployment refuses catalogued values by name (ruling 139)
 });
 
 /**
- * Ruling 139 (pass 34, F34-2, the read half): `get_project` reports each
+ * Ruling 261 (pass 34, F34-2, the read half): `get_project` reports each
  * deployment's RESOLVED grants at the mode the roster renders, and
  * `list_capabilities` publishes the catalogue with the absent-grant rule.
  */
-describe("get_project and list_capabilities read the catalogue (ruling 139)", () => {
+describe("get_project and list_capabilities read the catalogue (ruling 261)", () => {
   interface ProjectRead {
     agents: {
       profileId: string;
@@ -3552,7 +3582,7 @@ describe("get_project and list_capabilities read the catalogue (ruling 139)", ()
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");
     // A fixture that can move: strip the operator's stored deliver-review-pr
     // grant and human-gate the pre-work boundary, so the absent mode resolves
-    // to `recommend` (ruling 28).
+    // to `recommend` (ruling 109).
     await updateProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot }, (p) => {
       for (const a of p.frontmatter.agents) {
         a.capabilities = a.capabilities.filter((g) => g.capabilityId !== "deliver-review-pr");
@@ -3635,10 +3665,10 @@ describe("get_project and list_capabilities read the catalogue (ruling 139)", ()
 });
 
 /**
- * Ruling 139 (pass 34, G34-1): effort is settable wherever model is, judged
+ * Ruling 261 (pass 34, G34-1): effort is settable wherever model is, judged
  * by name against the backend at save time, never clamped at run time.
  */
-describe("effort and model at deploy are settable and refused by name (ruling 139)", () => {
+describe("effort and model at deploy are settable and refused by name (ruling 261)", () => {
   interface ProjectRead {
     agents: { profileId: string; backends: string[]; model: string; effort: string }[];
   }
@@ -3710,7 +3740,7 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
     expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
   });
 
-  // Ruling 153 (pass 35, G35-2): an omitted `effort` takes the TEMPLATE's tier,
+  // Ruling 261 (pass 35, G35-2): an omitted `effort` takes the TEMPLATE's tier,
   // not the backend default. The description is this door's only contract for
   // the model calling it, so it has to say the shipped rule.
   it("deploy_agent takes the template's own effort when none is given, and says so", async () => {
@@ -3733,11 +3763,11 @@ describe("effort and model at deploy are settable and refused by name (ruling 13
 });
 
 /**
- * Ruling 140(a) (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
+ * Ruling 48 (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
  * a named owner is seated before the first operator run; the release word is
  * refused by name at creation.
  */
-describe("create_task seats a named owner and takes dueDate (ruling 140)", () => {
+describe("create_task seats a named owner and takes dueDate (ruling 48)", () => {
   it("seats the named owner in the creating write, records dueDate, derives urgent from priority", async () => {
     // Canary: drop the owner pass-through (the seat becomes the caller); drop
     // the dueDate pass-through.
@@ -3778,13 +3808,13 @@ describe("create_task seats a named owner and takes dueDate (ruling 140)", () =>
 });
 
 /**
- * Ruling 467 (pass 40, F40-11): the controller can bring a deployed agent's
+ * Ruling 177 (pass 40, F40-11): the controller can bring a deployed agent's
  * persona in line. `update_agent_deployment` took no persona and propagation
  * rewrote only grants, so live the controller had to ask the owner to edit two
  * deployed copies by hand while the rulings KB contradicted the persona every
  * run of them read.
  */
-describe("update_agent_deployment sets a deployment's persona (ruling 467)", () => {
+describe("update_agent_deployment sets a deployment's persona (ruling 261)", () => {
   async function listJson<T>(toolName: string): Promise<T[]> {
     // SAFETY: every list tool answers through the toolkit's `json()` over an
     // array of the object literal its `.map` builds.
@@ -3975,7 +4005,7 @@ describe("invite_member seats the role it is given (C4)", () => {
 });
 
 /**
- * Pass 34 review (ruling 139, the read/write pairing): `update_agent_deployment`
+ * Pass 34 review (ruling 261, the read/write pairing): `update_agent_deployment`
  * used to seed its form from the RAW stored grants, so `grantsFor` materialised
  * every ABSENT id at its CATALOG default — an unrelated patch armed capabilities
  * the deployment had withheld. Live in the review: `comment-on-task: off` on the
@@ -4008,7 +4038,7 @@ describe("update_agent_deployment never arms a capability it was not asked to", 
 });
 
 /**
- * Pass 34 review, the same class as ruling 139's refusals: a setting the write
+ * Pass 34 review, the same class as ruling 261's refusals: a setting the write
  * cannot keep is refused by name instead of answering `[done]`.
  */
 describe("update_agent_deployment refuses a setting the deployment cannot hold", () => {
@@ -4066,12 +4096,12 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 679: a skill longer than a run can be given says so to whoever
+   * Ruling 267: a skill longer than a run can be given says so to whoever
    * writes it. Every save answered "updated" while the AWS board's Estimate
    * Judge skill grew to 31,289 characters, 7,289 of them past the 24,000 a run
    * handed its skills as prompt text receives.
    */
-  it("ruling 679: save_skill says how much of a skill no run is given, and list_skills carries each skill's size", async () => {
+  it("ruling 267: save_skill says how much of a skill no run is given, and list_skills carries each skill's size", async () => {
     const body = (chars: number) => `---\nname: long-rules\ndescription: Rules.\n---\n\n# Rules\n\n${"r".repeat(chars - 9)}`;
     const saved = await call(ids.orgAdmin, "save_skill", { name: "long-rules", summary: "Rules.", body: body(25_300) });
     const id = /id (sk_[A-Za-z0-9_-]+)/.exec(saved)![1]!;
@@ -4086,7 +4116,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
         "material into a knowledge base document, which a run reads on demand with no cap, and name that document here.",
     );
     // SAFETY: list_skills answers `json()` over rows carrying `id` and, since
-    // ruling 679, `chars` and (when over) `charsPastBudget`.
+    // ruling 267, `chars` and (when over) `charsPastBudget`.
     const row = () =>
       call(ids.orgAdmin, "list_skills").then(
         (text) => (JSON.parse(text) as { id: string; chars?: number; charsPastBudget?: number }[]).find((sk) => sk.id === id)!,
@@ -4145,12 +4175,12 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 680: one passage of a skill is replaced in place, as ruling 637
+   * Ruling 267: one passage of a skill is replaced in place, as ruling 212(b)
    * does for a knowledge-base document. To add one section to each of two
    * skills the controller typed both back whole, 48,000 characters between
    * them.
    */
-  it("ruling 680: edit_skill replaces one passage of a SKILL.md and leaves every other byte, org admins only", async () => {
+  it("ruling 267: edit_skill replaces one passage of a SKILL.md and leaves every other byte, org admins only", async () => {
     const body = "---\nname: estimate-steps\ndescription: Build the estimate.\n---\n\n# Steps\n\n1. Open the calculator.\n2. Save the link.\n\n## Report\n- One line per file.\n";
     const saved = await call(ids.orgAdmin, "save_skill", { name: "estimate-steps", summary: "Build the estimate.", body });
     const id = /id (sk_[A-Za-z0-9_-]+)/.exec(saved)![1]!;
@@ -4185,7 +4215,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     expect(missing).toContain("2. Save the link.");
 
     // CANARY: skip the SKILL.md check on this door and an edit that breaks
-    // the frontmatter leaves a skill no run can mount (ruling 183).
+    // the frontmatter leaves a skill no run can mount (ruling 186).
     const broken = await call(ids.orgAdmin, "edit_skill", {
       id,
       was: "description: Build the estimate.\n---",
@@ -4215,13 +4245,13 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 678: a file a task holds is copied into a knowledge base, where
+   * Ruling 267: a file a task holds is copied into a knowledge base, where
    * every run given it reads it and nothing depends on the task any more.
    * Asked to make AWSC-117's report the board's template, the controller had
    * only text writes, so it left the files on the task and had each operator
    * copy them over.
    */
-  it("ruling 678: copy_task_file_to_knowledge_base puts a task's file in a knowledge base, byte for byte, and names it to the runs given it", async () => {
+  it("ruling 267: copy_task_file_to_knowledge_base puts a task's file in a knowledge base, byte for byte, and names it to the runs given it", async () => {
     const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
     const { readKbIndexes } = await import("~/server/files/kb-injection.server");
     const bytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x10, 0x80]);
@@ -4234,7 +4264,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     const kbId = /id (kb_[A-Za-z0-9_-]+)/.exec(made)![1]!;
     const folder = path.join(app.dataRoot, "kb", "template-home");
     // An asset: what this test is about is the copy, not what it is kept as
-    // (ruling 684's kinds have their own test below).
+    // (ruling 267's kinds have their own test below).
     const copy = { kbId, kind: "asset", taskKey: "VIB-142", name: "Teklif Şablonu.pdf", as: "proposal-template.pdf" };
 
     // CANARY: drop `requireOrgAdmin` and a project member writes into a folder
@@ -4293,7 +4323,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       copiedFrom: { as: "proposal-template.pdf", replaced: true },
     });
 
-    // Ruling 675: the folder's file under the same name in the other Unicode
+    // Ruling 76: the folder's file under the same name in the other Unicode
     // form is the one a copy would replace, never a second beside it.
     // CANARY: look for the name byte for byte and the copy lands a twin no
     // reader can tell from the file already there.
@@ -4342,7 +4372,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     }
 
     // CANARY: let a copy land on a document and it replaces the rulings with
-    // no version check, the write rulings 257 and 305 refuse.
+    // no version check, the write rulings 212 and 212(a) refuse.
     expect(
       await call(ids.orgAdmin, "copy_task_file_to_knowledge_base", { kbId, kind: "asset", taskKey: "VIB-142", name: "notes.md", as: "rulings.md", replace: true }),
     ).toBe(
@@ -4383,13 +4413,13 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 684 (owner, 2026-10-07: "why would controller make the template
+   * Ruling 267 (owner, 2026-10-07: "why would controller make the template
    * with data? ... Even if we manually fix Aidea, controller will still create
    * wrong templates in the future"). The first template the controller made
    * was the report itself: one customer's figures and sentences in the folder
    * every run reads, and the next customer's proposal came back with one.
    */
-  it("ruling 684: a copy says what it keeps: a template holds placeholders, a sample is named for its task, an asset is neither", async () => {
+  it("ruling 267: a copy says what it keeps: a template holds placeholders, a sample is named for its task, an asset is neither", async () => {
     const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
     const page = (body: string) => new TextEncoder().encode(`<!doctype html><html><body>${body}</body></html>`);
     writeTaskAttachment(SLUG, "VIB-142", "report.html", page("<h1>Aidea | AWS Maliyet Teklifi</h1><p>13.381,01 USD</p>"), app.dataRoot);
@@ -4562,7 +4592,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 257 (pass 37, F37-88): a `doc` write REPLACES a whole file, so it
+   * Ruling 212 (pass 37, F37-88): a `doc` write REPLACES a whole file, so it
    * says so and refuses a silent clobber.
    *
    * `overwrite: true` was hardcoded, so `writeStoreDoc`'s own collision guard
@@ -4575,7 +4605,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
    * shopify-clone board's rulings KB — injected into every run on the project —
    * was one call away from erasure by a model writing the obvious filename.
    */
-  it("ruling 257: a doc that would overwrite is refused, names itself, and says REPLACED when told to", async () => {
+  it("ruling 212: a doc that would overwrite is refused, names itself, and says REPLACED when told to", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", {
       name: "Clobber Probe",
       doc: { path: "conventions.md", content: "ORIGINAL RULES, 20 bytes+" },
@@ -4588,7 +4618,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // CANARY: drop `documents` from list_knowledge_bases and the model has no
     // way to know the name it is about to write is taken.
     // SAFETY: `list_knowledge_bases` answers `json()` over rows that always
-    // carry `id` and, since ruling 257, `documents`.
+    // carry `id` and `documents`.
     const kbs = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as {
       id: string;
       documents: string[];
@@ -4603,7 +4633,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
       await call(ids.orgAdmin, "read_knowledge_base_doc", { id, path: "conventions.md" }),
     ) as { text: string; version: string };
     expect(read.text).toBe("ORIGINAL RULES, 20 bytes+");
-    // Ruling 305: the read hands back the version this text IS.
+    // Ruling 212(a): the read hands back the version this text IS.
     expect(read.version).toMatch(/^[0-9a-f]{12}$/);
 
     // Writing the same name WITHOUT `replace` is refused by the writer's own
@@ -4623,7 +4653,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     ) as { text: string };
     expect(after.text).toBe("ORIGINAL RULES, 20 bytes+");
 
-    // Ruling 305: `replace: true` is no longer enough on its own. Naming the
+    // Ruling 212(a): `replace: true` is no longer enough on its own. Naming the
     // version you read is what makes the write safe, and the refusal says
     // which version to pass.
     const unversioned = await call(ids.orgAdmin, "save_knowledge_base", {
@@ -4651,17 +4681,17 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
   });
 
   /**
-   * Ruling 305 (pass 37, F37-140): a whole-document replace names the version
+   * Ruling 212(a) (pass 37, F37-140): a whole-document replace names the version
    * it read, and a document that moved underneath it is refused.
    *
-   * Ruling 257's guard asks whether the file EXISTS. This asks whether it is
-   * still the one you read. The controller hit the difference live, correcting
+   * `replace: true` alone asks whether the file EXISTS. The version asks
+   * whether it is still the one you read. The controller hit the difference live, correcting
    * one paragraph of the 26,693-character rulings document that is injected
    * into every run on the board: it re-read first and found that "§9 had grown
    * a whole existence-oracle section I had not written". A blind replace would
    * have deleted that section and reported only how many bytes it destroyed.
    */
-  it("ruling 305: a replace whose base moved is refused, names both versions, and writes nothing", async () => {
+  it("ruling 212(a): a replace whose base moved is refused, names both versions, and writes nothing", async () => {
     const created = await call(ids.orgAdmin, "save_knowledge_base", {
       name: "Stale Base Probe",
       doc: { path: "rules.md", content: "one\ntwo\nthree" },
@@ -4729,7 +4759,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
  * U36-3 (pass 36): one call switched backend, model, effort, stages and grants
  * and answered "Effort is now max." — the reply and the audit row under-reported
  * what changed. The reply lists every changed field old → new, and the
- * `project.agent_profile.updated` row carries model + effort (ruling 139 parity
+ * `project.agent_profile.updated` row carries model + effort (ruling 261 parity
  * with `deployed`).
  */
 describe("update_agent_deployment reports every field it changed, old → new (U36-3)", () => {
@@ -4818,7 +4848,7 @@ describe("the effort descriptions are generated from the catalog (U36-5)", () =>
     // Canary: type the Codex list by hand again.
     const { effortsFor } = await import("~/server/runtimes/model-catalog.server");
     const toolkit = await toolkitAs(ids.orgAdmin);
-    // Ruling 296 made a tool's schema a whole strict Zod object, so the field
+    // Ruling 136 made a tool's schema a whole strict Zod object, so the field
     // texts are read where the model reads them: off the PUBLISHED JSON
     // schema, which is the only copy that matters.
     const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
@@ -4903,7 +4933,7 @@ describe("update_agent_deployment grants resources to every kind, the operator i
       skills: ["operator-grant-craft"],
       mcps: before.mcps,
     });
-    // project.md carries the copy a run mounts (ruling 156), on the operator.
+    // project.md carries the copy a run mounts (ruling 177), on the operator.
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     const stored = readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!
       .parsed.frontmatter.agents.find((a) => a.profileId === operatorId)!.definition?.resources;
@@ -4940,12 +4970,12 @@ describe("update_agent_deployment grants resources to every kind, the operator i
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the controller could not declare a REQUIRED
+ * Ruling 89 (pass 36, G36-3): the controller could not declare a REQUIRED
  * reviewer — it could only state the rule in prompts. `set_required_reviewers`
  * replaces the project's whole list through the same writer the Settings form
  * uses, and `get_project` reports it beside the stages it names.
  */
-describe("set_required_reviewers (ruling 178)", () => {
+describe("set_required_reviewers (ruling 89)", () => {
   async function rulesInFile() {
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.requiredReviewers;
@@ -5015,33 +5045,33 @@ describe("set_required_reviewers (ruling 178)", () => {
     expect(row?.text).toContain("(via the controller) set the required reviewers to **Reviewer at Review**.");
   });
 
-  it("ruling 575: tells the planner the required reviewer never delivers, and how work only it can do runs", async () => {
+  it("ruling 268: tells the planner the required reviewer never delivers, and how work only it can do runs", async () => {
     // Live on AWSC-11 the controller wrote "the Estimate Judge delivers" into
     // a goal on a board whose required reviewer is the Estimate Judge, and
-    // promised the owner a force-accept once it had. Ruling 556 refuses that
+    // promised the owner a force-accept once it had. Ruling 89 refuses that
     // hand-off, so the operator's first act was a decision packet. The
     // controller read `requiredReviewers` with nothing saying what it means
     // for a plan. CANARY: drop either sentence and this goes red.
     const toolkit = await toolkitAs(ids.projectAdmin);
     const describe =(name: string) => toolkit.tools.find((t) => t.name === name)?.description ?? "";
     expect(describe("set_required_reviewers")).toContain(
-      "Ruling 556: the agent a rule names never delivers on this project",
+      "Ruling 89: the agent a rule names never delivers on this project",
     );
     expect(describe("set_required_reviewers")).toContain(
       "runs it as a supporting agent, and the task closes when a project admin force-accepts it",
     );
     expect(describe("get_project")).toContain(
-      "`requiredReviewers`, the agent each review stage requires on every task (ruling 178), which never delivers on this project",
+      "`requiredReviewers`, the agent each review stage requires on every task (ruling 89), which never delivers on this project",
     );
   });
 });
 
 /**
- * Ruling 482 (pass 40, F40-52): the controller promotes a measured gate set
+ * Ruling 104 (pass 40, F40-52): the controller promotes a measured gate set
  * into the project's gates, where Viberr runs them, instead of writing the
  * commands into the rulings knowledge base as prose every directive re-types.
  */
-describe("set_project_gates (ruling 482)", () => {
+describe("set_project_gates (ruling 104)", () => {
   async function gatesInFile() {
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     return readProjectFile({ projectSlug: SLUG, dataRoot: app.dataRoot })!.parsed.frontmatter.gates;
@@ -5094,15 +5124,15 @@ describe("set_project_gates (ruling 482)", () => {
 });
 
 /**
- * Ruling 188 (pass 37): a controller read returns what the equivalent HUMAN
+ * Ruling 262 (pass 37): a controller read returns what the equivalent HUMAN
  * surface renders. Three reads returned less-resolved data than the UI with no
  * marker saying so, and live in pass 37 each one changed what the controller
  * said or did: it told its owner two live profiles were "effectively
  * unselectable" (F37-3), it repeated a Review-stage acceptance sentence about a
  * Design-stage task (F37-5), and it refused an MCP grant that was in fact safe
- * because it could not observe ruling 176's marking (F37-6/F37-7).
+ * because it could not observe ruling 188's marking (F37-6/F37-7).
  */
-describe("ruling 188: the controller reads what the human surfaces render", () => {
+describe("ruling 262: the controller reads what the human surfaces render", () => {
   interface AgentRow {
     profileId: string;
     stages: string[];
@@ -5153,7 +5183,7 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
     expect(read.task).toHaveProperty("notAcceptableReason");
   });
 
-  it("F37-6: list_mcp_servers reports ruling 176's marking and what it means", async () => {
+  it("F37-6: list_mcp_servers reports ruling 188's marking and what it means", async () => {
     await call(ids.orgAdminOutsider, "save_mcp_server", {
       name: "policy-probe",
       transport: "HTTP",
@@ -5168,7 +5198,7 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
     const row = listed.find((m) => m.name === "policy-probe")!;
     expect(row.writeTools).toEqual(["write_file", "edit_file"]);
     expect(row.writeToolsNote).toContain("withheld");
-    expect(row.writeToolsNote).toContain("ruling 176");
+    expect(row.writeToolsNote).toContain("ruling 188");
   });
 
   it("F37-7: save_mcp_server can mark write tools, and says which marking landed", async () => {
@@ -5183,16 +5213,16 @@ describe("ruling 188: the controller reads what the human surfaces render", () =
     // to assert an enforcement it cannot observe.
     expect(reply).toContain("create_directory");
     expect(reply).toContain("withheld from every run without execute-code-or-write-repo");
-    expect(reply).toContain("ruling 176");
+    expect(reply).toContain("ruling 188");
   });
 });
 
 /**
- * Ruling 469: the controller reads where an OAuth connection's sign-in stands
+ * Ruling 192: the controller reads where an OAuth connection's sign-in stands
  * and never a token, and it is told signing in is an org admin's act in
  * Instance settings, which it cannot perform.
  */
-describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", () => {
+describe("ruling 192: the controller reads an MCP connection's OAuth sign-in", () => {
   it("save_mcp_server says the admin signs the server in; list_mcp_servers reports the sign-in without a token", async () => {
     const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
     const oauth = await startOAuthMcpServer();
@@ -5232,7 +5262,7 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
     }
   });
 
-  it("ruling 486: list_mcp_servers and test_mcp_server report the grant; save_mcp_server records Requested scopes", async () => {
+  it("ruling 192: list_mcp_servers and test_mcp_server report the grant; save_mcp_server records Requested scopes", async () => {
     // CANARY: map `signIn` without `grant`, and the controller reads
     // "signed_in" over 194 read-only scopes, as it did live (F40-63).
     const { startOAuthMcpServer, signInWithOAuth } = await import("../../../test-support/mcp-oauth-server");
@@ -5274,7 +5304,7 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
 
       const tested = await call(ids.orgAdminOutsider, "test_mcp_server", { id: signedIn.id });
       expect(tested).toMatch(/signed in \(expires in 60 minutes, renews itself\) · read-only · 194 scopes$/);
-      // Ruling 537: save_mcp_server answers with the NAME, and a probe right
+      // Ruling 189: save_mcp_server answers with the NAME, and a probe right
       // after it passed that name and was told the server did not exist.
       // CANARY: pass `args.id` to testMcpServer unresolved and this is refused.
       expect(await call(ids.orgAdminOutsider, "test_mcp_server", { id: "grant-probe" })).toMatch(
@@ -5297,7 +5327,7 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
 });
 
 /**
- * Ruling 197 (F37-18, live): F33-7 put the GRANTS into `list_global_agents`
+ * Ruling 261 (F37-18, live): F33-7 put the GRANTS into `list_global_agents`
  * because "the model had no way to see what an edit was about to replace, and
  * the controller (rightly) refused to edit blind" — and left out the biggest
  * field of all. Pass 37 the controller needed to correct three stale template
@@ -5311,7 +5341,7 @@ describe("ruling 469: the controller reads an MCP connection's OAuth sign-in", (
  * but nothing said so while the same paragraph spelled the rule out for three
  * other fields, and nothing let the caller check. Both halves are fixed here.
  */
-describe("ruling 197: a template's persona is readable, and a summary-only edit keeps it", () => {
+describe("ruling 261: a template's persona is readable, and a summary-only edit keeps it", () => {
   it("returns the persona from list_global_agents and keeps it across a summary edit", async () => {
     await call(ids.orgAdmin, "save_global_agent", {
       name: "Persona Probe",
@@ -5370,7 +5400,7 @@ describe("ruling 197: a template's persona is readable, and a summary-only edit 
 });
 
 /**
- * Ruling 296's live half: what the SERVERS actually publish, not what a probe
+ * Ruling 136's live half: what the SERVERS actually publish, not what a probe
  * of the wrapper proves.
  *
  * strict-tool.server.test.ts proves `strictTool` refuses unknown keys and
@@ -5379,7 +5409,7 @@ describe("ruling 197: a template's persona is readable, and a summary-only edit 
  * while the file around it looks correct. This walks every schema Viberr
  * hands the controller and finds any object that would still strip.
  */
-describe("ruling 296: every published controller schema refuses unknown keys", () => {
+describe("ruling 136: every published controller schema refuses unknown keys", () => {
   /** The two JSON Schema nodes a walk can descend into. Parsed rather than
    *  `typeof`-checked, so each branch is a contract and not a representation
    *  guess. */
@@ -5447,13 +5477,13 @@ describe("ruling 296: every published controller schema refuses unknown keys", (
 });
 
 /**
- * Ruling 685 (owner, 2026-10-07): the controller leaves itself the next step
+ * Ruling 259 (owner, 2026-10-07): the controller leaves itself the next step
  * for when a task is accepted. Asked for a content-free template, it filed the
  * task that makes one and ended with "tell me when it is approved": the second
  * half of one request, left for the person to remember. What an acceptance
  * does with the step is `controller-continuation.server.test.ts`'s.
  */
-describe("ruling 685: continue_when_done", () => {
+describe("ruling 259: continue_when_done", () => {
   async function callAs(
     userId: string,
     conversationId: string | null,
@@ -5661,10 +5691,10 @@ describe("ruling 685: continue_when_done", () => {
 });
 
 /**
- * Ruling 573: the controller reads the files a person sent in the conversation
+ * Ruling 258: the controller reads the files a person sent in the conversation
  * it answers, and only there.
  */
-describe("ruling 573: read_message_file", () => {
+describe("ruling 258: read_message_file", () => {
   async function callIn(conversationId: string | null, args: Record<string, JsonValue>): Promise<string> {
     return callToolText((await toolkitAs(ids.orgAdmin, { conversationId })).tools, "read_message_file", args);
   }
@@ -5697,7 +5727,7 @@ describe("ruling 573: read_message_file", () => {
     expect(await callIn(null, { name: "inventory.csv" })).toContain("[unavailable]");
   });
 
-  it("ruling 675: reads a file sent before names were composed by the name as it is typed", async () => {
+  it("ruling 258: reads a file sent before names were composed by the name as it is typed", async () => {
     // A Mac's browser sent the name decomposed and it was stored so; the
     // message names it in that form and the model types the composed one.
     // CANARY: look the name up as typed alone and the reply is "No file X was
@@ -5724,12 +5754,12 @@ describe("ruling 573: read_message_file", () => {
 });
 
 /**
- * Ruling 693: the controller reads what a task took on `get_task`, with who
+ * Ruling 83: the controller reads what a task took on `get_task`, with who
  * spent it, and asks `list_tasks` for the run part of every task of a board
  * when it wants to rank one. What the figure counts is
  * `what-it-took.server.test.ts`'s; this owns the two replies.
  */
-describe("ruling 693: the controller's read of what a task took", () => {
+describe("ruling 83: the controller's read of what a task took", () => {
   async function ran(
     id: string,
     projectSlug: string,
@@ -5760,7 +5790,7 @@ describe("ruling 693: the controller's read of what a task took", () => {
   const DEVELOPER = { kind: "primary", profile: "developer", name: "Developer", backend: "claude" } as const;
   const REVIEWER = { kind: "reviewer", profile: "reviewer", name: "Reviewer", backend: "claude" } as const;
 
-  it("ruling 693: get_task says what a task took and who spent it, and list_tasks carries the run part for every task when it is asked for", async () => {
+  it("ruling 83: get_task says what a task took and who spent it, and list_tasks carries the run part for every task when it is asked for", async () => {
     // CANARY: (a) hand `runTotalsLine` every run of the project instead of
     // the task's own and each row reads the board's total; (b) print an
     // unreported cost as `$0.00` in `runTotalsLine` and a task only Codex ran
@@ -5837,12 +5867,12 @@ describe("ruling 693: the controller's read of what a task took", () => {
     );
   });
 
-  it("ruling 693: a board of 150 tasks is listed whole with what each task took", async () => {
+  it("ruling 83: a board of 150 tasks is listed whole with what each task took", async () => {
     // CANARY: carry the run part as the three-number object it first was
     // (`{ runs, agentMinutes, costUsd }`, five lines a row at the reply's
     // indent) and this board's listing passes what a turn carries: its first
     // line reads "[cut] This reply is ..." and its last tasks are missing
-    // (ruling 677). The board is the shape of the one that showed it: 150
+    // (ruling 260). The board is the shape of the one that showed it: 150
     // tasks with titles of 57 characters, an epic and an owner each.
     const { readProjectFile } = await import("~/server/files/project-writer.server");
     const { rebuildProject } = await import("~/server/projections/rebuilder.server");

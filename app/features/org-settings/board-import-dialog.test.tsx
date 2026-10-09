@@ -9,7 +9,7 @@ import { ToastProvider } from "~/ui/toast";
 import { BoardImportDialog } from "./board-import-dialog";
 
 /**
- * Ruling 653: the import dialog's own contract — what it posts (the file, the
+ * Ruling 32: the import dialog's own contract — what it posts (the file, the
  * form, and the choice made for each resource this instance holds
  * differently), and what it refuses to send. What the server does with the
  * post is `board-import.server.test.ts`'s and the route suite's.
@@ -110,7 +110,7 @@ function renderDialog(
   return render(<Stub initialEntries={["/"]} />);
 }
 
-describe("ruling 653: the board import dialog", () => {
+describe("ruling 32: the board import dialog", () => {
   it("posts the file, the new project and the choice made for each resource held differently here", async () => {
     // CANARY: post the choices under another key, or leave out a resource the
     // person did not touch (the server reads its absence as copy), and an
@@ -142,7 +142,7 @@ describe("ruling 653: the board import dialog", () => {
     });
   });
 
-  it("ruling 667: a board none of whose agents writes a repository imports without one, unless the person attaches it", async () => {
+  it("ruling 224: a board none of whose agents writes a repository imports without one, unless the person attaches it", async () => {
     // CANARY: require a connection and a repository whatever the board
     // delivers and a no-code board cannot be imported on an instance with no
     // GitHub connection; post them whatever `needsRepo` says and it is bound
@@ -167,7 +167,7 @@ describe("ruling 653: the board import dialog", () => {
     expect([posts[1]!.get("owner"), posts[1]!.get("repoName")]).toEqual(["acme", "release-train"]);
   });
 
-  it("ruling 672: a board whose agents write a repository imports without one when the person connects it later", async () => {
+  it("ruling 224: a board whose agents write a repository imports without one when the person connects it later", async () => {
     // CANARY: require a repository of every software board and one exported
     // from an instance cannot be brought up before its repository exists.
     await postsLikeABrowser();

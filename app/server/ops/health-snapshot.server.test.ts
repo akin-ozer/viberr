@@ -11,7 +11,7 @@ import {
 import { healthSnapshot } from "./health-snapshot.server";
 
 /**
- * Ruling 130(d): the unauthenticated `/resources/health` body never names a
+ * Ruling 160(a): the unauthenticated `/resources/health` body never names a
  * person; the signed-in `instance_health` read does. Canary: return the rows
  * unstripped by default.
  */
@@ -41,7 +41,7 @@ describe("healthSnapshot and the quota principal", () => {
   });
 });
 
-describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
+describe("healthSnapshot reports the MCP gateway (ruling 191)", () => {
   afterEach(async () => {
     await stopMcpGateway();
   });
@@ -70,17 +70,17 @@ describe("healthSnapshot reports the MCP gateway (ruling 461)", () => {
   });
 });
 
-describe("healthSnapshot reports the toolchain (ruling 182)", () => {
+describe("healthSnapshot reports the toolchain (ruling 40)", () => {
   it("carries the toolchain reading, then mcpProxy, then agentIsolation — key order is the wire contract", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
-    // `instance_health`. Canary: drop `toolchain` from the snapshot. It was
-    // the last key until ruling 460 appended `agentIsolation` behind it, as
-    // the contract says a new field must be.
+    // `instance_health`. Canary: drop `toolchain` from the snapshot.
+    // `agentIsolation` comes after it, appended last as the contract says a
+    // new field must be.
     const store = setupTestStore(ctx);
     const snapshot = healthSnapshot(store.db);
-    // Ruling 461 appended `mcpProxy` after it, and ruling 460 `agentIsolation` after that.
+    // Ruling 191 appended `mcpProxy` after it, and ruling 40 `agentIsolation` after that.
     expect(Object.keys(snapshot).slice(-3)).toEqual(["toolchain", "mcpProxy", "agentIsolation"]);
     // The one memoized reading (`cachedToolchain`), never a second probe: the
     // suite primes it hermetic in setup-env, and that is what comes back.

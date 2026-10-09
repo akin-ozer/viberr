@@ -122,12 +122,12 @@ describe("reconcile reads", () => {
 });
 
 /**
- * Ruling 494 (pass 40, F40-70): a count is read with the head it was counted
+ * Ruling 238 (pass 40, F40-70): a count is read with the head it was counted
  * on and with Viberr's newest push, from the same table, ordered by the
  * table's own ids: a push recorded after the count, or one whose first compare
  * read another head, is a push the count does not describe.
  */
-describe("ruling 494: the compare's head and the push it does not describe", () => {
+describe("ruling 238: the compare's head and the push it does not describe", () => {
   const A = "a".repeat(40);
   const B = "b".repeat(40);
   const C = "c".repeat(40);

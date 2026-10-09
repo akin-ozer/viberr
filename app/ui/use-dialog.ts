@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pinLivePose } from "./live-pose";
 
 /**
- * Dialog behavior required on EVERY dialog by orchestrator ruling 16, now on
+ * Dialog behavior required on EVERY dialog by ruling 287, now on
  * a native <dialog> opened via showModal(): the browser supplies the focus
  * trap, initial focus, Escape (cancel event), top-layer stacking and the
  * ::backdrop scrim. This hook adds what the platform doesn't: body scroll
@@ -17,7 +17,7 @@ import { pinLivePose } from "./live-pose";
  *        <dialog className="modal-card" ref={ref}> … <button onClick={close}>
  *        … <button onClick={() => commit(onConfirm)}>
  * Escape and backdrop clicks route through the same animated close, and so
- * does a primary action (ruling 459): `commit(fn)` runs fn once, then plays
+ * does a primary action (ruling 287): `commit(fn)` runs fn once, then plays
  * the exit Cancel plays, which calls onClose. So onClose runs after a confirm
  * too and must stay a pure state reset (`setX(null)`), never a revert or a
  * recorded cancellation; and the caller's fn must not unmount the dialog
@@ -103,7 +103,7 @@ export function useDialog(
     const fallback = setTimeout(finish, seconds * 1000 + 50);
   }, []);
 
-  // The primary's close (ruling 459): run the commit once, then play the same
+  // The primary's close (ruling 287): run the commit once, then play the same
   // exit Cancel plays. [data-closing]'s pointer-events: none stops only the
   // pointer, so a second Enter on the still-focused button during the exit
   // would commit twice; it is dropped here.
@@ -169,7 +169,7 @@ export function useDialog(
       dialog.removeEventListener("cancel", onCancel);
       dialog.removeEventListener("click", onClick);
       document.body.style.overflow = previousOverflow;
-      // A confirm's exit ends after its action (ruling 459), so the action
+      // A confirm's exit ends after its action (ruling 287), so the action
       // can have taken the opener away by now: disabled while the request it
       // started is in flight (a row's Undo), or off the page once the
       // revalidation has landed (the Undo replaced by "Undone by …"). Neither

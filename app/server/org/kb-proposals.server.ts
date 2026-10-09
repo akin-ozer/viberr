@@ -13,12 +13,12 @@ import { kbStoreTargetForDir, subDirNames } from "./resources.server";
 import { writeStoreDoc } from "./store-files.server";
 
 /**
- * Rulings 378 and 483: the knowledge-base corrections agents PROPOSED, filed in
+ * Rulings 210 and 267: the knowledge-base corrections agents PROPOSED, filed in
  * the document beside what they correct, under "## Proposed corrections (not
- * binding)" (ruling 378's "## Proposed (not binding)" before that), for a
+ * binding)" ("## Proposed (not binding)" before that), for a
  * person to promote into the settled text or dismiss.
  *
- * Ruling 498 ended the filing. The owner, 2026-09-26: "proposal spam is
+ * Ruling 210 ended the filing. The owner, 2026-09-26: "proposal spam is
  * exhausting, it should be easier to get them merged to the kb. No human can
  * approve all of these while inspecting them thoroughly." An agent's correction
  * is now written into the settled text as it is made, and a person undoes the
@@ -33,9 +33,9 @@ import { writeStoreDoc } from "./store-files.server";
  * edits that entry.
  */
 
-/** The section's heading as ruling 483 filed it, or ruling 378's
+/** The section's heading as ruling 267 filed it, or ruling 210's
  *  "## Proposed (not binding)", which rulings documents filed before ruling
- *  483 carry: both are the same section. */
+ *  267 carry: both are the same section. */
 const PROPOSALS_HEADING_RE = /^## Proposed(?: corrections)? \(not binding\)\s*$/;
 
 /** One open proposal, as its document holds it. */
@@ -50,7 +50,7 @@ export interface KbProposal {
   taskKey: string | null;
   /** The filing day (`YYYY-MM-DD`), as the stamp names it. */
   filedOn: string | null;
-  /** Who filed it: the agent's name, or "Operator". Null on ruling 378's entries. */
+  /** Who filed it: the agent's name, or "Operator". Null on ruling 210's entries. */
   filedBy: string | null;
   /** The settled line it corrects, as the filer quoted it; null when it adds one. */
   line: string | null;
@@ -146,7 +146,7 @@ interface EntryFieldLines {
   evidence: string[] | null;
 }
 
-/** Read one entry's fields. Ruling 378's entries have no filer and no line. */
+/** Read one entry's fields. Ruling 210's entries have no filer and no line. */
 function parseEntry(kb: string, doc: string, text: string): KbProposal {
   const [first = "", ...rest] = text.split("\n");
   const stamp = STAMP_RE.exec(first);
@@ -221,7 +221,7 @@ export function looseText(value: string): string {
 
 /**
  * Where a document's proposals section stands, heading to section end, or null
- * when it has none. Ruling 498 corrects the settled text around it: a passage
+ * when it has none. Ruling 210 corrects the settled text around it: a passage
  * an entry merely quotes is not in the document.
  */
 export function legacyProposalsSpan(raw: string): { start: number; end: number } | null {
@@ -262,7 +262,7 @@ function docProposals(kb: string, rel: string, abs: string): KbProposal[] {
 
 /**
  * Every open proposal in the store, oldest filing first. Walks every knowledge
- * base, because a proposal may stand in any of them (ruling 483): the rulings,
+ * base, because a proposal may stand in any of them (ruling 267): the rulings,
  * or any base granted to a run on a task.
  */
 function listKbProposals(dataRoot?: string): KbProposal[] {
@@ -356,7 +356,7 @@ export interface ResolveKbProposalResult {
 
 /**
  * Promote or dismiss one open proposal. The caller has already decided who may
- * (ruling 483: an org admin, directly or through the controller, because this
+ * (ruling 267: an org admin, directly or through the controller, because this
  * edits an org knowledge base).
  *
  * Promote writes `text` into the settled text, in place of `replaces` when it
@@ -454,7 +454,7 @@ export async function resolveKbProposal(
 
 /** The path a person opens a knowledge-base document at: Instance settings,
  *  with that knowledge base's browser open on the document (org admins). A
- *  proposal's "Open document" and a correction's (ruling 498) both go there. */
+ *  proposal's "Open document" and a correction's (ruling 210) both go there. */
 export function kbDocHref(place: { kb: string; doc: string }): string {
   const params = new URLSearchParams({ tab: "resources", kb: place.kb, doc: place.doc });
   return `/org/settings?${params.toString()}`;

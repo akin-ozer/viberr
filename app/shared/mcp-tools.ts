@@ -1,7 +1,7 @@
 import { isReservedMcpName } from "./mcp-reserved";
 
 /**
- * Ruling 176 (amends 39): an org MCP server's WRITE tools, as an admin marks
+ * Ruling 188 (amends 39): an org MCP server's WRITE tools, as an admin marks
  * them in the MCP server editor. MCP grants stay outside the capability matrix,
  * but a marked name is denied on every run whose `execute-code-or-write-repo`
  * grant is withheld (and on every operator run, which never writes). Viberr
@@ -20,7 +20,7 @@ export const MCP_TOOL_NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 export const MCP_WRITE_TOOLS_MAX = 200;
 
 /**
- * The discovery heuristic's verbs (ruling 176 / plan D2(c)).
+ * The discovery heuristic's verbs (ruling 188 / plan D2(c)).
  *
  * Pass 37 (F37-4) widened the list. The original seven missed `edit_file` and
  * `move_file` on a stock `@modelcontextprotocol/server-filesystem` — two of the
@@ -95,7 +95,7 @@ export function claudeMcpToolName(server: string, tool: string): string {
 }
 
 /**
- * Ruling 366: whose tool a console name is, read back from the two spellings
+ * Ruling 168: whose tool a console name is, read back from the two spellings
  * the runs carry — Claude's `mcp__<server>__<tool>` (the inverse of
  * `claudeMcpToolName`) and Codex's `<server>.<tool>` (as `wire-format.server.ts`
  * names an `mcp_tool_call`). `viberr` when the server is one of the product's

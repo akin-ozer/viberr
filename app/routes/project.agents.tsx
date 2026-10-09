@@ -72,7 +72,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (!project) {
     throw data(`No project at projects/${params.slug}.`, { status: 404 });
   }
-  // Ruling 127: "is this backend configured?" has no instance-level answer any
+  // Ruling 137: "is this backend configured?" has no instance-level answer any
   // more — a run bills a PERSON. So the page gets two person-shaped facts per
   // backend, from the one store every surface reads
   // (`backend-credentials.server`): whether the VIEWER connected it (they are
@@ -94,7 +94,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     profiles: assembleAgentRoster(db, params.slug),
     // The org-level template LIBRARY, minus what this project already runs
-    // (owner ruling 1 / AP-05): the "Add from library" picker's options. Before
+    // (P13 owner decision 1 / AP-05): the "Add from library" picker's options. Before
     // this, an org-created profile could never reach a project at all.
     library: listLibraryProfiles(db, params.slug),
     deployments: listAgentDeployments(db, params.slug),
@@ -120,7 +120,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // unconditionally — a toggle for it would be one an admin could flip with no
     // effect. No profile grants it either, as of B7 (pass 16).
     resourceCatalog: buildResourceCatalog(db),
-    // Ruling 239: the project's rulings KB is granted by nobody and reaches
+    // Ruling 208(a): the project's rulings KB is granted by nobody and reaches
     // every profile on this page. Without it here the page would show a
     // profile's `kb` list and be WRONG about what that profile reads — which
     // is the same mistake the capability matrix made about repo-write in
@@ -129,13 +129,13 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // display field, and a projection column for it would mean a baseline
     // change and a rebuild for something the file answers directly.
     rulingsKb: projectRulingsKb(params.slug),
-    // Ruling 127: ONE backend answer for this page. The roster line reads the
+    // Ruling 137: ONE backend answer for this page. The roster line reads the
     // count, and the create/edit modal reads `viewerConnected` for its advisory
     // note. It is deliberately not a second `backendAvailable` pair: authoring a
     // profile is not running one (a run bills the TASK OWNER), so nothing on
     // this page gates the form on the author's own credential.
     backendHealth,
-    // Ruling 156 (owner, Q35-8): only an org admin may copy a template's
+    // Ruling 177 (owner, Q35-8): only an org admin may copy a template's
     // grants onto this project's copy; the page renders the button for them
     // and the divergence marker for everyone.
     viewerIsOrgAdmin: user.role === "admin",
@@ -239,7 +239,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       return updated;
     }
     if (intent === "sync-profile-resources") {
-      // Ruling 156 (owner, Q35-8): the project's own `manage-agents` gate
+      // Ruling 177 (owner, Q35-8): the project's own `manage-agents` gate
       // first (audited like every other profile write), then the org role: a
       // project admin who is not an org admin sees the marker and asks.
       assertProjectAction(
@@ -264,7 +264,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       const copies = await propagateTemplateResources(db, propagateInput, actor);
       const copy = copies[0];
       const name = copy?.name ?? profileId;
-      // Ruling 479(d): ruling 156 says a grant the project added on its own
+      // Ruling 326: ruling 177 says a grant the project added on its own
       // is dropped "and the reply says so". This reply computed `removed`
       // and never said it, so a press that took `cloudflare-api` off the
       // agent owning the Cloudflare task read as a pure addition.
@@ -323,5 +323,5 @@ export default function AgentsView({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.agents");

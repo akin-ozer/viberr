@@ -75,12 +75,12 @@ export interface RunSpec {
   workdir: string;
   /** Resume an existing provider session, if any. */
   resumeSessionId?: string | null;
-  /** Ruling 559: the totals the resumed Claude session last reported, read
+  /** Ruling 165(c): the totals the resumed Claude session last reported, read
    *  from its run log by `startRun`. The adapter takes the run's share from
-   *  them (ruling 542) when this process holds nothing for the session, which
+   *  them when this process holds nothing for the session, which
    *  is every resumed session's first run after a restart. */
   resumedSessionReported?: ClaudeResultUsage;
-  /** Ruling 553: the CLI will restore the resumed session's cost state (it was
+  /** Ruling 159: the CLI will restore the resumed session's cost state (it was
    *  the last session run where this run works, under this account), so the
    *  spending cap, which the CLI measures against that restored total, is
    *  raised by it. False or absent: the run's own spend starts from zero. */
@@ -88,14 +88,14 @@ export interface RunSpec {
   /** Whether the run should be autonomous (Claude bypassPermissions / Codex
    *  danger-full-access for coding specialists). */
   autonomous?: boolean;
-  /** The run's system prompt: a static/dynamic split (ruling 370,
+  /** The run's system prompt: a static/dynamic split (ruling 169,
    *  `PromptPrefix`) or a plain string. Claude renders the split by kind —
    *  the operator as a `string[]` with the SDK's dynamic boundary, the
    *  controller as a recorded custom prompt, a specialist as the preset's
    *  static append with the dynamic tail on the first user message; Codex
    *  joins the same text into `developer_instructions`. */
   systemPrompt?: RunPrompt;
-  /** Ruling 371/373: what the run is told the moment its context has been
+  /** Ruling 170: what the run is told the moment its context has been
    *  compacted — the task anchor (task.md path, branch, PR, knowledge bases)
    *  or the controller's conversation anchor. Claude injects it through a
    *  `SessionStart` hook on the `compact` source; Codex keeps its per-task
@@ -118,26 +118,31 @@ export interface RunSpec {
    *  specialist without push rights cannot run `git push`). Deny rules bind
    *  even under bypassPermissions. Claude only. */
   disallowedTools?: string[];
-  /** Ruling 176: per mounted org server, the admin-marked write tools this
+  /** Ruling 188: per mounted org server, the admin-marked write tools this
    *  run withholds, by the server's own tool names. `startRun` has already
    *  added the Claude `mcp__<server>__<tool>` names to `disallowedTools`;
    *  Codex, which has no denylist channel, sends them as that server's
    *  `disabled_tools`. */
   mcpToolDenials?: McpToolDenial[];
-  /** Ruling 658: the servers in `mcpServers` a Codex run may start without:
+  /** Ruling 190: the servers in `mcpServers` a Codex run may start without:
    *  those mounted although their last probe failed or is stale, which the
    *  run's prompt already names as possibly missing. Codex marks every other
    *  server `required`. Claude ignores it. */
   mcpOptional?: string[];
   /** The task's attachments directory, when this run's profile holds
    *  `attach-evidence-references` — where the agent copies files to "post a
-   *  file on the task thread" (ruling 109). Neither adapter has to widen
-   *  anything for it: Claude runs at bypassPermissions, and since ruling 185
-   *  every Codex thread starts `danger-full-access`, which already writes it
+   *  file on the task thread" (ruling 78). Neither adapter has to widen
+   *  anything for it: Claude runs at bypassPermissions, and every Codex
+   *  thread starts `danger-full-access` (ruling 144), which already writes it
    *  (the `--add-dir` it once rode went with the `workspace-write` sandbox).
-   *  Ruling 564: on Claude it also keeps the file tools a withheld repo-write
+   *  Ruling 217(d): on Claude it also keeps the file tools a withheld repo-write
    *  grant denies, confined to it and the temp directory by a hook. */
   attachmentsWritableDir?: string | null;
+  /** Ruling 199: the run's working directory when its task has no checkout (a
+   *  board with no repository), which its workspace contract calls the task's
+   *  scratch. Ruling 217(d)'s hook lets the confined file tools write it too.
+   *  Absent on a board with a repository, even when the clone failed. */
+  scratchDir?: string | null;
   /** The GRANTED skills Viberr mounted for this run (`mountGrantedSkills`),
    *  by exact name. Claude only: the adapter turns these into the SDK's native
    *  skills context filter (qualified by the plugin below), so the model gets
@@ -147,7 +152,7 @@ export interface RunSpec {
    *  severed outright — codex-runtime LV-13), so a Codex run's granted skills
    *  ride the system prompt as text and this stays empty. */
   skills?: string[];
-  /** Ruling 180 (pass 36): the LOCAL PLUGIN that carries `skills`, built
+  /** Ruling 185 (pass 36): the LOCAL PLUGIN that carries `skills`, built
    *  beside the checkout (`<checkout>/../.viberr-plugins/<runId>/`). The
    *  Claude adapter passes it as `plugins: [{ type: "local", path }]` and
    *  qualifies each skill as `<name>:<skill>` for the filter; run-service
@@ -155,7 +160,7 @@ export interface RunSpec {
   skillPlugin?: SkillPlugin;
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
    *  `human`). Claude enforces it via the tool denylist. On Codex it is
-   *  ADVISORY since ruling 185 removed the OS sandbox: no adapter reads this
+   *  ADVISORY (ruling 183), with no OS sandbox: no adapter reads this
    *  flag to confine the run, and the prompt plus the server-owned delivery
    *  gate carry the withholding (`codexRepoWriteAdvisory` renders that).
    *  Deliberately NOT folded into `autonomous`, which also drives Claude's
@@ -173,7 +178,7 @@ export interface RunSpec {
    *  decision plan the caller parses + executes) AND every generic specialist/
    *  reviewer run (the report_outcome envelope — verdict/questions). */
   outputSchema?: unknown;
-  /** Ruling 175: the instance's spending cap for this run in USD, when one is
+  /** Ruling 159: the instance's spending cap for this run in USD, when one is
    *  set (Instance settings → Max spend per Claude run). Claude hands it to the SDK
    *  as `maxBudgetUsd`; Codex has no budget option and ignores it, which the
    *  run-inputs disclosure states. */
@@ -182,33 +187,33 @@ export interface RunSpec {
    *  THIS run only. `GIT_CEILING_DIRECTORIES` prevents accidental parent-repo
    *  discovery; it is not a filesystem or process isolation boundary. */
   env?: Record<string, string>;
-  /** Ruling 460: the OS user this run's processes run as — its credential
+  /** Ruling 139: the OS user this run's processes run as — its credential
    *  principal's agent uid — and the launcher that runs them as it. Set by
    *  `startRun` whenever this server launches agents; absent (the host dev
    *  server, the test harness) the CLI spawns as the server's own user. */
   agent?: AgentLaunch;
-  /** Ruling 636: the run's own temporary directory (`<root>/<runId>`), made
+  /** Ruling 141(c): the run's own temporary directory (`<root>/<runId>`), made
    *  when it launches and named to its processes as `TMPDIR`, `TMP` and `TEMP`
    *  in `env`; run-service removes it once the run has settled. Absent before
    *  the launch and on a run whose directory could not be made. */
   tmpDir?: string;
-  /** Ruling 507: the vendor home of the ACCOUNT this run bills (the person's
+  /** Ruling 138: the vendor home of the ACCOUNT this run bills (the person's
    *  active one when it started). Claude reads it as `CLAUDE_CONFIG_DIR` from
-   *  `env`; the Codex adapter's private home (ruling 181) takes the account's
+   *  `env`; the Codex adapter's private home (ruling 145) takes the account's
    *  `auth.json` from here and writes the refreshed one back here, and nowhere
    *  else. Absent on a refused run and in adapter tests that build a spec by
    *  hand, where the shared `CODEX_HOME` stands in, as before the ruling. */
   accountHome?: string;
-  /** Ruling 527: the channel a controller turn takes its person's steering
+  /** Ruling 251: the channel a controller turn takes its person's steering
    *  messages through while it works. Only controller turns carry it, and they
-   *  run on Claude (ruling 99), whose adapter reads it from two hooks: at every
+   *  run on Claude (ruling 247), whose adapter reads it from two hooks: at every
    *  step boundary it asks for what is waiting, and when the model has written
    *  its final answer it closes it. */
   steering?: RunSteering;
 }
 
 /**
- * Ruling 527: steering, from the run's side. The host holds the messages the
+ * Ruling 251: steering, from the run's side. The host holds the messages the
  * person sent while the run works; the adapter only asks for them at a step
  * boundary and says when asking has stopped.
  */
@@ -244,7 +249,7 @@ export interface EmittedLine {
 }
 
 /**
- * Ruling 394: the line a run carries when its transport died AFTER the agent's
+ * Ruling 155(d): the line a run carries when its transport died AFTER the agent's
  * work stood finished — a completed Codex turn with nothing in flight behind
  * it, or Claude's single terminal non-error result.
  *
@@ -307,11 +312,11 @@ export interface RunCallbacks {
 }
 
 /** The phase vocabulary both adapters emit; declared with the client-safe run
- *  types, because the controller page names the phase too (ruling 457). */
+ *  types, because the controller page names the phase too (ruling 11). */
 export { RUN_PHASE } from "~/features/runtime/runtime-types";
 
 /**
- * Ruling 701: the step a FINISHED specialist run carries, beside the phase
+ * Ruling 175: the step a FINISHED specialist run carries, beside the phase
  * `RUN_PHASE.compacting`, for as long as its session is being compacted after
  * it. The run service writes and clears it. It is the durable record that a
  * compaction is in flight on a row that is terminal: boot recovery finishes
@@ -321,7 +326,7 @@ export { RUN_PHASE } from "~/features/runtime/runtime-types";
 export const COMPACTING_AFTER_RUN_STEP = "after the run ended";
 
 /**
- * Ruling 701: the step of a `queued` run that waits for its session, which is
+ * Ruling 175: the step of a `queued` run that waits for its session, which is
  * still being compacted after the run that left it, and not for a slot. The
  * console's footer prints it in place of the cap's reason, and the restart
  * note says it of a run a restart found waiting so.
@@ -349,7 +354,7 @@ const ANSWERED_PREFIX = "composing · ";
 const ANSWERED_SUFFIX = " answered";
 
 /**
- * Ruling 348: the step once the tool it names has answered. The step used to
+ * Ruling 166: the step once the tool it names has answered. The step used to
  * stick unchanged from the tool's invocation to the NEXT invocation, so the
  * strip read `Working · get_github_state · {…}` for as long as the model
  * thought after that call came back — measured over the last 40 controller
@@ -378,7 +383,7 @@ export function answeredStep(step: string): string {
  */
 export function stepUpdateForLine(line: EmittedLine): StepUpdate | null {
   // A succeeding Codex MCP call projects no row at all on completion; the
-  // fact rides on the facts instead (ruling 348).
+  // fact rides on the facts instead (ruling 166).
   if (line.facts.toolAnswered) return { kind: "answered" };
   const display = line.display;
   if (!display) return null;
@@ -408,12 +413,12 @@ export interface RunHandle {
   runId: string;
   /** Stop the run: a cooperative interrupt first, then the adapter's abort
    *  ladder tears the process group down, and the settle sweep reaps whatever
-   *  the run started (ruling 174). Idempotent. Interrupter attribution is
+   *  the run started (ruling 142). Idempotent. Interrupter attribution is
    *  stamped onto the run row by the service (interruptRun), not passed here. */
   interrupt(): void;
 }
 
-/** What a completion compaction (ruling 376) reports back to the run service. */
+/** What a completion compaction (ruling 174) reports back to the run service. */
 export type CompactOutcome =
   | { compacted: true; preTokens: number | null; postTokens: number | null }
   | { compacted: false; reason: string };
@@ -421,7 +426,7 @@ export type CompactOutcome =
 /** The callbacks a completion compaction drives: the same line sink and
  *  phase writer as the run it closes; no exit, it returns its outcome. */
 export type CompactCallbacks = Pick<RunCallbacks, "onLine" | "onPhase"> & {
-  /** Ruling 701: aborted when the run service stops waiting for the
+  /** Ruling 175: aborted when the run service stops waiting for the
    *  compaction (`COMPLETION_COMPACT_DEADLINE_MS`). An adapter that can stop
    *  its request stops it; the service sweeps the compaction's process by its
    *  marker either way and drops what is said after. */
@@ -433,14 +438,14 @@ export interface RuntimeAdapter {
   /** Begin a run; drives callbacks; returns a handle for interrupt. */
   start(spec: RunSpec, cb: RunCallbacks): RunHandle;
   /**
-   * Ruling 376: compact the session `sessionId` a run of `spec` just left,
+   * Ruling 174: compact the session `sessionId` a run of `spec` just left,
    * while its prompt cache is warm. The request must share the run's prefix
    * (tools, system prompt, servers), so an adapter builds it from the same
    * spec it started the run with. Emits its lines through `cb.onLine` (a
    * `compaction` fact with trigger `completion`, the cost as `costAddUsd`)
    * and resolves with what happened; it never throws for a provider refusal.
    * Optional so a test's throwing or capturing stub stays a valid adapter; a
-   * backend without it simply keeps its large sessions for ruling 372.
+   * backend without it simply keeps its large sessions for ruling 173.
    */
   compact?(spec: RunSpec, sessionId: string, cb: CompactCallbacks): Promise<CompactOutcome>;
 }

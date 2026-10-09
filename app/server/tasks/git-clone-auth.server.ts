@@ -226,7 +226,7 @@ export function createGitHubClonePlan(input: {
  */
 export function cloneTimeoutMs(): number {
   // C3 (pass 31): through the validated schema, like every other tuning knob;
-  // ruling 458(j): the schema owns the coercion and the 15-minute default.
+  // ruling 39: the schema owns the coercion and the 15-minute default.
   // Read LAZILY like its C3 siblings (claudeIdleTimeoutMs et al.) — a
   // module-scope getEnv() call would throw at import time on an invalid env
   // (this module sits on the clone/delivery path) and would freeze the value
@@ -236,13 +236,13 @@ export function cloneTimeoutMs(): number {
 }
 
 export interface CloneFailureLogDetails {
-  /** `workspace_fault` (ruling 485): a LOCAL step failed — removing or
+  /** `workspace_fault` (ruling 197): a LOCAL step failed — removing or
    *  replacing a tree, making a directory, cloning the delivering checkout,
    *  stripping `.claude`. Nothing about it involved GitHub. */
   reason: "git_unavailable" | "clone_failed" | "clone_terminated" | "workspace_fault";
   exitCode?: number;
   signal?: string;
-  /** Ruling 485, a workspace fault only: what failed, the path and the OS
+  /** Ruling 197, a workspace fault only: what failed, the path and the OS
    *  error — "`…/website` could not be replaced: EACCES on `…/dev-1wnDsF`". */
   fault?: string;
   /**
@@ -261,7 +261,7 @@ export interface CloneFailureLogDetails {
 /**
  * What part a GitHub credential played in the attempt that failed.
  *
- * Ruling 249 (pass 37, F37-78): two values were not enough. The specialist
+ * Ruling 197 (pass 37, F37-78): two values were not enough. The specialist
  * checkout has an arm that never touches the network (a supporting run is
  * cloned from the delivering checkout ON DISK), and the token is fetched only
  * in the arm after it, so a failure there reported `false` and viberr said "No
@@ -285,7 +285,7 @@ export function cloneFailureSentence(
   details: CloneFailureLogDetails,
   opts: { credential: CloneCredential; timeoutMs?: number },
 ): string {
-  // Ruling 485: a local fault says what failed on the server's disk and
+  // Ruling 197: a local fault says what failed on the server's disk and
   // nothing else. Live on WEB-5 a replace that died on an agent's 0700
   // directory was told as "No GitHub credential is attached", and the
   // operator asked the owner to attach one; no clause about access belongs in
@@ -347,7 +347,7 @@ export function cloneFailureLogDetails(
   cause: unknown,
   opts: { token?: string | null } = {},
 ): CloneFailureLogDetails {
-  // Ruling 485: a local step's fault is classified as what it is, never as a
+  // Ruling 197: a local step's fault is classified as what it is, never as a
   // clone (a removal's EACCES is no `clone_failed`, and a mkdir's ENOENT is
   // no missing git).
   if (cause instanceof WorkspaceFault) {
@@ -377,11 +377,11 @@ export function cloneFailureLogDetails(
 }
 
 /**
- * Ruling 485: a LOCAL step in a task's workspace failed — a tree could not be
+ * Ruling 197: a LOCAL step in a task's workspace failed — a tree could not be
  * removed or replaced, a directory could not be made, the delivering checkout
  * could not be cloned, `.claude` could not be stripped. It names the path and
  * the OS error. It is never a credential's doing: a checkout that fails on one
- * reports `credential: not_involved` (ruling 249), and its sentence
+ * reports `credential: not_involved` (ruling 197), and its sentence
  * (`cloneFailureSentence`) says nothing about access at all.
  */
 export class WorkspaceFault extends Error {
@@ -432,7 +432,7 @@ export function workspaceFault(what: string, cause: unknown): WorkspaceFault {
 }
 
 /** Run one local step of preparing a checkout; its failure is a
- *  {@link WorkspaceFault} naming `what` (ruling 485). */
+ *  {@link WorkspaceFault} naming `what` (ruling 197). */
 export async function workspaceStep<T>(what: string, step: () => Promise<T> | T): Promise<T> {
   try {
     return await step();

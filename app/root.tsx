@@ -1,7 +1,7 @@
-// Ruling 365: one UI typeface. Inter carries both the body and the display
+// Ruling 280: one UI typeface. Inter carries both the body and the display
 // token (Manrope and Noto Sans are gone); JetBrains Mono stays for code and
 // identifiers that are code. 400–700 so every weight the sheet declares is a
-// real face and nothing is synthesised; ruling 625 retired 800 (headings are
+// real face and nothing is synthesised; ruling 280 retired 800 (headings are
 // 700, names 600), so its face is no longer shipped.
 import "@fontsource/inter/400.css";
 import "@fontsource/inter/500.css";
@@ -49,7 +49,7 @@ import {
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" },
-  // Ruling 457: the faces every first paint draws, fetched alongside the CSS.
+  // Ruling 11: the faces every first paint draws, fetched alongside the CSS.
   ...SHELL_FONT_PRELOADS,
 ];
 
@@ -58,9 +58,9 @@ export const links: Route.LinksFunction = () => [
  * `logger.*` call from any loader, action or nested route carries it with no
  * call-site work. `entry.server.tsx` reuses the id bound here rather than
  * minting a second one, so the render and the data phase share it. Ruling
- * 458(d): it also stamps the id on every response it wraps, as `X-Request-Id`.
+ * 43: it also stamps the id on every response it wraps, as `X-Request-Id`.
  * The error page below shows it too, for the error the document arrived with
- * (ruling 458(n) raised the ruling-457 ceilings by those bytes).
+ * (ruling 11 raised the ruling-11 ceilings by those bytes).
  *
  * The architecture doc promised "structured JSON logs with request/job
  * correlation identifiers" from the start. The affordance shipped once as an
@@ -68,7 +68,7 @@ export const links: Route.LinksFunction = () => [
  * deleted as dead code — which is what happens to an opt-in nobody opts into.
  * This one is not optional.
  *
- * Ruling 457: `liveHeadMiddleware` reads the SSE broker's head before any
+ * Ruling 11: `liveHeadMiddleware` reads the SSE broker's head before any
  * loader runs (the page's first stream replays from it), and
  * `sessionRenewalMiddleware` forwards the rolling-session renewal (F10-17) on
  * every GET, which this loader used to do only when it ran.
@@ -79,27 +79,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const theme = getThemePreference(request);
   // Identifies the signed-in user for the shell and <CsrfInput />.
   const auth = await authenticate(request);
-  // Ruling 148(c): the in-app reduce-motion preference (and its
+  // Ruling 30: the in-app reduce-motion preference (and its
   // <html data-motion> hook) is gone; the OS setting is the one signal.
   const payload = {
     theme,
     csrf: auth ? getCsrfToken(auth.sessionId) : null,
   };
-  // Ruling 457 (RF-1): where the page's first live stream starts. Only a
+  // Ruling 11 (RF-1): where the page's first live stream starts. Only a
   // document load seeds it; a `.data` answer would find the tab's streams
   // already under way.
   if (!isDocumentNavigation(request)) return payload;
   return {
     ...payload,
     liveHead: context.get(liveHeadContext),
-    // Ruling 458(d): the id the error page shows. Only the document's own
+    // Ruling 43: the id the error page shows. Only the document's own
     // error can use it (see ErrorBoundary), so a `.data` answer carries none.
     requestId: currentRequestId(),
   };
 }
 
 /**
- * Ruling 457 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
+ * Ruling 11 (RF-7): root re-runs after a sign-in, a sign-out, a theme or
  * profile change and on a document load, and not for a live event, a
  * navigation or a `revalidate()`, none of which changes its theme or csrf.
  */
@@ -136,7 +136,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // Layout also renders for ErrorBoundary, where loader data may be missing.
   const data = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = data?.theme ?? "system";
-  // Seeded once, then frozen (ruling 459): after first paint
+  // Seeded once, then frozen (ruling 283): after first paint
   // `setDocumentTheme` is the one writer of data-theme, so a revalidated
   // preference must not reach <html> through React. A live value here wrote
   // the loader's raw preference past the one-clock fade: Dark -> System on a
@@ -155,7 +155,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (onScreen === "dark" || onScreen === "light") return onScreen;
     return theme === "dark" ? "dark" : "light";
   });
-  // Ruling 457: one `{__html}` object per preference. React compares it by
+  // Ruling 11: one `{__html}` object per preference. React compares it by
   // identity, and a fresh object rewrote the script's text on every root
   // reload (the icon cost, in <head>).
   const bootScript = useMemo(() => ({ __html: themeBootScript(theme) }), [theme]);
@@ -180,7 +180,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 export default function App() {
   const rootData = useRouteLoaderData<typeof loader>("root");
   const theme: ThemePreference = rootData?.theme ?? "system";
-  // Ruling 457: the tab's live ledger (what its loaders owe), for every
+  // Ruling 11: the tab's live ledger (what its loaders owe), for every
   // surface, seeded with the server render's stream position. In render,
   // because the first stream opens in a child's effect and children's effects
   // run before root's; the seed takes only the first value.
@@ -208,11 +208,11 @@ export default function App() {
           Outlet so it survives every route change. */}
       <RoutePendingBar />
       <Outlet />
-      {/* Ruling 121: the controller dock, one mount for every signed-in
+      {/* Ruling 256: the controller dock, one mount for every signed-in
           surface. A csrf token in the root payload is the signed-in signal;
           the dock hides itself on the login and controller pages. */}
       {rootData?.csrf ? <ControllerDock /> : null}
-      {/* Ruling 481(c): the tab's title counts the unread decisions, and an
+      {/* Ruling 74: the tab's title counts the unread decisions, and an
           opted-in browser shows a desktop notification for a new one. */}
       {rootData?.csrf ? <AttentionWatcherSlot /> : null}
     </ToastProvider>
@@ -220,9 +220,9 @@ export default function App() {
 }
 
 /**
- * Ruling 481(c): the attention watcher is its own chunk, fetched once the page
+ * Ruling 74: the attention watcher is its own chunk, fetched once the page
  * has hydrated. It renders nothing and works only in a browser, and imported
- * here it would ride every route's closure (ruling 457).
+ * here it would ride every route's closure (ruling 11).
  */
 const LazyAttentionWatcher = lazy(() =>
   import("./features/notifications/attention-watcher").then((module) => ({
@@ -259,7 +259,7 @@ const thrownMessage = z
 /** Hydration is the only change `useSyncExternalStore` watches for here, and
  *  React observes it without a store. The same three as `useHydrated` in
  *  `ui/local-time.tsx`, which root does not import: its date formatters would
- *  join the root bundle (ruling 457). */
+ *  join the root bundle (ruling 11). */
 function subscribeToNothing(): () => void {
   return () => {};
 }
@@ -271,7 +271,7 @@ function serverSnapshot(): boolean {
 }
 
 export function ErrorBoundary({ error, loaderData }: Route.ErrorBoundaryProps) {
-  // Ruling 458(d): the id of the request that failed, so a person can quote it
+  // Ruling 43: the id of the request that failed, so a person can quote it
   // and its log line can be found. Root's data carries the document request's
   // id, which is the failed request's only for the error the document arrived
   // with: the server render, and the hydration render that reuses its markup

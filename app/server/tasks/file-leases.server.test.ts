@@ -11,10 +11,9 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { activeFileLeases, staleFileLeases } from "./file-leases.server";
 
 /**
- * Ruling 245(b) (pass 37, F37-76): a lease whose HOLDER is finished holds
- * nothing.
+ * Ruling 60 (F37-76): a lease whose HOLDER is finished holds nothing.
  *
- * Ruling 245 shipped with `FileLease.taskKey` documented as "released when it
+ * Leases first shipped with `FileLease.taskKey` documented as "released when it
  * reaches a terminal stage" and nothing implementing it. The controller read
  * that contract, believed it, and wrote it into the first real lease's own
  * reason — "Lease releases when SHOP-11 merges". SHOP-11 merged and the lease

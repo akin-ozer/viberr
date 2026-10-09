@@ -12,7 +12,7 @@ import { listDeployedSpecialists } from "./specialist-roster.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): review notes that reach the agent.
+ * Ruling 246 (pass 40, F40-54): review notes that reach the agent.
  *
  * The owner's plan for WEB-6 was "Akin approves each note individually in
  * review", and Viberr gave a person `Diff N files · +a −d` and nothing to read
@@ -38,7 +38,7 @@ export interface ReviewNote {
   startLine: number | null;
   /** The side `startLine` is numbered on when it is not `side`'s: a range can
    *  run from a removed line to an added one, as a GitHub comment's
-   *  `start_side` can (ruling 509). Null reads as `side`. */
+   *  `start_side` can (ruling 246). Null reads as `side`. */
   startSide: "new" | "old" | null;
   /** `old` = a removed line, numbered in the file as it was. */
   side: "new" | "old";
@@ -50,7 +50,7 @@ export interface ReviewNote {
 const REVIEW_NOTES_MAX = 50;
 
 /** A panel note as the `review-notes` intent receives it (JSON). A note on
- *  several lines (ruling 509) also names its first line and that line's side;
+ *  several lines (ruling 246) also names its first line and that line's side;
  *  on one side a range reads downward, as the diff draws it. */
 const panelNoteSchema = z
   .object({
@@ -107,7 +107,7 @@ function defuseMentions(text: string): string {
 
 /** Where a note points, as the comment quotes it: `path:line`, or
  *  `path:start-end` for lines on one side. A range from a removed line to an
- *  added one has no single numbering, so it names both ends (ruling 509). */
+ *  added one has no single numbering, so it names both ends (ruling 246). */
 function noteTarget(note: ReviewNote & { path: string }): string {
   const path = note.path.replaceAll("`", "'");
   if (note.line === null) return `\`${path}\``;

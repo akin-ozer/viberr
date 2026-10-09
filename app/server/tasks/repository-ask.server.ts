@@ -34,7 +34,7 @@ import {
 import { appendPolicyNote, taskRef, type TaskActor } from "./task-mutation.server";
 
 /**
- * Ruling 672: what answering the operator's repository question does, and
+ * Ruling 224: what answering the operator's repository question does, and
  * what a repository connected any other way settles.
  *
  * The owner, 2026-10-06: "operator creates a packet to remind to user to
@@ -44,7 +44,7 @@ import { appendPolicyNote, taskRef, type TaskActor } from "./task-mutation.serve
  *
  * The question is about the board, and it is asked on a task. So each answer
  * is carried out once, on the task a person answered, and every other task on
- * the board that asked takes the same answer through ruling 319's fan-out
+ * the board that asked takes the same answer through ruling 65's fan-out
  * (`answeredElsewhere` below): nothing is attached or written twice.
  */
 
@@ -59,7 +59,7 @@ export interface ConnectedFromPacket {
 
 /**
  * Carry out "Connect a repository": attach what the person typed through the
- * Change door (ruling 669), as a repository the board delivers through, so the
+ * Change door (ruling 226), as a repository the board delivers through, so the
  * token has to be able to push. The door's refusals are thrown as they are and
  * leave the packet open. A board that already has a repository is answered
  * already, by whoever connected it.
@@ -312,7 +312,7 @@ export async function connectionOutlivedItsDecision(
  *  - a board that can write its repository now: the operators start now;
  *  - one that cannot, with a controller on it (started here from the packet,
  *    or the one that made the connection): they wait, and the controller
- *    starts each when it has switched the board. Ruling 330's sweep starts a
+ *    starts each when it has switched the board. Ruling 122's sweep starts a
  *    task nothing moved for fifteen minutes, so a controller that forgets
  *    leaves no task stopped;
  *  - one that cannot, with no controller coming: they start now and say what
@@ -424,7 +424,7 @@ export type BoardSwitchTurn =
  * Start the controller on the board, as the person who connected the
  * repository: a new board conversation of theirs, opened with
  * {@link boardSwitchRequest}. A controller turn runs on the asker's own Claude
- * account (ruling 127), so with none connected nothing is started and the
+ * account (ruling 137), so with none connected nothing is started and the
  * reason comes back for the task's record.
  */
 async function startBoardSwitchTurn(

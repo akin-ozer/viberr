@@ -1,5 +1,5 @@
 /**
- * Where is the person standing? (ruling 121)
+ * Where is the person standing? (ruling 256)
  *
  * The dock mounts once, in root, and derives its scope from the matched
  * routes: a task page anchors it to that task, any workspace view binds it to
@@ -104,12 +104,12 @@ export function dockScopeKey(scope: {
 }
 
 /**
- * Ruling 457 (CTL-3, RF-8): the `shouldRevalidate` of the dock's two resource
+ * Ruling 11 (CTL-3, RF-8): the `shouldRevalidate` of the dock's two resource
  * routes. Their fetchers are root-owned, so React Router re-ran both on every
  * navigation, action and revalidation of every page: a request per page event
  * for the unseen list, and once the dock had been opened, a reload of the last
  * transcript with its `seen=1`, which marked a reply read while the panel was
- * closed (ruling 448 lets only the OPEN dock do that). The dock loads them
+ * closed (ruling 257 lets only the OPEN dock do that). The dock loads them
  * itself, on the moments that change them: its own opening, selection and
  * sends, a `controller.updated` the page's stream hands it, and its working
  * poll.
@@ -119,7 +119,7 @@ export function dockResourceShouldRevalidate(): boolean {
 }
 
 /** The dock's status on every page (`resources.controller-unseen.ts`): O39-d's
- *  unseen replies and, since ruling 457, the viewer's turns working right now.
+ *  unseen replies and the viewer's turns working right now (ruling 257).
  *  What the button reads, and all its working poll loads. */
 export const DOCK_STATUS_URL = "/resources/controller-unseen";
 

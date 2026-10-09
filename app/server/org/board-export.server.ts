@@ -39,7 +39,7 @@ import {
 import { readStoreFolderFiles } from "./store-files.server";
 
 /**
- * Ruling 653: EXPORT a board — any project, archived or not — as a board file
+ * Ruling 32: EXPORT a board — any project, archived or not — as a board file
  * (`board-file.server.ts` has the layout). What it carries is the workflow a
  * board runs, so the same board can be started again here or on another
  * instance:
@@ -95,7 +95,7 @@ interface BoardGrants {
   mcps: Set<string>;
 }
 
-/** The operator's template is the instance's one operator (ruling 518). */
+/** The operator's template is the instance's one operator (ruling 106). */
 const OPERATOR_PROFILE_ID = "operator";
 
 /**
@@ -300,7 +300,7 @@ export function exportBoard(
     const kb = kbRows.get(dir);
     if (!kb) continue;
     knowledgeBases.push({ dir, name: kb.name, refresh: kb.refresh, private: kb.private });
-    // Ruling 672: a decision that a board connects no repository is one
+    // Ruling 199: a decision that a board connects no repository is one
     // person's, on this instance, and does not travel with the board.
     kbFiles.set(
       dir,

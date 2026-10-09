@@ -15,7 +15,7 @@ import { BoardImportDialog } from "./board-import-dialog";
 import type { OrgActionData } from "./use-org-action";
 
 /**
- * Ruling 653: Instance settings → Import & export. A board file is a board's
+ * Ruling 32: Instance settings → Import & export. A board file is a board's
  * workflow without its work, every part of it a plain file in one zip; this
  * tab is where one is made (Export, per board) and where one becomes a new
  * project (Import, which reads the file, shows what it would bring, and

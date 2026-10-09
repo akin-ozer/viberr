@@ -4,18 +4,18 @@ import { Icon } from "~/ui/icon";
 import type { ChangesBodyProps } from "./changes-panel";
 
 /**
- * Ruling 484 (pass 40, F40-54): the task page's Changes panel, as the page
+ * Ruling 315 (pass 40, F40-54): the task page's Changes panel, as the page
  * ships it: a heading, one sentence and a Show changes button. The reader
  * (`changes-panel.tsx`: the diff drawing, the line notes, their send) is its
  * own chunk, fetched when the button is pressed or reached, so a task page
- * that nobody reviews pays nothing for it (ruling 457's task route budget); and
+ * that nobody reviews pays nothing for it (ruling 11's task route budget); and
  * the files themselves are read from GitHub only when it opens.
  *
  * The body stays mounted once opened, so hiding the panel keeps unsent notes.
  * A chunk that fails to arrive (offline, a stale deploy) says so and lets the
  * button try again, never the page's error boundary.
  *
- * Ruling 521: the completion packet carries the same reader `inline`, as a
+ * Ruling 316: the completion packet carries the same reader `inline`, as a
  * toggle and the body with no panel around it, and open from the first paint
  * when the change is small enough to read whole (`defaultOpen`).
  */
@@ -39,7 +39,7 @@ function loadBody(): Promise<typeof import("./changes-panel")> {
 }
 
 /** The toggle's words: Show or Hide, "changes" on the panel and "the diff"
- *  inline (ruling 521), and Try again while the open reader's chunk failed
+ *  inline (ruling 316), and Try again while the open reader's chunk failed
  *  to arrive. */
 function toggleLabel(open: boolean, failed: boolean, inline: boolean): string {
   return !open
@@ -64,9 +64,9 @@ export function ChangesPanel({
   prNumber: number;
   /** The deliverer's display name, for the lede; null when none. */
   delivererName: string | null;
-  /** Ruling 521: the toggle and the reader alone, for the completion packet. */
+  /** Ruling 316: the toggle and the reader alone, for the completion packet. */
   inline?: boolean;
-  /** Ruling 521: open, and the reader fetched, as the page mounts. */
+  /** Ruling 316: open, and the reader fetched, as the page mounts. */
   defaultOpen?: boolean;
 }) {
   const id = useId();
@@ -88,7 +88,6 @@ export function ChangesPanel({
   // An open-from-the-start reader fetches its chunk once the page is live.
   useEffect(() => {
     if (defaultOpen) fetchBody();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const reader = (

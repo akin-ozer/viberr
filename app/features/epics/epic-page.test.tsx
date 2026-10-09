@@ -9,14 +9,14 @@ import type { EpicActionResult } from "./epic-parts";
 import type { EpicPageView, EpicTaskView } from "./epics-query.server";
 
 /**
- * Ruling 503(e): `/projects/:slug/epics/:epicId`, one epic the way Jira opens
+ * Ruling 325: `/projects/:slug/epics/:epicId`, one epic the way Jira opens
  * an epic and Linear a project. The head carries the status select and Edit
  * (`manage-epics`); About is its markdown description; Tasks is its progress
- * and one row per task with the board card's status word (ruling 476(g)),
+ * and one row per task with the board card's status word (ruling 272),
  * "waits on N", its owner and Remove (`edit-task-meta`), with Add tasks, New
  * task and the archived ones folded under the list; History; and Details,
  * with "Planned in" when the viewer may open that conversation (476(h)).
- * Ruling 651: Archive on a live row and Restore on an archived one, and
+ * Ruling 274: Archive on a live row and Restore on an archived one, and
  * Archive tasks for a Done epic, to whoever may archive (`approve-transition`).
  */
 
@@ -190,7 +190,7 @@ function rowOf(key: string): HTMLElement {
   return row;
 }
 
-describe("ruling 503(e): the epic page's head", () => {
+describe("ruling 325: the epic page's head", () => {
   it("carries the status select and Edit for someone who may manage epics, and neither for anyone else", async () => {
     renderEpic(pageView(), { canManage: true });
     const select = await screen.findByRole("combobox", { name: "Status" });
@@ -252,11 +252,11 @@ describe("ruling 503(e): the epic page's head", () => {
     fireEvent.change(name, { target: { value: "Checkout v2" } });
     fireEvent.keyDown(name, { key: "Enter" });
     expect(await screen.findByText(RENAMED)).toBeTruthy();
-    // An edit's answer is the dialog's own (ruling 700(c)). CANARY: drop
+    // An edit's answer is the dialog's own (ruling 325). CANARY: drop
     // `close()` from EpicDialog's own result handler and the dialog stays
     // open over its toast.
     expect(dialog.hasAttribute("data-closing")).toBe(true);
-    // Ruling 459: a second Enter on the closing dialog posts nothing. CANARY:
+    // Ruling 287: a second Enter on the closing dialog posts nothing. CANARY:
     // drop `fetcher.data?.ok` from submit's guard and the fade posts
     // update-epic again.
     fireEvent.keyDown(name, { key: "Enter" });
@@ -274,7 +274,7 @@ describe("ruling 503(e): the epic page's head", () => {
   });
 });
 
-describe("ruling 615: the head says the status once and scrolls with the panels", () => {
+describe("ruling 325: the head says the status once and scrolls with the panels", () => {
   /** The head's status line: the one that says how far along the epic is. */
   const statusLine = () => screen.getByText("50% done · 2 tasks").parentElement!;
 
@@ -304,7 +304,7 @@ describe("ruling 615: the head says the status once and scrolls with the panels"
   });
 });
 
-describe("ruling 503(e): About, History and Details", () => {
+describe("ruling 325: About, History and Details", () => {
   it("About renders the description as markdown", async () => {
     renderEpic(pageView());
     const about = await section("About");
@@ -444,7 +444,7 @@ describe("ruling 503(e): About, History and Details", () => {
   });
 });
 
-describe("ruling 503(e): the Tasks section", () => {
+describe("ruling 325: the Tasks section", () => {
   const TASKS = [
     task({ key: "VIB-151", stageId: "impl", waitsOn: 2 }),
     task({
@@ -635,7 +635,7 @@ describe("ruling 503(e): the Tasks section", () => {
     renderEpic(pageView({ tasks: onlyArchived }), { canEditTasks: true });
     const tasks = await section("Tasks");
     // CANARY: say "No tasks in this epic yet" whatever the fold holds and an
-    // epic whose every task is archived claims it has none (ruling 651).
+    // epic whose every task is archived claims it has none (ruling 274).
     expect(tasks.textContent).toContain("Every task in this epic is archived.");
     expect(tasks.textContent).not.toContain("No tasks in this epic yet");
     expect(screen.queryByRole("list", { name: "Tasks in epic-3" })).toBeNull();
@@ -654,7 +654,7 @@ describe("ruling 503(e): the Tasks section", () => {
   });
 });
 
-describe("ruling 651: archiving from the epic page", () => {
+describe("ruling 274: archiving from the epic page", () => {
   const OPEN = task({ key: "VIB-151", title: "Wire the checkout", stageId: "impl" });
   const DONE = task({ key: "VIB-160", title: "Receipt email", stageId: "done", status: { kind: "done", label: "done", icon: "check" } });
   const FILED = task({
@@ -737,7 +737,7 @@ describe("ruling 651: archiving from the epic page", () => {
   });
 });
 
-describe("ruling 503(e): screen labels", () => {
+describe("ruling 325: screen labels", () => {
   it("the page and each of its dialogs carry a data-screen-label", async () => {
     renderEpic(pageView({ candidates: [{ key: "VIB-148", title: "Pay with a saved card", epicId: null }] }));
     const page = (await screen.findByRole("heading", { name: "Checkout revamp", level: 1 })).closest("[data-screen-label]");

@@ -114,9 +114,9 @@ describe("Profile: the theme segment shows the theme on screen", () => {
 });
 
 /**
- * Ruling 532: Home's setup checklist links "Connect" for Claude or Codex to
+ * Ruling 322: Home's setup checklist links "Connect" for Claude or Codex to
  * `/profile#agent-accounts`, and the link lands on the Agent accounts panel:
- * marked while the URL names it (ruling 497's idiom) and focused, so the keys
+ * marked while the URL names it (ruling 302's idiom) and focused, so the keys
  * scroll from there.
  */
 describe("Profile: the setup checklist's link lands on Agent accounts", () => {

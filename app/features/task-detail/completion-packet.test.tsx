@@ -11,11 +11,11 @@ import { CompletionPacket, type CompletionResult } from "./completion-packet";
 afterEach(cleanup);
 
 /**
- * Ruling 521: the completion packet as the person who accepts reads it. What
+ * Ruling 316: the completion packet as the person who accepts reads it. What
  * the loader ships is the route suite's and which verdict counts is the
  * server suite's; this suite owns what the card says about each reviewer, the
- * screenshots, and when the diff is read. Ruling 668: and what the card shows
- * as the result of an accepted task. Ruling 693: and how it prints what the
+ * screenshots, and when the diff is read. Ruling 103: and what the card shows
+ * as the result of an accepted task. Ruling 83: and how it prints what the
  * task took (the phrases themselves are the server suite's).
  */
 
@@ -116,7 +116,7 @@ const verdictRow = (container: HTMLElement, name: string) =>
     (row) => row.querySelector("strong")?.textContent === name,
   )!;
 
-describe("ruling 521: the completion packet", () => {
+describe("ruling 316: the completion packet", () => {
   it("says where each reviewer stands on the work under review, and shows a verdict on earlier work as stale", () => {
     // CANARY: draw `row.earlier` as the row's verdict and QA reads
     // "Approved" for a revision it never saw.
@@ -197,7 +197,7 @@ describe("ruling 521: the completion packet", () => {
   });
 });
 
-describe("ruling 668: the card is the task's result once it is accepted", () => {
+describe("ruling 103: the card is the task's result once it is accepted", () => {
   const labels = (container: HTMLElement) =>
     [...container.querySelectorAll(".cmp-k")].map((el) => el.textContent);
 
@@ -269,7 +269,7 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
   });
 
   it("a result file that is a page shows its desktop and phone pictures beside its row, and the reason when there is none", () => {
-    // Ruling 691. CANARY: remove the `f.page` block from the Files list and a
+    // Ruling 316. CANARY: remove the `f.page` block from the Files list and a
     // delivered page is a file row again, judged from its source.
     const at = "2026-10-07T12:00:09.412Z";
     renderPacket(
@@ -339,7 +339,7 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
     expect(screen.getByText("No reviewer is engaged on this task, and none has given a verdict.")).toBeTruthy();
   });
 
-  it("ruling 690: says how many kept sources the result rests on and lists them, and says so when a files result rests on none", () => {
+  it("ruling 82: says how many kept sources the result rests on and lists them, and says so when a files result rests on none", () => {
     // A fact the result states from outside is checked against what its runs
     // kept. CANARY: render the section only when the count is above zero and
     // a files result with no source says nothing about it.
@@ -381,7 +381,7 @@ describe("ruling 668: the card is the task's result once it is accepted", () => 
   });
 });
 
-describe("ruling 693: the card says what the task took", () => {
+describe("ruling 83: the card says what the task took", () => {
   const TOOK: TookCard = {
     facts: ["4 runs, 35m of agent time", "$2.50, 2 runs reported no cost", "sent back 1 time by reviewers"],
     notes: [
@@ -392,7 +392,7 @@ describe("ruling 693: the card says what the task took", () => {
   const labels = (container: HTMLElement) =>
     [...container.querySelectorAll(".cmp-k")].map((el) => el.textContent);
 
-  it("ruling 693: the card prints what the task took under its own label, and what the figure misses beneath it", () => {
+  it("ruling 83: the card prints what the task took under its own label, and what the figure misses beneath it", () => {
     // CANARY: (a) draw the label whenever `took` is set, though it holds no
     // fact and no note, and a card gains a heading over nothing; (b) drop the
     // notes' paragraphs and a figure with a run cut by a restart reads as

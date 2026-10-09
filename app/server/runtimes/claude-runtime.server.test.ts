@@ -24,7 +24,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
-import { claudeReportedTotals } from "./wire-format.server";
+import { claudeReportedTotals, claudeWire } from "./wire-format.server";
 import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
@@ -41,7 +41,7 @@ function fakeQuery(
   opts: {
     throwAfter?: number;
     rejectWith?: Error;
-    /** Ruling 611: the SDK's experimental `/usage` control request. */
+    /** Ruling 161(a): the SDK's experimental `/usage` control request. */
     usage?: (opts?: { skipBehaviors?: boolean }) => Promise<SDKControlGetUsageResponse>;
   } = {},
 ) {
@@ -69,7 +69,7 @@ function fakeQuery(
 
 /**
  * A run's skill plugin as `mountGrantedSkills` builds it beside the checkout
- * (ruling 180): the manifest the CLI reads plus one folder per granted skill.
+ * (ruling 185): the manifest the CLI reads plus one folder per granted skill.
  */
 function pluginDir(skills: string[]): string {
   const dir = temp.make("viberr-claude-plugin-");
@@ -456,7 +456,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured.strictMcpConfig).toBe(true);
   });
 
-  it("ruling 180: a run whose skills Viberr mounted as a plugin gets `plugins` + `plugin:`-qualified skill names, and NO settings source", async () => {
+  it("ruling 185: a run whose skills Viberr mounted as a plugin gets `plugins` + `plugin:`-qualified skill names, and NO settings source", async () => {
     // F36-9 (pass 36): the skills used to ride `<cwd>/.claude/skills` behind
     // `settingSources: ['project']`, which put Viberr files inside the tree the
     // project's own tools scan. They now ride a local plugin OUTSIDE cwd —
@@ -481,7 +481,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
     expect(captured.strictMcpConfig).toBe(true);
   });
 
-  it("ruling 180: a plugin that went missing before the start enables NO skill and corrects the persona", async () => {
+  it("ruling 185: a plugin that went missing before the start enables NO skill and corrects the persona", async () => {
     // The plugin is built beside the checkout moments before the spawn, and
     // that neighbourhood is writable by any live run's agent. A spec whose
     // plugin is gone must not hand the SDK a `--plugin-dir` that resolves to
@@ -644,7 +644,7 @@ describe("claude adapter (SDK, injected fake query)", () => {
       ...SPEC,
       allowedTools: ["mcp__viberr_agent", "mcp__everything__echo"],
     });
-    // Ruling 370: in name order, whatever order the caller listed them.
+    // Ruling 169: in name order, whatever order the caller listed them.
     expect(captured.allowedTools).toEqual([
       "mcp__everything__echo",
       "mcp__viberr_agent",
@@ -808,7 +808,7 @@ describe("claude idle hang guard (P13-RT-11)", () => {
 });
 
 /**
- * UC-16 — the Claude half of the disclosed MCP asymmetries, plus ruling 49.
+ * UC-16 — the Claude half of the disclosed MCP asymmetries, plus ruling 185.
  *
  * The capability matrix tells an admin that org MCP credentials travel on
  * CLAUDE runs only, and that the mid-run comment / ask-human channel exists here
@@ -817,9 +817,9 @@ describe("claude idle hang guard (P13-RT-11)", () => {
  * dropped) live in `codex-runtime.server.test.ts`, and the paired cross-backend
  * assertions in `runtime-registry.server.test.ts`.
  */
-describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
+describe("UC-16 MCP channel + strict MCP config (ruling 185)", () => {
   it("sets strictMcpConfig on EVERY run — kind, resume and skills change nothing", async () => {
-    // R18-3 / ruling 49: only Viberr-granted MCP servers reach a run. Without
+    // R18-3 / ruling 185: only Viberr-granted MCP servers reach a run. Without
     // this the SDK also picks up a repo `.mcp.json`, the user's MCP config and
     // plugin MCP — an ambient tool channel no capability grant authorized, on
     // the backend whose whole isolation story is "settingSources: []". The
@@ -863,7 +863,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     }
   });
 
-  it("acknowledges bypass exactly where it is asked for, and spawns the CLI itself on every run (ruling 174)", async () => {
+  it("acknowledges bypass exactly where it is asked for, and spawns the CLI itself on every run (ruling 142)", async () => {
     // The SDK: `allowDangerouslySkipPermissions` "must be set to `true` when
     // using `permissionMode: 'bypassPermissions'`", defaulting to false. The
     // pinned CLI does not enforce it; one that does would drop every run to
@@ -889,7 +889,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
 
   it("hands the SDK the granted servers verbatim — a gateway mount's run token and the in-process toolkit included", async () => {
     // The shapes a run's spec carries after `startRun` bound it to Viberr's
-    // MCP gateway (ruling 461): a credentialed server as a gateway mount with
+    // MCP gateway (ruling 191): a credentialed server as a gateway mount with
     // the RUN's token as its Authorization header (never the credential, which
     // stays in the gateway), an uncredentialed stdio server, and the
     // in-process `{ type: "sdk" }` toolkit that carries post_comment /
@@ -924,7 +924,7 @@ describe("UC-16 MCP channel + strict MCP config (ruling 49)", () => {
     expect(captured.allowedTools).toContain("mcp__viberr_agent");
   });
 
-  it("ruling 176: an HTTP server's per-tool deny policy and the denied names reach the SDK unchanged", async () => {
+  it("ruling 188: an HTTP server's per-tool deny policy and the denied names reach the SDK unchanged", async () => {
     // The resolver puts `always_deny` on the HTTP config and `startRun` adds the
     // `mcp__<server>__<tool>` names to the denylist; the adapter must forward
     // both as they are, beside the base denies.
@@ -1002,7 +1002,7 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe(steps[1]);
   });
 
-  it("names the tool as answered once its result lands, so the thinking after it does not read as the tool running (ruling 348)", async () => {
+  it("names the tool as answered once its result lands, so the thinking after it does not read as the tool running (ruling 166)", async () => {
     const phases = capturePhases([
       { type: "system", subtype: "init", session_id: "s", model: "claude-sonnet-4-5", tools: [], mcp_servers: [] },
       { type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }] } },
@@ -1045,12 +1045,12 @@ describe("claude adapter run phases (R21-4a / FR28)", () => {
 });
 
 /**
- * Ruling 130(a): refusals are classified from the structured envelope first
+ * Ruling 155(a): refusals are classified from the structured envelope first
  * and the terminal line carries the typed facts. Canaries: remove the
  * structured arms (`quotaByEvidence` / `authByEvidence`); drop the
  * `windowRejected` gate in `failureFacts`; require evidence for the quota arm.
  */
-describe("ruling 130(a): structured classification", () => {
+describe("ruling 155(a): structured classification", () => {
   const run = async (messages: unknown[], opts: { throwAfter?: number } = {}) => {
     const { q } = fakeQuery(messages, opts);
     const adapter = createClaudeAdapter({ queryFn: () => q });
@@ -1222,7 +1222,7 @@ describe("ruling 130(a): structured classification", () => {
   });
 
   it("a thrown stream error naming a 529 / overload classifies `overloaded` by prose, never quota or unknown", async () => {
-    // Ruling 659: a provider's "model is at capacity" is the same busy provider.
+    // Ruling 155(c): a provider's "model is at capacity" is the same busy provider.
     // CANARY: drop `at capacity` from the overload pattern and the last is `unknown`.
     for (const text of [
       "API Error: 529 Overloaded",
@@ -1254,12 +1254,12 @@ describe("ruling 130(a): structured classification", () => {
 });
 
 /**
- * Ruling 611: a run asks its own CLI for the account's plan windows (the data
+ * Ruling 161(a): a run asks its own CLI for the account's plan windows (the data
  * behind `/usage`), because a `rate_limit_event` gives a percentage only once
  * the provider warns. Live on 2026-10-01 the events read "five_hour · allowed ·
  * utilization not reported" while the account's week stood at 71%.
  */
-describe("ruling 611: a Claude run reads its account's plan windows", () => {
+describe("ruling 161(a): a Claude run reads its account's plan windows", () => {
   // The live answer's resets, floored to the second.
   const FIVE_HOUR_RESET = 1_790_833_199; // 2026-10-01T05:39:59Z
   const WEEK_RESET = 1_790_855_999; // 2026-10-01T11:59:59Z
@@ -1362,12 +1362,12 @@ describe("ruling 611: a Claude run reads its account's plan windows", () => {
 });
 
 /**
- * Ruling 174: the CLI leads its own process group, and a settled run leaves no
+ * Ruling 142: the CLI leads its own process group, and a settled run leaves no
  * live process. A fake `queryFn` never spawns anything, so these drive the SDK's
  * side of the contract themselves: they call `options.spawnClaudeCodeProcess`
  * the way the SDK does, with a stand-in child the adapter's seam accepts.
  */
-describe("claude CLI process lifecycle (ruling 174)", () => {
+describe("claude CLI process lifecycle (ruling 142)", () => {
   const CLI_PID = 4242;
 
   function standInChild() {
@@ -1436,11 +1436,11 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
   });
 
   /**
-   * Ruling 460: a run carrying an agent launch spawns the LAUNCHER, detached,
+   * Ruling 139: a run carrying an agent launch spawns the LAUNCHER, detached,
    * as the principal's uid — never the CLI as the server's user — with the
    * SDK's argv untouched and nothing of the server's own secrets in its env.
    */
-  describe("as the principal's own OS user (ruling 460)", () => {
+  describe("as the principal's own OS user (ruling 139)", () => {
     const LAUNCH = {
       uid: 20001,
       launcher: "/usr/local/libexec/viberr-launch",
@@ -1502,7 +1502,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
       expect(spawn?.env?.VIBERR_LAUNCH_UID).toBe("20001");
       expect(spawn?.env?.VIBERR_LAUNCH_HOME).toBe(LAUNCH.launchHome);
       expect(spawn?.env?.HOME).toBe(LAUNCH.home);
-      // The one credential a run may carry is its principal's own (ruling 127);
+      // The one credential a run may carry is its principal's own (ruling 137);
       // the server's secrets are in this process's env and must not follow.
       expect(spawn?.env?.ANTHROPIC_API_KEY).toBe("sk-ant-the-persons-own");
       expect(process.env.VIBERR_SECRET_ENCRYPTION_KEY).toBeTruthy();
@@ -1636,7 +1636,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
   });
 
   /**
-   * Ruling 687: Claude Code 2.1.292 keeps an SDK run open after its final
+   * Ruling 155: Claude Code 2.1.292 keeps an SDK run open after its final
    * result while a command the agent backgrounded still runs, and a dev server
    * never ends. The run used to sit past its result for the whole idle window
    * and then settle `run·error·idle_timeout`, holding its slot, and a run cut
@@ -1644,7 +1644,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
    * that still arrives after the result is read as before, and does not extend
    * the grace.
    */
-  describe("ruling 687: a CLI still open after the run's result", () => {
+  describe("ruling 155: a CLI still open after the run's result", () => {
     const INIT = { type: "system", subtype: "init", session_id: "s-683", model: "claude-opus-5-5", tools: ["Bash"], mcp_servers: [] };
     /** Well short of the default 15-minute idle window. */
     const A_MINUTE = 60_000;
@@ -1655,7 +1655,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
     type Step = readonly [pause: number, line: object];
     /** That line once a second for ten seconds. */
     const CHATTER: Step[] = Array.from({ length: 10 }, () => [1_000, RATE_LIMIT]);
-    /** Ruling 175: the turn cap's cut-off. */
+    /** Ruling 159: the turn cap's cut-off. */
     const MAX_TURNS = { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 2000, usage: {} };
     /** A failure only the result's own words classify: the abort's throw names none. */
     const QUOTA = { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 9, usage: {}, result: "429 too many requests" };
@@ -1734,7 +1734,7 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
         exit: () => exit,
         aborted: () => signal?.aborted,
         interrupts: () => interrupts,
-        /** Ruling 174: the stop reached the CLI's whole group. */
+        /** Ruling 142: the stop reached the CLI's whole group. */
         groupSignalled: () => h.signals.some(([pid, sig]) => pid === -CLI_PID && sig === "SIGTERM"),
       };
     }
@@ -1774,12 +1774,12 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
       expect(new Set(run.lines.map((l) => l.raw && JSON.parse(l.raw).type))).toEqual(
         new Set(["system", "result", "rate_limit_event"]),
       );
-      // Ruling 174: the settle sweep takes what the run left running.
+      // Ruling 142: the settle sweep takes what the run left running.
       expect(run.h.reaped).toEqual([{ runIds: ["run_683"], groupLeader: CLI_PID }]);
     });
 
     it.each([
-      ["a cut-off (ruling 175), and a CLI that throws on the abort", [[0, MAX_TURNS]], "throws", "error", ["run·error·max_turns"]],
+      ["a cut-off (ruling 159), and a CLI that throws on the abort", [[0, MAX_TURNS]], "throws", "error", ["run·error·max_turns"]],
       ["a failure only its words name, and a CLI that throws on the abort", [[0, QUOTA]], "throws", "error", ["run·error·quota"]],
       ["a success, that failure 2 s later, and a CLI that throws on the abort", [[0, SUCCESS], [2_000, QUOTA]], "throws", "error", ["run·error·quota"]],
       ["that failure, a success 2 s later, and a CLI that throws on the abort", [[0, QUOTA], [2_000, SUCCESS]], "throws", "finished", []],
@@ -1882,11 +1882,11 @@ describe("claude CLI process lifecycle (ruling 174)", () => {
 });
 
 /**
- * Ruling 175: the instance's spending cap reaches the SDK as `maxBudgetUsd`,
+ * Ruling 159: the instance's spending cap reaches the SDK as `maxBudgetUsd`,
  * and the SDK's `error_max_budget_usd` result is the `max_budget` cut-off —
  * a typed record carrying the cap and the spend, so the packet names both.
  */
-describe("claude spending cap (ruling 175)", () => {
+describe("claude spending cap (ruling 159)", () => {
   it("passes the cap as maxBudgetUsd when the run carries one, and names none otherwise", async () => {
     expect((await started({ ...SPEC, maxSpendUsd: 2.5 })).options.maxBudgetUsd).toBe(2.5);
     expect((await started(SPEC)).options).not.toHaveProperty("maxBudgetUsd");
@@ -1927,7 +1927,7 @@ describe("claude spending cap (ruling 175)", () => {
 });
 
 /**
- * Measured live (2026-09-11, the ruling-175 canary): the pinned SDK yields an
+ * Measured live (2026-09-11, the ruling-159 canary): the pinned SDK yields an
  * error result and THEN throws — the CLI exits non-zero after it, and
  * `readMessages` swaps that exit error for "Claude Code returned an error
  * result: <text>". The catch used to classify the throw, so a spending-cap
@@ -2001,14 +2001,14 @@ describe("a cut-off result followed by the SDK's throw stays a cut-off", () => {
 });
 
 /**
- * Ruling 101(e), amended by Option D PR 5: argument-level denies carry a
+ * Ruling 219(a), amended by Option D PR 5: argument-level denies carry a
  * model-visible reason and cover wrapped command shapes; the denylist remains
  * the fence. Measured live on 2026-09-11 (the PR's spike): the hook ran before
  * the rules, its reason came back as the tool result, and every wrapped push
  * shape was refused, where without it `git -C . push` and `sh -c 'git push'`
  * both landed on a local remote.
  */
-describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => {
+describe("the PreToolUse capability hook (ruling 219(a), Option D PR 5)", () => {
   /** A Developer whose commit-push grant is withheld, as the resolver denies it. */
   const PUSH_WITHHELD = resolveSpecialistDisallowedTools([
     { capabilityId: "execute-code-or-write-repo", mode: "direct" },
@@ -2028,7 +2028,7 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
   it("is installed only on a run with argument-level denies whose Bash is not denied outright", async () => {
     // Canary: drop the `bashPrefixes.length` guard and the plain run grows a hook.
     expect(hookOf((await started({ ...SPEC, disallowedTools: PUSH_WITHHELD })).options)).toBeDefined();
-    // Ruling 371: every run carries the PreCompact observer, so the absence
+    // Ruling 170: every run carries the PreCompact observer, so the absence
     // under test is the PreToolUse matcher's, not the whole hooks map's.
     expect((await started(SPEC)).options.hooks?.PreToolUse).toBeUndefined();
     // The operator's Bash is denied outright: nothing for a hook to add.
@@ -2076,10 +2076,10 @@ describe("the PreToolUse capability hook (ruling 101(e), Option D PR 5)", () => 
   });
 });
 
-describe("Claude Code's auto-memory (ruling 577)", () => {
+describe("Claude Code's auto-memory (ruling 141(b))", () => {
   it("is off on every run, over the base env and the run's own", async () => {
     // Live on 2026-09-28, 13 of 138 Claude runs spent turns writing notes
-    // into the account home's auto-memory, where ruling 564's hook refuses
+    // into the account home's auto-memory, where ruling 217(d)'s hook refuses
     // every write. CANARY: drop the switch from the run env and this goes red.
     for (const spec of [SPEC, { ...SPEC, kind: "operator" as const }]) {
       const { options } = await started(
@@ -2094,14 +2094,15 @@ describe("Claude Code's auto-memory (ruling 577)", () => {
 });
 
 /**
- * Ruling 564: a run that posts files keeps its file tools, confined by a
- * PreToolUse hook to the attachments folder and the temp directory. Live on
- * AWSC-4..7 every Claude run of the AWS calculator board read "No such tool
+ * Ruling 217(d): a run that posts files keeps its file tools, confined by a
+ * PreToolUse hook to the attachments folder and the run's temp directory. Live
+ * on AWSC-4..7 every Claude run of the AWS calculator board read "No such tool
  * available: Write" and wrote its deliverable through a shell heredoc. The
  * folder and checkout below do not exist: the hook decides on the path, so a
- * directory outside the temp root needs no disk.
+ * directory outside the temp root needs no disk. `SPEC` carries no `tmpDir`,
+ * a run whose own could not be made, so the server's shared one stands in.
  */
-describe("the file tools of a run that posts files (ruling 564)", () => {
+describe("the file tools of a run that posts files (ruling 217(d))", () => {
   /** A result-maker as the resolver denies it: evidence granted, repo-write withheld. */
   const WRITE_WITHHELD = resolveSpecialistDisallowedTools([
     { capabilityId: "attach-evidence-references", mode: "direct" },
@@ -2176,6 +2177,46 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
     expect(await call(hook, "Read", `${CHECKOUT}/mapping.md`)).toEqual({});
   });
 
+  it("on a task with no checkout also writes the run's working directory, and nothing wider (ruling 199)", async () => {
+    // The workspace contract of a run with no repository calls its working
+    // directory the task's scratch. Canary: leave `spec.scratchDir` out of the
+    // adapter's `fileWriteRoots` call and the first loop is refused.
+    const SCRATCH = "/srv/vib564/tasks/VIB-1/workspace";
+    const { options } = await started({ ...POSTS_FILES, workdir: SCRATCH, scratchDir: SCRATCH });
+    const hook = fileHookOf(options)!;
+    for (const [tool, filePath] of [
+      ["Write", `${SCRATCH}/draft.md`],
+      ["Edit", `${SCRATCH}/notes/sources.md`],
+      ["Write", `${DROP}/post.md`],
+    ] as const) {
+      expect(await call(hook, tool, filePath), filePath).toEqual({});
+    }
+    for (const filePath of [`${SCRATCH}/../task.md`, `${SCRATCH}-evil/draft.md`, SCRATCH]) {
+      const answer = await call(hook, "Write", filePath);
+      expect(answer.hookSpecificOutput?.permissionDecision, filePath).toBe("deny");
+    }
+    expect((await call(hook, "Write", `${SCRATCH}/../task.md`)).hookSpecificOutput?.permissionDecisionReason).toContain(
+      `where the files you post on the task go, and \`${SCRATCH}\` and \`${tmpdir()}\` for scratch.`,
+    );
+  });
+
+  it("writes the run's own temp directory, not the server's shared one (ruling 141(c))", async () => {
+    // Each run's `$TMPDIR` is `<root>/<runId>`, and the prompt tells it to keep
+    // temporary files there. The hook named the server's temp directory
+    // instead, so with `VIBERR_RUN_TMP_ROOT` outside it the run's own was
+    // refused, and by default every run could write the whole shared one.
+    // Canary: leave `spec.tmpDir` out of the adapter's `fileWriteRoots` call.
+    const RUN_TMP = "/srv/viberr-runs/run_1";
+    const { options } = await started({ ...POSTS_FILES, tmpDir: RUN_TMP });
+    const hook = fileHookOf(options)!;
+    expect(await call(hook, "Write", `${RUN_TMP}/scratch.mjs`)).toEqual({});
+    const shared = await call(hook, "Write", path.join(tmpdir(), "vib564", "scratch.mjs"));
+    expect(shared.hookSpecificOutput?.permissionDecision).toBe("deny");
+    expect(shared.hookSpecificOutput?.permissionDecisionReason).toContain(
+      `where the files you post on the task go, and \`${RUN_TMP}\` for scratch.`,
+    );
+  });
+
   it("changes nothing without a folder, with repo-write granted, or on an operator", async () => {
     // No attachments folder: the grants' deny stands and no hook is added.
     const noDrop = (await started({ ...SPEC, disallowedTools: WRITE_WITHHELD })).options;
@@ -2215,12 +2256,12 @@ describe("the file tools of a run that posts files (ruling 564)", () => {
 });
 
 /**
- * Rulings 370, 371 and 373: how each kind's prompt reaches the SDK, what the
+ * Rulings 169 and 170: how each kind's prompt reaches the SDK, what the
  * run is handed back after a compaction, and the byte-stability of every
  * list the adapter sends. Driven through the real adapter with a fake query,
  * so what is asserted is exactly what the SDK was handed.
  */
-describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)", () => {
+describe("prompt forms, compaction hooks and sorted lists (rulings 169/170)", () => {
   const RESULT = [{ type: "result", subtype: "success", is_error: false, num_turns: 1, usage: {} }];
   const PREFIX = { static: ["# Persona\n", "# Skills\n"], dynamic: ["\n# This task\n"] };
 
@@ -2330,7 +2371,7 @@ describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)"
     expect(phases).toContain(RUN_PHASE.compacting);
   });
 
-  it("ruling 527: a steered run hands the model what waits after each tool batch, logs it, and closes when the model stops", async () => {
+  it("ruling 251: a steered run hands the model what waits after each tool batch, logs it, and closes when the model stops", async () => {
     const text = "selin@viberr.dev sent this while you were working on this turn.\n\nThe KB is gone too.";
     const waiting = [{ text, count: 1 }];
     let closes = 0;
@@ -2411,11 +2452,11 @@ describe("prompt forms, compaction hooks and sorted lists (rulings 370/371/373)"
 });
 
 /**
- * Ruling 376: the completion compaction. `/compact` on the run's own session,
+ * Ruling 174: the completion compaction. `/compact` on the run's own session,
  * built from the run's spec so the request shares its prefix, folded as the
  * run's own compaction fact and cost increment, refusals as reasons.
  */
-describe("claude adapter compact() (ruling 376)", () => {
+describe("claude adapter compact() (ruling 174)", () => {
   const promptMessage = z.object({ message: z.object({ content: z.string() }) });
   /** The adapter hands the SDK an async iterable of one user message; this
    *  reads that one message's text back. */
@@ -2461,7 +2502,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(captured!.options.maxTurns).toBe(1);
     // The epilogue's own marker: the run's settle sweep reaps `r1`, not this.
     expect(captured!.options.env?.VIBERR_RUN_ID).toBe("r1:compaction");
-    // Ruling 577: the compaction builds its options as the run did.
+    // Ruling 141(b): the compaction builds its options as the run did.
     expect(captured!.options.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     // The same system prompt shape the run used: the preset with the static append.
     expect(captured!.options.systemPrompt).toMatchObject({ type: "preset", preset: "claude_code", append: "persona" });
@@ -2480,7 +2521,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(lines[1]!.facts.cache).toBeUndefined();
   });
 
-  it("ruling 701: stops its request when the run service stops waiting for it", async () => {
+  it("ruling 175: stops its request when the run service stops waiting for it", async () => {
     // The request has no timeout of its own. CANARY: build the request with
     // an abort controller nothing ever aborts, and a compaction given up at
     // its deadline keeps its CLI until the sweep finds it.
@@ -2506,7 +2547,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(requestAbort?.signal.aborted).toBe(true);
   });
 
-  it("ruling 536: records the compaction's own share when the resumed session reports its totals", async () => {
+  it("ruling 165(c): records the compaction's own share when the resumed session reports its totals", async () => {
     // The live controller turn of 2026-09-28: the run's result, then the
     // `/compact` on its resumed session, whose result carried the SESSION's
     // totals (the CLI restores a session's cost state on resume).
@@ -2546,7 +2587,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(request.display?.text).toBe("compaction request · $0.11 · 109k in (cached 106k), 4k out");
   });
 
-  it("ruling 542: a resumed run records its own share, and its spending cap starts from what the session had spent", async () => {
+  it("ruling 165(c): a resumed run records its own share, and its spending cap starts from what the session had spent", async () => {
     // The live controller of 2026-09-28: its second turn, resumed on the same
     // session, reported "$2.51 · in 2627.6k · out 35.2k" where its own four
     // calls read 188k tokens in, because the CLI restores a session's cost
@@ -2591,7 +2632,7 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(options.map((o) => o.maxBudgetUsd)).toEqual([5, 5 + 1.9779]);
   });
 
-  it("ruling 559: after a restart, a resumed run takes its share from the result its run log recalls", async () => {
+  it("ruling 165(c): after a restart, a resumed run takes its share from the result its run log recalls", async () => {
     // Live on the AWS calculator board, the first controller turn after a
     // deploy recorded $3.36, the whole session's spend, because the restart
     // had emptied the adapter's memory of the session. CANARY: drop
@@ -2599,11 +2640,11 @@ describe("claude adapter compact() (ruling 376)", () => {
     const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
       "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
     });
-    const before = claudeReportedTotals({
+    const before = claudeReportedTotals(claudeWire.parse({
       type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
       usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779,
       modelUsage: opus(2_889, 32_390, 2_328_378, 106_679, 1.9779),
-    })!;
+    }))!;
     const resumed = fakeQuery([
       { type: "system", subtype: "init", session_id: "sess-559", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
       { type: "result", subtype: "success", is_error: false, num_turns: 8, duration_ms: 29_000, usage: { input_tokens: 8, cache_read_input_tokens: 132_029, cache_creation_input_tokens: 56_088, output_tokens: 2_757 }, total_cost_usd: 2.5097, modelUsage: opus(4_383, 35_162, 2_460_407, 162_767, 2.5097) },
@@ -2633,16 +2674,16 @@ describe("claude adapter compact() (ruling 376)", () => {
     expect(options.map((o) => o.maxBudgetUsd)).toEqual([5 + 1.9779]);
   });
 
-  it("ruling 553: a resume the CLI will not restore keeps the cap at the run's own", async () => {
+  it("ruling 159: a resume the CLI will not restore keeps the cap at the run's own", async () => {
     // Every controller conversation shares one scratch folder, so a turn of
     // another conversation in between means the CLI restores nothing, and a
     // cap raised by the session's old spend was spend the run could overrun
     // by. CANARY: raise the cap whenever the session has totals, and this
     // reads 5 + 1.9779.
-    const before = claudeReportedTotals({
+    const before = claudeReportedTotals(claudeWire.parse({
       type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
       usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779, modelUsage: {},
-    })!;
+    }))!;
     const resumed = fakeQuery([
       { type: "system", subtype: "init", session_id: "sess-553", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
       { type: "result", subtype: "success", is_error: false, num_turns: 2, duration_ms: 9_000, usage: { input_tokens: 8, output_tokens: 100 }, total_cost_usd: 0.2 },
@@ -2688,7 +2729,7 @@ describe("claude adapter compact() (ruling 376)", () => {
 
 
 /**
- * Ruling 394 (F39-21) — the Claude half of "a completed turn is a completed
+ * Ruling 155(d) (F39-21) — the Claude half of "a completed turn is a completed
  * turn".
  *
  * The defect was demonstrated live on Codex (see that adapter's suite), but the
@@ -2697,9 +2738,9 @@ describe("claude adapter compact() (ruling 376)", () => {
  * the SDK had just told us succeeded was reported as a failure. `sawResult` is
  * the stronger evidence of the two: the result closes the run's own work, and a
  * turn a background command's completion wakes behind it (Claude Code 2.1.292)
- * is cut by the result grace (ruling 687).
+ * is cut by the result grace (ruling 155).
  */
-describe("ruling 394: the stream threw after the query's own result", () => {
+describe("ruling 155(d): the stream threw after the query's own result", () => {
   const MESSAGES = [
     { type: "system", subtype: "init", session_id: "sess-1", model: "claude-sonnet-4-5", tools: ["Bash"], mcp_servers: [] },
     { type: "assistant", message: { content: [{ type: "text", text: "@operator Done on branch `ax-2`." }] } },

@@ -3,7 +3,7 @@ import { GlyphSwap } from "~/ui/copy-glyph";
 import { Icon } from "~/ui/icon";
 
 /**
- * Profile → GitHub identity's personal OAuth card (ruling 700(e), the split of
+ * Profile → GitHub identity's personal OAuth card (ruling 13(b), the split of
  * `profile-page.tsx` along the task page's recipe): the scopes, and either the
  * connection with its Disconnect or the Connect. Hook-free: `ProfileGithub`
  * owns the connect, the confirm and the fetcher, and hands each in.
@@ -28,11 +28,11 @@ export function GithubOAuthIdentity({
   email: string;
   /** The disconnect is in flight. */
   busy: boolean;
-  /** Ruling 481(b): the Disconnect is asking first. */
+  /** Ruling 323: the Disconnect is asking first. */
   confirming: boolean;
   onConfirming: (confirming: boolean) => void;
   onDisconnect: () => void;
-  /** Ruling 368: the Connect is in flight, until the redirect. */
+  /** Ruling 286: the Connect is in flight, until the redirect. */
   connectBusy: boolean;
   onConnect: () => void;
 }) {
@@ -115,9 +115,9 @@ function GithubStatus({
       </span>
       <button
         type="button"
-        // Ruling 149: disconnecting an identity is destructive.
+        // Ruling 278: disconnecting an identity is destructive.
         className="btn ghost sm push danger"
-        // Ruling 481(b) (F40-49): asks first, like the agent account
+        // Ruling 323 (F40-49): asks first, like the agent account
         // Disconnect beside it.
         onClick={() => onConfirming(true)}
       >
@@ -145,7 +145,7 @@ function GithubStatus({
   ) : (
     <div className="cred-warn">
       <Icon name="alert" />
-      {/* Ruling 154 (pass 35, G35-3): an org admin can link the handle
+      {/* Ruling 29 (pass 35, G35-3): an org admin can link the handle
           on a deployment where GitHub sign-in IS configured too, so this
           card can no longer say the approvals go unmatched. The line
           above already reads "@handle · linked by an org admin". */}

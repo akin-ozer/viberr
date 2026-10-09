@@ -101,7 +101,7 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { type TookShipped, whatItTook } from "~/server/tasks/what-it-took.server";
-import { withLiveRun } from "~/shared/mapping/task.server";
+import { queuedRunWait, withLiveRun } from "~/shared/mapping/task.server";
 import {
   runOperator,
   type RunOperatorInput,
@@ -170,11 +170,11 @@ import { errorMessage, toError } from "~/shared/errors";
  *   comment · review-notes · resolve-packet · owner-take · owner-assign · owner-release ·
  *   transition · accept-completion · archive-task · restore-task ·
  *   run-interrupt · run-agent · release-agent · run-operator ·
- *   schedule-action · cancel-schedule · set-task-epic (ruling 503)
+ *   schedule-action · cancel-schedule · set-task-epic (ruling 272)
  */
 
 /**
- * Ruling 127: WHOSE accounts this task's agent runs would use, and what those
+ * Ruling 137: WHOSE accounts this task's agent runs would use, and what those
  * accounts can run. The page used to ship one deployment-wide "is this backend
  * configured" boolean; a run bills the task OWNER, so the honest answer is the
  * owner's own health, and the panels render copy that names them
@@ -224,7 +224,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const limit = clampTimelineLimit(
     new URL(request.url).searchParams.get("events"),
   );
-  // Ruling 457: the query reads only the window the page ships; the event
+  // Ruling 11: the query reads only the window the page ships; the event
   // count below keeps "Show older" exact.
   const detail = getTaskDetail(db, params.slug, params.key, {
     timelineLimit: timelineWindowSize(limit),
@@ -280,16 +280,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // raw execution history — NFR5. `logWindow` carries the cursor the console
   // pages backwards with via `/resources/run-log?before=`.
   //
-  // Ruling 457 (owner decision 2, 2026-09-24): and only where a person is
+  // Ruling 300 (owner decision 2, 2026-09-24): and only where a person is
   // arriving. A hard refresh ships the shown agent's window (display lines;
   // the envelopes load when the raw view opens); a revalidation or a client
   // navigation (`.data`) ships no console line at all, and the console fills
   // the thread it shows with one small request. This payload used to carry
   // every agent's window, lines and envelopes, on every revalidation.
   //
-  // Ruling 693: the task's run rows are read once here, for the projection
+  // Ruling 83: the task's run rows are read once here, for the projection
   // below and for what the task took, so the figure costs this loader no
-  // statement of its own (ruling 457's SQL budget has no room for one).
+  // statement of its own (ruling 11's SQL budget has no room for one).
   const runRows = listRunsForTaskRows(db, params.slug, params.key);
   const runtime = listRunsForTask(db, params.slug, params.key, {
     console: isDocumentNavigation(request) ? "shown" : "none",
@@ -339,7 +339,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const schedules = (taskFile?.parsed.frontmatter.schedules ?? []).filter(
     (s) => s.status === "pending",
   );
-  // Ruling 241: reviewer questions a dependency hold refused, waiting for the
+  // Ruling 66: reviewer questions a dependency hold refused, waiting for the
   // release. Read from the FILE beside the recommendations and for the same
   // reason (no projection column). Surfaced because a promise a person made and
   // cannot see is the defect this pass kept finding: the card said the question
@@ -352,11 +352,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   }));
 
   /**
-   * Ruling 319: this packet's `cause` says the failure that raised it belongs
+   * Ruling 65: this packet's `cause` says the failure that raised it belongs
    * to an ACCOUNT, not to this task — so confirming here also answers every
    * sibling packet the same failure raised. A decision that reaches four other
    * tasks and says nothing about it on the card is precisely the un-disclosed
-   * one-way write ruling 20 exists to stop; the disclosure is computed here,
+   * one-way write ruling 97 exists to stop; the disclosure is computed here,
    * beside the acceptance disclosure, and rendered above the options.
    *
    * Guarded: a search that fails must not 500 the task page over a sentence.
@@ -373,7 +373,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         packetCause,
       );
     } catch (error) {
-      logger.warn("ruling 319 fan-out disclosure failed", {
+      logger.warn("ruling 65 fan-out disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
         error: toError(error),
@@ -388,10 +388,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // R17-2: a verified no-change completion (empty branch, no PR) accepts to Done
   // without a merge — the confirm says so instead of implying delivered work.
   const noChanges = taskFile?.parsed.frontmatter.noChanges === true;
-  // Ruling 550: a task delivered as files says so in the confirm, rather than
+  // Ruling 316: a task delivered as files says so in the confirm, rather than
   // a merge it never had and a GitHub re-check that would call it unchanged.
   // Sent only when it applies: every other task's payload stays as it was
-  // (ruling 457's console budget measures it).
+  // (ruling 11's console budget measures it).
   const deliveredFm = taskFile?.parsed.frontmatter;
   const filesDelivery =
     deliveredFm && deliveredAsFiles(deliveredFm) && deliveredFm.deliveredAt
@@ -401,7 +401,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const defaultBranch = project?.defaultBranch || "main";
 
   /**
-   * Ruling 324: a `create_task` option creates a real task on the person's
+   * Ruling 67: a `create_task` option creates a real task on the person's
    * confirm, and the card says what it will create without saying what already
    * looks like it. Twice on the shopify-clone board a confirm was one click
    * from a second owner for work a live task already held.
@@ -424,7 +424,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
         }));
       }
     } catch (error) {
-      logger.warn("ruling 324 similar-task disclosure failed", {
+      logger.warn("ruling 67 similar-task disclosure failed", {
         projectSlug: params.slug,
         taskKey: params.key,
         error: toError(error),
@@ -432,14 +432,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }
   }
 
-  // Ruling 475 (F40-55 (c)): the other open PRs this task's merge would likely
+  // Ruling 244 (F40-55 (c)): the other open PRs this task's merge would likely
   // put in conflict, for the accept dialog. Guarded like the disclosures
   // above: a read that fails must not 500 the task page over a sentence.
   let mergeCollisions: PrOverlap[] = [];
   try {
     mergeCollisions = taskMergeCollisions(db, params.slug, detail);
   } catch (error) {
-    logger.warn("ruling 475 merge-collision disclosure failed", {
+    logger.warn("ruling 244 merge-collision disclosure failed", {
       projectSlug: params.slug,
       taskKey: params.key,
       error: toError(error),
@@ -463,11 +463,11 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // total to say "showing 100 of N" instead of hiding the older evidence silently.
   const attachmentsTotal = countTaskAttachments(params.slug, params.key);
 
-  // Ruling 690: the sources the task keeps, apart from its files (a kept page
+  // Ruling 317: the sources the task keeps, apart from its files (a kept page
   // shows whatever the agent read). One read of their index whatever the
   // count, and none on a task that keeps no sources; sent only for a task
   // that keeps some, so every other task's payload stays as it was (ruling
-  // 457). The serving route re-checks membership.
+  // 11). The serving route re-checks membership.
   const keptSources = readTaskSources(params.slug, params.key);
   const sourcesShown =
     keptSources.sources.length > 0
@@ -489,12 +489,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   });
   const ruleReviewerIds = new Set(standing.requiredReviewers.map((r) => r.profileId));
 
-  // Ruling 521: the completion packet, with each reviewer's verdict on the
+  // Ruling 103: the completion packet, with each reviewer's verdict on the
   // work under review and the change's size, built from what this loader has
   // already read (the task file, the project's rules, the reviewers' and the
   // deployed agents' names). A screenshot that has left the store is
   // counted, not drawn, checked by name rather than against the list above,
-  // which stops at the newest 100. Ruling 668: an accepted task keeps it as
+  // which stops at the newest 100. Ruling 103: an accepted task keeps it as
   // its result, in the archive too.
   const accepted = detail.stage === detail.stages[detail.stages.length - 1]?.id;
   const completion =
@@ -511,15 +511,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
             );
           },
           ruleReviewers: standing.requiredReviewers.map((r) => r.profileId),
-          // Ruling 690: what the work under review rests on, from the read above.
+          // Ruling 82: what the work under review rests on, from the read above.
           sources: sourcesRestedOn(keptSources, taskFile.parsed.frontmatter),
         })
       : null;
 
-  // Ruling 693: what the task took, as the card prints it: its facts and what
+  // Ruling 83: what the task took, as the card prints it: its facts and what
   // they miss, from the run rows and the task file this loader has already
   // read. It rides the card (no completion view, no figure), and is sent
-  // only then, so no other task's payload grows (ruling 457).
+  // only then, so no other task's payload grows (ruling 11).
   // Guarded like the disclosures above: a read of what a task cost must not
   // 500 the task page.
   const tookShipped: TookShipped = {};
@@ -534,7 +534,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       });
       tookShipped.whatItTook = { facts: took.facts, notes: took.notes };
     } catch (error) {
-      logger.warn("ruling 693 what-it-took read failed", {
+      logger.warn("ruling 83 what-it-took read failed", {
         projectSlug: params.slug,
         taskKey: params.key,
         error: toError(error),
@@ -542,23 +542,26 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }
   }
 
+  // Ruling 44: the hero and the rail read the run row, like the board card.
+  const liveRun = liveRunStateByTask(db, params.slug).get(params.key) ?? null;
+  const task = { ...withLiveRun(detail, liveRun), timeline: slice.events };
+  // Ruling 166: why a parked run waits, from the rows read above, sent only
+  // while one is parked so no other task's payload grows (ruling 11).
+  if (liveRun === "queued") task.liveRunWait = queuedRunWait(runRows);
+
   return {
-    // Ruling 349: the hero and the rail read the run row, like the board card.
-    task: {
-      ...withLiveRun(detail, liveRunStateByTask(db, params.slug).get(params.key) ?? null),
-      timeline: slice.events,
-    },
+    task,
     // The project's existing label vocabulary, for the Details panel's label
     // autocomplete — same source the board's New-task modal draws from.
     labelSuggestions: listProjectLabels(db, params.slug),
-    // Ruling 503: the project's epics as chips (one statement), for the
+    // Ruling 325: the project's epics as chips (one statement), for the
     // hero's Epic field and the Details panel's Epic menu.
     epics: listEpicChips(db, params.slug),
     attachments,
     attachmentsTotal,
-    /** Ruling 690: the task's kept sources, when it keeps any. */
+    /** Ruling 317: the task's kept sources, when it keeps any. */
     ...sourcesShown,
-    /** Ruling 521: the operator's completion packet as the page shows it. */
+    /** Ruling 103: the operator's completion packet as the page shows it. */
     completion,
     ...tookShipped,
     // Who saved each attachment and when, from the events that claim names.
@@ -566,9 +569,9 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     recommendations,
     schedules,
     queuedQuestions,
-    /** Ruling 319: what else this packet's confirm answers, or null. */
+    /** Ruling 65: what else this packet's confirm answers, or null. */
     packetAlsoAnswers,
-    /** Ruling 324: per create_task option, the tasks that already look like it. */
+    /** Ruling 67: per create_task option, the tasks that already look like it. */
     packetCreateTaskEchoes,
     archived,
     // P14-LV-06: the review queue counted this viewer under "Waiting on your
@@ -582,16 +585,16 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     timelineNextLimit: slice.nextLimit,
     tlDefault,
     runtime,
-    // Ruling 535's `postsFiles` is the operator's delivery signal; the page
-    // renders nothing from it, so it stays off the wire (ruling 457).
+    // Ruling 128's `postsFiles` is the operator's delivery signal; the page
+    // renders nothing from it, so it stays off the wire (ruling 11).
     deployedSpecialists: deployedSpecialists.map(({ capabilities: { postsFiles: _operatorOnly, ...shown }, ...agent }) => {
       const view: typeof agent & { capabilities: typeof shown; requiredReviewer?: true } = {
         ...agent,
         capabilities: shown,
       };
-      // Ruling 556: a project rule's reviewer is engaged to review, never to
+      // Ruling 89: a project rule's reviewer is engaged to review, never to
       // deliver, so the run control must not promise it the branch. Only
-      // where true, so no other agent's bytes grow (ruling 457).
+      // where true, so no other agent's bytes grow (ruling 11).
       if (ruleReviewerIds.has(agent.id)) view.requiredReviewer = true;
       return view;
     }),
@@ -603,7 +606,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // completion — `gate()` keeps that capability at `recommend` unless the
     // grant is explicitly `direct`. The caption used to read autonomy only.
     operatorAcceptsDirectly: operatorAcceptsDirectly({}, params.slug),
-    // Ruling 127: every agent run on this task bills its OWNER's accounts, so
+    // Ruling 137: every agent run on this task bills its OWNER's accounts, so
     // "which backends can run here" is a question about the owner — not about
     // this deployment and not about the viewer. `null` means the task has no
     // owner at all, which is its own refusal (nobody to bill), and the panels
@@ -628,7 +631,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // last compare, so the accept dialog can say which of its two cases this
     // click is. Null: never compared.
     baseBehindBy: createReconcileBehindByLookup(db)(detail.filePath),
-    /** Ruling 475: the open PRs sharing a changed path with this one. */
+    /** Ruling 244: the open PRs sharing a changed path with this one. */
     mergeCollisions,
     // F19-22: the line above is the last pass that CHANGED something — DG-3
     // deliberately withholds the provenance row when a poller tick finds
@@ -657,7 +660,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 /**
  * The toast a comment's result earns, for the `comment` intent and ruling
- * 484's `review-notes` (whose `posted` names the notes). Name the agent when one
+ * 246's `review-notes` (whose `posted` names the notes). Name the agent when one
  * is picking the comment up; note when a mention was recorded but the run was
  * not triggered (RBAC); an @operator mention that was REFUSED (packet open /
  * task Done) must NOT read as "picking it up" (the run never started): point
@@ -750,7 +753,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // and when an agent is @mentioned (and the commenter is admin|
         // maintainer) resumes THAT agent's session — the agent's reply arrives
         // later as a new agent-authored comment via SSE revalidation.
-        // Ruling 573: the files the comment carries, as the task's attachments.
+        // Ruling 76: the files the comment carries, as the task's attachments.
         const result = await commentToAgent(
           db,
           { projectSlug, taskKey, text: String(formData.get("text") ?? ""), files: await formFiles(formData) },
@@ -769,7 +772,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "review-notes": {
-        // Ruling 484 (F40-54): the Changes panel's line notes, posted as ONE
+        // Ruling 246 (F40-54): the Changes panel's line notes, posted as ONE
         // comment addressed `@<deliverer>` that quotes each note's file:line,
         // through the comment door, so the deliverer resumes on it exactly as
         // it would for the same words typed in the composer. Bound to the
@@ -806,7 +809,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, intent, toast: changed ? "Goal updated" : "Goal unchanged" };
       }
       case "set-task-metadata": {
-        // Ruling 501: the Details panel edits one property at a time, so an
+        // Ruling 49: the Details panel edits one property at a time, so an
         // axis is written only when the form carries its field; an absent
         // field leaves that axis as it stands (and a concurrent edit to it
         // unclobbered). A present field replaces its axis: an empty labels
@@ -841,7 +844,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "set-task-epic": {
-        // Ruling 503: the Details panel's Epic menu. An empty field takes the
+        // Ruling 272: the Details panel's Epic menu. An empty field takes the
         // task out of its epic; `setTasksEpic` checks the grant
         // (`edit-task-meta`), the epic and the task before it writes.
         const epicId = String(formData.get("epic") ?? "").trim();
@@ -853,7 +856,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return { ok: true as const, intent, toast: result.message };
       }
       case "set-task-dependencies": {
-        // Ruling 131: the Details panel's own form. The FULL list is submitted
+        // Ruling 55: the Details panel's own form. The FULL list is submitted
         // (comma- or newline-separated); an empty field clears the wait, which
         // for a person IS the release. Validation refuses by name before any
         // write, and the refusal surfaces on this form, never swallowed by the
@@ -875,18 +878,18 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "resolve-packet": {
         const raw = Number(formData.get("option"));
         const optionIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
-        // Ruling 315: NOT a slice. This field holds a person's own words on the
+        // Ruling 63: NOT a slice. This field holds a person's own words on the
         // highest-stakes card in the product, and the route used to cut it to
         // 2,000 characters before the request reached the server — no
         // `maxLength`, no counter, no marker, no error, and the tail exists nowhere
         // afterwards. The server refuses over-long input instead, exactly as
-        // the `custom` field beside it already does, and as ruling 288 does for
+        // the `custom` field beside it already does, and as ruling 131 does for
         // a goal and a title ("a contract Viberr will not write half of").
         const note = String(formData.get("note") ?? "");
         // Questionnaire packets (owner request 2026-08-20): the human's own
         // directive instead of a canned option. Non-empty ⇒ the server ignores
         // the option index and resolves through the synthetic `custom` kind.
-        // Ruling 315: same reason — the server refuses this one already, so the
+        // Ruling 63: same reason — the server refuses this one already, so the
         // route must stop quietly cutting it to the exact length that would slip
         // past the refusal.
         const custom = String(formData.get("custom") ?? "");
@@ -902,7 +905,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           projectSlug,
           taskKey,
           optionIndex,
-          // Ruling 88: an `accept_completion` option runs the full acceptance
+          // Ruling 97: an `accept_completion` option runs the full acceptance
           // contract — Done plus the real, irreversible merge — from a button
           // labelled "Confirm decision", so it is held to the ceremony like
           // every other acceptance door. The key rides on EVERY resolution
@@ -927,7 +930,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         const toast =
           option.kind === "accept_completion"
             ? completionToast("accepted", taskKey, terminalStageNameFor(getProject(db, projectSlug)))
-            // Ruling 164 (pass 35, F35-14): the two kinds that PERFORM what
+            // Ruling 131 (pass 35, F35-14): the two kinds that PERFORM what
             // their title promises say what happened, in the same words the
             // button and the picker use. A generic "Decision recorded" was the
             // whole defect: the record read like an act.
@@ -955,7 +958,7 @@ export async function action({ request, params }: Route.ActionArgs) {
                     : "Decision recorded, but the retry could NOT start. The reason is on the timeline"
                   : option.kind === "edit_goal"
                     ? "Decision recorded · type the new goal; the packet clears when it lands"
-                    : // Ruling 672: both answers to the repository question
+                    : // Ruling 224: both answers to the repository question
                       // act on the board, so each says what it did there.
                       option.kind === "connect_repository"
                       ? // What happens next (the controller, the operators) is
@@ -972,7 +975,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
         // F17-L3: a scoping (edit_goal) decision drops the human into the goal
         // editor — prefill it with the CHOSEN option's draft so they don't
-        // have to retype the scope they just picked. Ruling 138: the ONE
+        // have to retype the scope they just picked. Ruling 63: the ONE
         // composition (`goalDraftForOption`) is shared with the reload path,
         // so the editor opens the same text either way. Every other kind
         // ships NO `goalDraft` key at all, which is what tells the editor
@@ -986,7 +989,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // admins, records the ask on the timeline, and refuses (with a pointer)
         // if the caller could actually resolve it themselves. The button posts
         // the intent alone: there is no note to read, so none can be cut
-        // (ruling 315).
+        // (ruling 63).
         const { notified, to } = await requestPacketMaintainerDecision(
           db,
           { projectSlug, taskKey },
@@ -996,7 +999,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           ok: true as const,
           intent,
           toast:
-            // Ruling 672: the repository question is a project admin's, and
+            // Ruling 65: the repository question is a project admin's, and
             // the people told of it are not all admins, so no count is given.
             to === "admin"
               ? "Sent · a project admin will decide"
@@ -1041,7 +1044,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             taskKey,
             toStageId: terminal,
             manual: true,
-            // Ruling 88: the ceremony's echo of what it displayed. Absent ⇒
+            // Ruling 97: the ceremony's echo of what it displayed. Absent ⇒
             // `null` ⇒ the server refuses this accept.
             ack: parseAcceptanceDisclosure(formData),
           },
@@ -1055,7 +1058,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "refresh-and-review": {
-        // Ruling 449 (O39-c): the accept dialog's safe answer to a reviewed
+        // Ruling 97 (O39-c): the accept dialog's safe answer to a reviewed
         // head that is behind the base. The person's refresh, then the
         // re-review of the head that will merge. A refusal of the step
         // itself (a conflict, nothing to re-run) is the toast.
@@ -1078,7 +1081,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           ? {
               ok: true as const,
               intent,
-              // Ruling 134(a): one toast for every human delivery door.
+              // Ruling 229: one toast for every human delivery door.
               toast: deliveryToast(outcome),
             }
           : data(
@@ -1090,7 +1093,7 @@ export async function action({ request, params }: Route.ActionArgs) {
             );
       }
       case "run-gates": {
-        // Ruling 482: run the project's gates on the revision under review
+        // Ruling 104: run the project's gates on the revision under review
         // again. Same tier as a manual delivery (maintainer+ or the owner),
         // enforced and audited inside runProjectGatesByHand; queued, never run
         // on this request.
@@ -1128,7 +1131,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         };
       }
       case "remove-attachment": {
-        // Ruling 582: admin-only (`remove-from-record`), enforced in the writer.
+        // Ruling 80: admin-only (`remove-from-record`), enforced in the writer.
         const { name } = await removeTaskAttachment(
           db,
           {
@@ -1156,7 +1159,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "force-accept": {
         // Admin-only override of the review gate (DG-2): accept a task wedged on
         // an un-recordable required reviewer or a stale blocked packet. Audited.
-        // Ruling 88: force overrides the GATES, never the disclosure — its
+        // Ruling 97: force overrides the GATES, never the disclosure — its
         // ceremony states more, not less, so it echoes on the same terms.
         await forceAcceptCompletion(
           db,
@@ -1220,7 +1223,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // `manual` lets the move cross any stage, not just a governed boundary;
         // the same server rules still post the **Transition:** timeline comment.
         const toStageId = String(formData.get("to") ?? "");
-        // F19-37 + ruling 88: a manual move into the LAST stage IS an
+        // F19-37 + ruling 97: a manual move into the LAST stage IS an
         // acceptance (`transitionStage` routes it to `acceptCompletion` — the
         // real, irreversible merge), so this door demands the ceremony's echo
         // exactly like the Accept button does. Every other move is an ordinary
@@ -1234,7 +1237,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           toStageId,
           manual: true,
         };
-        // Ruling 381: why the person moved it. Required going BACKWARD, which
+        // Ruling 47: why the person moved it. Required going BACKWARD, which
         // the server decides (it is the side that knows the stage order).
         const moveReason = String(formData.get("reason") ?? "").trim();
         if (moveReason) move.reason = moveReason;
@@ -1309,9 +1312,9 @@ export async function action({ request, params }: Route.ActionArgs) {
         // R21-9's law, applied to the dispatch prompt: a directive that reaches
         // an agent off the record is invisible to supervision — record it as the
         // human's own timeline comment addressed to the agent. BEFORE the start
-        // (ruling 375): ruling 203's redelivery window is "a human comment
-        // addressed to this agent, posted after this run started", and the
-        // record used to be written after the start, so every prompted manual
+        // (ruling 69): the redelivery window is every human comment addressed
+        // to this agent since this run started, and the record used to be
+        // written after the start, so every prompted manual
         // dispatch ran twice — the run, then the same words redelivered as an
         // @mention the moment it finished (live, 2026-09-21: two identical
         // replies on BNB-26 and on BNB-28, one session each). Recorded first,
@@ -1338,9 +1341,9 @@ export async function action({ request, params }: Route.ActionArgs) {
         try {
           result = await startAgentRun(db, dispatch, actor);
         } catch (error) {
-          // Ruling 452: refused because this agent is already running, the
+          // Ruling 152: refused because this agent is already running, the
           // directive recorded above sits inside that run's window, and ruling
-          // 203 delivers it when the run finishes. The note and the toast say
+          // 69 delivers it when the run finishes. The note and the toast say
           // so; "No run started" beside a 409 telling the person to wait and
           // start another was how the same words got delivered twice.
           if (prompt && isAgentBusy(error) && error.busyProfileId === profileId) {
@@ -1357,7 +1360,7 @@ export async function action({ request, params }: Route.ActionArgs) {
                 "Your prompt is on the timeline and is delivered to it when that run finishes.",
             };
           }
-          // Ruling 152(c) (pass 35, G35-4): a hold is not a refusal. The
+          // Ruling 151 (pass 35, G35-4): a hold is not a refusal. The
           // dispatcher already scheduled the retry for the reopen instant and
           // put the prompt on that schedule, so the person reads the hold as
           // the outcome; the recorded directive predates that later run too.
@@ -1378,7 +1381,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           }
           throw error;
         }
-        // Ruling 263 (F37-93): the toast said "run started" for a run refused
+        // Ruling 152 (F37-93): the toast said "run started" for a run refused
         // before any process existed, and for one parked behind the cap. The
         // agent-logs half of that sentence is a promise of a stream that a
         // refused run never produces.
@@ -1419,7 +1422,7 @@ export async function action({ request, params }: Route.ActionArgs) {
       case "apply-recommendation": {
         // A human accepts an operator recommendation card — executes the
         // recommended assign/reviewer/transition through the governed mutation.
-        // Ruling 88 (F19-3, live-proven: one Apply click merged an unreviewed
+        // Ruling 97 (F19-3, live-proven: one Apply click merged an unreviewed
         // head into main): a card that REACHES acceptance — `accept_completion`,
         // or a transition onto the terminal stage — demands the ceremony's echo.
         // The key rides on every apply; `applyRecommendation` consults it only
@@ -1438,7 +1441,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         return {
           ok: true as const,
           intent,
-          // Ruling 134(a): an applied delivery card says what moved.
+          // Ruling 229: an applied delivery card says what moved.
           toast: result.delivery
             ? `Applied · ${deliveryToast(result.delivery)}`
             : `Applied · ${result.label}`,
@@ -1474,7 +1477,7 @@ export async function action({ request, params }: Route.ActionArgs) {
         // (R21-9) and the schedule form (R22) both stopped sending them, so the
         // route no longer reads them either: a crafted POST could otherwise run
         // a Codex-configured operator on Claude (autonomy is clamped by ruling
-        // 67, but backend was not). The run always follows the live profile.
+        // 108, but backend was not). The run always follows the live profile.
         const operatorInput: RunOperatorInput = {
           projectSlug,
           taskKey,
@@ -1522,7 +1525,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           intent,
           // A7 (pass 23), BUG-2's sibling on the manual "Run operator" control:
           // runOperator REFUSES a manual trigger with `refused: "open-packet"`
-          // (an open decision blocks it) or `"closed"` (ruling 177: an archived
+          // (an open decision blocks it) or `"closed"` (ruling 52: an archived
           // task or one at its terminal stage refuses every trigger, with the
           // sentence in `refusalReason`; the third value, `"blocked-by"`, never
           // meets a manual trigger), and this toast branched on `queued` alone —
@@ -1665,26 +1668,26 @@ export default function TaskDetailRoute({
       attachments={loaderData.attachments}
       attachmentsTotal={loaderData.attachmentsTotal}
       attachmentProducers={loaderData.attachmentProducers}
-      // Ruling 521: the completion packet the acceptance decision shows.
+      // Ruling 103: the completion packet the acceptance decision shows.
       completion={loaderData.completion}
-      // Ruling 693: what the task took, on the same card.
+      // Ruling 83: what the task took, on the same card.
       whatItTook={loaderData.whatItTook ?? null}
       attachmentsBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/attachments`}
-      // Ruling 690: the task's kept sources, when it keeps any, and the
+      // Ruling 317: the task's kept sources, when it keeps any, and the
       // route that serves one by its id.
       sources={loaderData.sources}
       sourcesTotal={loaderData.sourcesTotal}
       sourcesBase={`/projects/${params.slug}/tasks/${loaderData.task.key}/sources`}
-      // Ruling 484: the Changes panel's read, beside the page it posts notes to.
+      // Ruling 246: the Changes panel's read, beside the page it posts notes to.
       changesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/changes`}
-      // Ruling 548: the Blocked by picker's list of the project's tasks.
+      // Ruling 59: the Blocked by picker's list of the project's tasks.
       dependencyCandidatesUrl={`/projects/${params.slug}/tasks/${loaderData.task.key}/dependency-candidates`}
       runtime={loaderData.runtime}
       deployedSpecialists={loaderData.deployedSpecialists}
       operatorBackend={loaderData.operatorBackend}
       operatorAutonomy={loaderData.operatorAutonomy}
       operatorAcceptsDirectly={loaderData.operatorAcceptsDirectly}
-      // Ruling 127: the run picker's "would fail fast" gate answers for the
+      // Ruling 137: the run picker's "would fail fast" gate answers for the
       // task OWNER (whose accounts a run bills), and an unowned task can run
       // nothing at all. The panels render the refusal that names the person,
       // so the whole principal travels, not a pair of booleans that could only
@@ -1702,14 +1705,14 @@ export default function TaskDetailRoute({
       taskLinks={loaderData.taskLinks}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
-      // Ruling 320: the loader has read these since ruling 241 and the panel
-      // has rendered them since ruling 241, and the two were never joined —
+      // Ruling 10: the loader read these and the panel rendered them
+      // (ruling 66), but the two were never joined —
       // the prop defaults to `[]` at both ends, so the row simply never
       // appeared. See the wire test in task-detail-route.server.test.ts.
       queuedQuestions={loaderData.queuedQuestions}
-      // Ruling 319: what else this packet's confirm answers.
+      // Ruling 65: what else this packet's confirm answers.
       packetAlsoAnswers={loaderData.packetAlsoAnswers}
-      // Ruling 324: what already looks like what a create_task option would make.
+      // Ruling 67: what already looks like what a create_task option would make.
       packetCreateTaskEchoes={loaderData.packetCreateTaskEchoes}
       archived={loaderData.archived}
       acceptance={loaderData.acceptance}
@@ -1756,5 +1759,5 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.task");

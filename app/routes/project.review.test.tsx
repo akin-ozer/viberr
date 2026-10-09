@@ -8,7 +8,7 @@ import ReviewView from "./project.review";
 /**
  * Interface review 2026-09-24 (writ-3): the queue's "waiting on you" is the
  * board's own answer. Both loaders call `waitingOnViewer` (decisions.server.ts;
- * ruling 457 took the board's columns out of the workspace layout), and the
+ * ruling 11 took the board's columns out of the workspace layout), and the
  * review loader ships the keys as `waitingOnMe`, so the queue and the board
  * cannot disagree about the same task.
  */

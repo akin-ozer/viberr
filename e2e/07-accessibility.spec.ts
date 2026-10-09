@@ -30,7 +30,7 @@ const THEME_COOKIE = "viberr_theme";
 
 const SURFACES: { name: string; path: string; ready: string }[] = [
   { name: "board", path: "/projects/viberr-core/board", ready: "section.column" },
-  // Ruling 503: the Epics page, as a new project sees it (the seed holds no
+  // Ruling 325: the Epics page, as a new project sees it (the seed holds no
   // epic). `09-epics.spec.ts` audits an epic's page and its dialogs once it
   // has made one.
   { name: "epics", path: "/projects/viberr-core/epics", ready: ".empty-hero" },
@@ -67,7 +67,7 @@ const SURFACES: { name: string; path: string; ready: string }[] = [
     ready: ".policy-cols",
   },
   { name: "org settings", path: "/org/settings", ready: ".set-layout" },
-  // Ruling 653: the board file's drop and the Export list.
+  // Ruling 32: the board file's drop and the Export list.
   { name: "org settings · import & export", path: "/org/settings?tab=boards", ready: ".board-drop" },
   // Page-as-popup routes: both render their whole page inside a modal
   // <dialog>, so they are also the only two places the sweep sees the
@@ -135,7 +135,7 @@ const DIALOGS: {
     },
   },
   {
-    // Ruling 121 (review G2). The dock is the app's newest role="dialog" — a
+    // Ruling 318 (review G2). The dock is the app's newest role="dialog" — a
     // composer, a threads list, four icon buttons, a scope pill, a status row
     // and 110 lines of new CSS — and only its CLOSED trigger rode along on the
     // page sweep above. It is NON-modal, so it is queried by its screen label
@@ -292,7 +292,7 @@ test.describe("signed out", () => {
       await page.reload();
       await expect(page.locator('input[name="email"]')).toBeVisible();
       // The login card plays an entry animation, and beside it the pitch
-      // staggers in over about .6s (ruling 459); axe samples computed colors,
+      // staggers in over about .6s (ruling 283); axe samples computed colors,
       // so let every animation on the page settle instead of auditing a
       // mid-fade frame.
       await settle(page, ".login-wrap");

@@ -58,7 +58,7 @@ export interface TaskDetail extends TaskSummary {
   stages: { id: string; name: string; color: string }[];
   /** U36-10 (pass 36): the project's workflow edges, so the run-agent
    *  control resolves stage eligibility with the same predicate the dispatch
-   *  gate applies (ruling 133) before the click. */
+   *  gate applies (ruling 181) before the click. */
   workflow: { from: string; to: string }[];
   /** Gap-10: ISO of the newest timeline event; null when the timeline is empty.
    *  Derived from `task_events.occurred_at`, NOT `updated_at` — see the essay in
@@ -66,6 +66,9 @@ export interface TaskDetail extends TaskSummary {
   lastActivityAt: string | null;
   /** Gap-10: past its threshold, no run in flight, not archived, not terminal. */
   quiet: boolean;
+  /** Ruling 166: why the queued run carrying the task waits (`queuedRunWait`),
+   *  annotated by the task loader only while `liveRun` is `queued`. */
+  liveRunWait?: string;
 }
 
 /** The `diagnostics` columns the query below selects. A type alias, not an
@@ -113,7 +116,7 @@ export function getTaskSummary(
       stage: row.stage,
       stageIds: stages.map((s) => s.id),
     }),
-    // Ruling 131: resolved at read time, never cached.
+    // Ruling 55: resolved at read time, never cached.
     blockedBy: resolveDependencies(db, slug, parseBlockedByColumn(row.blocked_by_json)),
   });
   // The engaged agents' backend follows the LIVE deployment, not the
@@ -126,7 +129,7 @@ export function getTaskSummary(
 }
 
 /** Whether the task has a projection row — exactly when {@link getTaskSummary}
- *  answers non-null, without building the summary (ruling 457: the dock asks
+ *  answers non-null, without building the summary (ruling 11: the dock asks
  *  this yes/no question on every load). */
 export function taskExists(db: DatabaseSync, slug: string, key: string): boolean {
   return (
@@ -140,7 +143,7 @@ export function listTaskEvents(
   db: DatabaseSync,
   slug: string,
   key: string,
-  /** Ruling 457: only the newest `limit` events (the task page's window). */
+  /** Ruling 11: only the newest `limit` events (the task page's window). */
   opts: { limit?: number } = {},
 ): TimelineEventRender[] {
   const sql = `SELECT * FROM task_events WHERE project_slug = ? AND task_key = ?
@@ -245,7 +248,7 @@ export function getTaskDetail(
   slug: string,
   key: string,
   /** `dataRoot` feeds the live-backend overlay (tests only — production
-   *  defaults to the env root). `timelineLimit` (ruling 457): read only the
+   *  defaults to the env root). `timelineLimit` (ruling 11): read only the
    *  newest N events, the window the task page ships; the summary's
    *  `eventCount` is the total. */
   opts: { dataRoot?: string; timelineLimit?: number } = {},
@@ -267,7 +270,7 @@ export function getTaskDetail(
     terminal: isAcceptedDisplayState({ stage: summary.stage, stageIds }),
     runInFlight: facts.runInFlight,
     held: summary.blockedBy.length > 0,
-    // Ruling 225: the clock a schedule-resting task is measured against.
+    // Ruling 45: the clock a schedule-resting task is measured against.
     resumesAt: summary.resumesAt ?? null,
   };
   return {

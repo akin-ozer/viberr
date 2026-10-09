@@ -36,7 +36,7 @@ async function search(q: string, cookie?: string) {
 
 describe("GET /resources/search", () => {
   /**
-   * Ruling 457, test audit L14-29. The palette loads this through a fetcher
+   * Ruling 11, test audit L14-29. The palette loads this through a fetcher
    * as the person types, and `requireUser` answered a missing session with a
    * login redirect naming THIS route and the query as the returnTo: a fetcher
    * follows a redirect as a navigation, so typing in a stale tab went to

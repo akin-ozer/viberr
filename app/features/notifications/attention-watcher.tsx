@@ -13,7 +13,7 @@ import {
 } from "./desktop-alerts";
 
 /**
- * Ruling 481(c) (F40-51): a decision that only the owner can take reached him
+ * Ruling 74 (F40-51): a decision that only the owner can take reached him
  * only if a Viberr tab was in front of him. A notification was a row and an
  * SSE event, and the one signal outside the page was the bell's badge, inside
  * the page. On pass 40 a goal chain of five links sat behind WEB-3's
@@ -32,7 +32,7 @@ import {
  * It reads `/resources/attention`: on mount, when this tab's live stream
  * hands it a `notification.created` or `notification.read`, when the tab
  * gains or loses attention, and every `ATTENTION_POLL_MS` while it has not
- * got it. A hidden tab holds no stream (ruling 301), so that last short read
+ * got it. A hidden tab holds no stream (ruling 25), so that last short read
  * is the only way a background tab hears; it never holds a connection.
  */
 

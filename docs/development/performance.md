@@ -1,13 +1,13 @@
 # Performance: journeys, measurements and the ratchet
 
-> How Viberr measures and protects its speed (ruling 457). Modelled on the method in
+> How Viberr measures and protects its speed (ruling 11). Modelled on the method in
 > claude.ai's "How we made Claude.ai faster" post: pick the journeys people spend their
 > time in, give each one a deterministic benchmark, remove the redundant work, and pin
 > every win with a ceiling that can only move down. Source of truth:
 > `test-support/perf-verdict.ts`, `test-support/perf-budgets.ts` and
 > `test-support/perf-budgets/`, the `*.perf.test.ts(x)` files under `app/`,
 > `scripts/measure-routes.mjs`, `app/shared/docs/perf-budgets-sync.test.ts`.
-> Written 2026-09-24 with the first pass (ruling 457), from `main` @ `2169f940`.
+> Written 2026-09-24 with the first pass (ruling 11), from `main` @ `2169f940`.
 
 ## 1. The journeys
 
@@ -70,9 +70,8 @@ people load first: `root`, `root.css` (the render-blocking stylesheet alone),
 npm run build && node scripts/measure-routes.mjs --check
 ```
 
-CI's verify job is configured to run the same check after its build step, but no CI job
-has executed since 2026-09-07 ([testing.md](testing.md) §1), so the check is a local gate
-for now. `node scripts/measure-routes.mjs
+CI's verify job runs the same check after its build step ([testing.md](testing.md) §1).
+`node scripts/measure-routes.mjs
 routes/project.task` (no flag) still prints the raw and gzip figures for any route.
 
 The bundle table also accepts a `raised` note: a ceiling that went up says why beside the
@@ -113,7 +112,7 @@ The harnesses, one home each:
 
 ## 5. What the first pass measured
 
-Ruling 457 records the pass. On the fixtures the budgets name, from `main` @ `2169f940`
+Ruling 11 records the pass. On the fixtures the budgets name, from `main` @ `2169f940`
 to the pass (the bundle rows compare `main` @ `639e1e64`, the main it merged, built alone) (103 budgets in 27 perf test files, plus 8 bundle closures):
 
 | Journey | Figure | Before | After |

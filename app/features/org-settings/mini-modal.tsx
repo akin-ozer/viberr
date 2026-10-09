@@ -6,10 +6,10 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
 /**
  * Shared dialog chrome for every org-settings create/edit modal
  * (org-settings spec §4.5), on a native <dialog>.
- * Ruling 16 / spec §7.6 behaviors — Escape, focus trap, focus restore,
+ * Ruling 287 / spec §7.6 behaviors — Escape, focus trap, focus restore,
  * backdrop-click close — come from showModal() + useDialog.
  *
- * Ruling 147: the save button stays enabled until the request starts. A save
+ * Ruling 288: the save button stays enabled until the request starts. A save
  * attempted on an incomplete form is REFUSED here: the unmet-requirements
  * line is re-inserted as an alert and focus moves to the first empty control
  * (or wherever the caller's `focusUnmet` says). A hard-disabled primary gave
@@ -54,7 +54,7 @@ export function MiniModal({
   busy?: boolean;
   saveLabel: string;
   onSave: () => void;
-  /** The caller's save succeeded (ruling 459): the modal plays the exit Cancel
+  /** The caller's save succeeded (ruling 287): the modal plays the exit Cancel
    *  plays, then `onClose` unmounts it. A caller that unmounted it on success
    *  took it away in one frame, with no exit. */
   done?: boolean;
@@ -74,7 +74,7 @@ export function MiniModal({
   // Counted, not boolean: each refusal re-inserts the alert, because readers
   // announce an alert's insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const save = () => {
     // A save that landed is leaving: an Enter during the exit must not send
@@ -109,7 +109,7 @@ export function MiniModal({
       </div>
       <div className="modal-body">{children}</div>
       <div className="modal-foot">
-        {/* Ruling 625: one footnote at a time. While the form is incomplete
+        {/* Ruling 280: one footnote at a time. While the form is incomplete
             the unmet line is the one to read; two side by side each wrapped
             to two lines. */}
         {footHint && canSave && <span className="foot-hint">{footHint}</span>}

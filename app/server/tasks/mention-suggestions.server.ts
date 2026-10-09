@@ -154,7 +154,7 @@ export function getMentionables(
   // (F33-9). The picker used to append "any remaining registered app user"
   // after the members, so it offered people who cannot open the project: the
   // comment posted, the fan-out created the `mention` row, and the inbox link
-  // took a non-member to the members-only 404. Ruling 25 is not only "may you
+  // took a non-member to the members-only 404. Ruling 27 is not only "may you
   // open it" — the layout loader and every action return the SAME bytes for a
   // non-member as for an unknown slug so a probe cannot learn the project
   // exists, and that notification named the project, the task AND the comment
@@ -162,7 +162,7 @@ export function getMentionables(
   // roster the composer offers is exactly the roster the fan-out will deliver
   // to.
   //
-  // project.md is the canonical membership store (ruling 6 / R19-B), so the
+  // project.md is the canonical membership store (ruling 26(a) / R19-B), so the
   // order comes from the file and the `users` table only supplies the display
   // fields. A member id with no live row (LV-04 ghost member), a disabled
   // account, an empty handle or a handle that collides with an earlier member

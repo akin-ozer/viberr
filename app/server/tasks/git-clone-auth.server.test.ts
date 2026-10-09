@@ -219,7 +219,7 @@ describe("clone timeout + failure sentence", () => {
   });
 
   /**
-   * Ruling 249 (pass 37, F37-78): two values were not enough.
+   * Ruling 197 (pass 37, F37-78): two values were not enough.
    *
    * The specialist checkout has an arm that never touches the network — a
    * SUPPORTING run is cloned from the delivering checkout already on disk — and
@@ -239,7 +239,7 @@ describe("clone timeout + failure sentence", () => {
    * two assertions fail — the sentence claims a missing credential for a step
    * that never reached GitHub.
    */
-  it("ruling 249: a local checkout failure claims nothing about a credential", () => {
+  it("ruling 197: a local checkout failure claims nothing about a credential", () => {
     const sentence = cloneFailureSentence(
       { reason: "clone_failed", exitCode: 128 },
       { credential: "not_involved" },
@@ -251,7 +251,7 @@ describe("clone timeout + failure sentence", () => {
   });
 
   /**
-   * Ruling 485 (F40-62, live on WEB-5): the replace of a supporting checkout
+   * Ruling 197 (F40-62, live on WEB-5): the replace of a supporting checkout
    * died on an agent's 0700 directory, and the log said `credential: absent`;
    * the operator asked the owner to attach a GitHub credential. A local step's
    * failure is a workspace fault: it names the path and the OS error, and
@@ -260,7 +260,7 @@ describe("clone timeout + failure sentence", () => {
    * installed"; drop the `workspace_fault` arm of the sentence and it carries a
    * credential clause.
    */
-  it("ruling 485: a local step's fault names the path and the OS error, never a credential or a missing git", () => {
+  it("ruling 197: a local step's fault names the path and the OS error, never a credential or a missing git", () => {
     const mkdir = Object.assign(new Error("ENOENT: no such file or directory, mkdir"), {
       code: "ENOENT",
       path: "/data/projects/web/tasks/WEB-5/workspace/support",

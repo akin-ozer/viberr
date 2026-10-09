@@ -21,9 +21,9 @@ import {
 } from "./toolchain.server";
 
 /**
- * Ruling 182, narrowed by ruling 185: the once-per-process reading of what an
- * agent's shell would find on this host. The sandbox probe went with the
- * sandbox. Nothing here spawns a program: the runner is the seam.
+ * Ruling 40: the once-per-process reading of what an agent's shell would find
+ * on this host. There is no sandbox probe (ruling 144). Nothing here spawns a
+ * program: the runner is the seam.
  */
 const ctx = createTestDbContext();
 
@@ -76,7 +76,7 @@ describe("resolveToolchain", () => {
           git: "git version 2.45.0\n",
           python3: null,
           go: "go version go1.23.1 linux/arm64\n",
-          // Ruling 191: `make` answers, the rest do not — the live shape.
+          // Ruling 148: `make` answers, the rest do not — the live shape.
           make: "GNU Make 4.4.1\n",
           docker: null,
           pnpm: null,
@@ -101,8 +101,8 @@ describe("resolveToolchain", () => {
       codexCli: expect.stringMatching(/^\d+\.\d+\.\d+/),
       claudeAgentSdk: expect.stringMatching(/^\d+\.\d+\.\d+/),
     });
-    // The key order is the health body's. Ruling 185 removed the trailing
-    // `codexSandbox` verdict with the sandbox itself; ruling 191 added the five
+    // The key order is the health body's. Ruling 144 removed the trailing
+    // `codexSandbox` verdict with the sandbox itself; ruling 148 added the five
     // a run reaches for and cannot install.
     expect(Object.keys(reading)).toEqual([
       "node", "npm", "git", "python3", "go",
@@ -164,14 +164,14 @@ describe("cachedToolchain", () => {
 });
 
 /**
- * Ruling 191 (F37-13, live): the reading existed and nobody who needed it could
+ * Ruling 148 (F37-13, live): the reading existed and nobody who needed it could
  * see it. Pass 37's host had node, npm and git and nothing else; the controller
  * chose a pnpm + turbo monorepo with a root `Makefile` and a Docker Compose
  * stack, and chartered a REQUIRED reviewer whose pass opens "clean checkout,
  * `make up`, everything healthy" — so that reviewer's verdict could only ever
  * be request_changes, and the deliverer was sent back over it.
  */
-describe("shellInventoryPrompt (ruling 191)", () => {
+describe("shellInventoryPrompt (ruling 148)", () => {
   const host = (over: Partial<Toolchain>): Toolchain => ({
     ...HERMETIC_TOOLCHAIN,
     ...over,
@@ -188,16 +188,16 @@ describe("shellInventoryPrompt (ruling 191)", () => {
   });
 
   /**
-   * Ruling 275 (pass 37, F37-108): ruling 191 put this measurement into every
-   * prompt and it says what the host lacks — it did not say "and the role
-   * description above plans around three of them". A contradiction inside one
+   * Ruling 148 (pass 37, F37-108): the measurement in every prompt says what
+   * the host lacks, and must also say "and the role description above plans
+   * around three of them". A contradiction inside one
    * prompt is resolved by the model, and the persona is the half written with
    * more authority and read first. Live on this instance: the Infrastructure
    * Engineer's persona said "you own … the Docker Compose stack" and "`make
    * up` is your headline deliverable and it must be honest", while it ran two
    * tasks on a host with neither.
    */
-  it("ruling 275: names the absent tools the run's OWN persona plans around", () => {
+  it("ruling 148: names the absent tools the run's OWN persona plans around", () => {
     const persona =
       "You own the shared surfaces: the workspace scaffolding, the Docker Compose stack, " +
       "and the CI pipeline. `make up` is your headline deliverable.";
@@ -210,7 +210,7 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     expect(text).toContain("exits 127");
   });
 
-  it("ruling 636: sends scratch files to the run's own $TMPDIR, never /tmp itself", () => {
+  it("ruling 148: sends scratch files to the run's own $TMPDIR, never /tmp itself", () => {
     // Every prompt that describes the shell says it: a specialist's, and the
     // operator's and the controller's about the agents they dispatch.
     // CANARY: drop the push and nothing says where scratch goes, so an agent
@@ -220,7 +220,7 @@ describe("shellInventoryPrompt (ruling 191)", () => {
     expect(text).toContain("Nothing goes in `/tmp` itself");
   });
 
-  it("ruling 275: says nothing when the persona plans around what is actually here", () => {
+  it("ruling 148: says nothing when the persona plans around what is actually here", () => {
     // CANARY: match on substrings instead of word boundaries and "nodemon" or
     // "encurl" would name `node`/`curl`; scan the PRESENT tools too and a
     // persona that correctly says "run npm test" gets contradicted.
@@ -259,10 +259,10 @@ describe("shellInventoryPrompt (ruling 191)", () => {
    * Self-review: the advice half was two hardcoded sentences. Both could lie —
    * one by promising `npx` on a host with no npm, the other by naming an
    * INSTALLED tool as its example of something uninstallable, which is exactly
-   * what happened the moment ruling 196 put `make` and `curl` in the image.
+   * what happened the moment `make` and `curl` went into the image.
    */
   it("derives both halves of the advice from the reading, so neither can go stale", () => {
-    // Ruling 196's host: make and curl present, docker still absent.
+    // Ruling 42's host: make and curl present, docker still absent.
     const shipped = shellInventoryPrompt(
       host({ make: "4.4.1", curl: "8.14.1", pnpm: "12.4.1" }),
     );
@@ -310,13 +310,13 @@ describe("shellInventoryPrompt (ruling 191)", () => {
 });
 
 /**
- * Ruling 196 (owner, pass 37): the image ships the three tools an agent reaches
- * for first and cannot install for itself. Ruling 191 stopped agents
+ * Ruling 42 (owner, pass 37): the image ships the three tools an agent reaches
+ * for first and cannot install for itself. Ruling 148 stopped agents
  * rediscovering the gap one exit-127 at a time; this closed the cheap part of
  * it. A unit test cannot inspect a built image, so it pins the Dockerfile —
  * which is the artifact that changed, and deleting the line makes this red.
  */
-describe("ruling 196: the runtime image installs what a run reaches for", () => {
+describe("ruling 42: the runtime image installs what a run reaches for", () => {
   const dockerfile = (): string =>
     readFileSync(path.join(process.cwd(), "Dockerfile"), "utf8");
 
@@ -328,7 +328,7 @@ describe("ruling 196: the runtime image installs what a run reaches for", () => 
     expect(text).toMatch(/npm install -g pnpm@\d+\.\d+\.\d+/);
   });
 
-  it("ruling 566: installs poppler-utils, in a layer after chromium", () => {
+  it("ruling 42: installs poppler-utils, in a layer after chromium", () => {
     // Live on the AWS calculator board three of four result runs could not
     // render a PDF export, and one that decoded it by hand was killed past 5 GB
     // of output. CANARY: delete the install line and this fails; move it before
@@ -343,7 +343,7 @@ describe("ruling 196: the runtime image installs what a run reaches for", () => 
     const text = dockerfile();
     // CANARY: add a docker install here and this fails. The daemon socket is a
     // posture change (an agent holding it controls every container on the
-    // host), and ruling 196 deliberately left it out; the shell inventory tells
+    // host), and ruling 42 deliberately left it out; the shell inventory tells
     // every run that a Compose stack cannot come up in this image.
     expect(text).not.toMatch(/install[^\n]*\bdocker(-ce|\.io)?\b/);
     expect(text).toMatch(/docker-in-docker is a posture change/);

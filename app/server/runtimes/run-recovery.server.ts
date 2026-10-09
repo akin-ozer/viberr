@@ -76,7 +76,7 @@ export interface OrphanFinalization {
    */
   reinvokes: Promise<void>;
   /**
-   * Ruling 174: the sweep of whatever the orphans' processes left alive,
+   * Ruling 142: the sweep of whatever the orphans' processes left alive,
    * joinable for the same reason. A run's Claude CLI leads its own process
    * group, so a server that died without shutting down does not take it along,
    * and a survivor could still be writing the working tree the reclaim
@@ -84,13 +84,13 @@ export interface OrphanFinalization {
    */
   reaped: Promise<void>;
   /**
-   * Ruling 177 / U36-8 (pass 36): the "Interrupted by a restart" notes, one per
+   * Ruling 163 / U36-8 (pass 36): the "Interrupted by a restart" notes, one per
    * orphaned task, joinable so a caller (and a test) can read the task file
    * after they landed. Never rejects: each note is caught per task.
    */
   notes: Promise<void>;
   /**
-   * Ruling 215: the tasks this sweep took, `<projectSlug>/<taskKey>` keyed.
+   * Ruling 164: the tasks this sweep took, `<projectSlug>/<taskKey>` keyed.
    *
    * These tasks HAD a live run when the server stopped, and this pass owns
    * their recovery — including its own re-invoke, which is launched after the
@@ -102,7 +102,7 @@ export interface OrphanFinalization {
 }
 
 export interface FinalizeOrphanedRunsDeps {
-  /** Ruling 177 / U36-8: the data root the restart notes are written under
+  /** Ruling 163 / U36-8: the data root the restart notes are written under
    *  (the process default when omitted, as boot calls it). */
   dataRoot?: string;
   /** The sweep (default: the real one), injectable so a test can see which
@@ -131,13 +131,13 @@ export interface FinalizeOrphanedRunsDeps {
  *
  * Idempotent: a second boot finds nothing non-terminal.
  *
- * "No process behind it" is made true rather than assumed (ruling 174): every
+ * "No process behind it" is made true rather than assumed (ruling 142): every
  * process an orphan started carries its run id, and the sweep signals what is
  * still alive, so a CLI the dead server left running stops before its row is
  * reported interrupted and its workspace reclaimed.
  */
 /**
- * Ruling 198: tell the task's OWNER that the crash-loop guard stopped, so a
+ * Ruling 163(c): tell the task's OWNER that the crash-loop guard stopped, so a
  * stranded task is a message rather than a silence. Best-effort by design — a
  * task with no owner has nobody to tell, and a failure here must never take
  * boot recovery down with it.
@@ -146,7 +146,7 @@ function notifyCappedTask(
   db: DatabaseSync,
   projectSlug: string,
   taskKey: string,
-  /** Ruling 497: the restart note's time, so the row opens on it. */
+  /** Ruling 75: the restart note's time, so the row opens on it. */
   noteAt: string,
 ): void {
   try {
@@ -194,8 +194,8 @@ function finishCodexRunHomes(
 ): void {
   if (run.backend !== "codex" || !run.credential_user_id) return;
   const sharedHome = userBackendHome(run.credential_user_id, "codex", dataRoot);
-  // Ruling 460: the write-back is the server's file, handed back to the
-  // person's uid like the adapter's settle does; ruling 485: the run home
+  // Ruling 139: the write-back is the server's file, handed back to the
+  // person's uid like the adapter's settle does; ruling 140: the run home
   // their CLI wrote is removed as them.
   const principal = run.credential_user_id;
   const person = launchesAgents()
@@ -205,7 +205,7 @@ function finishCodexRunHomes(
           removeAgentTreeSync(target, agentGitLaunchFor(db, principal, dataRoot)),
       }
     : undefined;
-  // Ruling 507: the refreshed sign-in goes back to the account the run
+  // Ruling 138: the refreshed sign-in goes back to the account the run
   // billed. A run from before the ruling billed the one account there was,
   // whose sign-in sits in the shared home; an account removed since then
   // gets nothing back (its home is gone, and the write-back refuses to
@@ -230,14 +230,14 @@ function finishCodexRunHomes(
 }
 
 /**
- * Ruling 701: finish the completion compactions a restart cut on runs that had
+ * Ruling 175: finish the completion compactions a restart cut on runs that had
  * already ended. Such a row is terminal and carries the run service's mark
  * (`RUN_PHASE.compacting` with {@link COMPACTING_AFTER_RUN_STEP}); nothing else
  * at boot would find it, because every other pass keys on a live row. Each
  * gets what an orphan's epilogue gets: its compaction's process swept, a Codex
  * compaction's private home finished (it holds a copy of the person's
  * sign-in), and the mark cleared. The session keeps the size it had; ruling
- * 372 is its backstop. Resolves when the sweep has run, and never rejects.
+ * 173 is its backstop. Resolves when the sweep has run, and never rejects.
  */
 function finishCutCompactions(
   db: DatabaseSync,
@@ -300,8 +300,9 @@ export function finalizeOrphanedRuns(
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
   // (`backend` is NOT NULL too; `credential_user_id` and `started_at` are
-  // nullable — a row written before ruling 127 carries no credential, and a run
-  // that never got a concurrency slot never got a start.)
+  // nullable — a run refused before any credential was looked up carries none
+  // (ruling 137), and a run that never got a concurrency slot never got a
+  // start.)
   const orphans = db
     .prepare(
       `SELECT id, project_slug, task_key, kind, backend, credential_user_id,
@@ -311,23 +312,23 @@ export function finalizeOrphanedRuns(
     )
     .all() as {
     id: string;
-    /** Ruling 701: what a queued run waited for, when its row says. */
+    /** Ruling 175: what a queued run waited for, when its row says. */
     step: string | null;
     project_slug: string;
     task_key: string;
     kind: string;
     backend: string;
-    /** Ruling 567: the agent whose saved files the restart must not orphan. */
+    /** Ruling 163(b): the agent whose saved files the restart must not orphan. */
     agent_profile_id: string | null;
     role: string | null;
     credential_user_id: string | null;
-    /** Ruling 507: nullable — a run from before the ruling, or a refused one. */
+    /** Ruling 138: nullable — a run from before the ruling, or a refused one. */
     credential_account_id: string | null;
-    /** Ruling 310(b): null for a run that never got a concurrency slot. */
+    /** Ruling 163(b): null for a run that never got a concurrency slot. */
     started_at: string | null;
   }[];
   const reapProcesses = deps.reapProcesses ?? reapRunProcesses;
-  // Ruling 701: a specialist's run is terminal while its session is being
+  // Ruling 175: a specialist's run is terminal while its session is being
   // compacted, so a restart during that leaves a finished row and no orphan.
   const cutCompactions = finishCutCompactions(db, deps, reapProcesses);
   if (orphans.length === 0) {
@@ -342,7 +343,7 @@ export function finalizeOrphanedRuns(
     };
   }
 
-  // Ruling 376: an epilogue interrupted by the restart carries its own marker.
+  // Ruling 174: an epilogue interrupted by the restart carries its own marker.
   const reaped = Promise.all([
     cutCompactions,
     reapProcesses({
@@ -359,7 +360,7 @@ export function finalizeOrphanedRuns(
 
   const now = new Date().toISOString();
   const realTasks = new Map<string, { projectSlug: string; taskKey: string }>();
-  // Ruling 310(b): `started` too. The sweep finalizes QUEUED runs as well as
+  // Ruling 163(b): `started` too. The sweep finalizes QUEUED runs as well as
   // running ones, and the note used to call every one of them "still running
   // when the server stopped" — false for a run that never got a slot.
   const runsByTask = new Map<
@@ -368,7 +369,7 @@ export function finalizeOrphanedRuns(
       id: string;
       kind: string;
       started: boolean;
-      /** Ruling 701: it waited for its session's compaction, not for a slot. */
+      /** Ruling 175: it waited for its session's compaction, not for a slot. */
       heldForSession: boolean;
       backend: string;
       profileId: string | null;
@@ -376,14 +377,14 @@ export function finalizeOrphanedRuns(
     }[]
   >();
   for (const run of orphans) {
-    // Ruling 181 (pass 36): a Codex run's private CODEX_HOME is finished by the
+    // Ruling 145 (pass 36): a Codex run's private CODEX_HOME is finished by the
     // adapter's settle — which a process that died never reached. Live
     // 19:48Z: two restart-orphaned developer runs still owned
     // `codex-home/runs/<runId>/`, each with a copy of the person's sign-in.
     // Finish them here exactly as the settle would: the refreshed `auth.json`
     // written back when its bytes changed, the directory removed.
     // The run's own home, and its completion compaction's when the restart
-    // landed during that epilogue (ruling 376), each finished like a settle.
+    // landed during that epilogue (ruling 145), each finished like a settle.
     finishCodexRunHomes(db, run, [run.id, codexCompactionHomeId(run.id)], deps.dataRoot);
     patchRun(db, run.id, {
       state: "interrupted",
@@ -392,7 +393,7 @@ export function finalizeOrphanedRuns(
       phase: null,
       step: null,
     });
-    // Ruling 99: a controller conversation turn carries no task — there is no
+    // Ruling 247: a controller conversation turn carries no task — there is no
     // operator to re-invoke for it. Its own recovery (an honest "interrupted
     // by a restart" note on the conversation) lives in controller-run.
     if (run.kind === "controller") continue;
@@ -414,7 +415,7 @@ export function finalizeOrphanedRuns(
       },
     ]);
   }
-  // Ruling 198 (F37-19): the cap decision is taken BEFORE the restart note is
+  // Ruling 163(c) (F37-19): the cap decision is taken BEFORE the restart note is
   // written, because the note used to promise "the operator is re-invoked to
   // decide what to do next" on EVERY orphaned task — including the ones this
   // loop had already decided to skip. A capped task therefore carried a
@@ -434,7 +435,7 @@ export function finalizeOrphanedRuns(
   // it — then the (costly) operator runs fire-and-forget for the survivors.
   const windowStart = new Date(Date.now() - RECOVERY_WINDOW_MS).toISOString();
   const toReinvoke: { projectSlug: string; taskKey: string }[] = [];
-  /** Ruling 198: the tasks a turn IS coming for, keyed as `realTasks` keys it. */
+  /** Ruling 163(c): the tasks a turn IS coming for, keyed as `realTasks` keys it. */
   const reinvoking = new Set<string>();
   let capped = 0;
   for (const t of realTasks.values()) {
@@ -482,7 +483,7 @@ export function finalizeOrphanedRuns(
     reinvoking.add(`${t.projectSlug}/${t.taskKey}`);
   }
 
-  // Ruling 177 / U36-8 (pass 36): the task file said NOTHING about a restart
+  // Ruling 163 / U36-8 (pass 36): the task file said NOTHING about a restart
   // cutting its runs — the re-fired operator's directive was the first trace.
   // One policy note per task names every run the restart ended, before the
   // operator is re-invoked below (so the note precedes the turn it explains).
@@ -494,22 +495,22 @@ export function finalizeOrphanedRuns(
     for (const [taskId, t] of realTasks) {
       const runs = runsByTask.get(taskId) ?? [];
       const ref = deps.dataRoot ? { ...t, dataRoot: deps.dataRoot } : t;
-      // Ruling 662: an agent run by its role. The kind called every
+      // Ruling 292(b): an agent run by its role. The kind called every
       // supporting agent a "reviewer" (F31-C7: the kind says only whether the
       // run delivers), so the Cloud Solutions Architect read as one.
       const label = (r: { id: string; kind: string; role: string | null }): string =>
         `\`${r.id}\` (${r.kind === "operator" ? "operator" : (r.role ?? "agent")})`;
-      // Ruling 310(b): a run that never got a concurrency slot was not running,
-      // and saying it was is the same defect as ruling 311's "Started". The
+      // Ruling 163(b): a run that never got a concurrency slot was not running,
+      // and saying it was is the same defect as ruling 166's "Started". The
       // controller found this one by joining the timeline against the run
       // records: `run_VlR9mwnxyouc` carried `startedAt: null, turns: 0` and the
       // restart note called it still running. `started_at` is the fact, kept on
       // the row permanently, and this writer had it in hand.
       const ran = runs.filter((r) => r.started);
       const never = runs.filter((r) => !r.started && !r.heldForSession);
-      // Ruling 701: nor was a run parked for its session waiting on a slot.
+      // Ruling 175: nor was a run parked for its session waiting on a slot.
       const held = runs.filter((r) => !r.started && r.heldForSession);
-      // Ruling 567: an agent run the restart cut off gets the effects a
+      // Ruling 163(b): an agent run the restart cut off gets the effects a
       // person's Stop would have given it, before the note: its last words and
       // the files it saved are posted under its name, and a deliverer's files
       // are recorded as the delivery. Live on AWSC-7 the Calculator Builder had
@@ -548,7 +549,7 @@ export function finalizeOrphanedRuns(
             `${runs.length === 1 ? "it is" : "they are"} recorded as interrupted by the restart` +
             (reinvoking.has(taskId)
               ? ", and the operator is re-invoked to decide what to do next."
-              : // Ruling 198: the honest other half. Say what Viberr decided,
+              : // Ruling 163(c): the honest other half. Say what Viberr decided,
                 // why, and what the person can do — the cap is a guard
                 // against a crash loop, not a judgement about this task.
                 ". Viberr did NOT re-invoke the operator for it: it had already done so " +
@@ -559,7 +560,7 @@ export function finalizeOrphanedRuns(
         });
         rebuildPath(db, resolveTaskFilePath(ref), deps.dataRoot ? { dataRoot: deps.dataRoot } : {});
         if (!reinvoking.has(taskId)) {
-          // Ruling 198: the note alone would still leave the BOARD claiming an
+          // Ruling 163(c): the note alone would still leave the BOARD claiming an
           // agent is on it. `clearWaitingToHuman` is a no-op unless the flag is
           // `agent`, and with no packet and a live stage it settles to
           // `human` — which is the truth: nobody is coming until a person acts.
@@ -588,7 +589,7 @@ export function finalizeOrphanedRuns(
   let reinvokes: Promise<void> = Promise.resolve();
   if (toReinvoke.length > 0) {
     reinvokes = (async () => {
-      // Ruling 567: after the notes, so the operator reads a delivery the
+      // Ruling 163(b): after the notes, so the operator reads a delivery the
       // replay above recorded and the note that says why it ran again.
       await notes;
       const reinvoke = deps.runOperator ?? (await import("./operator-run.server")).runOperator;
@@ -620,7 +621,7 @@ export function finalizeOrphanedRuns(
     reinvokes,
     reaped,
     notes,
-    // Ruling 215: EVERY task this sweep took, capped ones included. A capped
+    // Ruling 164: EVERY task this sweep took, capped ones included. A capped
     // task is one this pass decided about; it is still not a task that had no
     // run when the server came back.
     claimedTasks: new Set(realTasks.keys()),
@@ -628,11 +629,11 @@ export function finalizeOrphanedRuns(
 }
 
 /**
- * Ruling 567: the completion effects of one agent run a restart cut off, as
+ * Ruling 163(b): the completion effects of one agent run a restart cut off, as
  * `state: "interrupted"` (what a person's Stop gets): the reply and the files
- * the run saved, posted under its name. Ruling 601: never as the delivery,
+ * the run saved, posted under its name. Ruling 85: never as the delivery,
  * which only a run that finished reports. A replay, so no
- * deferred @mention is redelivered (ruling 211(c)); an interrupted run never
+ * deferred @mention is redelivered (ruling 163(d)); an interrupted run never
  * reacts, so the operator re-invoke below stays the only one. Best-effort: a
  * failure is logged and the restart note still lands.
  */
@@ -688,7 +689,7 @@ async function replayInterruptedAgentRun(
  *
  * Safe by construction:
  *  - Only a live stall, not old history: the task is `waiting = 'agent'`, OR the
- *    run carries a `run.completion.effects_lost` audit row (ruling 207(a)). That
+ *    run carries a `run.completion.effects_lost` audit row (ruling 163(d)). That
  *    second arm exists because `noteCompletionEffectsLost` flips the task to
  *    `waiting = "human"` in the SAME write as the note promising this replay —
  *    honest about the board, and self-defeating about the recovery, until the
@@ -707,7 +708,7 @@ async function replayInterruptedAgentRun(
  *    of re-firing. A restart after the window elapses sees a clean count.
  */
 /**
- * Ruling 317(b): what the restart can actually SAY about a task left waiting.
+ * Ruling 164: what the restart can actually SAY about a task left waiting.
  *
  * The sweep's own SELECT proves one thing — `waiting = 'agent'` and no run in
  * `running` or `queued`. The note asserted three more: that a run existed, that
@@ -720,7 +721,7 @@ async function replayInterruptedAgentRun(
  * decision is needed." 09:30:29 — "the run finished just before the stop". The
  * first says no run was dispatched; the second says a run finished.
  *
- * This is the class ruling 310(b) named, in the neighbouring sweep of the same
+ * This is the class ruling 163(b) named, in the neighbouring sweep of the same
  * file, which its own commit message quoted the controller on: "One writer
  * fixed, its neighbour still inventing." This is the neighbour.
  */
@@ -732,12 +733,12 @@ function abandonedWaitNote(
   const head =
     "**Restart:** this task was waiting on an agent, and no run was live when the server came back. ";
   /**
-   * Ruling 337(b): the board fact is certain; the re-invoke is an intention.
+   * Ruling 164: the board fact is certain; the re-invoke is an intention.
    *
    * This asserted the re-invoke as done, and it is written BEFORE `runOperator`
    * is called — so a refusal (no operator deployed, a closed task, an open
    * packet) leaves a note claiming a turn that never happened, which is the
-   * unconditional promise ruling 198 removed from the sibling orphan sweep. The
+   * unconditional promise ruling 163(c) removed from the sibling orphan sweep. The
    * `!result.runId` branch clears `waiting` but does not correct the sentence.
    */
   const tail =
@@ -778,7 +779,7 @@ function abandonedWaitNote(
 }
 
 /**
- * Ruling 213: settle a task the restart left waiting on an agent that is not
+ * Ruling 164: settle a task the restart left waiting on an agent that is not
  * there.
  *
  * Every other boot path keys on a RUN: `finalizeOrphanedRuns` takes the ones
@@ -807,7 +808,7 @@ export async function settleAbandonedWaits(
   db: DatabaseSync,
   ctx: TaskMutationContext = {},
   /**
-   * Ruling 215: `<projectSlug>/<taskKey>` for every task the orphan sweep took
+   * Ruling 164: `<projectSlug>/<taskKey>` for every task the orphan sweep took
    * this boot. Those tasks DID have a live run at the stop and that pass owns
    * them; it just flipped their rows terminal, so the SELECT below would see
    * them as abandoned and write a note saying the one thing that was not true.
@@ -848,11 +849,11 @@ export async function settleAbandonedWaits(
     ]);
   const { readTaskFile } = await import("~/server/files/task-writer.server");
   /**
-   * Ruling 337(c): the count it SETTLED, not the count it looked at.
+   * Ruling 164: the count it SETTLED, not the count it looked at.
    *
    * This returned `rows.length` — the raw projection result — so it already
    * over-reported whenever `claimedByOrphanSweep` filtered some but not all
-   * (the ruling-215 test passes only because that case filters ALL of them and
+   * (the ruling-164 test passes only because that case filters ALL of them and
    * takes the early return). With the file re-read above, the gap is the normal
    * case: the number a boot log or a test reads has to be the number of tasks
    * this sweep actually spoke on.
@@ -862,7 +863,7 @@ export async function settleAbandonedWaits(
     const ref: TaskFileRef = { projectSlug: row.slug, taskKey: row.key };
     if (ctx.dataRoot) ref.dataRoot = ctx.dataRoot;
     /**
-     * Ruling 337: the projection is the index; the FILE is the record, and the
+     * Ruling 164: the projection is the index; the FILE is the record, and the
      * file is where the reason for the quiet lives.
      *
      * This sweep selected entirely on `t.waiting = 'agent'` with no live run
@@ -886,7 +887,7 @@ export async function settleAbandonedWaits(
      * consequence was not cosmetic: it reversed the owner's explicit backend
      * decision fifteen minutes after they made it.
      *
-     * The guard is borrowed verbatim from `findStrandedTasks` (ruling 330,
+     * The guard is borrowed verbatim from `findStrandedTasks` (ruling 122,
      * shipped hours earlier), which re-reads the file for exactly these cases.
      * The older sweep does MORE and checked LESS.
      */
@@ -1153,7 +1154,7 @@ export async function recoverUnreactedAgentRuns(
           completion.dispatchedByUserId = row.dispatched_by_user_id;
         }
       }
-      // Ruling 211(c): a replay is not the live completion. The deferred
+      // Ruling 163(d): a replay is not the live completion. The deferred
       // @mention redelivery is a promise the LIVE refusal made, and this hop
       // may be running days later — re-delivering from the old run's window
       // would start a duplicate paid run on an instruction a human has since

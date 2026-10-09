@@ -135,12 +135,12 @@ describe("loader", () => {
       // check-runs or reviews — the row now CARRIES the facts instead of
       // narrowing them away, which is what the finding was about.
       checks: null,
-      // Ruling 276: which KIND of null. The fixture's ref carries no `checks`
+      // Ruling 237: which KIND of null. The fixture's ref carries no `checks`
       // key at all, so this is "never read" rather than "GitHub reported no
       // check runs" — two facts the row now keeps apart for the readers that
       // act on them differently.
       checksRead: false,
-      // Ruling 360: the refused read, absent here (nothing refused in the seed).
+      // Ruling 237: the refused read, absent here (nothing refused in the seed).
       checksUnread: null,
       review: null,
       // F17-L6: the demo fixture's PR carries no reconciled mergeability.
@@ -164,7 +164,7 @@ describe("loader", () => {
       "VIB-160",
     ]);
     const byKey = Object.fromEntries(view.branches.map((b) => [b.taskKey, b]));
-    // Ruling 12: merged wins from the pr cache…
+    // Ruling 237: merged wins from the pr cache…
     expect(byKey["VIB-139"]!.sync).toBe("merged");
     expect(byKey["VIB-141"]!.sync).toBe("merged");
     // UI-05: REWRITTEN — this assertion pinned the bug. With NO
@@ -367,7 +367,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
     );
   });
 
-  it("reconcile captures REAL compare data → behind_main sync pill in the loader (ruling 12)", async () => {
+  it("reconcile captures REAL compare data → behind_main sync pill in the loader (ruling 237)", async () => {
     const { runReconcile } = await import("./github-actions.server");
     const { getGithubViewData } = await import("./github-query.server");
 
@@ -415,7 +415,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
         },
       },
       [`GET /repos/${REPO}/compare/main...vib-145-sse-revalidate`]: compareIdentical,
-      // THE ruling-12 case: VIB-151 is really behind the default branch.
+      // THE ruling-237 case: VIB-151 is really behind the default branch.
       [`GET /repos/${REPO}/compare/main...vib-151-timeline-compression`]: {
         status: 200,
         body: { ahead_by: 1, behind_by: 2, status: "diverged", commits: [] },
@@ -466,7 +466,7 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
   });
 
   /**
-   * Ruling 401 (F39-28), live on ax-clone AX-12. A task can finish without ever
+   * Ruling 237 (F39-28), live on ax-clone AX-12. A task can finish without ever
    * committing anything — that one delivered an upstream comparison as an
    * attachment, `noChanges: true`, no PR, zero commits, and no `ax-12` branch
    * anywhere on the remote or in the mirror. Viberr allocates the branch NAME
@@ -475,10 +475,10 @@ describe("grant-scope + reconcile against the canned GitHub transport", () => {
    * on finished work, for a branch that does not exist and never will — and
    * one that could never clear, because nothing about a completed task moves.
    *
-   * VIB-151 is the perfect A/B: the ruling-12 `behind_main` case above, with
+   * VIB-151 is the perfect A/B: the ruling-237 `behind_main` case above, with
    * zero commits and no PR. Only its stage differs.
    */
-  it("ruling 401: a finished task that committed nothing has no branch to be behind", async () => {
+  it("ruling 237: a finished task that committed nothing has no branch to be behind", async () => {
     const { getGithubViewData } = await import("./github-query.server");
     const { updateTaskFile } = await import("~/server/files/task-writer.server");
     const { rebuildTaskFile } = await import("~/server/projections/rebuilder.server");

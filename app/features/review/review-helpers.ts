@@ -30,35 +30,35 @@ export interface ReviewRowView {
   labels: string[];
   dueDate: string | null;
   /** The same lesson `PrState` below records: one vocabulary, one union. A
-   *  hand-copied triple here could not express ruling 225's derived
+   *  hand-copied triple here could not express ruling 45's derived
    *  `schedule`, so a review row would have had to invent its own answer for a
    *  state the projection already decided. */
   waiting: Waiting;
-  /** Ruling 225: when `waiting` is `schedule`, the instant the task picks
+  /** Ruling 45: when `waiting` is `schedule`, the instant the task picks
    *  itself back up. */
   resumesAt?: string | null;
   packet: { kind: string; title: string } | null;
-  /** Ruling 138: the packet is decided and waits for the edited goal. */
+  /** Ruling 63: the packet is decided and waits for the edited goal. */
   goalEditPending: boolean;
   latestEventText: string | null;
   pr: {
     number: number;
     /** F19-32: the canonical `PrState`, shared with the projection row and with
-     *  `prStatePill` (ruling 12). The hand-copied review|merged|closed union
-     *  dropped `accepted` (merge pending, R16-6/ruling 40) at the type level, so
+     *  `prStatePill` (ruling 237). The hand-copied review|merged|closed union
+     *  dropped `accepted` (merge pending, R16-6/ruling 244) at the type level, so
      *  the pill's amber branch could not be reached from this surface however
      *  the row was rendered. One vocabulary, one union. */
     state: PrState;
     /** P14-LV-07: GitHub's live mergeability for an open PR; absent = never read. */
     mergeable?: "clean" | "conflicting" | "unknown" | null;
-    /** R17-1 as amended by ruling 132 (pass 34): the whole drift record, so the
+    /** Ruling 239: the whole drift record, so the
      *  subline prints `describeRevisionDrift`'s sentence verbatim — authored
      *  commits merge unreviewed; a base refresh is named as a base refresh. */
     revisionDrift?: RevisionDrift | null;
-    /** Ruling 135: the CURRENT unpushed record, filtered by the row builder. */
+    /** Ruling 243: the CURRENT unpushed record, filtered by the row builder. */
     headSha?: string;
     unpushedRevision?: UnpushedRevision;
-    /** Ruling 236: the other open PRs whose diffs collide with this one, as the
+    /** Ruling 242: the other open PRs whose diffs collide with this one, as the
      *  projection computed them. Absent when no file list has been read; empty
      *  when nothing overlaps. */
     overlaps?: PrOverlap[];
@@ -96,14 +96,14 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
   if (pr.state === "closed") {
     return `PR #${pr.number} was closed on GitHub without merging. Rework and reopen it, or archive the task.`;
   }
-  // Ruling 135 (pass 34, F34-11): the delivered revision is not on the PR.
+  // Ruling 243 (pass 34, F34-11): the delivered revision is not on the PR.
   // Ranked ABOVE the conflict: `mergeable` describes the head GitHub has, and
   // the fact a person can act on is that the reviewed revision never reached it.
   if (pr.unpushedRevision || pr.mergeable === "conflicting") {
     const acted = actionablePrSub(pr);
     if (acted) return acted;
   }
-  // F19-32 / ruling 40 (R16-6): "accepted" means a human (or a direct-grant
+  // F19-32 / ruling 244 (R16-6): "accepted" means a human (or a direct-grant
   // operator) accepted the completion and the REAL merge is still outstanding.
   // It read "open for review on GitHub" here — the one sentence that hides the
   // second meaning of Done on the surface the ruling names. The conflict check
@@ -119,8 +119,8 @@ function prStateSub(pr: NonNullable<ReviewRowView["pr"]>): string {
  * The live PR facts a person can ACT on, in the order `prStateSub` ranks them,
  * or null when the pull request carries none of them and is simply open.
  *
- * Ruling 135 names "the review row subline" among the surfaces that must
- * consult `unpushedRevisionBlockedReason`; ruling 132 calls the drift line the
+ * Ruling 243 names "the review row subline" among the surfaces that must
+ * consult `unpushedRevisionBlockedReason`; ruling 239 calls the drift line the
  * one canonical sentence; P14-LV-07 puts the conflict here. None of them is
  * decoration, and none of them belongs to the acceptance boundary alone — the
  * queue is the triage surface, so a row listed from an EARLIER stage carries
@@ -135,14 +135,14 @@ function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
       : `PR #${pr.number} does not carry the delivered revision ${rev}. Deliver the branch to push it.`;
   }
   if (pr.mergeable === "conflicting") {
-    // Ruling 291: merged IN, not rebased. Viberr's own remedy is a merge
+    // Ruling 230: merged IN, not rebased. Viberr's own remedy is a merge
     // (`update_branch_from_base`), and a rebase rewrites commits the pull
     // request already published — which is how SHOP-11's branch diverged from
     // its own PR #15.
     return `PR #${pr.number} conflicts with the base branch. GitHub can't merge it until the base is merged INTO the branch (not rebased).`;
   }
-  // R17-1 (F17-L12) as amended by ruling 132 (pass 34, F34-14): the head moved
-  // after the review — the ONE canonical sentence says what moved, and only
+  // Ruling 239 (F17-L12, F34-14): the head moved after the review — the ONE
+  // canonical sentence says what moved, and only
   // authored commits are called unreviewed.
   const drift = describeRevisionDrift(pr.revisionDrift);
   if (drift.kind !== "none") return `PR #${pr.number} is open. ${drift.sentence}.`;
@@ -162,7 +162,7 @@ function actionablePrSub(pr: NonNullable<ReviewRowView["pr"]>): string | null {
  *
  * A LIVE PR fact outranks all of that: an unpushed delivered revision, a
  * conflicting pull request or a drifted head is what the person is being asked
- * to act on (rulings 135 / 132, P14-LV-07), and the stage name still says where
+ * to act on (rulings 243 / 239, P14-LV-07), and the stage name still says where
  * the task stands. Nothing else on the row renders those facts — `RQRow` draws
  * no mergeable pill — so ranking them below this sentence hid them on the one
  * surface built for triage.
@@ -180,7 +180,7 @@ function reviewInProgressSub(t: ReviewRowView): string {
 }
 
 /** The subline stripper is the shared `plainText` helper (same regexes as
- * the mock's `rqStripMd` — ruling 14, one stripper app-wide). */
+ * the mock's `rqStripMd` — ruling 297, one stripper app-wide). */
 export function reviewRowSub(t: ReviewRowView): string {
   // R16-3 (owner ruling 2026-08-04): a CLOSED PR is a TERMINAL GitHub fact and
   // outranks every process gate. The row rendered `blockReason` first, so a
@@ -205,7 +205,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   // F10-11: a not-yet-acceptable task states WHY (failing / awaiting a reviewer /
   // no delivered revision) instead of a generic "needs a human decision".
   if (t.blockReason) return t.blockReason;
-  // Ruling 138: a decided edit_goal packet is not a decision still owed — the
+  // Ruling 63: a decided edit_goal packet is not a decision still owed — the
   // row says what is owed instead of re-offering the packet.
   if (t.goalEditPending) {
     return "Goal edit pending: save the edited goal to clear the decision packet.";
@@ -229,7 +229,7 @@ export function reviewRowSub(t: ReviewRowView): string {
   if (t.waiting === "none") {
     return "At the review boundary: no agent is running and no decision is pending.";
   }
-  // Ruling 225 (F37-45), and F19-31's lesson a second time: a value that falls
+  // Ruling 45 (F37-45), and F19-31's lesson a second time: a value that falls
   // through to the sentence below claims a live agent run that does not exist.
   // A clock-resting row has neither a run nor a decision behind it; it has a
   // time.

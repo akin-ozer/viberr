@@ -3,7 +3,7 @@
  * the run sink, the packet builders) and the client (the console's `LogLine`
  * and the Agent-logs footer). Client-safe: no server imports.
  *
- * Pass 34 (ruling 130(a)): the classified failure used to live only in the
+ * Pass 34 (ruling 155(a)): the classified failure used to live only in the
  * `·<kind>` suffix of an adapter's `err` tag, and every reader that wanted
  * more than the kind (the reset instant, the API status) ran its own regex
  * over the raw stream and disagreed with the last one. The adapter now
@@ -27,7 +27,7 @@ export type RunFailureKind =
    *  from that fact first and from prose ("overloaded", "503") second. */
   | "overloaded"
   | "max_turns"
-  /** Ruling 175: the run reached the instance's spending cap (Instance settings →
+  /** Ruling 159: the run reached the instance's spending cap (Instance settings →
    *  Max spend per Claude run) and the SDK ended it with
    *  `error_max_budget_usd`. Cut off, like `max_turns`, not failed by the task:
    *  the remedy is to continue it or raise the cap. Claude only; Codex has no
@@ -36,7 +36,7 @@ export type RunFailureKind =
   /** The stream produced nothing for the whole idle window — the run was HUNG,
    *  not failed by the task. Both adapters emit it (P13-RT-11). */
   | "idle_timeout"
-  /** Ruling 598: the gateway stopped the run because it kept sending one tool
+  /** Ruling 158(b): the gateway stopped the run because it kept sending one tool
    *  call with the same arguments and getting the same answer, a script or
    *  loop that never read the answer. Not the account's fault and not a hang:
    *  the remedy is guidance, so the run's own sentence names the tool and
@@ -69,7 +69,7 @@ export const TAGGED_FAILURE_KINDS = [
 
 /**
  * The machine facts an adapter learned about a failure, attached to the
- * terminal `err` line beside its `run·error·<kind>` tag (ruling 130(a)).
+ * terminal `err` line beside its `run·error·<kind>` tag (ruling 155(a)).
  *
  * `resetsAt` / `window` are carried ONLY for a rate-limit reading whose
  * `status` was `rejected` (`windowRejected: true`): a transient 429 that the
@@ -107,10 +107,10 @@ export interface RunFailureFacts {
    * attribution is not. Null for every other kind (nothing to attribute).
    */
   origin: "provider" | "local" | null;
-  /** Ruling 175: for a `max_budget` cut-off, the cap the run carried (USD).
+  /** Ruling 159: for a `max_budget` cut-off, the cap the run carried (USD).
    *  Absent on every other kind, and on lines written before the ruling. */
   spendCapUsd?: number;
-  /** Ruling 175: for a `max_budget` cut-off, what the run had spent when the
+  /** Ruling 159: for a `max_budget` cut-off, what the run had spent when the
    *  SDK stopped it (USD, the result's cost). Absent otherwise. */
   spentUsd?: number;
 }
@@ -123,7 +123,7 @@ export interface RunFailureFacts {
  * two classifiers cannot drift.
  */
 /**
- * Ruling 212: the patterns here are what decides whether a failed run is
+ * Ruling 155: the patterns here are what decides whether a failed run is
  * reported as "this deployment could not reach the provider" or as "review its
  * authentication and runtime configuration" — and the second sentence sends a
  * person to re-issue a credential that was never at fault.
@@ -136,7 +136,7 @@ export interface RunFailureFacts {
  * inside a `close_notify` message.
  */
 /**
- * Ruling 389 (F39-16): the additions at the end are Codex's own transport
+ * Ruling 155(c) (F39-16): the additions at the end are Codex's own transport
  * vocabulary, which this list did not speak.
  *
  * Live on ax-clone AX-11 the provider said, verbatim, "Reconnecting... waiting
@@ -154,7 +154,7 @@ export const LOCAL_NETWORK_FAILURE_RE =
   /unable to connect|could not connect|connection (?:refused|reset|closed|timed out|error|failed)|econnrefused|econnreset|enotfound|eai_again|etimedout|ehostunreach|enetunreach|epipe|certificate|self.signed|\btls\b|\bssl\b|handshake|fetch failed|network error|socket hang up|getaddrinfo|dns|failed to lookup address information|name does not resolve|nodename nor servname|temporary failure in name resolution|peer closed connection|close_notify|error sending request|waiting for network|request timed out|\breconnecting\b|stream (?:closed|ended) unexpectedly/i;
 
 /**
- * Ruling 397 (F39-24): the lead of the sentence a failed run writes onto the
+ * Ruling 155 (F39-24): the lead of the sentence a failed run writes onto the
  * task timeline, and the matcher that finds it again.
  *
  * They live together so they cannot drift. The operator has to be able to spot
@@ -172,7 +172,7 @@ export function runDidNotCompleteLead(role: string, roleLabel: string): string {
 export const RUN_DID_NOT_COMPLETE_RE = /^The \S[^\n]{0,80}? run did not complete[.:]/;
 
 /**
- * Ruling 394 (F39-21): the tag on the line a run carries when its transport
+ * Ruling 155(d) (F39-21): the tag on the line a run carries when its transport
  * died AFTER the agent's turn had already completed.
  *
  * Live on the ax-clone board, twice inside ten minutes, a Codex run emitted a
@@ -232,7 +232,7 @@ export function emptyRunFailureFacts(kind: RunFailureKind): RunFailureFacts {
 }
 
 /**
- * Ruling 175: a dollar amount as a run's lines, packets and notes print it.
+ * Ruling 159: a dollar amount as a run's lines, packets and notes print it.
  * Cents from a dollar up; below a dollar up to four decimals, so a spend just
  * past a small cap does not print as equal to it ("reached its $0.01 cap after
  * spending $0.0106", not "…after spending $0.01"). Never fewer than two.
@@ -243,13 +243,13 @@ export function formatUsd(amount: number): string {
 }
 
 /**
- * Ruling 408: the lead sentence of the note Viberr writes when an operator plan
+ * Ruling 116: the lead sentence of the note Viberr writes when an operator plan
  * step did not run, and the matcher that finds it again.
  *
  * Paired here for the same reason {@link RUN_DID_NOT_COMPLETE_RE} is: the
  * writer is in `operator-codex-plan.server.ts` and the reader is in
  * `operator-snapshot.server.ts`, and a silent drift between them turns the
- * carry back into the "read them on the timeline" instruction ruling 400
+ * carry back into the "read them on the timeline" instruction ruling 121
  * retired.
  */
 export const PLAN_NOT_CARRIED_OUT_LEAD = "**The operator's plan was not carried out in full.**";

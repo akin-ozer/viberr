@@ -11,7 +11,7 @@ import {
 import { fixtureServer, listen } from "./mcp-upstream";
 
 /**
- * Ruling 469: an in-test MCP server that signs in with OAuth, the shape of the
+ * Ruling 192: an in-test MCP server that signs in with OAuth, the shape of the
  * Cloudflare API MCP server (`https://mcp.cloudflare.com/mcp`, measured
  * 2026-09-24): the MCP endpoint answers 401 with `WWW-Authenticate: Bearer
  * realm="OAuth", resource_metadata="…/.well-known/oauth-protected-resource/mcp"`,
@@ -38,14 +38,14 @@ export interface OAuthServerOptions {
   /** RFC 7591 `client_secret_expires_at` on the next registration (seconds
    *  since the epoch); null leaves it out. Recorded, not enforced. */
   clientSecretExpiresAt: number | null;
-  /** Ruling 486: the `scope` the next token reply (a code exchange or a
+  /** Ruling 192: the `scope` the next token reply (a code exchange or a
    *  refresh) names, space-joined; null leaves it out, which RFC 6749 reads
    *  as "the scope requested" (or, on a refresh, the scope already held). */
   grantedScope: string | null;
-  /** Ruling 486: the protected-resource metadata's `scopes_supported`; null
+  /** Ruling 192: the protected-resource metadata's `scopes_supported`; null
    *  leaves it out, as Cloudflare's does. */
   scopesSupported: string[] | null;
-  /** Ruling 486(d): how the MCP endpoint answers a call to `delete_zone`, the
+  /** Ruling 192: how the MCP endpoint answers a call to `delete_zone`, the
    *  fixture's write tool: `http-403` is an RFC 6750 `insufficient_scope`
    *  refusal, `tool-error` the shape Cloudflare's API gives a write on a
    *  read-only grant (a tool result, `isError`, "10000: Authentication

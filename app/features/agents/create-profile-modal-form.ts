@@ -10,7 +10,7 @@ import {
 } from "./create-profile-modal-derive";
 
 /**
- * The agent profile editor's form (ruling 700(e), the large-component split of
+ * The agent profile editor's form (ruling 13(b), the large-component split of
  * `create-profile-modal.tsx`, on the task page's recipe): the fields, the grant
  * pickers and the save gate, each a hook that `CreateProfileModal` calls in the
  * order its state always registered (the fields, the grants, then the model
@@ -184,7 +184,7 @@ export interface SaveGate {
   readiness: SaveReadiness;
   /** Refused saves so far. */
   attempted: number;
-  /** Which of name and role a refused save named (ruling 147); null on a
+  /** Which of name and role a refused save named (ruling 288); null on a
    *  pristine form. */
   flaggedField: "name" | "role" | null;
   /** The requirements line reads as an error: the server refused, or a save
@@ -214,7 +214,7 @@ export function useSaveGate(input: SaveGateInput): SaveGate {
     // rules out the picker's initial "" for the payload below.
     if (!valid || !backend) {
       setAttempted((n) => n + 1);
-      // Ruling 147: the refusal puts the person on the first unmet requirement.
+      // Ruling 288: the refusal puts the person on the first unmet requirement.
       const dlg = dialogRef.current;
       const target =
         missing === "name" || missing === "role"
@@ -235,7 +235,7 @@ export function useSaveGate(input: SaveGateInput): SaveGate {
       caps,
       resources: res,
     };
-    // Ruling 518: the operator has no name or role to send.
+    // Ruling 176: the operator has no name or role to send.
     if (!isOperator) {
       payload.name = name.trim();
       payload.role = role.trim();

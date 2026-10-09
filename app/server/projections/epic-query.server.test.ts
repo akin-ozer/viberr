@@ -32,7 +32,7 @@ import {
 } from "./rebuilder.server";
 
 /**
- * Ruling 503(a)/(b): the epic read models. An epic's row is its file
+ * Ruling 272/(b): the epic read models. An epic's row is its file
  * (`epic_projections`, written by the rebuilder); its PROGRESS is counted from
  * the task rows whose `epic_id` names it, at read time, never stored, with
  * archived tasks counted apart and left out of the total.
@@ -145,7 +145,7 @@ async function seeded(): Promise<TestStore> {
   return store;
 }
 
-describe("ruling 503(b): listEpics", () => {
+describe("ruling 272: listEpics", () => {
   it("lists a project's epics by number, each with its own progress", async () => {
     // CANARY: order listEpics by `epic_id` (text order puts epic-10 before
     // epic-2).
@@ -173,7 +173,7 @@ describe("ruling 503(b): listEpics", () => {
   });
 });
 
-describe("ruling 503(b): getEpic", () => {
+describe("ruling 272: getEpic", () => {
   it("counts progress from the task rows: archived apart and out of the total, held inside the others, an unknown stage its own segment last", async () => {
     // CANARY: drop the `if (!terminal) continue` after `progress.archived +=
     // row.n` in progressByEpic (the unfinished archived task joins the total
@@ -197,7 +197,7 @@ describe("ruling 503(b): getEpic", () => {
     });
   });
 
-  it("ruling 651: a task archived at the terminal stage still counts as done, in the total and its band; one archived unfinished stays out", async () => {
+  it("ruling 274: a task archived at the terminal stage still counts as done, in the total and its band; one archived unfinished stays out", async () => {
     // CANARY: put back the `continue` for every archived row in
     // progressByEpic and VIB-11 drops out of the total, done and its band.
     const store = await seeded();
@@ -282,7 +282,7 @@ describe("ruling 503(b): getEpic", () => {
   });
 });
 
-describe("ruling 503(b): an epic's tasks", () => {
+describe("ruling 272: an epic's tasks", () => {
   it("epicTaskRows and epicTaskKeys list them by key number, archived ones included", async () => {
     // CANARY: order epicTaskRows by `task_key` (text order puts VIB-10 right
     // after VIB-1).
@@ -315,7 +315,7 @@ describe("ruling 503(b): an epic's tasks", () => {
   });
 });
 
-describe("ruling 503(e): getEpicDetail", () => {
+describe("ruling 325: getEpicDetail", () => {
   it("adds the file's history, newest first, to the row's description and progress", async () => {
     // CANARY: drop `dataRoot: options.dataRoot` from getEpicDetail's
     // readEpicFile (the history is read from another store, and comes back
@@ -338,7 +338,7 @@ describe("ruling 503(e): getEpicDetail", () => {
   });
 });
 
-describe("ruling 503(a): the rebuilder projects epic files", () => {
+describe("ruling 17: the rebuilder projects epic files", () => {
   it("rebuildEpicFile projects an epic file into epic_projections, again only when it changed, and the watcher's path router sends epic files there", async () => {
     // CANARY: drop the EPIC_PATH_RE branch from rebuildPath (an edited epic
     // file is ignored by the watcher).

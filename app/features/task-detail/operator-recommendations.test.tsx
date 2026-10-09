@@ -8,7 +8,7 @@ import {
 } from "./operator-recommendations";
 
 /**
- * Ruling 137 (pass 34, F34-15): an `accept_completion` card names the work
+ * Ruling 99 (pass 34, F34-15): an `accept_completion` card names the work
  * revision it was authored against, so a reader can tell whether the offer
  * still describes the branch. Other kinds never render one, and a card written
  * before the binding existed renders nothing special.
@@ -78,13 +78,13 @@ describe("OperatorRecommendations: the operator's reason renders its inline form
 });
 
 /**
- * Ruling 162 (pass 35, F35-12 (c)): no surface offers an acceptance the gate
- * will refuse. The acceptance card keeps its control (ruling 147's shape) but
+ * Ruling 95 (pass 35, F35-12 (c)): no surface offers an acceptance the gate
+ * will refuse. The acceptance card keeps its control (ruling 288's shape) but
  * prints the gate's refusal as a keyed alert, and Apply re-announces it
  * instead of opening a confirm the server would answer 409 (KNC-6: the card
  * said "Accept completion", the click said "conflicts with the base branch").
  */
-describe("OperatorRecommendations: the acceptance gate's refusal on the card (ruling 162)", () => {
+describe("OperatorRecommendations: the acceptance gate's refusal on the card (ruling 95)", () => {
   const REFUSAL =
     "VIB-1's review PR #7 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.";
   const cards: RecommendationView[] = [
@@ -93,7 +93,7 @@ describe("OperatorRecommendations: the acceptance gate's refusal on the card (ru
     { id: "r-run", kind: "run_agent", profileId: "dev", label: "Run Developer", detail: "" },
   ];
 
-  it("ruling 451(g): a note that returns on a refresh does not shake again", () => {
+  it("ruling 284: a note that returns on a refresh does not shake again", () => {
     // Found in review: the gate cleared (the note unmounted), then blocked
     // again on a later refresh, and the note came back still carrying the
     // shake of a click made minutes before. CANARY: put `.refused` back on the
@@ -149,7 +149,7 @@ describe("OperatorRecommendations: the acceptance gate's refusal on the card (ru
     expect(onApply).not.toHaveBeenCalled();
     // The refused click re-keys the alert: a fresh element, announced again.
     expect(container.querySelectorAll('[role="alert"]')[0]).not.toBe(alerts[0]);
-    // Ruling 451(g): a note that stands on its own does not shake; the one
+    // Ruling 284: a note that stands on its own does not shake; the one
     // answering the latest refused click (the second card's) does. CANARY: put
     // `refused` on the note unconditionally and it shakes on every page load.
     expect(alerts[0]!.classList.contains("refused")).toBe(false);

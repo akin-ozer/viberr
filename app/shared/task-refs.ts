@@ -1,11 +1,11 @@
 /**
  * What a task file says about other work, in the spellings the task schema
- * validates: the tasks its `blockedBy` waits on (ruling 131) and the epic its
- * `epic` field puts it in (ruling 503). Client-safe, and it imports nothing.
+ * validates: the tasks its `blockedBy` waits on (ruling 55) and the epic its
+ * `epic` field puts it in (ruling 272). Client-safe, and it imports nothing.
  *
  * Keep it that way. `task-file.schema.ts` is in the closed controller dock's
  * static closure (`sse-event.schema.ts` takes its `READINESS_VALUES`), which
- * root ships to every page and ruling 457 (FL-1) budgets by module count, so
+ * root ships to every page and ruling 11 (FL-1) budgets by module count, so
  * whatever the schema imports, every page loads. Taking these spellings from
  * their vocabularies' homes put those homes on every page too:
  * `shared/dependencies.ts` with its hold sentences, and the epic file's zod
@@ -17,7 +17,7 @@
  * here so that neither page loads the epic file schema.
  */
 
-// ------------------------------------------------------ blockedBy (ruling 131)
+// ------------------------------------------------------ blockedBy (ruling 55)
 
 /** One `blockedBy` entry, parsed: a task in the same project. The spelling is
  *  documented with the rest of the vocabulary in `shared/dependencies.ts`. */
@@ -50,7 +50,7 @@ export function canonicalDependencyRef(text: string): string | null {
   return ref ? formatDependencyRef(ref) : null;
 }
 
-// ----------------------------------------------------------- epic (ruling 503)
+// ----------------------------------------------------------- epic (ruling 272)
 
 /** An epic's status, a person's call (what each one means is in
  *  `schemas/epic-file.schema.ts`). */

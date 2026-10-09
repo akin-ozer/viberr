@@ -78,7 +78,7 @@ export function compareBoardOrder(a: TaskSummary, b: TaskSummary): number {
  * make it differ between the two renders. The board revalidates on every project
  * domain event (a transition, a comment, a run starting or stopping) and on
  * navigation, but not on runs' console lines (a board never receives them,
- * ruling 457), and the shortest threshold is an hour. A task that crosses into
+ * ruling 300), and the shortest threshold is an hour. A task that crosses into
  * quiet therefore shows it at the project's next event or the next navigation,
  * not the minute it crosses.
  * The RELATIVE TEXT beside it is a different problem and is solved the way this
@@ -189,7 +189,7 @@ export function listProjectTasks(
     /** Data root for the live-backend overlay — tests only (production
      *  defaults to the env root, same as every file accessor). */
     dataRoot?: string;
-    /** Ruling 503: only the tasks in this epic; `null` for the tasks in
+    /** Ruling 273: only the tasks in this epic; `null` for the tasks in
      *  none. Absent: every task. */
     epicId?: string | null;
   } = {},
@@ -248,7 +248,7 @@ function mapProjectTasks(
   // task.md (backend + role, never a name) stays only for profiles no longer
   // deployed.
   const liveAgents = deployedSpecialistIdentities(slug, opts.dataRoot);
-  // Ruling 131: ONE resolver for the whole query (the stage list is read once);
+  // Ruling 55: ONE resolver for the whole query (the stage list is read once);
   // every held row's entries are resolved to their live state here, never in
   // the pure mapper and never from a cache.
   const resolveBlockedBy = dependencyResolver(db, slug);
@@ -285,7 +285,7 @@ function mapProjectTasks(
       terminal: accepted,
       runInFlight: facts.runInFlight,
       held: blockedBy.length > 0,
-      // Ruling 225: the clock a schedule-resting task is measured against.
+      // Ruling 45: the clock a schedule-resting task is measured against.
       resumesAt: summary.resumesAt ?? null,
     };
     return {
@@ -324,7 +324,7 @@ export function listProjectLabels(db: DatabaseSync, slug: string): string[] {
 /**
  * The full board read model (columns in project stage order) plus the flat
  * task list the columns were built from, in
- * {@link listProjectTasks} order and archived tasks included. Ruling 457: the
+ * {@link listProjectTasks} order and archived tasks included. Ruling 11: the
  * workspace layout also needs the review queue, which reads the same rows, so
  * it hands this list on instead of mapping every task a second time.
  */

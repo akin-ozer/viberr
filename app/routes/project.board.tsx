@@ -27,11 +27,11 @@ import { BoardPage } from "~/features/board/board-page";
 
 /**
  * Board view (board spec). The columns are this route's own loader (ruling
- * 457, BOARD-6: they used to ride the workspace layout, so every project page
+ * 11, BOARD-6: they used to ride the workspace layout, so every project page
  * shipped them); the rail counts stay in the layout, and both read the project
  * through `readWorkspace`, so one query per request still feeds the rail counts
  * AND the columns, and every action here revalidates both. Actions:
- * create-task (phase-3 createTask, RBAC inside; ruling 503: optionally in an
+ * create-task (phase-3 createTask, RBAC inside; ruling 272: optionally in an
  * epic), rescan (reconcile file store
  * ↔ projections). No optimistic UI for governed state — revalidation shows the
  * new card.
@@ -73,10 +73,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     params.slug,
     reviewQueue.ready.map((r) => r.key),
   );
-  // Ruling 349: a card says "agent queued" for a run the cap parked; the fact
+  // Ruling 44: a card says "agent queued" for a run the cap parked; the fact
   // is on the run row, read once for the project.
   const liveRuns = liveRunStateByTask(db, params.slug);
-  // Ruling 457 (BOARD-3): each card ships the fields the board reads
+  // Ruling 11 (BOARD-3): each card ships the fields the board reads
   // (`toBoardCard`), not the whole summary. Gap-10's `quiet` rides along.
   const card = (t: TaskActivitySummary) =>
     toBoardCard(
@@ -92,12 +92,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     // is the surface people live on and it must not call GitHub to render. The
     // row is written where the answer was already known (project creation, the
     // GitHub page's cached probe, a repair) and by the poller's re-check of a
-    // failing one (ruling 517); null means nothing has looked at the repository
+    // failing one (ruling 223); null means nothing has looked at the repository
     // the project points at now.
     repoAccess: readRepoHealth(db, params.slug)?.result ?? null,
-    // Ruling 503: the project's epics once (one statement), for the epic
+    // Ruling 325: the project's epics once (one statement), for the epic
     // filter and the New-task Epic pick; a card carries only its epic's id,
-    // which the filter reads (ruling 172 keeps the chip off the card).
+    // which the filter reads (ruling 306(e) keeps the chip off the card).
     epics: listEpicChips(db, params.slug),
   };
 }
@@ -130,10 +130,10 @@ export async function action({ request, params }: Route.ActionArgs) {
       // Due date is validated in `createTask` (blank ⇒ no due date).
       const dueDate = String(formData.get("dueDate") ?? "").trim();
       if (dueDate) createInput.dueDate = dueDate;
-      // Ruling 503: the epic it starts in; `createTask` checks it exists.
+      // Ruling 272: the epic it starts in; `createTask` checks it exists.
       const epic = String(formData.get("epic") ?? "").trim();
       if (epic) createInput.epic = epic;
-      // Ruling 533: the files the task is filed with. `createTask` checks
+      // Ruling 76: the files the task is filed with. `createTask` checks
       // them before it allocates a key and saves them before triage runs.
       const files = await formFiles(formData);
       if (files.length > 0) createInput.attachments = files;
@@ -156,8 +156,8 @@ export async function action({ request, params }: Route.ActionArgs) {
           taskKey: String(formData.get("taskKey") ?? ""),
           toStageId: String(formData.get("to") ?? ""),
           beforeKey: beforeRaw || null,
-          // Ruling 88 (F21-2): a drop on the FINAL column is an acceptance —
-          // the board's ceremony (ruling 53 / R18-7, the shared `AcceptConfirm`)
+          // Ruling 97 (F21-2): a drop on the FINAL column is an acceptance —
+          // the board's ceremony (R18-7, the shared `AcceptConfirm`)
           // has said so on screen for three passes while this POST carried
           // nothing. The key rides on every reorder; `reorderTask` forwards it
           // to `transitionStage`, which consults it on the terminal branch
@@ -165,7 +165,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           // Absent fields ⇒ `null` ⇒ a drop on Done that skipped the dialog is
           // refused.
           ack: parseAcceptanceDisclosure(formData),
-          // Ruling 381: why the card went BACK. The server requires it for a
+          // Ruling 47: why the card went BACK. The server requires it for a
           // backward manual move, whichever door the move came through.
           reason: String(formData.get("reason") ?? ""),
         },
@@ -234,12 +234,12 @@ export default function Board({ loaderData }: Route.ComponentProps) {
       // repository GitHub will not serve says so where the work happens instead
       // of only on its GitHub page.
       repoAccess={loaderData.repoAccess}
-      // Ruling 694: the layout already ships the project's repository.
+      // Ruling 307: the layout already ships the project's repository.
       hasRepository={layout.project.repo !== null}
       epics={loaderData.epics}
     />
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.board");

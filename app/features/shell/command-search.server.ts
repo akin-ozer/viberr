@@ -10,7 +10,7 @@ import { parseTaskLabels } from "~/shared/mapping/task.server";
  *
  * The topbar used to promise "Search tasks, branches, agents…" while only
  * filtering the board that happened to be open. This resolves those things,
- * with projects and (ruling 503) epics, GLOBALLY, over exactly the projects
+ * with projects and (ruling 325) epics, GLOBALLY, over exactly the projects
  * the viewer may open: it reuses
  * `listHomeProjectsForUser`, the same membership scoping the home grid and the
  * R15-4 workspace gate apply, so the palette can never surface a task, branch
@@ -28,7 +28,7 @@ export interface CommandHit {
   id: string;
   /** Primary line. */
   label: string;
-  /** A task hit's key, drawn quietly ahead of its title (ruling 625): baked
+  /** A task hit's key, drawn quietly ahead of its title (ruling 301): baked
    *  into the label it was as loud as the title. */
   key?: string;
   /** Secondary line (project name, stage, role…). */
@@ -182,7 +182,7 @@ export function searchWorkspace(
       prefix,
     ) as TaskRow[];
 
-  // Ruling 503: an epic, by its name or its id, the way Linear's palette finds
+  // Ruling 325: an epic, by its name or its id, the way Linear's palette finds
   // a project. Open ones first; a done or cancelled one says so, as an
   // archived task does.
   // SAFETY: EpicRow names exactly the four columns this SELECT lists, in the

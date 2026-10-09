@@ -34,7 +34,7 @@ export type ProjectRole = (typeof PROJECT_ROLES)[number];
 export const BOUNDARY_VALUES = ["auto", "approval", "human"] as const;
 export type Boundary = (typeof BOUNDARY_VALUES)[number];
 
-/** Agent capability modes (orchestrator ruling 2): forbidden === "human".
+/** Agent capability modes (ruling 26(a)): forbidden === "human".
  * `off` is the operator-RBAC "don't recommend" mode — the capability is
  * withheld entirely (the tool is not even offered), distinct from `human`
  * (reserved for a human to perform). Added for operator assignment RBAC. */
@@ -47,7 +47,7 @@ const stageSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
-    /** One of the twenty named presets (ruling 364); absent reads as slate. */
+    /** One of the twenty named presets (ruling 279); absent reads as slate. */
     color: stageColorSchema.default("slate"),
   })
   .loose();
@@ -170,7 +170,7 @@ export const guardrailSchema = z
 export type Guardrail = z.infer<typeof guardrailSchema>;
 
 /**
- * Ruling 178 (pass 36, G36-3): one project-level REQUIRED-reviewer rule —
+ * Ruling 89 (pass 36, G36-3): one project-level REQUIRED-reviewer rule —
  * "profile X reviews at stage Y". Before this rule, required-ness was emergent:
  * a reviewer was required on a task only once the operator engaged it there,
  * so a task whose operator never engaged the reviewer was acceptable with no
@@ -205,7 +205,7 @@ const projectSlugSchema = z.string().regex(/^[a-z0-9][a-z0-9-]*$/);
 const archivedSchema = z.boolean().optional();
 /** The project's GitHub repo ("owner/name"). One project, one repository —
  * P13-D-5 deleted the task-level override (nothing ever wrote `task.repo`
- * and the admin toggle gated nothing). Ruling 700(a): the parse below holds it
+ * and the admin toggle gated nothing). Ruling 225: the parse below holds it
  * to `REPO_SLUG_RE`, so no reader builds a checkout path from anything else. */
 const repoSchema = z.string().nullable();
 const defaultBranchSchema = z.string().min(1);
@@ -267,7 +267,7 @@ const guardrailsSchema = z.array(guardrailSchema);
 const requiredReviewersSchema = z.array(requiredReviewerSchema);
 
 /**
- * Ruling 245: the lease rows, named so the tolerant parser can reach
+ * Ruling 60: the lease rows, named so the tolerant parser can reach
  * `.element` — the same shape `requiredReviewersSchema` is extracted for.
  */
 const fileLeasesSchema = z.array(
@@ -285,7 +285,7 @@ const fileLeasesSchema = z.array(
 export type FileLeaseRow = z.infer<typeof fileLeasesSchema>[number];
 
 /**
- * Ruling 482 (pass 40, F40-52): the project's GATES — commands Viberr itself
+ * Ruling 17 (pass 40, F40-52): the project's GATES — commands Viberr itself
  * runs in a checkout of every delivered revision, as the task owner's agent
  * uid, recording each exit code, wall time and log on the task
  * (`app/server/tasks/project-gates.server.ts`). Before this the gate list was
@@ -330,7 +330,7 @@ const projectFrontmatterSchema = z.object({
   guardrails: guardrailsSchema,
   requiredReviewers: requiredReviewersSchema,
   /**
-   * Ruling 239 (pass 37): the project's RULINGS knowledge base, by store
+   * Ruling 208(a) (pass 37): the project's RULINGS knowledge base, by store
    * directory, or null when the project has not named one.
    *
    * Unlike `agents[].resources.kb`, which is a per-profile grant a controller
@@ -344,7 +344,7 @@ const projectFrontmatterSchema = z.object({
    */
   rulingsKb: z.string().nullish().catch(null),
   /**
-   * Ruling 245 (pass 37, F37-74): per-file LEASES — which task owns a shared
+   * Ruling 60 (pass 37, F37-74): per-file LEASES — which task owns a shared
    * path until it merges.
    *
    * `blockedBy` says "do not START until done" and is the only ordering
@@ -359,7 +359,7 @@ const projectFrontmatterSchema = z.object({
    */
   fileLeases: fileLeasesSchema.default([]).catch([]),
   /**
-   * Ruling 482: the commands Viberr runs on every delivered revision. Absent
+   * Ruling 17: the commands Viberr runs on every delivered revision. Absent
    * (not `[]`) on a project that declares none, so a project.md written
    * before this existed is not rewritten with an empty key.
    */
@@ -476,8 +476,8 @@ export function parseProjectFrontmatter(
     }),
     slug,
     archived: tolerant(diagnostics, data, "archived", archivedSchema, false),
-    // Ruling 700(a): a repository outside the pattern reads as none (ruling
-    // 667's project with no repository), and as an error, so `store:check`
+    // Ruling 225: a repository outside the pattern reads as none (ruling
+    // 224's project with no repository), and as an error, so `store:check`
     // lists the project among the degraded files and names the field. The
     // pattern is applied here, not on `repoSchema`: the browser loads this
     // module for its constants, and only the server parses project.md.
@@ -538,7 +538,7 @@ export function parseProjectFrontmatter(
     // and an explicitly disabled `delete-branch-after-merge` flipped back to
     // its ON default. The next project write then persisted the empty list.
     guardrails: tolerantRows(diagnostics, data, "guardrails", guardrailsSchema.element),
-    // Ruling 178: per row for the same reason — an emptied list reads as "no
+    // Ruling 17: per row for the same reason — an emptied list reads as "no
     // required reviewer", which silently reopens the acceptance gate.
     requiredReviewers: tolerantRows(
       diagnostics,
@@ -546,7 +546,7 @@ export function parseProjectFrontmatter(
       "requiredReviewers",
       requiredReviewersSchema.element,
     ),
-    // Ruling 239: the project's rulings KB. `tolerant` with a null fallback,
+    // Ruling 208(a): the project's rulings KB. `tolerant` with a null fallback,
     // like `credentialPolicy` — a garbled value must read as "no rulings KB"
     // rather than failing the whole project parse, and a project.md written
     // before this field existed has none.
@@ -558,7 +558,7 @@ export function parseProjectFrontmatter(
     // this same pass and wrote fine while reading back undefined.
     fileLeases: tolerantRows(diagnostics, data, "fileLeases", fileLeasesSchema.element),
   };
-  // Ruling 482: per ROW, because a dropped gate silently stops being run and
+  // Ruling 17: per ROW, because a dropped gate silently stops being run and
   // stops blocking. Absent stays absent: only a project that declared gates
   // carries the key.
   if (data.gates !== undefined) {

@@ -60,7 +60,7 @@ function ProviderModal({
   const meta = PROVIDER_META[provider];
   const [clientId, setClientId] = useState(existing.clientId ?? "");
   const [secret, setSecret] = useState("");
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => setDone(true));
   // On a NEW provider both values are required; on an existing one the secret
@@ -167,7 +167,7 @@ function CallbackUrl({ url }: { url: string }) {
     }
   };
   return (
-    // Ruling 625: the label is prose; only the URL is code.
+    // Ruling 280: the label is prose; only the URL is code.
     <span className="sub">
       Callback URL: <code className="mono">{url}</code>{" "}
       <button
@@ -193,7 +193,7 @@ export function SsoPanel({
   const [modal, setModal] = useState<AuthProviderView | null>(null);
   const [confirm, setConfirm] = useState<AuthProviderView | null>(null);
   const action = useOrgAction();
-  // Ruling 368: the row and the button whose request is in flight. The rest
+  // Ruling 286: the row and the button whose request is in flight. The rest
   // of the row's controls only wait.
   const inFlight = inFlightIntent(action.fetcher);
   const inFlightProvider = action.fetcher.formData?.get("provider") ?? null;

@@ -17,13 +17,13 @@ import { flush, waitFor } from "../../../test-support/polling";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
- * Ruling 503(h): nothing is lost at the upgrade. Boot converts every chained
- * goal of ruling 99 into the epic with its number, once, and every step is
+ * Ruling 17: nothing is lost at the upgrade. Boot converts every chained
+ * goal of ruling 273 into the epic with its number, once, and every step is
  * idempotent (`convertGoalsToEpics`; docs/domain/controller-and-epics.md §7.6;
  * the runbook's "Goal chains became epics").
  *
  * The goal writer is gone, so the legacy store is written here the way ruling
- * 99 left it on disk: `goals/goal-N.md` with the goal writer's keys in its
+ * 273 left it on disk: `goals/goal-N.md` with the goal writer's keys in its
  * order, and task files carrying the retired `goalRef` where `epic` sits now
  * (`goalRef: null` on every task outside a chain), with `goal-N link M` waits
  * in `blockedBy` and in open decisions. The store is re-projected before the
@@ -201,14 +201,14 @@ function legacyStore(m: Modules, app: AppTestContext) {
     writeGoal(goal: LegacyGoal): void {
       m.atomic.writeFileAtomic(path.join(goalsDir, `${goal.id}.md`), goalText(goal));
     },
-    /** Every seeded task as ruling 99 left it: in no chain. */
+    /** Every seeded task as ruling 273 left it: in no chain. */
     legacyEveryTask(): void {
       for (const entry of readdirSync(tasksDir, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
         writeLegacyTask(read(entry.name).parsed, null);
       }
     },
-    /** A seeded task, rewritten the way ruling 99 left it. */
+    /** A seeded task, rewritten the way ruling 273 left it. */
     legacySeedTask(
       taskKey: string,
       goalRef: LegacyGoalRef | null,
@@ -370,7 +370,7 @@ const keyNumber = (key: string): number => Number(key.split("-")[1]);
 
 // ===================================================================== A
 
-describe("ruling 503(h): the upgrade turns every goal chain into an epic", () => {
+describe("ruling 17: the upgrade turns every goal chain into an epic", () => {
   let app: AppTestContext;
   let m: Modules;
   let store: ReturnType<typeof legacyStore>;
@@ -670,7 +670,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     app.cleanup();
   });
 
-  it("ruling 503(h): each goal status maps onto the epic's", () => {
+  it("ruling 17: each goal status maps onto the epic's", () => {
     // CANARY: `epicStatusOf` answering in_progress for every active goal (no
     // started-link check) turns epic-2 and epic-10 red.
     const expected = {
@@ -690,7 +690,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     }
   });
 
-  it("ruling 503(h): goal-N becomes epic-N, or the next free number when a person's epic holds N", () => {
+  it("ruling 17: goal-N becomes epic-N, or the next free number when a person's epic holds N", () => {
     // CANARY: `ensureEpic` taking `epic-${goal.number}` without checking it is
     // free: `createEpicFile` refuses epic-9, and the project's whole
     // conversion stops.
@@ -723,7 +723,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(store.epic("epic-9").description).toBe("Made by a person.");
   });
 
-  it("ruling 503(h): the epic keeps the goal's title, description, creator, conversation and history, and says it was converted", () => {
+  it("ruling 17: the epic keeps the goal's title, description, creator, conversation and history, and says it was converted", () => {
     // CANARY: `ensureEpic` creating the file without `timeline: goal.timeline`
     // replaces the chain's history with a bare "Created by" line.
     const epic = store.epic("epic-1");
@@ -763,7 +763,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(store.epic("epic-2").frontmatter).toMatchObject({ createdBy: ids.murat, conversationId: null });
   });
 
-  it("ruling 503(h): every task that carried a link, or named the goal in goalRef, joins the epic with an Epic note and loses goalRef", () => {
+  it("ruling 17: every task that carried a link, or named the goal in goalRef, joins the epic with an Epic note and loses goalRef", () => {
     // CANARY: dropping step 2's `scan.goalId === goal.id` loop leaves VIB-148,
     // which named goal-1 without carrying a link, out of epic-1.
     const members = [
@@ -790,7 +790,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(taskRow(app.db, "VIB-153").epicId).toBeNull();
   });
 
-  it("ruling 503(h): an unstarted link of a running chain becomes a held task in the epic, made on the creator's authority and signed by the conversion", () => {
+  it("ruling 17: an unstarted link of a running chain becomes a held task in the epic, made on the creator's authority and signed by the conversion", () => {
     // CANARY: `startLinkTask` dropping `signedBy`: the owner seat's `assign`
     // event is then Arda's own, not the conversion's.
     const link2 = madeFor(first, "goal-1", 0);
@@ -835,7 +835,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(created.find((row) => row.taskKey === index)?.actorUserId).toBe(ids.murat);
   });
 
-  it("ruling 503(h): a link waiting on a later chain's unstarted link is made after it, waiting on its task", () => {
+  it("ruling 17: a link waiting on a later chain's unstarted link is made after it, waiting on its task", () => {
     // CANARY: `startUnstartedLinks` not deferring a candidate whose wait is
     // `later`: goal-2's link is made first, waiting on VIB-153 alone.
     const provision = madeFor(first, "goal-9");
@@ -845,7 +845,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(keyNumber(index)).toBeGreaterThan(keyNumber(provision));
   });
 
-  it("ruling 503(h): the unstarted links of a paused, stopped or cancelled chain are listed in the epic's description with their text", () => {
+  it("ruling 17: the unstarted links of a paused, stopped or cancelled chain are listed in the epic's description with their text", () => {
     // CANARY: dropping the `goal.status !== "active"` branch of
     // `startUnstartedLinks` makes paused goal-3's link 2 a task.
     for (const title of ["Export to CSV", "Send the welcome email", "Import the archive"]) {
@@ -878,7 +878,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     }
   });
 
-  it("ruling 503(h): a creator who lost task creation has the links listed, re-proven with a silent deny", () => {
+  it("ruling 17: a creator who lost task creation has the links listed, re-proven with a silent deny", () => {
     // CANARY: dropping the `creatorMayCreateTasks` check hands the link to
     // `createTask`, whose own loud check refuses Selin: a
     // `project.authority.denied` row, and another reason on the epic.
@@ -892,7 +892,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(denied.filter((row) => row.actorUserId === ids.selin)).toEqual([]);
   });
 
-  it("ruling 503(h): a link whose wait can never be satisfied is listed with why", () => {
+  it("ruling 17: a link whose wait can never be satisfied is listed with why", () => {
     // CANARY: `startUnstartedLinks` making a link whose wait is `gone`
     // instead of listing it: goal-8's Dashboards becomes a task waiting on
     // nothing.
@@ -921,7 +921,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     );
   });
 
-  it("ruling 503(h): a link whose task is refused is listed with the refusal", () => {
+  it("ruling 17: a link whose task is refused is listed with the refusal", () => {
     // CANARY: `describeEpic` adding its own full stop after a reason that
     // already ends in one (the refusal's message): "abandoned work..".
     expect(tasksTitled(app.db, "Revive the spike")).toEqual([]);
@@ -931,7 +931,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     );
   });
 
-  it("ruling 503(h): a goal-N link M wait is respelled by the key of the task that carried, or now carries, the link", () => {
+  it("ruling 17: a goal-N link M wait is respelled by the key of the task that carried, or now carries, the link", () => {
     // CANARY: `rewriteWaits` without `fm.blockedBy = next` keeps the list the
     // task parser read, which has already dropped every goal-link entry.
     const link2 = madeFor(first, "goal-1", 0);
@@ -956,7 +956,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     );
   });
 
-  it("ruling 503(h): a wait on a skipped link is dropped, and a task left waiting on nothing is released", async () => {
+  it("ruling 17: a wait on a skipped link is dropped, and a task left waiting on nothing is released", async () => {
     // CANARY: `rewriteWaits` never setting `released`: no `announceRelease`,
     // so VIB-182 gets no release note, audit row or notice.
     const cleared = store.task("VIB-182");
@@ -1002,7 +1002,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(operatorRunStates(app.db, "VIB-182")).toHaveLength(1);
   });
 
-  it("ruling 503(h): a wait on a link that will never have a task is dropped, and a task left with nothing waits for a person", () => {
+  it("ruling 17: a wait on a link that will never have a task is dropped, and a task left with nothing waits for a person", () => {
     // CANARY: dropping `fm.waiting = "human"` from `rewriteWaits`' dead
     // branch leaves VIB-183 waiting on nobody with nothing left to wait on.
     const dead = store.task("VIB-183");
@@ -1026,7 +1026,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     );
   });
 
-  it("ruling 503(h): a member's own goal-link wait is respelled although joining the epic rewrote its file first", () => {
+  it("ruling 17: a member's own goal-link wait is respelled although joining the epic rewrote its file first", () => {
     // CANARY: `rewriteWaits` reading the waits from the file at step 4 instead
     // of the scan taken before the joins: the join's write already dropped
     // the entry the task parser cannot read.
@@ -1035,7 +1035,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(waitNotes(store.task("VIB-168"))[0]?.text).toContain("goal-1 link 1 is VIB-151.");
   });
 
-  it("ruling 503(h): an open decision's options that named goal links are respelled by task key", () => {
+  it("ruling 17: an open decision's options that named goal links are respelled by task key", () => {
     // CANARY: skipping the text-level packet respell in `rewriteWaits` leaves
     // the goal-link items in the file, and the task parser drops every option
     // holding one.
@@ -1052,7 +1052,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(first.rewrittenWaits).toContain(`${SLUG}/VIB-185`);
   });
 
-  it("ruling 503(h): an option whose only goal-link entry is dropped stays in the decision", () => {
+  it("ruling 17: an option whose only goal-link entry is dropped stays in the decision", () => {
     // CANARY: the packet respell deleting a list's last item but keeping its
     // key: `blockedBy:` with nothing under it reads as null, and the task
     // parser drops the whole option.
@@ -1067,7 +1067,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(cleanup?.newTask?.blockedBy ?? []).toEqual([]);
   });
 
-  it("ruling 503(h): a member's open decision keeps its goal-link option, respelled", () => {
+  it("ruling 17: a member's open decision keeps its goal-link option, respelled", () => {
     // CANARY: step 2's join (`updateTaskFile` parses and re-serializes the
     // file) running before step 4 respells the decision as text: the parser
     // drops the option it cannot read.
@@ -1081,7 +1081,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(first.rewrittenWaits).toContain(`${SLUG}/VIB-160`);
   });
 
-  it("ruling 503(h): notices that opened a goal on the Controller page open its epic", () => {
+  it("ruling 17: notices that opened a goal on the Controller page open its epic", () => {
     // CANARY: `finishGoal` updating only the exact `#goal-N` href, without
     // the LIKE for `#goal-N-link-M`.
     expect(notificationHref(app.db, "ntf_goal1_link")).toBe(`/projects/${SLUG}/epics/epic-1`);
@@ -1092,7 +1092,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(notificationHref(app.db, "ntf_other_project")).toBe("/projects/deploy-pipeline/controller#goal-1");
   });
 
-  it("ruling 503(h): each conversion leaves an epic.converted audit row with title, from and total", () => {
+  it("ruling 17: each conversion leaves an epic.converted audit row with title, from and total", () => {
     // CANARY: `finishGoal` recording the row without `total` in its details.
     const rows = listAuditEvents(app.db, { action: "epic.converted", limit: 500 });
     expect(rows).toHaveLength(9);
@@ -1117,7 +1117,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     });
   });
 
-  it("ruling 503(h): each goal file is filed under goals/converted, recording the tasks made for its links", () => {
+  it("ruling 17: each goal file is filed under goals/converted, recording the tasks made for its links", () => {
     // CANARY: `recordLinkTask` not writing the new task's key into the goal
     // file: the filed goal-1 says links 2 and 3 never started.
     expect(readdirSync(store.goalsDir)).toEqual(["converted"]);
@@ -1134,7 +1134,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
     expect(filed.body).toContain("## Description\n\nShip the new checkout flow.");
   });
 
-  it("ruling 503(h): a second run converts nothing and changes nothing", async () => {
+  it("ruling 17: a second run converts nothing and changes nothing", async () => {
     // CANARY: `finishGoal` not moving the goal file: the second run finds all
     // nine goals again and reports them converted.
     await waitFor(releaseSettled, "the operator turn VIB-182's release hands off to end", SETTLE_MS);
@@ -1149,7 +1149,7 @@ describe("ruling 503(h): the upgrade turns every goal chain into an epic", () =>
 
 // ===================================================================== B
 
-describe("ruling 503(h): a conversion interrupted part-way finishes on the next boot", () => {
+describe("ruling 17: a conversion interrupted part-way finishes on the next boot", () => {
   let app: AppTestContext;
   let m: Modules;
   let store: ReturnType<typeof legacyStore>;
@@ -1263,7 +1263,7 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
     app.cleanup();
   });
 
-  it("ruling 503(h): a goal whose epic was finished but whose file was not filed gets no second epic and no second task", () => {
+  it("ruling 17: a goal whose epic was finished but whose file was not filed gets no second epic and no second task", () => {
     // CANARY: `recordLinkTask` not writing the new tasks' keys into the goal
     // file: the finishing run makes links 2 and 3 tasks a second time.
     expect(finishing.failed).toEqual([]);
@@ -1279,7 +1279,7 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
     expect(existsSync(store.filedGoalPath("goal-1"))).toBe(true);
   });
 
-  it("ruling 503(h): the tasks an interrupted run already moved are left alone", () => {
+  it("ruling 17: the tasks an interrupted run already moved are left alone", () => {
     // CANARY: `joinEpic` putting a task already in its epic, with no
     // `goalRef`, through `updateTaskFile`, which always writes: a new
     // `updatedAt`, and a projection it never refreshes.
@@ -1290,7 +1290,7 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
     expect(now).toEqual(goal1Files);
   });
 
-  it("ruling 503(h): an epic already made is found by convertedFrom, a task already moved keeps its one note, and the rest join", () => {
+  it("ruling 17: an epic already made is found by convertedFrom, a task already moved keeps its one note, and the rest join", () => {
     // CANARY: `ensureEpic` without the `epicsByGoal` lookup finds epic-2 taken
     // and makes goal-2 a second epic, epic-3.
     expect(store.epicIds()).toEqual(["epic-1", "epic-2"]);
@@ -1318,7 +1318,7 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
     expect(readdirSync(store.goalsDir)).toEqual(["converted"]);
   });
 
-  it("ruling 503(h): once finished, a further run changes nothing", () => {
+  it("ruling 17: once finished, a further run changes nothing", () => {
     // CANARY: `finishGoal` not filing the goal file: the further run reports
     // goal-1 and goal-2 converted again.
     expect(afterwards).toEqual({ converted: [], rewrittenWaits: [], failed: [] });
@@ -1328,7 +1328,7 @@ describe("ruling 503(h): a conversion interrupted part-way finishes on the next 
 
 // ===================================================================== C
 
-describe("ruling 503(h): a goal file that cannot be read waits for the next boot", () => {
+describe("ruling 17: a goal file that cannot be read waits for the next boot", () => {
   let app: AppTestContext;
   let m: Modules;
   let store: ReturnType<typeof legacyStore>;
@@ -1369,7 +1369,7 @@ describe("ruling 503(h): a goal file that cannot be read waits for the next boot
     app.cleanup();
   });
 
-  it("ruling 503(h): it lands in failed and stays in goals/, while the readable goals convert", () => {
+  it("ruling 17: it lands in failed and stays in goals/, while the readable goals convert", () => {
     // CANARY: `readLegacyGoal` ignoring the hard-stop diagnostics converts the
     // broken file with defaults, into an epic titled goal-2.
     const failed = [{ projectSlug: SLUG, goalId: "goal-2", reason: "its frontmatter could not be read" }];
@@ -1383,14 +1383,14 @@ describe("ruling 503(h): a goal file that cannot be read waits for the next boot
     expect(again).toEqual({ converted: [], rewrittenWaits: [], failed });
   });
 
-  it("ruling 503(h): a task whose goalRef names it keeps the goalRef for the boot that converts it", () => {
+  it("ruling 17: a task whose goalRef names it keeps the goalRef for the boot that converts it", () => {
     // CANARY: the dangling-goalRef sweep in `convertProject` taking a goal it
     // could not read for one the project no longer has.
     expect(store.rawGoalRef("VIB-148")).toEqual({ goalId: "goal-2" });
     expect(store.task("VIB-148").frontmatter.epic).toBeNull();
   });
 
-  it("ruling 503(h): a task waiting on one of its links keeps the wait", () => {
+  it("ruling 17: a task waiting on one of its links keeps the wait", () => {
     // CANARY: `translateWait` reading a link of a goal it could not read as
     // one that "does not exist": the wait is dropped and the task handed to a
     // person.

@@ -59,7 +59,7 @@ function task(patch: Partial<BoardTask> = {}): BoardTask {
     quiet: false,
     // D4: projected runtime-continuity fact (null = healthy).
     continuity: null,
-    // Ruling 503: in no epic.
+    // Ruling 325: in no epic.
     epicId: null,
     ...patch,
   };
@@ -86,13 +86,13 @@ function renderBoard(
     /** U33-2: GitHub's answer for the project's repository, when a caller has
      *  one. Absent (the default) is the state every loader is in today. */
     repoAccess?: RepoAccessResult;
-    /** Ruling 503: the project's epics, for the epic filter. */
+    /** Ruling 325: the project's epics, for the epic filter. */
     epics?: readonly EpicOption[];
-    /** Ruling 694: false for a board with no repository. */
+    /** Ruling 307: false for a board with no repository. */
     hasRepository?: boolean;
     /** Server result for the board's own fetchers (reorder / rescan). The
      *  request is handed through so a case can read what the board actually
-     *  POSTed (ruling 88's acknowledgment fields). */
+     *  POSTed (ruling 97's acknowledgment fields). */
     action?: (args: { request: Request }) =>
       | { ok: boolean; toast?: string; error?: string; errors?: number }
       | Promise<{ ok: boolean; toast?: string; error?: string; errors?: number }>;
@@ -185,7 +185,7 @@ function visibleText(el: Element): string {
   return copy.textContent ?? "";
 }
 
-describe("ruling 225: the board says a clock rest is a clock rest", () => {
+describe("ruling 45: the board says a clock rest is a clock rest", () => {
   it("names the instant on the card instead of naming a person", () => {
     const { container } = renderBoard([
       task({
@@ -196,7 +196,7 @@ describe("ruling 225: the board says a clock rest is a clock rest", () => {
       }),
     ]);
     const tag = container.querySelector(".card .chip.st.scheduled")!;
-    // The promise ruling 224's own packet copy made: "Nothing runs until then
+    // The promise ruling 157's own packet copy made: "Nothing runs until then
     // and the board says so." The INSTANT is rendered by `LocalDayDotTime`,
     // which swaps to the viewer's zone after hydration and has its own tests —
     // asserting a formatted string here would only assert this host's timezone.
@@ -318,7 +318,7 @@ describe("interface review 2026-09-06: the lane outline and the card corner", ()
     expect(seat.getAttribute("aria-label")).toBe("Owner: Selin Aksoy");
   });
 
-  it("ruling 365: the key leads the head, the seats close it, the status sits in the property row", () => {
+  it("ruling 306: the key leads the head, the seats close it, the status sits in the property row", () => {
     const { container } = renderBoard([task({ key: "VIB-1", stage: "impl" })]);
     const card = container.querySelector('[data-board-card="VIB-1"]')!;
     const head = card.querySelector(".card-head")!;
@@ -492,10 +492,10 @@ describe("P13-D-34: the board empty state names the filter that is hiding tasks"
 });
 
 /**
- * Ruling 503(e): the board filters to one epic's tasks (`?epic=epic-1`), or to
- * the tasks in none (`?epic=none`). The card itself names no epic (ruling 172).
+ * Ruling 325: the board filters to one epic's tasks (`?epic=epic-1`), or to
+ * the tasks in none (`?epic=none`). The card itself names no epic (ruling 306(e)).
  */
-describe("ruling 503(e): the board's epic filter", () => {
+describe("ruling 325: the board's epic filter", () => {
   const EPICS: EpicOption[] = [
     { id: "epic-1", title: "Checkout revamp", color: "teal", status: "in_progress" },
     { id: "epic-2", title: "Search", color: "violet", status: "done" },
@@ -708,7 +708,7 @@ describe("B1: accepting from the board asks first", () => {
     await waitFor(() => expect(submitted.length).toBeGreaterThan(0));
   });
 
-  it("ruling 381: the keyboard move BACK asks why, and sends the answer", async () => {
+  it("ruling 47: the keyboard move BACK asks why, and sends the answer", async () => {
     // The board's own keyboard door. Without the dialog the server refuses the
     // move with a 400 and the menu offers nowhere to answer it — the dead end
     // this ruling exists to close, one door over from the drag.
@@ -740,8 +740,8 @@ describe("B1: accepting from the board asks first", () => {
   });
 });
 
-describe("ruling 365: a hold beside a working agent is an amber problem chip", () => {
-  it("'blocked' never yields — beside a working agent it becomes an amber problem chip (ruling 365)", () => {
+describe("ruling 306: a hold beside a working agent is an amber problem chip", () => {
+  it("'blocked' never yields — beside a working agent it becomes an amber problem chip (ruling 306)", () => {
     const { container } = renderBoard([
       task({ waiting: "agent", readiness: "blocked", displayReadiness: "blocked" }),
     ]);
@@ -765,7 +765,7 @@ describe("R15-5: the board owns its own filter box", () => {
     expect(queryByText("Rotate the PAT")).toBeTruthy();
   });
 
-  it("leads the filter row, the end the open controller dock never covers (ruling 625)", () => {
+  it("leads the filter row, the end the open controller dock never covers (ruling 280)", () => {
     // At the row's right end the field sat under the open dock's panel at
     // 1280×720, so the page under a non-modal dock could not be filtered
     // (e2e 08-controller-dock). CANARY: render the field after the chip row.
@@ -805,7 +805,7 @@ describe("R16-2: the attention chip says what it selects", () => {
     expect(queryByText("Waiting on an answer")).toBeTruthy();
   });
 
-  // Ruling 477(a) (F40-27): live, `?filter=risk` read "0 of 4 tasks · 1
+  // Ruling 46 (F40-27): live, `?filter=risk` read "0 of 4 tasks · 1
   // waiting on a human in this project" above lanes saying every task was
   // hidden, because WEB-3's question left its stored readiness `ready`.
   it("keeps a ready card holding an open question visible, so the head and the lanes agree", () => {
@@ -832,7 +832,7 @@ describe("R16-2: the attention chip says what it selects", () => {
   });
 });
 
-describe("ruling 694: the new-task dialog asks in the words of the board it is on", () => {
+describe("ruling 307: the new-task dialog asks in the words of the board it is on", () => {
   const dialogOf = (hasRepository?: boolean) => {
     const r = renderBoard([task()], hasRepository === undefined ? {} : { hasRepository });
     const btn = [...r.container.querySelectorAll("button")].find((b) =>
@@ -1020,7 +1020,7 @@ describe("R19-14: only the entry lane offers task creation", () => {
 /**
  * F19-13 — the two board layouts are one board. The card foot drew the
  * PR-state, failing-checks and changes-requested pills; the list row drew none
- * of them, so a task whose Done still owes a human merge (R16-6 / ruling 40)
+ * of them, so a task whose Done still owes a human merge (R16-6 / ruling 244)
  * read "merge pending" under Board and looked finished under List — one toggle
  * apart, same stored state.
  */
@@ -1099,9 +1099,9 @@ describe("F19-8: an archived card is inert and honest", () => {
     expect(card).not.toContain("awaiting verdict");
     expect(container.querySelector(".chip.st.agent")).toBeNull();
     // "How far did this get?" stays answerable — the hero keeps its stage pill
-    // for the same reason. Ruling 171: the PR is the one trace when a PR
-    // exists (it implies the branch); ruling 365: a branch alone is the mark,
-    // its name the tooltip and accessible name.
+    // for the same reason. Ruling 306(d): the PR is the one trace when a PR
+    // exists (it implies the branch); a branch alone is the mark, its name the
+    // tooltip and accessible name.
     expect(card).toContain("VIB-9");
     expect(card).toContain("#124");
     cleanup();
@@ -1177,7 +1177,7 @@ function confirmText(patch: Partial<BoardTask>, from: "impl" | "triage" = "impl"
 /**
  * F19-27 — the board acceptance confirm received `taskKey` + `stageName` and
  * disclosed neither the PR it merges, the head it merges, nor the verdict it
- * merges over, on a card whose own summary carries all three. Ruling 42 wants
+ * merges over, on a card whose own summary carries all three. Ruling 96 wants
  * the divergence surfaced on "the accept dialog" and R18-7 says this IS an
  * accept dialog — board acceptance runs the identical contract.
  */
@@ -1190,7 +1190,7 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
     ).toContain("PR #124 · in review");
   });
 
-  it("warns that commits added since the review merge unreviewed (ruling 42)", () => {
+  it("warns that commits added since the review merge unreviewed (ruling 96)", () => {
     const text = confirmText({
       pr: {
         number: 124,
@@ -1200,7 +1200,7 @@ describe("F19-27: the board accept confirm discloses what it merges", () => {
       },
     });
     expect(text).toContain("a4c790ce63ef");
-    // Ruling 132: the ONE canonical sentence, verbatim.
+    // Ruling 239: the ONE canonical sentence, verbatim.
     expect(text).toContain("2 authored commits since review merge unreviewed");
   });
 
@@ -1276,7 +1276,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
       },
     });
     expect(text).toContain("conflicts with the base branch");
-    // Ruling 291: the remedy viberr actually implements — merge the base IN.
+    // Ruling 230: the remedy viberr actually implements — merge the base IN.
     // CANARY: put "Rebase the branch" back and this fails, which is the point:
     // that sentence recommended the one operation the product forbids
     // everywhere else, and the one that diverged SHOP-11's branch from its PR.
@@ -1284,7 +1284,7 @@ describe("F19-27: the board confirm asks the server's own refusal questions", ()
     expect(text).not.toContain("Rebase the branch");
   });
 
-  it("ruling 135: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
+  it("ruling 243: names an unpushed delivered revision ABOVE the conflict, through the server's own predicate", () => {
     // Canary: drop `unpushedRevisionBlockedReason` from `boardAcceptRefusal` (board-accept-confirm.tsx).
     const text = confirmText({
       blockReason: null,
@@ -1365,7 +1365,7 @@ describe("F19-27: the confirm names the stage gate the server will refuse on", (
   /**
    * The flag is the GRAPH's answer, not the column order's: a project whose
    * workflow declares triage → done really can be accepted from Triage, and
-   * refusing it here would be the forked mapping rulings 12/14 ban.
+   * refusing it here would be the forked mapping rulings 237/297 ban.
    */
   it("trusts the projected flag over the card's column position", () => {
     expect(fromTriage({ atAcceptanceBoundary: true })).not.toContain(
@@ -1752,7 +1752,7 @@ describe("D19: arrow-key traversal over the board (R19-10)", () => {
  *
  * `quiet` arrives resolved from the server (board-query.server.ts): it is what
  * the "No activity" chip selects on, so it must be the SAME value in the SSR
- * pass and in hydration. Ruling 172 took the cue itself off the card and the
+ * pass and in hydration. Ruling 306(e) took the cue itself off the card and the
  * row; the chip carries it.
  */
 describe("gap-10: the board says when a task has gone quiet", () => {
@@ -1791,10 +1791,10 @@ describe("gap-10: the board says when a task has gone quiet", () => {
 });
 
 /**
- * D3 (rulings 14 + 53) — the board raised its OWN acceptance dialog, forked from
+ * D3 (rulings 297 + 97) — the board raised its OWN acceptance dialog, forked from
  * the task page's and disclosing less: no merge target, no delivered-revision
- * row, no verdict attribution, no no-change disposition. Ruling 14 forbids the
- * fork; ruling 53 (R18-7) required the board ceremony to "match the task-detail
+ * row, no verdict attribution, no no-change disposition. Ruling 297 forbids the
+ * fork; ruling 97 (R18-7) required the board ceremony to "match the task-detail
  * dialog". The board now renders the ONE shared `AcceptConfirm` in its
  * `stage-move` mode.
  *
@@ -1843,10 +1843,10 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     ).toContain("No delivered revision recorded.");
   });
 
-  it("discloses the DELIVERED revision the projection now carries (ruling 53)", () => {
+  it("discloses the DELIVERED revision the projection now carries (ruling 97)", () => {
     // The row used to be hardcoded absent (`workRevisionSha={null}`), so the
     // board's ceremony disclosed "nothing delivered" about every task — and once
-    // ruling 88 made the confirmed click echo that disclosure back, the server
+    // ruling 97 made the confirmed click echo that disclosure back, the server
     // refused the resulting `"none"` against any task that HAD delivered. The
     // summary carries the sha now (TaskSummary.workRevisionSha).
     // CANARY: put `workRevisionSha={null}` back in AcceptOnBoardConfirm
@@ -1858,7 +1858,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(text).not.toContain("No delivered revision recorded.");
   });
 
-  it("ruling 471: a decision the move answers reads Answers, from the card the loader built", () => {
+  it("ruling 316: a decision the move answers reads Answers, from the card the loader built", () => {
     // CANARY: stop passing `answersWith` from AcceptOnBoardConfirm
     // (board-accept-confirm.tsx) and this reads "Withdraws … closes
     // unanswered".
@@ -1872,7 +1872,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(answered).not.toContain("Withdraws");
   });
 
-  it("ruling 475: names the other open PR on the board that shares a changed path, as the task page does", () => {
+  it("ruling 244: names the other open PR on the board that shares a changed path, as the task page does", () => {
     // CANARY: stop passing `mergeCollisions` to the board's AcceptOnBoardConfirm
     // (`useMoveConfirms`, board-page-actions.tsx) and the board's door is
     // silent where the task page's names the collision.
@@ -1898,7 +1898,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(row?.textContent).toContain("Merging this will likely put VIB-2's PR #3 in conflict on package.json.");
   });
 
-  it("ruling 88: the confirmed drop POSTs the ceremony's own acknowledgment", async () => {
+  it("ruling 97: the confirmed drop POSTs the ceremony's own acknowledgment", async () => {
     // F21-2: the board's ceremony was client architecture — the reorder POST
     // behind it carried nothing back from the dialog, so the server accepted
     // (and merged) a drop whose confirmation was never rendered. CANARY: drop
@@ -1940,7 +1940,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
     expect(submitted[0]!.ackVerdict).toBe("changed");
   });
 
-  it("ruling 53/88: a DELIVERED task echoes its revision, not a blanket 'none'", async () => {
+  it("ruling 97: a DELIVERED task echoes its revision, not a blanket 'none'", async () => {
     // The half of the echo the board could not tell the truth about. With the
     // revision hardcoded absent, this POST carried `ackRevision=none` for a task
     // whose live head was a real sha — the server compares the echo against the
@@ -1979,7 +1979,7 @@ describe("D3: the board renders the shared acceptance ceremony", () => {
   });
 
   it("discloses a refusal without dead-ending the drop: the server still answers", async () => {
-    // Ruling 162's interlock (a standing refusal disables the confirm) belongs
+    // Ruling 95's interlock (a standing refusal disables the confirm) belongs
     // to the dialog quoting the refusal the SERVER re-decides. The board's is
     // composed from a projection summary on purpose (`boardAcceptRefusal` in
     // board-accept-confirm.tsx, belt-and-braces so a stale row fails closed)
@@ -2118,9 +2118,9 @@ describe("pass 30: the state-pill stack ranks instead of shouting", () => {
     const fold = card.querySelector(".chip.more")!;
     expect(fold).toBeTruthy();
     expect(visibleText(fold)).toBe("+3");
-    // Ruling 365 ranks the failures first: validation and checks draw, the
+    // Ruling 306 ranks the failures first: validation and checks draw, the
     // review, the closed PR and the continuity fold. Every folded fact stays
-    // reachable — named in the title, one hover away (rulings 40/12/14).
+    // reachable — named in the title, one hover away (rulings 244/237/297).
     expect(card.textContent).toContain("validation failing");
     expect(card.textContent).toContain("2/5 checks failing");
     const title = fold.getAttribute("title")!;
@@ -2243,7 +2243,7 @@ describe("U33-2: an unreachable repository has a home on the board", () => {
 });
 
 /**
- * Interface review 2026-09-06 (ruling 148(d)): `.board-orphans` is one box
+ * Interface review 2026-09-06 (ruling 278): `.board-orphans` is one box
  * carrying four tones. The archived-filter caption and the "no stages yet"
  * empty state are attention, not faults, so they take GitHub's amber pair via
  * the `notice` modifier; the unstaged-task and repository boxes keep the error
@@ -2310,11 +2310,11 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
   const badge = (container: HTMLElement) =>
     container.querySelector('[data-board-card="VIB-1"] .who .abadge')!;
 
-  it("names the deployed profile in the badge's label and tooltip (ruling 365: the name is not printed)", () => {
+  it("names the deployed profile in the badge's label and tooltip (ruling 306: the name is not printed)", () => {
     const { container } = renderBoard([engaged("Developer")]);
     // The profile name says WHICH agent, where the role ("Implementation") did
     // not — two profiles can share a role. The backend is the badge's mark and
-    // the first word of its name (ruling 168(c)); the card face prints neither.
+    // the first word of its name (ruling 306); the card face prints neither.
     expect(badge(container).getAttribute("aria-label")).toBe("Claude · Developer");
     expect(badge(container).getAttribute("title")).toBe("Claude · Developer");
     expect(badge(container).getAttribute("role")).toBe("img");
@@ -2331,7 +2331,7 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
 });
 
 /**
- * Ruling 168 (owner, 2026-09-09): the board card states each fact once. A Ready
+ * Ruling 306 (owner, 2026-09-09): the board card states each fact once. A Ready
  * card read "blocked" in its top slot, "Claude · Developer" on its owner line
  * and "awaiting verdict" in its foot, above "waiting on you" — three
  * restatements of "a human must act" and two of "Claude". The task hero keeps
@@ -2339,7 +2339,7 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
  * only as a problem, and the agent as its glyph and its name.
  */
 /**
- * Ruling 171 (owner, 2026-09-09): one card anatomy, whatever a task has. Two
+ * Ruling 306 (owner, 2026-09-09): one card anatomy, whatever a task has. Two
  * cards side by side read in two grammars — a human-owned task put its owner
  * at the LEFT with a name and a role word and left the right end empty, an
  * agent-carried one put the agent at the left and the owner at the right as an
@@ -2349,7 +2349,7 @@ describe("the card's owner line names the agent PROFILE, not its role (owner, 20
  * the foot is two cells: traces and problem pills on the left, the status on
  * the right.
  */
-describe("ruling 171: every card has the same seats and the same foot", () => {
+describe("ruling 306: every card has the same seats and the same foot", () => {
   const arda = { kind: "human" as const, userId: "u-arda", name: "Arda Kaya", initials: "AK", tone: "" };
   const developer = {
     kind: "agent" as const,
@@ -2359,7 +2359,7 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     profileId: "developer",
     profileName: "Developer",
   };
-  /** Ruling 365: the seats are a stack in the head — the agent's badge, then
+  /** Ruling 306: the seats are a stack in the head — the agent's badge, then
    *  the owner's avatar — each named for assistive technology and on hover. */
   const seats = (root: ParentNode) => ({
     carrier: root.querySelector(".who .abadge")?.getAttribute("aria-label") ?? null,
@@ -2433,7 +2433,7 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
     expect(card.textContent).not.toContain("vib-1-b3e3");
     expect(card.querySelector(".card-props .chip.st.you")!.textContent!.trim()).toBe("waiting on you");
     cleanup();
-    // Ruling 365: no trace draws nothing — "no branch" was an empty seat named.
+    // Ruling 306: no trace draws nothing — "no branch" was an empty seat named.
     const bare = renderBoard([task({ key: "VIB-2", owner: arda, waiting: "human", waitingOnMe: true })]);
     const card2 = bare.container.querySelector(".card")!;
     expect(card2.querySelector(".card-head .trace")).toBeNull();
@@ -2459,19 +2459,19 @@ describe("ruling 171: every card has the same seats and the same foot", () => {
   it("the list row seats the same two identities", () => {
     const { container } = renderBoard([task({ key: "VIB-2", owner: arda })], { view: "list" });
     const row = container.querySelector(".list-row")!;
-    // Ruling 625: the agent seat stays as an empty, hidden column so the chips
+    // Ruling 306: the agent seat stays as an empty, hidden column so the chips
     // before it line up. CANARY: return null for a row with no agent.
     expect(row.querySelector(".list-agent")!.getAttribute("aria-hidden")).toBe("true");
     expect(row.querySelector(".list-agent")!.childElementCount).toBe(0);
     expect(row.textContent).not.toContain("no agent");
     expect(row.querySelector(".rev-stack")!.getAttribute("aria-label")).toBe("Owner: Arda Kaya");
-    // Ruling 625: no "OWNER" eyebrow repeated on every row; the seat's name is
+    // Ruling 306: no "OWNER" eyebrow repeated on every row; the seat's name is
     // its label. CANARY: print an "owner" label beside the list row's seat.
     expect(row.textContent).not.toMatch(/owner/i);
   });
 });
 
-describe("ruling 168: the board card states each fact once", () => {
+describe("ruling 306: the board card states each fact once", () => {
   const held = (patch: Partial<BoardTask> = {}) =>
     task({
       key: "VIB-1",
@@ -2680,7 +2680,7 @@ describe("a move in flight draws its request until the columns show the answer",
   });
 });
 
-describe("ruling 349: a run parked behind the cap reads 'agent queued'", () => {
+describe("ruling 44: a run parked behind the cap reads 'agent queued'", () => {
   it("the foot says queued with no pulse, and never claims work in flight", () => {
     const { container } = renderBoard([
       task({

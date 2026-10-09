@@ -47,7 +47,7 @@ const FULL: ParsedTaskFile = {
       commits: [{ sha: "a91f7c2", msg: "[VIB-142] add repo attach policy gate" }],
       changed: { files: 9, add: 412, del: 87 },
     },
-    // Ruling 503: the epic the task is in; it replaced ruling 99's `goalRef`.
+    // Ruling 272: the epic the task is in; it replaced ruling 273's `goalRef`.
     epic: "epic-2",
     createdAt: "2026-07-03T06:00:00.000Z",
     updatedAt: "2026-07-04T06:58:00.000Z",
@@ -123,7 +123,7 @@ describe("task.md round-trip", () => {
     expect(serializeTaskFile(parsed)).toBe(first);
   });
 
-  it("ruling 482: the gate run record round-trips whole, and a malformed one reads as absent", () => {
+  it("ruling 17: the gate run record round-trips whole, and a malformed one reads as absent", () => {
     // CANARY: read `gateRun` under another name in parseTaskFrontmatter and
     // the record is never read back, so the next write loses it.
     const gateRun = {
@@ -564,7 +564,7 @@ describe("task.md tolerant parsing", () => {
   });
 
   /**
-   * Ruling 526: a row is `[status] label · result`, and a task.md written
+   * Ruling 16: a row is `[status] label · result`, and a task.md written
    * before it holds `label · add · del`. Those rows still read, as references
    * with their two cells as the result (a diff's signed counts spaced, words
    * joined by a comma, the placeholder dropped), and the next write puts them
@@ -572,7 +572,7 @@ describe("task.md tolerant parsing", () => {
    * CANARY: drop the two-column branch of `parseEvidenceRow` and every verdict
    * written before 526 loses its rows.
    */
-  it("ruling 526: reads a row in its status form and in the two-column form it replaced", () => {
+  it("ruling 16: reads a row in its status form and in the two-column form it replaced", () => {
     const completion = { ...FULL.timeline[1]!, evidence: [{ label: "placeholder", result: "", status: "info" as const }] };
     const text = serializeTaskFile({ ...FULL, packet: null, extraSections: [], timeline: [completion] }).replace(
       "- [info] placeholder · —",
@@ -641,7 +641,7 @@ describe("task.md event attachments (P21 — the producing message names its fil
     ],
   };
 
-  /** Ruling 382: `notified:` is one metadata line, same shape as `title:`/`to:`. */
+  /** Ruling 20: `notified:` is one metadata line, same shape as `title:`/`to:`. */
   const WITH_NOTIFIED: ParsedTaskFile = {
     ...FULL,
     timeline: [
@@ -659,7 +659,7 @@ describe("task.md event attachments (P21 — the producing message names its fil
     ],
   };
 
-  it("ruling 382: serializes a notified: line and parses the ids back", () => {
+  it("ruling 20: serializes a notified: line and parses the ids back", () => {
     const text = serializeTaskFile(WITH_NOTIFIED);
     expect(text).toContain("notified: u_vw9JMMXYOH6X, u_KF1bFvSYPXkE");
     const { parsed, diagnostics } = parseTaskFileContent(text, {
@@ -669,7 +669,7 @@ describe("task.md event attachments (P21 — the producing message names its fil
     expect(parsed.timeline).toEqual(WITH_NOTIFIED.timeline);
   });
 
-  it("ruling 382: a comment LINE reading `notified:` is escaped \u2014 it forges no recipients", () => {
+  it("ruling 20: a comment LINE reading `notified:` is escaped \u2014 it forges no recipients", () => {
     const forged: ParsedTaskFile = {
       ...FULL,
       timeline: [
@@ -853,7 +853,7 @@ describe("task.md structure injection through metadata the escaper skipped", () 
  * it. The panel whose job is to tell a reader the truth about the record was
  * telling them the page had already compensated.
  *
- * Found on the live board: SHOP-24 carried this diagnostic because ruling 237's
+ * Found on the live board: SHOP-24 carried this diagnostic because ruling 94's
  * escalation note was written 5ms newer than the comment it sat below, and I
  * read this very sentence that day and took reassurance from it.
  */

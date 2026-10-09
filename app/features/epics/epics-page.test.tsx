@@ -8,13 +8,13 @@ import { EpicsPage } from "./epics-page";
 import type { EpicMemberView, EpicStageView } from "./epics-query.server";
 
 /**
- * Ruling 503(e): `/projects/:slug/epics`, the project's epics the way Linear
+ * Ruling 325: `/projects/:slug/epics`, the project's epics the way Linear
  * lists a team's projects. Each row is its epic's page (its colour and name,
  * its status, its progress in the project's own stage colours, its lead and,
  * while it is open, its target date); open epics come first by default, with
  * Closed and All one click away; New epic is offered to whoever may
  * `manage-epics`. A Done epic whose tasks are all done offers Archive tasks
- * to whoever may archive them (ruling 651).
+ * to whoever may archive them (ruling 274).
  */
 
 afterEach(cleanup);
@@ -130,7 +130,7 @@ function rowIds(list: HTMLElement): (string | null)[] {
   return Array.from(list.querySelectorAll("[data-epic]")).map((row) => row.getAttribute("data-epic"));
 }
 
-describe("ruling 503(e): each row of the Epics list is its epic", () => {
+describe("ruling 325: each row of the Epics list is its epic", () => {
   it("draws the colour dot and the name as a link to the epic, its status, its progress, its lead and its target date", async () => {
     renderEpics({
       epics: [
@@ -198,7 +198,7 @@ describe("ruling 503(e): each row of the Epics list is its epic", () => {
   });
 });
 
-describe("ruling 651: Archive tasks on a Done epic", () => {
+describe("ruling 274: Archive tasks on a Done epic", () => {
   const SHIPPED = epic({
     id: "epic-1",
     title: "Shipped",
@@ -292,7 +292,7 @@ describe("ruling 651: Archive tasks on a Done epic", () => {
   });
 });
 
-describe("ruling 503(e): Open, Closed and All", () => {
+describe("ruling 325: Open, Closed and All", () => {
   const MIXED = [
     epic({ id: "epic-1", title: "Running", status: "in_progress" }),
     epic({ id: "epic-2", title: "Landed", status: "done" }),
@@ -353,7 +353,7 @@ describe("ruling 503(e): Open, Closed and All", () => {
   });
 });
 
-describe("ruling 503(e): New epic, for manage-epics", () => {
+describe("ruling 325: New epic, for manage-epics", () => {
   it("is offered to someone who may manage epics, and to nobody else", async () => {
     renderEpics({ epics: [epic()], canManage: true });
     fireEvent.click(await screen.findByRole("button", { name: "New epic" }));
@@ -402,7 +402,7 @@ describe("ruling 503(e): New epic, for manage-epics", () => {
   });
 });
 
-describe("ruling 700(c): each opening of New epic is a create of its own", () => {
+describe("ruling 325: each opening of New epic is a create of its own", () => {
   /** Opens New epic, names the epic and presses Create epic. */
   async function create(title: string): Promise<HTMLElement> {
     fireEvent.click(await screen.findByRole("button", { name: "New epic" }));
@@ -460,7 +460,7 @@ describe("ruling 700(c): each opening of New epic is a create of its own", () =>
   });
 });
 
-describe("ruling 503(e): the empty Epics page", () => {
+describe("ruling 325: the empty Epics page", () => {
   it("says there are no epics yet, and offers New epic to who may create one", async () => {
     renderEpics({ epics: [], canManage: true });
     // CANARY: drop the `epics.length === 0` empty state from EpicsPage and a
@@ -471,7 +471,7 @@ describe("ruling 503(e): the empty Epics page", () => {
     expect(hero?.getAttribute("data-screen-label")).toBe("Empty state");
     expect(hero?.textContent).toContain("Create one here, or ask the controller to plan one.");
     expect(hero && within(hero).getByRole("button", { name: "New epic" })).toBeTruthy();
-    // Ruling 625: said once and offered once. CANARY: put the head's "No epics
+    // Ruling 325: said once and offered once. CANARY: put the head's "No epics
     // yet" back, or drop `epics.length > 0` from the head's New epic button,
     // and the page says it twice and offers two primary buttons.
     expect(headCount()).toBe("");

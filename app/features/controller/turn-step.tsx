@@ -3,7 +3,7 @@ import { readableStep } from "~/features/runtime/readable-step";
 import { useFreshLine } from "~/ui/use-fresh-line";
 
 /**
- * Ruling 250 (pass 37, F37-79): what the live controller turn is doing, on the
+ * Ruling 257 (pass 37, F37-79): what the live controller turn is doing, on the
  * row that says it is working.
  *
  * Measured live: a controller turn ran 201s over 11 turns for $4.11, and the
@@ -28,10 +28,10 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   // Before the early return: a turn with no step yet is the first paint too.
   const fresh = useFreshLine(detail);
   if (!detail) return null;
-  // Ruling 451(a): keyed on the step, so a new step is a new line that rises
+  // Ruling 284(a): keyed on the step, so a new step is a new line that rises
   // in (the sheet's `swap-in`) instead of words changing under the reader.
-  // Ruling 459: only a step that replaces the one on screen when the page or
-  // dock opened rises (`data-fresh`); that first one stands still.
+  // Only a step that replaces the one on screen when the page or dock opened
+  // rises (`data-fresh`); that first one stands still.
   return (
     <span
       key={detail}
@@ -45,7 +45,7 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
 }
 
 /**
- * Ruling 465 (F40-8): where an unanswered user message stands, on the page and
+ * Ruling 320 (F40-8): where an unanswered user message stands, on the page and
  * the dock alike. A message sent while a turn works is queued on the server;
  * the transcript rendered it as the newest message with "is working…" under
  * it, as if the running turn were answering it, and a person could not tell
@@ -56,7 +56,7 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
  * carry it, in the header's own small type (`.fine`, the surface chip's
  * look), so no rule joins the stylesheet every page loads.
  *
- * Ruling 527 adds the two steering words: "steering · next step" on a message
+ * Ruling 291 adds the two steering words: "steering · next step" on a message
  * waiting for the running turn's next step (`turn.steering`), and "steered"
  * on one a turn read, for good (`steered`, from the message row). A steered
  * message has no reply of its own, and the word says why.
@@ -68,7 +68,7 @@ export function MessageState({
 }: {
   turn: Pick<ConversationTurnState, "answering" | "queued" | "steering"> | null;
   messageId: string;
-  /** Ruling 527: a turn read this message at one of its steps. */
+  /** Ruling 291: a turn read this message at one of its steps. */
   steered?: boolean;
 }): React.ReactNode {
   if (steered) {
@@ -107,7 +107,7 @@ export function MessageState({
 }
 
 /**
- * Ruling 451(a): the sentence that says a controller turn is working, on the
+ * Ruling 284: the sentence that says a controller turn is working, on the
  * dock and the page. A highlight band crosses it while the turn holds (the
  * sheet's `.ctl-working-text`, transitions.dev's "Shimmer text"): the band is
  * a copy of these words drawn on `::before` from `data-text`, so the two must

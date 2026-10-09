@@ -600,7 +600,7 @@ const ALLOWED_ASSET_LINES: ReadonlyArray<{
  * and every escape in this finding's history was a silent green. These are the
  * surfaces the verifier actually broke: the accept-dialog refusal sentences
  * (`task-file.schema.ts`) and the stage and archive refusals and toasts
- * (`task-transitions.server.ts` and `task-archive.server.ts`, which ruling 654
+ * (`task-transitions.server.ts` and `task-archive.server.ts`, which ruling 13(a)
  * split out of `task-actions.server.ts`). The assertion is on SHAPE, not on
  * wording, so it proves reach without pinning copy another pass is free to
  * rewrite.
@@ -884,11 +884,11 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
  * `.server.ts` toast/refusal copy — plus the seed assets an org admin reads and
  * edits in the definition UI.
  *
- * Ruling 571 (owner, 2026-09-28) closed the carve-out P21 left: `app/server/**`
+ * Ruling 292 (owner, 2026-09-28) closed the carve-out P21 left: `app/server/**`
  * was ungated as "prompt machinery", and the sentence the owner then caught on
  * a task timeline under the Operator's name, "Started a Claude run for the
  * Estimate Judge agent — streaming to the agent logs.", was built there
- * (`runDispatchLine`). The model never writes it, so ruling 502's writing guide
+ * (`runDispatchLine`). The model never writes it, so ruling 187's writing guide
  * never reaches it. The third test below scans every string literal under the
  * literal roots, prompts and log lines included: an agent repeats what its
  * prompt and its tool replies say, and a log line is read by whoever runs the
@@ -900,7 +900,7 @@ describe("F18-14: the govern/governance copy ban holds on every surface a human 
  *
  * Every scan here reads source text, so a dash spelled as an escape (`\u2014`,
  * `\u{2014}`) or an HTML entity (`&mdash;`, `&#8212;`) renders as a dash and
- * would pass a pattern that only knows the character. Ruling 571 found both:
+ * would pass a pattern that only knows the character. Ruling 10 found both:
  * escapes in the operator's and the controller's prompts and tool descriptions,
  * and an `&mdash;` in the packet card's duplicate-task note.
  */
@@ -914,7 +914,7 @@ const BANNED_DASH = /[–—]|\\u(?:201[34]|\{0*201[34]\})|&(?:[mn]dash|#821[12]
 const DASH_ALLOW: readonly string[] = [];
 
 /**
- * Ruling 571's only exemptions, each an EXACT literal in one file: a dash that
+ * Ruling 292's only exemptions, each an EXACT literal in one file: a dash that
  * is a format byte code reads back, not prose. Same rot check as the other
  * allowlists: an entry that matches nothing fails the suite.
  */
@@ -926,7 +926,7 @@ const DASH_LITERAL_ALLOW: ReadonlyArray<{ file: string; exact: string; why: stri
   },
 ];
 
-describe("P21 and ruling 571: em/en dashes are banned in rendered copy, seed assets and every server string", () => {
+describe("P21 and ruling 292: em/en dashes are banned in rendered copy, seed assets and every server string", () => {
   it("no rendered line under the render roots carries an em or en dash", () => {
     const offenders: string[] = [];
     const files = [...ROOTS.flatMap(walk), ...EXTRA_RENDER_FILES];
@@ -965,7 +965,7 @@ describe("P21 and ruling 571: em/en dashes are banned in rendered copy, seed ass
     ).toEqual([]);
   });
 
-  it("no string literal under app/server, app/schemas, app/shared or app/lib carries one (ruling 571)", () => {
+  it("no string literal under app/server, app/schemas, app/shared or app/lib carries one (ruling 292)", () => {
     // CANARY: put the dash back in `runDispatchLine`'s started tail
     // (" — streaming to the agent logs.") and this names specialist-roster.server.ts.
     // Same roots, walk and lexer as the govern literal test above, whose
@@ -1065,7 +1065,7 @@ describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy"
 });
 
 /**
- * Ruling 518 — the operator has one name. The owner, over a screenshot of the
+ * Ruling 106 — the operator has one name. The owner, over a screenshot of the
  * task page's Execution profile reading OPERATOR above "Coordinator": "no need
  * to call it coordinator as well. It's a unqiue agent called Operator that's
  * it. NO other roles needed." The word was the task page's hard-coded label,
@@ -1076,7 +1076,7 @@ describe("F19-12: the retired 'primary specialist' vocabulary is gone from copy"
  */
 const OPERATOR_ALIAS = /\bcoordinators?\b/i;
 
-describe("ruling 518: nothing a person or an agent reads calls the operator a coordinator", () => {
+describe("ruling 106: nothing a person or an agent reads calls the operator a coordinator", () => {
   it("no rendered, server-built or prompt string, and no seeded asset, says 'coordinator'", () => {
     const assets = walkAll(ASSETS).filter((f) => f.endsWith(".md"));
     // Non-vacuity: the operator's own profile is among the assets read.

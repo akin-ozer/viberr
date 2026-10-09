@@ -93,7 +93,7 @@ function run(patch: Partial<RunView> = {}): RunView {
 
 /**
  * A run group whose console window holds the dead-session marker (dead run +
- * fresh run). Ruling 457: the projection reports the marker as `sessionMissing`
+ * fresh run). Ruling 300: the projection reports the marker as `sessionMissing`
  * (the page no longer carries every window's lines to scan); how it finds it
  * is pinned in `run-projection.server.test.ts`.
  */
@@ -167,7 +167,7 @@ describe("deriveContinuityLoss", () => {
     expect(noId!.agents[0]!.name).toBe("Dana");
   });
 
-  it("reads the projection's report, not the lines a payload may not carry (ruling 457)", () => {
+  it("reads the projection's report, not the lines a payload may not carry (ruling 300)", () => {
     // A `.data` revalidation carries no console lines; the marker is still
     // reported. CANARY: scan `run.lines` again and this returns null.
     const loss = deriveContinuityLoss({
@@ -189,7 +189,7 @@ describe("deriveContinuityLoss", () => {
         .agents[0]!.roleLabel;
     expect(roleOf({ kind: "operator", op: true })).toBe("Operator");
     expect(roleOf({ kind: "primary" })).toBe("Delivering agent");
-    // Ruling 662: a non-delivering run is a reviewer only when its profile's
+    // Ruling 292(b): a non-delivering run is a reviewer only when its profile's
     // verdict gates acceptance, as the run picker says; otherwise, or when the
     // profile is unknown, a supporting agent. CANARY: label every `reviewer`
     // kind "Reviewer" again, and the Cloud Solutions Architect reads as one.
@@ -510,7 +510,7 @@ describe("task detail wiring", () => {
   const shownThread = (root: ParentNode) =>
     root.querySelector('.panel-head .rsel-btn .rsel-nm')?.textContent ?? "";
 
-  it("opens the named thread's console and leaves an open console open (ruling 380)", async () => {
+  it("opens the named thread's console and leaves an open console open (ruling 311)", async () => {
     const intoView = vi.spyOn(Element.prototype, "scrollIntoView");
     // "re-anchored · running": Dana's re-anchored run streams, so the console
     // is disclosed on the run card, open by default, on the first running

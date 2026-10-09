@@ -48,10 +48,10 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   // in, this decides HOW they can.
   { id: "sso", label: "Sign-in & SSO", icon: "lock" },
   { id: "resources", label: "Agent resources", icon: "memory" },
-  // Ruling 653: a board's workflow out as a file, and a file in as a new
+  // Ruling 32: a board's workflow out as a file, and a file in as a new
   // board. Beside Agent resources: an import brings some in.
   { id: "boards", label: "Import & export", icon: "board" },
-  // Ruling 99: only org admins modify the controller itself (profile,
+  // Ruling 270: only org admins modify the controller itself (profile,
   // resources, prompt) — this is that surface.
   { id: "controller", label: "Controller", icon: "cpu" },
 ];
@@ -70,7 +70,7 @@ function resolveOrgTab(raw: string | null): OrgSettingsTab {
 export interface RunConcurrencyView {
   /** Configured cap (0 = unlimited). */
   cap: number;
-  /** Ruling 152(b): the extra slots operator and controller turns may take
+  /** Ruling 150: the extra slots operator and controller turns may take
    *  beyond the cap (one per four of it, minimum one; 0 when the cap is 0). */
   lane: number;
   /** Runs executing right now. */
@@ -98,20 +98,20 @@ export function OrgSettingsPage({
   /** This deployment's origin — the callback URL an OAuth app must carry. */
   callbackOrigin: string;
   runConcurrency: RunConcurrencyView;
-  /** Ruling 175: the instance's spending cap per Claude run, USD (null = none). */
+  /** Ruling 31: the instance's spending cap per Claude run, USD (null = none). */
   runSpendCapUsd: number | null;
   /** The S3 audit-export target (null when none is configured). */
   s3Audit: S3AuditConfigView | null;
   /** PG26-A: recent audit events for the in-app browse panel. */
   auditEvents: AuditBrowseRow[];
   auditEventsOrgScoped: AuditBrowseRow[];
-  /** Ruling 99: the live controller configuration this admin surface edits. */
+  /** Ruling 247: the live controller configuration this admin surface edits. */
   controllerConfig: ControllerConfigView;
-  /** Ruling 108: per-section deployment locks the panel renders read-only. */
+  /** Ruling 270: per-section deployment locks the panel renders read-only. */
   controllerLocks: ControllerSectionLocks;
-  /** Ruling 390: open grant requests the controller raised for itself. */
+  /** Ruling 271: open grant requests the controller raised for itself. */
   controllerRequests: ControllerGrantRequestView[];
-  /** Ruling 653: every board, for the Import & export tab. */
+  /** Ruling 32: every board, for the Import & export tab. */
   boards: BoardExportSummary[];
 }) {
   // F32-2 (pass 32): a `user`-scoped stream also receives broadcasts — the
@@ -161,7 +161,7 @@ export function OrgSettingsPage({
 
   return (
     <main className="home-shell" data-screen-label="Instance settings">
-      {/* Ruling 145: the way back is the header's brand and its Home crumb, as
+      {/* Ruling 294: the way back is the header's brand and its Home crumb, as
           it is on the board's own settings page. The button that used to sit
           here was this surface's only navigation, and a third control for the
           same trip once the header arrived. */}
@@ -251,7 +251,7 @@ export function OrgSettingsPage({
           )}
         </div>
         {/* The instance's two run limits outside the tabs, one well, one row
-            each (ruling 175 added the second): how many runs at once, and what
+            each (ruling 31 added the second): how many runs at once, and what
             one Claude run may spend. */}
         <div className="conc-well">
           <RunConcurrencyControl runConcurrency={runConcurrency} />
@@ -287,7 +287,7 @@ export function OrgSettingsPage({
  * for: `project_slug`-less events (sign-ins, PAT changes, user admin) that the
  * project Activity page can't show.
  *
- * Ruling 234: the toggle SWAPS between two server-fetched windows rather than
+ * Ruling 33: the toggle SWAPS between two server-fetched windows rather than
  * filtering one. It used to narrow whatever the unscoped query returned, so a
  * poller heartbeat that filled that window pushed every sign-in out of reach —
  * measured at 2 org-scoped rows visible against 96 on file. Two lists keep the
@@ -390,7 +390,7 @@ function AuditBrowse({
 /** The S3 target fields a save requires — the ones a refusal can name. */
 type S3Field = "bucket" | "region" | "accessKeyId" | "secret";
 
-/** Ruling 147: what is still missing, named field by field. */
+/** Ruling 288: what is still missing, named field by field. */
 const S3_UNMET = {
   bucket: "Enter the bucket name.",
   region: "Enter the bucket's region.",
@@ -398,9 +398,9 @@ const S3_UNMET = {
   secret: "Enter the secret access key.",
 } satisfies Record<S3Field, string>;
 
-/** Ruling 147: the first field a save still lacks, in the form's order (the
+/** Ruling 288: the first field a save still lacks, in the form's order (the
  *  secret only until one is on file), or null once the target is complete.
- *  Ruling 700(e): read off the modal's fields as a pure function, so the
+ *  Ruling 13(b): read off the modal's fields as a pure function, so the
  *  modal itself holds no chain of conditions. */
 function missingS3Field(
   fields: Record<S3Field, string>,
@@ -414,13 +414,13 @@ function missingS3Field(
 }
 
 /**
- * Ruling 148(b): the S3 target is a button that opens a modal, never a form
+ * Ruling 323: the S3 target is a button that opens a modal, never a form
  * served inline. Six fields (one of them a secret) for a target set once per
  * instance and rotated rarely sat open at the foot of EVERY Instance-settings
  * tab until someone configured one — an unconfigured instance had no control
  * that could fold it.
  *
- * The refusal contract is MiniModal's (ruling 147) and is not re-implemented
+ * The refusal contract is MiniModal's (ruling 288) and is not re-implemented
  * here: it counts the refusals, keys its own foot alert and disables the
  * primary only while busy. This caller supplies the named sentence
  * (`unmetHint`), where focus lands (`focusUnmet`) and the per-field
@@ -442,7 +442,7 @@ function S3TargetModal({
   const [secret, setSecret] = useState("");
   /** The field a refused save named; null on a pristine form (147(c)). */
   const [flagged, setFlagged] = useState<S3Field | null>(null);
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   // Closing on the result is what folds the form: a secret-only rotation
   // changes no summary field, so the card's remount key cannot see it.
   const [done, setDone] = useState(false);
@@ -589,13 +589,13 @@ function AuditExportCard({
   orgScopedEvents: AuditBrowseRow[];
 }) {
   const { submit, busy, fetcher } = useOrgAction();
-  // Ruling 368: the export and the removal share this fetcher; the one that
+  // Ruling 286: the export and the removal share this fetcher; the one that
   // started the request shows it, the other only waits.
   const inFlight = inFlightIntent(fetcher);
   const exporting = inFlight === "audit-export-s3";
   const removing = inFlight === "s3-config-clear";
   const configured = s3Audit !== null;
-  // D04-U7 (pass 32) + ruling 148(b): the target is ONE fact row in both states
+  // D04-U7 (pass 32) + ruling 323: the target is ONE fact row in both states
   // — the summary with "Edit target", or "No S3 target" with "Set up S3 target"
   // — and the fields it opens live in the modal. The page then shows one solid
   // primary (the active tab's own), and the card's own actions stay put.
@@ -640,7 +640,7 @@ function AuditExportCard({
         </a>
       </div>
       <div className="audit-s3">
-        {/* Ruling 625: one fact row needs no eyebrow over it; the label
+        {/* Ruling 280: one fact row needs no eyebrow over it; the label
             names the whole fact. */}
         <div className="kv-row">
           <span className="k">S3 export</span>
@@ -718,7 +718,7 @@ function AuditExportCard({
  * queues the rest (run-service gate); this control shows the live/queued counts
  * so an admin can see the cap biting. Admin-only, like the whole page.
  *
- * Ruling 152(b): a cap also carries a coordination lane (`lane` extra slots for
+ * Ruling 150: a cap also carries a coordination lane (`lane` extra slots for
  * operator and controller turns), and the sentence under the field says so,
  * because "capped at 4" alone would make five live runs look like a broken cap.
  * It prints the `lane` the server derived, never the rule it came from: the
@@ -743,7 +743,7 @@ function RunConcurrencyControl({
   const { submit, busy } = useOrgAction();
   const [value, setValue] = useState(String(runConcurrency.cap));
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
   // Re-seed the field when the server value changes (a save round-trips a fresh
@@ -755,7 +755,7 @@ function RunConcurrencyControl({
     setValue(String(runConcurrency.cap));
     setRefused(0);
   }
-  // Ruling 147(d): nothing-changed is the ONLY gate that keeps Save disabled.
+  // Ruling 288: nothing-changed is the ONLY gate that keeps Save disabled.
   // Validity used to be folded into `dirty`, so a typed "-1", "1.5" or an
   // emptied box was a changed value that left Save dead with no explanation.
   // An empty field is invalid, not zero: `Number("")` is 0, so clearing the box
@@ -847,20 +847,20 @@ function spendCapEntryValid(entry: string): boolean {
 }
 
 /**
- * Ruling 175: the instance's spending cap per Claude run (owner decision D4: an
+ * Ruling 31: the instance's spending cap per Claude run (owner decision D4: an
  * instance ceiling only, no profile field, none by default). The SDK stops a
  * Claude run once it has spent this much, and the run is reported as cut off
  * by its spending cap. Codex has no budget option, and the sentence under the
  * field says so rather than implying a limit that does not exist there. Blank
  * means no cap. Same row shape and refusal rules as the concurrency cap above
- * (ruling 147(d): only "nothing changed" disables Save).
+ * (ruling 288: only "nothing changed" disables Save).
  */
 function RunSpendCapControl({ spendCapUsd }: { spendCapUsd: number | null }) {
   const { submit, busy } = useOrgAction();
   const current = spendCapUsd === null ? "" : spendCapUsd.toFixed(2);
   const [value, setValue] = useState(current);
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const capRef = useRef<HTMLInputElement>(null);
   const [seeded, setSeeded] = useState(current);

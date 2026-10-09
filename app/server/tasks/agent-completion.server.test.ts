@@ -274,7 +274,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 137: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -326,9 +326,9 @@ async function finishedRunWith(
     actor: actorOf(store.users.arda),
     threadId: `th-${runSeq}`,
   };
-  // Ruling 544: what the run was dispatched on, when the case says.
+  // Ruling 153: what the run was dispatched on, when the case says.
   if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
-  // Ruling 316: dispatched with its verdict channel withheld, when the case says.
+  // Ruling 87: dispatched with its verdict channel withheld, when the case says.
   if (verdictWithheld) input.verdictWithheld = true;
   const started = await startRun(store.db, input);
   await pollUntil(() => {
@@ -394,7 +394,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
 
   /**
-   * Ruling 231 (F37-51, live on pass 37). The react re-invocation used to pin
+   * Ruling 108 (F37-51, live on pass 37). The react re-invocation used to pin
    * `ctx.operatorRun.backend` — the backend of the drive that prompted the
    * agent — and pass it as an OVERRIDE, which beats the live deployment. R22
    * removed exactly that pin from schedules, on exactly this reasoning:
@@ -407,7 +407,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    *
    * Canary: restore `reactBackend = input.operatorRun.backend`.
    */
-  it("ruling 231: a react uses the DEPLOYED backend, not the one its chain started on", async () => {
+  it("ruling 108: a react uses the DEPLOYED backend, not the one its chain started on", async () => {
     // The live deployment the owner just set: the operator on Claude.
     deployOperator();
     writeReviewTask({ stage: "impl", waiting: "agent" });
@@ -437,7 +437,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 177 (pass 36, F36-5): a run that outlives its task's closure —
+   * Ruling 52 (pass 36, F36-5): a run that outlives its task's closure —
    * HLC-9 was force-accepted while its developer was still building; the run
    * finished three minutes later, the dispatch-completion contract re-invoked
    * the operator on the SHIPPED task and the operator opened a decision packet
@@ -446,7 +446,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * dispatched. Canary: delete the `taskClosure` branch in
    * `applyAgentCompletionEffects` (no "Completed after the task closed" note).
    */
-  it("ruling 177: a run finishing after the task closed leaves a note and wakes no operator", async () => {
+  it("ruling 52: a run finishing after the task closed leaves a note and wakes no operator", async () => {
     deployOperator();
     // Shipped (terminal) while the run was live — the F36-5 shape.
     writeReviewTask({ stage: "done", waiting: "agent" });
@@ -510,7 +510,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 248 (pass 37, F37-77): a run that could not read the work judges
+   * Ruling 87 (pass 37, F37-77): a run that could not read the work judges
    * nothing.
    *
    * LIVE, on SHOP-5. The Code Reviewer's checkout failed to provision, so
@@ -532,7 +532,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     "Per the workspace contract: \u201cThe workspace has NO checkout, and this is a server-side failure, " +
     "not something you can fix.\u201d No content verdict recorded.";
 
-  it("ruling 248: a reviewer run with NO checkout records no verdict, however its prose reads", async () => {
+  it("ruling 87: a reviewer run with NO checkout records no verdict, however its prose reads", async () => {
     writeReviewTask();
     const runId = await finishedRunWith(VIBERR_OWN_NO_CHECKOUT_REPORT);
     // The durable fact the clone path stamps on the row.
@@ -557,7 +557,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(note!.text).not.toContain("Re-run the review or record a verdict manually");
   });
 
-  it("ruling 248: the trap is real — that same prose classifies as request_changes", () => {
+  it("ruling 87: the trap is real — that same prose classifies as request_changes", () => {
     // Not a hypothetical. The ONE word carrying the verdict is "failure", and
     // it is in the sentence VIBERR wrote and ordered the agent to quote.
     // CANARY: this is the pre-fix behaviour, pinned so nobody removes the gate
@@ -570,7 +570,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ).toBeNull();
   });
 
-  it("ruling 248: an envelope that ASKED instead of judging is not re-read as a verdict", async () => {
+  it("ruling 87: an envelope that ASKED instead of judging is not re-read as a verdict", async () => {
     writeReviewTask();
     const runId = await finishedRunWith(
       "I need the pinned revision before I can judge this. The suite currently fails to run at all.",
@@ -613,14 +613,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 159 (pass 35, F35-10): an agent under an older prompt created
+   * Ruling 78 (pass 35, F35-10): an agent under an older prompt created
    * `projects/<slug>/tasks/<key>/attachments` INSIDE its repository checkout,
    * so the file never reached the task page and the person never learned why.
    * Completion scans the run's workspace for that folder and posts a warning
    * line naming it, the files it holds and the real folder. Canary: delete
    * the `warnStrayAttachmentsFolder` call (no line is posted).
    */
-  it("ruling 159: a stray store-layout attachments folder inside the checkout is named on the timeline", async () => {
+  it("ruling 78: a stray store-layout attachments folder inside the checkout is named on the timeline", async () => {
     writeReviewTask();
     const workdir = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "workspace", "viberr");
     const strayDir = path.join(workdir, "projects", store.slug, "tasks", "VIB-1", "attachments");
@@ -645,14 +645,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(reply?.attachments).toBeUndefined();
   });
 
-  it("ruling 159: no warning line when the workspace holds no stray folder", async () => {
+  it("ruling 78: no warning line when the workspace holds no stray folder", async () => {
     writeReviewTask();
     const runId = await finishedRunWith("Nothing stray here.");
     await complete(runId, { workdir: store.dataRoot });
     expect(taskFile().parsed.timeline.some((e) => e.text.includes("store layout"))).toBe(false);
   });
 
-  it("ruling 105: prunes uncited browser working artifacts at completion; cited + visual stay", async () => {
+  it("ruling 78: prunes uncited browser working artifacts at completion; cited + visual stay", async () => {
     // The browser MCP's --output-dir IS the attachments store, so its aria
     // snapshots and console dumps land next to the screenshots. Completion
     // must delete the machine-stamped non-visual ones the run left UNCITED,
@@ -684,7 +684,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(claimed).not.toContain(uncitedLog);
   });
 
-  it("ruling 549: a snapshot cited only in a file the run saved is kept", async () => {
+  it("ruling 78: a snapshot cited only in a file the run saved is kept", async () => {
     // Live on AWSC-1 the Workflow Researcher's findings file named eleven
     // browser snapshots and its report named none: the prune deleted all
     // eleven, and the Estimate Judge rejected the findings for citing files
@@ -710,7 +710,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(findings)).toBe(true);
   });
 
-  it("ruling 533: a file a person attaches while a deliverer runs stays theirs, and delivers nothing", async () => {
+  it("ruling 77: a file a person attaches while a deliverer runs stays theirs, and delivers nothing", async () => {
     // A run's files are found by mtime, so a person's upload during the run
     // is in its window too. Claimed, it named the deliverer as its author and
     // stamped `deliveredAt` from the person's own input: a files-only task
@@ -744,7 +744,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(upload)).toBe(true);
   });
 
-  it("ruling 675: a file held under its composed name is not the run's when it is stored decomposed", async () => {
+  it("ruling 76: a file held under its composed name is not the run's when it is stored decomposed", async () => {
     // An upload that replaces a file a Mac stored decomposed keeps that file's
     // name, and its hold is taken under the composed one.
     // CANARY: compare the held name with the stored one byte for byte and the
@@ -767,7 +767,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.timeline.some((e) => (e.attachments ?? []).some((n) => n.normalize("NFC") === composed))).toBe(false);
   });
 
-  it.skipIf(diskFoldsUnicodeForms)("ruling 675: a hold on one of two files that differ only in Unicode form leaves the other the run's", async () => {
+  it.skipIf(diskFoldsUnicodeForms)("ruling 76: a hold on one of two files that differ only in Unicode form leaves the other the run's", async () => {
     // The folder holds a person's file stored decomposed and the run's own
     // under the composed name: two files on the disk production runs on.
     // CANARY: tell the held file from the run's by composed name alone and
@@ -791,7 +791,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.timeline.flatMap((e) => e.attachments ?? [])).toEqual([composed]);
   });
 
-  /** Ruling 558's writers: each puts `SAMPLE` on VIB-1 for someone other
+  /** Ruling 77's writers: each puts `SAMPLE` on VIB-1 for someone other
    *  than a run. The relay and the take bring it from VIB-2, which is Done. */
   const WRITERS = ["a person's upload", "a relay", "a take"] as const;
   const SAMPLE = "sample-01-input.csv";
@@ -841,7 +841,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   const vib1Sample = () => path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), SAMPLE);
 
   it.each(WRITERS)(
-    "ruling 558: a completion that lands while %s is claiming its file leaves the file to it",
+    "ruling 77: a completion that lands while %s is claiming its file leaves the file to it",
     async (writer) => {
       // The writers' side of the hold. Each puts its file down, then waits for
       // VIB-1's file lock to write the entry that claims it. The test holds
@@ -882,7 +882,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     },
   );
 
-  it.each(WRITERS)("ruling 558: %s whose claim cannot be written leaves no file behind", async (writer) => {
+  it.each(WRITERS)("ruling 77: %s whose claim cannot be written leaves no file behind", async (writer) => {
     // A file on the task that nothing claims is the next completion's to
     // credit to its run. CANARY: write the file with `writeTaskAttachment`
     // instead of the hold's `put` (in attachTaskFile, or in task-relay's
@@ -895,7 +895,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(vib1Sample())).toBe(false);
   });
 
-  it("ruling 555: a deliverer's reply is its delivery, whatever verdict it states", async () => {
+  it("ruling 87: a deliverer's reply is its delivery, whatever verdict it states", async () => {
     // Live on AWSC-3 the Estimate Judge designed the benchmark (it delivers
     // there) and ended its report "**Approved.**". Completion took that as a
     // review verdict, filed the samples as its evidence and never stamped the
@@ -923,7 +923,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.verdicts).toEqual([]);
   });
 
-  it("ruling 609: a deliverer that ends by asking a person has not delivered", async () => {
+  it("ruling 85: a deliverer that ends by asking a person has not delivered", async () => {
     // Live on AWSC-52 the Calculator Builder stopped at its headline ask
     // (rulings §4 C3) with drafts saved, and the ask stamped `deliveredAt` on an
     // estimate-link.md that said the delivered link was still pending.
@@ -951,7 +951,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(reply?.attachments).toEqual(expect.arrayContaining(["estimate-link.md", "assumptions.md"]));
   });
 
-  /** Ruling 555's hand-off: the `reviewer` profile was handed delivery while
+  /** Ruling 87's hand-off: the `reviewer` profile was handed delivery while
    *  its review run worked, over files `dev` delivered at `savedAt`. */
   function writeHandedOffReviewTask(savedAt: string): void {
     writeTask(store.dataRoot, store.slug, {
@@ -981,7 +981,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
   const completeReviewRun = (runId: string) => complete(runId, { role: "Review & validation" });
 
-  it("ruling 555: a review run whose profile was handed delivery while it worked keeps its verdict", async () => {
+  it("ruling 87: a review run whose profile was handed delivery while it worked keeps its verdict", async () => {
     // The channel was offered at dispatch, as a reviewer; the roster at
     // completion does not take it back. CANARY: key `verdictAuthorized` on the
     // engagement at completion instead of the run's dispatch and the verdict
@@ -995,7 +995,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.deliveredAt).toBe(savedAt);
   });
 
-  it("ruling 555: that review run's captures never become the delivery, with no verdict to carry them", async () => {
+  it("ruling 87: that review run's captures never become the delivery, with no verdict to carry them", async () => {
     // With no verdict the run's files ride its reply, which the delivery stamp
     // reads. They were saved for a review, and the roster at completion does
     // not make them the delivery. CANARY: drop the dispatch check from
@@ -1016,7 +1016,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(carrier?.actor).toMatchObject({ kind: "agent", profileId: "reviewer" });
   });
 
-  it("ruling 556: a reviewer's verdict never binds to files it saved itself", async () => {
+  it("ruling 245: a reviewer's verdict never binds to files it saved itself", async () => {
     // AWSC-3's way out, taken naively: the Estimate Judge delivered, delivery
     // was handed to another agent that saved nothing, and the Judge was run as
     // the reviewer. The subject is still the Judge's own files.
@@ -1054,7 +1054,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(note?.text).toContain("but it made what is delivered, so its verdict does not count");
   });
 
-  /** Ruling 587: `dev` delivered two files at `savedAt`, and `reviewer` asked
+  /** Ruling 85: `dev` delivered two files at `savedAt`, and `reviewer` asked
    *  for a change to one of them. */
   function writeDeliveredAndObjectedTask(savedAt: string): void {
     writeTask(store.dataRoot, store.slug, {
@@ -1095,7 +1095,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   }
   const completeSupportingRun = (runId: string) => complete(runId, { role: "Review & validation" });
 
-  it("ruling 587: a supporting run that rewrites a delivered file moves the delivery, and the verdict on it goes stale", async () => {
+  it("ruling 85: a supporting run that rewrites a delivered file moves the delivery, and the verdict on it goes stale", async () => {
     // Live on AWSC-28 the Architect rewrote the delivered assumptions.md at
     // Mapping and the subject stayed put, so the Judge's re-review landed on
     // the revision it had already objected to. CANARY: return early for every
@@ -1110,7 +1110,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(currentVerdicts(fm)).toEqual([]);
   });
 
-  it("ruling 597: each files delivery is kept as delivered, and a rework leaves the first one readable", async () => {
+  it("ruling 86: each files delivery is kept as delivered, and a rework leaves the first one readable", async () => {
     // Live in round 4 the Estimate Judge re-reviewing AWSC-43 scored the first
     // delivery as "a reconstruction from the surviving first-delivery exports":
     // the rework had saved mapping.md and assumptions.md again. CANARY: drop the
@@ -1140,7 +1140,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(read("2026-09-29T09:47:34.900Z")).toBeNull();
   });
 
-  it("ruling 610: a kept delivery holds every file on the task, a supporting agent's included", async () => {
+  it("ruling 81: a kept delivery holds every file on the task, a supporting agent's included", async () => {
     // Live on AWSC-52 the Estimate Judge's J4 audit read the first delivery
     // without the Architect's mapping.md and called its Deliverable score
     // unsupported. CANARY: keep only the deliverer's files and mapping.md is
@@ -1172,7 +1172,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
   });
 
-  /** Ruling 690: stage `name` on VIB-1 as a run's shell does before it calls
+  /** Ruling 82: stage `name` on VIB-1 as a run's shell does before it calls
    *  `keep_source`: saved in the attachments folder under the staging prefix. */
   function stageSource(name: string, body: string): string {
     const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
@@ -1181,7 +1181,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     return `${SOURCE_STAGING_PREFIX}${name}`;
   }
 
-  /** Ruling 690: keep `name` as a source on VIB-1, the way a run's
+  /** Ruling 82: keep `name` as a source on VIB-1, the way a run's
    *  `keep_source` does: staged in the attachments folder, then handed over. */
   function keepSourceInRun(runId: string, name: string, body: string, profileId = "reviewer"): string {
     return keepTaskSource(
@@ -1199,7 +1199,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     );
   }
 
-  it("ruling 690: a kept delivery records the sources the task held when it was delivered, and one kept afterwards is not among them", async () => {
+  it("ruling 82: a kept delivery records the sources the task held when it was delivered, and one kept afterwards is not among them", async () => {
     // What a result rests on is what its runs had kept when it was delivered.
     // A source a reviewer keeps while checking it is on the task, and was not
     // under the delivery. CANARY: remove recordDeliverySources from
@@ -1227,7 +1227,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(kept.deliveries).toEqual([{ deliveredAt: stamp, sources: ["S1"] }]);
   });
 
-  it("ruling 690: a page one run has staged and not yet kept is not the file of a run that completes beside it, and is still that run's to keep", async () => {
+  it("ruling 82: a page one run has staged and not yet kept is not the file of a run that completes beside it, and is still that run's to keep", async () => {
     // A researcher saves a page and keeps it a model turn later. A deliverer
     // that finished in between used to take the page as its delivery: posted
     // on its reply, stamped, copied into the kept delivery, and then refused
@@ -1272,7 +1272,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(taskFile().parsed.frontmatter.deliveredAt).toBe(stamp);
   });
 
-  it("ruling 690: a run that kept sources leaves one note naming them, and replaying its effects adds no second", async () => {
+  it("ruling 82: a run that kept sources leaves one note naming them, and replaying its effects adds no second", async () => {
     // One entry a run, not one a source: seventy pages would bury the
     // thread. Boot recovery replays a run's lost effects, and the entry it
     // finds is the entry. CANARY: drop the already-noted check and the
@@ -1295,8 +1295,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ]);
   });
 
-  it("ruling 587: a file the delivery does not hold moves nothing", async () => {
-    // A supporting agent's own notes are not the delivery (ruling 555).
+  it("ruling 85: a file the delivery does not hold moves nothing", async () => {
+    // A supporting agent's own notes are not the delivery (ruling 87).
     // CANARY: stamp on any saved file and the objection is dropped with no
     // change to what it objected to.
     const savedAt = "2026-09-29T09:47:34.900Z";
@@ -1309,7 +1309,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
   });
 
-  /** Ruling 699: the delivered and objected task of ruling 587, with a
+  /** Ruling 81: the delivered and objected task of ruling 85, with a
    *  supporting agent that holds no verdict engaged beside the reviewer and
    *  one file each of them saved earlier on the timeline. */
   function writeTaskWithAPictureMaker(savedAt: string): void {
@@ -1346,12 +1346,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   const completeRunAs = (runId: string, profileId: string, role: string) =>
     complete(runId, { profileId, role, agentHandle: profileId });
 
-  it("ruling 699: a supporting agent with no verdict that saves again a file it saved before moves the delivery, and the verdict on it goes stale", async () => {
+  it("ruling 81: a supporting agent with no verdict that saves again a file it saved before moves the delivery, and the verdict on it goes stale", async () => {
     // Read before it shipped: a cover sent back was replaced under its own
     // name, the stamp stayed, the kept delivery and the page's pictures still
     // showed the old cover, and the reviewer's second objection read as one
     // on unchanged work. CANARY: count the deliverer's entries alone in
-    // `deliveryMakers`, as ruling 587 did, and `deliveredAt` stays put.
+    // `deliveryMakers`, as ruling 85 did, and `deliveredAt` stays put.
     const savedAt = "2026-09-29T09:47:34.900Z";
     writeTaskWithAPictureMaker(savedAt);
     const runId = await finishedRunWith("Replaced cover.png with the cover the review asked for.");
@@ -1367,8 +1367,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
   });
 
-  it("ruling 699: a new file of such an agent moves nothing, and neither does a file a reviewer saved before", async () => {
-    // A first save is not yet part of what anybody judged (ruling 587's own
+  it("ruling 81: a new file of such an agent moves nothing, and neither does a file a reviewer saved before", async () => {
+    // A first save is not yet part of what anybody judged (ruling 85's own
     // case), and a reviewer's notes are never the delivery: saving them again
     // must not move the subject under its own verdict. CANARY: let every
     // engaged agent's files count in `deliveryMakers` and the second half
@@ -1387,10 +1387,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(currentVerdicts(fm).map((v) => v.result)).toEqual(["request_changes"]);
   });
 
-  it("ruling 699: beside another specialist run a maker still claims the picture it saved before, and never the deliverer's file", async () => {
+  it("ruling 81: beside another specialist run a maker still claims the picture it saved before, and never the deliverer's file", async () => {
     // Read before it shipped: a review that sent the text and a picture back
     // at once has the writer and the picture's maker running together, and
-    // ruling 627's filter dropped every name the delivery holds, the maker's
+    // ruling 85's filter dropped every name the delivery holds, the maker's
     // own earlier picture among them: its rework claimed nothing and moved
     // nothing. CANARY: drop `stillItsOwn` from the filter and `deliveredAt`
     // stays; let it pass a name the deliverer's entries claim and
@@ -1409,7 +1409,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(claimed).toEqual(["cover.png"]);
   });
 
-  it("ruling 699: where the delivery is a revision, a maker's file is beside it and saving it again moves nothing", async () => {
+  it("ruling 81: where the delivery is a revision, a maker's file is beside it and saving it again moves nothing", async () => {
     // On a board with a repository the review binds to the commit. CANARY:
     // count makers whatever the delivery is and this stamps `deliveredAt`
     // and keeps a copy of the whole folder for a change nobody reviews.
@@ -1429,11 +1429,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(listKeptDeliveries(store.slug, "VIB-1", store.dataRoot)).toEqual([]);
   });
 
-  it("ruling 627: beside another specialist run, a delivered file it names is not its, and the delivery stays", async () => {
+  it("ruling 85: beside another specialist run, a delivered file it names is not its, and the delivery stays", async () => {
     // A reviewer names the file it reviewed; the deliverer, live beside it,
     // is the one that saved it again. Claiming it would move the delivery
-    // onto the reviewer's entry (ruling 587) and make the subject its own
-    // work (ruling 556). CANARY: drop the delivered-file check and
+    // onto the reviewer's entry (ruling 85) and make the subject its own
+    // work (ruling 245). CANARY: drop the delivered-file check and
     // `deliveredAt` moves.
     const savedAt = "2026-09-29T09:47:34.900Z";
     writeDeliveredAndObjectedTask(savedAt);
@@ -1446,7 +1446,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.timeline.filter((e) => e.actor.kind === "agent" && e.actor.profileId === "reviewer").flatMap((e) => e.attachments ?? [])).toEqual([]);
   });
 
-  it("ruling 538: a file a relay carries here while a deliverer runs is the relay's, and delivers nothing", async () => {
+  it("ruling 71: a file a relay carries here while a deliverer runs is the relay's, and delivers nothing", async () => {
     // CANARY: leave relay comments out of the completion's `carriedHere` and
     // the run claims `sample-01-input.csv` and stamps `deliveredAt`.
     writeReviewTask({ stage: "impl", workRevision: null, validation: "none" });
@@ -1494,14 +1494,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 544 (live, AWSC-2): a verdict binds to the subject its run was
+   * Ruling 84 (live, AWSC-2): a verdict binds to the subject its run was
    * dispatched on. The Estimate Judge started on the research as it stood;
    * the researcher delivered the final files five seconds before the Judge
    * finished, and the Judge's verdict bound to that delivery, which it never
    * read. An approval there would have released acceptance on content no
    * reviewer read.
    */
-  it("ruling 544: a reviewer's run records the subject it was dispatched on", async () => {
+  it("ruling 153: a reviewer's run records the subject it was dispatched on", async () => {
     // CANARY: drop `runInput.reviewSubject` in dispatchAgentRun and both rows
     // say nothing, so each verdict binds to whatever is delivered at the end.
     writeReviewTask();
@@ -1547,7 +1547,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       verdict: "approve" as const,
       says: `Review & validation approved, but \`${"a".repeat(12)}\` was delivered while it was reviewing the revision before it`,
     },
-  ])("ruling 544: a verdict does not bind when $moved during its run", async ({ dispatchedOn, task, verdict, says }) => {
+  ])("ruling 84: a verdict does not bind when $moved during its run", async ({ dispatchedOn, task, verdict, says }) => {
     // CANARY: drop `!moved` from the binding in recordAgentCompletion and the
     // verdict binds to the delivery the reviewer never read.
     writeReviewTask(task);
@@ -1566,7 +1566,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ).not.toBeNull();
   });
 
-  it("ruling 544: a verdict binds when the subject it was dispatched on is still delivered", async () => {
+  it("ruling 84: a verdict binds when the subject it was dispatched on is still delivered", async () => {
     writeReviewTask();
     const summary = "Approved at the pinned head.";
     const runId = await finishedRunWith(summary, "rev_1");
@@ -1577,7 +1577,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     ).toEqual([["rev_1", "approve"]]);
   });
 
-  it("ruling 105 review: an ERRORED run keeps its working artifacts (its only diagnostics)", async () => {
+  it("ruling 78 review: an ERRORED run keeps its working artifacts (its only diagnostics)", async () => {
     // A crashed browsing run never got to cite anything — the citation escape
     // hatch is structurally unreachable on the failure path, so pruning there
     // deletes the console dump a human needs to diagnose the crash.
@@ -1589,7 +1589,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(path.join(dir, dump))).toBe(true);
   });
 
-  it("ruling 593: beside a live sibling a run deletes nothing and claims only the working files it cited", async () => {
+  it("ruling 78: beside a live sibling a run deletes nothing and claims only the working files it cited", async () => {
     // Live on AWSC-32 the Estimate Judge finished while the Workflow Researcher
     // was still running, and its verdict claimed twenty browser snapshots it
     // never cited; the researcher's completion would then have deleted them
@@ -1608,7 +1608,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const claimed = taskFile().parsed.timeline.flatMap((e) => e.attachments ?? []);
     expect(claimed).toContain(cited);
     expect(claimed).not.toContain(uncited);
-    // Ruling 627: nor a file of any kind it does not name.
+    // Ruling 85: nor a file of any kind it does not name.
     expect(claimed).not.toContain(screenshot);
   });
 
@@ -1630,7 +1630,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     { sibling: "a specialist run that finished inside its window", kind: "primary", live: false, claims: "only the files it names" },
     { sibling: "a live operator run", kind: "operator", live: true, claims: "its whole window" },
   ] as const)(
-    "ruling 627: beside $sibling, a run that does not deliver claims $claims",
+    "ruling 85: beside $sibling, a run that does not deliver claims $claims",
     async ({ kind, live, claims }) => {
       // Live on AWSC-80 the Estimate Judge, told to save no file, finished nine
       // seconds after the Workflow Researcher saved round-6-comparison.md, and
@@ -1649,7 +1649,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     },
   );
 
-  it("ruling 593: the prune keeps a working file another entry of its window cites in evidence or claims", async () => {
+  it("ruling 78: the prune keeps a working file another entry of its window cites in evidence or claims", async () => {
     // The Judge's verdict cited its snapshots in evidence rows, not in its
     // text, and claimed them on its entry. CANARY: read only each entry's text
     // into the citation corpus again.
@@ -1699,14 +1699,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const second = await finishedRunWith(reply);
     await complete(second);
     // No operator is deployed, so the no-progress arm's record is the note
-    // that its packet was refused (ruling 325). With the comparison forms out
+    // that its packet was refused (ruling 122). With the comparison forms out
     // of sync the repeat reads as NEW work and no note is written.
     expect(
       taskFile().parsed.timeline.some((e) => e.text.includes("stopped making progress")),
     ).toBe(true);
   });
 
-  it("dispatch-completion contract: the stored report gains the missing @tags (ruling 98)", async () => {
+  it("dispatch-completion contract: the stored report gains the missing @tags (ruling 124)", async () => {
     // A manually-dispatched run whose model forgot both tags: the pipeline
     // appends them BEFORE the reply is stored, so the timeline comment (and
     // the mention fan-out reading it) always reaches the dispatching human
@@ -1754,11 +1754,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(reply?.text).not.toContain("cc @");
   });
 
-  it("dispatch-completion contract: a verbatim repeat still hands back to the operator — no no-progress skip, no stuck packet (ruling 98)", async () => {
+  it("dispatch-completion contract: a verbatim repeat still hands back to the operator — no no-progress skip, no stuck packet (ruling 124)", async () => {
     // The owner's "to let the operator run again" half: a dispatched run's
     // completion bypasses the new-progress heuristic. Observable as the
     // ABSENCE of the stuck arm's record: with no operator deployed its packet
-    // is refused and the note saying so (ruling 325) is all it writes, and the
+    // is refused and the note saying so (ruling 122) is all it writes, and the
     // react then settles harmlessly.
     writeReviewTask();
     const reply = "The diff is unchanged since my last pass.";
@@ -1772,7 +1772,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 258 (pass 37, F37-89): a chain that stopped because the work is
+   * Ruling 119 (pass 37, F37-89): a chain that stopped because the work is
    * FINISHED did not get stuck.
    *
    * Live on SHOP-32: the Integration Verifier approved `f5470f05`, both
@@ -1785,7 +1785,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * remaining doors were to redo finished work, or to force-accept past a
    * review gate that had PASSED and record a bypass that never happened.
    */
-  it("ruling 326: a refused option set falls back to the stock one — a stalled task always gets a packet", async () => {
+  it("ruling 123: a refused option set falls back to the stock one — a stalled task always gets a packet", async () => {
     /**
      * `operatorOpenPacket`'s authoring guards exist to COACH the operator: it
      * reads the refusal, revises its options and tries again, and the messages
@@ -1803,7 +1803,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     deployOperator();
     // The owner has BOTH backends, and the other one is out of quota — the
     // exact live shape. `describeRunFailure` no longer composes the retry
-    // (ruling 326's first half), so force the refusal directly: an option set
+    // (ruling 156(b)), so force the refusal directly: an option set
     // whose `resolve_remote_collision` has no collision to clear is refused by
     // an authoring guard the same way.
     writeReviewTask({ validation: "changed" });
@@ -1840,12 +1840,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const withheld = packet!.observations.find((o) => o.k === "Tailored options withheld");
     expect(withheld, "the packet hides that a better option set was refused").toBeTruthy();
     expect(withheld!.v).toContain("refused its own packet");
-    // Ruling 432: the fallback is still a stall, so a later clean run may
+    // Ruling 123: the fallback is still a stall, so a later clean run may
     // still withdraw it.
     expect(packet!.stalled).toBe(true);
   });
 
-  it("ruling 325: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
+  it("ruling 122: an escalation that was REFUSED says what refused it, and that there is nothing to resolve", async () => {
     /**
      * C10.4 added this card so a task that stopped making progress never sits
      * waiting on a human with nothing explaining why. It said: "This task's
@@ -1887,7 +1887,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(note!.text).toContain("Clear what the refusal names");
   });
 
-  it("ruling 362 over 258: an approve at the cap on an ACCEPTABLE task resets the depth, and the operator acts now", async () => {
+  it("ruling 119 over 258: an approve at the cap on an ACCEPTABLE task resets the depth, and the operator acts now", async () => {
     deployOperator();
     writeReviewTask({
       validation: "healthy",
@@ -1916,13 +1916,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       acceptanceRefusalFor({ projectSlug: store.slug, taskKey: "VIB-1" }, { dataRoot: store.dataRoot }),
     ).toBeNull();
     expect(taskFile().parsed.packet).toBeNull();
-    // CANARY: gate the ruling 362 reset on the task not being acceptable, and
+    // CANARY: gate the ruling 119 reset on the task not being acceptable, and
     // the chain parks at 258's skip arm with no operator turn.
     await pollUntil(() => operatorRuns() > before);
     expect(operatorRuns()).toBe(before + 1);
   });
 
-  it("ruling 258: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
+  it("ruling 119: no stuck-loop packet when the task is acceptable — the boundary IS the boundary", async () => {
     // An operator that CAN open packets, so the absence below is a decision
     // rather than a missing grant.
     deployOperator();
@@ -1931,7 +1931,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       validation: "healthy",
       pr: { number: 7, state: "review", title: "[VIB-1] Task VIB-1" },
     });
-    // A report that is not an approve, so ruling 362's reset leaves the chain
+    // A report that is not an approve, so ruling 119's reset leaves the chain
     // at the cap.
     const runId = await finishedRunWith("Release notes tidied; nothing else to do.");
     await updateTaskFile(
@@ -1983,17 +1983,17 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 362 (pass 38, F38-16): an approve is a boundary for the depth count.
+   * Ruling 119 (pass 38, F38-16): an approve is a boundary for the depth count.
    *
    * Live on BNB-16: the code reviewer approved the rework at Review, the
    * verifier's stage still ahead — so the task was NOT acceptable and ruling
-   * 258's arm did not apply — and 0.1 s later the depth cap opened "Work
+   * 119's arm did not apply — and 0.1 s later the depth cap opened "Work
    * stalled: pick a recovery path" with redirect / send back / hold, each of
    * them re-running work that had just passed. Five of five such packets on
    * the instance followed an approve; every person answered "nothing is
    * stalled" and the approved work waited hours for it.
    */
-  it("ruling 362: an approve at the depth cap on a task that is NOT yet acceptable opens no stuck packet — the chain continues from a fresh depth", async () => {
+  it("ruling 119: an approve at the depth cap on a task that is NOT yet acceptable opens no stuck packet — the chain continues from a fresh depth", async () => {
     deployOperator();
     // Two verdict-capable reviewers engaged; only `reviewer` judges here, so
     // the task stays un-acceptable after its approve (the verifier's verdict is
@@ -2037,7 +2037,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { dataRoot: store.dataRoot },
       ),
     ).not.toBeNull();
-    // CANARY: drop the ruling-362 reset and "Work stalled: pick a recovery
+    // CANARY: drop the ruling-119 reset and "Work stalled: pick a recovery
     // path" opens here — three options, every one of them re-running work that
     // passed — and no operator turn follows the approve.
     expect(taskFile().parsed.packet).toBeNull();
@@ -2050,8 +2050,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 489 (pass 40, F40-68): a reply that MOVED the task's head is a
-   * boundary for the depth count, like an approve (ruling 362).
+   * Ruling 119 (pass 40, F40-68): a reply that MOVED the task's head is a
+   * boundary for the depth count, like an approve.
    *
    * Live on WEB-8 the Site Engineer reported its rework done: the new head
    * 178dc22 merged main in and fixed every reviewer finding, and Viberr's gates
@@ -2060,7 +2060,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * each re-dispatching the work that had just finished, and nothing on the
    * packet about the report or the head it left undelivered.
    */
-  describe("ruling 489: progress resets the react depth, and the capped packet says where the work stands", () => {
+  describe("ruling 119: progress resets the react depth, and the capped packet says where the work stands", () => {
     const operatorRuns = () =>
       // SAFETY: COUNT(*) over this store's own table is always an integer.
       (
@@ -2125,7 +2125,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       await completeDeveloperAtCap(runId);
 
-      // CANARY: drop the ruling-489 reset and "Work stalled: pick a recovery
+      // CANARY: drop the ruling-119 reset and "Work stalled: pick a recovery
       // path" opens here over the rework that just landed, and no operator
       // turn follows it.
       expect(taskFile().parsed.packet).toBeNull();
@@ -2153,7 +2153,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(packet?.title).toBe("Work stalled: pick a recovery path");
       expect(packet!.body).toContain("4-cycle depth cap without reaching a boundary");
       // CANARY: drop `stalled: true` from `openStuckLoopPacket`'s packet.
-      expect(packet!.stalled, "ruling 432: the server's own stall escalation carries the marker").toBe(true);
+      expect(packet!.stalled, "ruling 123: the server's own stall escalation carries the marker").toBe(true);
       expect(operatorRuns()).toBe(before);
       // The head is named, and it is delivered, so the general options stand.
       // CANARY: read every head as undelivered in `taskHeadState` and a
@@ -2167,7 +2167,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 613: a task whose deliverable is files is delivered by moving
+     * Ruling 119: a task whose deliverable is files is delivered by moving
      * `deliveredAt`, never by a work revision. Live on AWSC-71 the Calculator
      * Builder delivered the Judge's two fixes and the fourth hop opened "Work
      * stalled" over the rework it had just delivered.
@@ -2187,7 +2187,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       engagements: [{ ...REVIEWER_ENGAGEMENT, delivers: true }],
     };
 
-    it("ruling 613: a reply at the cap that delivered the task's files opens no stuck packet; the operator reacts from a fresh depth", async () => {
+    it("ruling 119: a reply at the cap that delivered the task's files opens no stuck packet; the operator reacts from a fresh depth", async () => {
       approveReviewEntry(store);
       deployOperator();
       writeReviewTask({ ...FILES_TASK, deliveredAt: "2026-09-30T12:00:00.000Z" });
@@ -2211,7 +2211,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(operatorRuns()).toBe(before + 1);
     });
 
-    it("ruling 613: a delivery from before the hop is not its progress, and the capped packet names it", async () => {
+    it("ruling 119: a delivery from before the hop is not its progress, and the capped packet names it", async () => {
       deployOperator();
       writeReviewTask({ ...FILES_TASK, deliveredAt: "2026-09-30T12:00:00.000Z" });
       // The reply saves nothing, so the delivery stays where an earlier hop put it.
@@ -2357,7 +2357,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 489(d): the ceiling progress does not reset. With the depth reset
+     * Ruling 119: the ceiling progress does not reset. With the depth reset
      * above, a chain whose every hop commits a new head (the operator
      * re-dispatching a developer, no reviewer to object) had no bound at all.
      */
@@ -2445,7 +2445,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         reactDepth: 1,
         reactHops: OPERATOR_REACT_HOP_CEILING,
       };
-      // Ruling 362's shape: an approve with a second verdict still owed.
+      // Ruling 119's shape: an approve with a second verdict still owed.
       writeReviewTask({
         validation: "changed",
         engagements: [
@@ -2487,7 +2487,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         reactDepth: 1,
         reactHops: OPERATOR_REACT_HOP_CEILING,
       };
-      // Ruling 258's shape: the task is acceptable, and the reply at the
+      // Ruling 119's shape: the task is acceptable, and the reply at the
       // ceiling is not an approve.
       writeReviewTask({
         validation: "healthy",
@@ -2526,7 +2526,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         "finished",
         { runOperator: runOp },
       );
-      // CANARY: leave the ceiling out of ruling 258's check and the packet
+      // CANARY: leave the ceiling out of ruling 119's check and the packet
       // opens and blocks the acceptance it should wait for.
       expect(taskFile().parsed.packet).toBeNull();
       // The chain still ends at the ceiling: no operator turn follows.
@@ -2564,21 +2564,21 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 204 (F37-24, live on SHOP-9). The verdict row is last-write-wins per
+   * Ruling 92 (F37-24, live on SHOP-9). The verdict row is last-write-wins per
    * (profileId, revisionId) — F10-15's model, and right: a verdict judges a
    * revision, and the latest judgement is the one that binds. What the overwrite
    * destroyed was the COUNT of times this reviewer had blocked, which is the
    * only evidence that the deliverer could not move. Live, the Integration
    * Verifier blocked a revision, the deliverer reported it had nothing in scope
    * to change and committed nothing, and the verifier blocked the same revision
-   * again: two objections, one row, and ruling 193's escalation counter read 1.
+   * again: two objections, one row, and ruling 93's escalation counter read 1.
    */
-  it("rulings 204 + 242: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
+  it("ruling 92: a second request_changes on the SAME revision counts a round only when the DELIVERER ran", async () => {
     writeReviewTask();
-    /** Ruling 242: the deliverer took a turn. A run row is the whole signal,
+    /** Ruling 92: the deliverer took a turn. A run row is the whole signal,
      *  whatever its state, because a rework that was dispatched and crashed
-     *  still means a round was fought. Ruling 416 carves out one state: a run
-     *  the PROVIDER refused fought nothing (see the deadlock block below). */
+     *  still means a round was fought. One state is carved out: a run the
+     *  PROVIDER refused fought nothing (see the deadlock block below). */
     let delivererRuns = 0;
     const delivererRan = (): void => {
       delivererRuns += 1;
@@ -2596,8 +2596,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(1);
     expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
 
-    // Ruling 242 (F37-69): a repeat objection with NOBODY having reworked is not
-    // a second round. Live on SHOP-25 the reviewer was asked ruling 237's
+    // Ruling 92 (F37-69): a repeat objection with NOBODY having reworked is not
+    // a second round. Live on SHOP-25 the reviewer was asked ruling 94's
     // escalation question, answered it completely, and attached a
     // `request_changes` to the same untouched revision 8 milliseconds later —
     // which took the deadlock count from 2 to 3 and re-raised the packet on top
@@ -2606,11 +2606,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     await review("Verdict: request_changes\n\n@operator here is the complete list.");
     expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(1);
 
-    // Ruling 204's own case, which still counts: no new revision is minted,
+    // Ruling 92's own case, which still counts: no new revision is minted,
     // because the DELIVERER ran and reported it had nothing in scope it was
     // allowed to change. That is a round fought, and the signal is the run.
     // CANARY: read `finished` runs only, or key on the revision again, and the
-    // deadlock ruling 237 escalates on goes back to sitting flat forever.
+    // deadlock ruling 94 escalates on goes back to sitting flat forever.
     delivererRan();
     await review("Verdict: request_changes\n\n@operator the stack still cannot start.");
     const blocked = taskFile().parsed.frontmatter.verdicts;
@@ -2627,7 +2627,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   it("F37-64: a Codex-envelope question reaches the inbox under the AGENT's name, not the Operator's", async () => {
-    // Ruling 222 fixed the CLAUDE `ask_human` door in agent-toolkit.server.ts
+    // Ruling 74 fixed the CLAUDE `ask_human` door in agent-toolkit.server.ts
     // and left this one, the Codex outcome envelope, which copies its title
     // format and never set `from` — so `notifyTaskWatchers` stamped
     // OPERATOR_NOTIFY_FROM over it. Live on SHOP-5: title "Infrastructure
@@ -2659,7 +2659,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     // `notifications`; the rows were written by `createNotification` above.
     const rows = store.db
       .prepare(
-        // Ruling 481(a): the Codex door files the question as `question` too.
+        // Ruling 74: the Codex door files the question as `question` too.
         `SELECT title, actor_json FROM notifications WHERE kind = 'question' AND task_key = 'VIB-1'`,
       )
       .all() as { title: string | null; actor_json: string }[];
@@ -2678,9 +2678,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
   });
 
   /**
-   * Ruling 237 (F37-57, live on SHOP-5). Ruling 210 held that a second
+   * Ruling 94 (F37-57, live on SHOP-5). Ruling 201 held that a second
    * consecutive objection from one reviewer is the point to stop reworking and
-   * ask, ruling 204 gave it a counter that reads the deadlock correctly, and
+   * ask, ruling 92 gave it a counter that reads the deadlock correctly, and
    * both were spent on a paragraph in the operator's prompt. Live, the operator
    * read the paragraph, took the third `request_changes`, and had the deliverer
    * running again 62 seconds later with no question put to anyone.
@@ -2688,18 +2688,18 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
    * The owner's remedy was to escalate rather than gate: the operator keeps
    * every move, and the second objection reaches a person by itself.
    */
-  describe("ruling 237 as amended by 410: the THIRD consecutive objection escalates to a person", () => {
+  describe("ruling 94: the THIRD consecutive objection escalates to a person", () => {
     const reviewerInput = (profileId: string) => ({
       profileId,
       role: "Review & validation",
       agentHandle: profileId,
     });
     /**
-     * Ruling 242: a round is a round only if the DELIVERER RAN. A real deadlock
+     * Ruling 92: a round is a round only if the DELIVERER RAN. A real deadlock
      * has the deliverer going back in between objections and coming out with
      * nothing it is allowed to change — SHOP-5, SHOP-6 and SHOP-10 all did — so
      * each review here is preceded by the rework it is objecting to. Without
-     * this the fixture models the one case ruling 242 says is NOT a deadlock: a
+     * this the fixture models the one case ruling 92 says is NOT a deadlock: a
      * reviewer repeating itself with nobody having touched the work.
      */
     let delivererRuns = 0;
@@ -2726,9 +2726,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       `Verdict: request_changes\n\n@operator objection number ${n}.`;
 
     /**
-     * Ruling 416: a deliverer run that ENDED in error, classified as `kind`.
+     * Ruling 92: a deliverer run that ENDED in error, classified as `kind`.
      * `quota` is the provider refusing it; `idle_timeout` is the run hanging
-     * mid-work, which is the crash ruling 242 still counts.
+     * mid-work, which is the crash ruling 92 still counts.
      */
     const erroredRework = (kind: "quota" | "idle_timeout"): void => {
       delivererRuns += 1;
@@ -2747,7 +2747,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     const reviewOnly = async (reply: string) => complete(await finishedRunWith(reply), reviewerInput("reviewer"));
     const roundsOnTheRevision = () => taskFile().parsed.frontmatter.verdicts[0]?.rounds;
 
-    it("ruling 416: a rework the PROVIDER refused fought no round, a crash still did, and a repeat keeps the rounds fought", async () => {
+    it("ruling 92: a rework the PROVIDER refused fought no round, a crash still did, and a repeat keeps the rounds fought", async () => {
       // Live on ax-clone AX-19: the rework was refused for quota three minutes
       // in, with nothing committed, and the reviewer's next verdict on the
       // untouched revision counted as a sixth round.
@@ -2764,14 +2764,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(roundsOnTheRevision()).toBe(2);
       expect(taskFile().parsed.packet, "two rounds, however many verdicts, is not a deadlock").toBeNull();
 
-      // A rework that hung mid-work is still a round fought (ruling 242 stands).
+      // A rework that hung mid-work is still a round fought (ruling 92 stands).
       erroredRework("idle_timeout");
       await reviewOnly(blocks(4));
       expect(roundsOnTheRevision()).toBe(3);
       expect(taskFile().parsed.packet?.title).toContain("requested changes 3 times running");
     });
 
-    it("ruling 416: the packet on an objection with no rework behind it recommends one rework against it, never asking again", async () => {
+    it("ruling 92: the packet on an objection with no rework behind it recommends one rework against it, never asking again", async () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
@@ -2805,7 +2805,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.body).not.toContain("So either it did");
     });
 
-    it("ruling 416(b): an answer given EARLIER in the streak is not recommended again either", async () => {
+    it("ruling 92: an answer given EARLIER in the streak is not recommended again either", async () => {
       // Live on ax-clone AX-24: round two at 20:35, the operator put the
       // completeness question, the reviewer answered on the untouched revision
       // at 20:45, one rework followed, and the round-three packet at 21:08
@@ -2830,9 +2830,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 421 (F39-43). The shape measured three times on ax-clone in 25
+     * Ruling 93 (F39-43). The shape measured three times on ax-clone in 25
      * minutes: after a rework, the operator dispatched the review WITH ruling
-     * 410's question folded in ("provide one complete verdict with every
+     * 93's question folded in ("provide one complete verdict with every
      * remaining blocker"), the reviewer answered, and the packet that answer
      * raised recommended asking the question again, because nothing on record
      * said it had been asked.
@@ -2855,7 +2855,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await complete(runId, reviewerInput("reviewer"));
     };
 
-    it("ruling 421: the verdict of a run that put the question IS the answer, and the packet it raises recommends one rework", async () => {
+    it("ruling 93: the verdict of a run that put the question IS the answer, and the packet it raises recommends one rework", async () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
@@ -2881,7 +2881,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.body).not.toContain("So either it did");
     });
 
-    it("ruling 421: a stamp from another run never makes this verdict an answer", async () => {
+    it("ruling 93: a stamp from another run never makes this verdict an answer", async () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
@@ -2893,7 +2893,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.options.find((o) => o.rec)?.kind).toBe("question_reviewer");
     });
 
-    it("ruling 421: an answer given with an EARLIER review in the streak is not asked for again either", async () => {
+    it("ruling 93: an answer given with an EARLIER review in the streak is not asked for again either", async () => {
       writeReviewTask();
       await review(blocks(1));
       await reviewAsked(blocks(2)); // round two, the question folded in: answered
@@ -2904,17 +2904,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(raised.body).not.toContain("read `");
     });
 
-    it("ruling 328: an escalation skipped because another packet was open is raised when that one clears", async () => {
+    it("ruling 94: an escalation skipped because another packet was open is raised when that one clears", async () => {
       /**
-       * Ruling 237 raises the "N times running" packet from inside the locked
+       * Ruling 94 raises the "N times running" packet from inside the locked
        * write that records the verdict, and skips it when a packet is already
        * open — which it must, since a task holds one packet. Nothing came back.
        *
        * So the escalation was attempted EXACTLY ONCE, and any unrelated packet
-       * standing at that instant killed it for good. Ruling 326 established
-       * what those packets usually are: a quota or credential failure, raised
-       * in bursts across several tasks at once and nothing to do with the
-       * review.
+       * standing at that instant killed it for good. Those packets are usually
+       * a quota or credential failure (ruling 156), raised in bursts across
+       * several tasks at once and nothing to do with the review.
        *
        * Measured: five tasks on the shopify-clone board reached a second
        * consecutive request_changes and TWO never got the packet. SHOP-18's
@@ -2927,7 +2926,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        */
       writeReviewTask();
       await review(blocks(1));
-      // Ruling 410: round two is the operator's and raises nothing, so the
+      // Ruling 93: round two is the operator's and raises nothing, so the
       // round that ESCALATES is the third -- which is the one the unrelated
       // packet has to be standing in front of.
       await review(blocks(2));
@@ -2948,7 +2947,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
             options: [
               { kind: "request_edit", t: "Send the agent back to continue", d: "", rec: true },
             ],
-            // Ruling 432: what `openStuckLoopPacket` writes on every stall,
+            // Ruling 123: what `openStuckLoopPacket` writes on every stall,
             // and what lets the run's success withdraw it below.
             stalled: true,
           };
@@ -2958,7 +2957,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await review(blocks(3));
 
       // The automatic clear site: no person is involved at all. The verdict was
-      // written while the stalled packet stood, so ruling 237 skipped the
+      // written while the stalled packet stood, so ruling 94 skipped the
       // escalation — and seconds later the SAME run's success auto-withdrew
       // that packet (withdrawSupersededStuckPacket), taking the escalation with
       // it. This path has fired ZERO times on the live board; the two real
@@ -2976,12 +2975,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(note!.text).toContain("another decision was already open");
     });
 
-    it("ruling 328: the same retry runs when a PERSON clears the packet that blocked it", async () => {
+    it("ruling 94: the same retry runs when a PERSON clears the packet that blocked it", async () => {
       // THE PATH THE TWO LIVE MISSES TOOK. An `input` packet is never
       // auto-withdrawn (`withdrawSupersededStuckPacket` returns on anything but
-      // a stall, ruling 432), so it survives the run and a person answers it — which is
+      // a stall, ruling 123), so it survives the run and a person answers it — which is
       // what happened on SHOP-18 at 04:38:38 and on SHOP-10 — and the
-      // escalation ruling 237 skipped is owed just the same.
+      // escalation ruling 94 skipped is owed just the same.
       // CANARY: delete the `retryReviewDeadlockEscalation` call in resolvePacket.
       writeReviewTask();
       await review(blocks(1));
@@ -3030,14 +3029,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const inbox = listNotifications(store.db, store.users.arda.id, { limit: 50 });
       const told = inbox.find((n) => (n.title ?? "").includes("requested changes 3 times running"));
       expect(told, "the escalation reached nobody's inbox").toBeTruthy();
-      // Ruling 237's own rule: the policy engine raised this, not the operator.
+      // Ruling 94's own rule: the policy engine raised this, not the operator.
       expect(told!.from?.name ?? "").toBe("Policy engine");
       const audited = listAuditEvents(store.db, { action: "task.review.deadlock" });
       expect(audited.length).toBeGreaterThan(0);
       expect(audited.at(-1)!.details).toMatchObject({ retried: true });
     });
 
-    it("opens the packet on the third, not the second: round two is the operator's (ruling 410)", async () => {
+    it("opens the packet on the third, not the second: round two is the operator's (ruling 93)", async () => {
       writeReviewTask();
 
       await review(blocks(1));
@@ -3099,6 +3098,69 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // this opens a packet the moment any two reviewers disagree once.
       expect(taskFile().parsed.frontmatter.verdicts).toHaveLength(2);
       expect(taskFile().parsed.packet).toBeNull();
+    });
+
+    it("ruling 94: two reviewers at the same count are two escalations, and answering one raises the other", async () => {
+      // Ruling 94: the retry skips an escalation whose title the timeline
+      // already carries, and the title names the reviewer as well as the
+      // count. Here the first reviewer in the engagement order is escalated at
+      // three; the second reaches three while that packet is open, so its own
+      // escalation is skipped and owed. Its name ends with the first one's on
+      // purpose: "Security reviewer" contains "reviewer".
+      // CANARY (a): match the timeline on "requested changes 3 times running"
+      // alone and the answered packet hides the owed one: nothing is raised.
+      // CANARY (b): stop at the first deadlocked reviewer instead of the first
+      // owed one, and the escalated "Security reviewer" ends the search.
+      // CANARY (c): find the title anywhere in an entry's text and "Security
+      // reviewer has requested changes 3 times running" reads as this one.
+      writeReviewTask({
+        engagements: [
+          DEV_DELIVERS_ENGAGEMENT,
+          {
+            profileId: "second",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+          REVIEWER_ENGAGEMENT,
+        ],
+      });
+      reconfigureProject(store, (fm) => ({
+        agents: [
+          ...fm.agents,
+          {
+            profileId: "second",
+            capabilities: VERDICT_GRANT,
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "Security reviewer",
+              role: "Review & validation",
+              backends: ["claude"],
+              model: "sonnet",
+            },
+          },
+        ],
+      }));
+      for (const n of [1, 2, 3]) await review(blocks(n), "second");
+      expect(taskFile().parsed.packet?.title).toBe("Security reviewer has requested changes 3 times running");
+      for (const n of [1, 2, 3]) await review(blocks(n), "reviewer");
+      // Three rounds, so its escalation is owed; skipped only for the open packet.
+      expect(taskFile().parsed.frontmatter.verdicts.find((v) => v.profileId === "reviewer")?.rounds).toBe(3);
+      expect(taskFile().parsed.packet?.title).toBe("Security reviewer has requested changes 3 times running");
+
+      // A person answers the first escalation.
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      // The owed one is raised, and the answered one is not raised again
+      // (ruling 87's loop).
+      expect(taskFile().parsed.packet?.title).toBe("reviewer has requested changes 3 times running");
     });
 
     it("resets on that reviewer's own approve", async () => {
@@ -3176,7 +3238,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(directive).toContain("do NOT return a verdict");
 
       /**
-       * Ruling 313. That sentence used to be the ONLY thing standing between
+       * Ruling 87. That sentence used to be the ONLY thing standing between
        * this run and another verdict, and the same prompt contradicted it:
        * `collab.verdict` comes from the PROFILE's grant, so the collaboration
        * notes also told the reviewer "`report_outcome` — REQUIRED at the end of
@@ -3190,7 +3252,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        * option the card recommended both times. `review-deadlock.server.ts`
        * predicted it in its own words ("a verdict here would bind to the same
        * revision and count as another objection, which is the loop") and its
-       * header names the construction as the one ruling 186 refused: a request
+       * header names the construction as the one ruling 56 refused: a request
        * in a prompt, with nothing that notices when the model does something
        * else.
        *
@@ -3210,7 +3272,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       );
       expect(engaged?.verdictCapable).toBe(true);
 
-      // Ruling 316: and the RUN remembers it, because the prompt is not the
+      // Ruling 87: and the RUN remembers it, because the prompt is not the
       // only thing that has to honour the withholding — the completion path
       // reads this row to tell an answer from a silence, long after the
       // dispatch is gone. CANARY: stop persisting `verdictWithheld` at run
@@ -3222,10 +3284,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 316. Ruling 313 withheld the verdict TOOL on the deadlock question
-     * and closed nothing, because the prose fallback manufactures a verdict
+     * Ruling 87. Withholding the verdict TOOL on the deadlock question closes
+     * nothing by itself, because the prose fallback manufactures a verdict
      * from the reply regardless: `verdictAuthorized` reads the ENGAGEMENT
-     * snapshot, which 313 deliberately left intact.
+     * snapshot, which stays intact on purpose.
      *
      * Live on SHOP-68 the reviewer said so in words and viberr wrote the
      * verdict under its name 70ms later: "No verdict recorded — the directive
@@ -3241,14 +3303,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * whole point is that the failure is NOT a finding.
      */
     /**
-     * Ruling 317. The stored `verdicts[].reason` is a 2,000-character clip whose
-     * own marker says "Its full report is on this task's timeline, whole"
-     * (ruling 292) — and compaction folded that comment away, because the two
-     * fields protecting a comment (`evidence`, `attachments`) are moved OFF the
-     * reply precisely when it carries a verdict. The title is what compaction
-     * reads instead.
+     * Ruling 88. The stored `verdicts[].reason` is a 2,000-character clip whose
+     * own marker says "Its full report is on this task's timeline, whole" — and
+     * compaction folded that comment away, because the two fields protecting a
+     * comment (`evidence`, `attachments`) are moved OFF the reply precisely
+     * when it carries a verdict. The title is what compaction reads instead.
      */
-    it("ruling 317: the verdict's reply comment is TITLED, so compaction can spare it", async () => {
+    it("ruling 88: the verdict's reply comment is TITLED, so compaction can spare it", async () => {
       writeReviewTask();
       await review(blocks(1));
       const { VERDICT_REPORT_TITLE } = await import("~/schemas/task-file.schema");
@@ -3262,7 +3323,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(reply?.evidence ?? null).toBeNull();
     });
 
-    it("ruling 316: a run whose verdict channel was withheld gets no prose verdict", async () => {
+    it("ruling 87: a run whose verdict channel was withheld gets no prose verdict", async () => {
       writeReviewTask();
       await review(blocks(1));
       const genuine = taskFile().parsed.frontmatter.verdicts.at(-1);
@@ -3289,7 +3350,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       rework();
       const quiet = await finishedRunWith(answer, undefined, { verdictWithheld: true });
       // The deadlock question's run: dispatched with its verdict channel taken
-      // away (ruling 313), which ruling 316 makes the completion path honour.
+      // away, which the completion path honours (ruling 87).
       await complete(quiet, reviewerInput("reviewer"));
 
       /**
@@ -3299,6 +3360,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain(
         "objection number 1",
       );
+      // Nor is the answer filed as a review that failed to judge: it was asked
+      // not to. CANARY: drop `verdictSilenced` from the note's guard and the
+      // task tells a person to re-run a review nobody asked for.
+      expect(
+        taskFile().parsed.timeline.some(
+          (e) => e.type === "note" && e.text.includes("finished without a readable verdict"),
+        ),
+      ).toBe(false);
 
       // And the rest of the path WOULD have done it: the identical completion
       // on a run whose channel was NOT withheld overwrites the genuine record.
@@ -3311,7 +3380,47 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 315. The note on a decision packet was sliced to 2,000 characters
+     * Ruling 87: a run dispatched with its verdict withheld records none, from
+     * its envelope either. Claude's `report_outcome` drops the field for such a
+     * run, but the Codex outcome schema is static and requires `verdict`, so a
+     * Codex reviewer answering the deadlock question (ruling 94) can still fill
+     * it. Recorded, that verdict binds to the same revision and fights another
+     * round (ruling 92): the loop the withholding exists to break.
+     */
+    it("ruling 87: a withheld run's Codex envelope verdict is not recorded and fights no round", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(roundsOnTheRevision()).toBe(2);
+      const envelope = JSON.stringify({
+        summary: "Everything I would still block on: objection number 3.",
+        verdict: "request_changes",
+        question: null,
+        evidence: null,
+        relay: null,
+      });
+      const asCodex = { ...reviewerInput("reviewer"), backend: "codex" as const };
+
+      rework();
+      const asked = await finishedRunWith(envelope, undefined, { verdictWithheld: true });
+      await complete(asked, asCodex);
+      // CANARY: take the envelope verdict without reading `verdict_withheld`
+      // and this is round 3 with a deadlock packet raised, the reviewer's real
+      // findings replaced by an answer to a question that forbade a verdict.
+      expect(roundsOnTheRevision()).toBe(2);
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain("objection number 2");
+      expect(taskFile().parsed.packet).toBeNull();
+
+      // The same envelope from a run asked to judge is a verdict, and a round.
+      rework();
+      const judged = await finishedRunWith(envelope);
+      await complete(judged, asCodex);
+      expect(roundsOnTheRevision()).toBe(3);
+      expect(taskFile().parsed.packet?.title).toContain("requested changes 3 times running");
+    });
+
+    /**
+     * Ruling 63. The note on a decision packet was sliced to 2,000 characters
      * in `project.task.tsx` before the request reached the server — no
      * `maxLength` on the box, no counter, no marker on the record, no error,
      * and nothing anywhere holding the tail.
@@ -3323,11 +3432,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * opposite: "anything you type below is recorded on the task's contract and
      * every later run reads it".
      *
-     * Ruling 292 permitted a cut on a VERDICT because "the full text is never
+     * Ruling 88 permitted a cut on a VERDICT because "the full text is never
      * lost — the agent's own report is on the same timeline, untruncated". A
      * person's typed note has no second copy, so the identical cut is loss.
      */
-    it("ruling 315: a note past the shared cap is REFUSED, and nothing is written", async () => {
+    it("ruling 63: a note past the shared cap is REFUSED, and nothing is written", async () => {
       writeReviewTask();
       await review(blocks(1));
       await review(blocks(2));
@@ -3355,15 +3464,15 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 241 (F37-68). Live on SHOP-5 this exact resolution ran on a HELD
-     * task: ruling 186 refuses every agent dispatch while a task waits, and
+     * Ruling 66 (F37-68). Live on SHOP-5 this exact resolution ran on a HELD
+     * task: ruling 56 refuses every agent dispatch while a task waits, and
      * this arm found that out only after writing the decision onto the task
      * contract and clearing the packet. The person's chosen option did nothing,
      * and there was no packet left to choose again from.
      *
      * The owner's call was to queue rather than refuse.
      */
-    it("ruling 241: on a HELD task the question is queued, not lost and not dispatched", async () => {
+    it("ruling 66: on a HELD task the question is queued, not lost and not dispatched", async () => {
       writeReviewTask({ blockedBy: ["VIB-9"] });
       await review(blocks(1));
       await review(blocks(2));
@@ -3403,7 +3512,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(fm.queuedQuestions[0]!.directive).toContain(
         "name EVERYTHING you would still block on",
       );
-      // Nothing was dispatched: ruling 186 would have refused it, and a run
+      // Nothing was dispatched: ruling 56 would have refused it, and a run
       // that never started must not be claimed. CANARY: drop the queued check
       // from the dispatch guard and this fires the refused run.
       expect(runCount()).toBe(before);
@@ -3417,7 +3526,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     it("does NOT hand the task back to the operator on the completion that raised it", async () => {
       // The packet says "Coordination is paused until you say which", and the
       // react at the end of this very completion is an `agent-reply` trigger —
-      // which ruling 195 records as deliberately NOT refused by an open packet.
+      // which ruling 115 records as deliberately NOT refused by an open packet.
       // Left alone, the operator gets a turn seconds after the packet opens and
       // can do the exact re-dispatch the packet exists to interrupt, while the
       // card tells a person nothing is moving.
@@ -3434,7 +3543,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         ).n;
       writeReviewTask();
       await review(blocks(1));
-      // Ruling 410: round two goes BACK to the operator on purpose -- that is
+      // Ruling 93: round two goes BACK to the operator on purpose -- that is
       // the round it now owns. The claim under test is about the round that
       // ESCALATES, so the baseline is taken after it.
       await review(blocks(2), "reviewer", { dispatchedByName: "operator" });
@@ -3501,7 +3610,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // CANARY: restore "with nothing changed".
       expect(opt("custom").d).not.toMatch(/nothing changed/);
       /**
-       * Ruling 329: and therefore `d` must contain only what BINDS.
+       * Ruling 64: and therefore `d` must contain only what BINDS.
        *
        * This assertion used to require the opposite — that `d` contain
        * "recorded on the task's contract" — and the comment above it named the
@@ -3516,7 +3625,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        * appended to nothing.
        */
       expect(opt("custom").d).not.toMatch(/recorded on the task's contract/);
-      expect(opt("custom").d).not.toMatch(/type below|ruling 189/i);
+      expect(opt("custom").d).not.toMatch(/type below|ruling 64/i);
       expect(packet.body).toContain("say why in the note box");
       // The whole of what this option writes into the goal, and every word of
       // it is about the decision.
@@ -3560,12 +3669,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       }
     });
 
-    it("ruling 177: no packet on a task that CLOSED while the reviewer was running", async () => {
+    it("ruling 52: no packet on a task that CLOSED while the reviewer was running", async () => {
       // A reviewer run that finishes after its task was accepted still records
-      // its verdict — evidence is evidence, and ruling 177 says so — but no
-      // coordination follows it. An escalation asking a person to decide
-      // something about a shipped task is exactly the packet ruling 177
-      // refused, and `operatorOpenPacket` would have refused it by name.
+      // its verdict — evidence is evidence — but no coordination follows it
+      // (ruling 52). An escalation asking a person to decide something about a
+      // shipped task is exactly the packet a closed task refuses, and
+      // `operatorOpenPacket` would have refused it by name.
       // CANARY: drop the `taskClosure(...).closed` clause from the escalation
       // guard and this opens a decision packet on a Done task.
       writeReviewTask();
@@ -3586,7 +3695,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.verdicts[0]?.rounds).toBe(3);
     });
 
-    it("ruling 137: no acceptance offer survives beside the packet", async () => {
+    it("ruling 99: no acceptance offer survives beside the packet", async () => {
       // A packet pauses coordination, so an offer to accept must not stand
       // beside it — least of all one the verdict in the same write just made
       // impossible. This packet needs no withdrawal code of its own: a
@@ -3643,7 +3752,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
   });
 
-  it("ruling 137: the envelope's question packet withdraws the standing acceptance offer on the record", async () => {
+  it("ruling 99: the envelope's question packet withdraws the standing acceptance offer on the record", async () => {
     // Canary: drop the withdrawal at the envelope-question site in
     // recordAgentCompletion and the accept card outlives the question.
     writeReviewTask({
@@ -3671,7 +3780,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(rows[0]!.details).toMatchObject({ cause: "packet", surviving: 1 });
   });
 
-  it("ruling 586: the question's entry carries the card, which leaves the task when it is answered", async () => {
+  it("ruling 68: the question's entry carries the card, which leaves the task when it is answered", async () => {
     // CANARY: write the title alone again and the numbered questions are on
     // no record once Arda answers.
     writeReviewTask();
@@ -3815,7 +3924,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       (e) => e.type === "blocked" && /did not complete/.test(e.text),
     );
     expect(failureEvent, "a typed failure event must be posted").toBeTruthy();
-    // Ruling 130(b) (pass 34): the classified cause in the remedy leaf's
+    // Ruling 156(a) (pass 34): the classified cause in the remedy leaf's
     // words and the owner's OWN move; never the generic advice, never `..`.
     const lower = failureEvent!.text.toLowerCase();
     expect(lower).toContain("codex refused the agent run");
@@ -3924,7 +4033,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(ardas[0]!.kind).toBe("packet");
   });
 
-  it("ruling 333: a refusal on a run that HAD been working does not tell the next agent the tree is clean", async () => {
+  it("ruling 156(a): a refusal on a run that HAD been working does not tell the next agent the tree is clean", async () => {
     /**
      * The same shape as the quota test below, on a run that had taken 48 turns
      * — SHOP-28's live case, where the provider rejected the credential one
@@ -3975,7 +4084,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).toContain("read the workspace before starting anything over");
   });
 
-  it("ruling 130(b): a specialist quota failure names the reset instant and the owner's remedy; the options come from the remedy leaf; never `..`", async () => {
+  it("ruling 156(a): a specialist quota failure names the reset instant and the owner's remedy; the options come from the remedy leaf; never `..`", async () => {
     // Canaries: restore the fixed "Retry on the other backend, or fix the
     // credential and re-run." sentence in the error arm (the event text
     // fails), or drop the `stuck.options` override so the stock set with
@@ -4044,7 +4153,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     for (const o of packet.options) expect(o.t).not.toMatch(/[–—]/);
   });
 
-  it("ruling 175: a specialist the spending cap cut off names the cap and the spend, is not a task failure, and names who raises the cap", async () => {
+  it("ruling 159: a specialist the spending cap cut off names the cap and the spend, is not a task failure, and names who raises the cap", async () => {
     // Canary: drop the `max_budget` arm and the event reads "Claude run failed:
     // …" followed by "No changes were delivered." — a cap reads as a failure.
     deployOperator();
@@ -4077,7 +4186,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).not.toMatch(/\.\./);
   });
 
-  it("ruling 595: a specialist run the idle guard stopped opens a stall packet that recommends running it again, in the leaf's words", async () => {
+  it("ruling 158(a): a specialist run the idle guard stopped opens a stall packet that recommends running it again, in the leaf's words", async () => {
     deployOperator();
     const runId = "run_595_hung";
     runRow(runId, { model: "gpt-6-luna" });
@@ -4115,7 +4224,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(event.text).not.toMatch(/\.\./);
   });
 
-  it("ruling 598: a specialist run the gateway stopped for repeating one call opens a stall packet that names the call and recommends a redirect", async () => {
+  it("ruling 158(b): a specialist run the gateway stopped for repeating one call opens a stall packet that names the call and recommends a redirect", async () => {
     // Live on AWSC-49 the Estimate Judge's script repeated a refused
     // correction 44,725 times. A plain re-run repeats the loop, so the
     // recommendation is guidance. CANARIES: leave tool_loop out of the leaf's
@@ -4183,7 +4292,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(notifs.length).toBeGreaterThan(0);
     expect(notifs.every((n) => n.kind === "quality")).toBe(true);
     expect(notifs.every((n) => /run failed/.test(n.text))).toBe(true);
-    // Ruling 497: each row opens the failure's own event, which says why.
+    // Ruling 75: each row opens the failure's own event, which says why.
     // CANARY: drop `about` from `failureNotice` and the rows open the top.
     const failure = taskFile().parsed.timeline.find((e) => e.type === "blocked")!;
     expect(
@@ -4208,7 +4317,7 @@ describe("unavailable backend through the specialist start path", () => {
       actorOf(store.users.arda),
       { dataRoot: store.dataRoot },
     );
-    // Ruling 127: the refusal is about the TASK OWNER's account — arda owns
+    // Ruling 137: the refusal is about the TASK OWNER's account — arda owns
     // VIB-1 here, and taking his accounts away is what makes the dispatch
     // refuse. BOTH go, so the packet has no real "retry on the other backend"
     // to offer either (asserted below).
@@ -4244,7 +4353,7 @@ describe("unavailable backend through the specialist start path", () => {
     const failureEvent = parsed.timeline.find(
       (e) => e.type === "blocked" && blockedByRefusal(e.text),
     )!;
-    // Ruling 127: the packet body carries the resolver's OWN sentence — the one
+    // Ruling 137: the packet body carries the resolver's OWN sentence — the one
     // the run's error line carries — naming the owner and where THEY connect
     // the backend. It never names an environment variable, and it never tells
     // the reader to "configure a credential" on an instance that has none.
@@ -4270,7 +4379,7 @@ describe("unavailable backend through the specialist start path", () => {
   });
 
   it("offers 'retry on the other backend' only when the OWNER has that one connected", async () => {
-    // Ruling 127: the retry run would bill the same owner. Offering it when
+    // Ruling 137: the retry run would bill the same owner. Offering it when
     // they cannot run it promises a one-click fix that fails identically —
     // the worst kind of packet option, because it looks like the way out.
     deployOperator();
@@ -4313,7 +4422,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
         title: "Unified completion pipeline probe",
         branch: "vib-1-work",
         // Delivered by another agent: a verdict on one's own revision binds to
-        // nothing (ruling 556).
+        // nothing (ruling 245).
         workRevision: { ...workRev(), sourceProfileId: "builder" },
       }),
       goal: "Exercise the canonical completion handler.",
@@ -4357,7 +4466,7 @@ describe("reviewer verdict on the UI Run-button path (H2/A1 regression)", () => 
 
 describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   /** Write a `type: "blocked"` work-stalled packet straight into the task file
-   *  (the schema shape operatorOpenPacket produces). `stalled` is the ruling 432
+   *  (the schema shape operatorOpenPacket produces). `stalled` is the ruling 123
    *  marker `openStuckLoopPacket` writes; `false` writes the same blocked shape
    *  without it, which is what every other blocked packet looks like. */
   async function openBlockedPacket(
@@ -4384,7 +4493,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   }
 
   /**
-   * Ruling 432: open a packet through the REAL writer rather than a hand-built
+   * Ruling 123: open a packet through the REAL writer rather than a hand-built
    * fixture of what it is believed to write. The operator is deployed only for
    * the write, since the writer opens packets on its authority, and is removed
    * again so the completion's react stays out of the way, exactly as in the
@@ -4462,7 +4571,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
   });
 
   it("an accept_completion packet is never auto-withdrawn (completion stays human)", async () => {
-    // Ruling 432: no acceptance packet is a stall, so none carries the marker.
+    // Ruling 123: no acceptance packet is a stall, so none carries the marker.
     await openBlockedPacket(
       [{ kind: "accept_completion", t: "Accept & move to Done", d: "", rec: true }, redirect],
       { stalled: false },
@@ -4508,7 +4617,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
     expect(taskFile().parsed.packet).toBeNull();
   });
 
-  it("ruling 432: a branch-conflict packet outlives a clean run that changed nothing (AX-21)", async () => {
+  it("ruling 123: a branch-conflict packet outlives a clean run that changed nothing (AX-21)", async () => {
     /**
      * Live on AX-21 at 01:24. `update_branch_from_base` met a conflict and
      * opened "`ax-21` conflicts with `main`". The same plan dispatched the
@@ -4584,12 +4693,12 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
 });
 
 /**
- * Ruling 602: a refusal in a window the owner already decided. Live on AWSC-52
+ * Ruling 65: a refusal in a window the owner already decided. Live on AWSC-52
  * at 13:20 a Judge run in flight when the Codex window closed was refused two
  * minutes after Arda had chosen to wait on AWSC-51, and its packet asked the
- * same question again: ruling 319 answers only the siblings open at the time.
+ * same question again: fan-out answers only the siblings open at the time.
  */
-describe("a refusal in a window the owner already decided (ruling 602)", () => {
+describe("a refusal in a window the owner already decided (ruling 65)", () => {
   const resetsAt = new Date(Date.now() + 2 * 3_600_000).toISOString();
   let seq = 0;
   /** A Codex run billed to Arda, refused for her usage window. */

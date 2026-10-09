@@ -25,15 +25,15 @@ is vertical; run one instance per data root.
 | Concern | Choice |
 |---|---|
 | Runtime | Node ≥ 26 (`engines`, `.nvmrc`, image `node:26-slim`), ESM, TypeScript 7, `~/*` → `app/*` |
-| Framework | React Router 8.4 framework mode, `ssr: true`, served by `@react-router/serve`; its action-origin check is off (`allowedActionOrigins: ["**"]`) and the app's `assertTrustedOrigin` is the origin check (ruling 687, [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)); React 19 |
+| Framework | React Router 8.4 framework mode, `ssr: true`, served by `@react-router/serve`; its action-origin check is off (`allowedActionOrigins: ["**"]`) and the app's `assertTrustedOrigin` is the origin check (ruling 28, [deployment.md §TLS and the reverse proxy](../operations/deployment.md#tls-and-the-reverse-proxy)); React 19 |
 | Build / test | Vite 8, Vitest 5 (`app/**/*.test.{ts,tsx}`, 20 s per-test budget), Playwright 1.63 (chromium only, against the production image), oxlint 1.87 + the vendored `tools/oxlint/anti-slop` plugin (15 rules, CI gate) |
 | Data | `node:sqlite` `DatabaseSync`, `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout=5000`; one file `state/projection.sqlite`; one squashed migration `db/migrations/0001_baseline.sql` applied at open, plus an idempotent open-time healer (`ensureSingleFlightIndexes`, `ensureBaselineColumns`) that adds the listed columns, tables and indexes the baseline gained after an existing root first applied it and brings `user_backend_credentials` to its several-accounts shape |
 | Validation | Zod 4 for env, files, SSE, DB row decoding |
 | Files | `yaml` frontmatter, chokidar 5 watchers (250 ms debounce) |
 | Auth | better-auth 1.7.7 behind `app/lib/auth.server.ts`; no plugins |
-| Agents | `@anthropic-ai/claude-agent-sdk` ^0.3.292, `@openai/codex-sdk` ^0.160.1, `@playwright/mcp` 0.0.83 with Debian chromium; in the image, `uv`/`uvx` 0.12.23 for Python stdio MCP servers and `git`, `make`, `curl` and `pnpm` 12.9.1 for agent shells (ruling 196); the operator, the controller and every specialist run write by the Humanizer skill 3.1.0, vendored unchanged (MIT, `THIRD_PARTY_NOTICES.md`, rulings 502 and 689) |
-| UI | one stylesheet `app/app.css` (no Tailwind), Inter / JetBrains Mono from `@fontsource` (ruling 365), lexical (comment composer), dnd-kit (board), Shiki (the attachment code reader, ruling 363), `radix-ui` for unstyled behaviour only (the user menu and `radio-seg`, ruling 166), @number-flow/react (the run console's rolling counts, rulings 366 and 451), the console's to-do list, code block, thinking block and orb adapted from AICSS's free components (MIT, `THIRD_PARTY_NOTICES.md`, ruling 499), react-markdown + remark-gfm |
-| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation (`requestId`, method, path, the signed-in `userId`, and `runId`/`taskKey` on a run's own work); every response the app's handlers answer carries the id as `X-Request-Id` (ruling 458(d); the exceptions: [runbook.md §Finding a request by its id](../operations/runbook.md#finding-a-request-by-its-id)); a fatal crash writes one synchronous stderr line first |
+| Agents | `@anthropic-ai/claude-agent-sdk` ^0.3.292, `@openai/codex-sdk` ^0.160.1, `@playwright/mcp` 0.0.83 with Debian chromium; in the image, `uv`/`uvx` 0.12.23 for Python stdio MCP servers and `git`, `make`, `curl` and `pnpm` 12.9.1 for agent shells (ruling 42); the operator, the controller and every specialist run write by the Humanizer skill 3.1.0, vendored unchanged (MIT, `THIRD_PARTY_NOTICES.md`, ruling 187) |
+| UI | one stylesheet `app/app.css` (no Tailwind), Inter / JetBrains Mono from `@fontsource` (ruling 280), lexical (comment composer), dnd-kit (board), Shiki (the attachment code reader, ruling 317), `radix-ui` for unstyled behaviour only (the user menu and `radio-seg`, ruling 14), @number-flow/react (the run console's rolling counts, ruling 284), the console's to-do list, code block, thinking block and orb adapted from AICSS's free components (MIT, `THIRD_PARTY_NOTICES.md`, ruling 168), react-markdown + remark-gfm |
+| Logging | dependency-free JSON lines on stdout with `AsyncLocalStorage` request correlation (`requestId`, method, path, the signed-in `userId`, and `runId`/`taskKey` on a run's own work); every response the app's handlers answer carries the id as `X-Request-Id` (ruling 43; the exceptions: [runbook.md §Finding a request by its id](../operations/runbook.md#finding-a-request-by-its-id)); a fatal crash writes one synchronous stderr line first |
 
 ## 3. Layers and the rules between them
 
@@ -57,7 +57,7 @@ Rules that hold in the tree (verified by grep, restated from
    and action modules that live beside their surface), for type-only imports, and for
    four pure client-safe helpers: `features/agents/capability-catalog`,
    `features/kb-browser/tree`, `features/github/github-pills` (`liveMergeable`, ruling
-   405) and `features/runtime/runtime-types` (`RUN_INPUTS_TAG`). Server code never
+   242) and `features/runtime/runtime-types` (`RUN_INPUTS_TAG`). Server code never
    imports a component.
 4. One-definition rules: readiness derivation only in
    `server/interpretation/readiness-policy.server.ts`; freshness thresholds only in
@@ -65,17 +65,17 @@ Rules that hold in the tree (verified by grep, restated from
    only in `shared/capabilities.ts`; provenance writes only in `server/provenance/`;
    the workspace `.claude` catalog only through `runtimes/skill-mount.server.ts`;
    reserved MCP names only in `shared/mcp-reserved.ts`; every context, compaction and
-   prompt-cache figure only in `runtimes/context-policy.server.ts` (ruling 370); "this
-   task is closed" only in `tasks/task-closure.server.ts` (ruling 177); env parsing
+   prompt-cache figure only in `runtimes/context-policy.server.ts` (ruling 169); "this
+   task is closed" only in `tasks/task-closure.server.ts` (ruling 52); env parsing
    only in `config/env.server.ts` (a handful of ops knobs read `process.env` directly,
    listed in
    [../operations/configuration.md](../operations/configuration.md#3-raw-processenv-reads-outside-the-schema));
    DB row → camelCase only in `shared/mapping/*`.
 5. `logger.server.ts` imports only `request-context.server.ts`;
    `tasks/task-mutation.server.ts` exists to break the `specialist-run → agent-toolkit
-   → task-actions` cycle; since ruling 654 the task actions are thirteen family modules
-   that import only downward from `task-action-core`, and a call that must reach upward
-   loads its module when it runs (ruling 207(e)).
+   → task-actions` cycle; the task actions are `task-action-core` and twelve family modules
+   that import only downward, and a call that must reach upward loads its module
+   when it runs (ruling 13(a)).
 6. Runtime adapters (`claude-runtime`, `codex-runtime`) never touch the DB, the canonical
    files or the SSE broker; they emit lines and an exit, and `run-service` + `run-sink`
    persist and publish.
@@ -85,16 +85,16 @@ Rules that hold in the tree (verified by grep, restated from
 **Process start.** `entry.server.tsx` awaits `bootServer()` at module scope, so boot
 finishes before the first request (§5). `root.tsx` mounts three middlewares: request
 correlation, the SSE broker's head read before any loader (a document load hands it to
-the page's first stream, ruling 457) and the rolling-session renewal, which forwards
+the page's first stream, ruling 11) and the rolling-session renewal, which forwards
 better-auth's refreshed cookie on whichever GET resolved the session (F10-17). The
 correlation middleware binds one id per request (an inbound `X-Request-Id` is reused) and
 answers with it as `X-Request-Id`; `entry.server.tsx` stamps the responses React Router
 answers without route middleware (an unmatched URL, a 405, a refused `.data` mutation).
 The session guard binds the user's id once the session resolves, and a run started in the
-request logs its own work under its `runId` and `taskKey` (ruling 458(d)). The root
+request logs its own work under its `runId` and `taskKey` (ruling 43). The root
 loader authenticates, reads the theme cookie and mints the CSRF token; it re-runs only
 after a sign-in, a sign-out, a theme or profile change and on a document load (ruling
-457). A signed-in page also mounts the controller dock (ruling 121).
+11). A signed-in page also mounts the controller dock (ruling 256).
 
 **Read path** (`/projects/:slug/board`): layout loader and board loader, together on one
 request → `requireUser` → `readWorkspace` (`routes/project-workspace.server.ts`, once per
@@ -103,7 +103,7 @@ request): project query → membership check from the project's projected `membe
 404 → the review queue. The layout returns the shell's slice (the project's name, slug,
 repo and archived flag, members, the viewer's role), the rail counts and the bell's two
 counts; the board loader returns the columns as board cards (`toBoardCard`), annotated
-with the viewer's decisions and live runs (ruling 457). Child routes read the layout data
+with the viewer's decisions and live runs (ruling 11). Child routes read the layout data
 with `useRouteLoaderData`; only the board reads the columns, and the bell loads its own
 list (`/resources/notifications`).
 
@@ -134,9 +134,9 @@ transactional rebuilds until commit), translated to the zod-parsed wire shape `{
 entityId, occurredAt, data }`, appended to a 256-event replay ring (console lines have
 their own) and fanned out to the scope-matching connections on `GET /resources/events`. The client revalidates the
 loaders that read what an event changed (300 ms debounce; `revalidation-policy.ts`,
-ruling 457), and not those whose data was requested after the event arrived; run logs
+ruling 11), and not those whose data was requested after the event arrived; run logs
 are fetched by reference from `/resources/run-log`. A hidden tab holds no stream (ruling
-301); a reconnect replays what it missed from the ring buffer. There is no optimistic UI
+25); a reconnect replays what it missed from the ring buffer. There is no optimistic UI
 for governed state.
 
 ## 5. Boot sequence (`app/server/boot.server.ts`)
@@ -148,7 +148,7 @@ for governed state.
 3. `ensureDataRootDirs` (`DATA_ROOT_SUBDIRS`: `projects`, `agents`, `agents/profiles`,
    `runtimes`, `runtimes/users`, `kb`, `skills`, `audit-exports`, `state`). There is no
    shared runtime home: each person's `runtimes/users/<userId>/{claude-home,codex-home}`
-   is created 0o700 on demand (ruling 127).
+   is created 0o700 on demand (ruling 137).
 4. Take `state/writer.lock` (a held root refuses with the holder named and exits 1;
    `VIBERR_FORCE_DATA_ROOT_LOCK` takes it over), arm the SIGINT/SIGTERM shutdown, and
    start the 20 s lock-ownership guard (fails closed).
@@ -161,13 +161,13 @@ for governed state.
 7. `seedDefaultAgentAssets`: write the shipped skills, the `agents/definitions/` doctrine
    files and the base profile templates when missing or still identical to a version the
    app shipped (`state/shipped-assets.json` plus `PRIOR_SHIPPED_HASHES`), and audit what it
-   replaced in the same step (`org.shipped_assets.refreshed`, ruling 681(f)). Then widen a
+   replaced in the same step (`org.shipped_assets.refreshed`, ruling 34). Then widen a
    `notifications.kind` CHECK that predates a kind by rebuilding that table in place, rows
-   and indexes kept (`widenNotificationKindCheck`, ruling 481).
+   and indexes kept (`widenNotificationKindCheck`, ruling 74).
 8. Bootstrap admin on an empty `users` table (`VIBERR_SEED_ADMIN_EMAIL`, default
    `admin@viberr.dev`; a random one-time password is logged once unless
    `VIBERR_SEED_ADMIN_PASSWORD` is set).
-9. Start the loopback MCP gateway on `127.0.0.1` (`VIBERR_MCP_PROXY_PORT`, ruling 461;
+9. Start the loopback MCP gateway on `127.0.0.1` (`VIBERR_MCP_PROXY_PORT`, ruling 191;
    a bind failure is logged and boot carries on), then the event publisher.
 10. Converge projections with the files: when the stored `projection.derivationVersion`
     lags `PROJECTION_DERIVATION_VERSION`, one forced full rescan (the new stamp is written
@@ -175,28 +175,28 @@ for governed state.
     the drop-all rebuild) for edits made while the process was down.
 11. `ensureBaseAgentsDeployed` (the operator everywhere; Developer/Reviewer only into
     projects with no specialist deployment at all), then `convertGoalsToEpics` (ruling
-    503): every chained-goal file still in a project's `goals/` becomes the epic with its
+    17): every chained-goal file still in a project's `goals/` becomes the epic with its
     number, its tasks join it, its unstarted links become held tasks in it, and every
     goal-link wait is respelled by task key; the goal file is then filed under
-    `goals/converted/`, so this runs once. Then `restoreCutEvidenceResults` (ruling 639):
+    `goals/converted/`, so this runs once. Then `restoreCutEvidenceResults` (ruling 16):
     an evidence result the old 40-character cap cut gets back the words its run's report
     holds, each task file written once and keeping its `updatedAt`; a restored row is no
     longer cut, so a later boot reads only what it could not restore.
 12. Start the file watcher and the KB watcher.
 13. Store maintenance: clear MCP warm-ups a restart interrupted, one retention pass (no
     workspace reclaim), arm the maintenance scheduler.
-14. `repairCodexRolloutPaths` (ruling 199): re-point Codex thread rollouts recorded under
+14. `repairCodexRolloutPaths` (ruling 145): re-point Codex thread rollouts recorded under
     removed per-run homes at their transcripts in the shared `sessions/` directory.
 15. `reconcileRestartedWork` (async, not awaited): move orphaned runs to `interrupted`
-    (reason `restart`) and sweep their surviving processes (ruling 174), replay unreacted
+    (reason `restart`) and sweep their surviving processes (ruling 142), replay unreacted
     agent replies, recover stranded Codex operator plans, settle waits no run backs
-    (`settleAbandonedWaits`, rulings 213 and 215), then reclaim terminal-task workspaces
+    (`settleAbandonedWaits`, ruling 164), then reclaim terminal-task workspaces
     only when no run is active.
 16. Start the schedule runner, the GitHub reconcile poller and the dependency runner; give
     controller conversations the restart interrupted an "interrupted" note
     (`recoverControllerConversations`).
 17. Log one `boot integrity check` line (dirs, migrations, counts, users, build, disk,
-    toolchain per ruling 182) and a `projection schema drift` WARN when a live CHECK
+    toolchain per ruling 40) and a `projection schema drift` WARN when a live CHECK
     (`task_projections.validation`, `task_projections.waiting`, `epic_projections.status`, and
     `notifications.kind` when step 7 could not widen it) does not admit a value the code declares, or
     `task_projections` / `task_events` lacks a baseline column.
@@ -210,18 +210,18 @@ gone or replaced. Everything else is best-effort and logged.
 
 | Service | Cadence | Module |
 |---|---|---|
-| File watcher (`projects/`) | event-driven, 250 ms debounce per path; a failed rebuild retries at 2 / 5 / 15 / 45 / 120 s (ruling 218) | `files/file-watch.service.server.ts` |
+| File watcher (`projects/`) | event-driven, 250 ms debounce per path; a failed rebuild retries at 2 / 5 / 15 / 45 / 120 s (ruling 22) | `files/file-watch.service.server.ts` |
 | KB watcher (`kb/`) | event-driven, 250 ms debounce per KB | `files/kb-watch.service.server.ts` |
 | SSE heartbeat + re-authorization | 25 s per connection | `events/sse-broker.server.ts` |
 | Data-root lock guard | 20 s, fail-closed | `db/data-root-lock.server.ts` |
-| Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 330) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
-| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 131(e); the minute tick ruling 99's goal runner gave it, kept by ruling 503) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
+| Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 122) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
+| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 57) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
 | GitHub reconcile poller | boot + 5 min; alert after 3 consecutive failures | `github/reconcile-poller.server.ts` |
 | Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |
 | MCP warm-up | detached, ≤ 15 min per first install | `org/mcp-warmup.server.ts` |
-| MCP gateway (ruling 461) | listener on `127.0.0.1` for the process lifetime; one token per live run that mounts a credentialed server, one upstream per (run, server) | `mcp-proxy/gateway.server.ts` |
-| MCP OAuth sign-ins in flight (ruling 469) | in memory, 10 min each, spent by the first callback; a restart forgets them (the admin starts again) | `org/mcp-oauth.server.ts` |
+| MCP gateway (ruling 191) | listener on `127.0.0.1` for the process lifetime; one token per live run that mounts a credentialed server, one upstream per (run, server) | `mcp-proxy/gateway.server.ts` |
+| MCP OAuth sign-ins in flight (ruling 192) | in memory, 10 min each, spent by the first callback; a restart forgets them (the admin starts again) | `org/mcp-oauth.server.ts` |
 | Run idle watchdogs | 15 min per backend (`VIBERR_CLAUDE_IDLE_TIMEOUT_MS`, `VIBERR_CODEX_IDLE_TIMEOUT_MS`); Claude max 2000 turns (`VIBERR_CLAUDE_MAX_TURNS`) | `runtimes/*-runtime.server.ts` |
 | Action watchdog | 30 s, around project creation | `actions/action-watchdog.server.ts` |
 | Rate-limiter prune | on insert, ≥ 1 s apart, 10 000 keys | `auth/rate-limit.server.ts` |
@@ -236,7 +236,7 @@ guard, WAL `TRUNCATE` checkpoint and close, release the lock, re-raise the signa
 normal process `exit` also releases the lock. The image's `CMD` runs node directly
 rather than through npm so the signal reaches it, and compose's `init: true` runs an
 init as pid 1 that forwards signals and reaps orphans. A live Claude run's CLI leads its
-own process group (ruling 174), so a terminal's Ctrl+C does not reach it directly. The
+own process group (ruling 142), so a terminal's Ctrl+C does not reach it directly. The
 Agent SDK's own exit hook SIGTERMs each one's group as node exits, and whatever a crash
 left alive is swept by run id at the next boot.
 
@@ -244,7 +244,7 @@ left alive is swept by run id at the next boot.
 
 Canonical: `projects/<slug>/project.md`, `projects/<slug>/tasks/<KEY>/task.md`,
 `projects/<slug>/epics/<id>.md`, `agents/profiles/<id>.md`, `agents/definitions/<id>.md`,
-`agents/controller-requests.md` (ruling 390), plus `kb/` and `skills/` folders. Derived
+`agents/controller-requests.md` (ruling 271), plus `kb/` and `skills/` folders. Derived
 and rebuildable: `projects`, `project_members`, `task_projections`, `task_events`,
 `epic_projections`, `diagnostics`. App-owned primary rows that live only in SQLite: users
 and the better-auth tables, audit, notifications, prefs, instance settings, sealed GitHub
@@ -272,15 +272,15 @@ table list with retention is in [data-model.md](data-model.md).
   non-members.
 - **Secrets**: env-only keys; AES-256-GCM sealed columns (`v1$iv$ct$tag`) with lazy key
   rotation (GitHub PATs, MCP credentials, OAuth client secrets, the S3 key, and the
-  personal backend API keys of ruling 127); the PAT reaches git only through
+  personal backend API keys of ruling 137); the PAT reaches git only through
   `GIT_ASKPASS`; git output and run-log lines are redacted, including each run's own
   credential value; SSE payloads are references, never content.
-- **Agent accounts are per person (ruling 127)**: there is no deployment-wide provider
+- **Agent accounts are per person (ruling 137)**: there is no deployment-wide provider
   credential. Each person connects Claude and Codex on Profile → Agent accounts; a hosted
   sign-in is executed by the unmodified vendor binary and its credential file stays in
   that person's own runtime home (`<dataRoot>/runtimes/users/<userId>/{claude-home,
-  codex-home}`, owned by that person's agent uid, ruling 460), in a home of its own per
-  account (ruling 507: a person keeps several accounts per backend and switches between
+  codex-home}`, owned by that person's agent uid, ruling 139), in a home of its own per
+  account (ruling 138: a person keeps several accounts per backend and switches between
   them without signing in again), while a pasted key or workspace token is sealed in
   `user_backend_credentials` and never returned to a loader. Every run resolves ONE
   principal (the task owner, or the asker on a controller turn), persisted as
@@ -288,7 +288,7 @@ table list with retention is in [data-model.md](data-model.md).
   persisted as `agent_runs.credential_account_id`; a run with no available principal is
   refused before any process starts. Viberr implements none of the vendors' OAuth and stores no Claude.ai or
   ChatGPT session token.
-- **Org MCP credentials (ruling 461)**: a credentialed org MCP server is never handed to
+- **Org MCP credentials (ruling 191)**: a credentialed org MCP server is never handed to
   an agent process. The server hosts a loopback MCP gateway (`127.0.0.1` only, not a
   route); a run that mounts such a server gets a random run-scoped bearer the gateway
   accepts only for that run's granted servers and only while the run is live, and the
@@ -300,21 +300,21 @@ table list with retention is in [data-model.md](data-model.md).
   run settles.
 - **Agent confinement**: Claude deny lists bind under `bypassPermissions`, and a
   withheld repo-write grant denies `Bash` command prefixes, including wrapped shapes such
-  as `git -C` and `sh -c` (ruling 101(e), `runtimes/bash-policy.server.ts`). Codex runs
-  `danger-full-access` with no OS sandbox (ruling 185): a withheld repo-write grant is
+  as `git -C` and `sh -c` (ruling 219(a), `runtimes/bash-policy.server.ts`). Codex runs
+  `danger-full-access` with no OS sandbox (ruling 144): a withheld repo-write grant is
   advisory there (the prompt omits the steps and the delivery gate refuses them), web
   search is off unless granted, and marked MCP write tools are removed through
-  `disabled_tools` (ruling 176). Every MCP server a Codex run mounts must start before
+  `disabled_tools` (ruling 188). Every MCP server a Codex run mounts must start before
   its first turn, or the run fails naming it, unless its last probe already failed
-  (ruling 658). The repo's own `.claude` catalog is stripped and only
+  (ruling 146). The repo's own `.claude` catalog is stripped and only
   granted skills are mounted; reserved MCP names are enforced at the writer, picker and
   resolver; the browser MCP is isolated and capability-gated; the in-process GitHub read
   tool scopes every path under the task's own repo; every child env starts from
   `filteredSpawnEnv()`, which strips every credential-shaped variable AND both vendor home
   variables, and gains back only the one principal's credential and the one home they
   own. A settled run leaves no live process: the Claude CLI leads its own process group
-  and both backends' leftovers are swept by run id (ruling 174).
-- **Every agent process runs as its person's own OS user (ruling 460)**: in the image,
+  and both backends' leftovers are swept by run id (ruling 142).
+- **Every agent process runs as its person's own OS user (ruling 139)**: in the image,
   each person gets a stable agent uid (from 20001, never reused) in the shared group
   `viberr-agents`, and every Claude and Codex CLI, the Codex compaction and the backend
   sign-in flows are started through one setuid launcher (`viberr-launch`, root:node 4750,
@@ -333,8 +333,8 @@ table list with retention is in [data-model.md](data-model.md).
 
 ## 9. Where the canon lives
 
-- Binding rulings and conventions: [decisions.md](decisions.md) (numbers are stable;
-  code cites "ruling N").
+- Binding rulings and conventions: [decisions.md](decisions.md) (current truth, grouped by
+  topic; numbers are stable and code cites "ruling N").
 - Canonical file formats: [file-formats.md](file-formats.md).
 - Product requirements: [../product/prd.md](../product/prd.md). Status per requirement:
   [../product/requirements-status.md](../product/requirements-status.md).

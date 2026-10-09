@@ -20,7 +20,7 @@ const TIMELINE_30 =
 const COMPOSER =
   "jsdom: the Timeline (ten comments) with the lazily loaded Lexical editor in a routes stub, text set through editor updates, inside a Profiler";
 
-/** Ruling 457 ratchet ceilings: client render work and CSS (board cards, icons, hydration). */
+/** Ruling 11 ratchet ceilings: client render work and CSS (board cards, icons, hydration). */
 export const RENDER_BUDGETS: PerfBudgetTable = {
   // TASK-8 / LIVE-6 / BOARD-4 / CTL-5: 12 before the per-glyph {__html} cache
   // (every re-render re-parsed every icon's SVG markup).

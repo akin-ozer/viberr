@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# Ruling 460's numbers, declared once for the two stages that use them: the
+# Ruling 139's numbers, declared once for the two stages that use them: the
 # launcher compiles them in, the runtime stage creates the group and the data
 # root. `agent-isolation.server.ts` holds the same three numbers and
 # `agent-isolation.server.test.ts` pins them against these defaults.
@@ -52,7 +52,7 @@ COPY . .
 RUN npm run build --no-audit --no-fund
 
 # ============================================================================
-# The agent launcher (ruling 460) — see "every agent process runs as its
+# The agent launcher (ruling 139) — see "every agent process runs as its
 # person's own OS user" in the runtime stage for what it is.
 #
 # Its own stage because the runtime stage carries no compiler: the slim base
@@ -126,12 +126,12 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
     && apt-get -o Acquire::https::CaInfo=/tmp/node-roots.pem install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/* /tmp/node-roots.pem
 
-# Ruling 196 (owner, pass 37): the three an agent reaches for FIRST and cannot
+# Ruling 42 (owner, pass 37): the three an agent reaches for FIRST and cannot
 # install for itself. Pass 37 measured the cost of their absence — 75
 # `command not found` lines in a single pass, a monorepo committed around a
 # package manager nothing here could run, a root Makefile whose every target
 # exits 127, and a REQUIRED reviewer chartered to `make up` a stack, which
-# could therefore never approve anything. Ruling 191 stopped agents
+# could therefore never approve anything. Ruling 148 stopped agents
 # rediscovering the gap one exit-127 at a time; this closes the part of it that
 # is cheap to close.
 #
@@ -161,7 +161,7 @@ RUN npm install -g pnpm@12.9.1 && npm cache clean --force
 # same reason uv is copied above: a pinned binary in the image, not a first-run
 # download into a container-local cache.
 #
-# Ruling 691: Viberr pictures every delivered page with this browser, and a
+# Ruling 42: Viberr pictures every delivered page with this browser, and a
 # picture is only worth keeping when it shows what a reader would get. Two
 # things were wrong with fonts-liberation alone (measured in this image, Debian
 # Chromium 154, 2026-10-07):
@@ -174,7 +174,7 @@ RUN npm install -g pnpm@12.9.1 && npm cache clean --force
 # fonts-noto-cjk alone is about 90 MB installed, so it waits for a board that
 # needs it.
 #
-# Ruling 698: an agent also DRAWS with this browser. `capture_page` with a size
+# Ruling 42: an agent also DRAWS with this browser. `capture_page` with a size
 # pictures an HTML page or an SVG as a PNG of exactly that size (a diagram, a
 # cover image), and a drawing set in Liberation alone looks like a default.
 # Three families a drawing can name, each with its Installed-Size per
@@ -217,7 +217,7 @@ RUN apt-get update \
     && fc-cache -f
 ENV VIBERR_BROWSER_EXECUTABLE=/usr/bin/chromium
 
-# Ruling 566: an agent that delivers or judges a PDF checks it the way a person
+# Ruling 42: an agent that delivers or judges a PDF checks it the way a person
 # would, by looking at its pages. Live on the AWS calculator board (2026-09-28)
 # three of four result runs could not render calculator.aws's PDF export
 # ("pdftoppm is not installed"), the Estimate Judge approved with the layout
@@ -244,10 +244,10 @@ COPY --from=ghcr.io/astral-sh/uv:0.12.23 /uv /uvx /usr/local/bin/
 
 ENV NODE_ENV=production
 # Canonical file store + SQLite projections live here; compose mounts a
-# host directory (or named volume) at this path. Ruling 127: each person's own
+# host directory (or named volume) at this path. Ruling 137: each person's own
 # agent-backend sign-in and provider sessions live under
 # /data/runtimes/users/<userId>/{claude-home,codex-home}, owned by that
-# person's agent uid (ruling 460), so they survive container restarts and a
+# person's agent uid (ruling 139), so they survive container restarts and a
 # `docker compose up --build`. There is no image-level backend credential and
 # no shared runtime home: a run gets the home and key of the ONE person it
 # bills. The launcher is compiled against the same root (the global ARG).
@@ -261,7 +261,7 @@ ENV UV_CACHE_DIR=/data/runtimes/uv-cache
 ENV UV_PYTHON_INSTALL_DIR=/data/runtimes/uv-python
 ENV PORT=3000
 
-# Ruling 460: every agent process runs as its person's own OS user.
+# Ruling 139: every agent process runs as its person's own OS user.
 #
 # Before it, the server (`node`) spawned every Claude and Codex CLI as `node`
 # too, so a run's shell could read the server's /proc/<pid>/environ (the
@@ -311,7 +311,7 @@ COPY --from=build --chown=node:node /app/app ./app
 COPY --from=build --chown=node:node /app/tsconfig.json ./tsconfig.json
 
 # The data root: the server's, traversable by the agent group and by nobody
-# else (ruling 460). A NAMED volume mounted here is initialised from this
+# else (ruling 15). A NAMED volume mounted here is initialised from this
 # directory, ownership and mode included; compose.yml mounts one
 # (`viberr-data`), because a macOS bind mount does not enforce file permissions
 # between uids at all (measured: uid 65534 read a 0600 file owned by 1000).
@@ -329,7 +329,7 @@ EXPOSE 3000
 # — or leave them empty: the image then falls back to package.json's version and
 # reports a null revision, which the health endpoint says plainly.
 #
-# Ruling 607: LAST, after every COPY. Each deploy stamps a new sha and time, and
+# Ruling 41: LAST, after every COPY. Each deploy stamps a new sha and time, and
 # an ENV that changes rebuilds every layer after it: placed before the
 # node_modules COPY, it re-copied 829 MB of unchanged dependencies into a new
 # layer on every deploy (seven such layers in the build cache on 2026-09-30).
@@ -340,7 +340,7 @@ ENV VIBERR_BUILD_VERSION=$VIBERR_BUILD_VERSION
 ENV VIBERR_BUILD_SHA=$VIBERR_BUILD_SHA
 ENV VIBERR_BUILD_TIME=$VIBERR_BUILD_TIME
 
-# No ENTRYPOINT (ruling 127). There used to be one — `scripts/docker-entrypoint.sh`,
+# No ENTRYPOINT (ruling 137). There used to be one — `scripts/docker-entrypoint.sh`,
 # which seeded a Codex CLI login from a read-only host mount into a shared
 # $CODEX_HOME before exec'ing the CMD. Both the mount and the shared home are
 # gone: a credential seeded by the image is a credential every person's runs

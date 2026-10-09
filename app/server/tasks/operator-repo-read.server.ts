@@ -71,7 +71,7 @@ const GIT_SHOW_TIMEOUT_MS = 20_000;
 /** Bound on the `git config` that names the checkout's repository. */
 const GIT_CONFIG_TIMEOUT_MS = 10_000;
 /**
- * Ruling 436: one read hands back at most this many characters, as whole lines.
+ * Ruling 219(c): one read hands back at most this many UTF-8 bytes, as whole lines.
  *
  * It was 60,000, and the Claude CLI refuses an MCP result over its own limit
  * (`MAX_MCP_OUTPUT_TOKENS`, 25,000 tokens by default), which dense code reaches
@@ -80,7 +80,7 @@ const GIT_CONFIG_TIMEOUT_MS = 10_000;
  * could not read `internal/runtime/executor.go` (57,835 characters) at all,
  * and a file over the cap was no better off: its first 60,000 characters were
  * refused whole, so the clip note never arrived. 40,000 left room for the
- * header and for code that tokenizes densely. Ruling 624: a page is counted in
+ * header and for code that tokenizes densely. Ruling 215: a page is counted in
  * UTF-8 bytes, at `READ_PAGE_BYTES`, the most a Codex run's code-mode tool
  * output carries whole, since an operator may run on Codex.
  */
@@ -96,7 +96,7 @@ const DEFAULT_BRANCH_READ_MAX_BLOB_BYTES = 32 * 1024 * 1024;
 export type DefaultBranchRead =
   | {
       kind: "found";
-      /** Ruling 436: lines `fromLine`..`toLine` (1-based) of the file. */
+      /** Ruling 219(c): lines `fromLine`..`toLine` (1-based) of the file. */
       text: string;
       fromLine: number;
       toLine: number;
@@ -138,8 +138,8 @@ export type TextPage =
   | { ok: false; totalLines: number };
 
 /**
- * Ruling 436: the whole lines from `fromLine` (1-based) that fit in
- * `pageBytes` of UTF-8 (ruling 624), so any file can be read to its end in pieces. At least one line
+ * Ruling 219(c): the whole lines from `fromLine` (1-based) that fit in
+ * `pageBytes` of UTF-8 (ruling 215), so any file can be read to its end in pieces. At least one line
  * is always taken; a single line longer than a page is cut and says so.
  */
 export function pageOfText(
@@ -188,7 +188,7 @@ export function pageOfText(
 }
 
 /**
- * Ruling 436: what a page says about itself, in the same words on the
+ * Ruling 219(c): what a page says about itself, in the same words on the
  * controller's tool and the operator's. `range` goes after the source in the
  * header; `note` closes the result and names the next call.
  */
@@ -359,7 +359,7 @@ export async function readDefaultBranchFile(
     defaultBranch: string;
     /** Repository-relative path, e.g. `docs/guide.md`. */
     path: string;
-    /** Ruling 436: the 1-based line the page starts at (default 1). */
+    /** Ruling 219(c): the 1-based line the page starts at (default 1). */
     fromLine?: number;
     /** Test seam; production callers resolve the configured store root. */
     dataRoot?: string;
@@ -419,7 +419,7 @@ export async function readDefaultBranchFile(
 }
 
 /**
- * Ruling 299: the same read, for an actor with no checkout.
+ * Ruling 265: the same read, for an actor with no checkout.
  *
  * `readDefaultBranchFile` takes a task workspace, because the operator always
  * has one. The CONTROLLER never does, and it is the actor that writes the
@@ -446,7 +446,7 @@ export async function readProjectDefaultBranchFile(
     defaultBranch: string;
     /** Repository-relative path, e.g. `docs/guide.md`. */
     path: string;
-    /** Ruling 436: the 1-based line the page starts at (default 1). */
+    /** Ruling 219(c): the 1-based line the page starts at (default 1). */
     fromLine?: number;
     dataRoot?: string;
   },

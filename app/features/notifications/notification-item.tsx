@@ -4,7 +4,7 @@ import { ntfMeta, plainText } from "./notification-meta";
 
 /**
  * One `.ntf-item` row — THE shared markup for the bell popover (both
- * shells) and the /notifications page list (ruling 14: bell popover ported
+ * shells) and the /notifications page list (ruling 297: bell popover ported
  * once, parameterized). Markup is verbatim from main.jsx/home.jsx.
  */
 

@@ -93,7 +93,7 @@ export function isOAuthWhitelisted(
  * domain allowlist or a claimed GitHub-handle placeholder.
  */
 /**
- * Ruling 154: write a GitHub handle that a sign-in has just PROVEN, taking it
+ * Ruling 29: write a GitHub handle that a sign-in has just PROVEN, taking it
  * off any other enabled account that carries it.
  *
  * Before pass 35 the column had one writer, so a duplicate was structurally

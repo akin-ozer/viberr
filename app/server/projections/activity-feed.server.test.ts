@@ -172,8 +172,8 @@ describe("listActivityStream", () => {
     expect(stream).toEqual(["newer", "older"]);
   });
 
-  it("F28-D1 + ruling 457: a newer event appended later still wins the tie", () => {
-    // Ruling 457 keeps the ids of rows that did not change, so the event
+  it("F28-D1 + ruling 21: a newer event appended later still wins the tie", () => {
+    // Ruling 21 keeps the ids of rows that did not change, so the event
     // appended SECOND carries the larger id — the old `id ASC` tie-break would
     // have listed it after the older one. The task page orders by position.
     const store = setupTestStore(ctx);
@@ -234,7 +234,7 @@ describe("listActivityStream", () => {
 });
 
 describe("listAuditLog", () => {
-  it("renders scope violations with their own open/resolved state (ruling 5)", () => {
+  it("renders scope violations with their own open/resolved state (ruling 221)", () => {
     const store = setupTestStore(ctx);
     // The mock VIB-142 violation used to be migration-seeded; the squashed
     // baseline is schema-only, so open one explicitly to render it.
@@ -716,7 +716,7 @@ describe("audit-panel actor names (E32-8, pass 32)", () => {
 /**
  * C5 (pass 34, U34-4): the Activity audit column keeps the controller
  * instrument. The joined user name used to win outright, so a row written as
- * `<email> · via controller` (ruling 99(b)) read exactly like one the same
+ * `<email> · via controller` (ruling 247) read exactly like one the same
  * person wrote by hand — this is the ONE column that dropped the disclosure.
  */
 describe("the audit column discloses the controller instrument (C5)", () => {
@@ -762,7 +762,7 @@ describe("the audit column discloses the controller instrument (C5)", () => {
     expect(row.text).toContain("gone@viberr.dev (via the controller)");
   });
 
-  it("ruling 178: a required-reviewer change reads as a policy change naming each rule, and a clear says so", () => {
+  it("ruling 89: a required-reviewer change reads as a policy change naming each rule, and a clear says so", () => {
     // Canary: leave `project.required_reviewers.updated` out of AUDIT_ACTION_KINDS.
     const store = setupTestStore(ctx);
     const arda = store.users.arda;
@@ -793,7 +793,7 @@ describe("the audit column discloses the controller instrument (C5)", () => {
   });
 
   it("two audit rows written in the SAME millisecond keep their insertion order", () => {
-    // Live (2026-09-12, twice in a full suite run): the ruling-178 test above
+    // Live (2026-09-12, twice in a full suite run): the ruling-89 test above
     // flipped its two rows. `ORDER BY occurred_at DESC, id DESC` tie-breaks on
     // a RANDOM id (`newId` is 72 random bits), so two events stamped in one
     // millisecond render in either order — the feed says the wrong thing
@@ -825,7 +825,7 @@ describe("the audit column discloses the controller instrument (C5)", () => {
 });
 
 /**
- * Ruling 235 — the refused-acceptance row reads as a sentence, not a humanised
+ * Ruling 96 — the refused-acceptance row reads as a sentence, not a humanised
  * action id.
  *
  * Registering the action on the feed put it on screen; without a `auditText`
@@ -834,7 +834,7 @@ describe("the audit column discloses the controller instrument (C5)", () => {
  * gate, but their project role (viewer) is not permitted." The panel exists to
  * be read, and a reader needs WHICH revision was reviewed against WHICH head.
  */
-describe("ruling 235: the refused-acceptance audit row", () => {
+describe("ruling 96: the refused-acceptance audit row", () => {
   it("names both shas and the pull request", () => {
     const store = setupTestStore(ctx);
     recordAudit(store.db, {
@@ -864,13 +864,13 @@ describe("ruling 235: the refused-acceptance audit row", () => {
 });
 
 /**
- * Ruling 477(b) (F40-28): the goal-chain rows. The org audit store held
+ * Ruling 273 (F40-28): the goal-chain rows. The org audit store held
  * `goal.created` and `goal.updated` for goal-1 on akinozer.com while the
  * project's audit column ("58 of 58 entries") showed neither: the whitelist
  * had no `goal.*` action. Every op a redirect can run has its own sentence,
  * and a row written before the writer recorded a title or a link still reads.
  */
-describe("ruling 477(b): goal-chain rows on the audit column", () => {
+describe("ruling 273: goal-chain rows on the audit column", () => {
   it("names every redirect op, the controller instrument, and the runner's completion", () => {
     // CANARY: leave `goal.updated` out of AUDIT_ACTION_KINDS and every row but
     // the creation and the completion vanishes.
@@ -918,12 +918,12 @@ describe("ruling 477(b): goal-chain rows on the audit column", () => {
 });
 
 /**
- * Ruling 503: the epic rows. Creating an epic, changing it and putting a task
+ * Ruling 272: the epic rows. Creating an epic, changing it and putting a task
  * in one or taking it out are a person's plan; the one-time conversion of a
  * goal chain is Viberr's own record. A task's move reads on its task chip,
  * and a row written without one still ends in a full stop.
  */
-describe("ruling 503: epic rows on the audit column", () => {
+describe("ruling 272: epic rows on the audit column", () => {
   it("names the epic, what changed, where a task moved, and the conversion", () => {
     // CANARY: leave `task.epic.changed` out of AUDIT_ACTION_KINDS and the
     // three membership rows vanish from the column.
@@ -980,14 +980,14 @@ describe("ruling 503: epic rows on the audit column", () => {
 });
 
 /**
- * Ruling 681: a write to a knowledge base, a skill or an MCP server is audited
+ * Ruling 34: a write to a knowledge base, a skill or an MCP server is audited
  * for the instance, with no project. The boards whose runs are given the
  * resource see it on their audit panel, as a sentence that names the document
  * and quotes none of it. Every row here is written by the writer that writes
  * it in the app, so a writer and this panel cannot come to disagree about a
  * detail's name.
  */
-describe("ruling 681: the instance writes to what a board's runs are given", () => {
+describe("ruling 34: the instance writes to what a board's runs are given", () => {
   type Store = ReturnType<typeof setupTestStore>;
   const personOf = (store: Store) => ({
     userId: store.users.arda.id,
@@ -1212,7 +1212,7 @@ describe("ruling 681: the instance writes to what a board's runs are given", () 
     setKnowledgeBasePrivacy(store.db, { id: facts.id, private: true }, actor, where);
     setKnowledgeBasePrivacy(store.db, { id: facts.id, private: false }, actor, where);
     await saveKnowledgeBase(store.db, { id: facts.id, name: "True facts", refresh: "manual" }, actor, where);
-    // Ruling 680's edit of one passage of a skill is a store write like any other.
+    // Ruling 267's edit of one passage of a skill is a store write like any other.
     const passage = await editSkillPassage(
       store.db,
       { id: skill.id, was: "# v1", now: "# v1, checked", actor },

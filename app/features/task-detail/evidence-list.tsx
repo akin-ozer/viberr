@@ -9,14 +9,14 @@ import type { useAttachmentLightbox } from "./attachment-lightbox";
 import { citedName } from "./cited-files";
 
 /**
- * Ruling 526: an outcome's evidence as a checklist, and a reviewer's verdict
+ * Ruling 313: an outcome's evidence as a checklist, and a reviewer's verdict
  * as a card around it.
  *
  * A row is its mark, what was checked and how it came out. The marks are the
- * circle family ruling 511 gave the PR card's status rows: a check for a
+ * circle family ruling 315 gave the PR card's status rows: a check for a
  * pass, a cross for a failure, a plain ring for a reference that is neither.
  * Failures come first and are tinted, as a failing gate's row is (ruling
- * 493), so what blocks is read before what passed; the file keeps the order
+ * 313), so what blocks is read before what passed; the file keeps the order
  * the agent wrote.
  */
 
@@ -45,8 +45,8 @@ function evidenceTally(rows: readonly EvidenceRowRender[]): string | null {
  * told to "cite the exact filename" when a file backs a claim; when a token
  * (backticks, quotes and trailing punctuation stripped) matches a file the
  * task has, it opens in the in-app card on a plain click (owner request
- * 2026-08-21, widened by the ruling-105 addendum to every kind), and modified
- * clicks keep the raw-file tab. Ruling 526: a span in backticks is code, as
+ * 2026-08-21, widened by the ruling-317 addendum to every kind), and modified
+ * clicks keep the raw-file tab. Ruling 313: a span in backticks is code, as
  * it is in the event's text. Nothing else is guessed at.
  */
 function EvidenceLabel({
@@ -112,7 +112,7 @@ function Result({ text }: { text: string }) {
 }
 
 /**
- * Ruling 639: a result rests on one line and opens in place.
+ * Ruling 313: a result rests on one line and opens in place.
  *
  * A result that fits beside its label keeps the row's end; a longer one drops
  * under the label and is cut there with an ellipsis, so a verdict's rows stay
@@ -191,7 +191,7 @@ export function EvidenceList({
 }
 
 /**
- * Ruling 526: a reviewer's verdict. The head is the note's title (Changes
+ * Ruling 313: a reviewer's verdict. The head is the note's title (Changes
  * requested, Review passed, Approval noted …) with the tally of its checks
  * under it and the revision it judged at its end; what the note's sentence
  * adds follows (who else must review, why there is nothing to deliver); then

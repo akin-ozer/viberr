@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { boardArgsRefusal, BOARD_TOOLS } from "./board-tool.server";
 
 /**
- * Ruling 707: what the Codex board server answers to arguments that are not a
- * tool's. It said every argument is text, which was true until a reader took
+ * Ruling 216: what the Codex board server answers to arguments that are not a
+ * tool's. It names each argument by what it takes, because a reader takes
  * `offset`: a run told a number is text sends `"32000"` and is refused again.
  */
-describe("ruling 707: a board tool's refusal names each argument by what it takes", () => {
+describe("ruling 216: a board tool's refusal names each argument by what it takes", () => {
   const sentence = (tool: Tool) => {
     const refusal = boardArgsRefusal(tool);
     expect(refusal.isError).toBe(true);

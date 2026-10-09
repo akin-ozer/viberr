@@ -7,10 +7,10 @@ import {
 import { prettySize } from "~/shared/text/byte-size";
 
 /**
- * Ruling 573: what a composer decides about files before the server sees
+ * Ruling 319: what a composer decides about files before the server sees
  * anything: which picks it keeps, and whether a paste is text or a file. The
  * rules alone, apart from the tray that draws them (`attach-files.tsx`), so a
- * form that draws its own (the New task dialog, ruling 533) ships none of it.
+ * form that draws its own (the New task dialog, ruling 76) ships none of it.
  * A refusal here is the one the server would give, said before the request.
  */
 
@@ -97,6 +97,6 @@ export function filesFromPaste(
 /** The names a picture has, of the image types `INLINE_TYPES` serves: what a
  *  composer and a controller transcript show as the picture itself, what the
  *  task page shows as a thumbnail and opens in its lightbox, and what a
- *  completion packet may show as a screenshot (ruling 657: one pattern where
+ *  completion packet may show as a screenshot (ruling 12: one pattern where
  *  three modules kept a copy). */
 export const IMAGE_RE = /\.(png|jpe?g|webp|gif)$/i;

@@ -44,16 +44,16 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * hands back the form payload the action's zod schema expects. Server
  * failures render in the foot-hint (err) and the modal stays open.
  *
- * Edit-mode seeding is id-based (ruling 7): the profile's stored
+ * Edit-mode seeding is id-based (ruling 62(a)): the profile's stored
  * `{capabilityId, mode}` grants seed the modal caps for catalog ids;
  * grants outside the modal catalog + display-only extras are preserved
  * server-side and never touched here.
  *
- * Ruling 700(e) split the modal on the task page's recipe: its fields, grant
+ * Ruling 13(b) split the modal on the task page's recipe: its fields, grant
  * pickers and save gate are hooks in `create-profile-modal-form.ts`, whose
  * state initialisers seed the fields and the resource grants from the profile
  * (a new profile starts from `{ skills: [], mcps: [], kb: [] }` in
- * `useGrantPickers`, the state ruling 54 cites). The capability policy for the
+ * `useGrantPickers`, the state ruling 176 cites). The capability policy for the
  * profile's kind, the capability seed (`seedCaps`), the save's requirements and
  * the footer's sentence are pure functions in `create-profile-modal-derive.ts`.
  */
@@ -80,7 +80,7 @@ function grantsOf(caps: CapSelection): { capabilityId: string; mode: CapabilityG
 
 export interface ProfileFormPayload {
   /** Absent on the operator's editor: it is one agent, called Operator, with
-   *  no role (ruling 518). */
+   *  no role (ruling 176). */
   name?: string;
   role?: string;
   backend: "codex" | "claude";
@@ -108,7 +108,7 @@ const BACKENDS: { id: "codex" | "claude"; label: string }[] = [
 
 /**
  * Model + effort catalog state for one backend, shared by this modal and the
- * controller settings panel (ruling 106): the /resources/model-catalog fetch,
+ * controller settings panel (ruling 270): the /resources/model-catalog fetch,
  * the D5 failed-load detection with its retry, defaulting the picks once the
  * catalog answers, and the selected-model derivations the pickers render.
  *
@@ -179,14 +179,13 @@ export function useModelCatalog(
     if (!backend) return;
     catalogLoadFired.current = false;
     loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backend]);
   const catalog = catalogFetcher.data?.data ?? null;
   const catalogLoading = catalogFetcher.state === "loading";
   // D5: a load fired and SETTLED (idle) with no catalog → the fetch failed. The
   // endpoint returns a curated fallback even without a credential, so this is a
   // real transport/500 failure, which the route's `clientLoader` answers with
-  // null (ruling 457). Without a signal, the pending state lasts forever over
+  // null (ruling 11). Without a signal, the pending state lasts forever over
   // an empty picker with no way out. This offers the retry.
   const catalogFailed =
     Boolean(backend) &&
@@ -197,7 +196,7 @@ export function useModelCatalog(
   // Default the picks to the catalog defaults once it loads and no valid pick
   // is set (create mode, or a backend switch that invalidated the prior model).
   // "Valid" mirrors the runtime's isKnownModel, not bare catalog membership
-  // (ruling 106 review, D1): a dated Claude id or family alias runs VERBATIM
+  // (ruling 270 review, D1): a dated Claude id or family alias runs VERBATIM
   // (`resolveRunModel` passes it through) even when the served catalog does
   // not list it, so rewriting it here would be a silent model change the next
   // save persists — the select keeps it via its preserve-a-seeded-value
@@ -210,7 +209,7 @@ export function useModelCatalog(
       (backend === "claude" && claudeModelRunsVerbatim(model));
     const nextModel = !model || !known ? catalog.defaultModel : model;
     if (nextModel !== model) setModel(nextModel);
-    // Ruling 139: a stored tier the backend does not list (a preserved Codex
+    // Ruling 261: a stored tier the backend does not list (a preserved Codex
     // `minimal`, or a tier from the other backend) is re-seeded to the
     // default, because the save would refuse it by name and the editor must
     // not offer what it cannot save. Judged against the tiers the select will
@@ -218,7 +217,6 @@ export function useModelCatalog(
     // the backend-wide list, and checking the wide one would leave a tier
     // standing that the picker never shows and the save refuses.
     seedEffort(catalog, nextModel, effort, setEffort);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
   // A model change can NARROW the tiers on offer. The pick is clamped to what
@@ -229,7 +227,6 @@ export function useModelCatalog(
   useEffect(() => {
     if (!catalog || !model) return;
     seedEffort(catalog, model, effort, setEffort);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
   // Effort options come from the selected model (when it constrains them),
@@ -326,7 +323,7 @@ function IdentityFields({
   setName: (v: string) => void;
   role: string;
   setRole: (v: string) => void;
-  /** Which of the two a refused save named (ruling 147); null on a pristine form. */
+  /** Which of the two a refused save named (ruling 288); null on a pristine form. */
   flagged: "name" | "role" | null;
 }) {
   return (
@@ -373,12 +370,12 @@ function BackendField({
 }: {
   backend: "codex" | "claude" | "";
   setBackend: (v: "codex" | "claude") => void;
-  /** Ruling 127: which backends the VIEWER has connected (from the loader).
+  /** Ruling 137: which backends the VIEWER has connected (from the loader).
    *  It decides one thing only — whether the note under the chips is shown.
    *
    *  RU-2 used to DISABLE a chip whose backend was not configured, because
    *  "configured" was a deployment fact and a profile pinned to an unconfigured
-   *  runtime could never run for anybody. Since ruling 127 there is no such
+   *  runtime could never run for anybody. Under ruling 137 there is no such
    *  fact: a run bills the TASK OWNER, so whether this profile runs depends on
    *  the person whose task it is dispatched on, not on the person writing the
    *  profile. Keeping the gate on the author's own credential blocked profile
@@ -445,7 +442,7 @@ function BackendField({
       )}
       {/* P14: the reason a control behaves the way it does is RENDERED copy.
           The old gate hid this sentence in a `title` on a DISABLED button,
-          where no browser ever opens it. Ruling 127: it is advice, not a
+          where no browser ever opens it. Ruling 137: it is advice, not a
           denial, because the profile runs on the task owner's account. */}
       {pickedLabel !== "" && (
         <p className="def-note">
@@ -509,7 +506,7 @@ function AutonomyField({
 }
 
 /** The model + effort pickers, exported for the controller settings panel
- *  (ruling 106) — same select, loading/failed/retry, description and
+ *  (ruling 270) — same select, loading/failed/retry, description and
  *  unavailable-model treatment everywhere a model is chosen. */
 export function ModelEffortFields({
   uid,
@@ -730,7 +727,8 @@ function CapabilityGrants({
 }: {
   capCatalog: readonly ModalCapGroup[];
   /** The mode buttons offered per row: 4 for the operator, 3 honest ones
-   *  (Allowed/Human-only/Off) for a specialist (R7-5). */
+   *  (Acts directly, Human-only, Off) for a specialist (`MODE_LABEL`,
+   *  ruling 298). */
   capModes: readonly { id: CapMode; label: string }[];
   caps: CapSelection;
   setCaps: Dispatch<SetStateAction<CapSelection>>;
@@ -789,8 +787,8 @@ function CapabilityGrants({
                     and position did not disambiguate either because a zero
                     count renders nothing. Each count now carries the SAME word
                     the expanded segment below uses for that mode on this
-                    profile kind (Allowed/Human-only/Off for a specialist,
-                    Direct/Recommend/Human/Off for the operator), the way the
+                    profile kind (`MODE_LABEL`: Acts directly, Human-only and
+                    Off, plus Recommends only for the operator), the way the
                     Policy page's identical strip already reads (`.pcap-counts`
                     in policy-page.tsx's `AgentCapability`). */}
                 <span className="cap-msum">
@@ -857,7 +855,7 @@ function CapabilityGrants({
                       !locked &&
                       capabilityEnforcement(capDef.id) === "claude-only";
                     const codexInert = codexAdvisory && capDef.id === "read-github-api";
-                    // Ruling 185: the headline write family has no OS channel
+                    // Ruling 183: the headline write family has no OS channel
                     // on Codex any more, so a withheld one is advisory there.
                     // Tag the row from the LIVE selection so the admin sees the
                     // caveat as they make it.
@@ -900,7 +898,7 @@ function CapabilityGrants({
                             UX-19: it was brought along as far as the ROLE and
                             stopped there. A radiogroup promises arrow-key
                             traversal (a hand-rolled helper then; Radix behind
-                            `RadioSeg` since ruling 166), which UXA-7 wired into
+                            `RadioSeg` now, ruling 14), which UXA-7 wired into
                             the twins on the Policy sheet (`HumanAccess`'s role
                             group and `WorkflowRules`' boundary group) and not
                             into this one — so the group announced an
@@ -1026,7 +1024,7 @@ function ResourcePicker({
           // "N of 0" and can never be unchecked (there's no chip to click).
           // U33-7: a chip reads its `label` when the store keeps one (knowledge
           // bases are stored by DIRECTORY and displayed by NAME everywhere else
-          // — ruling 106) and falls back to the key otherwise. The value written
+          // — ruling 270) and falls back to the key otherwise. The value written
           // into the grant is always `it.id`, the store key, unchanged.
           const displayItems: { id: string; label?: string; missing?: boolean }[] = [
             ...g.items,
@@ -1095,7 +1093,7 @@ function ResourcePicker({
                       >
                         {/* Interface review 2026-09-24 (acce-33): a dangling
                             grant says so in shape and word, not amber alone.
-                            Ruling 459: any other chip's check is always drawn,
+                            Ruling 284: any other chip's check is always drawn,
                             and faded in by the sheet on `.on`, so a toggle
                             never resizes the chip and re-wraps the row under
                             the pointer. */}
@@ -1162,7 +1160,7 @@ function ModalFooter({
    *  an insertion, not a role flip on unchanged text). */
   attempts: number;
 }) {
-  // Ruling 451(g): the box shakes once per refusal, not on each mount; a
+  // Ruling 284: the box shakes once per refusal, not on each mount; a
   // server error, never keyed per refusal, does not shake.
   const refusalShake = useRefusalShake(attempts);
   return (
@@ -1182,7 +1180,7 @@ function ModalFooter({
         </button>
         {/* P13-UI-58 residual: the submit had no busy state for assistive tech —
             a save in flight looked idle to a screen reader. */}
-        {/* Ruling 147: enabled until the request starts. An invalid save is
+        {/* Ruling 288: enabled until the request starts. An invalid save is
             refused by submit(), which names the requirement, marks the field
             and moves focus to it; the old dimmed-but-clickable aria-disabled
             state told readers the button did nothing. Busy stays a real
@@ -1220,7 +1218,7 @@ export function CreateProfileModal({
   projectName: string;
   busy: boolean;
   /** The save landed: the modal plays its exit, then onClose unmounts it
-   *  (ruling 459). */
+   *  (ruling 287). */
   done?: boolean;
   /** Server-side failure copy — renders in the foot hint, modal stays open. */
   error: string | null;
@@ -1230,7 +1228,7 @@ export function CreateProfileModal({
    *  page's loader had none to give, or an isolated component test), the
    *  picker offers nothing. */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** Ruling 127: which backends the VIEWER has connected (from the loader).
+  /** Ruling 137: which backends the VIEWER has connected (from the loader).
    *  Advisory only, never a gate on authoring (see `BackendField`). Omitted
    *  means "not probed on this surface", and nothing is claimed either way. */
   viewerConnected?: Record<"codex" | "claude", boolean>;
@@ -1286,7 +1284,7 @@ export function CreateProfileModal({
   // AP-07: a template-sourced profile FORKS on save (the deployment stores a
   // full definition snapshot that wins over the org template from then on) —
   // the confirm button says so instead of promising an inheritance that stops.
-  // Ruling 479(g): only while the copy still follows the template. A copy that
+  // Ruling 177: only while the copy still follows the template. A copy that
   // already holds its snapshot (a library deploy, any earlier save) forked
   // then, and saying so again implied template edits still reached it.
   const forksTemplate = editing && initial.tracksTemplate;
@@ -1325,7 +1323,7 @@ export function CreateProfileModal({
       />
 
       <div className="modal-body">
-        {/* Ruling 518: the operator is one agent, called Operator, with no
+        {/* Ruling 176: the operator is one agent, called Operator, with no
             role, so its editor has neither field. */}
         {!isOperator && (
           <IdentityFields

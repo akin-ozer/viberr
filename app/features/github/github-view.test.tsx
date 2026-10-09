@@ -262,7 +262,7 @@ describe("CredentialCard states", () => {
     );
   });
 
-  it("ruling 144(a): an advisory renders as a line, never as a missing chip or a warning", () => {
+  it("ruling 221(a): an advisory renders as a line, never as a missing chip or a warning", () => {
     // Canary: render the advisory only when the scope is granted (filter it out).
     const { container } = render(
       <CredentialCard
@@ -478,7 +478,7 @@ describe("CredentialManageActions (finding #13)", () => {
     );
     fireEvent.click(bound.getByText("Re-attach connection"));
     expect(onSet).toHaveBeenCalledTimes(2);
-    // Ruling 149: the destructive half of this row wears the danger label, the
+    // Ruling 278: the destructive half of this row wears the danger label, the
     // rotate/attach half stays neutral. Canary: drop `danger` from the Remove
     // className in `credential-card.tsx`.
     expect(
@@ -490,7 +490,7 @@ describe("CredentialManageActions (finding #13)", () => {
     // Remove is gated by the confirm dialog.
     fireEvent.click(bound.getByText("Remove credential"));
     expect(onClear).not.toHaveBeenCalled();
-    // Ruling 458(f): the shared ConfirmDialog, named by its title.
+    // Ruling 297: the shared ConfirmDialog, named by its title.
     expect(
       bound
         .getByRole("alertdialog", { name: "Remove this credential?" })
@@ -527,10 +527,10 @@ describe("RepositoryPanel", () => {
   });
 
   /**
-   * Ruling 468 (F40-12): an existing repository with no commit is said as a
+   * Ruling 227 (F40-12): an existing repository with no commit is said as a
    * fact Viberr acts on, never left for a person to find at the first run.
    */
-  it("ruling 468: an empty repository says Viberr will make its first commit", () => {
+  it("ruling 227: an empty repository says Viberr will make its first commit", () => {
     const repo = (empty: boolean) =>
       panel(
         renderPage(
@@ -580,7 +580,7 @@ describe("RepositoryPanel", () => {
     );
   });
 
-  it("ruling 667: a project with no repository says so once, with where one is attached, and nothing about credentials or branches", () => {
+  it("ruling 224: a project with no repository says so once, with where one is attached, and nothing about credentials or branches", () => {
     // CANARY: drop the page's early return and a board that needs no
     // repository shows a credential warning and three empty lists about one.
     const { container } = renderPage(
@@ -597,7 +597,7 @@ describe("RepositoryPanel", () => {
     expect(container.querySelectorAll(".panel")).toHaveLength(1);
     const only = panel(container, "Repository");
     expect(only.textContent).toContain(
-      // Ruling 672: a software board that has not connected its repository
+      // Ruling 224: a software board that has not connected its repository
       // yet reads this page too, so it does not call the board a results one.
       "This project has no repository: each task comes back as the files its agents save on it, so there are no branches or pull requests to show.",
     );
@@ -665,7 +665,7 @@ describe("PullRequestsPanel", () => {
     expect(rows[1]!.querySelector(".pill.done")!.textContent).toContain(
       "merged",
     );
-    // Ruling 12: closed-unmerged renders the risk pill.
+    // Ruling 237: closed-unmerged renders the risk pill.
     expect(rows[2]!.querySelector(".pill.risk")!.textContent).toContain(
       "closed",
     );
@@ -679,7 +679,7 @@ describe("PullRequestsPanel", () => {
     // Footer note is verbatim contract (B10: honest about the offline path).
     // F19-34: it used to say "in the review queue". The queue is a read-only
     // triage list — it performs no mutation at all, which is exactly why ruling
-    // 30 (R15-11) labels its row "Review" and not "Accept". Naming it as the
+    // 304 (R15-11) labels its row "Review" and not "Accept". Naming it as the
     // surface that merges pointed a reader at a page with no such control.
     expect(list.querySelector(".pol-note")!.textContent).toContain(
       "Merging stays reserved for humans. Accepting a completion on its task page merges its PR when GitHub is reachable; otherwise it records accepted (merge pending).",
@@ -719,7 +719,7 @@ describe("PullRequestsPanel", () => {
 /* ---------------------------------------------------------- branch table */
 
 describe("BranchesPanel", () => {
-  it("renders the 4-column table with sync pills per ruling 12", async () => {
+  it("renders the 4-column table with sync pills per ruling 237", async () => {
     const { container } = renderPage(viewData({ branches }));
     const table = panel(container, "Execution branches");
     expect(table.querySelector(".panel-head .right")!.textContent).toBe(
@@ -1149,7 +1149,7 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
     );
     expect(c.textContent).toContain("Checked 2m ago");
     expect(c.textContent).toContain("no changes recorded");
-    // Nothing is wrong here — a checked project with a quiet repo (ruling 46).
+    // Nothing is wrong here — a checked project with a quiet repo (ruling 237).
     expect(c.classList.contains("stale")).toBe(false);
   });
 
@@ -1176,7 +1176,7 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
 });
 
 /**
- * Ruling 368 (and 147(a)): a request shows itself in flight on the button that
+ * Ruling 286 (and 147(a)): a request shows itself in flight on the button that
  * started it. Update status, Re-check scopes and the credential row used to go
  * `disabled` for the whole wait with their resting glyph and label, so they
  * painted the .45 refused step with a not-allowed cursor and said nothing. Now
@@ -1188,7 +1188,7 @@ describe("F19-22: the chip renders the last CHECK beside the last change", () =>
  * test fails; pass `inFlight={null}` to `CredentialManageActions` there and the
  * credential test does.
  */
-describe("ruling 368: the GitHub page's requests in flight", () => {
+describe("ruling 286: the GitHub page's requests in flight", () => {
   /** An action the TEST answers, when it decides to. */
   function heldAction() {
     let answer: (reply: { ok: true; toast: string }) => void = () => {};
@@ -1220,7 +1220,7 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
     );
     const update = button(container, "Updating…");
     expect(update.disabled).toBe(true);
-    // Ruling 459: the loader is always drawn in the glyph's cell (GlyphSwap),
+    // Ruling 284: the loader is always drawn in the glyph's cell (GlyphSwap),
     // so "spinning" is the cell having traded the resting glyph for it.
     expect(update.querySelector(".copy-glyph[data-copied] > svg.ico.spin")).not.toBeNull();
     const recheck = button(container, "Re-check scopes");
@@ -1259,7 +1259,7 @@ describe("ruling 368: the GitHub page's requests in flight", () => {
   });
 });
 
-describe("ruling 368: CredentialManageActions names the request in flight", () => {
+describe("ruling 286: CredentialManageActions names the request in flight", () => {
   const renderRow = (configured: boolean, inFlight: string | null) =>
     render(
       <CredentialManageActions
@@ -1299,11 +1299,11 @@ describe("ruling 368: CredentialManageActions names the request in flight", () =
 });
 
 /**
- * Ruling 480 (F40-45): "Rotate credential" rotated nothing (it binds the
+ * Ruling 222 (F40-45): "Rotate credential" rotated nothing (it binds the
  * repository owner's connection again) and nothing on the card pointed at the
  * one control that replaces a token, Instance settings → Update token.
  */
-describe("ruling 480: the credential row says what re-attach does and where a token is replaced", () => {
+describe("ruling 222: the credential row says what re-attach does and where a token is replaced", () => {
   const renderAsMaintainer = (instanceAdmin: boolean) =>
     renderPage(viewData({ credential: violationCredential }), "maintainer", NO_CHECK_ON_RECORD, {
       instanceAdmin,

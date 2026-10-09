@@ -42,11 +42,11 @@ export interface HomePageData {
   user: SessionUser;
   greet: string;
   projects: HomeProjectCard[];
-  /** Ruling 532: the setup checklist's steps; null once all are done. */
+  /** Ruling 322: the setup checklist's steps; null once all are done. */
   setup: HomeSetupStep[] | null;
   prefs: HomePrefs;
   org: HomeOrgSummary;
-  /** The bell's counts; the bell loads its own list (ruling 457). */
+  /** The bell's counts; the bell loads its own list (ruling 300). */
   unread: number;
   orphanUnread: number;
   /** B-FD4: the host data root, org admins only (null otherwise). */
@@ -152,7 +152,7 @@ export function HomePage({
     }
   });
 
-  // Ruling 621: the setup checklist's close. The card goes at once (personal
+  // Ruling 322: the setup checklist's close. The card goes at once (personal
   // UI state, like a pin), and the answer's cookie keeps it gone for the rest
   // of this session; a refused close brings it back and says why.
   const setupFetcher = useFetcher<{ ok: boolean; error?: string }>();
@@ -233,7 +233,7 @@ export function HomePage({
       );
     }
   }, [rebuildFetcher.state, rebuildFetcher.data, push]);
-  // Runs from the confirm's commit, which then closes it (ruling 459).
+  // Runs from the confirm's commit, which then closes it (ruling 287).
   const rebuild = () => {
     if (rebuilding) return;
     const fd = new FormData();
@@ -293,10 +293,10 @@ export function HomePage({
           onNew={() => setModal(true)}
         />
 
-        {/* Ruling 532: an empty Home is never without the checklist, whose
+        {/* Ruling 322: an empty Home is never without the checklist, whose
             last step is the first project, so it stands where the empty
             state's dashed box did. Once there is a project, the person may
-            close it for the session (ruling 621). */}
+            close it for the session (ruling 322). */}
         {data.setup && !setupClosed && (
           <SetupChecklist
             steps={data.setup}

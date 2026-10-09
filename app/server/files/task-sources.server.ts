@@ -1,5 +1,5 @@
 /**
- * Ruling 690: a task keeps the sources its result rests on.
+ * Ruling 82: a task keeps the sources its result rests on.
  *
  * A result states facts from outside: a price, a quote, a date, what a page,
  * a file or a command said. What the run read to state them was nowhere. A
@@ -16,7 +16,7 @@
  *
  * The folder is the server's own. It is not one of the directories a run
  * writes (`TASK_SHARED_DIRS`) and is never shared with the agent group, so
- * where agents run as their own users (ruling 460) an agent reads a kept
+ * where agents run as their own users (ruling 15) an agent reads a kept
  * source and cannot change it. This module is the only writer: it never opens
  * an existing bytes file for writing, and the index only grows.
  *
@@ -70,7 +70,7 @@ export const SOURCE_FROM_MAX = 2000;
  * How a file staged for a keep is named in the task's attachments folder:
  * this prefix, then the name the source is kept under. The dot is what the
  * rule rests on: every lister of that folder skips a dot-name (the run's
- * window of ruling 593, the delivery's files of ruling 610, the panel), and
+ * window of ruling 78, the delivery's files of ruling 81, the panel), and
  * no upload, relay or take can land one. The rest keeps the name apart from
  * the store's own working files there (`.viberr-write-`, `.viberr-prev-`),
  * which hold somebody else's bytes.
@@ -165,7 +165,7 @@ function idNumber(id: string): number {
 function readIndexText(dir: string): string {
   const index = path.join(dir, INDEX_FILE);
   // Checked first: the task page's loader calls this on every task, and a
-  // task that keeps no sources must cost it no store read (ruling 457).
+  // task that keeps no sources must cost it no store read (ruling 11).
   if (!existsSync(index)) return "";
   try {
     return readFileSync(index, "utf8");
@@ -278,7 +278,7 @@ export function writeTaskSource(
         `Save the part your claim rests on as its own file and keep that, or cite a source already kept (\`read_task_source\` lists them).`,
     );
   }
-  // Ruling 460: a plain directory of the server's, never handed to the agent
+  // Ruling 15: a plain directory of the server's, never handed to the agent
   // group, so an agent reads what is kept here and cannot write it.
   mkdirSync(dir, { recursive: true });
   let highest = 0;
@@ -413,7 +413,7 @@ export interface TaskSourceRead {
  * One source for a reader, read as a task file is (`readAttachmentContent`):
  * text in pages, a PDF as its text, a spreadsheet as CSV, an image as the
  * picture, and an HTML page as its source text with embedded files left out
- * (ruling 676). Null for an id the task does not keep.
+ * (ruling 79). Null for an id the task does not keep.
  */
 export function readTaskSource(
   slug: string,
@@ -436,7 +436,7 @@ export interface TaskSourceFind {
 }
 
 /**
- * Ruling 706: the places in one source that hold `words`, searched in the
+ * Ruling 82: the places in one source that hold `words`, searched in the
  * text a read of it pages (`findInAttachmentContent`), from `offset` on. Null
  * for an id the task does not keep.
  */
@@ -465,7 +465,7 @@ export function sourceFromShown(from: string): string {
 }
 
 /**
- * Ruling 690: the ids of the sources a files delivery rested on. The line
+ * Ruling 82: the ids of the sources a files delivery rested on. The line
  * written when it was stamped decides. A delivery with no line (the task kept
  * nothing then, so none was written, or the write failed) rested on what was
  * kept at or before its stamp.
@@ -482,7 +482,7 @@ export function deliverySourceIds(read: TaskSourcesRead, deliveredAt: string): s
  * source with its id, the name it was saved under, its size and its SHA-256,
  * its title, where it came from, and when, by which agent and in which run it
  * was kept. `delivered` is the stamps of the task's kept deliveries (ruling
- * 597), so one stamped while the task kept nothing is named too, as resting
+ * 86), so one stamped while the task kept nothing is named too, as resting
  * on no kept source, and a reader is not left to wonder which delivery a
  * source kept later belongs under.
  */

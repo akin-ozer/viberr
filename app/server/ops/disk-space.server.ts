@@ -33,7 +33,7 @@ import { getDataRoot } from "~/server/files/file-store-root.server";
  *
  * `VIBERR_DISK_LOW_FREE_MB` / `VIBERR_DISK_CRITICAL_FREE_MB` override them,
  * read through `getEnv()`: the env schema holds the defaults and fails boot on
- * a value that is not a positive number (ruling 458(c)).
+ * a value that is not a positive number (ruling 39).
  *
  * An unmeasurable volume returns `null`, NEVER a fabricated zero: "we could not
  * measure" and "there is no space" must not render the same (R17-5 — a
@@ -45,7 +45,7 @@ const GB = 1024 * MB;
 
 export type DiskStatus = "ok" | "low" | "critical";
 
-/** Which filesystem a reading measured (ruling 603). */
+/** Which filesystem a reading measured (ruling 40). */
 export type DiskSource = "data-root" | "host";
 
 export interface DiskSpace {
@@ -173,8 +173,8 @@ function readPath(path: string, probes: DiskProbes): RawDiskReading | null {
  * measured by either source (path gone, platform without statfs) — the caller
  * reports "not measured", never "0 bytes free".
  *
- * Ruling 603: the data root's own filesystem is not always the disk that fills.
- * On Docker Desktop the store's named volume (ruling 460) lives on the VM's
+ * Ruling 40: the data root's own filesystem is not always the disk that fills.
+ * On Docker Desktop the store's named volume (ruling 38) lives on the VM's
  * ext4, a sparse disk image on the host that reports its virtual size: live on
  * 2026-09-30 it read 940.8 GB free while the Mac had 19.9 GB, and a build
  * filled the Mac until the VM remounted read-only. Compose mounts an empty host

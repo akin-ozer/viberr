@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
- * Ruling 366(f): a figure that counts up to its value. A frame loop eases from
+ * Ruling 284(e): a figure that counts up to its value. A frame loop eases from
  * the figure last drawn to the new one over two seconds (ease-out cubic: most
  * of the distance in the first half of the time, settling gently), so a mount
  * counts up from zero, and a retarget mid-count carries on from wherever the
@@ -45,7 +45,7 @@ export function NumberTicker({ end, children }: NumberTickerProps) {
     }
     let frame = 0;
     let began: number | null = null;
-    // Ruling 457 (LIVE-7): the float moves every frame, the text only when a
+    // Ruling 11 (LIVE-7): the float moves every frame, the text only when a
     // digit does. `drawn` keeps the float, so a retarget still eases on from
     // where the count really is; React hears only the frames that change the
     // text, which draws the same pixels with one commit per figure instead of

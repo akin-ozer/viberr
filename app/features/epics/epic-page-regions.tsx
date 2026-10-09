@@ -17,7 +17,7 @@ import { EPIC_STATUS_PILL, epicDonePercent } from "./epic-helpers";
 import type { EpicPageView, EpicStageView, EpicTaskView } from "./epics-query.server";
 
 /**
- * The epic page's regions (ruling 700(e), the large-component split of
+ * The epic page's regions (ruling 13(b), the large-component split of
  * `epic-page.tsx`): the head, About, Tasks, History and Details, with the
  * task row and the history feed they draw, moved here unchanged. Each region
  * takes the slot its markup held in the page and calls no hook (the feed
@@ -33,7 +33,7 @@ const HISTORY_PREVIEW = 8;
 
 /**
  * The head: the way back to Epics, the title with Edit, and the status line.
- * Ruling 615: the status is said once in it: the select, for someone who may
+ * Ruling 325: the status is said once in it: the select, for someone who may
  * change it, stands where everyone else reads the pill.
  */
 export function EpicHead({
@@ -150,7 +150,7 @@ export function EpicAbout({
 /**
  * Tasks: Archive tasks, Add tasks and New task in its head, the progress, the
  * live rows, and the archived ones folded under them. One row for both lists
- * (ruling 657): a live task offers Archive and Remove, an archived one
+ * (ruling 12): a live task offers Archive and Remove, an archived one
  * Restore.
  */
 export function EpicTasks({
@@ -175,7 +175,7 @@ export function EpicTasks({
   canEditTasks: boolean;
   canCreateTask: boolean;
   canArchive: boolean;
-  /** The page's row requests (ruling 651). */
+  /** The page's row requests (ruling 325). */
   rows: EpicTaskRows;
   /** Tasks Archive tasks would file away; 0 offers no button. */
   archivable: number;
@@ -334,7 +334,7 @@ export function EpicDetails({
           </div>
           <div className="kv-row">
             <span className="k">Created</span>
-            {/* Ruling 520: one run of text, so a value that wraps
+            {/* Ruling 309(a): one run of text, so a value that wraps
                 breaks between words rather than before its " · ". */}
             <span className="v">
               <span>
@@ -348,7 +348,7 @@ export function EpicDetails({
               </span>
             </span>
           </div>
-          {/* Ruling 476(h): the conversation that planned the epic holds
+          {/* Ruling 273: the conversation that planned the epic holds
               the reasoning behind its tasks. Shown only to a viewer who can
               open it. */}
           {plannedIn && (
@@ -370,7 +370,7 @@ export function EpicDetails({
   );
 }
 
-/** Ruling 560: the history reads as a feed, the way the shadcn timeline
+/** Ruling 325: the history reads as a feed, the way the shadcn timeline
  *  blocks draw one. Days head their entries, newest first; each entry is a dot
  *  on one rail with its clock at the right, and the tasks it names are the key
  *  chips every other feed links a task with. */
@@ -416,7 +416,7 @@ function EpicHistory({
 /** One task of the epic: its key and title (its page), its stage, the board
  *  card's status word, what it waits on, its owner, then what may be done to
  *  it: Archive and Remove on a live row, Restore on an archived one (ruling
- *  651). Each action is the page's request; `pending` names the one in flight
+ *  274). Each action is the page's request; `pending` names the one in flight
  *  on this row, and `locked` holds every row while one is. */
 function EpicTaskRow({
   task,

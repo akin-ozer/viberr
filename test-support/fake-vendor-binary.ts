@@ -6,7 +6,7 @@ import type { BackendBinaries } from "~/server/runtimes/backend-credentials.serv
 
 /**
  * Executable stand-ins for the vendors' own `claude` and `codex` binaries
- * (ruling 127, spec §3.4).
+ * (ruling 137, spec §3.4).
  *
  * The sign-in driver's whole job is to drive a REAL child process: spawn it with
  * one home variable and no credentials, read what it prints, write a code to its
@@ -40,7 +40,7 @@ const FAKE_VENDOR_MODE_ENV = "VIBERR_FAKE_VENDOR_MODE";
 const FAKE_VENDOR_STATUS_ENV = "VIBERR_FAKE_VENDOR_STATUS";
 const FAKE_VENDOR_DELAY_ENV = "VIBERR_FAKE_VENDOR_DELAY_MS";
 const FAKE_VENDOR_LOGOUT_EXIT_ENV = "VIBERR_FAKE_VENDOR_LOGOUT_EXIT";
-/** Ruling 507: a directory OUTSIDE every home where a logout also records
+/** Ruling 138: a directory OUTSIDE every home where a logout also records
  *  itself. Disconnecting an account removes that account's whole home — the
  *  `fake-logout.json` inside it included — so a test that must prove the
  *  logout ran in that home reads this durable copy instead. */
@@ -256,7 +256,7 @@ export function setFakeVendorLogoutExit(code: number): void {
   process.env[FAKE_VENDOR_LOGOUT_EXIT_ENV] = String(code);
 }
 
-/** Ruling 507: also record every logout in `dir`, which outlives the home the
+/** Ruling 138: also record every logout in `dir`, which outlives the home the
  *  logout ran in (see `FAKE_VENDOR_EVIDENCE_ENV`). */
 export function setFakeVendorEvidenceDir(dir: string): void {
   process.env[FAKE_VENDOR_EVIDENCE_ENV] = dir;
@@ -325,7 +325,7 @@ export function fakeVendorLogout(
 const terminationSchema = z.object({ home: z.string() });
 
 /** The homes of every fake child that received SIGTERM and exited, as recorded
- *  in an evidence directory (`setFakeVendorEvidenceDir`). Ruling 507: a
+ *  in an evidence directory (`setFakeVendorEvidenceDir`). Ruling 138: a
  *  cancelled or replaced sign-in into a NEW account takes its home with it
  *  once the child has exited, so the in-home marker cannot be read after. */
 export function fakeVendorTerminations(dir: string): string[] {

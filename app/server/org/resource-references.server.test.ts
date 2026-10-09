@@ -276,10 +276,10 @@ describe("countTemplateGrants — the read-only twin of rewriteTemplates", () =>
 });
 
 /**
- * Ruling 681: the boards whose runs are given a resource, which the audit row
+ * Ruling 34: the boards whose runs are given a resource, which the audit row
  * of a write to it keeps, and which puts the write on those boards' Activity.
  */
-describe("auditedResource — the boards given a resource (ruling 681)", () => {
+describe("auditedResource — the boards given a resource (ruling 34)", () => {
   // CANARY: drop the `rulingsKb` leg and the board that only names the
   // knowledge base as its rulings is gone; skip the operator's deployment and
   // no board holds the operator's skill.

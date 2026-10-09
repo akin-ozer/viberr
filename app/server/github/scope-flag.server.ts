@@ -22,7 +22,7 @@ import {
 } from "~/server/tasks/task-mutation.server";
 
 /**
- * Policy-engine side effects around scope violations (ruling 5 + github
+ * Policy-engine side effects around scope violations (ruling 221 + github
  * view spec §5.2/§5.4). The violations API owns the rows; this module owns
  * the FILE side effects that must accompany open/resolve:
  *
@@ -165,7 +165,7 @@ export async function flagScopeViolation(
   if (!created) return { violation, created };
 
   if (input.taskKey) {
-    // When the event was written, which is where the row opens (ruling 497);
+    // When the event was written, which is where the row opens (ruling 75);
     // null when the task file is gone and only the notification goes out.
     const at = await appendPolicyEvent(
       db,

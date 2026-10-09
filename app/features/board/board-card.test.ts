@@ -65,7 +65,7 @@ const PACKET = {
   options: [{ kind: "accept_completion" as const, t: "Accept VIB-1", d: "", rec: true }],
 };
 
-describe("ruling 471: the board card carries the option its acceptance answers", () => {
+describe("ruling 316: the board card carries the option its acceptance answers", () => {
   it("ships `acceptAnswersWith` when the loader set it, and nothing extra when it did not", () => {
     // CANARY: slice the packet back to `{ type, title }` in toBoardCard and the
     // board's dialog says "Withdraws" about a decision its move answers.

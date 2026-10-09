@@ -10,7 +10,7 @@ import {
 import { alive, gone } from "../../../test-support/process-liveness";
 
 /**
- * Ruling 174: the settle sweep finds a run's processes by the marker in their
+ * Ruling 142: the settle sweep finds a run's processes by the marker in their
  * environment and signals them, because the vendor CLIs put what they start in
  * sessions of their own. These tests use REAL processes — the thing under test
  * is the kernel's answer (`/proc` on Linux, `ps -E` on macOS) — each carrying a
@@ -228,13 +228,13 @@ describe("reapRunProcesses (scripted scan)", () => {
 });
 
 /**
- * Ruling 460: an agent runs as its person's own uid, so the server can neither
+ * Ruling 139: an agent runs as its person's own uid, so the server can neither
  * read its environment nor signal it. The sweep reaches those processes through
  * the launcher (`--reap`, as root, by marker) and, when the group leader is the
  * launcher, ends its group with the launcher's SIGUSR2 instead of a SIGKILL that
  * would only kill the launcher.
  */
-describe("reapRunProcesses through the agent launcher (ruling 460)", () => {
+describe("reapRunProcesses through the agent launcher (ruling 139)", () => {
   it("asks the launcher to TERM, then after the grace to KILL, every agent process of the runs", async () => {
     const sent: [number, NodeJS.Signals | 0][] = [];
     const reaps: [string, string[]][] = [];

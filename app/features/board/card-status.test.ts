@@ -3,13 +3,13 @@ import type { BoardCard } from "./board-card";
 import { cardProblems, cardStatus } from "./card-status";
 
 /**
- * Ruling 365: the board card's one status seat and its problem chips, decided
+ * Ruling 306: the board card's one status seat and its problem chips, decided
  * here and drawn by the card and the list row alike. These pin the seat rules
- * that used to be `readinessYields` (rulings 168(a), 225, 349, R21-8) and the
+ * that used to be `readinessYields` (rulings 306, 45, 44, R21-8) and the
  * problem order the fold counts against.
  */
 
-/** A board card (ruling 457, BOARD-3: the board ships these, not the whole
+/** A board card (ruling 11, BOARD-3: the board ships these, not the whole
  *  task summary). */
 function task(patch: Partial<BoardCard> = {}): BoardCard {
   return {
@@ -43,7 +43,7 @@ function task(patch: Partial<BoardCard> = {}): BoardCard {
 }
 
 describe("cardStatus: the wait takes the seat, else the readiness word", () => {
-  it("an agent at work is the pulse, queued is the ring (ruling 349)", () => {
+  it("an agent at work is the pulse, queued is the ring (ruling 44)", () => {
     expect(cardStatus(task({ waiting: "agent", liveRun: "running", displayReadiness: "agent_working" })))
       .toEqual({ kind: "agent", label: "agent working", icon: null });
     expect(cardStatus(task({ waiting: "agent", liveRun: "queued", displayReadiness: "agent_queued" })))
@@ -57,7 +57,7 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
       .toEqual({ kind: "human", label: "waiting on a human", icon: "hand" });
   });
 
-  it("a clock rest carries its instant, or the honest absence of one (ruling 225)", () => {
+  it("a clock rest carries its instant, or the honest absence of one (ruling 45)", () => {
     expect(cardStatus(task({ waiting: "schedule", resumesAt: "2026-09-21T02:30:00.000Z" })))
       .toEqual({ kind: "scheduled", label: "resumes", icon: "clock", resumesAt: "2026-09-21T02:30:00.000Z" });
     expect(cardStatus(task({ waiting: "schedule", resumesAt: null }))!.resumesAt).toBeNull();
@@ -76,7 +76,7 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
     expect(s.label).toBe(label);
   });
 
-  it("a demand yields to the wait that says who is asked (ruling 168(a), R21-8)", () => {
+  it("a demand yields to the wait that says who is asked (ruling 306, R21-8)", () => {
     for (const r of ["ready", "input_required", "goal_edit_pending", "blocked"] as const) {
       expect(cardStatus(task({ displayReadiness: r, waiting: "human", waitingOnMe: true }))!.kind).toBe("you");
       expect(cardStatus(task({ displayReadiness: r, waiting: "agent", liveRun: "running" }))!.kind).toBe("agent");
@@ -87,7 +87,7 @@ describe("cardStatus: the wait takes the seat, else the readiness word", () => {
   it("an inconsistency risk is a problem, never the seat", () => {
     expect(cardStatus(task({ displayReadiness: "inconsistency_risk_detected" }))).toBeNull();
     expect(cardProblems(task({ displayReadiness: "inconsistency_risk_detected" })).map((p) => p.key)).toEqual(["risk"]);
-    // …and unlike a demand it never yields to a human wait (ruling 168(a)).
+    // …and unlike a demand it never yields to a human wait (ruling 306).
     expect(
       cardProblems(
         task({ displayReadiness: "inconsistency_risk_detected", waiting: "human", waitingOnMe: true }),
@@ -128,13 +128,13 @@ describe("cardProblems: everything wrong, most severe first", () => {
     ]);
   });
 
-  it("a hold beside a working agent is an amber chip; beside a human wait it is absorbed (ruling 168(a))", () => {
+  it("a hold beside a working agent is an amber chip; beside a human wait it is absorbed (ruling 306)", () => {
     const working = task({ displayReadiness: "blocked", waiting: "agent", liveRun: "running" });
     expect(cardProblems(working)).toEqual([{ key: "blocked", label: "blocked", icon: "ban", tone: "amber" }]);
     expect(cardProblems(task({ displayReadiness: "blocked", waiting: "human", waitingOnMe: true }))).toEqual([]);
   });
 
-  it("a decision the viewer owes beside a working agent is the first chip, in the seat's words (ruling 529)", () => {
+  it("a decision the viewer owes beside a working agent is the first chip, in the seat's words (ruling 46)", () => {
     // CANARY: drop the `waitingOnMe` arm from `cardProblems` and CALC-1's card
     // says only "agent working" while its owner's decision waits.
     const owed = task({ waiting: "agent", liveRun: "running", waitingOnMe: true, validation: "failing" });
@@ -155,7 +155,7 @@ describe("cardProblems: everything wrong, most severe first", () => {
     expect(cardProblems(accepted)).toEqual([{ key: "merge", label: "merge pending", icon: "pr", tone: "amber" }]);
   });
 
-  it("validation is a problem or nothing: the fill tier only (ruling 168(b)), withdrawn on terminal work (C2)", () => {
+  it("validation is a problem or nothing: the fill tier only (ruling 306), withdrawn on terminal work (C2)", () => {
     expect(cardProblems(task({ validation: "bypassed" })).map((p) => p.label)).toEqual(["accepted · gate bypassed"]);
     for (const v of ["changed", "healthy", "none"] as const) {
       expect(cardProblems(task({ validation: v }))).toEqual([]);

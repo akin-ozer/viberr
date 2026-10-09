@@ -2,9 +2,9 @@
 // (Fast Refresh boundary, as app/ui/initials.ts is for avatar.tsx).
 
 /**
- * Ruling 527: the composer's box once a retracted message comes back. What
+ * Ruling 251: the composer's box once a retracted message comes back. What
  * the person is typing stays where it is and the message goes under it, so
- * neither is lost (ruling 259's rule for the box).
+ * neither is lost (ruling 319's rule for the box).
  */
 export function withRetracted(box: string, retracted: string): string {
   return box.trim() ? `${box.trimEnd()}\n\n${retracted}` : retracted;

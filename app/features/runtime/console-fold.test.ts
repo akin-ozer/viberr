@@ -13,7 +13,7 @@ import {
 } from "./runtime-types";
 
 /**
- * Ruling 457 (LIVE-4): the incremental fold draws exactly what the batch chain
+ * Ruling 11 (LIVE-4): the incremental fold draws exactly what the batch chain
  * the console used to run on every render draws, however the lines arrive. The
  * chain lives on below as the oracle; the console itself only ever runs the
  * incremental fold.
@@ -151,7 +151,7 @@ function groupThoughts(rows: readonly DrawnRow[], raw: boolean): DrawnRow[] {
   );
 }
 
-/** Ruling 366: one call's consecutive heartbeats into one wait row. */
+/** Ruling 168: one call's consecutive heartbeats into one wait row. */
 function foldWaits(rows: readonly DrawnRow[], raw: boolean): DrawnRow[] {
   if (raw) return [...rows];
   const out: DrawnRow[] = [];
@@ -175,7 +175,7 @@ function batch(lines: readonly FoldLine[], raw: boolean): DrawnRow[] {
   return foldWaits(groupThoughts(collapseTelemetry(hoistRunInputs(lines), raw), raw), raw);
 }
 
-describe("createConsoleFolder (ruling 457, LIVE-4)", () => {
+describe("createConsoleFolder (ruling 11, LIVE-4)", () => {
   it("draws what the batch chain draws, line by line and in bursts, on 300 random consoles", () => {
     for (let seed = 1; seed <= 300; seed++) {
       const next = random(seed);
@@ -278,7 +278,7 @@ describe("the console's four folds, as the folder draws them", () => {
       false,
       ["t1", "npm", "t2"],
     ],
-    // Ruling 366: keyed on the call, not on adjacency; a single heartbeat still
+    // Ruling 168: keyed on the call, not on adjacency; a single heartbeat still
     // folds, and one that never got its structured field is the meta line it is.
     [
       "one call's heartbeats fold into one wait row",

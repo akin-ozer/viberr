@@ -17,7 +17,7 @@ import { resolveOperatorAuthority } from "./operator-authority.server";
 import { STRANDED_NOTE_TITLE, strandedNoteText, sweepStrandedTasks } from "./stranded-sweep.server";
 
 /**
- * Ruling 330 — the state, not the causes.
+ * Ruling 122 — the state, not the causes.
  *
  * Four separate causes of a task stopping dead were fixed in one day and the
  * owner found a fifth. This is the sweep that makes the CLASS visible: a task
@@ -217,11 +217,11 @@ describe("sweepStrandedTasks", () => {
   });
 });
 
-describe("ruling 487: a run the operator scheduled is a reason for quiet", () => {
+describe("ruling 122: a run the operator scheduled is a reason for quiet", () => {
   /**
    * F40-65: live on WEB-9 the operator opened a packet only so the task "is not
    * left idle with nothing recorded". A pending schedule already counted as a
-   * reason for quiet here (ruling 330), and the operator can now make one
+   * reason for quiet here (ruling 122), and the operator can now make one
    * itself, so the schedule IS the record: the sweep must not nudge a task that
    * holds on nothing else.
    *

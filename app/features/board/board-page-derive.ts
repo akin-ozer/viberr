@@ -14,7 +14,7 @@ import type { BoardColumnData, BoardTask } from "./board-page";
 
 /**
  * What the board page reads off its props and its URL before it draws (ruling
- * 700(e), the task-page recipe rolled out to `board-page.tsx`): the view the
+ * 13(b), the task-page recipe rolled out to `board-page.tsx`): the view the
  * URL asks for, which tasks that view shows, the label vocabulary, the empty
  * copy, whether the filter bar stands, and where a new task starts. Pure
  * functions of the loader data and the search params, no React.
@@ -57,7 +57,7 @@ export interface BoardView {
   query: string;
   /** F26-12 / R26-2: the active label filter (`?label=`), or null when off. */
   labelFilter: string | null;
-  /** Ruling 503: the active epic filter (`?epic=`), or null when off. */
+  /** Ruling 325: the active epic filter (`?epic=`), or null when off. */
   epicFilter: string | null;
 }
 
@@ -123,11 +123,11 @@ export function labelVocabulary(allTasks: readonly BoardTask[]): string[] {
 }
 
 /** P13-D-34: what is hiding cards, for the empty copy to name — the readiness
- *  chip and (ruling 503) the epic filter, or null when neither is on. */
+ *  chip and (ruling 325) the epic filter, or null when neither is on. */
 function filterLabelOf(view: BoardView, epics: readonly EpicOption[]): string | null {
   const readinessFilterLabel =
     view.filter === "all" ? null : (FILTERS.find((f) => f.id === view.filter)?.label ?? null);
-  // Ruling 503: an epic filter hides cards too, so the empty copy names it.
+  // Ruling 325: an epic filter hides cards too, so the empty copy names it.
   const epicFilterLabel = !view.epicFilter
     ? null
     : view.epicFilter === EPIC_FILTER_NONE
@@ -177,7 +177,7 @@ export function isVirginBoard(view: BoardView, liveCount: number): boolean {
   );
 }
 
-/** Ruling 503: the epic a new task starts in — the one the board is filtered
+/** Ruling 325: the epic a new task starts in — the one the board is filtered
  *  to, while that epic is open. */
 export function newTaskEpic(
   epicFilter: string | null,

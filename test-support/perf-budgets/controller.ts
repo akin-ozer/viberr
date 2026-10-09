@@ -1,22 +1,22 @@
 import type { PerfBudgetTable } from "../perf-verdict";
 
-/** Ruling 457 ratchet ceilings: controller dock and page. */
+/** Ruling 11 ratchet ceilings: controller dock and page. */
 export const CONTROLLER_BUDGETS: PerfBudgetTable = {
   // FL-1 / CTL-1: root mounts the dock on every page, and the dock imported the
   // controller page (runs panels, run console, NumberFlow, thinking-orbs) and
   // the markdown pipeline for a panel that starts closed (48). The note moved
   // to not-connected.tsx and the open panel's body loads on demand.
-  // Raised 18 -> 19 by ruling 457 (RF-1/RF-5): the dock's live hook records
+  // Raised 18 -> 19 by ruling 11 (RF-1/RF-5): the dock's live hook records
   // into the tab's revalidation ledger (`live-updates/revalidation-policy.ts`),
   // a module root imports itself, so no byte is added to the first download.
-  // Raised 19 -> 22 on merging main: ruling 454's pull-to-dismiss sheet
+  // Raised 19 -> 22 on merging main: ruling 285's pull-to-dismiss sheet
   // lives in the dock's frame, which root ships, and brings
   // ui/use-sheet-drag.ts, ui/spring.ts and ui/live-pose.ts with it. The
   // panel's body, the markdown and the console stay lazy.
-  // Lowered 22 -> 21 by ruling 459's deferred dock half (2026-09-24): the
+  // Lowered 22 -> 21 by ruling 285's deferred dock half (2026-09-24): the
   // dock's entrance is a transition a close retargets, so it no longer pins
   // its live pose and ui/live-pose.ts left its closure (dialogs keep it).
-  // Held at 21 through ruling 503 (2026-09-26): the task schema is in this
+  // Held at 21 through ruling 272 (2026-09-26): the task schema is in this
   // closure (sse-event.schema takes its READINESS_VALUES), so whatever it
   // imports is too. The epic id it validates brought the epic file schema and
   // the stage presets (23); it now takes that and the `blockedBy` spelling

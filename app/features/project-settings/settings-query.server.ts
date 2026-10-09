@@ -20,7 +20,7 @@ import { listMembershipViews, type MembershipView } from "./membership.server";
  * Settings view read model (project-settings spec §3): project identity +
  * stages from the projection, per-stage task counts from task_projections
  * (never the whole task list — spec §3.2), membership with invite status
- * (canonical file), and credential health (the ruling-5 single fact, phase 7).
+ * (canonical file), and credential health (the ruling-221 single fact, phase 7).
  *
  * P13-D-5: the task-level repo-override flag (`taskRepoOverride`) used to be
  * read here for a toggle that gated nothing. One project, one repository.
@@ -34,14 +34,14 @@ export interface SettingsViewData {
     description: string;
     repo: string | null;
     archived: boolean;
-    /** Real store-relative task-file pattern (ruling 3). */
+    /** Real store-relative task-file pattern (ruling 15(a)). */
     taskFilePattern: string;
   };
   stages: { id: string; name: string; color: string }[];
   stageCounts: Record<string, number>;
   members: MembershipView[];
   /**
-   * The ruling-5 single credential fact — assembled here for every member and
+   * The ruling-221 single credential fact — assembled here for every member and
    * REDACTED per reader in the route loader (F21-5 / R19-11: the token's label,
    * masked tail and scope verdicts reach only `grant-github-scope` holders, via
    * `features/github/credential-visibility.server`, exactly as on /github).
@@ -55,25 +55,25 @@ export interface SettingsViewData {
   repoFootprintTasks: number;
   /** R15-6: delete a task's branch on GitHub once its PR merges (default on). */
   branchCleanupOnMerge: boolean;
-  /** Ruling 178: the required-reviewer rules as project.md holds them. */
+  /** Ruling 89: the required-reviewer rules as project.md holds them. */
   requiredReviewers: RequiredReviewerView[];
-  /** Ruling 178: the deployed specialists a rule may name — those holding
+  /** Ruling 89: the deployed specialists a rule may name — those holding
    *  report-validation-verdict, the same predicate the writer refuses on. */
   reviewerCandidates: { id: string; name: string }[];
-  /** Ruling 396: the project's file leases, as project.md holds them. */
+  /** Ruling 61: the project's file leases, as project.md holds them. */
   fileLeases: FileLeaseView[];
   /** The tasks a lease may name — every live task on the board. */
   leaseCandidates: { key: string; title: string }[];
-  /** Ruling 482: the commands Viberr runs on every delivered revision.
+  /** Ruling 104: the commands Viberr runs on every delivered revision.
    *  Absent when the project declares none (the settings payload is budgeted,
-   *  ruling 457). */
+   *  ruling 11). */
   gates?: ProjectGate[];
 }
 
 /**
- * Ruling 396 (F39-23): one file lease, readable without a lookup.
+ * Ruling 61 (F39-23): one file lease, readable without a lookup.
  *
- * Ruling 245 said a lease "is read where a person or an agent asks 'may I touch
+ * Ruling 60 said a lease "is read where a person or an agent asks 'may I touch
  * this'", and `staleFileLeases`' docstring says the spent ones are named "so a
  * surface can offer to tidy them". Neither surface existed: leases were written
  * by one controller tool, read by another, injected into every specialist's
@@ -87,7 +87,7 @@ export interface FileLeaseView {
    *  no such task, which the writer refuses but an edited file can still hold. */
   taskTitle: string | null;
   reason: string;
-  /** Ruling 245(b): the holder has merged or been archived, so this lease binds
+  /** Ruling 60: the holder has merged or been archived, so this lease binds
    *  nobody. The row stays because the declaration is still in project.md. */
   spent: boolean;
 }
@@ -113,9 +113,9 @@ export function getSettingsViewData(
     )
     .all(projectSlug) as { stage: string; n: number }[];
 
-  // Ruling 396: a lease names a task, so the panel needs the board's own task
+  // Ruling 61: a lease names a task, so the panel needs the board's own task
   // list to title the holder and to offer the pickable ones. Archived tasks are
-  // out: a lease they hold is spent by definition (ruling 245(b)).
+  // out: a lease they hold is spent by definition (ruling 60).
   const tasks = listProjectTasks(db, projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {})
     .map((t) => ({ key: t.key, title: t.title }));
 
@@ -151,7 +151,7 @@ export function getSettingsViewData(
 }
 
 /**
- * Ruling 396: every declared lease, with its holder named and the spent ones
+ * Ruling 61: every declared lease, with its holder named and the spent ones
  * marked.
  *
  * Read from the project file rather than `activeFileLeases`, because the page

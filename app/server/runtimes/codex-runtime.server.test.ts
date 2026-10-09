@@ -295,7 +295,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
         required: true,
         startup_timeout_sec: 60,
       },
-      // Ruling 554: Codex waits past the supervisor's deadline, so the model
+      // Ruling 146: Codex waits past the supervisor's deadline, so the model
       // reads the supervisor's "restarted" answer rather than a bare timeout.
       // CANARY: drop the browser's `tool_timeout_sec` and Codex gives up first.
       viberr_browser: {
@@ -310,7 +310,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
   });
 
   /**
-   * Ruling 658. The CLI starts MCP servers in the background and gives a turn
+   * Ruling 146. The CLI starts MCP servers in the background and gives a turn
    * the tools of the servers ready when it starts; a run is one turn, so a
    * server a second late was missing for the whole run (live: AWSC-106's
    * rework had no board readers and asked a person for the verdicts). A
@@ -320,7 +320,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
    * CANARY: drop `startFirst` from either transport and that server reaches
    * the CLI optional again.
    */
-  it("ruling 658: every mounted server must start before the first turn, except the ones the run names optional", async () => {
+  it("ruling 146: every mounted server must start before the first turn, except the ones the run names optional", async () => {
     const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
     createCodexAdapter({ codexFactory: run.factory }).start(
       {
@@ -716,7 +716,7 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.providerText).toContain("401 unauthorized for token [redacted]");
   });
 
-  it("ruling 434: a torn rollout classifies as 'session_missing' with its own sentence, not 'unknown'", async () => {
+  it("ruling 162: a torn rollout classifies as 'session_missing' with its own sentence, not 'unknown'", async () => {
     // Live on AX-5: "Codex execution failed. Review its authentication and
     // runtime configuration", for a session whose rollout head was torn.
     // CANARY: drop the SESSION_DAMAGED_RE branch.
@@ -747,7 +747,7 @@ describe("codex failure classification survives redaction into runFailureReason 
   });
 
   /**
-   * Ruling 221 (F37-41). Live on pass 37, after the host corrupted a SQLite
+   * Ruling 162 (F37-41). Live on pass 37, after the host corrupted a SQLite
    * file under load, the Codex CLI said its own thread-history database was
    * `file is not a database`. That matched nothing, fell through to the auth
    * branch, and viberr told the owner to "review its authentication and runtime
@@ -756,7 +756,7 @@ describe("codex failure classification survives redaction into runFailureReason 
    * while fresh runs kept working, which is the shape `session_missing` already
    * names and whose remedy is already the right one.
    */
-  it("a session store that cannot be OPENED classifies 'session_missing', not 'auth' (ruling 221)", async () => {
+  it("a session store that cannot be OPENED classifies 'session_missing', not 'auth' (ruling 162)", async () => {
     const reason = await classifyThrownFailure(
       "internal error: failed to open thread history database: failed to open thread history DB at " +
         "/data/runtimes/users/u_x/codex-home/thread_history_1.sqlite: error returned from database: " +
@@ -778,7 +778,7 @@ describe("codex failure classification survives redaction into runFailureReason 
     expect(reason?.text).not.toContain("/data/runtimes/users");
   });
 
-  it("an agent's OWN corrupt database is not a session failure (ruling 221)", async () => {
+  it("an agent's OWN corrupt database is not a session failure (ruling 162)", async () => {
     // The clone this pass built is SQLite-backed. A run whose agent hit a bad
     // file in its own work must not be reported as a session problem — which
     // is why the pattern is anchored on the store's nouns, not on "not a
@@ -806,7 +806,7 @@ describe("codex failure classification survives redaction into runFailureReason 
   });
 
   /**
-   * Ruling 212, live on SHOP-10 and SHOP-16. The local-network patterns were
+   * Ruling 155, live on SHOP-10 and SHOP-16. The local-network patterns were
    * written against Node's error codes and Node's prose; the Codex CLI is Rust
    * and says it differently, so a NAME RESOLUTION failure matched nothing and
    * fell through to `unknown` — whose sentence is "Review its authentication
@@ -814,13 +814,13 @@ describe("codex failure classification survives redaction into runFailureReason 
    * never at fault, for a DNS problem. Its TLS sibling matched only by
    * accident, through `\btls\b` inside a `close_notify` message.
    */
-  it("ruling 212: the Codex CLI's own transport prose is a LOCAL network failure, not an auth problem", async () => {
+  it("ruling 155: the Codex CLI's own transport prose is a LOCAL network failure, not an auth problem", async () => {
     for (const text of [
       // Verbatim from the live packet on SHOP-10.
       "Reconnecting... 2/5 (stream disconnected before completion: failed to lookup address information: Name does not resolve)",
       "stream error: temporary failure in name resolution",
       "IO error: peer closed connection without sending TLS close_notify",
-      // Ruling 389 (F39-16), verbatim from the live packet on ax-clone AX-11.
+      // Ruling 155(c) (F39-16), verbatim from the live packet on ax-clone AX-11.
       // reqwest's own transport failure, which the Rust CLI surfaces unchanged.
       // The list had "connection error" and not "connection failed", so this
       // classified `unknown`: the packet told the owner to review their
@@ -828,7 +828,7 @@ describe("codex failure classification survives redaction into runFailureReason 
       // and it came out as a stalled-work packet recommending a re-prompt
       // instead of the backend-failure packet that offers waiting.
       "Reconnecting... waiting for network (Connection failed: error sending request)",
-      // Ruling 394's sibling, verbatim from the live packet on ax-clone AX-3
+      // Ruling 155(d)'s sibling, verbatim from the live packet on ax-clone AX-3
       // the same morning: the SAME "Reconnecting..." banner with the other
       // wording the CLI uses for it. "connection timed out" was on the list and
       // "request timed out" was not, so this one still classified `unknown` and
@@ -854,7 +854,7 @@ describe("codex failure classification survives redaction into runFailureReason 
     for (const text of [
       "server_error: The server is currently overloaded, please try again later",
       "503 Service Unavailable from api.openai.com",
-      // Ruling 659, verbatim from AWSC-109's Judge (2026-10-05): the CLI's own
+      // Ruling 155(c), verbatim from AWSC-109's Judge (2026-10-05): the CLI's own
       // context compaction failed on it and ended a 228-turn run, which read
       // `unknown` and sent the owner to "review its authentication".
       // CANARY: drop `at capacity` from the overload pattern and this is `unknown`.
@@ -870,7 +870,7 @@ describe("codex failure classification survives redaction into runFailureReason 
   });
 
   /**
-   * Ruling 658: a required MCP server that did not start ends the session
+   * Ruling 146: a required MCP server that did not start ends the session
    * before the model is called, and the CLI's stderr carries the server's own
    * transport error. The network branch read that as this deployment failing
    * to reach Codex. The CLI's wording below is verbatim from a 0.156.0 run
@@ -878,7 +878,7 @@ describe("codex failure classification survives redaction into runFailureReason 
    * CANARY: delete the required-server branch and this reads "Codex could not
    * be reached from this deployment".
    */
-  it("ruling 658: a required MCP server that did not start is named, not read as this deployment's network", async () => {
+  it("ruling 146: a required MCP server that did not start is named, not read as this deployment's network", async () => {
     const failed =
       "Failed to initialize session: required MCP servers failed to initialize: viberr_board: handshaking with MCP " +
       "server failed: Send message error Transport [..] error: Client error: HTTP request failed: http/request " +
@@ -990,7 +990,7 @@ describe("codex run isolation (P13-LV-13 / LV-14 / RT-04)", () => {
   });
 });
 
-describe("ruling 185: Viberr never OS-confines a Codex run", () => {
+describe("ruling 144: Viberr never OS-confines a Codex run", () => {
   const KINDS = ["primary", "reviewer", "operator", "controller"] as const;
 
   it("every kind, every grant shape, reaches the SDK as `danger-full-access` with no extra dirs or network switch, and web search follows the grant", async () => {
@@ -1151,11 +1151,11 @@ describe("D5 — the verified SDK version is a fact, not a claim", () => {
 
 /**
  * UC-16 — the Codex half of the DISCLOSED MCP/skills asymmetries, and (ruling
- * 461) the parity that replaced one of them.
+ * 191) the parity that replaced one of them.
  *
  * The capability-matrix modal used to say "Org MCP credentials are sent on
  * Claude runs only — Codex mounts a declared server unauthenticated". Since
- * ruling 461 a credentialed server is a gateway mount on both backends, so
+ * ruling 191 a credentialed server is a gateway mount on both backends, so
  * the modal says the credential stays in Viberr, and this pins the Codex half
  * of that: the run token reaches the CLI as the server's `http_headers`.
  * Granted skills still arrive as prompt text here because there is no native
@@ -1195,7 +1195,7 @@ describe("UC-16 disclosed asymmetries — the Codex side", () => {
     return run.factoryOptions()?.config;
   }
 
-  it("ruling 461: a gateway mount reaches the CLI with the run's token as its http_headers", async () => {
+  it("ruling 191: a gateway mount reaches the CLI with the run's token as its http_headers", async () => {
     const config = await configWith({ mcpServers: MOUNTED_SERVERS });
     // SAFETY: `mcp_servers` is a leaf the ADAPTER writes — one table per
     // declared server (see the mcpServers translation in codex-runtime.server) —
@@ -1312,7 +1312,7 @@ describe("codex adapter run phases (R21-4a / FR28)", () => {
     expect(steps[2]).toBe(steps[1]);
   });
 
-  it("names the command as answered once it completes, through the reasoning that follows (ruling 348)", async () => {
+  it("names the command as answered once it completes, through the reasoning that follows (ruling 166)", async () => {
     const phases = capturePhases([
       { type: "thread.started", thread_id: "0199abc" },
       { type: "item.started", item: { type: "command_execution", command: "npm test", aggregated_output: "", status: "in_progress" } },
@@ -1329,7 +1329,7 @@ describe("codex adapter run phases (R21-4a / FR28)", () => {
     expect(steps[3]).toBe("composing · exec · npm test answered");
   });
 
-  it("names a succeeding MCP call as answered although its completion projects no row (ruling 348)", async () => {
+  it("names a succeeding MCP call as answered although its completion projects no row (ruling 166)", async () => {
     const phases = capturePhases([
       { type: "thread.started", thread_id: "0199abc" },
       { type: "item.started", item: { id: "mcp-1", type: "mcp_tool_call", server: "viberr", tool: "get_task", arguments: { taskKey: "BNB-1" }, status: "in_progress" } },
@@ -1358,9 +1358,9 @@ describe("codex adapter run phases (R21-4a / FR28)", () => {
   });
 });
 
-/** Ruling 130(a): the Codex adapter attaches the same typed record to its
+/** Ruling 155(a): the Codex adapter attaches the same typed record to its
  *  terminal line (every fact but the kind unknown). Canary: omit `failure`. */
-describe("ruling 130(a): failure record parity", () => {
+describe("ruling 155(a): failure record parity", () => {
   it("the terminal err line carries `failure` with the classified kind", async () => {
     const { factory } = fakeCodex([
       { type: "turn.started" },
@@ -1378,11 +1378,11 @@ describe("ruling 130(a): failure record parity", () => {
 });
 
 /**
- * Ruling 176: Codex has no denylist channel, so an org server's marked write
+ * Ruling 188: Codex has no denylist channel, so an org server's marked write
  * tools travel as that server's own `disabled_tools` (the pinned CLI reads it
  * per `mcp_servers.<name>`, beside `enabled_tools`), by the server's raw names.
  */
-describe("codex MCP write-tool denials (ruling 176)", () => {
+describe("codex MCP write-tool denials (ruling 188)", () => {
   const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
   const serversSchema = z.record(
     z.string(),
@@ -1424,12 +1424,12 @@ describe("codex MCP write-tool denials (ruling 176)", () => {
 });
 
 /**
- * Ruling 174: the Codex SDK spawns the CLI itself and signals only it, SIGTERM
+ * Ruling 142: the Codex SDK spawns the CLI itself and signals only it, SIGTERM
  * and never SIGKILL, so a settled run is swept by the marker every process it
  * started carries. The CLI inherits its full env; the model's shell and each
  * stdio server get only what is declared, so the marker is declared for both.
  */
-describe("per-run CODEX_HOME (ruling 181)", () => {
+describe("per-run CODEX_HOME (ruling 145)", () => {
   const homes = createTestDbContext();
   afterEach(homes.cleanup);
 
@@ -1507,7 +1507,7 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"after"}');
   });
 
-  it("takes the sign-in from the billed ACCOUNT's home and hands the refresh back there, never to another account (ruling 507)", async () => {
+  it("takes the sign-in from the billed ACCOUNT's home and hands the refresh back there, never to another account (ruling 138)", async () => {
     // Two accounts of one person: an older one whose sign-in sits in the
     // shared home, and the one this run bills, in a home of its own. Canary:
     // seed the fork from `spec.env.CODEX_HOME` again and the run reads the
@@ -1546,7 +1546,7 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"other-account"}');
   });
 
-  it("a pasted-key account's run inherits no sign-in at all, even with another account's in the shared home (ruling 507)", async () => {
+  it("a pasted-key account's run inherits no sign-in at all, even with another account's in the shared home (ruling 138)", async () => {
     const dataRoot = homes.makeTempDir();
     const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
     writeFileSync(path.join(shared, "auth.json"), '{"tokens":"other-account"}');
@@ -1571,13 +1571,13 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
   });
 
   /**
-   * Ruling 460: the SDK spawns `codexPathOverride` with its own argv, so the
+   * Ruling 139: the SDK spawns `codexPathOverride` with its own argv, so the
    * launcher stands in for the CLI and execs the SDK's vendored binary as the
    * principal's uid. The run home the server forks is handed to that uid
    * before the CLI starts, and handed back (with the written-back sign-in) at
    * the settle, through the launcher's `--prepare-home`.
    */
-  it("launches the vendored CLI through the launcher as the principal's uid, and hands the run home to it (ruling 460)", async () => {
+  it("launches the vendored CLI through the launcher as the principal's uid, and hands the run home to it (ruling 139)", async () => {
     const dir = homes.makeTempDir("viberr-launcher-");
     const log = path.join(dir, "calls.log");
     const launcher = path.join(dir, "viberr-launch");
@@ -1667,14 +1667,14 @@ describe("per-run CODEX_HOME (ruling 181)", () => {
 });
 
 /**
- * Ruling 541: a Viberr run is one Codex turn, and the SDK streams that turn's
+ * Ruling 165(b): a Viberr run is one Codex turn, and the SDK streams that turn's
  * usage once, at its end, so the Live run strip read Turns 0 and Tokens
  * "pending" for twenty minutes of a working run. The pinned CLI writes a
  * `token_usage_record` into the rollout as each model call completes; these
  * fakes write the rollout the way it does (shapes and figures from a real
  * 0.156.0 run against a scripted model), into the person's shared home.
  */
-describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
+describe("ruling 165(b): a Codex run's Turns and Tokens while it works", () => {
   const homes = createTestDbContext();
   afterEach(homes.cleanup);
   const THREAD = "01a0e71b-194e-75c1-a7bd-b59033305da2";
@@ -1806,13 +1806,13 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
   });
 
   /**
-   * Ruling 604: each `token_count` event in the same rollout carries the
+   * Ruling 161(b): each `token_count` event in the same rollout carries the
    * account's rate-limit snapshot, which Viberr never read, so Profile and
    * Insights showed no Codex usage until a run was refused. Shapes and figures
    * from AWSC-52's rollout on 2026-09-30 (the five-hour window spent, resetting
    * 15:32:58Z; the weekly one at 37%).
    */
-  describe("ruling 604: the account's usage window rides the lines", () => {
+  describe("ruling 161(b): the account's usage window rides the lines", () => {
     type RateWindow = { used_percent: number; window_minutes: number; resets_at: number };
     type RateLimits = {
       limit_id: string;
@@ -1864,7 +1864,7 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
       // CANARY: never read the rate limits and no Codex line carries one.
       // CANARY: let a null window clear the last one and the sparse update
       // records the weekly 38% as the account's usage, with no five-hour window.
-      // CANARY (ruling 608): report only the binding window and the five-hour
+      // CANARY (ruling 161(b)): report only the binding window and the five-hour
       // one disappears whenever the weekly one is fuller.
       const binding = { status: "allowed", rateLimitType: "five_hour", utilization: 0.64, resetsAt: 1_790_782_378, isUsingOverage: false };
       expect(readings(lines)).toEqual([
@@ -1884,7 +1884,7 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
         { event: { type: "item.completed", item: { type: "agent_message", text: "done" } } },
         { event: { type: "turn.completed", usage: { input_tokens: 11_000, cached_input_tokens: 0, output_tokens: 100 } } },
       ]);
-      // Ruling 608: the five-hour window a pacing controller needs is listed
+      // Ruling 161(b): the five-hour window a pacing controller needs is listed
       // beside it.
       expect(readings(lines)).toEqual([
         [
@@ -1904,14 +1904,14 @@ describe("ruling 541: a Codex run's Turns and Tokens while it works", () => {
 });
 
 /**
- * Ruling 595: the Codex CLI streams no event for a reasoning step whose
+ * Ruling 158(a): the Codex CLI streams no event for a reasoning step whose
  * summary is empty, and at a high effort one model call reasons in such steps
  * for many minutes, each one a line in the rollout. Live, two Inventory
  * Analysts on `gpt-6-luna` wrote a reasoning step every ten seconds for
  * fifteen minutes and the idle guard stopped them as hung. The guard now reads
  * the rollout before it calls a quiet stream a hang.
  */
-describe("ruling 595: a Codex run still writing its rollout is working, not hung", () => {
+describe("ruling 158(a): a Codex run still writing its rollout is working, not hung", () => {
   const homes = createTestDbContext();
   afterEach(() => {
     vi.useRealTimers();
@@ -1984,7 +1984,7 @@ describe("ruling 595: a Codex run still writing its rollout is working, not hung
   });
 });
 
-describe("codex run marker and settle sweep (ruling 174)", () => {
+describe("codex run marker and settle sweep (ruling 142)", () => {
   const COMPLETED = { type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } };
   const MARKED: RunSpec = { ...SPEC, runId: "run_marked", env: { VIBERR_RUN_ID: "run_marked" } };
   /** The two config leaves the adapter writes, read back through their shape. */
@@ -2038,7 +2038,7 @@ describe("codex run marker and settle sweep (ruling 174)", () => {
     expect(servers.docs).not.toHaveProperty("env");
   });
 
-  it("names the run's own temporary directory to the model's shell and every stdio MCP server (ruling 636)", async () => {
+  it("names the run's own temporary directory to the model's shell and every stdio MCP server (ruling 141(c))", async () => {
     // The shell inherits only the CLI's "core" names, which are the CLI's to
     // change, and a stdio server starts with its short default env plus what it
     // declares: undeclared, the shell and the browser write the shared /tmp.
@@ -2140,13 +2140,13 @@ describe("codex run marker and settle sweep (ruling 174)", () => {
 });
 
 /**
- * Rulings 370 and 371 on the Codex side: the prompt split joins into
+ * Rulings 169 and 170 on the Codex side: the prompt split joins into
  * `developer_instructions` in the same order, a specialist's config carries
  * the compaction window with the shared summarizer prompt (and the operator's
  * does not), and the server table reaches the CLI in name order.
  */
-describe("ruling 370/371: the joined prompt, the compaction keys and sorted servers", () => {
-  it("joins a prompt split into developer_instructions and sets the specialist's summarizer prompt (no limit since ruling 376)", async () => {
+describe("ruling 169/170: the joined prompt, the compaction keys and sorted servers", () => {
+  it("joins a prompt split into developer_instructions and sets the specialist's summarizer prompt (no limit, ruling 174)", async () => {
     const run = fakeCodex([{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }]);
     createCodexAdapter({ codexFactory: run.factory, env: { PATH: "/usr/bin" } }).start(
       { ...SPEC, systemPrompt: { static: ["# Persona\n"], dynamic: ["# This task\n"] } },
@@ -2197,11 +2197,11 @@ describe("ruling 370/371: the joined prompt, the compaction keys and sorted serv
 });
 
 /**
- * Ruling 376: the Codex completion compaction goes through the app-server,
+ * Ruling 174: the Codex completion compaction goes through the app-server,
  * in the principal's shared home with the run's credential overlay, the
  * thread's model and the shared summarizer prompt.
  */
-describe("codex adapter compact() (ruling 376)", () => {
+describe("codex adapter compact() (ruling 174)", () => {
   const compactHomes = createTestDbContext();
   afterEach(() => compactHomes.cleanup());
   interface ServerLine {
@@ -2258,7 +2258,7 @@ describe("codex adapter compact() (ruling 376)", () => {
   };
 
   it("resumes the thread in a private fork of the shared home with the model and the summarizer prompt, then starts the compaction", async () => {
-    // Ruling 507: the fork is seeded with the sign-in of the account the run
+    // Ruling 138: the fork is seeded with the sign-in of the account the run
     // billed, and settled like a run's — its refresh goes back to that account.
     const dataRoot = compactHomes.makeTempDir();
     const shared = ensureUserBackendHome("u_arda", "codex", dataRoot);
@@ -2339,7 +2339,7 @@ describe("codex adapter compact() (ruling 376)", () => {
 
 
 /**
- * Ruling 394 (F39-21) — a completed turn is a completed turn.
+ * Ruling 155(d) (F39-21) — a completed turn is a completed turn.
  *
  * Live on the ax-clone board, twice inside ten minutes: a Codex developer run
  * emitted a complete outcome envelope, the provider emitted `turn.completed`,
@@ -2378,7 +2378,7 @@ function fakeCodexThenThrow(
   return () => client;
 }
 
-describe("ruling 394: the transport died after the turn completed", () => {
+describe("ruling 155(d): the transport died after the turn completed", () => {
   const ENVELOPE = {
     type: "item.completed",
     item: {
@@ -2492,7 +2492,7 @@ describe("ruling 394: the transport died after the turn completed", () => {
 
   it("still FAILS when a fatal error event leaves work in flight and no completed turn", async () => {
     // A fatal event, then more work, then the stream ends: no turn stands
-    // complete, so the run fails (ruling 394). An error followed by a
+    // complete, so the run fails (ruling 155(d)). An error followed by a
     // completed turn is a recovery and finishes; see the RECOVERED test above.
     const { exit } = await runWith(
       fakeCodex([
@@ -2506,14 +2506,14 @@ describe("ruling 394: the transport died after the turn completed", () => {
 });
 
 /**
- * Ruling 534: the Codex SDK writes a turn's output schema into a 0700
+ * Ruling 145: the Codex SDK writes a turn's output schema into a 0700
  * directory of the server's own, and the CLI behind the launcher runs as the
- * person's agent uid (ruling 460). Live, every Codex run given a schema
+ * person's agent uid (ruling 139). Live, every Codex run given a schema
  * failed before its first turn: "Failed to read output schema file ...
  * Permission denied". Driven through the REAL SDK class, so an SDK whose exec
  * no longer takes the hook fails here rather than on the board.
  */
-describe("ruling 534: a turn's output schema is readable by the agent the launcher runs", () => {
+describe("ruling 145: a turn's output schema is readable by the agent the launcher runs", () => {
   const homes = createTestDbContext();
   afterEach(() => homes.cleanup());
 

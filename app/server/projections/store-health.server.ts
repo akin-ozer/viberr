@@ -1,5 +1,5 @@
 /**
- * Ruling 217 (F37-37) and ruling 218 (F37-38): what viberr remembers about a
+ * Ruling 22 (F37-37, F37-38): what viberr remembers about a
  * projection that stopped tracking its own files.
  *
  * Viberr's whole claim is that the markdown IS the record and SQLite is a
@@ -17,7 +17,7 @@
  * surface saying why." That is this module's whole reason to exist, for every
  * cause rather than one.
  *
- * Ruling 218 made the latch PER FILE. My first version held one slot, so any
+ * Ruling 22 made the latch PER FILE. My first version held one slot, so any
  * later rebuild that wrote cleared it — and ninety seconds after the corruption
  * was repaired, a transient `disk I/O error` left SHOP-4's row reading "waiting
  * on you" while its file said `waiting: agent`, with health back to `ok`
@@ -93,7 +93,7 @@ export function recordProjectionFault(sourcePath: string, message: string): void
   });
 }
 
-/** THIS file projected: its fault is over. Ruling 218 — a success here says
+/** THIS file projected: its fault is over. Ruling 22 — a success here says
  *  nothing about any other file, and must not clear one. */
 export function clearProjectionFault(sourcePath: string): void {
   faults().delete(sourcePath);

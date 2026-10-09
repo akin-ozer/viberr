@@ -3,7 +3,7 @@ import type { ActorRender } from "./actor.server";
 
 /**
  * Centralized mapping for per-user `notifications` rows (orchestrator
- * ruling 9). Task/project references are SOFT refs — string keys that may
+ * ruling 74). Task/project references are SOFT refs — string keys that may
  * point at other projects; the query layer joins the project name when the
  * project exists locally.
  */
@@ -16,7 +16,7 @@ import type { ActorRender } from "./actor.server";
  */
 export const NOTIFICATION_KINDS = [
   "packet",
-  // Ruling 481(a) (F40-48): an agent's question to a person (`ask_human`, or
+  // Ruling 74 (F40-48): an agent's question to a person (`ask_human`, or
   // the Codex outcome envelope's question). It used to be written as an
   // `approval`, so it wore the stage-transition arrow and pill and was
   // silenced by the "Approval requests" toggle, whose copy never named it.
@@ -25,22 +25,22 @@ export const NOTIFICATION_KINDS = [
   "mention",
   "quality",
   "policy",
-  // Ruling 99: chained-goal progress addressed to the goal's creator. Nothing
-  // has written one since ruling 503 turned goal chains into epics (their
+  // Ruling 273: chained-goal progress addressed to the goal's creator. Nothing
+  // has written one since goal chains became epics (their
   // notices are `epic` rows now); the kind stays so the rows an upgraded inbox
   // already holds still read, and the CHECK still admits them. A conversation
   // reply is never a row: it reaches its open surfaces through the
   // owner-routed `controller.updated` revalidation.
   "controller",
-  // Ruling 131 (pass 34): the work a task waited on reached Done and the task
+  // Ruling 57 (pass 34): the work a task waited on reached Done and the task
   // was released, or a dependency can never complete (its task was archived).
   "dependency",
-  // Ruling 140 (pass 34): the reader's owner seat on a task changed hands — a
+  // Ruling 50 (pass 34): the reader's owner seat on a task changed hands — a
   // hand-off to them, a creation that named them, a takeover of their seat, or
-  // an admin release. Under ruling 127 the seat is the credential principal
+  // an admin release. Under ruling 137 the seat is the credential principal
   // and the acceptance authority, so it is never a silent write.
   "ownership",
-  // Ruling 503: a task joined or left an epic the reader leads (or created,
+  // Ruling 272: a task joined or left an epic the reader leads (or created,
   // while nobody leads it), they were made its lead, someone else closed or
   // reopened it, or every task in it is done.
   "epic",
@@ -52,7 +52,7 @@ export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
  * question and a recommendation to approve. The one home of the set: "Waiting
  * on you" (`listNotifications`), the live reconciliation below, the
  * resolution side-effect (`markTaskPacketApprovalRead`) and the count a tab's
- * title carries (ruling 481, `attentionSnapshot`) all read it.
+ * title carries (ruling 74, `attentionSnapshot`) all read it.
  */
 export const DECISION_NOTIFICATION_KINDS = [
   "packet",
@@ -79,7 +79,7 @@ export type NotificationRow = {
   actor_json: string | null;
   project_slug: string | null;
   task_key: string | null;
-  /** Ruling 497: where the row opens, as its notifier recorded it (resolved by
+  /** Ruling 75: where the row opens, as its notifier recorded it (resolved by
    *  `notificationHref`, which ignores one outside the row's project). */
   href: string | null;
   occurred_at: string;

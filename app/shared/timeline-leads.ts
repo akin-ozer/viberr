@@ -1,5 +1,5 @@
 /**
- * Ruling 693: the opening words of the timeline entries a count is read from.
+ * Ruling 83: the opening words of the timeline entries a count is read from.
  *
  * What a task took (`what-it-took.server.ts`) counts the rounds a person was
  * asked, the questions agents raised and the times a person sent the work

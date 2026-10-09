@@ -115,7 +115,7 @@ export interface RebuildFileResult {
    * Projects only: the keys of the tasks the cascade could not re-project.
    * The project row landed; they did not, and the row keeps the F28-D3
    * sentinel so the next rebuild of project.md runs the cascade again (ruling
-   * 218's retry re-arms on this as on `error`).
+   * 22's retry re-arms on this as on `error`).
    */
   failedTasks?: string[];
 }
@@ -135,7 +135,7 @@ function nowIso(): string {
 }
 
 /**
- * Ruling 457 (SRV-4): one file's re-projection is ONE transaction. It used to
+ * Ruling 21 (SRV-4): one file's re-projection is ONE transaction. It used to
  * run as N+5 autocommit writes (one WAL sync per timeline event: 305 commits
  * for a 300-event task), and with the project cascade below that multiplied by
  * every task in the project. The projection events the body raises are held
@@ -198,11 +198,11 @@ interface ProjectContextRow {
   slug: string;
   repo: string | null;
   stages_json: string;
-  /** Ruling 225 (amended): the stage graph, for the acceptance-boundary test —
+  /** Ruling 45 (amended): the stage graph, for the acceptance-boundary test —
    *  the one acceptance gate `acceptanceBlockReason` deliberately leaves out. */
   workflow_json: string;
   required_reviewers_json: string;
-  /** Ruling 482: the project's declared gates, for the acceptance block. */
+  /** Ruling 104: the project's declared gates, for the acceptance block. */
   gates_json: string;
 }
 
@@ -221,7 +221,7 @@ interface TaskProjectContext {
  * acceptance boundary, the resolved required reviewers, the repo, the member
  * ids behind guest flags). `rebuildTaskFile` reads its context here, and
  * `rebuildProjectFile` compares this digest before and after it writes the row
- * to decide whether the tasks must follow (ruling 457, SRV-3), so the cascade
+ * to decide whether the tasks must follow (ruling 21, SRV-3), so the cascade
  * test can never drift from what a task actually reads.
  */
 function projectContextForTasks(
@@ -259,7 +259,7 @@ function projectContextForTasks(
       row.stages_json,
       row.workflow_json,
       row.required_reviewers_json,
-      // Ruling 482: a gate edit changes every task's acceptance block.
+      // Ruling 104: a gate edit changes every task's acceptance block.
       row.gates_json,
       members,
     ]),
@@ -359,12 +359,12 @@ function rebuildProjectFileNow(
     JSON.stringify(fm.agents),
     fm.credentialPolicy ? JSON.stringify(fm.credentialPolicy) : null,
     JSON.stringify(fm.guardrails),
-    // Ruling 178: RESOLVED here (stage and agent names) so the task walk below
+    // Ruling 89: RESOLVED here (stage and agent names) so the task walk below
     // prints the gate's sentence from the row alone. A rule edit changes what
     // tasks derive from, which cascades into every task (below), so the queue
     // refreshes.
     JSON.stringify(resolveRequiredReviewers(fm, options.dataRoot)),
-    // Ruling 482: the declared gates, as project.md holds them.
+    // Ruling 104: the declared gates, as project.md holds them.
     JSON.stringify(fm.gates ?? []),
     sourcePath,
     // F28-D3: sentinel hash; the real content_hash is the LAST write below, so a
@@ -408,7 +408,7 @@ function rebuildProjectFileNow(
   // rebuildAll suppresses the cascade and forces its own task walk instead
   // (see skipTaskCascade), reading `taskFacingChanged` for the same answer.
   //
-  // Ruling 457 (SRV-3): "the project file changed" was the test here, and
+  // Ruling 21 (SRV-3): "the project file changed" was the test here, and
   // every task creation changes it — `allocateTaskKey` bumps nextTaskNumber —
   // so creating one task re-projected all of them and sent one task.updated per
   // task to every open board and task page (30 tasks: 30 events, 279 commits).
@@ -446,13 +446,13 @@ function rebuildProjectFileNow(
 }
 
 /**
- * Ruling 457: one task of the project cascade, in a SAVEPOINT of the project's
+ * Ruling 21: one task of the project cascade, in a SAVEPOINT of the project's
  * transaction. Since the project row became one transaction (SRV-4), a task
  * that threw here rolled back the project row and its members too: an admin's
  * member add never landed, and every later write of project.md (a task-key
  * allocation included) failed the same way while the fault was reported
  * against project.md. The task's own writes roll back to the savepoint, its
- * failure is reported against ITS file (ruling 218: a fault belongs to the file
+ * failure is reported against ITS file (ruling 22: a fault belongs to the file
  * that has it), the events it raised are dropped, and the cascade goes on.
  * Returns whether the task projected.
  */
@@ -540,11 +540,11 @@ function acceptanceBlockReason(
     /** The writers' `blockedPacket` predicate, computed by the caller because
      *  the packet lives in the task file's BODY, not its frontmatter. */
     blockedPacket: boolean;
-    /** Ruling 178: the project's resolved rules, from the projected row. */
+    /** Ruling 89: the project's resolved rules, from the projected row. */
     requiredReviewers: readonly RequiredReviewerView[];
-    /** Ruling 482: the project's declared gates, from the projected row. */
+    /** Ruling 104: the project's declared gates, from the projected row. */
     gates: readonly ProjectGate[];
-    /** Ruling 556: who made the review subject, read from the task file's
+    /** Ruling 89: who made the review subject, read from the task file's
      *  BODY (the timeline) by the caller, like `blockedPacket`. */
     subjectAuthor: string | null;
   },
@@ -564,11 +564,11 @@ function acceptanceBlockReason(
     closedPrBlockedReason(fm, fm.key) ??
     // F10-15: every required reviewer must have approved the current revision.
     acceptanceBlockedReason(fm, ctx.subjectAuthor) ??
-    // Ruling 178: and every reviewer the PROJECT declares, engaged or not —
+    // Ruling 89: and every reviewer the PROJECT declares, engaged or not —
     // the same position it holds in `acceptanceRefusalReasons`.
     requiredReviewerRefusals(ctx.requiredReviewers, fm, ctx.subjectAuthor)[0] ??
     verdictGateReason(fm, ctx.validation, fm.key) ??
-    // Ruling 482: the project's gates on the revision under review — the same
+    // Ruling 104: the project's gates on the revision under review — the same
     // position it holds in `acceptanceRefusalReasons`.
     projectGatesRefusal(ctx.gates, fm, fm.key) ??
     // F7-VAL1/F7-PKT1: an operator-raised blocked decision is still open —
@@ -576,7 +576,7 @@ function acceptanceBlockReason(
     (ctx.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null) ??
-    // Ruling 135: the delivered revision is not on the PR, above the conflict.
+    // Ruling 243: the delivered revision is not on the PR, above the conflict.
     unpushedRevisionBlockedReason(
       fm.pr,
       activeWorkRevision(fm.workRevision)?.headSha ?? null,
@@ -724,12 +724,12 @@ function rebuildTaskFileNow(
     subjectAuthor: reviewSubjectAuthor(fm, parsed.timeline),
   });
 
-  // Ruling 225 (F37-45): a task resting on a CLOCK is not waiting on a person.
+  // Ruling 45 (F37-45): a task resting on a CLOCK is not waiting on a person.
   //
   // `waiting: "human"` in a task file means "no agent is working; a human is
   // next" — it is what `clearWaitingToHuman` writes when the last run ends.
   // Every waiting-sensitive surface renders that as the sentence "waiting on a
-  // human", which was true while the only way forward was a person. Ruling 224
+  // human", which was true while the only way forward was a person. Ruling 157
   // made it false: a task whose quota window is shut now resolves its packet by
   // writing a `run-operator` schedule and picks ITSELF back up when the window
   // reopens. Live on pass 37 four tasks sat exactly there — packet resolved,
@@ -757,7 +757,7 @@ function rebuildTaskFileNow(
   // authors `waiting: schedule`, so a file that somehow carries one projects as
   // whatever it has actually earned here.
   /**
-   * Ruling 225, amended again — and this one was caught on the live board, not
+   * Ruling 45, amended again — and this one was caught on the live board, not
    * by reading.
    *
    * `acceptanceRefusal === null` is NOT "a human could accept this". The stage
@@ -791,10 +791,10 @@ function rebuildTaskFileNow(
     fm.waiting === "human" &&
     !parsed.packet &&
     fm.recommendations.length === 0 &&
-    // Ruling 225 (amended): "nothing a human could accept right now" — the
+    // Ruling 45 (amended): "nothing a human could accept right now" — the
     // stage gate included, which `acceptanceRefusal` alone omits.
     !couldBeAcceptedNow &&
-    // Ruling 131(d): a task that waits on other work is HELD, and the schedule
+    // Ruling 115: a task that waits on other work is HELD, and the schedule
     // runner refuses its occurrence on exactly those grounds — "waits on other
     // work (…) — no operator run was started; Viberr releases the task when
     // every entry is done." A card reading "resumes Sep 14 · 02:28" over an
@@ -831,7 +831,7 @@ function rebuildTaskFileNow(
   const derivation = deriveReadiness({
     storedReadiness,
     diagnostics: allDiagnostics,
-    // Ruling 131: a task waiting on other work is floored at `blocked`; the
+    // Ruling 55: a task waiting on other work is floored at `blocked`; the
     // list's states are resolved at read time (dependencies.server.ts), so
     // the floor reads only that a list exists.
     dependenciesListed: fm.blockedBy.length > 0,
@@ -921,7 +921,7 @@ function rebuildTaskFileNow(
     fm.priority,
     JSON.stringify(fm.labels),
     fm.dueDate,
-    // Ruling 131: the raw list, verbatim (canonical spellings).
+    // Ruling 55: the raw list, verbatim (canonical spellings).
     JSON.stringify(fm.blockedBy),
     fm.archived ? 1 : 0,
     derivedValidation,
@@ -941,13 +941,13 @@ function rebuildTaskFileNow(
     project?.repo ?? null, // P13-D-5: no task-level repo override
     fm.pr ? JSON.stringify(fm.pr) : null,
     fm.github ? JSON.stringify(fm.github) : null,
-    // Ruling 53/88: the delivered revision the board's acceptance ceremony
+    // Ruling 97: the delivered revision the board's acceptance ceremony
     // discloses and then echoes back for the server to verify. Written from the
     // SAME expression the server's own `acceptanceDisclosureOf` reads
     // (`fm.workRevision?.headSha ?? "none"`, task-acceptance.server.ts), so a board
     // echo built from this column can only differ from the live task when the
     // task really moved under the dialog — which is the refusal the echo exists
-    // to produce. Ruling 161: a discarded revision projects as none.
+    // to produce. Ruling 234: a discarded revision projects as none.
     activeWorkRevision(fm.workRevision)?.headSha ?? null,
     parsed.goal,
     parsed.packet ? JSON.stringify(parsed.packet) : null,
@@ -959,7 +959,7 @@ function rebuildTaskFileNow(
     JSON.stringify(fm.schedules),
     parsed.timeline.length,
     commentCount,
-    // Ruling 503: the epic the task belongs to, for the board's epic filter,
+    // Ruling 272: the epic the task belongs to, for the board's epic filter,
     // the Epics pages and the epic's progress.
     fm.epic,
     allDiagnostics.length,
@@ -1002,7 +1002,7 @@ function rebuildTaskFileNow(
   });
   // F28-D3: commit marker — flip the sentinel to the true content_hash only now
   // that the projection row, the task_events rows and the diagnostics have all
-  // landed. Everything above runs in one transaction (ruling 457), so this row
+  // landed. Everything above runs in one transaction (ruling 21), so this row
   // is consistent by the time the hash lets a later rebuild skip it.
   db.prepare(
     `UPDATE task_projections SET content_hash = ? WHERE project_slug = ? AND task_key = ?`,
@@ -1096,7 +1096,7 @@ function sameTaskEventContent(a: TaskEventColumns, b: TaskEventColumns): boolean
 }
 
 /**
- * Ruling 457 (CS-6, CS-1): write a task's timeline rows (`fresh`, newest
+ * Ruling 21 (CS-6, CS-1): write a task's timeline rows (`fresh`, newest
  * first, position 0 = newest) without re-issuing the rows that did not change.
  *
  * The rebuilder used to DELETE every row and INSERT them all again, so one
@@ -1215,7 +1215,7 @@ function syncTaskEvents(
 // ---------------------------------------------------------------- epics
 
 /**
- * Ruling 503: project one epic file into `epic_projections`.
+ * Ruling 272: project one epic file into `epic_projections`.
  *
  * The row is the file and nothing else: an epic's tasks are the task rows
  * whose `epic_id` names it, and its progress is counted from them at read
@@ -1412,12 +1412,12 @@ export function rebuildPath(
 function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void {
   const message = error.message;
   logger.error("projection rebuild failed", { sourcePath: rel, err: error });
-  // Ruling 217 (F37-37): this catch is deliberately quiet so one bad file
+  // Ruling 22 (F37-37): this catch is deliberately quiet so one bad file
   // cannot take the process down — and for the twelve minutes the store was
   // `SQLITE_CORRUPT`, quiet is exactly what it was, while health reported
   // `degraded: []`. The log line stays; the FACT now has somewhere to live.
   recordProjectionFault(rel, message);
-  // Ruling 219 (F37-39): the provenance row is a NOTE ABOUT the failure, and
+  // Ruling 22 (F37-39): the provenance row is a NOTE ABOUT the failure, and
   // it is written to the same store that just failed — so when the store
   // itself is the fault, this threw out of the catch and `rebuildPath` raised
   // after all. Live: `resolvePacket` wrote SHOP-4's file (packet resolved,
@@ -1441,10 +1441,10 @@ function reportRebuildFailure(db: DatabaseSync, rel: string, error: Error): void
   }
 }
 
-/** Ruling 217/218: a rebuild that WROTE clears THIS FILE's fault — the mirror
+/** Ruling 22: a rebuild that WROTE clears THIS FILE's fault — the mirror
  *  tracks it again. An `ignored` path is not a projection source and says
  *  nothing either way, so it never clears. Nor does a success here speak for
- *  any other file: that was ruling 217's own defect, fixed by 218. */
+ *  any other file: that was ruling 22's own defect, fixed by 218. */
 function succeeded(rel: string, result: RebuildFileResult): RebuildFileResult {
   if (result.action !== "error") clearProjectionFault(rel);
   return result;
@@ -1519,7 +1519,7 @@ function rescanProjectFiles(
     taskKeys.push(key);
     track(rebuildPath(db, taskFilePath(slug, key, options.dataRoot), taskOptions));
   }
-  // Ruling 503: epics. Their rows derive from their own files alone, so
+  // Ruling 272: epics. Their rows derive from their own files alone, so
   // neither the order nor a changed project row matters to them.
   const epicIds = listEpicIds(slug, options.dataRoot);
   for (const epicId of epicIds) track(rebuildEpicFile(db, slug, epicId, options));

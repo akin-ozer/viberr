@@ -21,7 +21,7 @@ export interface AuditLogEntryView {
   /** Violations only — resolve context surfaced on the pill (Phase 10). */
   resolvedAt: string | null;
   resolvedBy: string | null;
-  /** Ruling 681: where the knowledge-base document this row wrote opens, set
+  /** Ruling 34: where the knowledge-base document this row wrote opens, set
    *  only for a viewer who may open it (an org admin). */
   docHref?: string;
 }

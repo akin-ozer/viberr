@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { PillKind } from "~/ui/pill";
 import { useClock } from "~/ui/use-clock";
 import { toolIdentity, type ToolIdentity } from "~/shared/mcp-tools";
-// Ruling 457: count plurals are spelled inline here, not through `countLabel`
+// Ruling 11: count plurals are spelled inline here, not through `countLabel`
 // (why: shared/text/plural.ts).
 import {
   ARGUMENT_CLIP,
@@ -37,7 +37,7 @@ const RUN_STATE = {
 
 /**
  * The logs pill for a run: uses RUN_STATE, but a run interrupted by a human
- * shows a neutral "interrupted · by <actor>" footer/pill (ruling 11) — the
+ * shows a neutral "interrupted · by <actor>" footer/pill (ruling 165) — the
  * render state of an interrupted run is idle-shaped. Pass 35 U35-7: a run boot
  * recovery interrupted names its REASON ("by a restart") the same way; it is
  * not a continuity error and no person did it.
@@ -47,7 +47,7 @@ export function runStatePill(run: RunView): RunStateBadge {
     return { kind: "neutral", label: `interrupted${interruptedByClause(run)}` };
   }
   if (run.lifecycle === "queued") return { kind: "neutral", label: "queued" };
-  // Ruling 130(a): the pill is a reader of the failure too. A classified
+  // Ruling 155(a): the pill is a reader of the failure too. A classified
   // refusal names its class; "continuity error" is only an unclassified one.
   if (run.state === "error" && run.failureKind === "quota") {
     return { kind: "blocked", label: "refused · quota" };
@@ -59,11 +59,11 @@ export function runStatePill(run: RunView): RunStateBadge {
     return { kind: "blocked", label: "backend unavailable" };
   }
   if (run.state === "error" && run.failureKind === "max_budget") {
-    // Ruling 175: the instance's spending cap stopped it, not the task.
+    // Ruling 159: the instance's spending cap stopped it, not the task.
     return { kind: "blocked", label: "cut off · spending cap" };
   }
   if (run.state === "error" && run.failureKind === "tool_loop") {
-    // Ruling 598: the gateway stopped it for repeating one call.
+    // Ruling 158(b): the gateway stopped it for repeating one call.
     return { kind: "blocked", label: "stopped · repeated call" };
   }
   if (run.state === "error" && run.failureKind === "overloaded") {
@@ -88,7 +88,7 @@ function interruptedByClause(run: RunView): string {
 }
 
 /**
- * Ruling 524(c): the role a run's name is followed by, or null when it adds
+ * Ruling 147: the role a run's name is followed by, or null when it adds
  * nothing. A controller turn is named "Controller" in the role "Controller",
  * and the card's head read "Controller · Controller"; an operator named
  * "Operator" read "Operator · operator" in the picker. A renamed deployment
@@ -118,7 +118,7 @@ export function roleShort(run: RunView): string | null {
   // authority for supporting engagements that hold none. Same mapping the
   // Agents roster applies under F10-20.
   //
-  // Ruling 419(d): a controller turn has no engagement at all, so it has no
+  // Ruling 321: a controller turn has no engagement at all, so it has no
   // role to print. It fell through to "supporting" and the controller page's
   // console read "Controller · supporting", an engagement role on a surface
   // that has no task.
@@ -165,10 +165,10 @@ export function runInputRows(
   inputs: RunInputs,
   backend?: "claude" | "codex",
   /**
-   * Ruling 346: WHICH kind of run this is, because two of these rows describe
+   * Ruling 167: WHICH kind of run this is, because two of these rows describe
    * an absence, and the same absence means different things.
    *
-   * Ruling 344 gave the operator and the controller this disclosure, and both
+   * The operator and the controller make this disclosure too, and both
    * legitimately record `cwd: null` and `anchor: null` — neither has a checkout
    * and neither is handed a canonical task block. The two stand-in sentences
    * here were written when every caller was a specialist, so they then said
@@ -252,7 +252,7 @@ export function runInputRows(
       inputs.mcp.unhealthy.length
         ? `mounted but its last connection check failed: ${inputs.mcp.unhealthy.join(", ")}`
         : null,
-      // Ruling 176: the admin-marked write tools this run withheld.
+      // Ruling 188: the admin-marked write tools this run withheld.
       inputs.mcp.writeToolsDenied?.length
         ? "write tools withheld (repo write is withheld): " +
           inputs.mcp.writeToolsDenied
@@ -281,7 +281,7 @@ export function runInputRows(
         : "viberr tools: none",
       inputs.tools.denied.length
         ? // F-P10 (pass 25): the deny list binds on Claude (SDK denylist);
-          // codex-runtime never consults `disallowedTools` directly. Ruling 185
+          // codex-runtime never consults `disallowedTools` directly. Ruling 183
           // removed the Codex OS sandbox, so one family still binds there
           // through a derived flag: withheld web egress turns the CLI's own
           // web search off (`webSearchMode: "disabled"`). The repo-write tools
@@ -293,7 +293,7 @@ export function runInputRows(
           ? `capability grants deny (on this Codex run only a withheld web search binds, through the CLI's search toggle; the repo-write and command-level entries are advisory, and the server-owned delivery gate is the boundary): ${inputs.tools.denied.join(", ")}`
           : `denied by its capability grants: ${inputs.tools.denied.join(", ")}`
         : "no built-in tools denied",
-      // Ruling 564: kept, and confined by a hook rather than denied.
+      // Ruling 217(d): kept, and confined by a hook rather than denied.
       inputs.tools.fileWriteRoots?.length
         ? `Edit, MultiEdit and Write write only into ${inputs.tools.fileWriteRoots.join(" and ")}`
         : null,
@@ -302,7 +302,7 @@ export function runInputRows(
       .join(" · "),
   });
 
-  // Ruling 175: what the run may spend, stated even when nothing caps it, and
+  // Ruling 159: what the run may spend, stated even when nothing caps it, and
   // honest that the cap is Claude's alone.
   if (inputs.spendCapUsd !== undefined) {
     const cap = inputs.spendCapUsd;
@@ -373,7 +373,7 @@ export function waitText(lines: readonly { display: LogLine }[], live: boolean):
 }
 
 /**
- * Ruling 366(d): what the fold stands for, said on the row itself — a reader
+ * Ruling 168: what the fold stands for, said on the row itself — a reader
  * has to know the hidden events were keepalives and nothing more, or a fold
  * reads as a hole in the record. The disclosure under it lists every one.
  */
@@ -404,7 +404,7 @@ function flat(text: string): string {
 }
 
 /**
- * Ruling 366(d): what a tool row's one-line summary CUT — the arguments a
+ * Ruling 168: what a tool row's one-line summary CUT — the arguments a
  * reader cannot see on the row — by key, with the label the link prints.
  *
  * Three cuts count: a string the arguments line clipped at `ARGUMENT_CLIP`
@@ -431,7 +431,7 @@ const recordValue = z.record(z.string(), z.unknown());
 
 export function hiddenArguments(
   line: LogLine,
-  /** Ruling 499: arguments the row already draws in full (an edit's diff, a
+  /** Ruling 168: arguments the row already draws in full (an edit's diff, a
    *  to-do list), which it therefore does not cut. */
   drawn: readonly string[] = [],
 ): HiddenArguments | null {
@@ -484,7 +484,7 @@ export function commandNote(line: LogLine): string | null {
 }
 
 /**
- * Ruling 499: the file a tool row names as its whole summary (Claude's Read,
+ * Ruling 168: the file a tool row names as its whole summary (Claude's Read,
  * Edit, Write, …), so the row can print it repo-relative. Null for any other
  * row, a Bash command's included: a path inside a command is the command's
  * own words, and rewriting it would change what the command says.
@@ -541,7 +541,7 @@ export function thoughtLabel(lines: readonly { display: LogLine }[]): string {
 
 /** A tool call reduced to what a scanning reader needs: the verb and its target. */
 export interface ToolChip {
-  /** Whose tool, and the label the chip prints for it (ruling 366). */
+  /** Whose tool, and the label the chip prints for it (ruling 168). */
   who: ToolIdentity;
   /** What it was pointed at; empty when the line carried only a name. */
   detail: string;
@@ -722,7 +722,7 @@ export function agentMessageProse(line: LogLine): string | null {
  * mount, when the effect installs the real client `Date.now()`. Never call
  * `Date.now()` during render.
  *
- * Ruling 457 (RF-9): the ticking is the shared one-second clock
+ * Ruling 11 (RF-9): the ticking is the shared one-second clock
  * (`~/ui/use-clock`), one interval for every counter on the page instead of
  * one per counter, and a counter mounted after hydration reads the client
  * clock on its first render.

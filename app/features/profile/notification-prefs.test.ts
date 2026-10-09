@@ -6,7 +6,7 @@ import {
 import { PROFILE_NTF, mergeNotifPrefs, notifCategoryForKind } from "./notification-prefs";
 
 /**
- * Rulings 131 and 140 (pass 34): the two new notification kinds route through
+ * Rulings 57 and 50 (pass 34): the two new notification kinds route through
  * their own categories, with their own toggles, defaulting ON like every other.
  *
  * Canary: map `dependency` to `controller` (or `ownership` to `packets`) in
@@ -26,7 +26,7 @@ describe("notification routing — the pass-34 kinds", () => {
     }
   });
 
-  it("a stored pref written before the categories existed reads them as ON (questions too, ruling 481)", () => {
+  it("a stored pref written before the categories existed reads them as ON (questions too, ruling 74)", () => {
     const merged = mergeNotifPrefs({
       packets: { app: false },
       approvals: { app: true },
@@ -47,7 +47,7 @@ describe("notification routing — the pass-34 kinds", () => {
 });
 
 /**
- * Ruling 481(a) (F40-48): every writer of a decision notification, the kind it
+ * Ruling 74 (F40-48): every writer of a decision notification, the kind it
  * writes, and the words the toggle it routes through must use to name it. The
  * "Approval requests" row said "Operator transition requests at boundaries you
  * can approve" while it carried every agent question, so switching it off to
@@ -57,7 +57,7 @@ describe("notification routing — the pass-34 kinds", () => {
  * Canary: route `question` back to `approvals` in `KIND_TO_CATEGORY` (or put
  * the old "transition requests" copy back on the approvals row) and this fails.
  */
-describe("each toggle names what its writers send (ruling 481)", () => {
+describe("each toggle names what its writers send (ruling 74)", () => {
   const WRITERS: { writer: string; kind: NotificationKind; names: RegExp[] }[] = [
     // agent-toolkit.server.ts `openAgentQuestionPacket` (Claude `ask_human`)
     // and agent-completion.server.ts's Codex outcome-envelope question.

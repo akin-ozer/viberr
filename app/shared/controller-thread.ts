@@ -1,5 +1,5 @@
 /**
- * Ruling 465 (F40-8): a controller transcript in REPLY order.
+ * Ruling 320 (F40-8): a controller transcript in REPLY order.
  *
  * A user message takes its `seq` when it is recorded, which for a message sent
  * while a turn works is when it is QUEUED. In `seq` order the transcript read
@@ -13,7 +13,7 @@
  * One home for the rule: the controller page, the dock and the turn prompt's
  * digest all read the conversation through it.
  *
- * Ruling 527: a user message that steered a turn (`steeredInto`) sits in that
+ * Ruling 251: a user message that steered a turn (`steeredInto`) sits in that
  * turn too, under the message the turn answered and above its reply, which
  * was written after the turn read it. So does one still waiting to steer the
  * live turn (`turn.steering`), so it does not move when the turn reads it.
@@ -26,7 +26,7 @@ export interface ThreadMessage {
   steeredInto: string | null;
 }
 
-/** Ruling 527: the live turn's side of the order: the message it answers and
+/** Ruling 251: the live turn's side of the order: the message it answers and
  *  the messages waiting to steer it. */
 export interface LiveSteering {
   answering: string | null;
@@ -61,17 +61,17 @@ export function inReplyOrder<M extends ThreadMessage>(
   return out;
 }
 
-/** Ruling 527: the turn a user message steered, or is waiting to steer. */
+/** Ruling 251: the turn a user message steered, or is waiting to steer. */
 function steeredInto(m: ThreadMessage, live: LiveSteering | null): string | null {
   if (m.steeredInto) return m.steeredInto;
   return live?.answering && live.steering.includes(m.id) ? live.answering : null;
 }
 
 /**
- * Ruling 465: where "is working…" goes in a reply-ordered transcript — after
+ * Ruling 320: where "is working…" goes in a reply-ordered transcript — after
  * the message the live turn answers and any reply already posted to it (an
  * answer is posted before the turn's compaction ends, U39-30). Null when that
- * message is not in the list, and the row then goes at the end. Ruling 527:
+ * message is not in the list, and the row then goes at the end. Ruling 251:
  * after the messages that steered the turn or wait to, too.
  */
 export function workingRowAfter(

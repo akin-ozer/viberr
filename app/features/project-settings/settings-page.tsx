@@ -30,8 +30,8 @@ import {
   CredentialManageActions,
 } from "~/features/github/credential-card";
 import { replaceTokenHref } from "~/features/github/replace-token-href";
-// Ruling 148(b): the invite form is a button that opens THIS shared modal —
-// the same chrome (and the same ruling 147 refusal) as every org-settings
+// Ruling 323: the invite form is a button that opens THIS shared modal —
+// the same chrome (and the same ruling 288 refusal) as every org-settings
 // create modal, including the org-level twin of this very action.
 import { MiniModal } from "~/features/org-settings/mini-modal";
 // The one shared "Escape or an outside press closes me" hook.
@@ -210,7 +210,7 @@ export function ProjectPanel({
           >
             Discard
           </button>
-          {/* Ruling 147(d): `dirty` stays a gate; ruling 368: the save in
+          {/* Ruling 288: `dirty` stays a gate; ruling 286: the save in
               flight shows itself here, Discard only waits. */}
           <button
             type="button"
@@ -239,7 +239,7 @@ export function ProjectPanel({
                 and a "Task keys" row is a statement about the project, not a
                 preview of an uncommitted edit. Same rule as everywhere else on
                 this page: no optimistic UI for governed state. */}
-            {/* Ruling 625: a task key is a name, not code, so its pattern is
+            {/* Ruling 280: a task key is a name, not code, so its pattern is
                 set in the body face like every key (the prefix field too). */}
             {project.prefix}-###
           </span>
@@ -268,11 +268,11 @@ export function ProjectPanel({
 function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
-  // Ruling 147: the commit stays enabled and an empty name is refused here.
+  // Ruling 288: the commit stays enabled and an empty name is refused here.
   // Counted, not boolean: each refusal re-inserts the alert, because readers
   // announce an insertion, not a role flip on unchanged text.
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const errId = "stg-add-err";
   const inputRef = useRef<HTMLInputElement>(null);
@@ -287,7 +287,7 @@ function AddStageControl({ onAdd }: { onAdd: (name: string) => void }) {
   };
   const commit = () => {
     const v = name.trim();
-    // Ruling 147: the create primary stays enabled; an empty name is REFUSED
+    // Ruling 288: the create primary stays enabled; an empty name is REFUSED
     // on the client with a sentence, not pre-empted by a dead button.
     if (!v) {
       setRefused((n) => n + 1);
@@ -510,7 +510,7 @@ function StageMoveMenu({
 }
 
 /**
- * Ruling 364: the stage's dot IS the colour picker. A real button (the dot,
+ * Ruling 279: the stage's dot IS the colour picker. A real button (the dot,
  * with the app-wide focus ring) opens the twenty presets as a 5×4 grid of
  * swatches — `role="menu"` of `menuitemradio`s, the arrows walk the grid,
  * Escape closes and returns focus, an outside press closes. Picking submits
@@ -614,7 +614,7 @@ function StageColorMenu({
   );
 }
 
-/** A stage row's class (ruling 700(e) took it out of `StageRow`): the
+/** A stage row's class (ruling 13(b) took it out of `StageRow`): the
  *  grab cursor while it can drag, the lifted row while it does, and the
  *  insertion line where the dragged row would land. */
 function stageRowClass(canDrag: boolean, dragging: boolean, over: boolean): string {
@@ -985,12 +985,12 @@ const draftKey = (rows: readonly RequiredReviewerDraft[]) =>
   JSON.stringify(rows.map((r) => [r.stageId, r.profileId]));
 
 /**
- * Ruling 178 (pass 36, G36-3): the project's required reviewers, edited as a
+ * Ruling 89 (pass 36, G36-3): the project's required reviewers, edited as a
  * small table — a non-terminal stage and a deployed verdict-capable agent per
  * row — and saved WHOLE through one intent (`set-required-reviewers`), the
  * same writer and validation the controller's `set_required_reviewers` uses.
  * Lives beside the stage editor because a rule names a stage. A role without
- * `edit-policy` reads the rules as text (ruling 65's withdrawn-not-disabled
+ * `edit-policy` reads the rules as text (ruling 27's withdrawn-not-disabled
  * precedent, the same shape the guardrail rows take); the server enforces
  * regardless. Remounted by the page (`key`) whenever the loader's rules
  * change, so a saved list never fights a stale draft.
@@ -1120,7 +1120,7 @@ export function RequiredReviewersPanel({
           ))}
         </div>
       )}
-      {/* Ruling 625 (e-settings #4): an empty list is ONE left-aligned row, the
+      {/* Ruling 281 (e-settings #4): an empty list is ONE left-aligned row, the
           sentence with Add beside it, and Save arrives with something to save
           (a row, or the clear that removed the last one). The sentence used to
           repeat the note below word for word, centred over right-aligned
@@ -1186,9 +1186,9 @@ function splitPaths(line: string): string[] {
 }
 
 /**
- * Ruling 396 (F39-23): the project's file leases, on a page a person can open.
+ * Ruling 61 (F39-23): the project's file leases, on a page a person can open.
  *
- * Ruling 245 built leases and gave them no human surface at all. They were
+ * Ruling 60 built leases and gave them no human surface at all. They were
  * declared by one controller tool, read by another, injected into every
  * specialist's prompt, and ENFORCED at delivery — `push-workspace` refuses the
  * push before anything reaches GitHub and says "clear the lease once AX-9 has
@@ -1228,7 +1228,7 @@ export function FileLeasesPanel({
   const update = (i: number, patch: Partial<FileLeaseDraft>) =>
     setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
-  /** Ruling 245(b): a lease whose holder finished binds nobody. Dropping every
+  /** Ruling 60: a lease whose holder finished binds nobody. Dropping every
    *  spent row at once is the tidy `staleFileLeases` was named for. */
   const clearSpent = () => {
     const spent = new Set(
@@ -1346,7 +1346,7 @@ export function FileLeasesPanel({
           ))}
         </div>
       )}
-      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
+      {/* Ruling 280: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
           {draft.length === 0 && (
@@ -1437,7 +1437,7 @@ function gatesOfDraft(rows: readonly GateDraft[]) {
 }
 
 /**
- * Ruling 482 (F40-52): the commands Viberr itself runs on every delivered
+ * Ruling 104 (F40-52): the commands Viberr itself runs on every delivered
  * revision.
  *
  * On akinozer-com the gate list lived in the rulings knowledge base as prose,
@@ -1554,7 +1554,7 @@ export function ProjectGatesPanel({
           ))}
         </div>
       )}
-      {/* Ruling 625: the empty list is one row, as the reviewers' above. */}
+      {/* Ruling 280: the empty list is one row, as the reviewers' above. */}
       {canManage && (
         <div className="rr-actions">
           {draft.length === 0 && (
@@ -1604,13 +1604,13 @@ export function ProjectGatesPanel({
 type InviteField = "name" | "email";
 
 /**
- * Ruling 148(b): adding a member is an occasional multi-field action (a few
+ * Ruling 323: adding a member is an occasional multi-field action (a few
  * times in a project's life), so it is a button in the panel head that opens a
  * modal, never a form served permanently under the member list. That is also
  * what the org-level twin of this exact action does
  * (`org-settings/users-panel.tsx`: "Allow access").
  *
- * Ruling 147 comes from `MiniModal`: the primary stays enabled until the
+ * Ruling 288 comes from `MiniModal`: the primary stays enabled until the
  * request is in flight, and an incomplete submit is REFUSED here — the foot
  * alert is re-inserted and the first unmet field is marked and focused. The
  * refusal the toast used to carry ("Enter a name and a valid email") is that
@@ -1641,7 +1641,7 @@ function InviteMemberModal({
   const [flagged, setFlagged] = useState<InviteField | null>(null);
   /** The already-a-member refusal, counted so each one re-inserts the alert. */
   const [dupe, setDupe] = useState<{ n: number; email: string } | null>(null);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const dupeShake = useRefusalShake(dupe?.n ?? null);
   const refs = {
     name: useRef<HTMLInputElement>(null),
@@ -1650,7 +1650,7 @@ function InviteMemberModal({
   const name = nm.trim();
   const email = em.trim().toLowerCase();
   const canSave = name !== "" && email.includes("@");
-  // Ruling 459: an invite plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: an invite plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
 
   const save = () => {
@@ -1762,7 +1762,7 @@ export function MembersPanel({
   projectName: string;
   canManage: boolean;
   busy: boolean;
-  /** The member whose removal is in flight (ruling 368): only that row's ✕
+  /** The member whose removal is in flight (ruling 286): only that row's ✕
    *  reads busy; the others, and every row during an invite, only wait. */
   removing?: string | null;
   onInvite: (name: string, email: string) => void;
@@ -1784,7 +1784,7 @@ export function MembersPanel({
     // UI-29: mirror the server's live-account guard (`isLastLiveAdmin`).
     // Counting file entries let a ghost admin satisfy it client-side too. Only
     // the last admin who can sign in is kept: a removed or disabled admin's
-    // seat is never that one, so its removal goes (F18-6, ruling 705).
+    // seat is never that one, so its removal goes (F18-6, ruling 26).
     const liveAdmin = (x: MembershipView) =>
       x.role === "admin" && !x.missing && !x.disabled;
     if (liveAdmin(m) && members.filter(liveAdmin).length <= 1) {
@@ -1801,7 +1801,7 @@ export function MembersPanel({
 
   // LV-04/UI-29: memberships whose org account was deleted are counted and
   // labelled separately — they are not active members, and the row exists so an
-  // admin can SEE and REMOVE the stale entry. Ruling 705: nor is a disabled
+  // admin can SEE and REMOVE the stale entry. Ruling 26: nor is a disabled
   // account active, but it is still a member (its row says "disabled"), so the
   // head counts members, as Policy's does.
   const stale = members.filter((m) => m.missing);
@@ -1817,7 +1817,7 @@ export function MembersPanel({
             ? ` · ${countLabel(stale.length, "removed account")}`
             : ""}
         </span>
-        {/* Ruling 148(b): the panel's one create action sits in its head, the
+        {/* Ruling 323: the panel's one create action sits in its head, the
             same placement the instance-level Users panel gives "Allow access". */}
         {canManage && (
           <span className="right">
@@ -1884,8 +1884,8 @@ export function MembersPanel({
                     : "Remove member"
                 }
                 disabled={busy}
-                // Ruling 459's busy step (.7) on the row whose own removal is
-                // in flight; ruling 368: a row that only waits claims nothing.
+                // Ruling 283's busy step (.7) on the row whose own removal is
+                // in flight; ruling 286: a row that only waits claims nothing.
                 aria-busy={removing === m.userId || undefined}
                 onClick={() => remove(m)}
               >
@@ -1933,12 +1933,12 @@ export function MembersPanel({
 
 // -------------------------------------------------- repository & credentials
 
-/** What the dialog says it checks the new repository with (ruling 700(e) took
+/** What the dialog says it checks the new repository with (ruling 13(b) took
  *  it out of the markup). */
 function repoCheckNote(current: string | null, hasCredential: boolean): string {
   return current && hasCredential
     ? "Viberr checks it with the attached credential first. Nothing changes if the check fails."
-    : // Rulings 667 and 669: with no credential of the project's to ask
+    : // Rulings 226 and 292: with no credential of the project's to ask
       // with, the change finds a connection's token and binds it.
       (current ? "No credential is attached, so " : "") +
         "Viberr checks it first with the GitHub connection for its owner, or the instance's default one, takes the repository's default branch from GitHub, and binds that connection to this project. Nothing changes if the check fails.";
@@ -1946,10 +1946,10 @@ function repoCheckNote(current: string | null, hasCredential: boolean): string {
 
 /**
  * Owner ruling 2026-07-26: a project has one repository, and this dialog is
- * the one door that changes which (ruling 539 named it Change: "repair" was
+ * the one door that changes which (ruling 226 named it Change: "repair" was
  * the wrong word for pointing a project at the repository it should have had).
  * The human TYPES the new target; the server probes it with the bound
- * credential, or with a connection when none is bound (rulings 667 and 669),
+ * credential, or with a connection when none is bound (ruling 226),
  * and refuses misses. The repository itself is never inferred.
  */
 function ChangeRepoDialog({
@@ -1968,12 +1968,12 @@ function ChangeRepoDialog({
   busy: boolean;
   result: { ok: boolean; error?: string } | undefined;
   /** The change landed: the dialog plays its exit, then onCancel unmounts it
-   *  (ruling 459). */
+   *  (ruling 287). */
   done: boolean;
   onCancel: () => void;
   onSubmit: (repo: string, confirmFootprint: boolean) => void;
 }) {
-  // Ruling 147: the primary stays enabled; a refused submit names what is
+  // Ruling 288: the primary stays enabled; a refused submit names what is
   // missing, marks it and moves focus there (`useChangeRepoForm`).
   const {
     ref,
@@ -1992,13 +1992,18 @@ function ChangeRepoDialog({
   } = useChangeRepoForm({ footprintTasks, busy, result, done, onCancel, onSubmit });
   const verb = current ? "Change" : "Attach";
   return (
-    <dialog ref={ref} className="confirm-card" aria-label={verb + " repository"}>
+    <dialog
+      ref={ref}
+      className="confirm-card"
+      aria-label={verb + " repository"}
+      data-screen-label={verb + " repository dialog"}
+    >
       {/* colo-7: a primary commit, so the primary wash, not the danger one. */}
       <div className="confirm-icon primary">
         <Icon name="github" />
       </div>
       <h3>{verb} repository</h3>
-      {/* Ruling 667: a project with no repository attaches one here. */}
+      {/* Ruling 226: a project with no repository attaches one here. */}
       {current ? (
         <p>
           Currently <code className="mono">{current}</code>. Enter the
@@ -2092,7 +2097,7 @@ function ChangeRepoDialog({
 }
 
 /**
- * The Repository panel's credential slot (ruling 700(e), the split of
+ * The Repository panel's credential slot (ruling 13(b), the split of
  * `RepoPanel`): the shared CredentialCard with its Re-check scopes and manage
  * actions for a reader who holds `grant-github-scope`, and the lock note for
  * everyone else. Hook-free; the panel renders it only while a repository is
@@ -2111,7 +2116,7 @@ function RepoCredentialSlot({
 }: {
   credential: SettingsViewData["credential"];
   canGrant: boolean;
-  /** The repository fetcher's intent (ruling 368): the scope re-check rides it. */
+  /** The repository fetcher's intent (ruling 286): the scope re-check rides it. */
   inFlight: string | null;
   credInFlight: string | null;
   instanceAdmin: boolean;
@@ -2190,7 +2195,7 @@ export function RepoPanel({
   repo: string | null;
   credential: SettingsViewData["credential"];
   canGrant: boolean;
-  /** Ruling 368: the intent the repository fetcher is carrying (the change,
+  /** Ruling 286: the intent the repository fetcher is carrying (the change,
    *  branch cleanup or the scope re-check), null while it is idle. */
   inFlight: string | null;
   /** The same for the credential fetcher (attach / re-attach / remove). */
@@ -2204,14 +2209,14 @@ export function RepoPanel({
   repoBusy: boolean;
   changeResult: { ok: boolean; toast?: string; error?: string } | undefined;
   onChangeRepo: (repo: string, confirmFootprint: boolean) => void;
-  /** Ruling 667: take the repository away from a board that does not write it. */
+  /** Ruling 226: take the repository away from a board that does not write it. */
   onRemoveRepo: () => void;
   onSetBranchCleanup: (enabled: boolean) => void;
   onGrantScope: () => void;
   onSetCredential: () => void;
   onClearCredential: () => void;
   onOpenTask: (taskKey: string) => void;
-  /** Ruling 480 (F40-45): the reader is an instance admin, so the credential
+  /** Ruling 222 (F40-45): the reader is an instance admin, so the credential
    *  row links to the bound connection's Update token (Instance settings is
    *  admin-only; everyone else reads where a token is replaced). */
   instanceAdmin?: boolean;
@@ -2220,7 +2225,7 @@ export function RepoPanel({
   const [removing, setRemoving] = useState(false);
   // Close the dialog only when a change SUCCEEDS — a probe refusal keeps it
   // open with the typed reason so the owner can correct the input.
-  // Ruling 459: through the dialog's exit (`changeDone`), then its onCancel
+  // Ruling 287: through the dialog's exit (`changeDone`), then its onCancel
   // unmounts it.
   const [changeDone, setChangeDone] = useState(false);
   const settled = useRef<unknown>(changeResult);
@@ -2266,7 +2271,7 @@ export function RepoPanel({
             {repo ? (
               <span className="mono">{repo}</span>
             ) : (
-              // Ruling 667: a standing state, not a missing setting.
+              // Ruling 224: a standing state, not a missing setting.
               <span className="fine md dim">none · tasks are delivered as files</span>
             )}
             {canEditPolicy && (
@@ -2362,12 +2367,12 @@ body="Tasks are then delivered as the files their agents save on them. The proje
           the project's token fingerprint, its scope verdicts and its
           re-attach/remove controls. Every one of those actions gates on
           `grant-github-scope` server-side (this route's action), so the card is
-          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          WITHDRAWN below that tier rather than rendered read-only — ruling 27's
           precedent, and byte-for-byte what /projects/:slug/github already does
           with the same component. The /github page fixed this in pass 19 and
           Settings did not, so a project Viewer read the masked tail here. The
           loader redacts the same fields it hides, so the withheld detail never
-          reaches the browser at all. Ruling 667: with no repository there is
+          reaches the browser at all. Ruling 224: with no repository there is
           no credential to speak of, and attaching one is the row above. */}
       {!repo ? null : (
         <RepoCredentialSlot
@@ -2399,14 +2404,14 @@ function DeleteProjectDialog({
   onCancel: () => void;
   onConfirm: (confirmName: string) => void;
 }) {
-  // Ruling 459: the delete leaves the way Cancel does (`commit`).
+  // Ruling 287: the delete leaves the way Cancel does (`commit`).
   const { ref: dialogRef, close, commit } = useDialog(onCancel);
   const [confirmName, setConfirmName] = useState("");
   const matches = confirmName.trim() === projectName;
   return (
     // Native <dialog>: Escape, backdrop-click light-dismiss, scroll lock, and
     // focus restore come from useDialog + showModal(); role="alertdialog"
-    // keeps the stronger semantics. Ruling 458(l): it stays hand-written, since
+    // keeps the stronger semantics. Ruling 287(d): it stays hand-written, since
     // its confirm waits on the typed name, and carries the screen label every
     // dialog does (surfaces.md §4).
     <dialog
@@ -2471,7 +2476,7 @@ export function DangerZone({
   projectName: string;
   archived: boolean;
   busy: boolean;
-  /** Ruling 368: the intent in flight on the danger fetcher, so the control
+  /** Ruling 286: the intent in flight on the danger fetcher, so the control
    *  that sent it (Archive/Restore, or Delete once its dialog has closed)
    *  shows the work and the other only waits. */
   inFlight?: string | null;
@@ -2501,7 +2506,7 @@ export function DangerZone({
         </span>
         <button
           type="button"
-          // Ruling 149: archiving is destructive, so it carries the danger
+          // Ruling 278: archiving is destructive, so it carries the danger
           // label beside "Delete project" instead of reading as a plain
           // secondary. Restore is a recovery action and stays neutral.
           className={"btn ghost sm" + (archived ? "" : " danger")}
@@ -2561,7 +2566,7 @@ export function SettingsPage({
   data: SettingsViewData;
   meId: string | null;
   myRole: string | null;
-  /** Ruling 480 (F40-45): the reader's instance role is `admin`. */
+  /** Ruling 222 (F40-45): the reader's instance role is `admin`. */
   instanceAdmin?: boolean;
 }) {
   const navigate = useNavigate();
@@ -2579,7 +2584,7 @@ export function SettingsPage({
     "set-required-reviewers",
     "rules",
   );
-  // Ruling 652(b): a lease save answers like every other panel's.
+  // Ruling 303: a lease save answers like every other panel's.
   const leaseSave = useListSave<SavedLease>(csrf, "set-file-leases", "leases");
   const gateSave = useListSave<SavedGate>(csrf, "set-project-gates", "gates");
 
@@ -2614,15 +2619,15 @@ export function SettingsPage({
         </div>
       </div>
       <div className="policy-wrap">
-        {/* Ruling 178 put the required reviewers "under the stage editor in the
-            same grid cell", and rulings 396 and 482 stacked leases and gates under
+        {/* Ruling 89 put the required reviewers "under the stage editor in the
+            same grid cell", and rulings 61 and 104 stacked leases and gates under
             them — but the cell was a third grid item, so it wrapped to row 2 under
-            Project and left a 786px hole beside it (ruling 625, e-settings #1).
+            Project and left a 786px hole beside it (ruling 281, e-settings #1).
             Two stacks now, one theme each: the project, its people and its
             repository on the left; the workflow and the policy that names its
             stages on the right. `.profile-col` is the sheet's
             stack-of-panels-in-a-cell (Policy stacks Guardrails the same way),
-            and ruling 148(a) ends the two columns on one line. */}
+            and ruling 323 ends the two columns on one line. */}
         <div className="policy-cols">
           <div className="profile-col">
             <ProjectPanel
@@ -2689,7 +2694,7 @@ export function SettingsPage({
               busy={reviewerSave.busy}
               onSave={reviewerSave.save}
             />
-            {/* Ruling 396: a lease names a task and a path, and it is policy in
+            {/* Ruling 61: a lease names a task and a path, and it is policy in
                 the same sense the reviewer rules are, so it stacks in the same
                 column under them. */}
             <FileLeasesPanel
@@ -2700,7 +2705,7 @@ export function SettingsPage({
               busy={leaseSave.busy}
               onSave={leaseSave.save}
             />
-            {/* Ruling 482: the gates decide what acceptance waits on, as the
+            {/* Ruling 104: the gates decide what acceptance waits on, as the
                 reviewer rules above do, so they stack in the same column. */}
             <ProjectGatesPanel
               key={`gates:${JSON.stringify(data.gates ?? [])}`}

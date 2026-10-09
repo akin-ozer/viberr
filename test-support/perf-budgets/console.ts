@@ -8,34 +8,34 @@ const TASK_CONSOLE =
 const TASK_PAGE =
   "jsdom: TaskDetailPage beside the layout's live stream, one Profiler; the developer streaming beside a finished 50-line operator, no timeline events; fake EventSource and /resources/run-log, fake timers";
 
-/** Ruling 457 ratchet ceilings: live run console, task page render and its SSE streams. */
+/** Ruling 11 ratchet ceilings: live run console, task page render and its SSE streams. */
 export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // TASK-1: 1,048,869 while every group's window (display and raw) rode every
   // revalidation; now window facts only (owner decision 2). Raised 13001 to
   // 13073 by CON-7: each of the three groups carries its facts' version
   // (`"factsAt":<ms>,`, 24 bytes), so the strip keeps the newer of a
   // revalidation's read and a tail read instead of stepping back. Raised
-  // 13073 to 13152 by ruling 471: VIB-142's packet render names the option
+  // 13073 to 13152 by ruling 316: VIB-142's packet render names the option
   // each acceptance door answers its decision with (`acceptAnswersWith` and
   // `forceAnswersWith`, "Accept completion", 79 bytes), so the accept dialog
   // reads the loader's answer instead of guessing. Raised 13152 to 13173 by
-  // ruling 475(c): the loader names the open pull requests this merge will
+  // ruling 242: the loader names the open pull requests this merge will
   // likely put in conflict (`"mergeCollisions":[],`, 21 bytes on VIB-142, which
   // shares no path), so the accept dialog can say so before the merge. Raised
-  // 13173 to 13395 by ruling 521: the loader ships the completion packet's
+  // 13173 to 13395 by ruling 103: the loader ships the completion packet's
   // view (`completion`, 234 bytes on VIB-142: its one required reviewer, no
   // verdict yet on a91f7c2, and the change's size), which the decision that
   // offers acceptance draws; the payload had come down 12 bytes since 475.
-  // Raised 13395 to 13421 by ruling 526: VIB-142's completion carries its two
+  // Raised 13395 to 13421 by ruling 16: VIB-142's completion carries its two
   // evidence rows as a result and a mark (`"result":"6 passed","status":"pass"`)
   // in place of a diff's `add` and `del` (26 bytes), which the timeline draws
-  // as a checklist. Raised 13421 to 13685 by ruling 693: the loader ships what
+  // as a checklist. Raised 13421 to 13685 by ruling 83: the loader ships what
   // the task took for the completion card to print (`whatItTook`, its facts
   // and notes alone, 273 bytes on VIB-142: six runs and their agent time, no
   // cost reported, the first delivery, and two notes on what the figure
   // misses; its open acceptance decision is no asked round), only with a
   // completion view and to a viewer who may see the runs; the payload had
-  // come down 9 bytes since 526. Lowered 13685 to 13666 by ruling 705: the
+  // come down 9 bytes since 526. Lowered 13685 to 13666 by ruling 308: the
   // loader no longer ships `"runsVisible":true,` (19 bytes), a flag the
   // members-only page could only ever set true.
   "console:task-data.json-bytes": {
@@ -56,13 +56,13 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // TASK-1: 1,048,869 (the same payload as a revalidation); now the shown
   // agent's window, display lines only. Raised 136574 to 136646 by CON-7:
   // the three groups' `factsAt` (24 bytes each). Raised 136646 to 136725 by
-  // ruling 471: the packet render's two answer fields (79 bytes, as above).
-  // Raised 136725 to 136746 by ruling 475(c): `"mergeCollisions":[],` (21
-  // bytes, as above). Raised 136746 to 136968 by ruling 521: `completion`
+  // ruling 316: the packet render's two answer fields (79 bytes, as above).
+  // Raised 136725 to 136746 by ruling 242: `"mergeCollisions":[],` (21
+  // bytes, as above). Raised 136746 to 136968 by ruling 103: `completion`
   // (234 bytes, as above, less the same 12). Raised 136968 to 136994 by
-  // ruling 526: the two rows' result and mark (26 bytes, as above). Raised
-  // 136994 to 137258 by ruling 693: `whatItTook` (273 bytes, as above, less
-  // the same 9). Lowered 137258 to 137239 by ruling 705: `runsVisible` (19
+  // ruling 16: the two rows' result and mark (26 bytes, as above). Raised
+  // 136994 to 137258 by ruling 83: `whatItTook` (273 bytes, as above, less
+  // the same 9). Lowered 137258 to 137239 by ruling 308: `runsVisible` (19
   // bytes, as above).
   "console:task-document.json-bytes": {
     ceiling: 137239,
@@ -137,12 +137,12 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // re-reconciled on identical data; neither renders now (the stable run
   // projection, memoised panels). The 43 left are the page's other panels
   // (54 before the timeline and composer memos of perf/journeys-pass; 51
-  // before ruling 459's memoised GlyphSwap took the run start's and Archive's
-  // glyphs out of the re-render; 49 before ruling 501's Details panel, whose
-  // property rows are memoised on its stabilised values, so an unchanged task
-  // re-renders only the panel's shell and its head glyph; 44 before ruling
-  // 511's PR card, where the branch is the link to its tree and the "Open on
-  // GitHub" button's glyph is gone). Raised to 44 by ruling 700(d): the
+  // before the memoised GlyphSwap (ruling 284) took the run start's and
+  // Archive's glyphs out of the re-render; 49 before the Details panel (ruling
+  // 309), whose property rows are memoised on its stabilised values, so an
+  // unchanged task re-renders only the panel's shell and its head glyph; 44
+  // before the PR card (ruling 315), where the branch is the link to its tree
+  // and the "Open on GitHub" button's glyph is gone). Raised to 44 by ruling 13(b): the
   // TaskMainColumn region, the page's main column as a component of its own,
   // renders once with the page; every panel under it renders as before.
   "console:task-page.renders-per-noop-revalidation": {

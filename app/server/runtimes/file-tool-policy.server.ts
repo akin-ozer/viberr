@@ -4,11 +4,11 @@ import path from "node:path";
 import { capabilityById } from "~/shared/capabilities";
 
 /**
- * Ruling 564: a run that posts files keeps its file tools, and they write only
+ * Ruling 217(d): a run that posts files keeps its file tools, and they write only
  * where its posting goes.
  *
- * Ruling 109 gives every run whose profile holds `attach-evidence-references`
- * the task's attachments folder, and ruling 535 lets an agent that makes a
+ * Ruling 78 gives every run whose profile holds `attach-evidence-references`
+ * the task's attachments folder, and ruling 128 lets an agent that makes a
  * result deliver it there without a repo-write grant. The write posture never
  * met either: a withheld `execute-code-or-write-repo` removes Edit, MultiEdit
  * and Write outright (the parity ruling of 2026-08-31), so on Claude the agent
@@ -21,12 +21,20 @@ import { capabilityById } from "~/shared/capabilities";
  * (`$766.63` reads `66.63`).
  *
  * Such a run keeps the three tools, and a PreToolUse hook refuses a call whose
- * target is outside the attachments folder and the temp directory, with a
- * sentence naming both. The checkout stays out of their reach, which is what
- * the withheld grant is about, and NotebookEdit stays denied. Coverage, not
- * containment, like the Bash hook beside it (ruling 101(e)): the run keeps
+ * target is outside the attachments folder and the run's own temp directory
+ * (ruling 141(c): `<root>/<runId>`, its `$TMPDIR`, where the prompt tells it to
+ * keep temporary files), with a sentence naming both. A run whose temp
+ * directory could not be made starts without one and says so, and its tools
+ * use the server's shared temp directory, which is then its `$TMPDIR` too.
+ * The checkout stays out of their reach, which is what the withheld grant is
+ * about, and NotebookEdit stays denied. On a board with
+ * no repository there is no checkout, and the workspace contract calls the
+ * run's working directory the task's scratch (ruling 199), so the tools write
+ * it too; a run on a board with a repository never has its working directory
+ * added, even when its clone failed. Coverage, not
+ * containment, like the Bash hook beside it (ruling 219(a)): the run keeps
  * Bash, which writes anywhere its user can. Codex is unchanged: since ruling
- * 185 its write posture is advisory, and its patch tool already writes the
+ * 183 its write posture is advisory, and its patch tool already writes the
  * drop.
  */
 
@@ -36,17 +44,25 @@ export const DROP_FILE_TOOLS = ["Edit", "MultiEdit", "Write"] as const;
 /**
  * Where a Claude run's Edit, MultiEdit and Write may write, or null when
  * nothing changes: the grants leave the tools alone, or the run has no
- * attachments folder. The one derivation the adapter's hook and the run's
- * disclosure share.
+ * attachments folder. `scratchDir` is the run's working directory when its
+ * task has no checkout (a board with no repository), and absent otherwise.
+ * `runTmpDir` is the run's own temp directory (`spec.tmpDir` at launch,
+ * `runTmpDirFor` in the disclosure before it); absent, the run has none and
+ * the server's shared one stands in, as it does for the run's processes.
+ * The one derivation the adapter's hook and the run's disclosure share.
  */
 export function fileWriteRoots(
   denied: readonly string[] | undefined,
   attachmentsDir: string | null | undefined,
-  tempDir: string = tmpdir(),
+  scratchDir: string | null | undefined,
+  runTmpDir: string | null | undefined,
 ): string[] | null {
   if (!attachmentsDir || !denied) return null;
   if (!DROP_FILE_TOOLS.every((tool) => denied.includes(tool))) return null;
-  return [attachmentsDir, tempDir];
+  // Ruling 141(c): the run's own `$TMPDIR`, never the whole of the server's
+  // temp directory, which every run of every person shares.
+  const tempDir = runTmpDir || tmpdir();
+  return scratchDir ? [attachmentsDir, scratchDir, tempDir] : [attachmentsDir, tempDir];
 }
 
 /** The denylist the SDK is handed once the file tools are confined instead. */
@@ -91,14 +107,14 @@ export function fileWriteDenyReason(
   const id = "execute-code-or-write-repo";
   const label = capabilityById(id)?.label ?? id;
   const [attachments, ...scratch] = roots;
-  // Ruling 692(d): the last sentence. The grant's label used to open with
+  // Ruling 183: the last sentence. The grant's label used to open with
   // "Execute code", and live a writer that read this refusal stopped running
   // commands for the rest of its run ("after that I only counted words and
   // checked links"), though the grant never took its shell away.
   return (
     `Withheld by capability policy: "${label}" (${id}) is not granted on this run, so ${tool} ` +
     `writes only into the task's attachments folder \`${attachments}\`, where the files you ` +
-    `post on the task go, and ${scratch.map((dir) => `\`${dir}\``).join(", ")} for scratch. ` +
+    `post on the task go, and ${scratch.map((dir) => `\`${dir}\``).join(" and ")} for scratch. ` +
     `\`${filePath}\` is outside both: write the file there by its absolute path, and leave ` +
     "everything else as it is. This confines Edit, MultiEdit and Write and nothing else: your " +
     "shell still runs commands."

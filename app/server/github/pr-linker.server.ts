@@ -16,7 +16,7 @@ import {
  * PR linker (Phase 7): finds the pull request for a task's execution
  * branch, fetches state/draft/merged + a checks summary + (P13-D-28) the
  * review state, and maps real GitHub PR states to the task-file cache
- * vocabulary (orchestrator ruling 12):
+ * vocabulary (ruling 237):
  *
  *   merged            → cache "merged"
  *   open (incl draft) → cache "review"
@@ -33,7 +33,7 @@ import {
 
 /** The `pr.state` vocabulary stored in task.md — the prRefSchema enum
  * (PR_STATE_VALUES): "closed" extends the phase-3 "review"|"merged" pair per
- * ruling 12; "accepted" = human-accepted, real merge pending. */
+ * ruling 237; "accepted" = human-accepted, real merge pending. */
 export type PrCacheState = PrState;
 
 export function mapPrToCacheState(pr: {
@@ -43,7 +43,7 @@ export function mapPrToCacheState(pr: {
 }): PrCacheState {
   if (pr.merged || pr.merged_at) return "merged";
   if (pr.state === "closed") return "closed";
-  return "review"; // open + draft both read "in review" (ruling 12)
+  return "review"; // open + draft both read "in review" (ruling 237)
 }
 
 /**
@@ -66,7 +66,7 @@ export interface PrChecksSummary extends PrChecks {
 export interface PrFacts {
   number: number;
   title: string;
-  /** Mapped cache state (ruling 12). */
+  /** Mapped cache state (ruling 237). */
   state: PrCacheState;
   draft: boolean;
   headSha: string | null;
@@ -78,7 +78,7 @@ export interface PrFacts {
    * that were reported but not readable are counted in `unknown`, never left to
    * pass as green (F21-7). */
   checks: PrChecksSummary | null;
-  /** Ruling 360 (pass 38, F38-14): the check-runs read for this head was
+  /** Ruling 237 (pass 38, F38-14): the check-runs read for this head was
    *  ATTEMPTED and GitHub refused or failed it, so `checks` is null for THAT
    *  reason. Absent when the read succeeded or was never attempted (no head).
    *  A 403 here is the credential: a fine-grained token without Checks: read
@@ -94,13 +94,13 @@ export interface PrFacts {
    *  (terminal PR, or the call failed) means UNKNOWN, so callers keep the
    *  cached value instead of erasing a real approval on a GitHub hiccup. */
   approvals?: PrApproval[];
-  /** Ruling 484: the submitted reviews, for the relay. ABSENT under the same
+  /** Ruling 246: the submitted reviews, for the relay. ABSENT under the same
    *  rule as `approvals`: not read this pass. */
   reviewEvents?: PrReviewEvent[];
   /** P14-LV-07: can GitHub merge this PR? ABSENT when the detail fetch failed
    * (unknown → callers keep the cached value) or the PR is terminal. */
   mergeable?: PrMergeable;
-  /** Ruling 236: the paths this PR changes, pinned to the head they were read
+  /** Ruling 242: the paths this PR changes, pinned to the head they were read
    *  at. ABSENT under the same rule as everything above — not read this pass,
    *  so the caller keeps its cached list. Deliberately NOT fetched when the
    *  known head already matches: a file list cannot change without the head
@@ -192,7 +192,7 @@ interface GhReview {
    *  approved. */
   commit_id?: string | null;
   submitted_at?: string | null;
-  /** Ruling 484: the review's id (what its line comments are listed under,
+  /** Ruling 246: the review's id (what its line comments are listed under,
    *  and what the relay records once it has relayed it) and its body. */
   id?: number;
   body?: string | null;
@@ -222,7 +222,7 @@ const ghReviewsSchema = z
   .catch([]);
 
 /**
- * Ruling 484 (pass 40, F40-54): one SUBMITTED review, as the reconciler's
+ * Ruling 246 (pass 40, F40-54): one SUBMITTED review, as the reconciler's
  * review relay reads it. A CHANGES_REQUESTED review used to become a pill
  * state and nothing else; its body and its line comments never reached the
  * agent that delivered the work.
@@ -424,13 +424,13 @@ export function deriveMergeable(pr: {
  * Finds the newest PR whose head is `branch` (any state), then fetches the
  * PR detail (merged flag + change stats) and a check-runs summary.
  */
-/** Ruling 236: the one field the changed-files read uses. A row without a
+/** Ruling 242: the one field the changed-files read uses. A row without a
  *  usable `filename` is dropped rather than failing the page, and a page that
  *  does not parse at all leaves the key absent (= not read). */
 const ghPullFileSchema = z.object({ filename: z.string().min(1) }).loose();
 
 /**
- * Ruling 236 — the repository paths a pull request changes.
+ * Ruling 242 — the repository paths a pull request changes.
  *
  * Called only when the head MOVED (see `knownPathsHeadSha`), because a file
  * list cannot change without it: on a board where most ticks find nothing new,
@@ -478,7 +478,7 @@ export async function findPrForBranch(
   client: GithubClient,
   repo: string,
   branch: string,
-  /** Ruling 236: the head the caller's cached `pr.paths` was read at. When the
+  /** Ruling 242: the head the caller's cached `pr.paths` was read at. When the
    *  live head still equals it the changed-file read is SKIPPED and the key is
    *  left absent, so the caller keeps the list it already has. */
   knownPathsHeadSha?: string | null,
@@ -583,7 +583,7 @@ export async function findPrForBranch(
     } else if (checkRuns.kind === "network") {
       checksUnread = { status: null, message: checkRuns.message };
     } else {
-      // Ruling 360: the refusal is carried, not swallowed — it used to leave
+      // Ruling 237: the refusal is carried, not swallowed — it used to leave
       // `checks: null` indistinguishable from "never looked".
       checksUnread = { status: checkRuns.status, message: checkRuns.message };
     }
@@ -614,7 +614,7 @@ export async function findPrForBranch(
       // R19-B: same payload, no extra call — the identities + commits behind
       // the pill, so a project member's approval can BE the verdict.
       approvals = deriveApprovals(entries);
-      // Ruling 484: and the reviews themselves, for the relay. Same payload.
+      // Ruling 246: and the reviews themselves, for the relay. Same payload.
       reviewEvents = reviewEventsOf(entries);
     }
   }
@@ -654,7 +654,7 @@ export async function findPrForBranch(
   const mergeable =
     detail.ok && state === "review" ? deriveMergeable(pr) : "unknown";
   if (mergeable !== "unknown") facts.mergeable = mergeable;
-  // Ruling 236: only an OPEN pull request's file list is worth anything to the
+  // Ruling 242: only an OPEN pull request's file list is worth anything to the
   // overlap read, and only a head that MOVED can have changed it.
   if (state === "review" && headSha && headSha !== knownPathsHeadSha) {
     const paths = await readPrPaths(client, repo, pr.number, headSha);
@@ -664,7 +664,7 @@ export async function findPrForBranch(
 }
 
 /**
- * Ruling 160 (pass 35, F35-11): the SAME pull request the task already
+ * Ruling 232 (pass 35, F35-11): the SAME pull request the task already
  * references, read by NUMBER.
  *
  * `findPrForBranch` lists by head branch and, for a closed PR whose branch has
@@ -722,7 +722,7 @@ const ghIssueCloserSchema = z
   .catch({});
 
 /**
- * Ruling 160: the GitHub login of whoever closed the pull request, or null
+ * Ruling 232: the GitHub login of whoever closed the pull request, or null
  * when GitHub named nobody (a degraded read, a closure GitHub attributes to no
  * account). One call, on the transition into `closed` only.
  */

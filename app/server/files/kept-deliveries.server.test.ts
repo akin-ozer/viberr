@@ -8,8 +8,8 @@ import { changesSinceKeptDelivery, keepDelivery } from "./kept-deliveries.server
 import { listTaskAttachmentNames, writeTaskAttachment } from "./task-attachments.server";
 
 /**
- * Ruling 703: how the task's files stand against the delivery a reviewer
- * judged, read from the copy Viberr kept of it (ruling 597). The reviewer
+ * Ruling 81: how the task's files stand against the delivery a reviewer
+ * judged, read from the copy Viberr kept of it (ruling 86). The reviewer
  * sent to judge again is told this, so the answer has to be the bytes' own,
  * and about the folder the reviewer will open.
  */
@@ -47,7 +47,7 @@ const nothing = () => false;
 const changes = (judged = JUDGED, now = onTask(), leftOut: (name: string) => boolean = nothing) =>
   changesSinceKeptDelivery(store.slug, "VIB-1", judged, now, leftOut, store.dataRoot);
 
-describe("ruling 703: the task's files set against the delivery a reviewer judged", () => {
+describe("ruling 81: the task's files set against the delivery a reviewer judged", () => {
   it("sorts every file into changed, new, gone or unchanged, by its bytes", () => {
     // BLOG-8's shape: a label changed in the drawing and its alt text in the
     // piece, the cover was not touched, one file was dropped, one was added.
@@ -116,7 +116,7 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
   });
 
   it("one file under two Unicode forms of its name is one file, named as the folder has it now", () => {
-    // Ruling 675: the store may hold a name decomposed, and a later save may
+    // Ruling 76: the store may hold a name decomposed, and a later save may
     // compose it. Canary: pair the names exactly, and the file is told as
     // both gone and new.
     const composed = "İçerik-teklifi.md";
@@ -157,7 +157,7 @@ describe("ruling 703: the task's files set against the delivery a reviewer judge
   });
 
   it("answers null when the judged delivery was not kept, or its stamp cannot be one", () => {
-    // A task delivered before ruling 597 has no folder for that delivery.
+    // A delivery that was not kept (ruling 86) has no folder.
     // Canary: answer a comparison with an empty kept side, and a reviewer is
     // told every file is new.
     save("post.md", "one");

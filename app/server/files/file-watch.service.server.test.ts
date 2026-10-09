@@ -43,7 +43,7 @@ async function waitFor(
   cond: () => boolean,
   what: string,
   nudge?: () => void,
-  /** Ruling 218's retry test needs its own budget — see the call site. */
+  /** Ruling 22's retry test needs its own budget — see the call site. */
   budgetMs: number = WAIT_TIMEOUT_MS,
 ): Promise<void> {
   const deadline = Date.now() + budgetMs;
@@ -186,14 +186,14 @@ describe("subtree pruning (F-SPAWN1 — fd explosion)", () => {
 });
 
 /**
- * Ruling 218 (F37-38). A projection is rebuilt when its file CHANGES. If that
+ * Ruling 22 (F37-38). A projection is rebuilt when its file CHANGES. If that
  * one rebuild fails, the file does not change again — so the row keeps whatever
  * it held before, forever. Live: ninety seconds of `disk I/O error` left
  * SHOP-4's card reading "waiting on you" while its own file said `waiting:
  * agent`, and it stayed wrong until a human pressed Re-scan. Nobody would have,
  * because nothing on any surface said to.
  */
-describe("a failed rebuild is retried (ruling 218)", () => {
+describe("a failed rebuild is retried (ruling 22)", () => {
   it("heals a stale projection whose ONE rebuild failed, with no further file change", async () => {
     const store = setupTestStore(ctx);
     const uid = store.users.arda.id;
@@ -222,7 +222,7 @@ describe("a failed rebuild is retried (ruling 218)", () => {
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     expect(events()).toBe(1);
 
-    // Ruling 218's real ladder is 2s / 5s / 15s. This test has to WAIT for a
+    // Ruling 22's real ladder is 2s / 5s / 15s. This test has to WAIT for a
     // retry, so with the production numbers a repair landing just after the
     // second attempt waits fifteen more seconds for the third — and the budget
     // then has to beat full-suite scheduling noise on top. It was raised to 12s
@@ -303,7 +303,7 @@ describe("a failed rebuild is retried (ruling 218)", () => {
   }, 30_000);
 
   /**
-   * Ruling 457: a project's cascade isolates each task (a SAVEPOINT apiece), so
+   * Ruling 21: a project's cascade isolates each task (a SAVEPOINT apiece), so
    * a task that cannot re-project no longer fails project.md's rebuild. The
    * project row lands and keeps the F28-D3 sentinel, and the result names the
    * task: without a retry on that, nothing would ever re-run the cascade, since
@@ -372,12 +372,12 @@ describe("a failed rebuild is retried (ruling 218)", () => {
   }, 30_000);
 
   /**
-   * The ruled ladder, pinned (ruling 218(a)). `scheduleRetry` gives up after
+   * The ruled ladder, pinned (ruling 22). `scheduleRetry` gives up after
    * the last rung, which is why the test ladder above is 500 long: a test
    * ladder that runs out mid-wait stops retrying and the canary fails for a
-   * reason that has nothing to do with ruling 218.
+   * reason that has nothing to do with the ladder.
    */
-  it("ruling 218's ladder is 2s, 5s, 15s, 45s, 120s", () => {
+  it("ruling 22's ladder is 2s, 5s, 15s, 45s, 120s", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);
   });
 });

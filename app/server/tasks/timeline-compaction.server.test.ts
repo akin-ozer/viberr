@@ -118,7 +118,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 257 (pass 37, F37-87). Ruling 99(b) made a controller write a
+   * Ruling 73 (pass 37, F37-87). Ruling 247 made a controller write a
    * DIFFERENT actor kind on purpose — the person is the authority, the
    * controller is the instrument — and every other seam honours that: the audit
    * row reads "arda@viberr.dev · via controller", the comment is signed "Posted
@@ -132,7 +132,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
    * lease the board was still enforcing — under a marker that says human
    * comments are never compacted, so nobody who saw the gap would look.
    */
-  it("ruling 257: never folds a CONTROLLER comment either — it is a person publishing", () => {
+  it("ruling 73: never folds a CONTROLLER comment either — it is a person publishing", () => {
     const controller = (i: number, text: string) =>
       comment(i, { actor: { kind: "controller" }, text });
     const events = [
@@ -183,7 +183,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 206 (F37-26, measured on the live board). Every fixture above puts
+   * Ruling 73 (F37-26, measured on the live board). Every fixture above puts
    * the foldable comments NEXT TO each other, and the adjacency requirement is
    * invisible under that shape. Viberr's own timeline never has it: a typed
    * `agent` / `quality` / `github` / `transition` event lands between every pair
@@ -193,7 +193,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
    * existed anywhere — while the foldable comments were 29% of SHOP-7's
    * timeline bytes and 34% of SHOP-6's.
    */
-  it("ruling 206: folds routine comments that are SEPARATED by typed events", () => {
+  it("ruling 73: folds routine comments that are SEPARATED by typed events", () => {
     // The live shape: reply, typed, reply, typed, reply… for the whole tail.
     const events = [
       ...Array.from({ length: 10 }, (_, i) => comment(90 - i)),
@@ -225,7 +225,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 209. The evidence-separation guardrail takes an agent's raw output
+   * Ruling 73. The evidence-separation guardrail takes an agent's raw output
    * OFF the timeline and onto disk, leaving a reference behind. A comment
    * carrying one is therefore not disposable prose: folding it keeps a count
    * and drops the pointer, orphaning a file that is still there and still the
@@ -233,7 +233,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
    * Engineer's reply with "1 attachment: …" rows — agent-authored, not
    * `toAgent`, matching every other foldable clause.
    */
-  it("ruling 209: never folds a comment that carries an evidence reference", () => {
+  it("ruling 73: never folds a comment that carries an evidence reference", () => {
     const withEvidence = (i: number): TaskFileEvent => ({
       ...agent(i),
       evidence: [{ label: "Timed lifecycle log", result: "1 attachment: SHOP-15-run.log", status: "info" }],
@@ -254,13 +254,13 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 211(e), from the adversarial self-review of 209: `attachments` is a
+   * Ruling 73, from the adversarial self-review of 209: `attachments` is a
    * SECOND, separate pointer list on the same event — the browser captures a run
    * saved into `attachments/` — and 209 excluded only `evidence`. The files
    * survive in the directory either way; what folding deletes permanently from
    * canonical task.md is the chips AND the prose saying what each capture shows.
    */
-  it("ruling 211(e): never folds a comment carrying ATTACHMENTS either", () => {
+  it("ruling 73: never folds a comment carrying ATTACHMENTS either", () => {
     const withFiles = (i: number): TaskFileEvent => ({
       ...agent(i),
       attachments: ["shop-15-checkout.png", "shop-15-orders.png"],
@@ -281,7 +281,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 382 (F39-9), live on ax-clone AX-9. The operator answered Arda by
+   * Ruling 20 (F39-9), live on ax-clone AX-9. The operator answered Arda by
    * name about a correction he had just filed; his question survived as human
    * prose and the answer was folded, so canonical task.md — the file the next
    * agent anchors on — read as a person correcting the record and nobody
@@ -289,7 +289,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
    * button to the task, so following it landed on a page the text was no longer
    * on.
    */
-  it("ruling 382: never folds a comment whose notification reached somebody", () => {
+  it("ruling 20: never folds a comment whose notification reached somebody", () => {
     const answered = (i: number): TaskFileEvent => ({
       ...comment(i),
       text: "@Arda Agreed — the corrected evidence settles the diagnosis.",
@@ -310,7 +310,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
     expect(kept!.text).toContain("@Arda");
   });
 
-  it("ruling 382: an empty recipient list is not a protection", () => {
+  it("ruling 20: an empty recipient list is not a protection", () => {
     // The field is written only when the fan-out reached someone, but a file
     // edited by hand can carry `notified:` with nothing after it; that is not
     // evidence anybody was told.
@@ -324,7 +324,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 317. `clipVerdictReason` (ruling 292) stores 2,000 characters of a
+   * Ruling 88. `clipVerdictReason` stores 2,000 characters of a
    * reviewer's justification and appends "Its full report is on this task's
    * timeline, whole." Compaction then folded exactly that comment away.
    *
@@ -338,7 +338,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
    * from canonical `task.md` while every `verdicts[].reason` still named the
    * timeline as the complete copy.
    */
-  it("ruling 317: a verdict's justification is never folded", () => {
+  it("ruling 88: a verdict's justification is never folded", () => {
     const agent = {
       kind: "agent" as const,
       backend: "claude" as const,

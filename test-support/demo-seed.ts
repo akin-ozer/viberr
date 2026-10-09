@@ -185,7 +185,7 @@ export async function runDemoSeed(
     );
   }
 
-  // 3. Project files (viberr-core + the two ruling-9 stubs).
+  // 3. Project files (viberr-core + the two ruling-74 stubs).
   const projects = seedProjects(ids);
   for (const project of projects) {
     writeFileAtomic(

@@ -46,7 +46,7 @@ function renderIn(node: React.ReactNode, list: NotificationView[] = []) {
     // fetcher 404s and React Router's default ErrorBoundary replaces the whole
     // tree — which reads in a test exactly like the menu having closed.
     { path: "/prefs/theme", action: () => ({ ok: true, theme: "light" }) },
-    // Ruling 457: the bell's own list (`routes/resources.notifications.ts`).
+    // Ruling 300: the bell's own list (`routes/resources.notifications.ts`).
     {
       path: LIST_ROUTE,
       loader: ({ request }) => {
@@ -85,11 +85,11 @@ describe("UI-14: the bell popover discloses its own cap", () => {
 });
 
 /**
- * Ruling 457 (owner, 2026-09-24; FL-4 / SRV-6): pages carry the bell's counts,
+ * Ruling 300 (owner, 2026-09-24; FL-4 / SRV-6): pages carry the bell's counts,
  * not its list. The bell fetches the list when the pointer or the focus reaches
  * it and on open, and while open whenever the counts move.
  */
-describe("ruling 457: the bell loads its own list", () => {
+describe("ruling 300: the bell loads its own list", () => {
   it("a first open with no intent before it shows a loading row, then the list", async () => {
     const view = renderIn(<TopBell unread={1} orphanUnread={0} />, [notification(1)]);
     fireEvent.click(view.getByLabelText(/Notifications/));
@@ -155,10 +155,10 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
     // Radix opens on pointerdown, which is what the first half of a real click
     // is; `fireEvent.click` alone never reaches the trigger's handler.
     fireEvent.pointerDown(getByLabelText("Account menu"), { button: 0 });
-    // Ruling 166: the menu roles are BACK, and this time they are honoured.
+    // Ruling 14: the menu roles are BACK, and this time they are honoured.
     // UI-45 had dropped them because they were declared with no arrow-key
     // handling — a contract that promises Up/Down navigation that does not
-    // exist. Radix implements the widget, so the promise is kept. (Ruling 457:
+    // exist. Radix implements the widget, so the promise is kept. (Ruling 11:
     // the menu module is lazy, so the press opens it once it has arrived.)
     const menu = await waitFor(() => {
       const found = container.querySelector('[role="menu"]');
@@ -193,7 +193,7 @@ describe("UI-45: popovers rendered before their trigger move focus", () => {
  * deliberately: it closes on an explicit action, not on any press. Converting
  * it to the hook's DEFAULT would silently take that away, so it is asserted.
  *
- * The account menu no longer uses the hook at all (ruling 166 — Radix owns its
+ * The account menu no longer uses the hook at all (ruling 14 — Radix owns its
  * dismissal). What that block protected for the menu was never "ignore outside
  * presses" for its own sake; it was "the Theme item cycles in place". That is
  * now asserted directly, which is a better test than the proxy it replaces —
@@ -307,7 +307,7 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("ruling 149: the announcer is mounted before the stream drops", () => {
+  it("ruling 299: the announcer is mounted before the stream drops", () => {
     // A live region inserted together with its text is the one case screen
     // readers skip, so the region has to exist (and be empty) while the stream
     // is healthy, and only its TEXT may change.
@@ -430,7 +430,7 @@ describe("acce-19: the rail's violations count says what it counts", () => {
   });
 });
 
-describe("ruling 667: the rail lists GitHub only for a project that has a repository", () => {
+describe("ruling 224: the rail lists GitHub only for a project that has a repository", () => {
   const items = (container: HTMLElement) =>
     [...container.querySelectorAll("a.nav-item")].map((a) => a.getAttribute("href")!.split("/").pop());
 
@@ -682,7 +682,7 @@ describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
 });
 
 /**
- * Ruling 145 — the app header on the standalone pages.
+ * Ruling 294 — the app header on the standalone pages.
  *
  * Every project surface, the board's own Settings included, sits under a header
  * with the brand, the ⌘K search, the bell and the account menu. The instance
@@ -690,7 +690,7 @@ describe("F15-18/UI-C: the mobile rail overlay has a keyboard way out", () => {
  * access" or "Insights" replaced the whole app with a bare page. These pin what
  * the header IS: the same four parts, in one place, naming where the reader is.
  */
-describe("ruling 145: the standalone-page header", () => {
+describe("ruling 294: the standalone-page header", () => {
   function headerFor(title: string) {
     let opened = 0;
     const Stub = createRoutesStub([
@@ -710,7 +710,7 @@ describe("ruling 145: the standalone-page header", () => {
         ),
       },
       { path: "/", Component: () => <p>home</p> },
-      // Ruling 457: the bell loads its own list.
+      // Ruling 300: the bell loads its own list.
       { path: LIST_ROUTE, loader: () => ({ notifications: [notification(1)] }) },
     ]);
     return {
@@ -742,7 +742,7 @@ describe("ruling 145: the standalone-page header", () => {
   });
 });
 
-describe("ruling 459: the bell badge pulses on an arrival, not on a paint", () => {
+describe("ruling 284: the bell badge pulses on an arrival, not on a paint", () => {
   /** The bell with its count driven from outside, as SSE revalidation does. */
   function Harness({ start }: { start: number }) {
     const [unread, setUnread] = useState(start);

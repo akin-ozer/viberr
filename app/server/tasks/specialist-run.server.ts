@@ -146,7 +146,7 @@ import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
  * ONE anchor implementation, not two: `canonicalTaskAnchor` (task-replies) is
  * already the shape ruled correct for the resume path and is prompt-budget
  * clamped on every axis. Imported dynamically, like every reach from this
- * module into the task-action modules (ruling 207(e)).
+ * module into the task-action modules (ruling 13).
  *
  * Best-effort by design: a task whose project file cannot be read still runs —
  * it falls back to the raw stage id, exactly as the resume path does, and only
@@ -164,12 +164,11 @@ async function freshRunAnchor(
       parsed,
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),
       boardReader,
-      // Ruling 245: read at anchor time, so a lease set mid-flight binds the
-      // very next run rather than the one after a restart.
-      // Ruling 245(b): resolved, so a run is never warned off a file whose
-      // holder has already landed.
+      // Ruling 60: read at anchor time, so a lease set mid-flight binds the
+      // very next run rather than the one after a restart, and resolved, so
+      // a run is never warned off a file whose holder has already landed.
       fileLeases: activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
-      // Ruling 482: the project's gates as Viberr ran them, so a reviewer
+      // Ruling 315: the project's gates as Viberr ran them, so a reviewer
       // reads the record instead of re-running the gates to report them.
       gates:
         readProjectFile(
@@ -188,7 +187,7 @@ async function freshRunAnchor(
 
 // ------------------------------------------------------- run-input disclosure
 
-// Ruling 344: the run-input disclosure moved to `~/server/runtimes/run-inputs.server`,
+// Ruling 167: the run-input disclosure moved to `~/server/runtimes/run-inputs.server`,
 // where the operator and controller can reach it without importing this runtime.
 // Re-exported because this module is still where the specialist paths use it.
 import {
@@ -197,6 +196,7 @@ import {
   type ResolvedResourceInputs,
 } from "~/server/runtimes/run-inputs.server";
 import { fileWriteRoots } from "~/server/runtimes/file-tool-policy.server";
+import { runTmpDirFor } from "~/server/runtimes/run-tmp.server";
 import { joinedPrompt, type RunPrompt, sortedNames } from "~/server/runtimes/prompt-prefix.server";
 import { specialistCompactAnchor } from "~/server/runtimes/context-policy.server";
 import { errorMessage, toError } from "~/shared/errors";
@@ -228,6 +228,7 @@ import {
   cloneRepo,
   projectRepo,
   taskCloneDir,
+  taskScratchDir,
   taskWorkspaceRoot,
   workspaceRunEnv,
 } from "./specialist-workspace.server";
@@ -257,11 +258,11 @@ export interface StartAgentRunResult {
   /** The agent's display name (deployment name; profile id when unresolvable). */
   name: string;
   /**
-   * Ruling 263 (pass 37, F37-93): what the dispatch actually did.
+   * Ruling 152 (pass 37, F37-93): what the dispatch actually did.
    *
    * A dispatch that returns is not a dispatch that started a provider process.
    * A run whose principal has no credential for this backend becomes a run ROW
-   * recording the refusal and nothing else (ruling 127), and a run that finds
+   * recording the refusal and nothing else (ruling 137), and a run that finds
    * the concurrency cap full is parked as `queued` until a slot frees. Both
    * used to be indistinguishable here from a live run, so `run_agent_on_task`
    * answered `[done] … run started` for all three under a tool description
@@ -277,7 +278,7 @@ export interface StartAgentRunResult {
  *  value: the throw is exactly the path that produces no return value. */
 interface PendingReservation {
   reservation: RunReservation | null;
-  /** Ruling 180: the skill plugin built for a run that has not started yet —
+  /** Ruling 185: the skill plugin built for a run that has not started yet —
    *  removed by the wrapper when the dispatch fails before `startRun` adopts
    *  it; null once the run owns it (run-service removes it at settle). */
   skillPlugin: SkillPlugin | null;
@@ -329,9 +330,9 @@ export interface StartAgentRunInput {
    *  "already tagged?" against the mention resolution ladder with it. */
   triggeredByUserId?: string;
   /**
-   * Ruling 313: run this reviewer with its VERDICT channel withheld, for the
+   * Ruling 87: run this reviewer with its VERDICT channel withheld, for the
    * one dispatch whose whole point is that it must not produce another verdict
-   * — `question_reviewer` (ruling 237).
+   * — `question_reviewer` (ruling 94).
    *
    * The engagement is untouched: the reviewer stays verdict-capable and stays a
    * required reviewer, so acceptance still waits for its approve. Only THIS run
@@ -339,7 +340,7 @@ export interface StartAgentRunInput {
    */
   withholdVerdict?: boolean;
   /**
-   * Ruling 421 (F39-43): this run puts ruling 410's completeness question, so
+   * Ruling 93 (F39-43): this run puts the completeness question, so
    * the verdict it returns is the reviewer's complete blocking set. Stamped on
    * the engagement with this run's id once the run exists (`Engagement.question`)
    * and read back by the verdict writer, which records the verdict as the
@@ -359,7 +360,7 @@ export async function startAgentRun(
     return await dispatchAgentRun(db, input, actor, ctx, pending);
   } catch (error) {
     pending.reservation?.abandon(errorMessage(error));
-    // A plugin no run adopted has no reader (ruling 180).
+    // A plugin no run adopted has no reader (ruling 185).
     removeSkillPlugin(pending.skillPlugin);
     throw error;
   }
@@ -392,10 +393,10 @@ async function dispatchAgentRun(
   // auto-engaged a NEW seat the seat could not be released again:
   // `removeReviewer` refuses on archived and has no admin escape, so the only
   // way back was to restore the task. Note this is deliberately the ARCHIVED
-  // gate only — ruling 133 licenses engaging an eligible profile at any STAGE,
+  // gate only — ruling 181 licenses engaging an eligible profile at any STAGE,
   // terminal included, so a closed-but-not-archived task is untouched here.
-  // Ruling 177 (pass 36): the gate is CLOSED (terminal stage or archived), one
-  // spelling for every door — ruling 133's "an eligible profile at any stage,
+  // Ruling 52 (pass 36): the gate is CLOSED (terminal stage or archived), one
+  // spelling for every door — ruling 181's "an eligible profile at any stage,
   // terminal included" ended with the terminal stage.
   {
     const dispatchBoard = projectBoard(ctx, input.projectSlug);
@@ -409,9 +410,9 @@ async function dispatchAgentRun(
     }
   }
 
-  // Ruling 186 (pass 37, F37-2): a task waiting on other work is HELD, and the
+  // Ruling 56 (pass 37, F37-2): a task waiting on other work is HELD, and the
   // hold is a GATE here — beside closure, in the same chokepoint, for the same
-  // reason. Ruling 131(d) refused three operator triggers and then asked the
+  // reason. Ruling 115 refused three operator triggers and then asked the
   // model not to "dispatch delivery work"; asking is not a gate. Live, SHOP-2
   // was marked "Held until every entry is done; Viberr releases it then" and a
   // Codex run started 1.9 seconds later, designed and committed the whole
@@ -458,7 +459,7 @@ async function dispatchAgentRun(
     }
     const currentDeliverer = deliveringEngagement(existing.parsed.frontmatter);
     const delivery = view.capabilities?.delivery === true;
-    // Ruling 556: a reviewer the project requires is engaged to review when
+    // Ruling 89: a reviewer the project requires is engaged to review when
     // nothing asks otherwise; only an explicit `delivers: true` reaches the
     // refusal in `assignSpecialist`.
     const requiredHere = readRequiredReviewers(input.projectSlug, ctx).some(
@@ -496,7 +497,7 @@ async function dispatchAgentRun(
     // Dispatch-rework hunt (2026-08-29): the repo-write guard below used to
     // live only on the UNENGAGED branch above, so a verdict-only reviewer
     // already engaged as supporting could be handed delivery — recreating the
-    // exact ships-nothing dead end ruling 98(a) closes. Same check, same
+    // exact ships-nothing dead end ruling 51 closes. Same check, same
     // remedy-naming refusal, on BOTH doors to `delivers: true`.
     const handoffView = listDeployedSpecialists(input.projectSlug, ctx).find(
       (s) => s.id === input.profileId,
@@ -531,15 +532,15 @@ async function dispatchAgentRun(
   }
   const delivers = engagement.delivers;
 
-  // Ruling 122: the branch name is ALLOCATED once, before the agent is told
+  // Ruling 228: the branch name is ALLOCATED once, before the agent is told
   // what to check out. The operator's own dispatch already ran this hook
   // (FR31's delivery spine), but a human-dispatched delivering run reached the
   // prompt with no branch recorded, so it fell back to the canonical key — the
   // one name a reused task key can already have a stranger's pull request on.
   // Best-effort by the same reasoning as the operator's: a task that cannot
   // reach GitHub still runs, and delivery re-checks the name.
-  // Ruling 665: and only for a deliverer that writes the repository. One whose
-  // delivery is the files it saves on the task (ruling 535) never commits, so
+  // Ruling 228: and only for a deliverer that writes the repository. One whose
+  // delivery is the files it saves on the task (ruling 128) never commits, so
   // a branch made for it stays empty on the repository for good. A profile
   // undeployed since it was engaged has no grants to read, and keeps the hook.
   const delivererId = engagement.profileId;
@@ -564,8 +565,8 @@ async function dispatchAgentRun(
   // push. One live delivering run per task: refuse a second until the first
   // finishes or is interrupted. Supporting agents run concurrently in their own
   // isolated checkouts (P8); their write posture is grants-derived on BOTH
-  // backends (ruling 101: Claude's denylist binds it; on Codex it is advisory
-  // since ruling 185, with the delivery gate as the boundary).
+  // backends (ruling 183: Claude's denylist binds it; on Codex it is advisory,
+  // with the delivery gate as the boundary).
   if (delivers) {
     const liveDelivering = listRunsForTaskRows(
       db,
@@ -576,7 +577,7 @@ async function dispatchAgentRun(
         r.kind === "primary" && (r.state === "running" || r.state === "queued"),
     );
     if (liveDelivering) {
-      // Ruling 452: typed with the live run's agent, which is not always this
+      // Ruling 152: typed with the live run's agent, which is not always this
       // one — only a directive to the SAME agent is delivered on its finish.
       throw new AgentBusyError(
         "A delivering agent run is already in progress on this task. Wait for it to finish or interrupt it before starting another.",
@@ -685,7 +686,7 @@ async function dispatchAgentRun(
   // for. Outside the try so the undeployed-profile fallback can't swallow it.
   // An undeployed profile declares no stages to check against — the withheld
   // confinement above is what bounds that run instead (P14-RT-01).
-  // Ruling 133 (pass 34): the RUN boundary admits the engaged deliverer at
+  // Ruling 181 (pass 34): the RUN boundary admits the engaged deliverer at
   // every stage and keeps a supporting engagement stage-scoped; the admitted
   // reason is recorded on the audit row.
   let stageEligibility: "declared" | "engaged-deliverer" | "undeployed" = "undeployed";
@@ -723,7 +724,7 @@ async function dispatchAgentRun(
       ),
     );
   }
-  // Ruling 239: the project's rulings KB reaches EVERY agent on the project,
+  // Ruling 208(a): the project's rulings KB reaches EVERY agent on the project,
   // after the profile's own grants and R18-1's inherited ones so it never
   // displaces them in the shared injection budget. Placed here rather than in
   // the per-profile grant so nobody can forget it on the one profile that
@@ -731,7 +732,7 @@ async function dispatchAgentRun(
   // came to be re-derived from first principles, four rework rounds at a time.
   kb = withProjectRulings(kb, input.projectSlug, ctx);
 
-  // Ruling 127: WHOSE account this run bills, resolved BEFORE anything is
+  // Ruling 137: WHOSE account this run bills, resolved BEFORE anything is
   // spent. A task with no owner, an owner whose account is gone, or an owner
   // who has not connected this backend all end the same way — an honest error
   // run through the normal completion pipeline, with no clone, no reservation
@@ -745,7 +746,7 @@ async function dispatchAgentRun(
     input.taskKey,
     backend,
   );
-  // G35-4 / ruling 152(c) (pass 35): the ONE read before anything is spent.
+  // G35-4 / ruling 151 (pass 35): the ONE read before anything is spent.
   // A backend the instance already knows is out of quota for the account this
   // run bills gets no run row, no clone and no operator turn: the dispatch is
   // held, said on the timeline, audited, and re-scheduled for the reopen
@@ -774,7 +775,7 @@ async function dispatchAgentRun(
   // records the refusal as an honest terminal error and the normal completion
   // pipeline opens the blocked packet — it just never pays for a checkout, a
   // skill mount, a browser or a toolkit for a process that will not exist.
-  // Same shape the pre-127 "backend unavailable" path had (R7-2).
+  // Same shape the old instance-credential "backend unavailable" path had (R7-2).
   const realBackend = principal.ok;
 
   // P14-LV-09: resolve the MCP grants BEFORE the persona, and build it from what
@@ -783,18 +784,18 @@ async function dispatchAgentRun(
   // built AFTER the clone below, because the same rule now applies to skills:
   // which ones mount natively is only knowable once the workspace exists.
   //
-  // Ruling 127: and AFTER the principal, because this resolve is not a read.
+  // Ruling 137: and AFTER the principal, because this resolve is not a read.
   // `mcpServersFor` pre-flights every declared stdio server by SPAWNING it to
   // handshake it (F20-10) and corrects its registry row from what happened —
   // vendor/org child processes and org-level writes for a run the next line is
   // about to refuse. A refused run mounts nothing, so it resolves nothing.
   //
-  // Ruling 176: the same denylist that withholds the file tools decides
+  // Ruling 188: the same denylist that withholds the file tools decides
   // whether the admin's marked MCP write tools go too — one predicate.
   const resolvedMcps: RunMcpMounts = realBackend
     ? await mcpServersFor(db, mcpNames, repoWriteWithheldFromDenylist(disallowedTools))
     : { unresolved: [], unhealthy: [], toolDenials: [], proxied: [], oauthGrants: [] };
-  // Ruling 585: a Codex run that holds a knowledge base reads and corrects it
+  // Ruling 216: a Codex run that holds a knowledge base reads and corrects it
   // through the gateway's knowledge server, and its prompt says so.
   const knowledgeMount = realBackend
     ? resolveKnowledgeMcp({
@@ -819,7 +820,7 @@ async function dispatchAgentRun(
     resolved ? resolved.capabilities : withheldAgentGrants(),
   );
   /**
-   * Ruling 313. `question_reviewer` (ruling 237) re-runs a deadlocked reviewer
+   * Ruling 87. `question_reviewer` (ruling 94) re-runs a deadlocked reviewer
    * "exactly as it stands" and asks it, in the directive, to answer in a comment
    * and NOT return a verdict — because "a verdict here would bind to the same
    * revision and count as another objection, which is the loop"
@@ -833,32 +834,33 @@ async function dispatchAgentRun(
    * were shown as recommended fed the loop it was offered to end.
    *
    * `review-deadlock.server.ts`'s own header names this construction as the one
-   * ruling 186 refused: "a request in a prompt, with nothing that notices when
-   * the model does something else". One variable feeds both backends here — the
-   * Claude toolkit's `report_outcome` field, the Codex envelope's schema, and
-   * the persona's collaboration notes — so withholding it once withholds it
-   * everywhere, and the prompt stops promising what the tools contradict.
+   * ruling 56 refused: "a request in a prompt, with nothing that notices when
+   * the model does something else". One variable feeds the Claude toolkit's
+   * `report_outcome` field and the persona's collaboration notes, so the prompt
+   * stops promising what the tools contradict. The Codex envelope's schema is
+   * static and keeps its `verdict` key whenever the envelope is mounted, so the
+   * run also records `verdict_withheld` and completion takes no verdict from it.
    *
-   * Ruling 555: nor is the deliverer offered it. The deliverer mints and
-   * everyone else judges (ruling 388), so a verdict from the run that makes the
+   * Ruling 200: nor is the deliverer offered it. The deliverer mints and
+   * everyone else judges (ruling 84), so a verdict from the run that makes the
    * delivery is a verdict on its own work, which `requiredReviewers` has never
    * counted. On AWSC-3 the Estimate Judge delivered and approved in one reply,
    * and completion filed its files as the evidence for that verdict, so they
    * were never recorded as the delivery.
    */
   const collab = input.withholdVerdict || delivers ? { ...granted, verdict: false } : granted;
-  // Ruling 690: the run's `use-web-search-fetch` grant, read off the same
+  // Ruling 204: the run's `use-web-search-fetch` grant, read off the same
   // denylist that takes its web tools away on either backend, for what the
   // run is told about keeping a source: a page, or only what it can reach.
   const webEgress = !webSearchWithheldFromDenylist(disallowedTools);
-  // Ruling 589: a Codex run that holds a collaboration grant reads the board
+  // Ruling 216: a Codex run that holds a collaboration grant reads the board
   // and its own timeline through the gateway's board server, as a Claude run's
   // toolkit does.
   const boardMount = realBackend
     ? resolveBoardMcp({
         backend,
         collaborates: holdsCollaborationGrant(collab),
-        // Ruling 690: the grant that lets a run save files on its task lets
+        // Ruling 82: the grant that lets a run save files on its task lets
         // it keep the sources its result rests on, and the tool names
         // fetching a page only to a run whose web grant stands.
         keepsSources: collab.evidence,
@@ -909,7 +911,7 @@ async function dispatchAgentRun(
   // mirror in seconds. The strip showed a static "Cloning …" for the whole
   // download and "looked stalled for minutes" on the first-run experience; say
   // when the wait is the one-time mirror build so it reads as expected setup.
-  // Ruling 127: a REFUSED run has nothing to prepare, so it reserves nothing.
+  // Ruling 137: a REFUSED run has nothing to prepare, so it reserves nothing.
   // The reservation exists to render a live "Preparing workspace" strip during
   // a clone; showing one for a run that is about to be recorded as an error
   // would be theatre, and it would hold a concurrency slot for it.
@@ -949,9 +951,9 @@ async function dispatchAgentRun(
           // `support` is undefined for the delivering engagement (→ canonical
           // checkout) and set for a supporting one (→ isolated checkout).
           support,
-          // Ruling 179: a supporting checkout judges the revision under review;
+          // Ruling 240: a supporting checkout judges the revision under review;
           // the delivering one follows origin's copy of the task branch.
-          // Ruling 238: with ONE exception, computed from facts already on the
+          // Ruling 239: with ONE exception, computed from facts already on the
           // task — a head that moved only because Viberr refreshed the base
           // carries the same deliverable on a newer base, and pinning behind it
           // is what left SHOP-18's verifier re-reading a defect that had been
@@ -962,7 +964,7 @@ async function dispatchAgentRun(
                   activeWorkRevision(existing.parsed.frontmatter.workRevision)?.headSha ?? null,
                 prHeadSha: existing.parsed.frontmatter.pr?.headSha ?? null,
                 drift: existing.parsed.frontmatter.pr?.revisionDrift ?? null,
-                // Ruling 439: a refresh made before any PR exists re-pins too.
+                // Ruling 239: a refresh made before any PR exists re-pins too.
                 refreshes: existing.parsed.frontmatter.baseRefreshes,
               })
             : null,
@@ -991,7 +993,7 @@ async function dispatchAgentRun(
   const cloneFailure = clone?.failure ?? null;
   const runWorkdir = clone?.dir ?? (realBackend ? supportRoot : null);
   if (runWorkdir && !existsSync(runWorkdir)) {
-    // Ruling 460: the agent runs as its person's own user and writes here.
+    // Ruling 15: the agent runs as its person's own user and writes here.
     shareDirWithAgents(workspaceRoot);
     mkdirSync(runWorkdir, { recursive: true });
   }
@@ -1013,7 +1015,7 @@ async function dispatchAgentRun(
   );
 
   // Mount the granted skills as this run's plugin BESIDE the checkout (ruling
-  // 180) so the Claude SDK discovers them natively (progressive disclosure:
+  // 185) so the Claude SDK discovers them natively (progressive disclosure:
   // metadata now, full body only when the agent invokes one) while the tree
   // the project's own tools scan stays exactly a clean clone (F36-9). AFTER
   // the clone — the mount re-strips the repo's own `.claude` first. Claude
@@ -1056,7 +1058,7 @@ async function dispatchAgentRun(
   // the dir must exist BEFORE the run so a plain `cp` into it cannot fail on
   // a missing path (the browser mount creates it too — idempotent).
   if (collab.evidence && realBackend) {
-    // Ruling 460: shared with the agent group, which writes the drop.
+    // Ruling 15: shared with the agent group, which writes the drop.
     shareDirWithAgents(attachmentsDir);
   }
 
@@ -1085,7 +1087,7 @@ async function dispatchAgentRun(
     mcpWriteToolsDenied: resolvedMcps.toolDenials,
     mcpProxied: resolvedMcps.proxied,
     mcpOAuthGrants: resolvedMcps.oauthGrants,
-    // Ruling 159: the agent is handed the ABSOLUTE directory (inside the
+    // Ruling 198: the agent is handed the ABSOLUTE directory (inside the
     // container `/data/...` is real; on bare metal it is the data root's own
     // absolute path). The store-relative form is a display form for humans.
     browser: browser.server
@@ -1108,11 +1110,11 @@ async function dispatchAgentRun(
   // A profile with no body of its own leaves the key ABSENT — the builder falls
   // back to the generic prompt, which an empty definition would not do.
   if (resolved?.definition) personaInput.definition = resolved.definition;
-  // Ruling 370: the split the adapters render by backend; `persona` is the
+  // Ruling 169: the split the adapters render by backend; `persona` is the
   // same text as one document, for the disclosure's character count.
   const personaPrefix = buildSpecialistPromptPrefix(personaInput);
   const persona = joinedPrompt(personaPrefix);
-  // Ruling 371: what the run is handed back after a compaction.
+  // Ruling 170: what the run is handed back after a compaction.
   const compactAnchor = specialistCompactAnchor({
     taskKey: input.taskKey,
     title,
@@ -1133,7 +1135,7 @@ async function dispatchAgentRun(
   // The run env: git confinement only. Delivery is SERVER-SIDE for BOTH
   // backends (F-GH3): the agent commits locally but NEVER pushes — viberr
   // pushes the workspace branch + opens the PR when the OPERATOR decides to
-  // deliver (ruling 207(f): R15-2 deleted the Review-transition hook).
+  // deliver (ruling 200: R15-2 deleted the Review-transition hook).
   const baseRunEnv = {
     ...workspaceRunEnv(input.projectSlug, input.taskKey, ctx.dataRoot),
     // F24: unify the delivery commit author across codex/claude.
@@ -1141,7 +1143,7 @@ async function dispatchAgentRun(
   };
   // F15-15: a reviewing run judges the DELIVERED revision (the PR head), not
   // whatever the local workspace branch holds — pin it into the prompt.
-  // Ruling 161: a discarded revision is no subject to review.
+  // Ruling 234: a discarded revision is no subject to review.
   const activeRevision = activeWorkRevision(existing.parsed.frontmatter.workRevision);
   const reviewSubject =
     !delivers && activeRevision
@@ -1150,7 +1152,7 @@ async function dispatchAgentRun(
           prNumber: existing.parsed.frontmatter.pr?.number ?? null,
         }
       : null;
-  // Ruling 594: the same condition that mounts the board readers.
+  // Ruling 214: the same condition that mounts the board readers.
   const boardReader =
     realBackend && holdsCollaborationGrant(collab) && (backend === "claude" || !!boardMount);
   // P19-G0: EVERY fresh run re-anchors on the canonical task artifact. This is
@@ -1171,7 +1173,7 @@ async function dispatchAgentRun(
   };
   if (clone?.refreshed) promptInput.workspaceRefresh = clone.refreshed;
   if (anchor) promptInput.anchor = anchor;
-  // Ruling 422: the folders the persona's knowledge-base index points at, so
+  // Ruling 217(a): the folders the persona's knowledge-base index points at, so
   // the workspace contract permits the reads the index asks for.
   const kbReadDirs = knowledgeBaseReadDirs(
     [...kb, projectRulingsKb(input.projectSlug, ctx)],
@@ -1179,22 +1181,22 @@ async function dispatchAgentRun(
   );
   if (kbReadDirs.length > 0) promptInput.kbReadDirs = kbReadDirs;
   if (boardReader) promptInput.taskFileReader = true;
-  // Ruling 690: the same conditions that mount `keep_source`: the grant, and
+  // Ruling 204: the same conditions that mount `keep_source`: the grant, and
   // on Codex the gateway's board server (a Claude run has it in its toolkit).
   if (collab.evidence && realBackend && (backend === "claude" || !!boardMount)) {
     promptInput.sourceKeeper = true;
     if (!webEgress) promptInput.webWithheld = true;
   }
-  // Ruling 691: the same condition that mounts `capture_page`.
+  // Ruling 194: the same condition that mounts `capture_page`.
   if (boardReader && pageCaptureStatus().available) promptInput.pageCapture = true;
-  // Ruling 591: the same condition as the correction note below.
+  // Ruling 217(a): the same condition as the correction note below.
   if (realBackend && kb.length > 0 && (backend === "claude" || knowledgeMount)) {
     promptInput.kbCorrectionTool = true;
   }
   if (collab.evidence && realBackend) {
     promptInput.attachmentsDropDir = attachmentsDir;
   } else if (realBackend) {
-    // Ruling 592: a run that cannot post still reads what the task holds.
+    // Ruling 217(b): a run that cannot post still reads what the task holds.
     promptInput.attachmentsReadDir = attachmentsDir;
   }
   if (cloneFailure) {
@@ -1213,7 +1215,7 @@ async function dispatchAgentRun(
   }
   if (reviewSubject) promptInput.reviewSubject = reviewSubject;
   if (input.directive) promptInput.directive = input.directive;
-  // Ruling 207(e): both of these end up inside a "tag @X so they are notified"
+  // Ruling 70: both of these end up inside a "tag @X so they are notified"
   // instruction, and the mention ladder matches an email's LOCAL PART, a full
   // name or a first name — never a whole address. A schedule carries
   // `createdByLabel`, which is whatever `actor.label` was when it was created,
@@ -1239,7 +1241,7 @@ async function dispatchAgentRun(
       input.triggeredByName,
     );
   }
-  // Ruling 275: the persona this run will actually carry, so the shell
+  // Ruling 148: the persona this run will actually carry, so the shell
   // inventory can contradict it by name where the two disagree.
   if (persona.trim()) promptInput.persona = persona;
   const basePrompt = buildAnalyzePrompt(promptInput);
@@ -1288,7 +1290,7 @@ async function dispatchAgentRun(
             ? ", plus `evidence`: short REFERENCES to what you checked (a suite, a file and line, a check), each with how it came out and marked pass, fail or info, never raw output"
             : "") +
           ", then finish with your full findings.\n" +
-          // Ruling 210 (owner): the round count is the expensive thing, and the
+          // Ruling 201 (owner): the round count is the expensive thing, and the
           // doctrine only ever addressed a reviewer whose objection SURVIVES a
           // rework. A reviewer that returns a NEW valid objection every round
           // costs exactly as much and was asked for nothing: live, SHOP-6 took
@@ -1312,7 +1314,7 @@ async function dispatchAgentRun(
         "- `report_outcome`: at the end of your work, report `evidence`: short REFERENCES to what you checked or produced (a suite, a file and line, a check), each with how it came out and marked pass, fail or info, never raw output, with a one-paragraph summary. You do NOT judge the work; there is no verdict on this tool for you.",
       );
     }
-    // Ruling 488 (F40-67): the relay rides whichever `report_outcome` mounted.
+    // Ruling 202 (F40-67): the relay rides whichever `report_outcome` mounted.
     if (collab.verdict || collab.evidence) collabNotes.push(RELAY_NOTE_CLAUDE);
   } else if (
     backend === "codex" &&
@@ -1331,7 +1333,7 @@ async function dispatchAgentRun(
         (collab.evidence
           ? ', "evidence": [{"label", "result", "status"}] (short REFERENCES to what you checked: a suite, a file and line, a check; each with how it came out and pass, fail or info; never raw output)'
           : "") +
-        // Ruling 488: every envelope carries the relay field.
+        // Ruling 202: every envelope carries the relay field.
         ', "relay": [{"taskKey", "text"}] (only when you must post something on another task)' +
         "}.",
     );
@@ -1350,7 +1352,7 @@ async function dispatchAgentRun(
       );
     }
   }
-  // Ruling 590: a reviewer that has judged this task before is told its new
+  // Ruling 88: a reviewer that has judged this task before is told its new
   // verdict replaces the old one for every reader, on either backend.
   if (
     realBackend &&
@@ -1358,17 +1360,17 @@ async function dispatchAgentRun(
     existing.parsed.frontmatter.verdicts.some((v) => v.profileId === engagement.profileId)
   ) {
     collabNotes.push(REREVIEW_RESTATES_NOTE);
-    // Ruling 703: and, when what it judged was a files delivery Viberr kept,
+    // Ruling 201: and, when what it judged was a files delivery Viberr kept,
     // how the task's files stand against it now. Said only when there is
     // something to say: a later delivery under review, or a file that differs.
     // A reviewer asked again about the very delivery it judged, with nothing
-    // reworked (ruling 410's question), is being asked what it has NOT said
+    // reworked (ruling 93's question), is being asked what it has NOT said
     // yet, and a note about what it may leave unchecked has no place there.
     // The note is advice: nothing in building it may stop the review.
     try {
       const judged = judgedFilesDelivery(existing.parsed.frontmatter, engagement.profileId);
       // Imported dynamically, like every reach from this module into the
-      // task-action modules (ruling 207(e)).
+      // task-action modules (ruling 13).
       const { changesSinceJudged } = await import("./task-replies.server");
       const changes =
         judged === null
@@ -1390,10 +1392,10 @@ async function dispatchAgentRun(
       });
     }
   }
-  // Ruling 483 (F40-53): a knowledge-base line this run proves wrong has a
+  // Ruling 210 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the
   // KB grant mounts, and Codex with the same tool on the gateway's knowledge
-  // server (ruling 585); a Codex run without that server reports it, and the
+  // server (ruling 216); a Codex run without that server reports it, and the
   // operator relays it (its agent-reply turn says so).
   if (realBackend && kb.length > 0) {
     collabNotes.push(
@@ -1424,7 +1426,7 @@ async function dispatchAgentRun(
           actorRef: agentActorRef,
           outcomeKey,
           collab,
-          // Ruling 283: the SAME list the persona indexed, so the tool can read
+          // Ruling 205: the SAME list the persona indexed, so the tool can read
           // exactly what the index named and nothing else.
           kb,
           webEgress,
@@ -1465,7 +1467,7 @@ async function dispatchAgentRun(
     // resumes into one entry labeled by the agent's name.
     agentName,
     agentProfileId: engagement.profileId,
-    // Ruling 127: the task owner pays for this run — or nobody does, and the
+    // Ruling 137: the task owner pays for this run — or nobody does, and the
     // refusal below is what the run records. A run refused because the owner
     // has not connected the backend still NAMES that owner, so the refusal is
     // auditable; a run with no owner at all records null.
@@ -1476,11 +1478,11 @@ async function dispatchAgentRun(
     actor: auditActor,
     dataRoot: ctx.dataRoot,
   };
-  // Ruling 316: the run REMEMBERS that its verdict channel was withheld, so the
-  // completion path can tell an answer from a silence. Ruling 313 stopped the
+  // Ruling 87: the run REMEMBERS that its verdict channel was withheld, so the
+  // completion path can tell an answer from a silence. Withholding stops the
   // tool; without this the prose fallback manufactures the verdict anyway.
   if (input.withholdVerdict) runInput.verdictWithheld = true;
-  // Ruling 544: what this run is judging — read from the same task file the
+  // Ruling 84: what this run is judging — read from the same task file the
   // support checkout was pinned from — so a verdict returned after a newer
   // delivery binds to nothing it never read.
   runInput.reviewSubject = reviewSubjectId(existing.parsed.frontmatter);
@@ -1490,7 +1492,7 @@ async function dispatchAgentRun(
   runInput.compactAnchor = compactAnchor;
   if (disallowedTools.length) runInput.disallowedTools = disallowedTools;
   if (resolvedMcps.toolDenials.length) runInput.mcpToolDenials = resolvedMcps.toolDenials;
-  // Ruling 658: a server mounted on a failed or stale probe may be missing;
+  // Ruling 190: a server mounted on a failed or stale probe may be missing;
   // Codex starts every other one before the agent works, or fails the run.
   if (resolvedMcps.unhealthy.length) runInput.mcpOptional = resolvedMcps.unhealthy;
   // The SDK's native skills filter (Claude): exactly what mounted, nothing else.
@@ -1506,11 +1508,15 @@ async function dispatchAgentRun(
   if (runWorkdir) runInput.workdir = runWorkdir;
   if (realBackend) runInput.env = baseRunEnv;
   // The attachments drop the "Posting files" section above names. It widens
-  // no sandbox any more (ruling 185 removed Codex's) — it is the path the
+  // no sandbox any more (ruling 144 removed Codex's) — it is the path the
   // persona promises, carried on the spec so a resumed run keeps it (C02-R3).
   if (collab.evidence && realBackend) {
     runInput.attachmentsWritableDir = attachmentsDir;
   }
+  // Ruling 199: with no repository there is no checkout, and the working
+  // directory is the task's scratch the contract names. A repository whose
+  // clone failed keeps its working directory out: that run reports and stops.
+  if (!repo && runWorkdir) runInput.scratchDir = runWorkdir;
   // R21-4: hand the reserved row over — `startRun` adopts it rather than
   // minting a second one.
   if (pending.reservation) runInput.reservation = pending.reservation;
@@ -1522,7 +1528,7 @@ async function dispatchAgentRun(
   pending.reservation = null;
   pending.skillPlugin = null;
 
-  // Ruling 421: the run that puts the completeness question says so on its
+  // Ruling 93: the run that puts the completeness question says so on its
   // engagement, keyed by THIS run's id, so the verdict it returns is recorded
   // as the answer. A refused run answers nothing, so it stamps nothing.
   if (input.completeness && outcome !== "refused") {
@@ -1548,7 +1554,7 @@ async function dispatchAgentRun(
         cwd: runWorkdir,
         repo,
         cloned: !!clone?.dir,
-        // Ruling 129: what the pre-run refresh did, disclosed on the run.
+        // Ruling 195: what the pre-run refresh did, disclosed on the run.
         workspaceRefresh: clone?.refreshed,
         delivers,
         personaChars: persona.length,
@@ -1556,7 +1562,7 @@ async function dispatchAgentRun(
         nativeSkills: skillMount.mounted,
         kb,
         mountedMcps: Object.keys(mergedMcpServers),
-        // The run RECORD keeps names; the reasons ride the prompt (ruling 310)
+        // The run RECORD keeps names; the reasons ride the prompt (ruling 190)
         // and the KB/skill misses already have their own name+reason list here.
         unresolvedMcps: resolvedMcps.unresolved.map((u) => u.name),
         unhealthyMcps: resolvedMcps.unhealthy,
@@ -1564,15 +1570,22 @@ async function dispatchAgentRun(
         unresolvedResources,
         deniedTools: disallowedTools,
         toolkit: toolkit?.toolNames ?? null,
-        // Ruling 564: what the Claude adapter's hook confines the file tools to.
+        // Ruling 217(d): what the Claude adapter's hook confines the file tools to.
+        // The temp directory is the one this run is given when it launches
+        // (ruling 141(c)); one that cannot be made is said on its console.
         fileWriteRoots:
           backend === "claude"
-            ? fileWriteRoots(disallowedTools, runInput.attachmentsWritableDir)
+            ? fileWriteRoots(
+                disallowedTools,
+                runInput.attachmentsWritableDir,
+                runInput.scratchDir,
+                runTmpDirFor(runId),
+              )
             : null,
       }),
       promptChars: prompt.length,
       anchor,
-      // Ruling 175: the cap `startRun` just stamped on the run, disclosed.
+      // Ruling 159: the cap `startRun` just stamped on the run, disclosed.
       spendCapUsd: getMaxRunSpendUsd(db),
       directive: input.directive?.trim()
         ? {
@@ -1602,7 +1615,7 @@ async function dispatchAgentRun(
   // a PR). The specialist prompt gives the typed contract precedence and the
   // clone has no push credential, so the directive is inert — but recording it
   // keeps the authority source auditable instead of silently trusted.
-  // Ruling 323: the PHRASE, not a bare boolean. A heuristic that writes a
+  // Ruling 200: the PHRASE, not a bare boolean. A heuristic that writes a
   // permanent accusation has to show its evidence — a reader who disagrees with
   // the note can see what it matched on, and so can whoever fixes the next hole.
   const deliveryPhrase = input.directive
@@ -1667,10 +1680,10 @@ async function dispatchAgentRun(
     backend,
     delivers,
     cloned: !!clone?.dir,
-    // Ruling 133: why the run was admitted at this stage.
+    // Ruling 181: why the run was admitted at this stage.
     stageEligibility,
   };
-  // Ruling 357: a dispatch after the operator drive's own delivery is the
+  // Ruling 127: a dispatch after the operator drive's own delivery is the
   // drive acting on it; the lease release then owes no `delivered` follow-up.
   if (ctx.operatorRun?.deliveredHeadMoved) ctx.operatorRun.actedAfterDelivery = true;
   recordAudit(db, {
@@ -1696,7 +1709,7 @@ async function dispatchAgentRun(
   // Dynamic, like the import above: agent-reply already imports THIS module for
   // the deployed-specialist list, so a static import here would close a cycle.
   const { agentMentionHandle } = await import("./agent-reply.server");
-  // Ruling 157 (pass 35, F35-8): a dispatch that starts a run lifts a
+  // Ruling 54 (pass 35, F35-8): a dispatch that starts a run lifts a
   // packet-less hold on the record, whichever door it came through (the Run
   // control, an @mention, the operator's `run_agent`, a schedule,
   // `retry_other_backend`, an applied recommendation).
@@ -1732,7 +1745,7 @@ async function dispatchAgentRun(
     // F-P11 (pass 25): a plain Codex developer (no envelope schema) must not have
     // its prose reply re-parsed as an outcome envelope.
     envelopeRequested: useEnvelopeSchema,
-    // Ruling 248 (F37-77): the server could not provision this run's checkout,
+    // Ruling 87 (F37-77): the server could not provision this run's checkout,
     // so it ran with no working tree. A run that read nothing judges nothing.
     noCheckout: !!cloneFailure,
   };
@@ -1740,7 +1753,7 @@ async function dispatchAgentRun(
   // completion pipeline appends the missing @tags to the report and ALWAYS
   // re-invokes the operator, bypassing the react heuristic (still depth-capped).
   if (input.triggeredByName?.trim()) {
-    // Ruling 211(i): the same resolution the PROMPT half got (ruling 207(e)).
+    // Ruling 119: the same resolution the PROMPT half got (ruling 70).
     // This is the mechanical fallback — the cc line the pipeline appends when
     // the model did not tag the dispatcher itself — and it was still carrying
     // the raw `TaskActor.label`, which for a schedule is an email. So the
@@ -1787,7 +1800,7 @@ function dispatchHeldSentence(input: {
 }
 
 /**
- * Ruling 152(c): the ONE read every door that starts provider work passes
+ * Ruling 151: the ONE read every door that starts provider work passes
  * through, against its own target backend and the account the work bills.
  * `dispatchAgentRun` is one caller; `commentToAgent`'s RESUME branch is the
  * other, because it goes straight to `resumeRun` and would otherwise pay the
@@ -1803,7 +1816,7 @@ export async function assertDispatchNotHeld(
     projectSlug: string;
     taskKey: string;
     backend: RealBackend;
-    /** The user the work bills (ruling 127); the hold is scoped to it. */
+    /** The user the work bills (ruling 137); the hold is scoped to it. */
     credentialUserId: string;
     profileId: string;
     agentName: string;
@@ -1830,7 +1843,7 @@ export async function assertDispatchNotHeld(
 }
 
 /**
- * Ruling 152(c): record a held dispatch and hand back the error the door
+ * Ruling 151: record a held dispatch and hand back the error the door
  * throws. Nothing here is a run: no row, no reservation, no process. The
  * schedule is the retry (`run-agent`, the same profile and directive, due one
  * minute after the reopen instant, or `UNDATED_HOLD_MS` after the refusal
@@ -1995,7 +2008,7 @@ export interface DispatchHoldRecord {
   agentName: string;
 }
 
-/** Ruling 152(c): the hold a dispatch door reads as "already rescheduled,
+/** Ruling 151: the hold a dispatch door reads as "already rescheduled,
  *  nothing to retry" rather than as a refusal (400) or a conflict (409). A
  *  typed subclass so the record travels as itself, not as a details bag. */
 export class DispatchHeldError extends AppError {
@@ -2021,15 +2034,15 @@ export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
 }
 
 /**
- * Ruling 452: the single-flight refusal, typed, naming whose run is live. A
- * dispatch door records a person's directive before the start (ruling 375),
+ * Ruling 152: the single-flight refusal, typed, naming whose run is live. A
+ * dispatch door records a person's directive before the start (ruling 69),
  * so when the live run is the SAME agent's, the directive sits inside that
- * run's window and ruling 203 delivers it when the run finishes. The door says
+ * run's window and is delivered when the run finishes. The door says
  * so instead of "No run started" and "wait, then start another", which a
  * person who obeyed turned into a second delivery of the same words.
  */
 class AgentBusyError extends AppError {
-  /** The profile whose run is live; ruling 203 delivers to that profile only. */
+  /** The profile whose run is live; ruling 69 delivers to that profile only. */
   readonly busyProfileId: string | null;
   constructor(userMessage: string, busyProfileId: string | null) {
     super({
@@ -2046,7 +2059,7 @@ export function isAgentBusy(cause: unknown): cause is AgentBusyError {
   return cause instanceof AgentBusyError;
 }
 
-/** Ruling 452: the person's note beside a directive whose agent was already
+/** Ruling 152: the person's note beside a directive whose agent was already
  *  running — one sentence for every dispatch door that records one. */
 export function directiveDeferredNote(agentName: string): string {
   return (
@@ -2061,20 +2074,20 @@ export function directiveDeferredNote(agentName: string): string {
  *  never silently carry less policy than the fresh run did (the XS-1 class). */
 export interface ResumeConfinement {
   disallowedTools: string[];
-  /** Ruling 176: the org servers' marked write tools the resumed run
+  /** Ruling 188: the org servers' marked write tools the resumed run
    *  withholds, re-derived like the rest of its policy. */
   mcpToolDenials?: McpToolDenial[];
-  /** Ruling 658: the mounted servers the resumed run may start without. */
+  /** Ruling 190: the mounted servers the resumed run may start without. */
   mcpOptional?: string[];
   env: Record<string, string>;
   mcpServers?: RunMcpServers;
-  /** Ruling 370: the persona as its static/dynamic split. */
+  /** Ruling 169: the persona as its static/dynamic split. */
   systemPrompt?: RunPrompt;
-  /** Ruling 371: the compaction anchor, re-derived like the rest. */
+  /** Ruling 170: the compaction anchor, re-derived like the rest. */
   compactAnchor?: string;
   /** The granted skills re-mounted beside the surviving workspace (Claude). */
   skills?: string[];
-  /** Ruling 180: the resumed run's own plugin directory carrying `skills`. */
+  /** Ruling 185: the resumed run's own plugin directory carrying `skills`. */
   skillPlugin?: SkillPlugin;
   /** Staging key for a Claude report_outcome on this resumed turn. */
   outcomeKey?: string;
@@ -2085,14 +2098,18 @@ export interface ResumeConfinement {
    *  resolution this function performs. The caller owns the remaining three
    *  fields (it composes the prompt) and passes the whole thing to
    *  `recordRunInputs` once `resumeRun` has minted the run id — which ruling
-   *  343 made true; this sentence asserted it for two days while the field had
-   *  no reader at all. */
-  runInputs: ResolvedResourceInputs;
+   *  167 made true; this sentence asserted it for two days while the field had
+   *  no reader at all. It takes that id because the file tools' roots name the
+   *  resumed run's own temp directory, `<root>/<runId>` (ruling 217(d)). */
+  runInputsFor: (runId: string) => ResolvedResourceInputs;
   /** C02-R3 (pass 32): the task's attachments drop, when the profile holds
    *  `attach-evidence-references` — re-armed on resume exactly as the fresh
    *  run mounts it — the path the "Posting files" section promises. Absent
    *  when evidence is withheld. */
   attachmentsWritableDir?: string;
+  /** Ruling 199: the resumed run's working directory when the task has no
+   *  checkout, as the fresh run's `scratchDir`. Absent with a repository. */
+  scratchDir?: string;
 }
 
 /**
@@ -2141,7 +2158,7 @@ export async function resolveResumeConfinement(
     // P14-LV-09: resolve first, then describe what MOUNTED — the resumed run
     // gets the same honest prompt as a fresh one. F20-10: pre-flight the stdio
     // mounts so a server that fails to start is dropped + disclosed here too.
-    // Ruling 176: with the same write-tool withholding the fresh run derives.
+    // Ruling 188: with the same write-tool withholding the fresh run derives.
     const resumeMcps = await verifyStdioMcpMountsForRun(
       db,
       resolveSpecialistMcpServersDetailed(db, resolved.mcps, {
@@ -2154,11 +2171,11 @@ export async function resolveResumeConfinement(
     const resumeTask = readTaskFile(
       taskRef(ctx, input.projectSlug, input.taskKey),
     );
-    // Ruling 239: and the project's rulings, for the same reason R18-1 keeps the
+    // Ruling 208(a): and the project's rulings, for the same reason R18-1 keeps the
     // deliverer's KBs here — a resumed thread that silently drops a knowledge
     // base mid-conversation is worse than one that never had it, because the
     // agent's earlier turns were reasoning with it. This is the SECOND place
-    // that builds a run's KB list; the fresh-run site is the one ruling 239
+    // that builds a run's KB list; the fresh-run site is the one ruling 208(a)
     // shipped with, and this one was missed.
     const kb = withProjectRulings(
       !input.delivers && resumeTask
@@ -2174,7 +2191,7 @@ export async function resolveResumeConfinement(
       input.projectSlug,
       ctx,
     );
-    // Re-mount beside the workspace this task's runs share (ruling 180: one
+    // Re-mount beside the workspace this task's runs share (ruling 185: one
     // plugin per run, so a RESUMED supporting agent can no longer wipe the
     // delivering run's skills — the F19-15 race the in-checkout mount had).
     // `resumeWorkdir` (agent-reply) hands the resumed run the same clone when
@@ -2207,7 +2224,7 @@ export async function resolveResumeConfinement(
           backend: input.backend,
         })
       : { server: null, refused: null };
-    // Ruling 585: the knowledge server re-mounts on resume from the same list.
+    // Ruling 216: the knowledge server re-mounts on resume from the same list.
     const resumeKnowledge = resolveKnowledgeMcp({
       backend: input.backend,
       kb,
@@ -2218,14 +2235,14 @@ export async function resolveResumeConfinement(
     // Resolve the collaboration gates up-front: the persona's github_read
     // section (F4) needs `collab.githubRead`, and the toolkit below reuses the
     // same value. Same both-paths parity the browser mount keeps (line ~2476).
-    // Ruling 555: a resumed deliverer is offered no verdict either.
+    // Ruling 200: a resumed deliverer is offered no verdict either.
     const resumeGranted = resolveAgentCollab(resolved.capabilities);
     const collab = input.delivers ? { ...resumeGranted, verdict: false } : resumeGranted;
-    // Ruling 589: and the board server, from the same grants.
+    // Ruling 216: and the board server, from the same grants.
     const resumeBoard = resolveBoardMcp({
       backend: input.backend,
       collaborates: holdsCollaborationGrant(collab),
-      // Ruling 690: a resumed run keeps sources as the fresh one did.
+      // Ruling 82: a resumed run keeps sources as the fresh one did.
       keepsSources: collab.evidence,
       webEgress: !webSearchWithheldFromDenylist(disallowedTools),
       agent: { profileId: input.profileId, roleHint: input.role ?? resolved.role },
@@ -2250,7 +2267,7 @@ export async function resolveResumeConfinement(
       mcpWriteToolsDenied: resumeMcps.toolDenials,
       mcpProxied: resumeMcps.proxied,
       mcpOAuthGrants: resumeMcps.oauthGrants,
-      // Ruling 159: the absolute dir, exactly as the fresh path hands it.
+      // Ruling 198: the absolute dir, exactly as the fresh path hands it.
       browser: resumeBrowser.server
         ? {
             attachmentsDir: taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot),
@@ -2283,7 +2300,7 @@ export async function resolveResumeConfinement(
     const personaPrefix = buildSpecialistPromptPrefix(personaInput);
     const persona = joinedPrompt(personaPrefix);
     if (resumeBrowser.refused) resumeUnresolved.push(resumeBrowser.refused);
-    // Ruling 371: the same anchor the fresh run carries (XS-1 parity).
+    // Ruling 170: the same anchor the fresh run carries (XS-1 parity).
     const compactAnchor = specialistCompactAnchor({
       taskKey: input.taskKey,
       title: resumeTask?.parsed.frontmatter.title ?? input.taskKey,
@@ -2350,10 +2367,13 @@ export async function resolveResumeConfinement(
       );
       shareDirWithAgents(attachmentsWritableDir);
     }
+    // Ruling 199: the scratch `resumeWorkdir` runs the resumed run in when the
+    // task has no checkout, as the fresh run's.
+    const scratchDir = taskScratchDir(ctx, input.projectSlug, input.taskKey, support);
     const confinement: ResumeConfinement = {
       disallowedTools,
       env,
-      runInputs: resolvedResourceInputs({
+      runInputsFor: (runId) => resolvedResourceInputs({
         cwd: cloneDir,
         repo: projectRepo(ctx, input.projectSlug),
         workspaceRefresh: undefined,
@@ -2374,13 +2394,14 @@ export async function resolveResumeConfinement(
         toolkit: toolkit?.toolNames ?? null,
         fileWriteRoots:
           input.backend === "claude"
-            ? fileWriteRoots(disallowedTools, attachmentsWritableDir)
+            ? fileWriteRoots(disallowedTools, attachmentsWritableDir, scratchDir, runTmpDirFor(runId))
             : null,
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
+    if (scratchDir) confinement.scratchDir = scratchDir;
     if (resumeMcps.toolDenials.length) confinement.mcpToolDenials = resumeMcps.toolDenials;
-    // Ruling 658: the same split the fresh run takes, from the same disclosure.
+    // Ruling 190: the same split the fresh run takes, from the same disclosure.
     const resumeOptional = resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name);
     if (resumeOptional.length) confinement.mcpOptional = resumeOptional;
     // Each key is set only when this resume really has that policy: the caller
@@ -2406,7 +2427,7 @@ export async function resolveResumeConfinement(
       // P19-G11: the disclosure states the withheld posture rather than going
       // silent — "this run's profile could not be resolved" is exactly the kind
       // of thing a human reading the console needs to be told.
-      runInputs: resolvedResourceInputs({
+      runInputsFor: () => resolvedResourceInputs({
         cwd: taskCloneDir(ctx, input.projectSlug, input.taskKey, support),
         repo: projectRepo(ctx, input.projectSlug),
         workspaceRefresh: undefined,

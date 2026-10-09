@@ -20,7 +20,7 @@ import { toError } from "~/shared/errors";
 import { withoutConfinedFileTools } from "~/server/runtimes/file-tool-policy.server";
 
 /**
- * Ruling 344 — what a run was GIVEN, recorded on the run. One home, because
+ * Ruling 167 — what a run was GIVEN, recorded on the run. One home, because
  * every runtime that starts a run owes the same disclosure.
  *
  * This lived in `specialist-run.server.ts`, which is why for the whole of pass
@@ -59,7 +59,7 @@ export function resolvedResourceInputs(input: {
   cwd: string | null;
   repo: string | null;
   cloned: boolean;
-  /** Ruling 129: what the pre-run refresh did to a reused checkout; undefined
+  /** Ruling 195: what the pre-run refresh did to a reused checkout; undefined
    *  on a fresh clone and on a run with no working tree. */
   workspaceRefresh: string | undefined;
   delivers: boolean;
@@ -70,18 +70,18 @@ export function resolvedResourceInputs(input: {
   mountedMcps: string[];
   unresolvedMcps: string[];
   unhealthyMcps: string[];
-  /** Ruling 176: the org servers' marked write tools this run withholds. */
+  /** Ruling 188: the org servers' marked write tools this run withholds. */
   mcpWriteToolsDenied: McpToolDenial[];
   unresolvedResources: { name: string; reason: string }[];
   deniedTools: string[];
   /**
-   * Ruling 339: the names the toolkit reports it mounted (null → no toolkit at
+   * Ruling 167: the names the toolkit reports it mounted (null → no toolkit at
    * all). Handed straight through, because this field is the answer to "what
    * did this run actually get" and a second derivation of the gates is how it
    * came to be wrong.
    */
   toolkit: readonly string[] | null;
-  /** Ruling 564: `fileWriteRoots` for this run, the derivation its adapter's
+  /** Ruling 217(d): `fileWriteRoots` for this run, the derivation its adapter's
    *  hook reads. Set, the file tools leave the denied list for this one. */
   fileWriteRoots?: string[] | null;
 }): ResolvedResourceInputs {
@@ -119,7 +119,7 @@ export function resolvedResourceInputs(input: {
 /**
  * One-line console summary of `RunInputs` (the expandable detail is the rest).
  *
- * U39-25: `kind` does for the headline what ruling 346 did for the detail
+ * U39-25: `kind` does for the headline what ruling 167 did for the detail
  * rows. Every controller turn opened "supporting engagement · NO canonical
  * anchor": a controller turn is not an engagement, and it is never handed a
  * canonical block, so the capitals flagged the design as a fault on the one
@@ -198,7 +198,7 @@ export function recordRunInputs(
     backend: RealBackend;
     inputs: RunInputs;
     /** U39-25: which kind of run, for the headline; absent reads as a
-     *  specialist's, the only kind that recorded this before ruling 344. */
+     *  specialist's, the only kind that once recorded this. */
     kind?: RunKind;
     dataRoot?: string;
   },

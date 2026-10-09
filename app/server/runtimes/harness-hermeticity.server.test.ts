@@ -38,7 +38,7 @@ import { fakeClaudeQuery } from "../../../test-support/fake-claude-query";
  * survives. Importing the registry above already ran that real module-scope
  * loadEnvFile.
  *
- * Ruling 127 changed WHAT is guarded, not why. There is no instance credential
+ * Ruling 137 changed WHAT is guarded, not why. There is no instance credential
  * to detect any more, so the invariant is stated where it now lives: the base
  * spawn env both adapters are built on must carry nothing credential-shaped,
  * and a run's child env must carry exactly ONE credential — the one belonging
@@ -68,7 +68,7 @@ async function withAmbientHomes<T>(body: () => T | Promise<T>): Promise<T> {
   };
   process.env.CLAUDE_CONFIG_DIR = "/data/runtimes/claude-home";
   process.env.CODEX_HOME = "/data/runtimes/codex-home";
-  // Ruling 181: the CLI's state-db location is a home too.
+  // Ruling 141: the CLI's state-db location is a home too.
   process.env.CODEX_SQLITE_HOME = "/data/runtimes/codex-home";
   try {
     return await body();
@@ -161,7 +161,7 @@ function recordingAdapters() {
 }
 
 /**
- * Ruling 127, the input-side invariant end to end: the process a run spawns
+ * Ruling 137, the input-side invariant end to end: the process a run spawns
  * sees the credential of the ONE person that run bills, and no other.
  *
  * Driven through the REAL pieces — a migrated database, the real credential
@@ -217,7 +217,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
     const child = captured.claude;
     expect(child).toBeTruthy();
     // The principal's own key, and their own home — nobody else's. Ruling
-    // 507: the home of the ACCOUNT the run bills, inside the person's own.
+    // 138: the home of the ACCOUNT the run bills, inside the person's own.
     expect(child?.ANTHROPIC_API_KEY).toBe(credential.secrets[0]);
     expect(child?.CLAUDE_CONFIG_DIR).toBe(credential.accountHome);
     expect(child?.CLAUDE_CONFIG_DIR).toContain(path.join("users", "u_owner", "claude-home", "accounts"));
@@ -263,7 +263,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
     const codexRun = await withAmbientHomes(() =>
       startWithEnv(codexCredential.env),
     );
-    // Ruling 181: the child's CODEX_HOME is the run's private fork UNDER the
+    // Ruling 145: the child's CODEX_HOME is the run's private fork UNDER the
     // principal's home, and the state db stays the principal's — never the
     // ambient `/data/runtimes/codex-home` planted on the server.
     expect(codexRun.codex?.CODEX_HOME).toBe(
@@ -274,7 +274,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
   });
 
   it("a codex Platform key never rides beside OPENAI_API_KEY", async () => {
-    // The billing trap ruling 127 closes by construction: a person's pasted
+    // The billing trap ruling 137 closes by construction: a person's pasted
     // Platform key arrives as CODEX_API_KEY, and OPENAI_API_KEY — which the
     // CLI would prefer, on a different account — is stripped by the filter and
     // never re-added.
@@ -292,7 +292,7 @@ describe("a run's child env carries exactly its principal's credential", () => {
 
     const child = captured.codex;
     expect(child?.CODEX_API_KEY).toBe(credential.secrets[0]);
-    // Ruling 181: the run's fork of the principal's home, the state db shared.
+    // Ruling 145: the run's fork of the principal's home, the state db shared.
     expect(child?.CODEX_HOME).toBe(codexRunHomeDir(credential.homeDir, "run_principal"));
     expect(child?.CODEX_SQLITE_HOME).toBe(credential.homeDir);
     expect(child?.OPENAI_API_KEY).toBeUndefined();
@@ -383,14 +383,13 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
 });
 
 /**
- * Ruling 371/373, as amended by ruling 376: no context window rides a child
- * env any more, and the set of keys Viberr ADDS to a child env is pinned by
- * name — the credential (ruling 127), the home and the run marker (ruling
- * 174). A key added anywhere on the run path without a line here fails this
- * test. Ruling 577 adds one to every Claude run: the switch that keeps
- * auto-memory off.
+ * Ruling 174: no context window rides a child env, and the set of keys Viberr
+ * ADDS to a child env is pinned by name — the credential (ruling 137), the
+ * home, the run marker and, on every Claude run, the switch that keeps
+ * auto-memory off (ruling 141(b)). A key added anywhere on the run path
+ * without a line here fails this test.
  */
-describe("the keys Viberr adds to a run's child env are named (ruling 371)", () => {
+describe("the keys Viberr adds to a run's child env are named (ruling 141)", () => {
   const ctx = createTestDbContext();
   afterEach(() => ctx.cleanup());
 
@@ -423,7 +422,7 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     return { added, seen: child };
   }
 
-  it("ruling 376: no kind carries a window key — the child env is the credential, the home, git, the marker and the auto-memory switch", async () => {
+  it("ruling 174: no kind carries a window key — the child env is the credential, the home, git, the marker and the auto-memory switch", async () => {
     for (const kind of ["primary", "reviewer", "controller", "operator"] as const) {
       const env = await childEnvFor(kind, "claude");
       expect(env.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
@@ -441,7 +440,7 @@ describe("the keys Viberr adds to a run's child env are named (ruling 371)", () 
     const primary = await childEnvFor("primary", "codex");
     expect(primary.seen.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     // The credential and its home (`runCredentialFor`), which the adapter
-    // turns into the run's fork plus the shared state db (ruling 181), git
+    // turns into the run's fork plus the shared state db (ruling 145), git
     // and the marker.
     expect(primary.added).toEqual([
       "CODEX_API_KEY",

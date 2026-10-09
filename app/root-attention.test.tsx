@@ -6,7 +6,7 @@ import App from "./root";
 import { MemoryStorage } from "../test-support/memory-storage";
 
 /**
- * Ruling 481(c) (F40-51): root mounts the attention watcher for a signed-in
+ * Ruling 74 (F40-51): root mounts the attention watcher for a signed-in
  * tab (a csrf token in root's data is the signed-in signal, as for the dock)
  * and for nobody else, so every signed-in page's title carries the count of
  * unread decisions. The watcher's own behaviour is `attention-watcher.test.tsx`.
@@ -51,7 +51,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("root mounts the attention watcher (ruling 481)", () => {
+describe("root mounts the attention watcher (ruling 74)", () => {
   it("a signed-in tab's title counts the unread decisions", async () => {
     renderRoot("csrf-token");
     await waitFor(() => expect(document.title).toBe("(3) Profile & preferences · Viberr"));

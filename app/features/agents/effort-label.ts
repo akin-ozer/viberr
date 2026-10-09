@@ -12,7 +12,7 @@ const EFFORT_LABEL = new Map<string, string>([
 ]);
 
 /** An effort tier's display name, as the picker offers it. Exported for the
- *  profile panel's runtime row (ruling 479(e)), which names the stored tier in
+ *  profile panel's runtime row (ruling 326), which names the stored tier in
  *  the same words; the two modules already share one route chunk. */
 export function effortLabel(id: string): string {
   return EFFORT_LABEL.get(id) ?? id;

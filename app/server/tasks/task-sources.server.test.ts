@@ -16,7 +16,7 @@ import { readTaskSources, writeTaskSource } from "~/server/files/task-sources.se
 import { keepTaskSource, type KeepSourceInput } from "./task-sources.server";
 
 /**
- * Ruling 690: a task keeps the sources its result rests on. The keep is the
+ * Ruling 82: a task keeps the sources its result rests on. The keep is the
  * action behind `keep_source`: it takes a file the run staged in the task's
  * attachments folder under a `.source-` name, keeps the server's own copy
  * under an id, and removes the staged file. These drive it through the real
@@ -97,7 +97,7 @@ function keepEarlier(store: TestStore, count: number, bytes = 0): void {
 const MB = 1024 * 1024;
 const TOKEN = "ghp_0123456789abcdefABCDEF0123456789abcd";
 
-describe("ruling 690: keeping a source on a task", () => {
+describe("ruling 82: keeping a source on a task", () => {
   it("keeps a staged file as a source under the name after the prefix: the staged file goes, no reader of the task's files ever lists it, and the record carries its id, origin, title, agent, run, size and hash", () => {
     // CANARY: drop the removal of the staged file in keepTaskSource and the
     // folder still holds `.source-aws-pricing.html` after the keep.
@@ -236,7 +236,7 @@ describe("ruling 690: keeping a source on a task", () => {
       reply: notStaged("inventory.csv"),
     },
     {
-      // Ruling 558: what a relay or an upload sets aside while its claim is
+      // Ruling 77: what a relay or an upload sets aside while its claim is
       // written is somebody's file under a dot-name. CANARY: take any name
       // that starts with a dot and the set-aside copy is moved out from under
       // the writer that would put it back.

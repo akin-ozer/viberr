@@ -53,7 +53,7 @@ const operatorDefinitionMd = readFileSync(
 );
 
 /**
- * R19-1 (ruling 55) — the operator gets a FULL read-only checkout of the
+ * R19-1 (ruling 107) — the operator gets a FULL read-only checkout of the
  * repository under its cwd and must ground repo claims in it, read via
  * Read/Grep/Glob. Live origin (F19-4): before the clone, at triage the working
  * directory held only `task.md`, and with nothing else to look at the operator
@@ -98,12 +98,12 @@ describe("R19-1: the persona grounds repo claims in the read-only checkout", () 
 });
 
 /**
- * Ruling 164 (pass 35, F35-14) — the persona is read on every turn, and it was
+ * Ruling 131 (pass 35, F35-14) — the persona is read on every turn, and it was
  * silent on the one thing that made KNC-3's decision inert: the operator wrote
  * "Force-accept as admin without a fresh verdict" as a `custom` title because
  * nothing told it a kind existed that performs it.
  */
-describe("ruling 164: the persona says an option title is a promise", () => {
+describe("ruling 131: the persona says an option title is a promise", () => {
   it("names the promise, the two kinds that keep it, and the Agents surface for a profile", () => {
     // Canary: drop the paragraph and the operator is free to write a title its
     // kind cannot honour again.
@@ -131,7 +131,7 @@ describe("ruling 164: the persona says an option title is a promise", () => {
 });
 
 /**
- * Pass-35 cluster review of ruling 162: `notAcceptableReason` is the FIRST of
+ * Pass-35 cluster review of ruling 95: `notAcceptableReason` is the FIRST of
  * every acceptance gate, and one of them is "this task has not reached the
  * boundary yet". The doctrine forbade the move into the acceptance stage while
  * the field was set, which is every task short of that stage, by a sentence

@@ -42,7 +42,7 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
    three private copies of two declarations the sheet already owns (`.fine`,
    and `.pol-note.after` / `.pol-note.last`), and they had already drifted
    (this file's note sat at .9rem, settings' at .8rem, the sheet's at
-   .85rem). Ruling 14: shared single implementations, never fork per
+   .85rem). Ruling 297: shared single implementations, never fork per
    surface. The count is `right sub fine`, the same three classes seven
    other panel heads use; the note is `pol-note after last`. */
 
@@ -93,7 +93,7 @@ function RepositoryPanel({
           <span className="k">Default repository</span>
           <span className="v">
             <Icon name="github" />
-            {/* Ruling 667: the page draws this panel only for a project that
+            {/* Ruling 224: the page draws this panel only for a project that
                 has a repository. */}
             <span className="mono">{data.project.repo}</span>
           </span>
@@ -124,7 +124,7 @@ function RepositoryPanel({
             )}
           </span>
         </div>
-        {/* Ruling 468 (F40-12): an existing repository with no commit is a fact
+        {/* Ruling 227 (F40-12): an existing repository with no commit is a fact
             Viberr acts on, not a person's chore: the first task branch waits
             for the default branch's first commit, which the server makes. */}
         {data.connection.status === "connected" && data.connection.empty && (
@@ -157,7 +157,7 @@ function RepositoryPanel({
           project's token fingerprint, its scope verdicts and its re-attach/remove
           controls. Server-side, every one of those actions gates on
           `grant-github-scope` (routes/project.github.tsx), so the card is
-          WITHDRAWN below that tier rather than rendered read-only — ruling 37's
+          WITHDRAWN below that tier rather than rendered read-only — ruling 27's
           precedent: a withdrawn affordance is honest, a disabled one invites a
           support question. What stays is the Connection row above, which is the
           only credential fact a reader of the board legitimately needs ("can
@@ -210,7 +210,7 @@ function PullRequestsPanel({
           {prs.length} linked to tasks
         </span>
       </div>
-      {/* Ruling 625: `gh-prs` scopes this page's own row rules (the one-line
+      {/* Ruling 280: `gh-prs` scopes this page's own row rules (the one-line
           row on a tablet) without touching the review queue's. */}
       <div className="rq-list gh-prs">
         {prs.length === 0 && (
@@ -279,7 +279,7 @@ function PullRequestsPanel({
       </div>
       {/* F19-34: this used to say "accepting a completion in the review queue".
           The queue performs zero mutations — it is a read-only triage list whose
-          rows navigate to task detail, which is exactly why ruling 30 (R15-11)
+          rows navigate to task detail, which is exactly why ruling 304 (R15-11)
           labels its row "Review" and not "Accept". Acceptance happens on the
           task page, next to the evidence it is judged against, so the note names
           that surface. */}
@@ -339,7 +339,7 @@ function BranchesPanel({
                 onClick={() => onOpenTask(row.taskKey)}
               >
                 <span className="live-task">
-                  {/* Ruling 625: a task key is a name, not code. */}
+                  {/* Ruling 280: a task key is a name, not code. */}
                   <span className="key">{row.taskKey}</span>{" "}
                   <span className="ttl">{row.title}</span>
                 </span>
@@ -347,7 +347,7 @@ function BranchesPanel({
                   {/* Interface review 2026-09-24 (colo-12): secondary ink, not
                       the teal OK ink — the Sync pill carries the state, and a
                       branch never compared or not pushed is not "ok". */}
-                  {/* Ruling 625: one line, never broken at every hyphen; a
+                  {/* Ruling 280: one line, never broken at every hyphen; a
                       name longer than its column ends in an ellipsis and the
                       title carries it whole. */}
                   <span className="trace" title={row.branch}>
@@ -358,7 +358,7 @@ function BranchesPanel({
                     <span className="fine xs">
                       {row.commitCount}{" "}
                       {row.commitCount === 1 ? "commit" : "commits"}
-                      {/* Ruling 187 (pass 37, F37-8): a commit the remote does
+                      {/* Ruling 236 (pass 37, F37-8): a commit the remote does
                           not have is real work, and counting it is right — but
                           rendering it identically to a pushed one is what let
                           SHOP-2 read "1 commit · synced" for a change that
@@ -407,7 +407,7 @@ function BranchesPanel({
                       )}
                       {/* F17-L6: a conflict is actionable here too — the base
                           must be merged into the branch before its PR can merge
-                          (ruling 291: never a rebase). */}
+                          (ruling 230: never a rebase). */}
                       {mergeablePill(row.pr.mergeable) && (
                         <Pill kind={mergeablePill(row.pr.mergeable)!.kind} sm>
                           {mergeablePill(row.pr.mergeable)!.label}
@@ -415,7 +415,7 @@ function BranchesPanel({
                       )}
                     </>
                   ) : (
-                    // Ruling 148: inside the row BUTTON a bare "−" reads as a
+                    // Ruling 291: inside the row BUTTON a bare "−" reads as a
                     // per-row remove control. Same words as the task page's
                     // neutral "no PR" pill.
                     <span className="fine md dim">no PR</span>
@@ -459,7 +459,7 @@ export interface ReconcileCheckView {
   stale: boolean;
 }
 
-/** The freshness chip's tone, line and sentence (ruling 700(e), the split of
+/** The freshness chip's tone, line and sentence (ruling 13(b), the split of
  *  `GithubViewPage`). */
 interface Freshness {
   staleCache: boolean;
@@ -469,7 +469,7 @@ interface Freshness {
 
 /**
  * What the freshness chip says, from the last CHANGE and the last CHECK
- * (ruling 700(e): a pure function of the loader's two values, read once per
+ * (ruling 13(b): a pure function of the loader's two values, read once per
  * render by {@link GithubViewPage}).
  */
 function reconcileFreshness(
@@ -516,7 +516,7 @@ function reconcileFreshness(
   return { staleCache, text, title };
 }
 
-/** Ruling 667's page for a project with no repository (ruling 700(e): the
+/** Ruling 224's page for a project with no repository (ruling 13(b): the
  *  early return of `GithubViewPage`, hook-free). */
 function NoRepositoryPage({ name, slug }: { name: string; slug: string }) {
   return (
@@ -547,7 +547,7 @@ function NoRepositoryPage({ name, slug }: { name: string; slug: string }) {
 }
 
 /** The page head: title, the freshness chip, Update status and Open on GitHub
- *  (ruling 700(e): the `.board-head` slot of `GithubViewPage`, hook-free). */
+ *  (ruling 13(b): the `.board-head` slot of `GithubViewPage`, hook-free). */
 function GithubHead({
   name,
   repo,
@@ -633,7 +633,7 @@ function GithubHead({
   );
 }
 
-/** The cred-warn action slot (ruling 700(e): the element `GithubViewPage`
+/** The cred-warn action slot (ruling 13(b): the element `GithubViewPage`
  *  hands the credential card, hook-free): Re-check scopes for a reader who
  *  holds the grant once a PAT is bound, and Fix in Settings. */
 function CredentialWarnActions({
@@ -686,7 +686,7 @@ export function GithubViewPage({
    *  though it were the last check, which is the defect. */
   reconcileCheck: ReconcileCheckView;
   myRole: string | null;
-  /** Ruling 480 (F40-45): the reader's instance role is `admin`, so the
+  /** Ruling 222 (F40-45): the reader's instance role is `admin`, so the
    *  credential row can link to the bound connection's Update token. */
   instanceAdmin?: boolean;
 }) {
@@ -739,7 +739,7 @@ export function GithubViewPage({
   // credential is configured (F6). Only offer it once a PAT is bound; the
   // no-credential card still shows "Fix in Settings" / "Attach credential".
   const hasCredential = data.credential.source === "pat";
-  // Ruling 368: each request shows itself on the button that started it; the
+  // Ruling 286: each request shows itself on the button that started it; the
   // other one only waits at the disabled step.
   const reconciling = reconcileFetcher.state !== "idle";
   const rechecking = grantFetcher.state !== "idle";
@@ -784,7 +784,7 @@ export function GithubViewPage({
 
   const freshness = reconcileFreshness(data.reconcile, reconcileCheck);
 
-  // Ruling 667: a board that delivers results may have no repository, and
+  // Ruling 224: a board that delivers results may have no repository, and
   // then this page has one thing to say. The rail no longer lists the page
   // for such a project; a link that still lands here reads this, not a
   // credential warning and three empty lists about a repository nobody needs.

@@ -82,7 +82,7 @@ export interface AuthEndpointContext {
  * P13-D-22: which provider's callback is running, read off the endpoint the
  * database hook fires under. The social callback endpoint is declared
  * `/callback/:id`, so `params.id` IS the provider id — the same resolution
- * better-auth's own `lastLoginMethod` plugin uses. (Ruling 652(d): the generic
+ * better-auth's own `lastLoginMethod` plugin uses. (Ruling 28(c): the generic
  * OAuth plugin's `/oauth2/callback/:id` is not installed, so it is not read.)
  *
  * This has to be threaded explicitly: `databaseHooks.user.create` receives only

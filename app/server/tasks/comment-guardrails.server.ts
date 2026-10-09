@@ -39,7 +39,7 @@ export function isMeaninglessComment(text: string | null | undefined): boolean {
 }
 
 /**
- * Ruling 383 (F39-11): repair a body whose line breaks arrived DOUBLE-ESCAPED.
+ * Ruling 20 (F39-11): repair a body whose line breaks arrived DOUBLE-ESCAPED.
  *
  * Live on ax-clone AX-12 the deliverer returned a 27,597-character upstream
  * fidelity report whose `summary` carried 146 literal `\n` sequences and not
@@ -130,7 +130,7 @@ export function applyCommentGuardrails(input: {
     return { text: null, dropped: "meaningless", trimmedBy: [] };
   }
 
-  // Ruling 383: before every other guardrail reads it, because a body that is
+  // Ruling 20: before every other guardrail reads it, because a body that is
   // one 27KB line defeats the evidence-separation fence scan too.
   let text = repairDoubledNewlines(input.text);
   const trimmedBy: CommentTrim[] = [];

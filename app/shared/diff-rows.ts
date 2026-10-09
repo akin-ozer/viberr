@@ -1,5 +1,5 @@
 /**
- * Ruling 484: a unified-diff patch (GitHub's `pulls/{n}/files` `patch`) as the
+ * Ruling 246: a unified-diff patch (GitHub's `pulls/{n}/files` `patch`) as the
  * rows the Changes panel draws, each with the line numbers a note quotes.
  *
  * A hunk header `@@ -a,b +c,d @@ …` sets both counters; a context line
@@ -39,7 +39,7 @@ export interface NoteRow extends NoteLine {
  * longer paste (`maxLength`), the `review-notes` intent refuses one, and a
  * longer comment relayed from GitHub is cut and says where the rest is
  * (`review-notes.server.ts`). One number here, because the box is a client
- * component and the guard is server-only: ruling 315's reason for
+ * component and the guard is server-only: ruling 63's reason for
  * `PACKET_NOTE_MAX`.
  */
 export const REVIEW_NOTE_MAX_CHARS = 4_000;
@@ -100,7 +100,7 @@ export function noteLine(row: DiffRow): NoteLine | null {
 }
 
 /**
- * Ruling 509: the rows one note covers when a person drags or shift-clicks from
+ * Ruling 296: the rows one note covers when a person drags or shift-clicks from
  * row `from` towards row `to`, first row first. The run stops at its hunk's
  * edge, because the lines between two hunks are not in the patch, and before
  * any row `taken` says another note covers, because a line carries one note.

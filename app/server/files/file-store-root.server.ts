@@ -14,7 +14,7 @@ import { AppError } from "../errors/app-error.server";
  *                                          served member-only, cited as evidence)
  *   agents/profiles/<id>.md               (org-level agent profile templates)
  *   runtimes/                             (NDJSON run logs — Phase 8)
- *   runtimes/users/<userId>/claude-home   (ruling 127 — that person's own
+ *   runtimes/users/<userId>/claude-home   (ruling 137 — that person's own
  *   runtimes/users/<userId>/codex-home     vendor sign-in + provider sessions)
  *   kb/<dir>/                             (knowledge-base folders — Phase 9B;
  *                                          UI renders them as store://kb/<dir>/)
@@ -22,7 +22,7 @@ import { AppError } from "../errors/app-error.server";
  *                                          store://skills/<name>/)
  *   state/projection.sqlite               (SQLite — managed by db/)
  *
- * UI copy renders REAL store-relative paths (orchestrator ruling 3):
+ * UI copy renders REAL store-relative paths (ruling 15(a)):
  * `projects/viberr-core/tasks/VIB-142/task.md`, never the mock's `.viberr/…`.
  */
 
@@ -31,7 +31,7 @@ export const DATA_ROOT_SUBDIRS = [
   "agents",
   "agents/profiles",
   "runtimes",
-  // Ruling 127: the per-person runtime homes. The deployment-wide
+  // Ruling 137: the per-person runtime homes. The deployment-wide
   // `runtimes/claude-home` / `runtimes/codex-home` are gone — a credential in a
   // shared home is a credential every run bills to whoever owns it. Each
   // person's `runtimes/users/<userId>/{claude-home,codex-home}` is created
@@ -41,7 +41,7 @@ export const DATA_ROOT_SUBDIRS = [
   "runtimes/users",
   "kb",
   "skills",
-  // Ruling 102: the purge's durable export of expiring audit rows (A00-6,
+  // Ruling 33: the purge's durable export of expiring audit rows (A00-6,
   // pass 32 — created here so every root shows the folder the runbook, the
   // backup and file-formats.md all name, not only roots that already purged).
   "audit-exports",
@@ -67,15 +67,15 @@ export function projectsDir(dataRoot?: string): string {
 }
 
 /**
- * One project's folder. Ruling 697: the slug is one folder under `projects/`,
+ * One project's folder. Ruling 15(b): the slug is one folder under `projects/`,
  * or it names no project.
  *
- * Like a task key (ruling 696), the slug arrives from a URL — decoded, so a
+ * Like a task key (ruling 15(b)), the slug arrives from a URL — decoded, so a
  * `%2F` is a `/` — and from form fields. `projectDir` is where every project
  * path is built, and the membership guard reads `project.md` from the folder
  * the slug resolves to. Unchecked, a slug that walked into a task's own
  * `attachments/` (which a person holding `attach-file`, and an agent's shell,
- * may write, ruling 460) named a `project.md` planted there as its frontmatter:
+ * may write, ruling 15) named a `project.md` planted there as its frontmatter:
  * the folder then passed as a project its planter administered, and the
  * settings `delete-project` door ran its `rmSync` on it. The refusal is here,
  * and it is the answer an unknown project gets.
@@ -93,7 +93,7 @@ export function projectFilePath(slug: string, dataRoot?: string): string {
 }
 
 /**
- * One task's folder. Ruling 696: the key is one folder under the project's
+ * One task's folder. Ruling 15(b): the key is one folder under the project's
  * tasks, or it names no task.
  *
  * A key arrives from a URL and from an agent's tool call as well as from the
@@ -137,7 +137,7 @@ export function taskAttachmentsDir(
   return path.join(taskDir(slug, key, dataRoot), "attachments");
 }
 
-/** Ruling 503: a project's epic files live beside its tasks. */
+/** Ruling 17: a project's epic files live beside its tasks. */
 export function epicsDir(slug: string, dataRoot?: string): string {
   return path.join(projectDir(slug, dataRoot), "epics");
 }
@@ -153,7 +153,7 @@ export function epicFilePath(
 }
 
 /**
- * Ruling 503: where the chained-goal files of ruling 99 lived. Nothing reads
+ * Ruling 17: where the chained-goal files of ruling 273 lived. Nothing reads
  * or writes a goal any more; the boot conversion (`convertGoalsToEpics`,
  * goal-epic-conversion.server.ts) turns each one into an epic and files the
  * original under `converted/`.
@@ -227,7 +227,7 @@ export function resolveStoreSegment(root: string, name: string): string {
 }
 
 /**
- * Ruling 675: the name a file is stored under, whatever form it arrived in.
+ * Ruling 76: the name a file is stored under, whatever form it arrived in.
  *
  * A browser on macOS sends a file's name decomposed ("İ" as "I" and a
  * combining dot above it), a Linux directory holds names byte for byte, and a
@@ -239,7 +239,7 @@ export function storedFileName(name: string): string {
 }
 
 /**
- * Ruling 675: {@link resolveStoreSegment} for a name somebody typed, which
+ * Ruling 76: {@link resolveStoreSegment} for a name somebody typed, which
  * finds the file whichever Unicode form it was stored in.
  *
  * Live on AWSC-117 the task's own input, a PDF uploaded from a Mac, was
@@ -265,7 +265,7 @@ export function resolveStoredSegment(root: string, name: string): string {
 }
 
 /**
- * Ruling 675: the one of `entries` a written name means, by the rule
+ * Ruling 76: the one of `entries` a written name means, by the rule
  * {@link resolveStoredSegment} states: the entry of exactly that name, else
  * the single entry that composes to the same name. Null when none does, or
  * when two do and the name is neither of them.
@@ -305,7 +305,7 @@ export function skillDirPath(name: string, dataRoot?: string): string {
 /**
  * Store-relative display path (always forward slashes), e.g.
  * `projects/viberr-core/tasks/VIB-142/task.md` — what the UI shows wherever
- * the mock showed `.viberr/...` (ruling 3).
+ * the mock showed `.viberr/...` (ruling 15(a)).
  */
 export function storeRelativePath(absPath: string, dataRoot?: string): string {
   const rel = path.relative(getDataRoot(dataRoot), path.resolve(absPath));

@@ -101,7 +101,7 @@ describe("seedDefaultAgentAssets", () => {
   });
 });
 
-describe("ruling 692: the library ships a Writer and an Editor", () => {
+describe("ruling 179: the library ships a Writer and an Editor", () => {
   const grantsOf = (id: string): Map<string, string> => {
     const profile = LIBRARY_AGENT_PROFILES.find((p) => p.frontmatter.id === id);
     return new Map((profile?.frontmatter.capabilities ?? []).map((c) => [c.capabilityId, c.mode]));
@@ -192,7 +192,7 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
     // for a picture nobody could take.
     expect(editor).toContain("do not block on a picture nobody could take");
     expect(writer).toContain("Where you could not look, say so in your note.");
-    // Ruling 695: three readers out of three picked a piece whose facts all
+    // Ruling 179: three readers out of three picked a piece whose facts all
     // held, for a narrator who cited his own log and quoted his own messages.
     // CANARY: drop either paragraph from the Writer's manual, or the cold
     // read's line from the Editor's.
@@ -225,7 +225,7 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
 });
 
 /**
- * Ruling 706, live on BLOG-7. The post said of a request, "How much of it
+ * Ruling 218, live on BLOG-7. The post said of a request, "How much of it
  * comes from the cache isn't recorded", on the word of a ruling of
  * 2026-09-26. A ruling two days later, 62 lines further down the same kept
  * decisions file, had the product print exactly that. The Writer cited the
@@ -233,7 +233,7 @@ describe("ruling 692: the library ships a Writer and an Editor", () => {
  * at high effort in four minutes, and again at max in nineteen. Two outside
  * checks, told only to check every claim, both found the later entry.
  */
-describe("ruling 706: a record that grows is read to its latest entry on the subject", () => {
+describe("ruling 218: a record that grows is read to its latest entry on the subject", () => {
   const said = (dataRoot: string, name: string) =>
     readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
 
@@ -261,8 +261,8 @@ describe("ruling 706: a record that grows is read to its latest entry on the sub
     // rehearsal the sentence's own words led back to the entry it cited, and
     // the later entry, whose title is about cost, came up only under the
     // feature's name.
-    // What is gone through is the places found, not every later entry: the
-    // entries after ruling 506 are twenty-six pages of a read.
+    // What is gone through is the places found, not every later entry: in the
+    // rehearsal's record the later entries were twenty-six pages of a read.
     expect(editor).toContain(
       "Search the whole kept record, not a cut of it, for the thing that sentence is about, under the name the record gives it and not the sentence's own words, " +
         "which a later entry seldom repeats, and go through every place found in an entry dated after the one cited.",
@@ -318,7 +318,7 @@ describe("ruling 706: a record that grows is read to its latest entry on the sub
   });
 });
 
-describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () => {
+describe("ruling 179: the library ships a Diagrammer and a Cover Designer", () => {
   const profileOf = (id: string) => LIBRARY_AGENT_PROFILES.find((p) => p.frontmatter.id === id);
   const grantsOf = (id: string): Map<string, string> =>
     new Map((profileOf(id)?.frontmatter.capabilities ?? []).map((c) => [c.capabilityId, c.mode]));
@@ -372,9 +372,9 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
 
   it("each manual leaves a board's own skill half of what a run with no checkout is given", () => {
     // On a board with no repository every skill reaches a run as prompt text
-    // under one shared budget (ruling 679), drawn in name order: a manual that
+    // under one shared budget (ruling 186), drawn in name order: a manual that
     // filled it would cut the board's own skill off whole. The Writer's and the
-    // Editor's manuals (ruling 692) are held to it here too.
+    // Editor's manuals (ruling 179) are held to it here too.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise"]) {
@@ -481,14 +481,14 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     expect(cover).toContain("the same call with `scale` 0.25 is the cover as a feed shows it");
     for (const manual of [diagrammer, cover]) {
       // A supporting agent's save of the piece is what puts its picture under
-      // review (ruling 587), so both manuals say the save is theirs to make
+      // review (ruling 85), so both manuals say the save is theirs to make
       // and that nothing else in the piece is.
       expect(manual).toContain("That save makes the assembled piece the delivery a reviewer judges.");
       expect(manual).toContain("Copy the picture `capture_page` saved for your run");
       expect(manual).toContain("a face it lacks is replaced without a word");
       expect(manual).toContain("Change nothing else in the piece");
       // The picture that is kept is the scale 2 one, and a rework that only
-      // replaces it still reaches review (ruling 699's delivery rule).
+      // replaces it still reaches review (ruling 81's delivery rule).
       // Within 2,000 px on a side, so its maker and whoever opens it next
       // both see the picture that goes out, not a smaller render of it.
       expect(manual).toMatch(/the same call with `scale` (2|1\.5) makes the (picture|cover) you keep/);
@@ -518,7 +518,7 @@ describe("ruling 699: the library ships a Diagrammer and a Cover Designer", () =
     const writer = said(dataRoot, "writer-expertise");
     expect(writer).toContain("the diagrams and the cover are that agent's. Draw none yourself");
     const guide = said(dataRoot, "controller-guide");
-    expect(guide).toContain("add the shipped Diagrammer and Cover Designer** (ruling 699)");
+    expect(guide).toContain("add the shipped Diagrammer and Cover Designer** (ruling 268)");
     expect(guide).toContain("each deployed at the stage where its step happens");
     // Two at once would each save the piece, and the writer has to be told
     // the drawing is not its to do. CANARY: drop either clause.
@@ -661,11 +661,11 @@ describe("ensureBaseAgentsDeployed", () => {
   });
 
   /**
-   * Ruling 518 (owner, 2026-09-27): the operator is one agent, called Operator,
+   * Ruling 176 (owner, 2026-09-27): the operator is one agent, called Operator,
    * with no role. Its editor used to ask for a name and a role, and a save
    * stored both on the project's deployment with the template's scope line.
    */
-  it("ruling 518: removes the operator's stored name, role and scope, and keeps an agent profile's", async () => {
+  it("ruling 176: removes the operator's stored name, role and scope, and keeps an agent profile's", async () => {
     // CANARY: stop calling `withoutOperatorIdentity`, or let it strip a
     // deployment that is not the operator.
     const db = ctx.makeDb();

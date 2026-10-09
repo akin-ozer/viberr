@@ -17,7 +17,7 @@ import {
 import { errorMessage } from "~/shared/errors";
 
 /**
- * Ruling 461: the ONE MCP client Viberr speaks to an org server with.
+ * Ruling 191: the ONE MCP client Viberr speaks to an org server with.
  *
  * Two callers use it and must not disagree about what "up" means: the gateway
  * (`gateway.server.ts`), which holds a run's connection to a credentialed
@@ -41,7 +41,7 @@ export const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
  * "13 tools discovered" for the Everything server while both live runs
  * enumerated **15** from the same command. The number shown has to be the
  * number a run gets, so the probe declares the same capability set the SDK
- * clients do — and since ruling 461 the gateway's upstream client IS that
+ * clients do — and the gateway's upstream client (ruling 191) IS that
  * client, answering each capability honestly (no roots, elicitation declined,
  * sampling refused with a sentence).
  */
@@ -60,7 +60,7 @@ export type McpFetch = (url: string | URL, init?: RequestInit) => Promise<Respon
 export interface UpstreamHttpOptions {
   /** The decrypted org credential, sent as `Authorization: Bearer <token>`. */
   token?: string | null;
-  /** Ruling 469: an OAuth sign-in's access token, asked for on every request
+  /** Ruling 192: an OAuth sign-in's access token, asked for on every request
    *  (so a sign-out or a refresh elsewhere takes effect on the next one) and
    *  renewed once on a 401. Takes the place of `token`. */
   auth?: UpstreamTokenSource;
@@ -71,7 +71,7 @@ export interface UpstreamHttpOptions {
 }
 
 /**
- * Ruling 469: where an OAuth-signed-in connection's access token comes from.
+ * Ruling 192: where an OAuth-signed-in connection's access token comes from.
  * The registry implements it (`org/mcp-oauth.server.ts`); this module only
  * attaches what it hands over, in the server process, like a static
  * credential. Each method throws an `UpstreamConnectError` whose reason is the
@@ -87,12 +87,12 @@ export interface UpstreamTokenSource {
   refusedAfterRenewal(rejected: string): Promise<UpstreamConnectError>;
 }
 
-/** Ruling 469: what a server with no credential says when it asks for an
+/** Ruling 192: what a server with no credential says when it asks for an
  *  OAuth sign-in (the MCP authorization spec's 401 challenge). */
 export const OAUTH_NEEDS_SIGN_IN =
   "needs sign-in: this server asks for an OAuth sign-in, which an org admin does from its editor in Instance settings → Agent resources";
 
-/** Ruling 469: what a sign-in that can no longer be renewed says. */
+/** Ruling 192: what a sign-in that can no longer be renewed says. */
 export const OAUTH_SIGN_IN_EXPIRED =
   "sign-in expired: an admin must sign in again (Instance settings → Agent resources)";
 
@@ -122,7 +122,7 @@ export class UpstreamConnectError extends Error {
 }
 
 /**
- * Ruling 469: a server with no credential answered the MCP authorization
+ * Ruling 192: a server with no credential answered the MCP authorization
  * challenge, a 401 carrying `resource_metadata`. The probe records it, so the
  * row reads "needs sign-in" and the sign-in knows where the metadata is.
  */
@@ -289,7 +289,7 @@ function fallsBackToSse(cause: unknown): boolean {
 }
 
 /**
- * Ruling 469: every request carries the sign-in's current access token; a 401
+ * Ruling 192: every request carries the sign-in's current access token; a 401
  * renews it and retries once (a request body is a string, so it replays), and
  * a second 401 ends the sign-in rather than looping.
  */
@@ -336,8 +336,8 @@ function watchSession(base: McpFetch, onSession: (init: RequestInit | undefined)
  * Connect to a remote MCP server: Streamable HTTP first, the legacy SSE
  * transport when the server answers the way an SSE-only server does. The
  * credential rides both as `Authorization: Bearer <token>` — attached here,
- * in the server process, and nowhere else (ruling 461). An OAuth sign-in's
- * token rides the same way, through `auth` (ruling 469).
+ * in the server process, and nowhere else (ruling 191). An OAuth sign-in's
+ * token rides the same way, through `auth` (ruling 192).
  */
 export async function connectHttpUpstream(
   target: string,
@@ -353,7 +353,7 @@ export async function connectHttpUpstream(
     throw new UpstreamConnectError("endpoint is not an http(s) URL");
   }
   const timeoutMs = options.timeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS;
-  // Ruling 469: with no credential at all, a 401 may be the MCP authorization
+  // Ruling 192: with no credential at all, a 401 may be the MCP authorization
   // challenge; its `resource_metadata` is kept to report "needs sign-in". A
   // static credential's 401 stays "authentication rejected", as before.
   let challenge: string | null = null;

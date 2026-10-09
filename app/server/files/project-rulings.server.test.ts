@@ -6,7 +6,7 @@ import { readProjectFile } from "~/server/files/project-writer.server";
 import { projectRulingsKb, withProjectRulings } from "./project-rulings.server";
 
 /**
- * Ruling 239 (pass 37): the project's rulings knowledge base reaches every run
+ * Ruling 208(a) (pass 37): the project's rulings knowledge base reaches every run
  * the project makes, whether or not any profile grants it.
  *
  * The unit under test is deliberately tiny, because the interesting property is
@@ -14,8 +14,8 @@ import { projectRulingsKb, withProjectRulings } from "./project-rulings.server";
  * (the controller) only when a project is in scope. The operator's and the
  * controller's call sites are pinned at the bottom by what they return; the
  * specialist's two (a fresh run and a resumed @mention) by the index the run
- * is handed, in `specialist-run.server.test.ts` (ruling 422) and
- * `agent-reply.server.test.ts` (ruling 239). A helper with no production
+ * is handed, in `specialist-run.server.test.ts` (ruling 217(a)) and
+ * `agent-reply.server.test.ts` (ruling 208(a)). A helper with no production
  * caller is the state this pass found that ruling's own helper in.
  */
 let ctx: TestDbContext;
@@ -55,7 +55,7 @@ describe("withProjectRulings", () => {
   it("appends the rulings KB, never displacing the profile's own grants", () => {
     setRulings("team-rulings");
     // CANARY: prepend instead of append. `readKbIndexes` emits the indexes in
-    // this order, and ruling 239 reads a profile's own grants first and the
+    // this order, and ruling 208(a) reads a profile's own grants first and the
     // project's rulings last.
     expect(withProjectRulings(["mine", "inherited"], store.slug, { dataRoot: store.dataRoot })).toEqual([
       "mine",
@@ -96,7 +96,7 @@ describe("the runtimes that build a run's knowledge call it", () => {
     // CANARY: build either branch's `kb` without `withProjectRulings` (the
     // deployed `view.resources.kb`, the undeployed `[]`) and that operator's
     // list loses the project's rulings; leave its `rulingsKb` null and its
-    // index no longer says they bind (ruling 286).
+    // index no longer says they bind (ruling 208(b)).
     expect(authority.kb).toContain("team-rulings");
     expect(authority.rulingsKb).toBe("team-rulings");
   });
@@ -112,7 +112,7 @@ describe("the runtimes that build a run's knowledge call it", () => {
     const { writeFileSync } = await import("node:fs");
     const { kbDirPath } = await import("~/server/files/file-store-root.server");
     const marker = "LOCKFILE IS DERIVED, NOT SEPARATELY OWNED";
-    // Ruling 283: the prompt carries the INDEX — the doc's name and its
+    // Ruling 205: the prompt carries the INDEX — the doc's name and its
     // headings — so the marker has to live where an index can carry it.
     writeFileSync(`${kbDirPath(saved.kb.dir, store.dataRoot)}/rulings.md`, `# ${marker}\n\nbody\n`);
     setRulings(saved.kb.dir);

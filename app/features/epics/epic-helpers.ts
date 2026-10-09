@@ -11,7 +11,7 @@ import type { PillKind } from "~/ui/pill";
  * rather than the agents' purple: an epic in progress is a plan being worked,
  * not a run. Paused is amber like everything parked on purpose; done is the
  * accepted green; planned and cancelled are quiet. The epic page's status
- * select draws its dot in the same tone (ruling 615).
+ * select draws its dot in the same tone (ruling 325).
  */
 export const EPIC_STATUS_PILL = {
   planned: "neutral",
@@ -21,7 +21,7 @@ export const EPIC_STATUS_PILL = {
   cancelled: "neutral",
 } satisfies Record<EpicStatus, PillKind>;
 
-/** Ruling 651: how many tasks "Archive tasks" files away: the epic's live
+/** Ruling 274: how many tasks "Archive tasks" files away: the epic's live
  *  tasks, when it is Done and every one of them is done; otherwise none. */
 export function archivableTasks(epic: Pick<EpicSummary, "status" | "progress">): number {
   const { total, done, archivedDone } = epic.progress;

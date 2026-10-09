@@ -11,7 +11,7 @@
 ## 1. Setup
 
 ```sh
-cp .env.example .env      # every variable optional (ruling 504)
+cp .env.example .env      # every variable optional (ruling 38)
 npm ci                    # Node ≥ 26
 npm run seed              # baseline store; refused while an app holds the writer lock
 npm run dev               # http://localhost:5173 (PORT)
@@ -19,14 +19,13 @@ npm run dev               # http://localhost:5173 (PORT)
 
 Left unset, `VIBERR_SESSION_SECRET` and `VIBERR_SECRET_ENCRYPTION_KEY` are generated once
 into `<data root>/state/instance-secrets.json` by the first process that reads the env, and
-every process after it reads them back (ruling 504). Default sign-in after `npm run seed`:
+every process after it reads them back (ruling 38). Default sign-in after `npm run seed`:
 `admin@viberr.dev` / `viberr-dev-2828` (or `VIBERR_SEED_ADMIN_EMAIL` /
 `VIBERR_SEED_ADMIN_PASSWORD`, read while the users table is empty). `.env.example` sets
-`VIBERR_DATA_ROOT=./docker-data`, the dev server's store. Until ruling 460 it was also the
-directory `compose.yml` bind-mounted at `/data`; the container now mounts the named volume
-`viberr-data` instead (a macOS bind mount enforces no file permissions between users, and
-every agent runs as its person's own user), so the dev server and the container no longer
-share a store — read the container's through the app or `docker compose exec` (the schema
+`VIBERR_DATA_ROOT=./docker-data`, the dev server's store. The container mounts the named
+volume `viberr-data` instead (ruling 38; a macOS bind mount enforces no file permissions
+between users, and every agent runs as its person's own user), so the dev server and the
+container do not share a store — read the container's through the app or `docker compose exec` (the schema
 default, used when the variable is unset, is `./data`). All variables are documented in
 [../operations/configuration.md](../operations/configuration.md).
 
@@ -36,11 +35,11 @@ Run what CI runs (details in [testing.md](testing.md)):
 
 ```sh
 npm run lint && npm run typecheck && npm test && npm run build
-node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build (ruling 457)
+node scripts/measure-routes.mjs --check   # the bundle ratchet, after the build (ruling 11)
 npm run e2e     # Docker; the only gate that boots the shipped image
 ```
 
-CI runs `npm test` in the image's Debian base as an unprivileged user (ruling 622); as root,
+CI runs `npm test` in the image's Debian base as an unprivileged user (ruling 6); as root,
 or on another coreutils, the agent-tree suites fail for reasons of the host, not the change.
 [testing.md](testing.md) §1 has the command that runs it as CI does.
 
@@ -48,13 +47,16 @@ A change that makes a perf budget move fails `npm test` in either direction: low
 ceiling to keep a win, or raise it with the reason beside it
 ([performance.md](performance.md)).
 
-Lint has no suppression list: fix findings, never allowlist them (ruling 86). A change
+Lint has no suppression list: fix findings, never allowlist them or disable a rule in a
+comment (ruling 7; `lint-directives.test.ts` fails on any disable directive). A change
 that contradicts a numbered ruling in
 [../architecture/decisions.md](../architecture/decisions.md) must say so and be re-ruled;
-never reverse one silently. Rulings are appended under the next number; existing numbers
-are cited by code comments and never renumbered. A ruling that narrows, replaces or
-supersedes an earlier one obliges the earlier one to carry an inline marker
-(`rulings-supersession.test.ts`, ruling 341).
+never reverse one silently. Each ruling states its decision as it holds today: a changed
+decision is rewritten in place, with no dated note and no superseded text kept beside it;
+a new decision takes the next unused number in its topic's section; a ruling that stops
+holding is deleted and its citations are repointed in the same change. Numbers are cited
+by code comments, so they are never reused, and `ruling-citations.test.ts` fails on any
+"ruling N" the file does not define (ruling 1).
 
 ## 3. Where code goes
 
@@ -62,10 +64,10 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
   `requireFormAction` (session + CSRF + `intent`) and return `{ ok, toast }` or
   `{ ok: false, error }` (`appErrorResponse` renders a caught `AppError` that way, with
   `field` when the refusal names the form field it is about: `AppError.fieldValidation`,
-  ruling 514); loaders never mutate.
+  ruling 288); loaders never mutate.
 - **Governed task logic** lives in `app/server/tasks/*`; controller logic in
   `app/server/controller/*`, and epic logic in `app/server/tasks/epic-actions.server.ts`
-  (ruling 503); project and
+  (ruling 272); project and
   org logic beside its surface in `app/features/<surface>/*.server.ts` or
   `app/server/org/*`.
 - **Never write canonical files directly.** Use the writers in `app/server/files/`:
@@ -102,12 +104,12 @@ supersedes an earlier one obliges the earlier one to carry an inline marker
   (`request-context.server.ts`) with no call-site work; an id a request learns later
   goes on with `bindCorrelation` (identifiers only: the session guard binds `userId`,
   a run's launch binds `runId` and `taskKey` in its own `forkCorrelation`), and every
-  response echoes the request id as `X-Request-Id` (ruling 458(d)).
+  response echoes the request id as `X-Request-Id` (ruling 43).
 
 ## 4. Data and schema changes
 
 There is one squashed migration, `db/migrations/0001_baseline.sql`, and no
-back-compat obligation (ruling 683 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and, in the same change, give
+back-compat obligation (ruling 5 kept this convention at launch). To change a table or a CHECK constraint, edit the baseline and, in the same change, give
 existing roots a way to get it: a new column goes into `BASELINE_COLUMNS` in a form `ALTER TABLE … ADD COLUMN`
 accepts on a table that has rows (with a backfill when the default misdescribes older rows),
 a new table into `BASELINE_TABLES` and a new index into `BASELINE_INDEXES`
@@ -139,13 +141,13 @@ into the env schema and `.env.example` (`env.server.test.ts`).
 |---|---|---|
 | `docs/architecture/file-formats.md` | `file-formats-sync.test.ts` | §2 documents every `TASK_FRONTMATTER_KEYS` entry, §4 every `AGENT_PROFILE_KNOWN_KEYS` entry; the `## Packet` "The N kinds:" enumeration equals `PACKET_OPTION_KINDS` in order, and every stated count equals its length |
 | `docs/architecture/file-formats.md` (append contract) | `task-file.server.test.ts` | never says "display sorts by timestamp"; keeps "it does not undo it" |
-| `docs/architecture/decisions.md` | `rulings-supersession.test.ts` | every ruling a later one changes carries an inline marker (ruling 341) |
-| `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 158) |
-| `README.md`, `docs/operations/deployment.md` | `store-volume-wiring.test.ts` | the first shell block that runs Compose is the install: it runs `docker compose up`, with no `.env` copy and no `docker volume create` (ruling 504) |
+| `docs/architecture/decisions.md` | `ruling-citations.test.ts` | every "ruling N" cited anywhere in the tree names a ruling the file defines, and each number is defined once (ruling 1) |
+| `docs/operations/runbook.md`, `docs/operations/deployment.md`, `docs/development/scripts.md` | `runbook-db-read.test.ts` | copy first, never a second connection to a live projection; in-container backups use an absolute `--out` outside `/data` (ruling 23) |
+| `README.md`, `docs/operations/deployment.md` | `store-volume-wiring.test.ts` | the first shell block that runs Compose is the install: it runs `docker compose up`, with no `.env` copy and no `docker volume create` (ruling 38) |
 | `docs/architecture/codebase-map.md` | `app/features/shell/nav.test.ts` | contains `` `nav.ts` order: `` and the rail labels in order |
-| `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 458(c)) |
+| `.env.example` | `env.server.test.ts` | lists every key the env schema declares and every raw `process.env.VIBERR_*` read under `app/` (ruling 39) |
 | `tools/oxlint/anti-slop/` | `anti-slop-vendor-sync.test.ts` | matches `tools/oxlint/anti-slop.manifest.json`; re-pin with `node scripts/anti-slop-manifest.mjs` |
-| `app/server/runtimes/humanizer/`, `THIRD_PARTY_NOTICES.md` | `humanizer.server.test.ts` | holds only upstream's `SKILL.md` (matching `HUMANIZER_SKILL_SHA256`) and its `LICENSE`, and the notices name the repository, the commit and the licence; re-vendor from upstream and move the pin and `HUMANIZER_SOURCE` with it (ruling 502) |
+| `app/server/runtimes/humanizer/`, `THIRD_PARTY_NOTICES.md` | `humanizer.server.test.ts` | holds only upstream's `SKILL.md` (matching `HUMANIZER_SKILL_SHA256`) and its `LICENSE`, and the notices name the repository, the commit and the licence; re-vendor from upstream and move the pin and `HUMANIZER_SOURCE` with it (ruling 187) |
 
 Code comments cite `docs/architecture/decisions.md` (ruling numbers),
 `docs/architecture/file-formats.md`, `docs/operations/deployment.md`,
@@ -155,30 +157,30 @@ paths stable.
 
 ## 6. UI rules in one place
 
-The shipped app is the design source (ruling 682): reuse what an existing surface already
+The shipped app is the design source (ruling 275): reuse what an existing surface already
 draws, and record a deliberate departure in a comment at its site. `app/app.css`
 `:root` is the only token source (no Tailwind, no inline hex, new CSS only in the marked
-appended sections). One typeface, Inter, for body and display (ruling 365); the faces a
+appended sections). One typeface, Inter, for body and display (ruling 280); the faces a
 first paint draws are preloaded from `features/shell/font-preloads.ts`, and a
-metric-matched "Inter Fallback" face stands in until they arrive (ruling 457). Unstyled
+metric-matched "Inter Fallback" face stands in until they arrive (ruling 11). Unstyled
 primitive packages are allowed only behind an `app/ui/*` boundary, rendered with classes
-`app.css` defines (ruling 166). One `Icon` component. A failure toast passes `"error"`
-explicitly; success is the default kind (ruling 458(b)). Dialogs are native `<dialog>`
+`app.css` defines (ruling 14). One `Icon` component. A failure toast passes `"error"`
+explicitly; success is the default kind (ruling 288(e)). Dialogs are native `<dialog>`
 with Escape and scrim close. Every top-level surface
 carries a `data-screen-label`. WCAG 2.2 AA in both themes is an e2e gate. Full list in
-[../architecture/decisions.md#ui-porting-rules](../architecture/decisions.md#ui-porting-rules)
+[../architecture/decisions.md#ui-rules](../architecture/decisions.md#ui-rules)
 and [../ui/surfaces.md](../ui/surfaces.md).
 
 ## 7. Definition of done for a change
 
 1. The six gates pass locally ([testing.md](testing.md) §1).
 2. New behaviour has ONE owning test at the boundary that owns it ([testing.md](testing.md)
-   §0, ruling 512), through the real writers or the route harness: no `vi.mock` and no
+   §0, ruling 8), through the real writers or the route harness: no `vi.mock` and no
    production seam that only a test calls.
 3. Audit and typed events exist for any new governed action.
 4. Docs that describe the changed behaviour are updated in the same PR, in present
    tense: correct the body where it is wrong rather than stacking a dated update note on
-   the page header, and cite the ruling inline where it explains why. `decisions.md` is
-   the exception: a ruling's text is never rewritten, and a later change to it is a dated
-   note inside its block.
-5. If an owner decision was taken, it is recorded as the next numbered ruling.
+   the page header, and cite the ruling inline where it explains why. `decisions.md`
+   follows the same rule: a changed decision is rewritten in its ruling, in place.
+5. If an owner decision was taken, it is recorded in `decisions.md`: a new ruling under the
+   next number in its topic's section, or a rewrite of the ruling it changes.

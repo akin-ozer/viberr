@@ -7,9 +7,9 @@ import {
 } from "./dependencies";
 
 /**
- * Ruling 131 (pass 34): `blockedBy` has one spelling, a task key. Everything
+ * Ruling 55 (pass 34): `blockedBy` has one spelling, a task key. Everything
  * the writers refuse by name starts here, so the grammar is pinned tightly.
- * Ruling 503 retired the second spelling, `goal-1 link 3`, with the chains.
+ * The chains' `goal-1 link 3` spelling is gone with them (ruling 273).
  *
  * Canary: loosen `TASK_REF_RE` (drop its anchors, or narrow `\d+` to `\d`)
  * and the "nothing else" / two-digit cases below fail.
@@ -21,7 +21,7 @@ describe("dependency references — the task key and nothing else", () => {
     expect(parseDependencyRef("JC-06")).toEqual({ kind: "task", task: "JC-6" });
   });
 
-  it("ruling 503: a goal link is no longer a spelling", () => {
+  it("ruling 55: a goal link is no longer a spelling", () => {
     // CANARY: bring `GOAL_LINK_RE` back into `parseDependencyRef`.
     expect(parseDependencyRef("goal-1 link 3")).toBeNull();
     expect(parseDependencyRef("Goal-1   Link 12")).toBeNull();
@@ -76,13 +76,13 @@ const entry = (label: string, state: DependencyRender["state"]): DependencyRende
 });
 
 /**
- * Ruling 355 (pass 38, F38-9): the hold sentence promises a release only when
+ * Ruling 58 (pass 38, F38-9): the hold sentence promises a release only when
  * one can come. The release engine writes "can never complete … edit what it
  * waits on" for a failed or missing entry, and this sentence stood
  * beside it on the same task promising "Viberr releases it when every entry
  * is done" — structurally unreachable for such an entry.
  */
-describe("ruling 355: holdRefusal names an entry that can never complete", () => {
+describe("ruling 58: holdRefusal names an entry that can never complete", () => {
   it("keeps the release promise while every entry can still complete", () => {
     expect(holdRefusal("JC-9", [entry("JC-3", "open")], "running an agent on it")).toContain(
       "Viberr releases it when every entry is done",
@@ -110,12 +110,12 @@ describe("ruling 355: holdRefusal names an entry that can never complete", () =>
 });
 
 /**
- * Ruling 356 (pass 38, F38-10): a hold releases as a whole, so the stored list
+ * Ruling 58 (pass 38, F38-10): a hold releases as a whole, so the stored list
  * keeps an entry after the task it names is done — and every sentence built
  * from the bare labels named it as still waited on, beside a rail marking it
  * done. The states are on the entries; the sentence reads them.
  */
-describe("ruling 356: the hold sentence names a done entry as done, not as waited on", () => {
+describe("ruling 58: the hold sentence names a done entry as done, not as waited on", () => {
   it("lists an all-open hold as before", () => {
     expect(holdEntriesSentence([entry("JC-2", "open"), entry("JC-3", "open")])).toBe("JC-2 and JC-3");
     expect(holdEntriesSentence([entry("JC-3", "open")])).toBe("JC-3");
@@ -136,7 +136,7 @@ describe("ruling 356: the hold sentence names a done entry as done, not as waite
   it("F39-44: a done entry's tag never reads as the pending entry before it", () => {
     // Live on ax-clone's Goals rail: the trailing `(… is done)` group read as
     // the LAST pending entry's own parenthesis, so "goal-1 link 2 (JC-3 is
-    // done)" said the PENDING entry was done. The chains are gone (ruling 503);
+    // done)" said the PENDING entry was done. The chains are gone (ruling 55);
     // the rule stands for task keys.
     // CANARY: restore the trailing group, `${pending} (${done} are done)`.
     const s = holdEntriesSentence([

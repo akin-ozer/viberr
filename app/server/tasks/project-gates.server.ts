@@ -58,7 +58,7 @@ import { refreshWorkspaceFromMirror } from "./workspace-refresh.server";
 import type { TaskActionDeps } from "./task-action-core.server";
 
 /**
- * Ruling 482 (pass 40, F40-52): **Viberr runs the project's gates itself.**
+ * Ruling 104 (pass 40, F40-52): **Viberr runs the project's gates itself.**
  *
  * The gate list used to be prose: a rulings knowledge base said "the only gate
  * is `pnpm build`", WEB-1's measured set sat under "Proposed (not binding)",
@@ -84,7 +84,7 @@ import type { TaskActionDeps } from "./task-action-core.server";
  *    agent-written, pass 40 review R-seams-1), detached at the revision's sha
  *    — fetched from the project's mirror when the checkout does not have it
  *    (an external revision). Each command runs as `sh -c` through the ruling
- *    460 launcher as the owner's agent uid, with `filteredSpawnEnv()` (no
+ *    139 launcher as the owner's agent uid, with `filteredSpawnEnv()` (no
  *    secret, no app configuration) and the agent's own `$HOME`; with no
  *    launcher (the host dev server, tests) as the server's own user, the way
  *    workspace git does. Never as the server where isolation is on.
@@ -314,7 +314,7 @@ export async function requestProjectGatesQuietly(
 }
 
 /**
- * Ruling 482: a changed gate list re-asks for every open task that has a
+ * Ruling 104: a changed gate list re-asks for every open task that has a
  * delivered revision, so a promoted gate set is evidence on the tasks already
  * in review rather than a refusal nobody can clear without a click.
  */
@@ -413,13 +413,13 @@ async function patchRun(
 
 /** Who a gate runs as: the task owner's agent uid through the launcher, or
  *  (isolation off) the server's own user. Throws when isolation is on and
- *  nobody can be named — ruling 460(h): never the server instead. */
+ *  nobody can be named — ruling 139: never the server instead. */
 function gateLaunch(db: DatabaseSync, ownerUserId: string | null, dataRoot?: string): AgentLaunch | null {
   return taskOwnerLaunch(
     db,
     ownerUserId,
     dataRoot,
-    "the task has no owner to run them as (ruling 460: a gate runs as its person's agent user, never as the server)",
+    "the task has no owner to run them as (ruling 139: a gate runs as its person's agent user, never as the server)",
   );
 }
 
@@ -437,7 +437,7 @@ type GateCommandOutcome = PersonCommandOutcome;
 
 /** `sh -c <command>` as `launch` (or as the server), its own process group,
  *  killed with its group at the timeout (`runPersonCommand`, the home ruling
- *  691 gave it). Never rejects. */
+ *  194 gave it). Never rejects. */
 function runGateCommand(input: GateCommandInput): Promise<GateCommandOutcome> {
   let sh: string;
   try {
@@ -501,7 +501,7 @@ async function prepareGateCheckout(
   }
   const gatesRoot = path.join(workspaceRoot, ".gates");
   const root = path.join(gatesRoot, job.runId);
-  // Ruling 460: the clone below is made by the person's uid, so the
+  // Ruling 15: the clone below is made by the person's uid, so the
   // directories it lands in are the agents' to write.
   shareDirWithAgentsOrWarn(workspaceRoot);
   shareDirWithAgentsOrWarn(gatesRoot);
@@ -525,7 +525,7 @@ async function prepareGateCheckout(
     }
   };
   if (!(await has())) {
-    // An external revision (ruling 179) is a head GitHub has and the
+    // An external revision (ruling 240) is a head GitHub has and the
     // delivering checkout never saw: read origin's heads from the mirror.
     const refresh: Parameters<typeof refreshWorkspaceFromMirror>[1] = {
       projectSlug: job.projectSlug,
@@ -547,7 +547,7 @@ async function prepareGateCheckout(
   return { dir, root };
 }
 
-/** Remove a gate checkout as the person its gates ran as (ruling 485: their
+/** Remove a gate checkout as the person its gates ran as (ruling 140: their
  *  files, whatever mode a tool left them in, and never the server's own
  *  recursive remove after it). A checkout left behind costs disk and is
  *  removed before the next gate run. */
@@ -574,7 +574,7 @@ function saveGateLog(
   const name = gateLogName(input.sha, input.index, input.gate.name, input.startedAt);
   const dir = taskAttachmentsDir(job.projectSlug, job.taskKey, job.dataRoot);
   const header = [
-    `# Viberr project gate \`${input.gate.name}\` on ${input.sha} (${job.taskKey}, ruling 482)`,
+    `# Viberr project gate \`${input.gate.name}\` on ${input.sha} (${job.taskKey}, ruling 104)`,
     `# command: ${input.gate.command.replace(/\s*\n\s*/g, " ")}`,
     `# run as: ${input.runsAs}`,
     `# started: ${input.startedAt}`,
@@ -630,8 +630,8 @@ function gateRunEvent(run: GateRun, gates: readonly ProjectGate[], taskKey: stri
     text = `**${line}.** Each gate's log is attached.`;
   }
   const evidence = normalizeEvidenceRows(
-    // Ruling 493: the timeline reads these rows back (`gateNoteView`).
-    // Ruling 526: each row says whether its gate passed.
+    // Ruling 313: the timeline reads these rows back (`gateNoteView`).
+    // Ruling 16: each row says whether its gate passed.
     run.results.map((r) => ({
       label: gateEvidenceLabel(r),
       status: r.exitCode === 0 ? "pass" : "fail",
@@ -775,7 +775,7 @@ async function runGateJob(job: GateJob): Promise<void> {
     },
   });
   if (done.status === "finished" && failedGates.length > 0) {
-    // Ruling 482: a failing gate is the operator's to act on — it dispatches
+    // Ruling 130: a failing gate is the operator's to act on — it dispatches
     // the rework — so the result is handed to it rather than left on a card.
     const { autoInvokeOperator } = await import("./task-action-core.server");
     const operatorCtx: Parameters<typeof autoInvokeOperator>[1] = {};

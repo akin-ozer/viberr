@@ -4,9 +4,9 @@ import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import { LANGUAGE_LOADERS } from "./code-highlight";
 import { languageForName, mappedLanguages, PLAIN_LANGUAGE } from "./code-language";
 
-/* Ruling 363: the name → grammar table, and the promise that every grammar it
+/* Ruling 317: the name → grammar table, and the promise that every grammar it
    names can actually be fetched. */
-describe("code-language (ruling 363)", () => {
+describe("code-language (ruling 317)", () => {
   it("maps by extension, by bare name and by the .env family; unknown names read plain", () => {
     expect(languageForName("shop-65-journey-script.mjs")).toBe("javascript");
     expect(languageForName("Board.TSX")).toBe("tsx");

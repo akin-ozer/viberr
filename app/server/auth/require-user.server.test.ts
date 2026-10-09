@@ -87,7 +87,7 @@ describe("authenticate (better-auth session)", () => {
     expect(count.c).toBe(0);
   });
 
-  it("ruling 458(d): binds the user's id on the request's correlation, and nothing from the session", async () => {
+  it("ruling 43: binds the user's id on the request's correlation, and nothing from the session", async () => {
     const { user, cookie } = await seedUser();
     const correlation = await runWithRequestContext({ requestId: "req_auth" }, async () => {
       await authenticate(app.request("/some/where", { cookie }));
@@ -97,7 +97,7 @@ describe("authenticate (better-auth session)", () => {
     expect(correlation).toEqual({ requestId: "req_auth", userId: user.id });
   });
 
-  it("ruling 458(d): a disabled user's request binds no user id", async () => {
+  it("ruling 43: a disabled user's request binds no user id", async () => {
     const { user, cookie } = await seedUser();
     app.db.prepare(`UPDATE users SET disabled = 1 WHERE id = ?`).run(user.id);
     const correlation = await runWithRequestContext({ requestId: "req_off" }, async () => {
@@ -156,10 +156,10 @@ describe("authenticate (better-auth session)", () => {
 });
 
 /**
- * Ruling 457 (FL-8 / SRV-7): React Router hands every loader of one request
+ * Ruling 11 (FL-8 / SRV-7): React Router hands every loader of one request
  * the same Request, so the session is resolved once per Request — for reads.
  */
-describe("one session resolution per Request (ruling 457)", () => {
+describe("one session resolution per Request (ruling 11)", () => {
   let app: Awaited<ReturnType<typeof setupAppTest>>;
   afterEach(() => app?.cleanup());
 

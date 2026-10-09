@@ -67,7 +67,7 @@ describe("seedOrgResources", () => {
     expect(listMcpServers(db)).toHaveLength(0);
     expect(listConnections(db)).toHaveLength(0);
 
-    // Ruling 688: no Google sign-in domain is allowlisted by the seed.
+    // Ruling 28(c): no Google sign-in domain is allowlisted by the seed.
     expect(listDomains(db)).toEqual([]);
   });
 

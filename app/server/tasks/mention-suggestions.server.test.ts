@@ -110,7 +110,7 @@ describe("getMentionables", () => {
    * the members, so it offered someone who cannot open the project at all. Live:
    * an admin tagged a viewer of a DIFFERENT project, her inbox showed the
    * project name, the task key and the comment text, and the link served her the
-   * members-only 404. Ruling 25 says a non-member gets the same bytes as an
+   * members-only 404. Ruling 27 says a non-member gets the same bytes as an
    * unknown slug precisely so "a probe cannot learn a project exists" — a
    * suggestion whose only outcome is that disclosure must not be offered.
    */

@@ -22,7 +22,7 @@ import type { PrReviewEvent } from "./pr-linker.server";
 import { resolveGithubHandle } from "./pr-human-approval.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): a project member's GitHub review of the
+ * Ruling 246 (pass 40, F40-54): a project member's GitHub review of the
  * delivered revision reaches the agent that delivered it.
  *
  * Before this, a CHANGES_REQUESTED review became the `changes requested` pill
@@ -137,7 +137,7 @@ async function readReviewComments(
 }
 
 /** A GitHub line comment as a note: its line on the commit it was written on.
- *  A multi-line comment's first line keeps its own side (ruling 509). */
+ *  A multi-line comment's first line keeps its own side (ruling 246). */
 function commentNote(c: ReviewComment): ReviewNote {
   const line = c.original_line ?? c.line ?? null;
   const start = c.original_start_line ?? c.start_line ?? null;

@@ -1,6 +1,6 @@
 import type { PerfBudgetTable } from "../perf-verdict";
 
-/** Ruling 457 ratchet ceilings: server read path (file parses, auth, SQL per request). */
+/** Ruling 11 ratchet ceilings: server read path (file parses, auth, SQL per request). */
 
 const TASK_REVALIDATION =
   "demo seed, arda, VIB-142 + 60 comments (69 events): root + layout + task loaders on one .data Request, second (warm) revalidation";
@@ -40,7 +40,7 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // 76 before the layout built the task list once.
   // 64 before the layout stopped reading the bell's list (FL-4 / SRV-6) and
   // the board's decisions, live runs and repo probe (BOARD-6).
-  // Raised 49 to 50 by ruling 503: the task loader's one read of the
+  // Raised 49 to 50 by ruling 325: the task loader's one read of the
   // project's epics, which the hero's Epic field and the Details panel's Epic
   // menu draw from.
   // Lowered 50 to 49 by the 2026-10-04 simplifier run: the task loader reads
@@ -88,7 +88,7 @@ export const SERVER_READ_BUDGETS: PerfBudgetTable = {
   // 49 before the layout built the task list once (getBoardWithTasks feeds the review queue).
   // 37 before the bell's list left the layout (FL-4 / SRV-6); the board
   // route's own loader (BOARD-6) shares the layout's read of the project.
-  // Raised 29 to 30 by ruling 503: the board loader's one read of the
+  // Raised 29 to 30 by ruling 325: the board loader's one read of the
   // project's epics, for the epic filter and the New task dialog's Epic select.
   "server-read:board-revalidation.sql": {
     ceiling: 30,

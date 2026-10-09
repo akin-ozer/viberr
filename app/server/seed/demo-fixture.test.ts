@@ -218,7 +218,7 @@ describe("demo fixture", () => {
     expect(vib139.readiness).toBe("ready");
     expect(vib139.displayReadiness).toBe("merged");
 
-    // Custom 3-stage board fixture (ruling 15).
+    // Custom 3-stage board fixture (ruling 47).
     const billing = getBoardWithTasks(db, "billing-service")!.board;
     expect(billing.columns.map((c) => c.stage.id)).toEqual(["todo", "doing", "done"]);
   });
@@ -245,7 +245,7 @@ describe("demo fixture", () => {
     expect(task.filePath).toBe("projects/viberr-core/tasks/VIB-142/task.md");
     expect(task.stages.map((s) => s.id)).toEqual(["triage", "ready", "impl", "review", "done"]);
 
-    // Packet — verbatim strings + stable option kinds (ruling 7).
+    // Packet — verbatim strings + stable option kinds (ruling 62(a)).
     const packet = task.packet!;
     expect(packet.type).toBe("input");
     expect(packet.kind).toBe("Completion report");
@@ -278,7 +278,7 @@ describe("demo fixture", () => {
     });
     expect(comment?.actor).toMatchObject({ kind: "human", name: "Arda Kaya", initials: "AK" });
     expect(completion).toMatchObject({ title: "Completion report" });
-    // Ruling 526 departs from data.js here: the mock's rows carried a diff's
+    // Ruling 16 departs from data.js here: the mock's rows carried a diff's
     // two columns ("+14", "0"), where a row now says how its check came out.
     expect(completion?.evidence).toEqual([
       { label: "unit/policy_gate_test", result: "6 passed", status: "pass" },
@@ -293,7 +293,7 @@ describe("demo fixture", () => {
     expect(assign?.text).toBe(
       "Took task ownership — owner is the human reviewer and acceptance authority for this task.",
     );
-    // Ruling 4: back-dated — the assign event landed yesterday at 15:12 local.
+    // Ruling 293: back-dated — the assign event landed yesterday at 15:12 local.
     const assignDate = new Date(assign!.occurredAt);
     expect(assignDate.getHours()).toBe(15);
     expect(assignDate.getMinutes()).toBe(12);
@@ -330,7 +330,7 @@ describe("demo fixture", () => {
       "n-160-packet", "n-dep-31", "n-142-packet", "n-142-policy",
       "n-145-approval", "n-bil-9",
     ]);
-    // Cross-project soft refs resolve to the stub projects (ruling 9).
+    // Cross-project soft refs resolve to the stub projects (ruling 74).
     const dep = list.find((n) => n.id === "n-dep-31")!;
     expect(dep.projectSlug).toBe("deploy-pipeline");
     expect(dep.projectName).toBe("Deploy Pipeline");

@@ -20,14 +20,14 @@ import type { WaitingActionResult } from "./waiting-actions";
  *  posted; anything else (absent, a File part) reads as empty. */
 export const textField = z.string().catch("");
 
-/** Ruling 527: the send mode a form posts. Only an explicit `queue` queues:
+/** Ruling 251: the send mode a form posts. Only an explicit `queue` queues:
  *  steering is what a message sent while a turn works does by default. */
 export function sendModeOf(formData: FormData): SendMode {
   return textField.parse(formData.get("mode")) === "queue" ? "queue" : "steer";
 }
 
 /**
- * Ruling 527: the Send now and Retract intents, one handler for the three
+ * Ruling 251: the Send now and Retract intents, one handler for the three
  * controller doors (the two pages and the dock's resource). Null for any other
  * intent. The engine decides: only the conversation's owner, and only a
  * message still waiting. Its refusals throw, for the door's own
@@ -62,7 +62,7 @@ export function waitingMessageAction(
 }
 
 /**
- * The action both Controller pages answer (ruling 99): `/controller` with
+ * The action both Controller pages answer (ruling 247): `/controller` with
  * `projectSlug` null, `/projects/:slug/controller` with its slug. Send, Send
  * now and Retract, Interrupt and Delete; any other intent is refused. The
  * engine's refusals throw, for the page's own `appErrorResponse`.
@@ -77,7 +77,7 @@ export async function controllerPageAction(
   const asker = { id: user.id, email: user.email, name: user.name, orgRole: user.role };
   if (intent === "send") {
     const text = String(formData.get("text") ?? "");
-    // Ruling 573: the files it carries, checked before a thread is made for
+    // Ruling 258: the files it carries, checked before a thread is made for
     // it, so a refused file leaves no empty conversation behind.
     const files = checkMessageFiles(await formFiles(formData));
     let conversationId = String(formData.get("conversationId") ?? "");
@@ -93,13 +93,13 @@ export async function controllerPageAction(
       text,
       files,
       user: asker,
-      // Ruling 121(d) records the page every USER message was sent from, and
+      // Ruling 249 records the page every USER message was sent from, and
       // that includes the ones sent from here (review finding 23). The store
       // normalizes it; a form without the field records null, as before.
       surface: String(formData.get("surface") ?? "") || null,
       // U39-24: the reader's zone; normalized by the engine.
       timeZone: String(formData.get("timeZone") ?? "") || null,
-      // Ruling 527: steer the working turn (the default) or queue behind it.
+      // Ruling 251: steer the working turn (the default) or queue behind it.
       mode: sendModeOf(formData),
     });
     if (result.state === "refused") {
@@ -113,7 +113,7 @@ export async function controllerPageAction(
     }
     return { ok: true as const, conversationId };
   }
-  // Ruling 527: Send now and Retract on a message still waiting.
+  // Ruling 251: Send now and Retract on a message still waiting.
   const waiting = waitingMessageAction(db, intent, formData, asker);
   if (waiting) return waiting;
   if (intent === "interrupt") {
@@ -137,7 +137,7 @@ export async function controllerPageAction(
     };
   }
   if (intent === "delete-conversation") {
-    // Ruling 525: the rail's Delete, confirmed on the page. The engine
+    // Ruling 250: the rail's Delete, confirmed on the page. The engine
     // decides who may (its starter, an org admin, or on a project's page a
     // holder of `delete-controller-conversations` there), stops a running
     // turn and purges what the turns logged. A project's page deletes only

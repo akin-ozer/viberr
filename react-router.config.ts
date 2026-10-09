@@ -12,7 +12,7 @@ export default {
   // this check never saw: it accepts the configured public origin
   // (BETTER_AUTH_URL) and the request's own. The exception is /api/auth/*,
   // which better-auth checks against its trustedOrigins, built from the same
-  // BETTER_AUTH_URL (ruling 687).
+  // BETTER_AUTH_URL (ruling 28).
   allowedActionOrigins: ["**"],
   future: {
     // Feed route modules to Vite's dep crawler at dev-server startup. Without

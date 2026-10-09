@@ -14,7 +14,7 @@ import {
 } from "./mcp-oauth";
 
 /**
- * Ruling 486 (F40-63): the one classifier every surface reads a sign-in's
+ * Ruling 192 (F40-63): the one classifier every surface reads a sign-in's
  * grant through — the Settings row and editor, the controller, the run's
  * prompt and the gateway's refusal sentence.
  */
@@ -28,7 +28,7 @@ const SIGNED_IN: McpOAuthView = {
   scope: CLOUDFLARE_READ_ONLY_GRANT,
 };
 
-describe("the grant classifier (ruling 486)", () => {
+describe("the grant classifier (ruling 192)", () => {
   it("reads the 194 scopes of the live cloudflare-api grant as read-only", () => {
     // CANARY: drop `monitoring` or `report` from the read actions, or treat
     // `offline_access` / `user:read` as writes, and the live grant grows writes.

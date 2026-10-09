@@ -54,7 +54,7 @@ import { refreshRepoAccess } from "~/features/github/github-query.server";
  * A connection = owner + PAT. The token rides the phase-7 pat-store
  * (encrypted at rest, masked display, cached validation); this module owns
  * the org facts: default flag, expiry, and which repositories the token
- * reaches (ruling 463, `connection-reach.server.ts`). The whole surface is
+ * reaches (ruling 222, `connection-reach.server.ts`). The whole surface is
  * built around "nothing is saved unless validation passes" (§7.2):
  * create/replace validate the token against the minimum scope set FIRST
  * and return a typed failure — the DB is untouched (and on replace the old
@@ -80,7 +80,7 @@ export interface ConnectionScopeEvidence {
 }
 
 /**
- * Ruling 480 (F40-43): what one repository proved about the token, for the
+ * Ruling 220 (F40-43): what one repository proved about the token, for the
  * scopes the token as a whole could not prove (a fine-grained token's `repo`
  * and `pull_request:write`). `proven` and `refused` are scope ids.
  */
@@ -103,7 +103,7 @@ export interface ConnectionRecord {
   /** Whole days until expiry (may be negative); null when no expiry. */
   daysLeft: number | null;
   validationState: ConnectionValidationState;
-  /** Ruling 463: the token's kind as the last validation read it; null when
+  /** Ruling 222: the token's kind as the last validation read it; null when
    *  it was never validated. */
   tokenKind: PatTokenKind | null;
   /** The validator's own secret-free sentence when the last verdict failed;
@@ -112,12 +112,12 @@ export interface ConnectionRecord {
   /** Required scope ids the last validation found missing. */
   missingScopes: string[];
   /**
-   * Ruling 463 (F40-6): which repositories the token reaches, read from
+   * Ruling 222 (F40-6): which repositories the token reaches, read from
    * `GET /user/repos` whenever the token is validated (create, replace,
    * Re-check, the 24-hour re-proof). Null when no validation has read it yet;
    * a failed read is `unknown` with GitHub's reason, never an empty list. A
    * repository Viberr creates through the token joins a `read` list
-   * (`recordCreatedRepositoryInReach`, ruling 463's dated note).
+   * (`recordCreatedRepositoryInReach`, ruling 222's dated note).
    */
   reach: ConnectionReach | null;
   /**
@@ -130,14 +130,14 @@ export interface ConnectionRecord {
    */
   scopes: ConnectionScopeEvidence[];
   /**
-   * Ruling 480 (F40-43): per-repository proof of the scopes `scopes` could not
+   * Ruling 220 (F40-43): per-repository proof of the scopes `scopes` could not
    * prove for the token as a whole: an attached project's probe, or a branch,
    * push, pull request or merge Viberr made there. The card said "unproven.
    * Verified when attached to a project" while the proof it promised sat on
    * the project, unshown here.
    */
   repoProofs: ConnectionRepoProof[];
-  /** Ruling 144(a): the same advisories the project credential card shows. */
+  /** Ruling 221(a): the same advisories the project credential card shows. */
   advisories: CredentialAdvisory[];
   lastValidatedAt: string | null;
   createdAt: string;
@@ -176,7 +176,7 @@ function validationState(
 
 /**
  * The token-wide evidence and the per-repository proofs a connection card
- * shows. A repository's probe is that repository's evidence (ruling 480): the
+ * shows. A repository's probe is that repository's evidence (ruling 220): the
  * token's newest validation may be a project's repository-scoped one, and
  * painting its `repo` probe as a token-wide check claimed it for every
  * repository the token reaches. It is listed under its repository instead, and
@@ -378,7 +378,7 @@ export async function ensureConnectionFresh(
   const validation = await validatePatToken(token, probe);
   if (validation.status === "network_error") return connection;
 
-  // Ruling 463: a re-proof is a validation, so it re-reads the reach too.
+  // Ruling 222: a re-proof is a validation, so it re-reads the reach too.
   const reach = await reachFor(token, validation, options);
   recordPatValidation(db, connection.patId, validation);
   db.prepare(
@@ -428,7 +428,7 @@ export interface ConnectionOptions {
 }
 
 /**
- * Ruling 540: the projects whose GitHub calls go through this PAT. A project
+ * Ruling 223: the projects whose GitHub calls go through this PAT. A project
  * talks to GitHub only with the credential bound to it
  * (`project_github_credentials`), never with a connection it is not bound to,
  * so these are the boards a change to the token can change.
@@ -444,7 +444,7 @@ function boundProjectSlugs(db: DatabaseSync, patId: string): string[] {
 }
 
 /**
- * Ruling 540: a new reading of each bound project's repository, for its board
+ * Ruling 223: a new reading of each bound project's repository, for its board
  * and home card (U33-2). One `GET /repos/{repo}` each, in turn rather than all
  * at once, the way GitHub asks one token's requests to arrive; a project left
  * without a credential answers without a call.
@@ -486,7 +486,7 @@ interface ValidatedToken {
 }
 
 /**
- * Ruling 463: the reach a validation's verdict allows reading. A token GitHub
+ * Ruling 222: the reach a validation's verdict allows reading. A token GitHub
  * has just refused reaches nothing Viberr can learn, so its reach is unknown
  * with that reason instead of a read that could only fail the same way.
  */
@@ -520,7 +520,7 @@ function patValidationThrottle(actor: AuditActor): string | null {
 
 /**
  * Full pre-save gate: scope validation + owner existence, then what the token
- * reaches (ruling 463; a failed reach read never refuses the save, it is
+ * reaches (ruling 222; a failed reach read never refuses the save, it is
  * stored as unknown). Returns a typed failure message; nothing is persisted
  * here.
  */
@@ -544,7 +544,7 @@ async function validateConnectionToken(
   }
 
   // Owner existence. A miss here refuses the save — the owner must be real.
-  // Ruling 463: nothing else is read off this answer. The account's
+  // Ruling 222: nothing else is read off this answer. The account's
   // `public_repos` it carries used to be shown on the card as "3 public
   // repos", which says nothing about what the TOKEN reaches.
   const clientOptions: GithubClientOptions = { token };
@@ -641,7 +641,7 @@ export async function createConnection(
   };
 }
 
-/** Ruling 463: what a save or Re-check read, for its toast. */
+/** Ruling 222: what a save or Re-check read, for its toast. */
 function reachClause(connection: ConnectionRecord): string {
   const reach = connection.reach;
   if (reach?.status === "read") return `. It reaches ${reachSummary(reach)}`;
@@ -693,7 +693,7 @@ export async function replaceConnectionToken(
     subjectId: existing.id,
     details: { owner: existing.owner },
   });
-  // Ruling 540: every project bound to this token checks its repository with
+  // Ruling 223: every project bound to this token checks its repository with
   // the new one now; a board that said "token expired" says what GitHub does.
   await refreshBoundProjects(db, boundProjectSlugs(db, existing.patId), options);
 
@@ -712,7 +712,7 @@ export type RecheckConnectionResult =
   | { status: "not_found"; message: string };
 
 /**
- * Ruling 463: "Re-check" on a connection's card. Validates the STORED token
+ * Ruling 222: "Re-check" on a connection's card. Validates the STORED token
  * again and re-reads what it reaches — the one way to read the reach of a
  * connection saved before the read existed without pasting its token again.
  *
@@ -774,7 +774,7 @@ export async function recheckConnection(
           : "unknown",
     },
   });
-  // Ruling 540: GitHub's verdict on the token is the verdict on every bound
+  // Ruling 223: GitHub's verdict on the token is the verdict on every bound
   // project's repository too, so each board takes a new reading. An
   // unreachable GitHub returned above: it evaluated nothing, so nothing is
   // re-checked.
@@ -797,8 +797,8 @@ export async function recheckConnection(
 }
 
 /**
- * Ruling 463's dated note (pre-merge review R-seams-4): Viberr just created
- * `repo` through this connection's token (ruling 462), so the stored reach
+ * Ruling 222's dated note (pre-merge review R-seams-4): Viberr just created
+ * `repo` through this connection's token (ruling 225), so the stored reach
  * lists it. Otherwise the card undercounts and `list_github_connections` tells
  * the controller the token cannot see the repository it has just made, until
  * a Re-check or the 24-hour re-proof reads the list again. A reach not read,
@@ -876,7 +876,7 @@ export async function removeConnection(
       message: "Set another connection as default first",
     };
   }
-  // Ruling 540: read the bindings first; deleting the token cascades them away.
+  // Ruling 223: read the bindings first; deleting the token cascades them away.
   const unbound = boundProjectSlugs(db, existing.patId);
   db.prepare(`DELETE FROM github_connections WHERE id = ?`).run(id);
   deletePat(db, existing.patId, actor);

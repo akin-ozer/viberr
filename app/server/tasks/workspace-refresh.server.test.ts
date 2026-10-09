@@ -20,13 +20,13 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { describeWorkspaceRefresh, refreshWorkspaceFromMirror } from "./workspace-refresh.server";
 
 /**
- * Ruling 129 (pass 34, F34-6): a reused checkout is refreshed from the
+ * Ruling 195 (pass 34, F34-6): a reused checkout is refreshed from the
  * project mirror on every dispatch — real git against a local origin.
  */
 const exec = promisify(execFile);
 const REPO = "akin-ozer/viberr";
 
-describe("refreshWorkspaceFromMirror (ruling 129)", () => {
+describe("refreshWorkspaceFromMirror (ruling 195)", () => {
   let ctx: TestDbContext;
   let store: TestStore;
   let origins: string;
@@ -95,7 +95,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(describeWorkspaceRefresh(result, "main")).toContain("fast-forwarded the unborn checkout");
   });
 
-  it("ruling 670: a checkout never committed to moves onto the default branch from the name it was cloned with; a task's branch and an orphan branch are left", async () => {
+  it("ruling 195: a checkout never committed to moves onto the default branch from the name it was cloned with; a task's branch and an orphan branch are left", async () => {
     // A clone of an empty repository is unborn on the name the project had
     // then. Once the project has taken the repository's own default branch,
     // that name never gets a commit. CANARY: keep "unborn and not on the
@@ -205,7 +205,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(await gitOut(dirty, ["status", "--porcelain"])).toContain("README.md");
   });
 
-  it("ruling 179: a clean task-branch checkout strictly behind origin's copy is fast-forwarded; a DIVERGED one is not", async () => {
+  it("ruling 240: a clean task-branch checkout strictly behind origin's copy is fast-forwarded; a DIVERGED one is not", async () => {
     // Canary: delete the `behind_task_branch` arm (let every non-default branch
     // fall through to `task_branch`) and the first head assertion fails — the
     // rework starts from the stale head, which is the dead end HLC-18 hit live
@@ -260,7 +260,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(describeWorkspaceRefresh(result, "main")).toContain(
       "fast-forwarded the task branch to origin's copy",
     );
-    expect(describeWorkspaceRefresh(result, "main")).toContain("ruling 179");
+    expect(describeWorkspaceRefresh(result, "main")).toContain("ruling 240");
 
     // A branch that DIVERGED is left exactly as it stands: the delivery's
     // non-fast-forward refusal and a person own that, never a silent merge.
@@ -280,7 +280,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(kept).toMatchObject({ status: "fetched", head: "task_branch" });
     expect(await gitOut(diverged, ["rev-parse", "HEAD"])).toBe(mine);
 
-    // A task branch refreshed WITHOUT the ruling-179 input is untouched too:
+    // A task branch refreshed WITHOUT the ruling-240 input is untouched too:
     // the fast-forward follows the task's own branch, not any branch.
     const unnamed = await checkout("unnamed");
     await exec("git", ["-C", unnamed, "checkout", "-q", "-b", "vib-20"]);
@@ -294,7 +294,7 @@ describe("refreshWorkspaceFromMirror (ruling 129)", () => {
     expect(await gitOut(unnamed, ["rev-parse", "HEAD"])).toBe(head20);
   });
 
-  it("ruling 179: a task branch says WHICH it is — unpushed, in sync, ahead, or diverged", async () => {
+  it("ruling 240: a task branch says WHICH it is — unpushed, in sync, ahead, or diverged", async () => {
     // Canary: return `{ status: "fetched", head: "task_branch" }` without the
     // standing and every sentence below goes back to the one live text that
     // called an IN-SYNC branch "a diverged task branch" (2026-09-12, HLC-18's

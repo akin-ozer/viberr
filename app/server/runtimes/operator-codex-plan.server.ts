@@ -1,5 +1,5 @@
 /**
- * The Codex operator's plan (ruling 656): the tools a plan may name and the
+ * The Codex operator's plan (ruling 13(a)): the tools a plan may name and the
  * structured-output schema built from the operator's grants, the packet
  * options a plan authors, and the execution of a plan step by step, with the
  * notes that narrate a paused, refused or empty plan on the task.
@@ -17,6 +17,7 @@ import {
 } from "~/server/github/update-branch-operator.server";
 import {
   CREATE_TASK_BASE_NOTE,
+  OPERATOR_PACKET_MAX_OPTIONS,
   OPERATOR_PACKET_OPTION_KINDS,
   operatorAskForRepository,
   operatorOpenPacket,
@@ -107,7 +108,7 @@ const OPERATOR_PLAN_TOOLS = [
   // Server-owned merge+push; a conflict opens a packet, never a force.
   "update_branch_from_base",
   "accept_completion",
-  // Ruling 521: the plan mirror of `write_completion_packet`, the packet every
+  // Ruling 130: the plan mirror of `write_completion_packet`, the packet every
   // acceptance offer carries. `text` is the summary, `reason` the summary of
   // the code changes, `screenshots` the images that show the result.
   "write_completion_packet",
@@ -116,15 +117,15 @@ const OPERATOR_PLAN_TOOLS = [
   // conflict as the same typed `quality` event + notification, not just a plain
   // comment. `kbSource`/`repoSource` name the two sides; `text` is the detail.
   "flag_context_conflict",
-  // Ruling 131(b) (pass 34): record what the task WAITS ON (the full list of
+  // Ruling 55 (pass 34): record what the task WAITS ON (the full list of
   // task keys; `blockedBy: []` clears it) instead of opening a hold packet.
   // The plan mirror of the Claude toolkit's `set_dependencies`.
   "set_dependencies",
-  // Ruling 503: put this task in an epic, move it, or take it out (`epicId`,
+  // Ruling 116: put this task in an epic, move it, or take it out (`epicId`,
   // "" for none). The plan mirror of the Claude toolkit's `set_epic`.
   "set_epic",
   // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
-  // ruling 483 into `propose_kb_correction` and made a write by ruling 498 as
+  // F40-53 into `propose_kb_correction` and made a write by ruling 210 as
   // `correct_knowledge_doc`. Every agent on the pass-39 instance ran on Codex,
   // so a tool that exists only on the Claude toolkit would have been
   // unreachable by the operator that actually found the false ruling. `text`
@@ -132,31 +133,31 @@ const OPERATOR_PLAN_TOOLS = [
   // document (`<kb>/<doc>`, or a bare document of the rulings), `reason` the
   // exact passage it replaces, `repoSource` the evidence.
   "correct_knowledge_doc",
-  // Ruling 417 (owner): lease shared files to THIS task until it merges. The
+  // Ruling 61 (owner): lease shared files to THIS task until it merges. The
   // plan mirror of the Claude toolkit's `lease_files`; `paths` carries the
   // globs and `text` the reason.
   "lease_files",
-  // Ruling 487 (F40-65): schedule a future run on THIS task (its own re-run,
+  // Ruling 125 (F40-65): schedule a future run on THIS task (its own re-run,
   // or a deployed agent's with a directive) and cancel one it scheduled. The
   // plan mirrors of the Claude toolkit's two tools of the same names:
   // `profileId` (or "operator"/null) is the target, `dueAt` or `delayMinutes`
   // the time, `text` the steer or directive, `scheduleId` what to cancel.
   "schedule_task_action",
   "cancel_task_schedule",
-  // Ruling 488 (F40-67): post on ANOTHER task of this project. The plan mirror
+  // Ruling 135 (F40-67): post on ANOTHER task of this project. The plan mirror
   // of the Claude toolkit's `relay_to_task`: `taskKey` names the task, `text`
-  // is what lands there, `files` (ruling 538) the attachments it carries.
+  // is what lands there, `files` the attachments it carries.
   "relay_to_task",
-  // Ruling 557: the relay's other direction. `taskKey` names the task that
+  // Ruling 135: the relay's other direction. `taskKey` names the task that
   // holds the files, `files` which of them to take onto this task, `text` an
   // optional line on what they are for.
   "take_from_task",
-  // Ruling 584: edit or delete a comment the operator or an agent wrote on
+  // Ruling 133: edit or delete a comment the operator or an agent wrote on
   // THIS task, silently. The plan mirror of the Claude toolkit's
   // `edit_comment`: `commentAt` names the comment, `text` the words that
   // replace it (null deletes it), `reason` why.
   "edit_comment",
-  // Ruling 672: ask a person to connect a repository to a board that has
+  // Ruling 107: ask a person to connect a repository to a board that has
   // none, because this task needs one. The plan mirror of the Claude
   // toolkit's `ask_for_repository`: `reason` is why the task needs it and
   // `text` the repository the goal or a person named (`owner/name`), if any.
@@ -179,7 +180,7 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   set_goal: ["append-typed-events"],
   open_packet: ["generate-packets"],
   resolve_packet: ["generate-packets"],
-  // Ruling 672: a packet, on the packets' grant.
+  // Ruling 107: a packet, on the packets' grant.
   ask_for_repository: ["generate-packets"],
   run_agent: ["dispatch-agents"],
   transition_stage: ["stage-transitions"],
@@ -190,33 +191,33 @@ const OPERATOR_PLAN_TOOL_CAPABILITIES = {
   // updateBranchGate below, not the plain gate.
   update_branch_from_base: ["update-task-branch"],
   accept_completion: ["completion-for-acceptance"],
-  // Ruling 521: the packet exists only to go with an acceptance offer.
+  // Ruling 130: the packet exists only to go with an acceptance offer.
   write_completion_packet: ["completion-for-acceptance"],
   // F-P6 (pass 25): same gate as Claude's `flag_context_conflict` tool.
   flag_context_conflict: ["append-typed-events"],
-  // Ruling 131(b): the wait is the hold packet's replacement, so it rides the
+  // Ruling 55: the wait is the hold packet's replacement, so it rides the
   // packet's own grant.
   set_dependencies: ["generate-packets"],
-  // Ruling 503: the same grant as `set_goal`, the operator's other planning
+  // Ruling 116: the same grant as `set_goal`, the operator's other planning
   // edit on its own task.
   set_epic: ["append-typed-events"],
   // F39-1/F39-7: same gate as `flag_context_conflict`, the typed event it
-  // posts. Ruling 498 made the correction a write; a person undoes one from
+  // posts. Ruling 210 made the correction a write; a person undoes one from
   // the Controller page rather than gating each (owner, 2026-09-26).
   correct_knowledge_doc: ["append-typed-events"],
-  // Ruling 417: a lease orders DELIVERIES, so it rides delivery authority —
+  // Ruling 61: a lease orders DELIVERIES, so it rides delivery authority —
   // resolved via deliverGate below, like `deliver_for_review` itself.
   lease_files: ["deliver-review-pr"],
-  // Ruling 487: a schedule is a dispatch with a date on it, and it starts
+  // Ruling 125: a schedule is a dispatch with a date on it, and it starts
   // with nobody present, so it rides a DIRECT dispatch grant (resolved below).
   schedule_task_action: ["dispatch-agents"],
   cancel_task_schedule: ["dispatch-agents"],
-  // Ruling 488: a relay is a comment one task over, so it rides the comment's
+  // Ruling 135: a relay is a comment one task over, so it rides the comment's
   // own grant, as the Claude tool does.
   relay_to_task: ["append-typed-events"],
-  // Ruling 557: a take writes the relay's claim comment on this task.
+  // Ruling 135: a take writes the relay's claim comment on this task.
   take_from_task: ["append-typed-events"],
-  // Ruling 584: a comment's words are a timeline write, like the comment.
+  // Ruling 133: a comment's words are a timeline write, like the comment.
   edit_comment: ["append-typed-events"],
 } satisfies Record<OperatorPlanTool, readonly string[]>;
 
@@ -231,7 +232,7 @@ export function operatorPlanToolsFor(
 ): OperatorPlanTool[] {
   const permitted = OPERATOR_PLAN_TOOLS.filter((toolName) =>
     toolName === "ask_for_repository"
-      ? // Ruling 672: only where the question can be asked: a board with no
+      ? // Ruling 107: only where the question can be asked: a board with no
         // repository whose rulings hold no decision to keep none.
         authority.repositoryAsk === "open" && gate(authority, "generate-packets") !== "deny"
       : toolName === "deliver_for_review" || toolName === "lease_files"
@@ -239,7 +240,7 @@ export function operatorPlanToolsFor(
       : toolName === "update_branch_from_base"
         ? updateBranchGate(authority) !== "deny"
         : toolName === "schedule_task_action" || toolName === "cancel_task_schedule"
-          ? // Ruling 487: only a grant that starts runs itself schedules one,
+          ? // Ruling 125: only a grant that starts runs itself schedules one,
             // the same test the Claude toolkit builds the two tools on.
             dispatchGate(authority) === "direct"
         : toolName === "run_agent"
@@ -264,10 +265,10 @@ export function operatorPlanToolsFor(
   // OUTSIDE Viberr — a pushed branch, an opened PR. `operatorDeliverForReview`
   // refuses either way, so advertising them only buys a billed turn spent
   // planning a push that cannot happen.
-  // Ruling 417: `lease_files` rides the delivery gate, so the fallback that
+  // Ruling 61: `lease_files` rides the delivery gate, so the fallback that
   // withholds delivery withholds it too; advertising it would buy a turn
   // spent planning a lease `operatorLeaseFiles` refuses.
-  // Ruling 487: the schedule verbs ride a DIRECT dispatch grant, which no
+  // Ruling 125: the schedule verbs ride a DIRECT dispatch grant, which no
   // operator reaching the fallback holds, so they are withheld the same way.
   const withheldInFallback: readonly OperatorPlanTool[] = [
     "deliver_for_review",
@@ -275,7 +276,7 @@ export function operatorPlanToolsFor(
     "lease_files",
     "schedule_task_action",
     "cancel_task_schedule",
-    // Ruling 672: it is offered on its own condition above and never by default.
+    // Ruling 107: it is offered on its own condition above and never by default.
     "ask_for_repository",
   ];
   return permitted.length
@@ -285,13 +286,13 @@ export function operatorPlanToolsFor(
 
 /** The JSON schema the Codex operator run must answer with, for this
  *  authority's permitted tools — exported so a test can read the emitted
- *  shape (ruling 138: `goalDraft` is a REQUIRED option key). */
+ *  shape (ruling 63: `goalDraft` is a REQUIRED option key). */
 export function operatorPlanSchemaFor(authority: OperatorAuthority) {
   return buildOperatorPlanSchema(operatorPlanToolsFor(authority));
 }
 
 function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
-  // Ruling 672: `ask_for_repository` reads two fields other tools own, and is
+  // Ruling 107: `ask_for_repository` reads two fields other tools own, and is
   // offered on few boards. Its sentences join their descriptions only where
   // it is offered, and its two answers are not among the option kinds an
   // operator writes (`OPERATOR_PACKET_OPTION_KINDS`), so the schema every
@@ -322,12 +323,12 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             enum: tools,
           },
           profileId: { type: ["string", "null"], description: "For run_agent: the deployed agent profile to select and run (pick by desc + capabilities from the snapshot). For schedule_task_action: the deployed profile whose run to schedule, or \"operator\" (or null) for your own re-run. Else null." },
-          delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task; on a task whose deliverable is a result, the agent that makes it, which needs only `postsFiles`, ruling 535, and whose saved files are the delivery); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
+          delivers: { type: ["boolean", "null"], description: "run_agent: true = hand delivery to this profile (owns branch/PR, one per task; on a task whose deliverable is a result, the agent that makes it, which needs only `postsFiles`, ruling 128, and whose saved files are the delivery); false = run as supporting (review). Null derives it from the profile's grants and the task's current deliverer." },
           toStageId: { type: ["string", "null"], description: "For transition_stage, else null." },
           packetType: { type: ["string", "null"], enum: ["input", "blocked", null], description: "For open_packet: 'blocked' when work is stuck, 'input' for a decision; else null." },
-          // Ruling 492: `set_goal` drafts the task's goal in `text`, so this
+          // Ruling 105: `set_goal` drafts the task's goal in `text`, so this
           // field is one of the doors that write a goal.
-          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), an empty string to delete that passage (ruling 581), or the missing convention (ruling 418); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 521), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE + askForRepository.text },
+          text: { type: ["string", "null"], description: "For post_comment: the comment text (narration the HUMANS read, which starts no agent, so an @name in it reaches nobody); put a question or directive to an agent with run_agent instead. For open_packet: the packet title; for run_agent: the agent's directive (posted as your hand-off comment; null for a bare re-run); for flag_context_conflict: the one-or-two-sentence detail of what each side says; for correct_knowledge_doc: what the document should say in place of `reason`'s passage, in the document's own form (the corrected fact, not the evidence), an empty string to delete that passage (ruling 210(b)), or the missing convention (ruling 210(a)); for lease_files: why this task holds the paths, which every task the lease refuses is shown; for schedule_task_action: the steer for your own re-run, or the agent's directive (under 4000 characters); for relay_to_task: what to post on the other task, whole, since it is what that task reads; for take_from_task: optional, one line on what the files are for, on the comment that claims them here (an @name in it is notified), or null for the default line; for set_goal: the drafted goal, scope plus acceptance criteria, whose done signal follows the rule below; for write_completion_packet: the summary a person reads before accepting (ruling 130), what was done against the goal and why it is complete, outcome first, in markdown, never restating a verdict or pasting a diff; else null. " + DONE_SIGNAL_RULE + askForRepository.text },
           reason: { type: ["string", "null"], description: "Short why: recommendation-card reasoning (for a transition_stage that moves the task, shown on the move in its history), or the packet body for open_packet. For write_completion_packet: your summary of the code changes by area, naming the files that matter, required when the snapshot's `completionPacket.changesSummaryRequired` is true (more than 200 changed lines), else null so the diff is shown whole. For correct_knowledge_doc: the passage the correction REPLACES, copied EXACTLY as the document has it (list marker and emphasis included; it must stand once in the document); null only to add `text` at the end of the document, such as a missing convention." + askForRepository.reason },
           kbSource: { type: ["string", "null"], description: "For flag_context_conflict: the knowledge-base document that disagrees. For correct_knowledge_doc: the knowledge base and the document to correct as `<knowledge base>/<document>`, each named as the index names it (any knowledge base a run on this task was given, yours or an engaged agent's), or the document alone for the project's rulings knowledge base. Else null." },
           repoSource: { type: ["string", "null"], description: "For flag_context_conflict: the repository file that is authoritative. For correct_knowledge_doc: the EVIDENCE that proves the passage wrong or the convention missing: the exact command and its exit code or output, or the run and verdict that showed it (for a missing convention, the reviewer's verdict). Else null." },
@@ -336,48 +337,48 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             items: { type: "string" },
             description: "For set_dependencies ONLY: the FULL list of what this task waits on, as task keys (`JC-6`) in this project; an empty array clears the wait. Null for every other tool.",
           },
-          // Ruling 503: the epic set_epic puts this task in.
+          // Ruling 116: the epic set_epic puts this task in.
           epicId: {
             type: ["string", "null"],
-            description: "For set_epic ONLY (ruling 503): the epic to put THIS task in (`epic-3`, from the snapshot's `openEpics`), or \"\" to take it out of its epic. A task is in at most one epic, and membership holds and orders nothing: what it waits on is set_dependencies. Null for every other tool.",
+            description: "For set_epic ONLY (ruling 116): the epic to put THIS task in (`epic-3`, from the snapshot's `openEpics`), or \"\" to take it out of its epic. A task is in at most one epic, and membership holds and orders nothing: what it waits on is set_dependencies. Null for every other tool.",
           },
           paths: {
             type: ["array", "null"],
             items: { type: "string" },
-            description: "For lease_files ONLY (ruling 417): the path globs to lease to THIS task until it merges, as narrow as the shared files (`*` within one segment, `**` across segments), and put the reason in `text`. First come, first served: a path another active task already holds is refused by name. Null for every other tool.",
+            description: "For lease_files ONLY (ruling 61): the path globs to lease to THIS task until it merges, as narrow as the shared files (`*` within one segment, `**` across segments), and put the reason in `text`. First come, first served: a path another active task already holds is refused by name. Null for every other tool.",
           },
-          // Ruling 487: when a scheduled run fires, and which one to cancel.
+          // Ruling 125: when a scheduled run fires, and which one to cancel.
           dueAt: {
             type: ["string", "null"],
-            description: "For schedule_task_action ONLY (ruling 487): the instant the run fires, as an ISO timestamp, between 1 minute and 28 days out. Give this or `delayMinutes`. Use it for a wait a clock explains: just after the cron run, the window reopening, the deploy landing. Null for every other tool.",
+            description: "For schedule_task_action ONLY (ruling 125): the instant the run fires, as an ISO timestamp, between 1 minute and 28 days out. Give this or `delayMinutes`. Use it for a wait a clock explains: just after the cron run, the window reopening, the deploy landing. Null for every other tool.",
           },
           delayMinutes: {
             type: ["number", "null"],
-            description: "For schedule_task_action ONLY (ruling 487): minutes from now (1 to 40320) instead of `dueAt`. Null for every other tool.",
+            description: "For schedule_task_action ONLY (ruling 125): minutes from now (1 to 40320) instead of `dueAt`. Null for every other tool.",
           },
           scheduleId: {
             type: ["string", "null"],
-            description: "For cancel_task_schedule ONLY (ruling 487): the pending entry to cancel (`schedules[].id` in the snapshot); only one marked `yours` is yours to cancel. Null for every other tool.",
+            description: "For cancel_task_schedule ONLY (ruling 125): the pending entry to cancel (`schedules[].id` in the snapshot); only one marked `yours` is yours to cancel. Null for every other tool.",
           },
           commentAt: {
             type: ["string", "null"],
-            description: "For edit_comment ONLY (ruling 584): the time of a comment the operator or an agent wrote on THIS task, exactly as the timeline gives it. Use it yourself, without asking anyone and without saying so on the task, when a comment should not stand as written: it states an expected answer or a golden entry's configuration agents on a benchmark must not read, holds a secret, or misleads the next run. `text` is the words that replace it in full (null deletes it) and `reason` why, for the audit log. A person's comment is refused. Null for every other tool.",
+            description: "For edit_comment ONLY (ruling 133): the time of a comment the operator or an agent wrote on THIS task, exactly as the timeline gives it. Use it yourself, without asking anyone and without saying so on the task, when a comment should not stand as written: it states an expected answer or a golden entry's configuration agents on a benchmark must not read, holds a secret, or misleads the next run. `text` is the words that replace it in full (null deletes it) and `reason` why, for the audit log. A person's comment is refused. Null for every other tool.",
           },
-          // Ruling 488: the task a relay posts on.
+          // Ruling 135: the task a relay posts on.
           taskKey: {
             type: ["string", "null"],
-            description: "For relay_to_task (ruling 488): ANOTHER task in this project to post `text` on, e.g. WEB-8. It lands there as your comment, that task's operator is woken with it, and this task's timeline records the relay, so never ask a person to copy text between tasks or to confirm it landed. Refused: another project, this task, a task that does not exist, a closed task. For take_from_task (ruling 557): the task in this project whose attachments to take onto this one, e.g. AWSC-3; it may be Done, not archived. Null for every other tool.",
+            description: "For relay_to_task (ruling 135): ANOTHER task in this project to post `text` on, e.g. WEB-8. It lands there as your comment, that task's operator is woken with it, and this task's timeline records the relay, so never ask a person to copy text between tasks or to confirm it landed. Refused: another project, this task, a task that does not exist, a closed task. For take_from_task (ruling 135): the task in this project whose attachments to take onto this one, e.g. AWSC-3; it may be Done, not archived. Null for every other tool.",
           },
-          // Ruling 538: the files a relay carries onto the other task.
+          // Ruling 135: the files a relay carries onto the other task.
           files: {
             type: ["array", "null"],
-            description: "For relay_to_task (ruling 538): names of THIS task's attachments to put on the other task with the text, exactly as this task lists them (an input that task works from, a file it is to judge). They land on its attachments, where its agents read them. Null for a relay of text alone. For take_from_task (ruling 557): names of the OTHER task's attachments to put on THIS task, exactly as it lists them: only what this task works from, never a file that task keeps from this one (an answer key). Use it instead of asking a person to attach or carry a file. Null for every other tool.",
+            description: "For relay_to_task (ruling 135): names of THIS task's attachments to put on the other task with the text, exactly as this task lists them (an input that task works from, a file it is to judge). They land on its attachments, where its agents read them. Null for a relay of text alone. For take_from_task (ruling 135): names of the OTHER task's attachments to put on THIS task, exactly as it lists them: only what this task works from, never a file that task keeps from this one (an answer key). Use it instead of asking a person to attach or carry a file. Null for every other tool.",
             items: { type: "string" },
           },
-          // Ruling 521: the images write_completion_packet puts on the packet.
+          // Ruling 103: the images write_completion_packet puts on the packet.
           screenshots: {
             type: ["array", "null"],
-            description: "For write_completion_packet ONLY (ruling 521): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. " +
+            description: "For write_completion_packet ONLY (ruling 103): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. " +
               PAGE_PICTURES_PLAN_SENTENCE +
               " Null when nothing visible changed, and for every other tool.",
             items: {
@@ -390,10 +391,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
               required: ["name", "caption"],
             },
           },
-          // Ruling 668: what write_completion_packet says beside the summary.
+          // Ruling 103: what write_completion_packet says beside the summary.
           result: {
             type: ["object", "null"],
-            description: "For write_completion_packet ONLY (ruling 668): the rest of what a person reads before accepting, which stays on the task as its result. Null for every other tool.",
+            description: "For write_completion_packet ONLY (ruling 103): the rest of what a person reads before accepting, which stays on the task as its result. Null for every other tool.",
             additionalProperties: false,
             properties: {
               considerations: { type: ["string", "null"], description: "The choices the work made that the person should weigh: an option taken over another and why, a trade-off, a default. Markdown; null when there are none (never write \"none\")." },
@@ -417,18 +418,22 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           },
           completeness: {
             type: ["boolean", "null"],
-            description: "For run_agent ONLY (ruling 421): true when this run puts ruling 410's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
+            description: "For run_agent ONLY (ruling 93): true when this run puts the completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
           },
           noVerdict: {
             type: ["boolean", "null"],
-            description: "For run_agent ONLY (ruling 583): true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one; a directive saying \"record no verdict\" is not enforced without it. Null for every other run and every other tool.",
+            description: "For run_agent ONLY (ruling 124): true whenever this run must not judge: a verdict-capable agent run for its knowledge-base corrections or its files on a task a person closes by force-accept, or a question put before any verdict. Viberr withholds its verdict and reads nothing it writes as one; a directive saying \"record no verdict\" is not enforced without it. Null for every other run and every other tool.",
           },
           // P11-27: let the Codex operator AUTHOR the packet's option set from its
           // own reasoning (2–4 options), instead of always getting the canned
           // default set. Null → use the packet type's default options.
           packetOptions: {
             type: ["array", "null"],
-            description: "For open_packet ONLY: 2 to 4 options the human chooses from, mark exactly one recommended; null to use the packet type's defaults.",
+            // Ruling 202: the cap Claude's `open_decision_packet` states,
+            // refused by the writer both doors share.
+            description:
+              `For open_packet ONLY: 2 to ${OPERATOR_PACKET_MAX_OPTIONS} options the human chooses from, mark exactly one recommended; null to use the packet type's defaults. ` +
+              `More than ${OPERATOR_PACKET_MAX_OPTIONS} is refused, not trimmed, and no packet opens: keep the choices that are really different and put the rest in \`reason\`.`,
             items: {
               type: "object",
               additionalProperties: false,
@@ -439,7 +444,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                 recommended: { type: "boolean" },
                 reply: {
                   type: ["boolean", "null"],
-                  description: "redirect and request_edit only (ruling 650): true when choosing this option means nothing without the person's own words, what to change or what to tell the agent. The card then requires them and an empty confirm is refused. Dropped on every other kind. Null otherwise.",
+                  description: "redirect and request_edit only (ruling 132): true when choosing this option means nothing without the person's own words, what to change or what to tell the agent. The card then requires them and an empty confirm is refused. Dropped on every other kind. Null otherwise.",
                 },
                 // B1: the retry target used to be unexpressible here, so every
                 // Codex-authored retry resolved to Claude — a re-run of the
@@ -451,8 +456,8 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "retry_other_backend only: the backend to re-run the failed agent on; it must be the OTHER one. Null lets the server pick the opposite of the backend that failed.",
                 },
-                // Ruling 409 (F39-36): this said "retry_other_backend only" while
-                // ruling 237 REFUSES a `question_reviewer` option that has no
+                // Ruling 132 (F39-36): this said "retry_other_backend only" while
+                // ruling 94 REFUSES a `question_reviewer` option that has no
                 // profileId. Live on ax-clone AX-18 the operator reached for
                 // exactly that option, read this description, correctly left
                 // the field null, and was refused twice -- then the task was
@@ -468,7 +473,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "archive_task only: true = ALSO delete the task's remote branch (discard the rejected work). Null otherwise.",
                 },
-                // Ruling 164 (pass 35, F35-14): a move_stage option names the
+                // Ruling 131 (pass 35, F35-14): a move_stage option names the
                 // stage its resolution moves the task to. Without it the
                 // Codex operator could author the kind and the confirm would
                 // have nowhere to move.
@@ -477,7 +482,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                   description:
                     "move_stage only: the stage id this option moves the task to. Null on every other kind. The terminal stage is refused (moving there accepts the completion).",
                 },
-                // Ruling 138: the goal editor opens with this text when the
+                // Ruling 63: the goal editor opens with this text when the
                 // human confirms an edit_goal option, so it is written AS a
                 // goal, never as an instruction to the human.
                 goalDraft: {
@@ -486,27 +491,27 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria); it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind. " +
                     DONE_SIGNAL_RULE,
                 },
-                // Ruling 433 (F39-55): ruling 270 gave the Claude tool the
-                // payloads of rulings 224, 230 and 269, and this schema never
-                // got them. A Codex operator could name the three kinds, was
+                // Ruling 132 (F39-55): the Claude tool carries the payloads
+                // of rulings 157, 66 and 67, and this schema never got
+                // them. A Codex operator could name the three kinds, was
                 // refused for the missing payload, and had no field to send
                 // it in. Live on ax-clone: AX-4 twice, AX-27 once.
                 blockedBy: {
                   type: ["array", "null"],
                   items: { type: "string" },
                   description:
-                    "block_on_dependencies only (ruling 230): what THIS task waits on, as task keys. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
+                    "block_on_dependencies only (ruling 66): what THIS task waits on, as task keys. Required on that kind, since an option that names nothing to wait on resolves into a hold that releases on nothing. Null on every other kind. Not the action-level blockedBy, which is set_dependencies'.",
                 },
                 dueAt: {
                   type: ["string", "null"],
                   description:
-                    "wait_for_window only (ruling 224): the instant the provider said its window reopens, as an ISO timestamp. The resolution schedules the re-dispatch just after it. Required on that kind; null on every other. Viberr raises the quota packet itself, so author one only when no packet was raised.",
+                    "wait_for_window only (ruling 157): the instant the provider said its window reopens, as an ISO timestamp. The resolution schedules the re-dispatch just after it. Required on that kind; null on every other. Viberr raises the quota packet itself, so author one only when no packet was raised.",
                 },
                 newTask: {
                   type: ["object", "null"],
                   additionalProperties: false,
                   description:
-                    "create_task only (ruling 269): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. " +
+                    "create_task only (ruling 67): the task the person's confirm CREATES, under their own authority. Use it for work that belongs outside this task (another owner's package, a contract nobody produces, a gap a report named), instead of an option whose text tells the reader to create a task. " +
                     CREATE_TASK_BASE_NOTE +
                     " Required on that kind; null on every other.",
                   properties: {
@@ -526,7 +531,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                       type: ["array", "null"],
                       items: { type: "string" },
                       description:
-                        "Ruling 287: the EXISTING tasks that must wait on the new one, usually the direction that matters, since a task is created to unblock something. Each key gets the new task added to its own blockedBy when the person confirms. This task's own key belongs here whenever it is the work that must wait (ruling 322). Null for none.",
+                        "Ruling 67: the EXISTING tasks that must wait on the new one, usually the direction that matters, since a task is created to unblock something. Each key gets the new task added to its own blockedBy when the person confirms. This task's own key belongs here whenever it is the work that must wait (ruling 67). Null for none.",
                     },
                     labels: { type: ["array", "null"], items: { type: "string" }, description: "Labels for the new task; null for none." },
                   },
@@ -563,21 +568,21 @@ const operatorPlanActionSchema = z.strictObject({
   // (not just null) so plans persisted before these fields existed still replay.
   kbSource: z.string().nullable().optional(),
   repoSource: z.string().nullable().optional(),
-  // Ruling 131: set_dependencies — the FULL list; `.optional()` so plans
+  // Ruling 55: set_dependencies — the FULL list; `.optional()` so plans
   // persisted before the field existed still replay across a restart-resume.
   blockedBy: z.array(z.string()).nullable().optional(),
-  // Ruling 503: set_epic's epic — `.optional()` for the same replay reason.
+  // Ruling 116: set_epic's epic — `.optional()` for the same replay reason.
   epicId: z.string().nullable().optional(),
-  // Ruling 417: lease_files — `.optional()` so plans persisted before the
+  // Ruling 61: lease_files — `.optional()` so plans persisted before the
   // field existed still replay across a restart-resume.
   paths: z.array(z.string()).nullable().optional(),
-  // Ruling 521: write_completion_packet's images — `.optional()` for the same
+  // Ruling 103: write_completion_packet's images — `.optional()` for the same
   // replay reason.
   screenshots: z
     .array(z.strictObject({ name: z.string(), caption: z.string().nullable() }))
     .nullable()
     .optional(),
-  // Ruling 668: write_completion_packet's notes and result files, `.optional()`
+  // Ruling 103: write_completion_packet's notes and result files, `.optional()`
   // for the same replay reason.
   result: z
     .strictObject({
@@ -588,23 +593,23 @@ const operatorPlanActionSchema = z.strictObject({
     })
     .nullable()
     .optional(),
-  // Ruling 421: run_agent's completeness question — `.optional()` for the same
+  // Ruling 93: run_agent's completeness question — `.optional()` for the same
   // replay reason.
   completeness: z.boolean().nullable().optional(),
-  // Ruling 583: run_agent's no-verdict switch, `.optional()` for the same
+  // Ruling 124: run_agent's no-verdict switch, `.optional()` for the same
   // replay reason.
   noVerdict: z.boolean().nullable().optional(),
-  // Ruling 487: schedule_task_action's time and cancel_task_schedule's entry —
+  // Ruling 125: schedule_task_action's time and cancel_task_schedule's entry —
   // `.optional()` for the same replay reason.
   dueAt: z.string().nullable().optional(),
   delayMinutes: z.number().nullable().optional(),
   scheduleId: z.string().nullable().optional(),
-  // Ruling 584: edit_comment's comment, `.optional()` for the same replay reason.
+  // Ruling 133: edit_comment's comment, `.optional()` for the same replay reason.
   commentAt: z.string().nullable().optional(),
-  // Ruling 488: relay_to_task's target — `.optional()` for the same replay
+  // Ruling 135: relay_to_task's target — `.optional()` for the same replay
   // reason.
   taskKey: z.string().nullable().optional(),
-  // Ruling 538: the files a relay carries — `.optional()` for the same reason.
+  // Ruling 135: the files a relay carries — `.optional()` for the same reason.
   files: z.array(z.string()).nullable().optional(),
   packetOptions: z
     .array(
@@ -621,7 +626,7 @@ const operatorPlanActionSchema = z.strictObject({
         deleteBranch: z.boolean().nullable().optional(),
         toStage: z.string().nullable().optional(),
         goalDraft: z.string().nullable().optional(),
-        // Ruling 433: `.optional()` for the same replay reason.
+        // Ruling 132: `.optional()` for the same replay reason.
         blockedBy: z.array(z.string()).nullable().optional(),
         dueAt: z.string().nullable().optional(),
         newTask: z
@@ -650,8 +655,10 @@ type OperatorPlan = z.infer<typeof operatorPlanRuntimeSchema>;
  * Normalize the Codex operator's AUTHORED packet options (P11-27) into the shape
  * `operatorOpenPacket` expects, or null when it supplied nothing usable (empty,
  * or every option lacked a title) — the caller then falls back to the type's
- * default set. Caps at 4 options and ensures exactly one is marked recommended
- * (the first, if the model marked none or several).
+ * default set. Ensures exactly one is marked recommended (the first, if the
+ * model marked none or several). It keeps every titled option: a list past
+ * ruling 202's cap is refused whole by the packet writer both backends share
+ * (`operatorOpenPacketDisclosed`), never cut here.
  */
 export function authoredPacketOptions(
   authored:
@@ -679,10 +686,12 @@ export function authoredPacketOptions(
     | null,
 ): OperatorPacketOptionInput[] | null {
   if (!authored || authored.length === 0) return null;
-  // Filter+cap FIRST, then locate the recommended within the KEPT set — an
+  // Filter FIRST, then locate the recommended within the KEPT set — an
   // earlier empty-title option (dropped here) would otherwise shift the raw
-  // index and mark the wrong kept option recommended.
-  const kept = authored.filter((o) => o.title.trim() !== "").slice(0, 4);
+  // index and mark the wrong kept option recommended. Ruling 202: no cut. A
+  // `.slice(0, 4)` here opened a four-option card from a five-option plan, and
+  // nobody, the operator or the person, learned a choice had gone.
+  const kept = authored.filter((o) => o.title.trim() !== "");
   if (kept.length === 0) return null;
   const recIdx = kept.findIndex((o) => o.recommended);
   return kept.map((o, i) => {
@@ -692,9 +701,9 @@ export function authoredPacketOptions(
     // Carry the per-option detail line so a Codex-authored packet renders with
     // the same context a Claude-authored one does (AO-5 #12).
     if (detail) option.detail = detail;
-    // Ruling 650: `operatorOpenPacket` keeps it on redirect and request_edit.
+    // Ruling 132: `operatorOpenPacket` keeps it on redirect and request_edit.
     if (o.reply) option.reply = true;
-    // Ruling 138: the proposed goal rides with the option; `operatorOpenPacket`
+    // Ruling 63: the proposed goal rides with the option; `operatorOpenPacket`
     // caps it and refuses it on any kind but edit_goal.
     const goalDraft = o.goalDraft?.trim();
     if (goalDraft) option.goalDraft = goalDraft;
@@ -707,12 +716,12 @@ export function authoredPacketOptions(
     // archive_task only — any other kind ignores it at resolution, so gating
     // here would just second-guess the resolver.
     if (o.deleteBranch) option.deleteBranch = true;
-    // Ruling 164: move_stage carries its target; `operatorOpenPacket` refuses
+    // Ruling 131: move_stage carries its target; `operatorOpenPacket` refuses
     // it on any other kind and validates the stage id against the board.
     const toStage = o.toStage?.trim();
     if (toStage) option.toStage = toStage;
-    // Ruling 433: the payloads rulings 230, 224 and 269 require, carried the
-    // way the Claude tool carries them (ruling 270). `operatorOpenPacket`
+    // Ruling 132: the payloads rulings 66, 157 and 67 require, carried the
+    // way the Claude tool carries them (ruling 132). `operatorOpenPacket`
     // refuses each off its kind and its kind without it.
     if (o.blockedBy?.length) option.blockedBy = [...o.blockedBy];
     const dueAt = o.dueAt?.trim();
@@ -737,7 +746,7 @@ function defaultPacketOptions(
   // R20-1 (F20-5): every "blocked" label says exactly what will happen. The old
   // "…and unblock" recorded a HOLD and re-accepted the same confirm forever;
   // now each option resolves the packet, and the two active ones re-run.
-  // Ruling 130(c) (pass 34, F34-12): the stock re-run option asserts only what
+  // Ruling 62 (pass 34, F34-12): the stock re-run option asserts only what
   // the human says. It used to read "I've updated the policy / credential",
   // was recommended for a run that died of a spent usage window, and its
   // record ("policy / credential updated") led an operator to tell a
@@ -870,7 +879,7 @@ export async function executeCodexPlan(
   for (const a of plan.actions) {
     if (a.text) a.text = normalizeEscapedNewlines(a.text);
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
-    // Ruling 668: the completion packet's notes are prose a person reads too.
+    // Ruling 103: the completion packet's notes are prose a person reads too.
     if (a.result) {
       for (const key of ["considerations", "assumptions", "gaps"] as const) {
         const note = a.result[key];
@@ -898,7 +907,7 @@ export async function executeCodexPlan(
   // blocked — e.g. B3's "a decision packet is already open", which the
   // operator had every capability to do and simply must not do twice.
   const refused: RefusedPlanStep[] = [];
-  // R20-9 / ruling 84: the delegated-ask disclosure used to ride the CLAUDE
+  // R20-9 / ruling 114: the delegated-ask disclosure used to ride the CLAUDE
   // toolkit's `open_decision_packet` alone, so a CODEX plan whose actions were
   // `prompt_agent` then `open_packet` — the exact shape the ruling is about —
   // raised the human's decision with nothing said about the consultation. The
@@ -912,10 +921,10 @@ export async function executeCodexPlan(
       refused.push(refusal);
       return;
     }
-    // Ruling 406: the drive acted. Stamped HERE, on the one funnel every plan
+    // Ruling 121: the drive acted. Stamped HERE, on the one funnel every plan
     // step already passes through, so a new action shape is covered the day it
     // is added instead of the day it is mistaken for a deliberate hold. The
-    // Claude toolkit's replies ask the same predicate (ruling 705).
+    // Claude toolkit's replies ask the same predicate (ruling 121).
     noteCarriedOutAction(ctx, result);
   };
   // B-6 (pass 24): OpenAI-strict structured output makes every plan field
@@ -926,7 +935,7 @@ export async function executeCodexPlan(
   const skippedMalformed = (toolName: string, missing: string) => {
     refused.push({ tool: toolName, message: `plan step omitted ${missing}`, kind: "state" });
   };
-  // Ruling 430 (F39-52): a plan is written whole, before any step runs, so it
+  // Ruling 118 (F39-52): a plan is written whole, before any step runs, so it
   // cannot see a decision one of its own steps puts in front of a person. Live
   // on AX-21 (01:18): `update_branch_from_base` met a conflict and opened the
   // blocking conflict packet, and the next step still dispatched the Surface
@@ -942,7 +951,7 @@ export async function executeCodexPlan(
   let pausedBy: { tool: string; title: string } | null = null;
   const pausedSteps: string[] = [];
   for (const a of plan.actions) {
-    // Ruling 488: a relay is a comment on another task, whose decision this
+    // Ruling 135: a relay is a comment on another task, whose decision this
     // task's new packet does not hold, so it still posts like one.
     if (pausedBy && a.tool !== "post_comment" && a.tool !== "relay_to_task") {
       pausedSteps.push(a.tool);
@@ -966,7 +975,8 @@ export async function executeCodexPlan(
               packetType,
               title: a.text,
               // P11-27: honor the operator's authored options when it supplied
-              // a usable set (2–4); else fall back to the type's defaults.
+              // a usable set; else fall back to the type's defaults. More than
+              // four is refused by the writer below (ruling 202).
               options: authoredPacketOptions(a.packetOptions) ?? defaultPacketOptions(packetType),
             };
             if (a.reason) packet.body = a.reason;
@@ -984,7 +994,7 @@ export async function executeCodexPlan(
           break;
         }
         case "ask_for_repository": {
-          // Ruling 672: the plan mirror of the Claude tool. The question is
+          // Ruling 107: the plan mirror of the Claude tool. The question is
           // the server's packet; the plan carries the reason and, if the
           // goal named one, the repository.
           if (a.reason) {
@@ -1000,7 +1010,7 @@ export async function executeCodexPlan(
           break;
         }
         case "set_dependencies": {
-          // Ruling 131(b): the plan mirror of the Claude tool. A null list is
+          // Ruling 55: the plan mirror of the Claude tool. A null list is
           // a malformed step (state), never a policy refusal.
           if (a.blockedBy) {
             const wait: Parameters<typeof operatorSetDependencies>[2] = {
@@ -1013,7 +1023,7 @@ export async function executeCodexPlan(
           break;
         }
         case "set_epic": {
-          // Ruling 503: the plan mirror of the Claude tool. "" takes the task
+          // Ruling 116: the plan mirror of the Claude tool. "" takes the task
           // out of its epic; a null epic is a malformed step.
           if (a.epicId != null) {
             const move: Parameters<typeof operatorSetEpic>[2] = {
@@ -1033,7 +1043,7 @@ export async function executeCodexPlan(
               ...base,
               profileId: a.profileId,
             };
-            // Ruling 446 (F39-70): the directive travels with what this plan's earlier steps
+            // Ruling 118 (F39-70): the directive travels with what this plan's earlier steps
             // were refused, which the narration below only writes after the
             // agent has started.
             if (a.text) dispatch.prompt = withEarlierRefusals(a.text, refused);
@@ -1083,7 +1093,7 @@ export async function executeCodexPlan(
           record(a.tool, await operatorAcceptCompletion(db, ctx, base, authority));
           break;
         case "write_completion_packet":
-          // Ruling 521: `text` is the summary, `reason` the summary of the
+          // Ruling 130: `text` is the summary, `reason` the summary of the
           // code changes.
           if (a.text) {
             const packet: Parameters<typeof operatorWriteCompletionPacket>[2] = {
@@ -1094,7 +1104,7 @@ export async function executeCodexPlan(
             if (a.screenshots?.length) {
               packet.screenshots = a.screenshots.map((s) => ({ name: s.name, caption: s.caption }));
             }
-            // Ruling 668: the notes and the result's files.
+            // Ruling 103: the notes and the result's files.
             if (a.result) {
               packet.considerations = a.result.considerations;
               packet.assumptions = a.result.assumptions;
@@ -1150,12 +1160,12 @@ export async function executeCodexPlan(
           }
           break;
         case "correct_knowledge_doc":
-          // F39-1/F39-7 (pass 39), rulings 483 and 498: `kbSource` is
+          // F39-1/F39-7 (pass 39), ruling 210: `kbSource` is
           // `<kb>/<doc>` (or a bare rulings document), `text` what the document
           // should say, `reason` the exact passage it replaces, `repoSource`
           // the evidence that proves it. Reuses the plan's existing string
           // fields rather than growing the schema — the two knowledge-base-
-          // shaped actions then read alike. Ruling 581: an empty `text` with a
+          // shaped actions then read alike. Ruling 210(b): an empty `text` with a
           // `reason` deletes that passage.
           if (a.kbSource && (a.text || a.reason) && a.repoSource) {
             record(
@@ -1181,7 +1191,7 @@ export async function executeCodexPlan(
           }
           break;
         case "lease_files": {
-          // Ruling 417: `paths` are the globs, `text` (or `reason`) why.
+          // Ruling 61: `paths` are the globs, `text` (or `reason`) why.
           const why = a.text || a.reason;
           if (a.paths && a.paths.length > 0 && why) {
             record(
@@ -1194,7 +1204,7 @@ export async function executeCodexPlan(
           break;
         }
         case "schedule_task_action": {
-          // Ruling 487: `profileId` is the agent (null or "operator" is the
+          // Ruling 125: `profileId` is the agent (null or "operator" is the
           // operator's own re-run), `dueAt`/`delayMinutes` the time, `text`
           // the steer. No time at all is refused by the action itself, in
           // the same sentence every schedule door uses.
@@ -1217,8 +1227,8 @@ export async function executeCodexPlan(
           } else skippedMalformed(a.tool, "the schedule to cancel");
           break;
         case "relay_to_task":
-          // Ruling 488: `taskKey` is the other task, `text` what lands there;
-          // ruling 538: `files` what it carries with it.
+          // Ruling 135: `taskKey` is the other task, `text` what lands there,
+          // `files` what it carries with it.
           if (a.taskKey && a.text) {
             record(
               a.tool,
@@ -1232,7 +1242,7 @@ export async function executeCodexPlan(
           } else skippedMalformed(a.tool, "the task to relay to and the text");
           break;
         case "take_from_task":
-          // Ruling 557: `taskKey` holds the files, `files` names them, `text`
+          // Ruling 135: `taskKey` holds the files, `files` names them, `text`
           // is an optional line on what they are for.
           if (a.taskKey && a.files && a.files.length > 0) {
             const take: Parameters<typeof operatorTakeFromTask>[2] = {
@@ -1245,7 +1255,7 @@ export async function executeCodexPlan(
           } else skippedMalformed(a.tool, "the task to take from and the files");
           break;
         case "edit_comment":
-          // Ruling 584: `commentAt` names the comment, `text` replaces its
+          // Ruling 133: `commentAt` names the comment, `text` replaces its
           // words (null deletes it), `reason` is why.
           if (a.commentAt && a.reason) {
             record(
@@ -1297,7 +1307,7 @@ export async function executeCodexPlan(
     await narratePausedPlan(db, ctx, input, pausedBy, pausedSteps);
   }
   await narrateRefusedActions(db, ctx, input, refused, plan.reasoning);
-  // Ruling 228 (F37-47): stamp the case where the drive did NOTHING because
+  // Ruling 120 (F37-47): stamp the case where the drive did NOTHING because
   // every step it planned was refused. The refusal messages are written to be
   // acted on ("Do not refresh it here; recommend or accept the completion
   // instead") and they arrive after the turn has ended, so without this nobody
@@ -1311,7 +1321,7 @@ export async function executeCodexPlan(
   // is narrated on its own terms and is not this.
   if (ctx.operatorRun && plan.actions.length > 0 && refused.length === plan.actions.length) {
     ctx.operatorRun.planWhollyRefused = true;
-    // Ruling 400: the sentences, not just the flag. The retry quotes them.
+    // Ruling 121: the sentences, not just the flag. The retry quotes them.
     ctx.operatorRun.refusedPlanSteps = refused.map((r) => ({
       tool: r.tool,
       message: r.message,
@@ -1354,7 +1364,7 @@ async function narrateOperatorNote(
 }
 
 /**
- * Ruling 430: say which steps a new decision packet stopped, and why.
+ * Ruling 118: say which steps a new decision packet stopped, and why.
  *
  * Written directly, like `narrateRefusedActions`. Never throws; the plan
  * already ran.
@@ -1378,7 +1388,7 @@ async function narratePausedPlan(
 }
 
 /**
- * Ruling 446 (F39-70): a dispatch in a Codex plan carries the refusals the same plan has
+ * Ruling 118 (F39-70): a dispatch in a Codex plan carries the refusals the same plan has
  * already collected. A plan is written before any step runs, so a directive
  * can only say "if the lease is refused, ...". The note that answers it is
  * narrated after the plan's last step, when the agent is already running.
@@ -1442,7 +1452,7 @@ async function narrateRefusedActions(
         ? `${were(byAuthority)} refused by its capability policy:\n\n${refusalList(byAuthority)}`
         : `${did(byState)} not apply to the task's current state:\n\n${refusalList(byState)}`;
   const text =
-    // Ruling 408: the lead is a shared constant, because the next turn's carry
+    // Ruling 116: the lead is a shared constant, because the next turn's carry
     // finds this note by it.
     `${PLAN_NOT_CARRIED_OUT_LEAD} ${body}` +
     (reasoning.trim()

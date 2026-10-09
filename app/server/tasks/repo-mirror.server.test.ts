@@ -349,7 +349,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
   });
 
-  it("ruling 670: a mirror whose HEAD names a branch the remote no longer has follows the remote's HEAD and serves clones again", async () => {
+  it("ruling 195: a mirror whose HEAD names a branch the remote no longer has follows the remote's HEAD and serves clones again", async () => {
     // The default branch renamed on GitHub, or a repository mirrored while it
     // was empty and first pushed on another name. Viberr no longer creates
     // the old name there, so nothing would ever make this mirror usable.
@@ -369,7 +369,7 @@ describe("cloneWorkspaceRepo — the per-project repository mirror cache", () =>
     expect(existsSync(path.join(workspace("b"), "README.md"))).toBe(true);
   });
 
-  it("ruling 670: a mirror built while the repository was empty follows its first branch, whatever that is named", async () => {
+  it("ruling 195: a mirror built while the repository was empty follows its first branch, whatever that is named", async () => {
     // The other way a mirror's HEAD names a branch that never comes: the
     // repository was empty, and its first push was a person's own `master`.
     // CANARY: follow only a HEAD that once resolved and this mirror never

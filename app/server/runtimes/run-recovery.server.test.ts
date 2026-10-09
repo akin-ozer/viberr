@@ -107,7 +107,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(row.interrupted_reason).toBe("restart");
   });
 
-  it("ruling 177 / U36-8: an interrupted task run leaves a note on the task's timeline", async () => {
+  it("ruling 163 / U36-8: an interrupted task run leaves a note on the task's timeline", async () => {
     // Pass 36 U36-8: four runs were cut by a restart and the task files said
     // nothing — the re-fired operator's directive was the first trace. Canary:
     // delete the `appendTimelineEvent` call from the orphan loop.
@@ -122,7 +122,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).toContain("run_dev_orphan");
     expect(note!.text).toContain("run_op_orphan");
     /**
-     * Ruling 310(b). This note called EVERY finalized run "still running when
+     * Ruling 163(b). This note called EVERY finalized run "still running when
      * the server stopped", and the sweep finalizes queued runs too — so a run
      * that never got a concurrency slot was described as having been running.
      * `run_op_orphan` is seeded `queued` with `startedAt: null` precisely
@@ -150,7 +150,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(parsed.timeline.filter((e) => e.title === "Interrupted by a restart")).toHaveLength(1);
   });
 
-  it("ruling 701: the restart note says a run parked for its session waited for a summary, not for a slot", async () => {
+  it("ruling 175: the restart note says a run parked for its session waited for a summary, not for a slot", async () => {
     // CANARY: read no step and the run is said to have been queued behind the
     // concurrent-run cap, on an instance that may have none.
     seedRun("run_held_orphan", {
@@ -166,7 +166,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(note!.text).not.toContain("concurrent-run cap");
   });
 
-  it("ruling 662: the restart note names a supporting agent's run by its role, not as a reviewer", async () => {
+  it("ruling 292(b): the restart note names a supporting agent's run by its role, not as a reviewer", async () => {
     // `kind: "reviewer"` is every non-delivering run (F31-C7), and the note
     // said "(reviewer)" for each, so the AWS board's Cloud Solutions Architect
     // read as one. CANARY: label the run by its kind again.
@@ -182,13 +182,13 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
   });
 
   /**
-   * Ruling 567. A person's Stop and a failed run both reach the completion
+   * Ruling 163(b). A person's Stop and a failed run both reach the completion
    * effects, which post the run's saved files under its name and record a
    * deliverer's as the delivery. A restart reached none of it. Live on AWSC-7
    * a deploy cut the Calculator Builder after it had saved every result file:
    * the files belonged to nobody, `deliveredAt` stayed null, the move to Review
    * offered acceptance before the Judge had started, and the Judge's verdict
-   * could bind to nothing. Ruling 601 keeps the posting and drops the
+   * could bind to nothing. Ruling 85 keeps the posting and drops the
    * delivery: only a run that finished reports one.
    */
   function cutRunWithFiles(kind: "primary" | "reviewer", profileId: string, files: string[]) {
@@ -214,8 +214,8 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     for (const f of files) writeFileSync(path.join(dir, f), f);
   }
 
-  it("ruling 601: a deliverer the restart cut off has its saved files posted under its name before the operator runs again, and they are not the delivery", async () => {
-    // Ruling 567 recorded them as the delivery. Live on AWSC-54 a restart cut
+  it("ruling 85: a deliverer the restart cut off has its saved files posted under its name before the operator runs again, and they are not the delivery", async () => {
+    // Ruling 163(b) recorded them as the delivery. Live on AWSC-54 a restart cut
     // the Calculator Builder mid-estimate, its interim exports became the
     // task's first delivery, and the Estimate Judge failed the run for an
     // interim link "delivered" before the headline ask. A delivery is what a
@@ -254,7 +254,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(postedWhenCalled).toEqual([true]);
   });
 
-  it("ruling 570: a deliverer cut off mid-browse has its working files posted under its name, and they are not the delivery", async () => {
+  it("ruling 85: a deliverer cut off mid-browse has its working files posted under its name, and they are not the delivery", async () => {
     // Live on AWSC-8 a restart cut the Workflow Researcher while it reproduced
     // a calculator form, and `deliveredAt` moved off its report onto twelve
     // page snapshots. CANARY: stamp on any attachment again and this one moves.
@@ -271,8 +271,8 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(parsed.frontmatter.deliveredAt).toBeNull();
   });
 
-  it("ruling 567: a reviewer the restart cut off has its files posted under its name, and they are not the delivery", async () => {
-    // Ruling 388: a reviewer's captures are evidence, never the subject.
+  it("ruling 163(b): a reviewer the restart cut off has its files posted under its name, and they are not the delivery", async () => {
+    // Ruling 84: a reviewer's captures are evidence, never the subject.
     cutRunWithFiles("reviewer", "judge", ["page-capture.png"]);
     await finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).notes;
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
@@ -283,7 +283,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(parsed.frontmatter.deliveredAt).toBeNull();
   });
 
-  it("ruling 181: a Codex run the restart orphaned gets its private home finished at boot — sign-in written back, directory gone", () => {
+  it("ruling 145: a Codex run the restart orphaned gets its private home finished at boot — sign-in written back, directory gone", () => {
     // Live 19:48Z: `codex-home/runs/` still held the two developer runs a
     // restart had cut, each with its copy of the sign-in — the adapter's settle
     // never ran for a process that died. Canary: drop the `finishCodexRunHome`
@@ -303,7 +303,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
       sdk: "Codex SDK",
       credentialUserId: "u-arda",
     });
-    // A run whose row predates ruling 127 (no credential principal) is left to
+    // A run whose row predates ruling 137 (no credential principal) is left to
     // the retention sweep — nothing to resolve a home from.
     seedRun("run_codex_nobody", { state: "running", backend: "codex", credentialUserId: null });
     expect(finalizeOrphanedRuns(store.db, { dataRoot: store.dataRoot }).finalized).toBe(2);
@@ -314,7 +314,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(getRun(store.db, "run_codex_orphan")!.state).toBe("interrupted");
   });
 
-  it("ruling 507: an orphaned run's refreshed sign-in goes back to the ACCOUNT it billed, its compaction's fork too", () => {
+  it("ruling 138: an orphaned run's refreshed sign-in goes back to the ACCOUNT it billed, its compaction's fork too", () => {
     // Two accounts: an older one whose sign-in sits in the shared home, and
     // the one the orphaned run billed, in a home of its own. Canary: finish
     // the run home against the shared home again and the older account's
@@ -354,7 +354,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(readFileSync(path.join(sharedHome, "auth.json"), "utf8")).toBe('{"token":"other-account"}');
   });
 
-  it("ruling 701: a finished run whose compaction the restart cut has that compaction's home finished, its process swept and its mark cleared", async () => {
+  it("ruling 175: a finished run whose compaction the restart cut has that compaction's home finished, its process swept and its mark cleared", async () => {
     // A specialist's run is terminal while its session is compacted, so the
     // restart leaves no orphan to find it by. CANARY: key the sweep on live
     // rows alone and the fork stays for good, with its copy of the sign-in
@@ -422,7 +422,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(asked).toEqual([]);
   });
 
-  it("ruling 701: a mark boot cannot clear does not stop the orphans from being finalized", async () => {
+  it("ruling 175: a mark boot cannot clear does not stop the orphans from being finalized", async () => {
     // The sweep of cut compactions runs ahead of the orphans'. CANARY: let its
     // write throw and a live row stays `running` with nothing behind it.
     seedRun("run_marked", { state: "finished", finishedAt: new Date().toISOString(), kind: "primary", threadId: "primary-marked" });
@@ -444,7 +444,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(getRun(store.db, "run_marked")!.phase).toBe(RUN_PHASE.compacting);
   });
 
-  it("ruling 507: an orphaned run of an account removed since hands its token back to nobody", () => {
+  it("ruling 138: an orphaned run of an account removed since hands its token back to nobody", () => {
     const arda = store.users.arda;
     const sharedHome = ensureUserBackendHome(arda.id, "codex", store.dataRoot);
     writeFileSync(path.join(sharedHome, "auth.json"), '{"token":"other-account"}');
@@ -510,14 +510,14 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
   });
 
   /**
-   * Ruling 198 (F37-19, live): the restart note promised "the operator is
+   * Ruling 163(c) (F37-19, live): the restart note promised "the operator is
    * re-invoked to decide what to do next" on EVERY orphaned task, and it was
    * written before the cap loop had even run — so a capped task carried a
    * promise Viberr had already decided not to keep, kept `waiting: "agent"`
    * with no agent alive, and nothing revisited it. SHOP-7 sat that way for two
    * hours while the board and the review queue both said "agent working".
    */
-  it("ruling 198: a capped task's note says what actually happened, and stops claiming an agent", async () => {
+  it("ruling 163(c): a capped task's note says what actually happened, and stops claiming an agent", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
         stage: "impl",
@@ -577,7 +577,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(n).toBe(1);
   });
 
-  it("ruling 198: an UNCAPPED task keeps the promise, because a turn really is coming", async () => {
+  it("ruling 163(c): an UNCAPPED task keeps the promise, because a turn really is coming", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
     });
@@ -603,7 +603,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
     expect(finalizeOrphanedRuns(store.db).finalized).toBe(0);
   });
 
-  it("sweeps the processes of exactly the orphans it finalizes (ruling 174)", async () => {
+  it("sweeps the processes of exactly the orphans it finalizes (ruling 142)", async () => {
     // The dead server's CLIs led their own groups and did not die with it; a
     // survivor could still be writing the tree boot reclaims. Terminal runs
     // settled in their own process and were swept there.
@@ -618,7 +618,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
 
     const res = finalizeOrphanedRuns(store.db, { reapProcesses });
     await res.reaped;
-    // Ruling 376: each orphan's completion-compaction marker is swept beside it.
+    // Ruling 174: each orphan's completion-compaction marker is swept beside it.
     expect(asked).toEqual([
       ["run_running", "run_running:compaction", "run_waiting", "run_waiting:compaction"],
     ]);
@@ -642,7 +642,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
 });
 
 /**
- * Ruling 213 (live on SHOP-4). Every other boot path keys on a RUN — the ones
+ * Ruling 164 (live on SHOP-4). Every other boot path keys on a RUN — the ones
  * still running, the finished ones whose reply never landed, the Codex plans
  * that never executed. None covers an operator drive that COMPLETED cleanly and
  * whose settle was still in flight when the process died: the run row is
@@ -651,7 +651,7 @@ describe("finalizeOrphanedRuns (F-RUN1)", () => {
  * SHOP-4's operator moved it Review → Build at 18:57:34 and the container
  * restarted at 18:57:35; six minutes later nothing had looked at it.
  */
-describe("settleAbandonedWaits (ruling 213)", () => {
+describe("settleAbandonedWaits (ruling 164)", () => {
   it("re-invokes the operator for a task waiting on an agent that is not there, and says so", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
@@ -680,7 +680,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     expect(note, "the record must say why a run started").toBeTruthy();
     expect(note!.text).toContain("no run was live when the server came back");
     /**
-     * Ruling 317(b). This task DOES have a finished run, so the note may say
+     * Ruling 164. This task DOES have a finished run, so the note may say
      * the follow-up is what did not happen. CANARY: go back to the fixed
      * sentence and the no-run case below starts asserting a run that never
      * existed.
@@ -696,7 +696,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
   });
 
   /**
-   * Ruling 317(b). The sweep's SELECT proves ONE thing: `waiting = 'agent'` and
+   * Ruling 164. The sweep's SELECT proves ONE thing: `waiting = 'agent'` and
    * no run in `running` or `queued`. The note asserted three more — that a run
    * existed, that it "finished just before the stop", and that "nothing was
    * lost from the record".
@@ -706,11 +706,11 @@ describe("settleAbandonedWaits (ruling 213)", () => {
    * and no decision is needed." 09:30:29 — "the run finished just before the
    * stop". A dispatch held on quota records the wait and starts nothing.
    *
-   * This is the class ruling 310(b) named in the neighbouring sweep of this
+   * This is the class ruling 163(b) named in the neighbouring sweep of this
    * same file, whose commit quoted the controller: "One writer fixed, its
    * neighbour still inventing."
    */
-  it("ruling 317(b): a task that never had a run is not told one finished", async () => {
+  it("ruling 164: a task that never had a run is not told one finished", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
     });
@@ -731,9 +731,9 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     expect(note!.text).toContain("No agent run has ever been started on it");
     expect(note!.text).not.toContain("the run finished just before the stop");
     expect(note!.text).not.toMatch(/follow-up that would have moved the task did not run/);
-    // Ruling 337(b): it states the board fact and claims no turn that may not
+    // Ruling 164: it states the board fact and claims no turn that may not
     // run — the note is written BEFORE `runOperator` is called, so a refusal
-    // would leave it promising one (the unconditional promise ruling 198
+    // would leave it promising one (the unconditional promise ruling 163(c)
     // removed from the sibling orphan sweep).
     // CANARY: restore "the operator is re-invoked to decide what happens next".
     expect(note!.text).toContain("The board has stopped claiming an agent");
@@ -743,7 +743,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
   });
 
   /**
-   * Ruling 215 (F37-35). The deploy that shipped 213 produced two restart notes
+   * Ruling 164 (F37-35). The deploy that shipped 213 produced two restart notes
    * on the same task, one second apart: "the run `run_JFvmbz…` (reviewer) was
    * still running when the server stopped" and "no run was live when the server
    * came back". Both cannot be true. `finalizeOrphanedRuns` runs first and its
@@ -751,7 +751,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
    * asks its question the evidence is already gone — and its re-invoke raced the
    * orphan sweep's own, two coordination drives for one restart.
    */
-  it("ruling 337: reads the RECORD, not just the index — a parked dispatch is not an abandoned wait", async () => {
+  it("ruling 164: reads the RECORD, not just the index — a parked dispatch is not an abandoned wait", async () => {
     /**
      * This sweep selected entirely on `t.waiting = 'agent'` with no live run and
      * never opened the task file. So a dispatch viberr ITSELF had parked was
@@ -773,7 +773,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
      *
      * Every clause of that note was false on the task's own record, and it
      * reversed the owner's explicit backend decision fifteen minutes after they
-     * made it. The guard is borrowed from `findStrandedTasks` (ruling 330,
+     * made it. The guard is borrowed from `findStrandedTasks` (ruling 122,
      * shipped hours earlier), which re-reads the file for exactly these cases:
      * the older sweep does MORE and checked LESS.
      *
@@ -821,7 +821,7 @@ describe("settleAbandonedWaits (ruling 213)", () => {
     }
   });
 
-  it("does not re-claim a task the orphan sweep already took (ruling 215)", async () => {
+  it("does not re-claim a task the orphan sweep already took (ruling 164)", async () => {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", waiting: "agent" }),
     });
@@ -921,14 +921,14 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
   });
 
   /**
-   * Ruling 207(a) (claim audit). `noteCompletionEffectsLost` writes, in ONE
+   * Ruling 163(d) (claim audit). `noteCompletionEffectsLost` writes, in ONE
    * update, `waiting = "human"` and a note saying "Run recovery replays the
    * effects on the next restart" — while this reconciler selected on
    * `t.waiting = 'agent'`. The note's own write made the replay it promised
    * unreachable, and the effects it names include a required reviewer's VERDICT,
    * so the acceptance gate stayed shut on a review that had actually happened.
    */
-  it("ruling 207(a): a run whose completion effects were LOST is still replayed, though its task now waits on a human", async () => {
+  it("ruling 163(d): a run whose completion effects were LOST is still replayed, though its task now waits on a human", async () => {
     seedDroppedReplyRun("run_lost");
     // Exactly what noteCompletionEffectsLost leaves behind: the honest board
     // state, and the marker that says why.
@@ -953,7 +953,7 @@ describe("recoverUnreactedAgentRuns (NFR17/B9 crash-loop backstop)", () => {
     expect(countReplayAudits("run_lost")).toBe(1);
   });
 
-  it("ruling 207(a): a task waiting on a human with NO effects-lost marker is still left alone", async () => {
+  it("ruling 163(d): a task waiting on a human with NO effects-lost marker is still left alone", async () => {
     // The scope the original `waiting = 'agent'` filter was protecting: old
     // history, not a live stall. Widening the selection must not sweep it in.
     seedDroppedReplyRun("run_old");

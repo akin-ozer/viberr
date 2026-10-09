@@ -146,10 +146,10 @@ type BootIntegrityFields = {
   users: number;
   build: BuildInfo;
   disk: { free: string; total: string; status: DiskStatus; source: DiskSource } | null;
-  /** Ruling 182: what this host can run, probed once here so the first health
+  /** Ruling 40: what this host can run, probed once here so the first health
    *  request does not pay for it. */
   toolchain: Toolchain;
-  /** F21-1 / ruling 140: absent on a healthy schema — see
+  /** F21-1 / ruling 50: absent on a healthy schema — see
    *  `projectionCheckGaps` (table-qualified CHECK gaps). */
   projectionSchemaDrift?: string[];
   /** Absent on a healthy schema — see `projectionMissingColumns`. */
@@ -189,7 +189,7 @@ function projectionValidationGaps(db: DatabaseSync): string[] {
 }
 
 /**
- * Ruling 140 (pass 34): the SAME drift, one table over. `notifications.kind` is
+ * Ruling 50 (pass 34): the SAME drift, one table over. `notifications.kind` is
  * a CHECK over `NOTIFICATION_KINDS`, pinned to the baseline by
  * `notification.server.test.ts` — which, like the validation pin, reaches only
  * FRESH roots. On an existing root every INSERT of a kind the CHECK predates
@@ -211,7 +211,7 @@ function tableColumns(db: DatabaseSync, table: string): string[] {
 }
 
 /**
- * Ruling 481(a): widen a lagging `notifications.kind` CHECK in place, at boot.
+ * Ruling 74: widen a lagging `notifications.kind` CHECK in place, at boot.
  *
  * The drift WARN above names the gap and prescribes re-baselining the
  * projection database, which also destroys the users, sessions, sealed PATs,
@@ -221,7 +221,7 @@ function tableColumns(db: DatabaseSync, table: string): string[] {
  * from the shipped baseline's own DDL (read from a throwaway in-memory
  * migration, as `projectionMissingColumns` does), its rows copied across, and
  * its indexes recreated, in one transaction (sqlite cannot ALTER a CHECK).
- * Without it, the day ruling 481 shipped every agent question on a deployed
+ * Without it, the day ruling 74 shipped every agent question on a deployed
  * root would have thrown at the INSERT and reached nobody, which is worse than
  * the mis-filed row it replaced.
  *
@@ -277,7 +277,7 @@ export function widenNotificationKindCheck(db: DatabaseSync): string[] {
 function projectionCheckGaps(db: DatabaseSync): string[] {
   return [
     ...projectionValidationGaps(db).map((value) => `task_projections.validation: ${value}`),
-    // Ruling 225 (F37-45): the THIRD instance of this drift, and the one that
+    // Ruling 45 (F37-45): the THIRD instance of this drift, and the one that
     // shows the read above was a list of the columns someone had been bitten by
     // rather than of the columns at risk. `waiting` is a CHECK over a TS enum
     // the projector derives into, exactly like `validation` beside it, and when
@@ -288,7 +288,7 @@ function projectionCheckGaps(db: DatabaseSync): string[] {
       (value) => `task_projections.waiting: ${value}`,
     ),
     ...notificationKindGaps(db).map((value) => `notifications.kind: ${value}`),
-    // Ruling 503: an epic's status is the same shape, a CHECK over the enum
+    // Ruling 272: an epic's status is the same shape, a CHECK over the enum
     // the epic file schema declares, so it belongs here from its first day.
     ...checkListGaps(db, "epic_projections", "status", EPIC_STATUS_VALUES).map(
       (value) => `epic_projections.status: ${value}`,
@@ -417,7 +417,7 @@ export function logBootIntegrity(db: DatabaseSync): void {
           source: disk.source,
         }
       : null,
-    // Ruling 182: resolved here, once, so the probe's cost lands in boot and
+    // Ruling 40: resolved here, once, so the probe's cost lands in boot and
     // the toolchain is on the one line an operator reads after a deploy.
     toolchain: cachedToolchain(),
   };
@@ -533,8 +533,8 @@ interface ReconcileRestartedWorkDeps {
  * one failure never stops the next, and none of them blocks boot.
  *
  *  0. orphaned runs (F7-BOOT1) — a run row left `running`/`queued` has no live
- *     process in a fresh boot. Each is finalized to `error`
- *     (interrupted-by-restart) and its task's operator re-invoked. It leads the
+ *     process in a fresh boot. Each is finalized `interrupted` with
+ *     `interrupted_reason: "restart"` and its task's operator re-invoked. It leads the
  *     chain so step 1 reads clean terminal states, and its re-invokes are JOINED
  *     before step 3: those drives clone the very workspaces the reclaim deletes.
  *  1. agent replies (NFR17, B9) — a specialist/reviewer run that finished before
@@ -570,11 +570,11 @@ export async function reconcileRestartedWork(
   // which is exactly what step 3 deletes — so the chain keeps the handle and
   // joins it there. `reinvokes` never rejects, so the await needs no catch.
   let orphanReinvokes: Promise<void> = Promise.resolve();
-  // Ruling 174: the orphans' surviving processes are swept alongside, and the
+  // Ruling 142: the orphans' surviving processes are swept alongside, and the
   // reclaim waits for that too — a CLI the dead server left running could still
   // be writing a tree the reclaim deletes. Never rejects either.
   let orphanReaped: Promise<void> = Promise.resolve();
-  /** Ruling 215: the tasks step 1 took, withheld from step 4 (see below). */
+  /** Ruling 164: the tasks step 1 took, withheld from step 4 (see below). */
   let orphanTasks: ReadonlySet<string> = new Set<string>();
   try {
     const finalization = deps.finalizeOrphanedRuns(db);
@@ -601,12 +601,12 @@ export async function reconcileRestartedWork(
     });
   }
   try {
-    // Ruling 213: LAST of the four, deliberately. The three above all key on a
+    // Ruling 164: LAST of the four, deliberately. The three above all key on a
     // run and may themselves set `waiting: agent` by starting one; this sweep
     // asks the leftover question — which tasks claim an agent that no run
     // backs — so it has to see the board they leave behind.
     //
-    // Ruling 215: which is exactly why it must be told what step 1 took. That
+    // Ruling 164: which is exactly why it must be told what step 1 took. That
     // step's whole job is to move live runs to `interrupted`, and its own
     // re-invokes are launched below, AFTER this line — so on the deploy that
     // shipped 213 two tasks got both notes at once, the second one saying "no
@@ -753,11 +753,11 @@ export async function bootServer(): Promise<void> {
   // Ship the default agent assets (each agent's expertise skill + its detailed
   // definition + the base profile templates) into the store when a store lacks
   // them — before anything reads them. Idempotent and best-effort (never blocks
-  // boot). Ruling 681(f): what a refresh replaced goes on the record in the
+  // boot). Ruling 34: what a refresh replaced goes on the record in the
   // same step, so no boot can replace a file and stop before it says so.
   recordShippedAssetRefresh(db, seedDefaultAgentAssets());
 
-  // Ruling 481(a): before anything can write a notification. A root whose
+  // Ruling 74: before anything can write a notification. A root whose
   // `notifications.kind` CHECK predates a kind gets it widened in place, so an
   // agent question (the kind that ruling added) is never refused at INSERT.
   try {
@@ -770,7 +770,7 @@ export async function bootServer(): Promise<void> {
     logger.error("could not widen the notifications kind CHECK", { err: toError(error) });
   }
 
-  // Ruling 460: before anything spawns an agent or creates a workspace — the
+  // Ruling 139: before anything spawns an agent or creates a workspace — the
   // server's umask, the store layout, every person's home handed to their
   // agent uid, and the probe that says whether the store enforces any of it
   // (`/resources/health` → `agentIsolation`). Without a launcher (the host dev
@@ -781,7 +781,7 @@ export async function bootServer(): Promise<void> {
   } catch (error) {
     logger.error("agent isolation could not be set up at boot", { err: toError(error) });
   }
-  // Ruling 636: before anything can start a run, so every run's temporary
+  // Ruling 141(c): before anything can start a run, so every run's temporary
   // directory still on disk is one a stopped server or a failed removal left.
   // As each run's person, after isolation knows who that is. Never throws.
   const runTmpSwept = sweepRunTmp(db);
@@ -792,7 +792,7 @@ export async function bootServer(): Promise<void> {
     password: env.VIBERR_SEED_ADMIN_PASSWORD,
   });
 
-  // Ruling 461: the loopback MCP gateway, before anything can start a run
+  // Ruling 191: the loopback MCP gateway, before anything can start a run
   // (recovery, the schedule and goal runners, a request). A run reaches every
   // org MCP server with a stored credential through it; one that fails to bind
   // leaves those servers unmountable — each run's prompt then says why — and
@@ -861,7 +861,7 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Ruling 519: a board created before the move into Review became automatic
+  // Ruling 91: a board created before the move into Review became automatic
   // gets the template's `auto` edge in place of its old approval. After the
   // rescan (the project rows exist) and before the watcher (no concurrent
   // writer); a converted edge is not converted again.
@@ -873,7 +873,7 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Ruling 503: every chained goal becomes the epic with its number, its
+  // Ruling 17: every chained goal becomes the epic with its number, its
   // tasks join it, its unstarted links become held tasks, and every wait on a
   // goal link is respelled by task key. Once: a converted goal file is filed
   // under `goals/converted/`. After the rescan (task rows exist to validate
@@ -887,7 +887,7 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Ruling 639: an evidence result the old 40-character cap cut gets back the
+  // Ruling 16: an evidence result the old 40-character cap cut gets back the
   // words its run reported. After the rescan (the event rows exist) and before
   // the watcher (no concurrent writer); a restored row is no longer cut.
   try {
@@ -898,7 +898,7 @@ export async function bootServer(): Promise<void> {
     });
   }
 
-  // Ruling 486 (live verification 2026-09-25): an OAuth sign-in made before the
+  // Ruling 192 (live verification 2026-09-25): an OAuth sign-in made before the
   // public half carried its grant shows it from the sealed half's token scope.
   try {
     backfillMcpGrantScopes(db);
@@ -923,7 +923,7 @@ export async function bootServer(): Promise<void> {
   // Best-effort; canonical task files (source of truth) untouched.
   startStoreMaintenance(db);
 
-  // Ruling 199: the Codex CLI records each rollout under the PER-RUN home it
+  // Ruling 145: the Codex CLI records each rollout under the PER-RUN home it
   // was written through, and that home is removed when the run settles — so
   // every thread recorded before the settle learned to re-point is aimed at a
   // path that no longer exists, and every `thread/resume` fails. The transcripts
@@ -945,7 +945,7 @@ export async function bootServer(): Promise<void> {
   // online.
   void reconcileRestartedWork(db);
 
-  // Ruling 482: a project gate run the previous process left queued or running
+  // Ruling 104: a project gate run the previous process left queued or running
   // has no worker behind it, and the acceptance gate would wait on it forever.
   // Each is queued again; the runs themselves happen off this path.
   void (async () => {
@@ -970,9 +970,9 @@ export async function bootServer(): Promise<void> {
   // "Update status" button. Idempotent start; the timer is unref'd.
   startGithubReconcilePoller(db);
 
-  // Ruling 131(e): release every held task whose wait was satisfied while the
+  // Ruling 57: release every held task whose wait was satisfied while the
   // process was down, then sweep on a one-minute interval (the goal runner's
-  // tick, kept when ruling 503 retired the chains); and give any conversation
+  // tick, kept when ruling 273 retired the chains); and give any conversation
   // whose turn a restart orphaned an honest "interrupted" note instead of
   // eternal silence.
   startDependencyRunner(db);
@@ -983,7 +983,7 @@ export async function bootServer(): Promise<void> {
       err: toError(error),
     });
   }
-  // Ruling 525: and finish the purge for a deleted conversation whose running
+  // Ruling 250: and finish the purge for a deleted conversation whose running
   // turn a restart cut off before it settled.
   try {
     purgeOrphanedConversationLogs(db);

@@ -21,9 +21,9 @@ import {
 } from "./packet-fanout.server";
 
 /**
- * Ruling 319 — one account failure, one decision.
+ * Ruling 65 — one account failure, one decision.
  *
- * Ruling 315 stamped `packet.cause` and its own field comment went on promising
+ * Ruling 63 stamped `packet.cause` and its own field comment went on promising
  * that "packets that share a cause resolve together". Nothing read the field.
  * These tests are the difference between the sentence and the product.
  */
@@ -203,7 +203,7 @@ describe("siblingOptionIndex", () => {
   });
 });
 
-describe("resolvePacket fans a shared cause out (ruling 319)", () => {
+describe("resolvePacket fans a shared cause out (ruling 65)", () => {
   it("answers every sibling the same way, and says so on both timelines", async () => {
     // CANARY: delete the `await fanOutByCause(...)` call in resolvePacket.
     const store = prepared([
@@ -235,7 +235,7 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
      * The defect this whole module exists to prevent, end to end.
      *
      * `describeRunFailure` composes the option set from the failure AND from
-     * what each task's own OWNER has connected (ruling 127), so two tasks
+     * what each task's own OWNER has connected (ruling 137), so two tasks
      * knocked out by one quota outage do not get the same list: the one whose
      * owner has Codex connected is offered a retry, the one whose owner does
      * not is offered "send the agent back" instead — and every index behind
@@ -374,11 +374,11 @@ describe("resolvePacket fans a shared cause out (ruling 319)", () => {
 });
 
 /**
- * Ruling 602: a person's answer to a quota packet stands until its window
+ * Ruling 65: a person's answer to a quota packet stands until its window
  * reopens, for the packets later refusals open (the answering half is pinned
  * through the real escalation in `agent-completion.server.test.ts`).
  */
-describe("a standing decision (ruling 602)", () => {
+describe("a standing decision (ruling 65)", () => {
   const inHours = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
   function windowOptions(until: string): PacketOption[] {
     return [

@@ -73,6 +73,15 @@ function bareToolkit(auth: OperatorAuthority, workspace?: { dir: string; default
   return buildOperatorToolkit(deps);
 }
 
+/** One argument of a tool as its published JSON Schema declares it: the copy
+ *  the model is handed (ruling 136: a schema is a whole strict object). */
+async function publishedField(toolkit: ReturnType<typeof buildOperatorToolkit>, toolName: string, field: string) {
+  const schema = (await publishedSchemas(toolkit.mcpServers.viberr)).get(toolName);
+  return z
+    .object({ properties: z.record(z.string(), z.object({ description: z.string() }).partial()) })
+    .parse(schema).properties[field];
+}
+
 /** The toolkit for VIB-1 of a test store, whose files the read tools open. */
 function storeToolkit(store: TestStore, auth: OperatorAuthority = authority([])) {
   return buildOperatorToolkit({
@@ -157,11 +166,11 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // get_task / read_default_branch_file are read-only Claude tools with no plan
   // mirror (Codex gets that information embedded in its prompt). The two packet
   // tools carry different display names either side; everything else matches.
-  // Ruling 282: `read_board` is a READ, like its two siblings — it changes
+  // Ruling 117: `read_board` is a READ, like its two siblings — it changes
   // nothing, so it is not part of the governed vocabulary the two toolkits
   // must agree on. (Codex operators get board facts in their prompt, which is
   // why no read here has a plan mirror.)
-  // Ruling 283 (`read_knowledge_doc`) and ruling 285 (`read_timeline_entry`) add
+  // Ruling 205 (`read_knowledge_doc`) and ruling 117 (`read_timeline_entry`) add
   // two more reads for the same reason: each is the pull half of something the
   // prompt now carries only a clipped or indexed form of.
   const READ_ONLY = new Set([
@@ -170,9 +179,9 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     "read_board",
     "read_knowledge_doc",
     "read_timeline_entry",
-    // Ruling 293: the evidence a report only claims. A read like its siblings.
+    // Ruling 79: the evidence a report only claims. A read like its siblings.
     "read_task_attachment",
-    // Ruling 690: the sources a result's claims are checked against. A read.
+    // Ruling 82: the sources a result's claims are checked against. A read.
     "read_task_source",
   ]);
   const RENAME = new Map([
@@ -238,7 +247,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   // to the full in-Viberr set (never deliver/update — effects OUTSIDE Viberr)
   // and every action the operator then proposes is refused visibly by
   // narrateRefusedActions. Pins that this asymmetry stays the enum-only one.
-  it("ruling 131(b): set_dependencies is built under generate-packets, withheld when that grant is off, and the plan enum agrees", () => {
+  it("ruling 55: set_dependencies is built under generate-packets, withheld when that grant is off, and the plan enum agrees", () => {
     // Canary: gate the Claude tool under `append-typed-events` instead (the
     // withheld case still builds it; the parity cases above also go red).
     const granted = withPolicy(uniform("direct"));
@@ -252,7 +261,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(operatorPlanToolsFor(withheld)).not.toContain("set_dependencies");
   });
 
-  it("ruling 488: relay_to_task is built with the comment grant and carries the no-hand-copy doctrine", () => {
+  it("ruling 135: relay_to_task is built with the comment grant and carries the no-hand-copy doctrine", () => {
     // Canaries: build it outside the `append-typed-events` block (the withheld
     // case still builds it); drop the no-hand-copy sentence.
     const granted = bareToolkit(withPolicy(uniform("direct")));
@@ -264,7 +273,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     );
   });
 
-  it("ruling 487: the schedule tools are built on a DIRECT dispatch grant, and schedule_task_action carries the doctrine", () => {
+  it("ruling 125: the schedule tools are built on a DIRECT dispatch grant, and schedule_task_action carries the doctrine", () => {
     // Canaries: build them on `dispatchGate !== "deny"` (the recommend
     // operator is handed a run that starts with nobody present); drop the
     // no-packet sentence from the description.
@@ -282,47 +291,47 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("schedule_task_action")).toContain(
       "A hold that a pending schedule explains needs NO decision packet: write one timeline note naming the schedule and end your turn.",
     );
-    expect(desc("get_task")).toContain("`schedules` (ruling 487) lists the runs scheduled on this task that have not fired yet");
+    expect(desc("get_task")).toContain("`schedules` (ruling 125) lists the runs scheduled on this task that have not fired yet");
   });
 
-  it("ruling 494: get_task and update_branch_from_base say which head a behind count describes, to check it against the pushed head, and never to quote an older head's", () => {
+  it("ruling 116: get_task and update_branch_from_base say which head a behind count describes, to check it against the pushed head, and never to quote an older head's", () => {
     // Canaries: drop the `baseComparedHead` sentence from either description.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("get_task")).toContain(
-      "`baseComparedHead` (ruling 494) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means the count was not read on the head Viberr last pushed (`pushedSince` names it), because that push came after the compare or GitHub had not shown it yet when it compared",
+      "`baseComparedHead` (ruling 116) names the head `baseBehindBy` was counted on (`sha`, `observedAt`): `current: false` means the count was not read on the head Viberr last pushed (`pushedSince` names it), because that push came after the compare or GitHub had not shown it yet when it compared",
     );
     expect(desc("get_task")).toContain("the count is never stated as the branch's, in a comment or a packet");
     expect(desc("update_branch_from_base")).toContain(
-      "`get_task`'s `baseComparedHead` names the head that count was read on (ruling 494): check it against the head you just pushed.",
+      "`get_task`'s `baseComparedHead` names the head that count was read on (ruling 116): check it against the head you just pushed.",
     );
     expect(desc("update_branch_from_base")).toContain(
       "a decision packet never states a behind count for a head other than the one it puts up",
     );
   });
 
-  it("ruling 133 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
+  it("ruling 181 (A19): get_task, run_agent and transition_stage say the engaged deliverer runs at every stage and a hand-off is never a stage workaround", () => {
     // Canary: restore any one of the three original sentences.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
-    expect(desc("get_task")).toContain("it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 133)");
+    expect(desc("get_task")).toContain("it is the engaged deliverer (`engagedAsDeliverer`), which runs at EVERY stage (ruling 181)");
     expect(desc("run_agent")).toContain("A hand-off is a choice about WHO should build, never a way around a stage");
     expect(desc("run_agent")).toContain("never hand delivery to another profile to get around a stage");
     expect(desc("transition_stage")).toContain("never a workaround for a profile's stages");
     expect(desc("transition_stage")).not.toContain("does not work the review stage");
   });
 
-  it("ruling 160 (pass 35, F35-11): deliver_for_review says a closed-unmerged PR is a person's decision and names the packet", () => {
+  it("ruling 232 (pass 35, F35-11): deliver_for_review says a closed-unmerged PR is a person's decision and names the packet", () => {
     // Canary: restore the description from before S14.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
-    expect(desc("deliver_for_review")).toContain("A pull request a person closed WITHOUT merging is that person's decision about the task (ruling 160)");
+    expect(desc("deliver_for_review")).toContain("A pull request a person closed WITHOUT merging is that person's decision about the task (ruling 232)");
     expect(desc("deliver_for_review")).toContain("the tool answers `closed_by_human`, opens no new PR for the branch");
     expect(desc("deliver_for_review")).toContain("closed-PR recovery packet");
     expect(desc("deliver_for_review")).toContain("Only a MERGED pull request clears the way for a fresh review PR");
   });
 
-  it("pass 35 S15 (rulings 162 and 163): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
+  it("pass 35 S15 (rulings 95 and 90): the tool text names the gate's verdict, the acceptance-stage refusal, the rework route and the acceptance-time refresh", () => {
     // Canary: restore any of the four descriptions from before S15.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
@@ -334,11 +343,12 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
   });
 
-  it("ruling 702: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", () => {
-    // Canary: restore the description from before ruling 702. The operator on
+  it("ruling 112: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", async () => {
+    // Canary: restore the old description. The operator on
     // BLOG-8 read "populated only while validation is failing" and asked a
     // person for the move.
-    const tool = bareToolkit(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
+    const toolkit = bareToolkit(withPolicy(uniform("direct")));
+    const tool = toolkit.tools.find((t) => t.name === "transition_stage")!;
     const desc = tool.description;
     expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent you can run (one whose profile is no longer deployed counts as none) and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
     expect(desc).toContain("each with `engage` naming the agents (`id` and `name`)");
@@ -354,20 +364,20 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc).not.toContain("to send failed work back");
     // The parameter said "must be a declared next stage" beside a description
     // that offers backward moves. Canary: restore it.
-    expect(z.toJSONSchema(tool.inputSchema).properties?.toStageId).toHaveProperty(
+    expect(await publishedField(toolkit, "transition_stage", "toStageId")).toHaveProperty(
       "description",
       "The target stage id: one from `nextStages`, or one from `reworkStages` for a backward move.",
     );
   });
 
-  it("ruling 492 (review): accept_completion says it waits for the answer to the operator's own follow-up option", () => {
+  it("ruling 130 (review): accept_completion says it waits for the answer to the operator's own follow-up option", () => {
     // The tool refuses while the open decision offers a create_task whose new
     // task waits on this one, because accepting would withdraw it unanswered.
     // Canary: drop the sentence from the accept_completion description.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
     const desc = (name: string) => defs.find((t) => t.name === name)!.description;
     expect(desc("accept_completion")).toContain(
-      "It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 492)",
+      "It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 130)",
     );
   });
 
@@ -410,7 +420,7 @@ describe("buildOperatorToolkit — update_branch_from_base (N19-9)", () => {
   });
 });
 
-describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 588)", () => {
+describe("buildOperatorToolkit — the knowledge tools name the document alike (ruling 210(a))", () => {
   it("correct_knowledge_doc takes the document as `path`, the field read_knowledge_doc takes", async () => {
     // Live on AWSC-29 the Estimate Judge read mapping.md with `path` and sent
     // its two corrections with `path` too; the tool took `doc`, and both came
@@ -441,7 +451,7 @@ describe("buildOperatorToolkit — the knowledge tools name the document alike (
  * exactly F19-4: describing the empty task folder as "the repo".
  */
 describe("the viberr server's instructions — reading is expected, writing is not (R19-1)", () => {
-  /** The instructions as a run receives them: through `initialize` (ruling 297). */
+  /** The instructions as a run receives them: through `initialize` (ruling 255). */
   const wired = () =>
     publishedInstructions(
       bareToolkit(authority([])).mcpServers.viberr,
@@ -503,14 +513,14 @@ describe("buildOperatorToolkit — read_default_branch_file (F21-21)", () => {
   });
 });
 
-/** Ruling 138: the Claude tool declares `goalDraft` on packet options, with a
+/** Ruling 63: the Claude tool declares `goalDraft` on packet options, with a
  *  description that says to write it AS the goal. */
-describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 138)", () => {
+describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruling 63)", () => {
   it("the option schema carries goalDraft and says what it is", async () => {
     // Canary: remove the field from the option schema.
     const toolkit = bareToolkit(authority([]));
     expect(toolkit.tools.some((t) => t.name === "open_decision_packet")).toBe(true);
-    // Ruling 296 made the schema a whole strict object, so the field texts are
+    // Ruling 136 made the schema a whole strict object, so the field texts are
     // read off the JSON Schema of the whole tool -- which is the copy the model
     // is handed, and the only one that can be wrong in a way that matters.
     const declared = JSON.stringify(
@@ -521,7 +531,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain("Refused on any other kind");
   });
 
-  it("ruling 421: run_agent publishes `completeness`, and get_task names it with the round-two question", async () => {
+  it("ruling 93: run_agent publishes `completeness`, and get_task names it with the round-two question", async () => {
     // CANARY: drop the `completeness` field from run_agent's schema, and the
     // Claude operator has no way to say the question was put.
     const toolkit = bareToolkit(authority([]));
@@ -531,16 +541,16 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain('"completeness"');
     expect(declared).toContain("records the verdict that run returns as the reviewer's complete set");
     const getTask = toolkit.tools.find((t) => t.name === "get_task")!;
-    expect(getTask.description).toContain("Pass `completeness: true` on that `run_agent` (ruling 421)");
+    expect(getTask.description).toContain("Pass `completeness: true` on that `run_agent` (ruling 93)");
   });
 
   /**
-   * Ruling 164 (pass 35, F35-14): the tool that AUTHORS options says the title
+   * Ruling 131 (pass 35, F35-14): the tool that AUTHORS options says the title
    * is a promise, names the two kinds that keep it, and declares `toStage`.
    * The operator wrote "Force-accept as admin ..." as a `custom` title because
    * nothing here told it there was another way.
    */
-  it("ruling 164: the tool text names the promise, force_accept, move_stage and toStage", async () => {
+  it("ruling 131: the tool text names the promise, force_accept, move_stage and toStage", async () => {
     // Canary: restore the description and the option schema from before S18.
     const toolkit = bareToolkit(authority([]));
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
@@ -565,15 +575,15 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 289 (pass 37, F37-124): the excerpt SAYS it is one.
+   * Ruling 213(a) (pass 37, F37-124): the excerpt SAYS it is one.
    *
    * `read_board` returned a bare `.slice` of another task's goal, so a long
    * contract came back ending mid-word and read as the whole of it — the shape
-   * rulings 283, 285 and 288 closed on a knowledge base, an agent report and a
+   * rulings 205, 117 and 131 closed on a knowledge base, an agent report and a
    * goal draft, sitting in the reader those rulings' own author wrote the same
    * day. The cap stays: this is the SHALLOW read of the tasks beside your own.
    */
-  it("ruling 289: a clipped goal says it is clipped, a short one is untouched, and no key lists the board", async () => {
+  it("ruling 213(a): a clipped goal says it is clipped, a short one is untouched, and no key lists the board", async () => {
     const store = setupTestStore(ctxDb);
     const long = `Deliverable: the thing. ${"detail ".repeat(500)}END-OF-CONTRACT`;
     writeTask(store.dataRoot, store.slug, {
@@ -604,19 +614,19 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(whole).toContain("Short and whole.");
     expect(whole).not.toContain("[excerpt");
 
-    // Ruling 282: with no key, the operator's read lists the whole board.
+    // Ruling 117: with no key, the operator's read lists the whole board.
     const board = await call();
     for (const key of ["VIB-1", "VIB-2", "VIB-3"]) expect(board).toContain(`"key": "${key}"`);
   });
 
   /**
-   * Ruling 579: live on AWSC-16 the round-2 comparison read AWSC-15's goal,
+   * Ruling 213(a): live on AWSC-16 the round-2 comparison read AWSC-15's goal,
    * 2,751 characters, and got its first 2,000; the Workflow Researcher said it
    * "cannot say whether a third decision is recorded in the clipped tail".
-   * Decisions are appended at a goal's end (ruling 189), the part the cap cut.
+   * Decisions are appended at a goal's end (ruling 64), the part the cap cut.
    * CANARY: return the bare excerpt and both decisions are gone.
    */
-  it("ruling 579: a clipped goal keeps every decision recorded on it, whole", async () => {
+  it("ruling 213(a): a clipped goal keeps every decision recorded on it, whole", async () => {
     const store = setupTestStore(ctxDb);
     const text = `Deliverable: the estimate. ${"detail ".repeat(400)}END-OF-TEXT`;
     const older =
@@ -645,16 +655,16 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 569: a task that waited on others could learn only THAT they
+   * Ruling 213(a): a task that waited on others could learn only THAT they
    * finished. Live on AWSC-8 the research task's operator told its researcher
    * "neither you nor I can read that" about sample-04's 90/100, which lived only
    * in AWSC-7's verdict. CANARIES: drop `outcome` from the single-task read and
    * the finished task reads like an unfinished one; stop filtering on the
    * current subject and a verdict on an earlier delivery reads as the result.
-   * Ruling 668: the outcome is the whole result. CANARY: read the summary
+   * Ruling 103: the outcome is the whole result. CANARY: read the summary
    * alone and the reader misses what the result leaves out and which files it is.
    */
-  it("ruling 569: read_board(taskKey) carries a finished task's outcome, and nothing stale", async () => {
+  it("ruling 213(a): read_board(taskKey) carries a finished task's outcome, and nothing stale", async () => {
     const store = setupTestStore(ctxDb);
     const deliveredAt = "2026-09-28T20:15:47.701Z";
     writeTask(store.dataRoot, store.slug, {
@@ -720,7 +730,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(await call("VIB-3")).not.toHaveProperty("outcome");
   });
 
-  it("ruling 596: read_board indexes a task's timeline (capped), and read_timeline_entry opens another task's entry by that stamp", async () => {
+  it("ruling 213: read_board indexes a task's timeline (capped), and read_timeline_entry opens another task's entry by that stamp", async () => {
     // The operator reads its own task with get_task; another task's history
     // was out of reach, so a results task could not see the first verdict on a
     // benchmark run, where its score of record lives. CANARIES: drop the cap
@@ -752,7 +762,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(oldest).toMatchObject({ text: "entry 204", title: "Review verdict" });
   });
 
-  it("ruling 597: read_task_attachment reads this task's file as a kept delivery held it", async () => {
+  it("ruling 198: read_task_attachment reads this task's file as a kept delivery held it", async () => {
     // CANARY: drop `delivery` on the way to the reader and the rework's text
     // comes back for the first delivery.
     const store = setupTestStore(ctxDb);
@@ -772,7 +782,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     );
   });
 
-  it("ruling 690: read_task_source lists and opens the sources of the operator's own task, and of another task with taskKey", async () => {
+  it("ruling 82: read_task_source lists and opens the sources of the operator's own task, and of another task with taskKey", async () => {
     // The operator checks a result's claims against what its runs kept
     // before it offers the result for acceptance. CANARY: read the toolkit's
     // own task whatever `taskKey` says and VIB-2's source comes back as
@@ -799,7 +809,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       );
     keepOn("VIB-1", "ec2-pricing.html", "t3.medium $0.0416 per hour");
     keepOn("VIB-2", "rds-pricing.html", "db.t3.medium $0.068 per hour");
-    const { tools } = storeToolkit(store);
+    const toolkit = storeToolkit(store);
+    const { tools } = toolkit;
     const read = async (args: Record<string, string>) =>
       z.record(z.string(), z.unknown()).parse(JSON.parse(await callToolText(tools, "read_task_source", args)));
     const own = await read({});
@@ -812,7 +823,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       name: "rds-pricing.html",
       text: "db.t3.medium $0.068 per hour",
     });
-    // Ruling 706: and searches one, as at every door. Briefed on a later
+    // Ruling 82: and searches one, as at every door. Briefed on a later
     // entry of a 2 MB record on BLOG-7, the operator found it in three reads
     // at guessed offsets, and only because the request named its line.
     // CANARY: drop `args.find` on the way to the reader and a search is
@@ -830,16 +841,16 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // here with no description.
     const tool = tools.find((t) => t.name === "read_task_source")!;
     expect(tool.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
-    expect(z.toJSONSchema(tool.inputSchema).properties?.find).toHaveProperty(
+    expect(await publishedField(toolkit, "read_task_source", "find")).toHaveProperty(
       "description",
       expect.stringContaining("A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow."),
     );
   });
 
-  it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
+  it("ruling 213(a): a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
     // Live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000 of
     // 5,382: a verdict stores 2,000 characters and points at the timeline
-    // (ruling 292), which another task's reader cannot open. CANARY: return
+    // (ruling 88), which another task's reader cannot open. CANARY: return
     // the stored reason and the report stops at the cut; drop the opening
     // match and an earlier round's report can stand in for this one.
     const store = setupTestStore(ctxDb);
@@ -940,7 +951,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 285 (pass 37, F37-120): the coordinator could not read a report it
+   * Ruling 117 (pass 37, F37-120): the coordinator could not read a report it
    * was handed half of. Its prompt clips an agent report at 4,000 characters,
    * `get_task` clips every `recentTimeline` entry at 1,500, and nothing in the
    * toolkit returned one whole. Live on SHOP-42 it said so in a packet it put
@@ -949,7 +960,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * the timeline" — which was true, and was somewhere it could not go. What it
    * could not read named two unowned defects the reviewer had gone looking for.
    */
-  it("ruling 285: read_timeline_entry returns a clipped report whole, by its stamp", async () => {
+  it("ruling 117: read_timeline_entry returns a clipped report whole, by its stamp", async () => {
     const store = setupTestStore(ctxDb);
     // A report past BOTH clips: the prompt's 4,000 and the snapshot's 1,500.
     const report = `## Findings\n\n${"filler ".repeat(900)}\n\nSENTINEL-PAST-THE-CLIP`;
@@ -999,7 +1010,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(missed).toContain("2026-09-15T13:53:26.000Z");
   });
 
-  it("ruling 707: read_timeline_entry reads a report longer than a page to its end, here as at every door", async () => {
+  it("ruling 213(e): read_timeline_entry reads a report longer than a page to its end, here as at every door", async () => {
     // The operator reads a reviewer's report before it summarises it for a
     // person, and one over 40,000 characters came back cut with nothing to
     // read on with. CANARY: drop `args.offset` on the way to the reader and
@@ -1017,7 +1028,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       ],
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const { tools } = storeToolkit(store);
+    const toolkit = storeToolkit(store);
+    const { tools } = toolkit;
     const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
     const read = async (args: Record<string, string | number>) =>
       page.parse(JSON.parse(await callToolText(tools, "read_timeline_entry", { occurredAt: at, ...args })));
@@ -1035,21 +1047,25 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     const tool = tools.find((t) => t.name === "read_timeline_entry")!;
     expect(tool.description).toContain("A long entry comes in pages of up to 32,000 bytes");
     expect(tool.description).toContain("`entry` reads one of them alone, a whole page of it.");
-    const fields = z.toJSONSchema(tool.inputSchema).properties;
-    expect(fields?.offset).toHaveProperty("description", expect.stringContaining("the `nextOffset` a truncated read returned"));
-    expect(fields?.entry).toHaveProperty("description", expect.stringContaining("counted from 1 in the order they were written"));
+    // Read off the published JSON Schema, the copy the model is handed.
+    const argument = z.object({ description: z.string(), type: z.string(), minimum: z.number() });
+    const fields = z
+      .object({ properties: z.object({ offset: argument, entry: argument }) })
+      .parse((await publishedSchemas(toolkit.mcpServers.viberr)).get("read_timeline_entry")).properties;
+    expect(fields.offset).toHaveProperty("description", expect.stringContaining("the `nextOffset` a truncated read returned"));
+    expect(fields.entry).toHaveProperty("description", expect.stringContaining("counted from 1 in the order they were written"));
     // Whole numbers with their floors, as the model is told. CANARY: declare
     // either as any number.
-    expect(fields?.offset).toMatchObject({ type: "integer", minimum: 0 });
-    expect(fields?.entry).toMatchObject({ type: "integer", minimum: 1 });
+    expect(fields.offset).toMatchObject({ type: "integer", minimum: 0 });
+    expect(fields.entry).toMatchObject({ type: "integer", minimum: 1 });
   });
 
   /**
-   * Ruling 287's DOOR, tested for the reason ruling 270 exists: rulings 224 and
-   * 230 each added an option payload and never added the field to the tool that
+   * Ruling 67's DOOR, tested for the reason ruling 132 exists: rulings 157 and
+   * 66 each added an option payload and never added the field to the tool that
    * AUTHORS options, so the only actor that could have sent one could not.
    */
-  it("ruling 287: the option schema carries `blocks`, and it reaches the stored packet", async () => {
+  it("ruling 67: the option schema carries `blocks`, and it reaches the stored packet", async () => {
     // Canary: drop `blocks` from the authoring schema, or from the forwarder
     // beneath it, and the reverse edge becomes unauthorable — a field the
     // resolver reads and nothing can ever write.
@@ -1093,7 +1109,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 270 (pass 37, F37-102): rulings 230 and 224 each added an option
+   * Ruling 132 (pass 37, F37-102): rulings 66 and 157 each added an option
    * kind with a payload, wrote the two authoring refusals for it, and never
    * added the field to the tool that AUTHORS options. So the operator could
    * name `block_on_dependencies`, be told "needs the work it waits on", and
@@ -1102,7 +1118,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * called `operatorOpenPacket` directly, which accepts the field; the DOOR was
    * never exercised.
    */
-  it("ruling 270: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", async () => {
+  it("ruling 132: the option schema carries blockedBy and dueAt, the payloads two kinds are refused without", async () => {
     // Canary: remove either field from the option schema and its kind becomes
     // unauthorable again — named, refused, and impossible to satisfy.
     const toolkit = bareToolkit(authority([]));
@@ -1112,22 +1128,22 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(declared).toContain("block_on_dependencies only");
     expect(declared).toContain('"dueAt"');
     expect(declared).toContain("wait_for_window only");
-    // Ruling 269's payload rides the same door, and was written with it.
+    // Ruling 67's payload rides the same door, and was written with it.
     expect(declared).toContain('"newTask"');
     expect(declared).toContain("create_task only");
-    // Ruling 650: and the flag that makes a send-back take the person's words.
+    // Ruling 132: and the flag that makes a send-back take the person's words.
     expect(declared).toContain('"reply"');
     expect(declared).toContain("redirect and request_edit only");
   });
 
   /**
-   * Ruling 433 (F39-55): ruling 270 opened this door on the Claude tool and
-   * left the Codex plan's closed. The same three kinds stayed named, refused
+   * Ruling 132 (F39-55): this door was open on the Claude tool and closed on
+   * the Codex plan. The same three kinds stayed named, refused
    * and impossible to satisfy for every Codex operator, and on ax-clone, where
    * every operator is Codex, that was AX-4 twice and AX-27 once. A new option
    * field is added to both doors or the suite goes red.
    */
-  it("ruling 433: the Codex plan's option carries every field the Claude tool's option does", async () => {
+  it("ruling 132: the Codex plan's option carries every field the Claude tool's option does", async () => {
     // CANARY: drop any option field from the Codex plan schema.
     const auth = authority([]);
     const toolkit = bareToolkit(auth);
@@ -1145,7 +1161,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 492 (F40-69): a done signal is something the task can show before
+   * Ruling 105 (F40-69): a done signal is something the task can show before
    * acceptance. Live on WEB-16 the operator's own `create_task` option
    * drafted "Done when, after the merge and the Workers Builds deploy, a
    * read-only post-merge read … shows the new field's value". Acceptance
@@ -1154,7 +1170,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
    * owner rewrote the goal by hand. Every goal field the operator writes
    * through said only "deliverable plus acceptance criteria".
    */
-  it("ruling 492: every door the operator writes a goal through carries DONE_SIGNAL_RULE, on both backends", async () => {
+  it("ruling 105: every door the operator writes a goal through carries DONE_SIGNAL_RULE, on both backends", async () => {
     // CANARY: drop `DONE_SIGNAL_RULE` from any one door and its assertion
     // fails naming it.
     const auth = authority([]);
@@ -1213,30 +1229,30 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
 
   /**
    * Pass-35 cluster review: ONE description carried both halves of a
-   * contradiction. Ruling 164's new sentence refuses "a custom option that asks
-   * a person to edit an agent profile", while the older ruling-85 clause still
+   * contradiction. Ruling 131's new sentence refuses "a custom option that asks
+   * a person to edit an agent profile", while the older ruling-110 clause still
    * told the operator to offer exactly that ("offer it as an option beside any
    * workaround"). An operator following the second sentence burned a turn on
-   * the first: `operatorOpenPacket` answers `noop`. Ruling 85's substance is
+   * the first: `operatorOpenPacket` answers `noop`. Ruling 110's substance is
    * untouched (the remedy is still named); only the surface it is named ON is
-   * settled here, which is what ruling 164 already says the refusal means.
+   * settled here, which is what ruling 131 already says the refusal means.
    */
-  it("ruling 85 and ruling 164 agree in one string: the remedy is named, never offered as an option", () => {
+  it("ruling 110 and ruling 131 agree in one string: the remedy is named, never offered as an option", () => {
     // Canary: restore "and offer it as an option beside any workaround".
     const toolkit = bareToolkit(authority([]));
     const def = toolkit.tools.find((t) => t.name === "open_decision_packet")!;
-    // Ruling 85 still stands: the capability and where a human grants it.
+    // Ruling 110 still stands: the capability and where a human grants it.
     expect(def.description).toContain("grantable on an agent profile");
     expect(def.description).toContain("Agents surface");
     expect(def.description).toContain("lists only workarounds hides the fix");
-    // Ruling 164 decides the surface, and nothing here contradicts it.
+    // Ruling 131 decides the surface, and nothing here contradicts it.
     expect(def.description).toContain("never write it as an OPTION");
     expect(def.description).not.toMatch(/offer it (as an option )?beside any workaround/i);
   });
 });
 
 /**
- * Pass-35 cluster review of ruling 162. `notAcceptableReason` is
+ * Pass-35 cluster review of ruling 95. `notAcceptableReason` is
  * `acceptanceRefusalFor`, i.e. the FIRST of EVERY acceptance gate, and its
  * third is `acceptanceStageBlockedReason` — "KNC-x is at Review, not Merge ...
  * Move the task through the workflow first." So the field stands on every task
@@ -1272,16 +1288,16 @@ describe("buildOperatorToolkit — the acceptance-stage move reads the pull requ
 });
 
 /**
- * Ruling 521's door: a decision that offers acceptance carries the completion
+ * Ruling 130's door: a decision that offers acceptance carries the completion
  * packet, and the tool its refusal names is mounted on the same grant as the
  * offer. The writer's own refusals are the completion-packet suite's; the
  * check itself sits in `operatorOpenPacket`, after the boundary check, so both
  * backends meet it.
  */
-describe("buildOperatorToolkit — the completion packet goes with the acceptance decision (ruling 521)", () => {
+describe("buildOperatorToolkit — the completion packet goes with the acceptance decision (ruling 130)", () => {
   it("refuses a decision offering accept_completion until write_completion_packet describes the delivered revision", async () => {
     // CANARY: drop the check from `operatorOpenPacket` and the first open
-    // files a decision whose card has nothing summarized on it. Ruling 668:
+    // files a decision whose card has nothing summarized on it. Ruling 130:
     // stop passing the tool's notes to the writer and the result has none.
     const store = setupTestStore(ctxDb);
     writeTask(store.dataRoot, store.slug, {
@@ -1348,13 +1364,50 @@ describe("buildOperatorToolkit — the completion packet goes with the acceptanc
 });
 
 /**
- * Ruling 693: the operator reads what the task took on either backend. Claude
+ * Ruling 202 on the operator's two doors: Claude's `open_decision_packet`
+ * opened a card with all five options a Codex plan's `open_packet` cut to four.
+ * Both now meet one cap in the writer they share, and refuse past it by name.
+ * The Codex door's half is operator-run.server.test.ts's.
+ */
+describe("buildOperatorToolkit — open_decision_packet refuses a fifth option (ruling 202)", () => {
+  it("ruling 202: refuses five options by name, writing nothing, and opens four", async () => {
+    // CANARY: drop `authoredOptionsRefusal` from `operatorOpenPacketDisclosed`
+    // and five open here while a Codex plan's five are refused.
+    const store = setupTestStore(ctxDb);
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { tools } = storeToolkit(store);
+    const packet = () =>
+      readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed.packet;
+    const ask = (titles: string[]) =>
+      callToolText(tools, "open_decision_packet", {
+        packetType: "input",
+        title: "Which database?",
+        options: titles.map((title, i) => ({ kind: "custom", title, recommended: i === 0 })),
+      });
+
+    expect(await ask(["a", "b", "c", "d", "the fifth"])).toBe(
+      "[noop] A decision packet offers at most 4 options, and this one had 5. Nothing was opened " +
+        "and no option was dropped: keep the choices that are really different, put the rest in " +
+        "the packet's body, and open it again.",
+    );
+    expect(packet()).toBeNull();
+
+    expect(await ask(["a", "b", "c", "d"])).toContain("[done]");
+    expect(packet()!.options.map((o) => o.t)).toEqual(["a", "b", "c", "d"]);
+  });
+});
+
+/**
+ * Ruling 83: the operator reads what the task took on either backend. Claude
  * calls `get_task`; Codex calls nothing and is handed the snapshot in its
  * prompt. Both are one `operatorSnapshot`, so both carry one figure. What the
  * figure counts is `what-it-took.server.test.ts`'s; this owns its carriage.
  */
-describe("ruling 693: the operator's read of what a task took", () => {
-  it("ruling 693: get_task carries what the task took, and a Codex operator reads the same figure in its snapshot", async () => {
+describe("ruling 83: the operator's read of what a task took", () => {
+  it("ruling 83: get_task carries what the task took, and a Codex operator reads the same figure in its snapshot", async () => {
     // CANARY: (a) leave the key out of `operatorSnapshot` and both operators
     // lose the figure; (b) leave it out of a `toolless` snapshot alone (or
     // build it in the `get_task` handler instead) and the Codex prompt, which

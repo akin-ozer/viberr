@@ -2,7 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 /**
- * Ruling 503: epics against the production image. A person makes an epic and
+ * Ruling 272: epics against the production image. A person makes an epic and
  * lands on its page, and tasks join and leave it there and from their own
  * page. The seed holds no epic, so the spec makes the one it reads, in order;
  * it runs after the specs that read the seeded tasks it moves.
@@ -121,10 +121,10 @@ test("at 375px the epic page reads in one column, and each task's title keeps a 
   const side = await page.locator(".epic-side").boundingBox();
   // CANARY: drop `.policy-wrap` from the 1100px collapse and the base rule,
   // later in the sheet, keeps two columns: About, Tasks and History shrink to
-  // 0px beside a 340px Details column (ruling 560).
+  // 0px beside a 340px Details column (ruling 325).
   expect(main!.width).toBeGreaterThan(300);
   expect(side!.y).toBeGreaterThanOrEqual(main!.y + main!.height);
-  // Ruling 615. CANARY: drop the task list's 36rem container query and the
+  // Ruling 325. CANARY: drop the task list's 36rem container query and the
   // row stays one line: the stage, the status chip, the owner and Remove take
   // it all, the title is 0px wide and the stage runs over the key.
   const row = taskRow(page, "VIB-166");
@@ -135,7 +135,7 @@ test("at 375px the epic page reads in one column, and each task's title keeps a 
   expect(stage!.y).toBeGreaterThanOrEqual(key!.y + key!.height);
 });
 
-test("at 375px a task under a long-named epic does not scroll sideways (ruling 666)", async ({ page }) => {
+test("at 375px a task under a long-named epic does not scroll sideways (ruling 308)", async ({ page }) => {
   // Live on the AWS board: an epic named "Research and tune the estimate
   // workflow (round 10: owed choices, priced classes, sourced prices)" made
   // its tasks' pages 191px wider than a phone.

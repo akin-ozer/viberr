@@ -8,7 +8,7 @@ import * as listRoute from "~/routes/resources.notifications";
 import { TopBell } from "./top-bell";
 
 /**
- * Ruling 457 (FL-4 / SRV-6): the bell loads its own list. These pin what the
+ * Ruling 300 (FL-4 / SRV-6): the bell loads its own list. These pin what the
  * list is allowed to be when the popover shows it: never older than the counts
  * the page last read (review finding bell-stale-list-count-key), and never a
  * reason to lose the page (bell-hover-error-boundary).
@@ -95,7 +95,7 @@ async function listSettled(view: ReturnType<typeof render>) {
   );
 }
 
-describe("the bell's list is never older than the counts it sits under (ruling 457)", () => {
+describe("the bell's list is never older than the counts it sits under (ruling 300)", () => {
   it("reloads on open when the counts were re-read since, even if they came back the same", async () => {
     const server = { unread: 1, list: [notification(1)] };
     const view = await mountWorkspaceReady(server);
@@ -181,7 +181,7 @@ function mountFailing(server: () => Promise<ListAnswer>) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
-describe("a failed list load stays in the bell (ruling 457)", () => {
+describe("a failed list load stays in the bell (ruling 300)", () => {
   for (const [failure, reject] of [
     ["a 503 during a restart", () => Promise.reject(new Response("down", { status: 503 }))],
     ["a network rejection", () => Promise.reject(new TypeError("Failed to fetch"))],

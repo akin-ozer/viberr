@@ -17,7 +17,7 @@ import { acceptCompletion } from "./task-acceptance.server";
 import type { TaskActionDeps } from "./task-action-core.server";
 
 /**
- * Ruling 686: an acceptance does the same things whichever control a person
+ * Ruling 100: an acceptance does the same things whichever control a person
  * used. Two writes set a board's last stage, the shared acceptance write and
  * the decision packet's "accept completion" option, which writes the stage
  * itself. The option told no epic its last task was done, left the tasks
@@ -128,7 +128,7 @@ async function lastTaskOfAnEpic(): Promise<string> {
   return epic.id;
 }
 
-describe("ruling 686: what follows an acceptance does not depend on the door", () => {
+describe("ruling 100: what follows an acceptance does not depend on the door", () => {
   /** The two writers of a board's last stage, as a person reaches each. */
   const doors: [string, () => Promise<void>][] = [
     [

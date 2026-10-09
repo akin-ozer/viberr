@@ -21,27 +21,27 @@ import type { RescanSummary } from "./rebuilder.server";
  * forces ONE full rebuild at boot, then records the version.
  *
  * History: 1 = pre-pass-32 (implicit); 2 = D32-14 actor_ref keyed by profile;
- * 3 = ruling 131 (pass 34) put `blockedBy` on every goal LINK, and
+ * 3 = ruling 55 (pass 34) put `blockedBy` on every goal LINK, and
  * `goal_projections.links_json` is only rewritten when the goal file's content
  * hash changes — an existing store's rows carry links with no such key, which
  * the Controller page reads. This stamp forces the one rebuild that fills them.
- * 4 = ruling 225 (pass 37) derives a FOURTH `waiting` value, `schedule`, from
+ * 4 = ruling 45 (pass 37) derives a FOURTH `waiting` value, `schedule`, from
  * the same task file: a task resting on a pending occurrence with nothing
  * pending on a person. Every row written under the old rule says `human`
- * forever otherwise — which is exactly what happened. Ruling 225 deployed at
+ * forever otherwise — which is exactly what happened. Ruling 45 deployed at
  * 03:32 UTC, the boot rescan reported `changed=0` because no file had changed,
  * and SHOP-21's card and rail went on reading "waiting on a human" over a
  * schedule pending for 07:29. This file's whole first paragraph describes that
  * failure, and I shipped the ruling without bumping the stamp it describes.
- * 5 = ruling 503 (epics replace chained goals): every task row derives
+ * 5 = ruling 272 (epics replace chained goals): every task row derives
  * `epic_id` from task.md `epic`, and epic files project into
  * `epic_projections`. A row written by an older build never named the column,
  * so an unchanged task file would keep its NULL forever without this stamp.
- * 6 = ruling 526: an evidence row projects as `{ label, result, status }`, read
+ * 6 = ruling 16: an evidence row projects as `{ label, result, status }`, read
  * from the older `label · add · del` line too. `evidence_json` written by an
  * older build holds `add` and `del`, which the timeline no longer reads, so an
  * unchanged task file would draw its rows with no result without this stamp.
- * 7 = ruling 700(a): `projects.repo` reads NULL for a project.md `repo`
+ * 7 = ruling 225: `projects.repo` reads NULL for a project.md `repo`
  * outside `REPO_SLUG_RE`, with its error diagnostic projected, and the cascade
  * carries the NULL into `task_projections.repo`. A row an older build wrote
  * from a hand-edited `owner/..` keeps it, and every GitHub reader keeps calling

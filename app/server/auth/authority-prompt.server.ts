@@ -6,7 +6,7 @@ import {
 } from "~/shared/rbac";
 
 /**
- * Ruling 309: the authorization table, written out for a model that has to
+ * Ruling 254: the authorization table, written out for a model that has to
  * decide what to OFFER a person before it calls anything.
  *
  * The controller is told "their live permissions are the ceiling for everything
@@ -81,7 +81,7 @@ export function tiersFrom(
           `Grouping by floor cannot describe it; the prompt table would lie.`,
       );
     }
-    // Ruling 309(a): two actions gate more than their grant name says, and the
+    // Ruling 26(b): two actions gate more than their grant name says, and the
     // model reads this list to decide what to offer. A name it can only take
     // literally would have it predicting that a contributor may retitle a
     // label and not that the same grant lets them release a held task.
@@ -210,10 +210,10 @@ export function askerAuthorityLine(role: ProjectRole | null, orgAdmin: boolean):
       : orgAdmin
         ? `project role ${role}, and org admin, which overrides it and holds every action here`
         : `project role ${role}`;
-  // Ruling 309 (the controller's own amendment): tools default to the bound
+  // Ruling 254 (the controller's own amendment): tools default to the bound
   // project but take another, so a conversation anchored here can act there —
   // and this line says nothing about there. Naming the reader turns being blind
-  // into knowing where to look, which is what ruling 297 settled for tools.
+  // into knowing where to look, which is what ruling 255 settled for tools.
   return (
     `your authority: ${here} · your role on any OTHER project is not in this ` +
     `read; whoami has it, and the tier list in your instructions says what a role holds`

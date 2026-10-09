@@ -179,7 +179,7 @@ export function seedProjects(ids: SeedUserIds): SeedProject[] {
           requiredScopes: ["repo", "workflow", "read:org", "pull_request:write"],
         },
         // The one canonical list — a hand-copy here diverged from
-        // DEFAULT_GUARDRAILS every time the set changed (ruling-104 review).
+        // DEFAULT_GUARDRAILS every time the set changed (ruling-134 review).
         guardrails: DEFAULT_GUARDRAILS,
         requiredReviewers: [],
         fileLeases: [],
@@ -611,7 +611,7 @@ export function seedTasks(ids: SeedUserIds): SeedTask[] {
         key: "VIB-139",
         title: "Separate human RBAC from agent capability policy",
         stage: "done",
-        readiness: "ready", // mock "done" readiness = derived accepted display state (ruling 1)
+        readiness: "ready", // mock "done" readiness = derived accepted display state (ruling 44)
         waiting: "none",
         owner: ids.elif,
         specialist: null,
@@ -825,7 +825,7 @@ export interface SeedNotification {
 }
 
 /** Arda's inbox — the mock's 10 rows (incl. the two cross-project splices),
- * with real timestamps; the query sorts DESC (ruling 9 supersedes the
+ * with real timestamps; the query sorts DESC (ruling 74 supersedes the
  * mock's unsorted splice order). Curly quotes preserved verbatim. */
 export function seedNotifications(ids: SeedUserIds): SeedNotification[] {
   return [

@@ -7,9 +7,9 @@ import {
 import type { RealBackend } from "~/server/runtimes/runtime-registry.server";
 
 /**
- * Connect / disconnect an agent backend for a test's person (ruling 127).
+ * Connect / disconnect an agent backend for a test's person (ruling 137).
  *
- * Since ruling 127 there is no instance-level "the backend is available"
+ * There is no instance-level "the backend is available"
  * switch to flip — `setBackendAvailability` is gone. Whether a run may start is
  * a fact about the ONE person it bills, read from `user_backend_credentials`.
  * So a test that wants a run to reach its (fake) adapter connects the backend
@@ -75,7 +75,7 @@ export async function connectFakeBackends(
 
 /**
  * Disconnect one backend for one person — the "not connected" half every
- * refusal test needs: every account they hold on it (ruling 507), through the
+ * refusal test needs: every account they hold on it (ruling 138), through the
  * same per-account disconnect the Profile card calls. Tolerates a person who
  * never connected it, so a test can state the posture it wants without first
  * asking what the posture is.

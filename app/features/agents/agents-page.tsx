@@ -67,7 +67,7 @@ import { effortLabel } from "./effort-label";
  * Presentational pieces (ProfileDetail, LiveRoster, …) take props +
  * callbacks so jsdom tests render them without a router.
  *
- * Ruling 700(e) split the two large bodies along the task-page recipe:
+ * Ruling 13(b) split the two large bodies along the task-page recipe:
  * ProfileDetail and AgentsPage keep their hooks and hand hook-free regions
  * (ProfileHero, CapabilityPolicyPanel, ContextRuntimePanel with its
  * RuntimeRow; AgentsHead, ProfilesTab) one slot of their markup each; what the
@@ -101,7 +101,7 @@ const AUTO_BOUNDARY_LABEL =
 // ------------------------------------------------------------ small parts
 
 /**
- * Ruling 127: who on this project can actually run this backend.
+ * Ruling 137: who on this project can actually run this backend.
  *
  * There is no instance-level "the backend is configured" fact any more — a run
  * bills a PERSON, so the honest instance-level number is a count of the people
@@ -137,8 +137,8 @@ function BackendChip({
   // Mirrors the task-level Execution profile panel ("Codex — not
   // configured"), which was already telling this truth while this page said
   // "available" about the same profile.
-  // Ruling 127: "not connected" is about the VIEWER's own account, not the
-  // deployment's — the badge says what THEY have to do about it. Ruling 625:
+  // Ruling 137: "not connected" is about the VIEWER's own account, not the
+  // deployment's — the badge says what THEY have to do about it. Ruling 326:
   // one phrase and one hue for it on the page (the hero's and the roster's
   // rose pill), and only where nothing nearer says it already.
   const missing = health ? !health.viewerConnected && !noted : false;
@@ -155,14 +155,14 @@ function BackendChip({
   );
 }
 
-/** Ruling 127: what a person who has not connected a backend must do, in one
+/** Ruling 137: what a person who has not connected a backend must do, in one
  *  sentence, addressed to them. */
 function notConnectedNote(backend: "codex" | "claude"): string {
   return `You haven't connected ${BACKEND_LABEL[backend]}. Connect it on your Profile → Agent accounts to run this profile on your tasks.`;
 }
 
 /**
- * Ruling 127: the billing rule, plus the only instance-level number that
+ * Ruling 137: the billing rule, plus the only instance-level number that
  * survives it.
  *
  * "Configured" was a property of the deployment; a run is a property of a
@@ -203,7 +203,7 @@ function ActiveBadge({
    *  half-truth. The sentence its hover carries, naming the backend. */
   unusable?: string | undefined;
 }) {
-  // Ruling 455 names the count in words; ruling 459's violet working dot
+  // Ruling 299 names the count in words; ruling 282's violet working dot
   // leads them, as on every other agent-at-work surface.
   if (count > 0)
     return (
@@ -212,7 +212,7 @@ function ActiveBadge({
         {count} running
       </span>
     );
-  // Ruling 625: the page's one phrase and hue for this fact ("no runtime" was
+  // Ruling 326: the page's one phrase and hue for this fact ("no runtime" was
   // a second, vaguer claim, in amber beside the hero's rose pill). The words
   // the backend chips use: in a 312px roster card the backend's name wrapped
   // the role under the name, so it rides the hover sentence and the hero.
@@ -270,7 +270,7 @@ function ProfileItem({
  * the roster rendered them as the raw `d.status` text inside a bare `<Pill>` at
  * two call sites, so a future rename of the vocabulary would have to be chased
  * across the page. Routing both sites through this component keeps the kind AND
- * the label in one place (ruling 14's single implementations). It also restores
+ * the label in one place (ruling 297's single implementations). It also restores
  * the article the board carries — the raw status "waiting on human" reads
  * "waiting on a human" here, matching every other surface (C4) — while the
  * underlying status VALUE the loader derives is untouched.
@@ -365,7 +365,7 @@ function CapColumn({
 }
 
 /**
- * Ruling 156: the sentence under a grant list whose copy differs from the
+ * Ruling 177: the sentence under a grant list whose copy differs from the
  * template's. "there" is the template, "here" is this project's copy.
  */
 function driftSentence(drift: { missing: string[]; extra: string[] }): string {
@@ -397,10 +397,10 @@ function ResGroup({
   /** P14-KM-11: the ids the store actually holds. `undefined` = unknown here, so
    *  nothing is marked (never invent a "missing" state from missing data). */
   known?: ReadonlySet<string>;
-  /** Ruling 479(b): what the registry knows against a resource the store does
+  /** Ruling 184: what the registry knows against a resource the store does
    *  hold (an MCP server that needs a sign-in, say), keyed by id. */
   warnings?: ReadonlyMap<string, ResItemWarning>;
-  /** Ruling 156: how this list differs from the template's, when it does. */
+  /** Ruling 177: how this list differs from the template's, when it does. */
   drift?: { missing: string[]; extra: string[] };
 }) {
   const differs = drift && (drift.missing.length > 0 || drift.extra.length > 0);
@@ -415,7 +415,7 @@ function ResGroup({
             // as nothing at all — live, a renamed MCP left this panel painting a
             // healthy chip while the agent found zero tools under that name.
             const missing = known ? !known.has(x) : false;
-            // Ruling 479(b): a server the store holds can still reach no run
+            // Ruling 184: a server the store holds can still reach no run
             // (live: `cloudflare-api` needed a sign-in and every run dropped
             // it). Marked the way a missing one is, with the remedy.
             const flag: ResItemWarning | undefined = missing
@@ -459,7 +459,7 @@ function ResGroup({
  *  - `activeCount` counts ENGAGEMENTS on every non-archived, non-terminal task
  *    (`agent-deployments.server.ts`), most of them idle — "keep running"
  *    describes only a run already in flight. What the next run gets is ruling
- *    26 (R15-7): a profile that can no longer be resolved is FULLY conservative
+ *    182 (R15-7): a profile that can no longer be resolved is FULLY conservative
  *    — `resolveUndeployedDisallowedTools()` and `withheldAgentGrants()`
  *    (both applied in `dispatchAgentRun`, specialist-run.server.ts), i.e. no
  *    delivery, no comments, no ask-human, no evidence. The thread runs and
@@ -485,11 +485,11 @@ function DeleteConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  // Ruling 459: the confirm plays its exit after the delete lands, and the
+  // Ruling 287: the confirm plays its exit after the delete lands, and the
   // page then selects another profile, so the words are the ones it opened
   // with; the exit never names the next profile.
   const [{ a, activeCount }] = useState(() => ({ a: current, activeCount: currentCount }));
-  // The shared `ConfirmDialog` (ruling 458(f)): a native <dialog> whose
+  // The shared `ConfirmDialog` (ruling 297): a native <dialog> whose
   // backdrop click and Escape dismiss come from useDialog.
   return (
     <ConfirmDialog
@@ -525,8 +525,8 @@ function DeleteConfirm({
 }
 
 /**
- * Ruling 479(d): "Use the template's grants" REPLACES this project's copy of
- * the three grant lists (ruling 156, owner Q35-7), so a grant the project
+ * Ruling 326: "Use the template's grants" REPLACES this project's copy of
+ * the three grant lists (ruling 177, owner Q35-7), so a grant the project
  * added on its own is dropped. The label reads as "add what the template
  * has", and the press went straight to the server: live, one click would have
  * taken `cloudflare-api` off the agent that owns the open Cloudflare task, and
@@ -546,7 +546,7 @@ function SyncGrantsConfirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  // Ruling 459: the words stay the ones it opened with while the exit plays,
+  // Ruling 287: the words stay the ones it opened with while the exit plays,
   // after the write has already cleared the drift.
   const [{ name, removed, added }] = useState(() => ({
     name: current.name,
@@ -596,7 +596,7 @@ function SyncGrantsConfirm({
  * it locally is what made the panel and the run guard disagree in the first
  * place, so this panel now asks the same function the guard does.
  *
- * Ruling 133 (F34-16): the chips and the count said WHERE without saying what
+ * Ruling 181 (F34-16): the chips and the count said WHERE without saying what
  * the where gates. Eligibility decides where a profile may be NEWLY engaged;
  * the task's delivering engagement, once made, may be prompted or resumed on
  * that task at every stage (rework, conflict resolution, follow-ups), while a
@@ -655,7 +655,7 @@ function StageEligibility({
                 data-stage-color={elig ? s.color : undefined}
               />
               {s.name}
-              {/* Ruling 479(f): the difference was ink and a strike-through
+              {/* Ruling 291(a): the difference was ink and a strike-through
                   alone, so assistive technology read all five stage names
                   the same way (WCAG 1.3.1). The state is in the text now. */}
               <span className="vh">{elig ? ", eligible" : ", not eligible"}</span>
@@ -702,12 +702,12 @@ const META_DOT = "\u00a0· ";
 
 /**
  * "Add from library" — deploy an org-level template into this project
- * (owner ruling 1 / P13-AP-05). Until this existed, a profile created in
+ * (P13 owner decision 1 / P13-AP-05). Until this existed, a profile created in
  * Settings → Global agent profiles could never be deployed, run or selected:
  * no code path copied a template into a project's roster, so the org editor
  * offered a lifecycle it could not finish.
  *
- * Ruling 638: a row is the profile as Settings → Global agent profiles shows
+ * Ruling 326: a row is the profile as Settings → Global agent profiles shows
  * it, with its add on the right. It borrowed the deployments row instead, whose
  * 84px label column holds "delivering" and not a role: "IMPLEMENTATION" ran on
  * under the description, the name sat in the faint key voice beside a bold
@@ -736,10 +736,10 @@ function LibraryPicker({
   projectName: string;
   busy: boolean;
   /** The profile whose deploy is in flight: its row names the work while the
-   *  others wait at the busy step (ruling 368). */
+   *  others wait at the busy step (ruling 286). */
   adding?: string | null;
   /** The deploy landed: the picker plays its exit, then onClose unmounts it
-   *  (ruling 459). */
+   *  (ruling 287). */
   done?: boolean;
   onClose: () => void;
   onAdd: (profileId: string) => void;
@@ -749,14 +749,19 @@ function LibraryPicker({
     if (done) close();
   }, [done, close]);
   return (
-    <dialog className="modal-card" aria-label="Add from library" ref={dialogRef}>
+    <dialog
+      className="modal-card"
+      aria-label="Add from library"
+      data-screen-label="Add from library modal"
+      ref={dialogRef}
+    >
       <div className="modal-head">
         <span className="agent-glyph lg">
           <Icon name="agents" />
         </span>
         <div className="mh-main">
           <h2>Add from library</h2>
-          {/* Ruling 638: one sentence. The footer said the copy part again
+          {/* Ruling 326: one sentence. The footer said the copy part again
               ("the global profile stays the source"), beside a Close the
               head's ✕ already is, so the footer went. */}
           <div className="mh-sub">
@@ -844,7 +849,7 @@ function LibraryPicker({
 // ------------------------------------------------------------------ detail
 
 /**
- * The open profile's hero (ruling 700(e), the split of `ProfileDetail` along
+ * The open profile's hero (ruling 13(b), the split of `ProfileDetail` along
  * the task-page recipe): its glyph, name and role, whether it is running,
  * engaged or idle, where its copy came from, and its Delete and Edit buttons.
  * Hook-free: the detail owns the delete confirm and hands in its setter.
@@ -892,7 +897,7 @@ function ProfileHero({
           <h2 className="ag-hero-name">{a.name}</h2>
           {/* Quiet: the role describes. The "not connected" pill beside it is
               the one thing on this line that wants a person. The operator
-              has no role (ruling 518), so its name stands alone. */}
+              has no role (ruling 106), so its name stands alone. */}
           {heroRole && (
             <Pill kind="neutral" sm quiet>
               {heroRole}
@@ -928,7 +933,7 @@ function ProfileHero({
           {a.customized && (
             <> · customized for {projectName}</>
           )}
-          {/* Ruling 156: the grants signal beside the identity one, with the
+          {/* Ruling 177: the grants signal beside the identity one, with the
               exact difference under each list in the resources panel. */}
           {a.templateDrift && <> · grants differ from the template</>}
         </div>
@@ -956,7 +961,7 @@ function ProfileHero({
 }
 
 /**
- * "Capability policy" (ruling 700(e), the split of `ProfileDetail`): the three
+ * "Capability policy" (ruling 13(b), the split of `ProfileDetail`): the three
  * governed columns, the operator's two qualifying notes, and the advisory
  * lines collapsed under them. Hook-free; all of it is read off the profile.
  */
@@ -971,7 +976,7 @@ function CapabilityPolicyPanel({ a }: { a: AgentProfileView }) {
   const isGoverned = (label: string) => GOVERNED_CAP_LABELS.has(label);
   // F-P1 (pass 25): when a run would resolve to Codex, the claude-only-enforced
   // grants in these columns bind only advisorily — CapColumn shows the caveat.
-  // Ruling 185 adds the write family to that set on Codex.
+  // Ruling 183 adds the write family to that set on Codex.
   const codexPrimary = primaryBackend(a) === "codex";
   const codexCarveOut = codexPrimary && codexRepoWriteAdvisory(a.capabilities);
   const governed = {
@@ -1098,7 +1103,7 @@ function CapabilityPolicyPanel({ a }: { a: AgentProfileView }) {
 }
 
 /**
- * "Context resources & runtime" (ruling 700(e), the split of
+ * "Context resources & runtime" (ruling 13(b), the split of
  * `ProfileDetail`): the template-grants button, the granted resources, what a
  * run starts on, and the viewer's connection note. Hook-free: the detail owns
  * the grants confirm and hands in its setter.
@@ -1130,7 +1135,7 @@ function ContextRuntimePanel({
     const group = resourceCatalog?.find((g) => g.key === key);
     return group ? new Set(group.items.map((i) => i.id)) : undefined;
   };
-  // Ruling 479(b): the registry's word against a resource it does hold.
+  // Ruling 184: the registry's word against a resource it does hold.
   const warningsOf = (key: string): ReadonlyMap<string, ResItemWarning> => {
     const out = new Map<string, ResItemWarning>();
     for (const item of resourceCatalog?.find((g) => g.key === key)?.items ?? []) {
@@ -1143,11 +1148,11 @@ function ContextRuntimePanel({
       <div className="panel-head">
         <Icon name="cpu" />
         <h2>Context resources &amp; runtime</h2>
-        {/* Ruling 156 (owner, Q35-8): only an org admin copies the template's
+        {/* Ruling 177 (owner, Q35-8): only an org admin copies the template's
             grants onto this project; a project admin sees the difference and
             asks. The button carries the record the page rendered (B5), so a
             save landing in between is refused, never reverted. Ruling
-            479(d): it opens a confirm naming what the press removes and
+            326: it opens a confirm naming what the press removes and
             adds; the submit is the confirm's. */}
         {canSyncTemplate && a.templateDrift && (
           <button
@@ -1193,7 +1198,7 @@ function ContextRuntimePanel({
         {rulingsKb && (
           <p className="muted">
             Every run on this project reads <code className="mono">{rulingsKb}</code>, the
-            project's rulings, whether or not it is granted above (ruling 239). Removing the
+            project's rulings, whether or not it is granted above (ruling 208(a)). Removing the
             grant here would not stop this profile reading it.
           </p>
         )}
@@ -1204,10 +1209,10 @@ function ContextRuntimePanel({
         runHealth={runHealth}
         backendMissing={backendMissing}
       />
-      {/* Ruling 127: the actionable half, addressed to the person reading
+      {/* Ruling 137: the actionable half, addressed to the person reading
           it. There is no instance credential to name any more — a run bills
           the task owner, and this viewer's own account is what decides
-          whether the profile runs on the tasks THEY own. Ruling 625: the
+          whether the profile runs on the tasks THEY own. Ruling 280: the
           members' count is the runtime line's, just above; it is not said
           twice. */}
       {backendMissing && (
@@ -1226,7 +1231,7 @@ function ContextRuntimePanel({
 }
 
 /** What a run on this profile starts on: its backend, model and effort, the
- *  operator's autonomy, and its continuity (ruling 700(e), the split of
+ *  operator's autonomy, and its continuity (ruling 13(b), the split of
  *  `ProfileDetail`; hook-free). */
 function RuntimeRow({
   a,
@@ -1272,7 +1277,7 @@ function RuntimeRow({
               </span>
             )}
           </div>
-          {/* Ruling 127: WHOSE account a run on this profile spends. The
+          {/* Ruling 137: WHOSE account a run on this profile spends. The
               page cannot answer "is this backend configured" any more (a
               run bills the task owner, and this page is not on a task), so
               it states the rule and the one honest instance-level number:
@@ -1284,7 +1289,7 @@ function RuntimeRow({
           )}
         </div>
       </div>
-      {/* Ruling 479(e): every kind shows what a run starts on, model AND
+      {/* Ruling 326: every kind shows what a run starts on, model AND
           effort. The operator used to get Autonomy in this cell and no
           model at all, and no profile showed its effort, so whether an
           agent ran at Maximum or High was readable only inside the
@@ -1364,20 +1369,20 @@ export function ProfileDetail({
   stages: StageView[];
   /** R14-1: the board's edges — eligibility resolves by structural role too. */
   workflow: WorkflowEdgeView[];
-  /** F16 + ruling 127: who can run each backend, from the one credential store
+  /** F16 + ruling 137: who can run each backend, from the one credential store
    *  (`connectedUserIds` / `isBackendAvailableFor`). */
   backendHealth?: BackendHealthMap | undefined;
   /** P14-KM-11: the live store catalog, so a grant naming a resource the store
    *  no longer holds renders as missing rather than healthy. */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** Ruling 239: the project's rulings knowledge base, which every profile
+  /** Ruling 208(a): the project's rulings knowledge base, which every profile
    *  reads whether or not it grants one. Without saying so here, this card's
    *  own `kb` list is WRONG about what the profile actually gets. */
   rulingsKb?: string | null;
   insts: AgentDeploymentView[];
   projectName: string;
   canManage: boolean;
-  /** Ruling 156 (owner, Q35-8): org admins only may take the template's
+  /** Ruling 177 (owner, Q35-8): org admins only may take the template's
    *  grants onto this project's copy. */
   canSyncTemplate?: boolean;
   onOpen: (taskKey: string) => void;
@@ -1387,19 +1392,19 @@ export function ProfileDetail({
 }) {
   const activeKeys = [...new Set(insts.map((d) => d.taskKey))];
   const [confirm, setConfirm] = useState(false);
-  // Ruling 479(d): "Use the template's grants" asks first, naming what goes.
+  // Ruling 326: "Use the template's grants" asks first, naming what goes.
   // The drift is held from the press, so the confirm outlives the write that
-  // clears it on the card (its exit plays, ruling 459).
+  // clears it on the card (its exit plays, ruling 287).
   const [syncDrift, setSyncDrift] = useState<TemplateDrift | null>(null);
   // F16: "idle · available" was the page's answer no matter what — live, a
   // Codex profile whose backend nobody could run read "idle · available" here
   // while the task-level Execution panel, one click away, disagreed.
   // Availability is two claims, and only one of them is about engagements:
-  // nothing is running it, AND a run could start. Ruling 127 makes the second
+  // nothing is running it, AND a run could start. Ruling 137 makes the second
   // claim person-shaped — a run bills the task owner, and the person reading
   // this page is who would start one on the tasks they own.
   const runHealth = primaryBackendHealth(a, backendHealth);
-  // Ruling 127: the second claim is now about the VIEWER's own account — they
+  // Ruling 137: the second claim is now about the VIEWER's own account — they
   // are the person who would press Run.
   const backendMissing = runHealth !== null && !runHealth.viewerConnected;
   const backendLabel = runHealth ? BACKEND_LABEL[runHealth.backend] : "Codex";
@@ -1466,7 +1471,7 @@ export function ProfileDetail({
         </div>
         {insts.length === 0 ? (
           <div className="empty sm">
-            {/* Ruling 625: with the backend not connected, the note above
+            {/* Ruling 280: with the backend not connected, the note above
                 already says why a run would be refused; this stops at the
                 fact, and no longer calls the profile available. */}
             {backendMissing
@@ -1482,7 +1487,7 @@ export function ProfileDetail({
                 key={`${d.taskKey}:${d.engagement}`}
                 onClick={() => onOpen(d.taskKey)}
               >
-                {/* Ruling 625: on the operator's own page every row is an
+                {/* Ruling 280: on the operator's own page every row is an
                     operator engagement, so the label went on all of them. */}
                 {(a.kind !== "operator" || d.engagement !== "operator") && (
                   <span className="deploy-eng">{engagementLabel(d.engagement)}</span>
@@ -1582,10 +1587,10 @@ export function LiveRoster({
    *  raw profileId (P11-42). The row falls back to the profileId when a name
    *  can't be resolved. */
   nameById?: Record<string, string>;
-  /** profileId → the profile's own icon (ruling 625), so a row wears the mark
+  /** profileId → the profile's own icon (ruling 280), so a row wears the mark
    *  the Profiles tab gives it; the Backend column names the backend. */
   iconById?: Record<string, string>;
-  /** Ruling 479(e): the backend an operator run starts on. The Backend column
+  /** Ruling 326: the backend an operator run starts on. The Backend column
    *  printed "orchestration" for every operator row, a word for no runtime,
    *  while the operator runs on Claude or Codex like any agent. */
   operatorBackend: "codex" | "claude";
@@ -1637,7 +1642,7 @@ export function LiveRoster({
               onClick={() => onOpen(d.taskKey)}
             >
               <span className="live-agent">
-                {/* Ruling 625: the profile's own glyph, as on the Profiles tab
+                {/* Ruling 280: the profile's own glyph, as on the Profiles tab
                     (Developer drew Codex's cpu here and its branch there). A
                     row whose profile is gone keeps the backend's tile. */}
                 <span
@@ -1746,7 +1751,7 @@ type ProfileSubmitFields = {
 };
 
 /**
- * The page head (ruling 700(e), the split of `AgentsPage` along the task-page
+ * The page head (ruling 13(b), the split of `AgentsPage` along the task-page
  * recipe): the title and its sentence, the Profiles/Live switch, and the
  * matrix, library and new-profile buttons. Hook-free: the page owns the tab
  * and every modal's state and hands in their setters.
@@ -1848,7 +1853,7 @@ function AgentsHead({
 }
 
 /**
- * The Profiles tab (ruling 700(e), the split of `AgentsPage` along the
+ * The Profiles tab (ruling 13(b), the split of `AgentsPage` along the
  * task-page recipe): the roster, operator first, and the open profile's
  * detail. Hook-free: the page owns the selection, the fetcher and every
  * modal, and hands in what the roster and the detail call.
@@ -1902,7 +1907,7 @@ function ProfilesTab({
   return (
     <div className="agents-layout">
       <aside className="profile-list">
-        {/* Ruling 518: the operator is one agent, so it heads the list on
+        {/* Ruling 106: the operator is one agent, so it heads the list on
             its own, with no group label naming a second role for it. */}
         {operator && (
           <ProfileItem
@@ -1997,17 +2002,17 @@ export function AgentsPage({
   projectSlug: string;
   projectName: string;
   myRole: ProjectRole | null;
-  /** Ruling 156 (owner, Q35-8): the org role decides who may copy a
+  /** Ruling 177 (owner, Q35-8): the org role decides who may copy a
    *  template's grants onto this project; a project admin sees the marker. */
   viewerIsOrgAdmin?: boolean;
   /** Live store resources for the profile-editor picker (F6/item-2). */
   resourceCatalog?: readonly ResCatalogGroup[];
-  /** F16 + ruling 127: per backend, whether the VIEWER connected it and how
+  /** F16 + ruling 137: per backend, whether the VIEWER connected it and how
    *  many project members have. One probe answers every backend claim on this
    *  page, including the editor's note (there is no second, quietly divergent
    *  `backendAvailable` pair any more). */
   backendHealth?: BackendHealthMap | undefined;
-  /** Ruling 239: the project's rulings knowledge base, injected into every run
+  /** Ruling 208(a): the project's rulings knowledge base, injected into every run
    *  the project makes. Null when the project names none. */
   rulingsKb?: string | null;
 }) {
@@ -2022,7 +2027,7 @@ export function AgentsPage({
   const [creating, setCreating] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [editing, setEditing] = useState<AgentProfileView | null>(null);
-  // Ruling 459: a save or deploy that lands plays the open modal's exit; the
+  // Ruling 287: a save or deploy that lands plays the open modal's exit; the
   // modal's onClose then unmounts it and clears this.
   const [modalDone, setModalDone] = useState(false);
   const [matrixOpen, setMatrixOpen] = useState(false);
@@ -2098,7 +2103,7 @@ export function AgentsPage({
     );
   };
 
-  // Ruling 156: take the template's grants onto this project's copy, carrying
+  // Ruling 177: take the template's grants onto this project's copy, carrying
   // the record the page rendered so a save landing in between is refused.
   const syncResources = (a: AgentProfileView) => {
     fetcher.submit(

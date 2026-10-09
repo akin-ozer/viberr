@@ -3,7 +3,7 @@ import { highlightCode, type CodeToken } from "./code-highlight";
 import { PLAIN_LANGUAGE } from "./code-language";
 
 /**
- * Ruling 363: read-only code with a line-number gutter and Shiki tokens.
+ * Ruling 317: read-only code with a line-number gutter and Shiki tokens.
  *
  * The lines render plain on the first paint — the text is what the reader
  * came for, and it must never wait on a grammar. `highlightCode` then fetches

@@ -542,7 +542,7 @@ describe("validatePat / revalidateProjectCredential (stored PAT + grant flow)", 
     ).not.toBeNull();
   });
 
-  it("ruling 144(c): a re-check resolves an open `workflow` violation once the header lists it, and not before", async () => {
+  it("ruling 221(a): a re-check resolves an open `workflow` violation once the header lists it, and not before", async () => {
     // Canary: stop adding `headerScopes` to the granted set and the second
     // re-check leaves the violation open.
     const store = setupTestStore(ctx);
@@ -893,16 +893,16 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
 });
 
 /**
- * Ruling 144 (pass 34, G34-2): a CLASSIC token's full granted list is recorded
+ * Ruling 221(a) (pass 34, G34-2): a CLASSIC token's full granted list is recorded
  * beside the required-scope verdicts, so the credential card can say a token
  * without `workflow` cannot push `.github/workflows/*` and delivery can refuse
  * such a push BEFORE GitHub is asked. Advisory only: `workflow` stays optional
- * (ruling 18) and a token without it is still `valid`.
+ * (ruling 221) and a token without it is still `valid`.
  *
  * Canary: drop the `headerScopes` assignment in `validatePatToken` (leave the
  * base's `null`) and the first case fails.
  */
-describe("ruling 144 — the classic token's header list is recorded", () => {
+describe("ruling 221(a) — the classic token's header list is recorded", () => {
   it("records the full x-oauth-scopes list on a classic token, and the token without `workflow` stays valid", async () => {
     const gh = fakeGithubFetch({
       "GET /user": {

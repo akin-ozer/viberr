@@ -9,7 +9,7 @@ import {
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 457, journey `task-open` / `server`: what one task-page revalidation
+ * Ruling 11, journey `task-open` / `server`: what one task-page revalidation
  * costs the shared event loop. React Router runs root + the workspace layout +
  * the task loader for it, all handed ONE Request (single fetch), so the three
  * are measured together that way.
@@ -68,7 +68,7 @@ async function revalidateTaskPage(cookie: string) {
   return Promise.all([root.loader(args), layout.loader(args), task.loader(args)]);
 }
 
-describe("task-page timeline window (ruling 457)", () => {
+describe("task-page timeline window (ruling 11)", () => {
   it("'Show older' still pages through the whole history", async () => {
     const { loader } = await import("~/routes/project.task");
     const { cookie } = await app.cookieFor(ardaId);
@@ -83,7 +83,7 @@ describe("task-page timeline window (ruling 457)", () => {
   });
 });
 
-describe("task-page revalidation (ruling 457)", () => {
+describe("task-page revalidation (ruling 11)", () => {
   it("stays within its server-read budgets", async () => {
     const { cookie } = await app.cookieFor(ardaId);
     await revalidateTaskPage(cookie);

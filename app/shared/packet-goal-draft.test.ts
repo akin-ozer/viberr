@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { goalDraftForOption } from "./packet-goal-draft";
 
 /**
- * Ruling 138 (pass 34, U34-10): the ONE composition of the goal editor's
+ * Ruling 63 (pass 34, U34-10): the ONE composition of the goal editor's
  * prefill. An explicit `goalDraft` wins; without one the title and detail are
  * the draft (F17-L3), verbatim.
  *

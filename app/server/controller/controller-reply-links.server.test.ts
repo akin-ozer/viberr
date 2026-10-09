@@ -6,7 +6,7 @@ import { backfillControllerReplyLinks, RESTART_NOTE } from "./controller-reply-l
 import { recoverControllerConversations } from "./controller-run.server";
 
 /**
- * Ruling 465 (dated note 2026-09-25): the backfill gives an old controller
+ * Ruling 252 (dated note 2026-09-25): the backfill gives an old controller
  * row the message it answers only where the writers' order PROVES it, and
  * marks the rest earlier history that boot recovery never notes.
  *
@@ -118,7 +118,7 @@ function recoveryNotes(db: DatabaseSync, conversationId: string, after: string) 
   );
 }
 
-describe("ruling 465: the reply-link backfill links only what the order proves", () => {
+describe("ruling 252: the reply-link backfill links only what the order proves", () => {
   it("a restart that lost a queued message does not shift every later reply onto the message before it", () => {
     const db = ctx.makeDb();
     // A ran; B waited behind it. The restart noted A's dead turn (the old

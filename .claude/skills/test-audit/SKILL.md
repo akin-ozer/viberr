@@ -1,6 +1,6 @@
 ---
 name: test-audit
-description: "Use whenever writing, changing, reviewing or sweeping Viberr tests: vitest suites under app/, test-support harnesses, e2e specs, perf budgets, doc pins. The authoring gate every new or changed test meets (docs/development/testing.md §0, ruling 512), plus the audit workflow for low-value, implementation-coupled or duplicated tests and the test-only production seams they keep alive."
+description: "Use whenever writing, changing, reviewing or sweeping Viberr tests: vitest suites under app/, test-support harnesses, e2e specs, perf budgets, doc pins. The authoring gate every new or changed test meets (docs/development/testing.md §0, ruling 8), plus the audit workflow for low-value, implementation-coupled or duplicated tests and the test-only production seams they keep alive."
 ---
 
 # Test audit
@@ -11,7 +11,7 @@ proof, couple to implementation, or keep a test-only production seam alive. **Ca
 prunes one production owner's whole test surface in one change.
 
 The bar itself — the four authoring questions, the junk patterns and the retention bar —
-lives in one place: `docs/development/testing.md` §0 (ruling 512). Read it before adding,
+lives in one place: `docs/development/testing.md` §0 (ruling 8). Read it before adding,
 changing or deleting a test. This skill is the workflow around it. Adapted from OpenClaw's
 `test-audit` skill (MIT; `THIRD_PARTY_NOTICES.md`).
 

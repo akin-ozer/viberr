@@ -62,13 +62,13 @@ describe("isAcceptedDisplayState", () => {
 });
 
 /**
- * Ruling 131 (pass 34): a non-empty `blockedBy` list floors readiness at
+ * Ruling 55 (pass 34): a non-empty `blockedBy` list floors readiness at
  * `blocked`, the one derivation home, and never improves a stored value.
  *
  * Canary: floor at `input_required` instead of `blocked` and the first two
  * cases fail.
  */
-describe("deriveReadiness — the dependency floor (ruling 131)", () => {
+describe("deriveReadiness — the dependency floor (ruling 55)", () => {
   it("floors a ready or input_required task at blocked while it waits on other work", () => {
     expect(deriveReadiness({ storedReadiness: "ready", diagnostics: [], dependenciesListed: true })).toEqual({
       readiness: "blocked",

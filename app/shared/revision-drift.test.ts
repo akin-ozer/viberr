@@ -10,7 +10,7 @@ import {
 const HEAD = "a4c790ce63ef0011223344556677889900aabbcc";
 
 /**
- * Ruling 132 (pass 34, F34-14): ONE sentence for what moved on the PR head.
+ * Ruling 239 (pass 34, F34-14): ONE sentence for what moved on the PR head.
  * Only authored commits are "unreviewed"; a base refresh is named as one.
  *
  * Canary: derive the kind from `authored + (baseRefresh?.commits ?? 0)` (the
@@ -78,7 +78,7 @@ describe("revisionDriftNote — the completion record's suffix", () => {
   });
 
   it("names authored commits, with the verb agreeing (F19-23)", () => {
-    // The canonical sentence rides along verbatim (ruling 132).
+    // The canonical sentence rides along verbatim (ruling 239).
     expect(revisionDriftNote({ headSha: HEAD, authored: 1, baseRefresh: null })).toBe(
       " 1 authored commit was added to the PR head (`a4c790ce63ef`) after the review, outside the reviewed revision: 1 authored commit since review merges unreviewed.",
     );
@@ -112,12 +112,12 @@ describe("revisionDriftNote — the completion record's suffix", () => {
 });
 
 /**
- * Ruling 132: the classifier. Base commits are the ones the branch's own
+ * Ruling 239: the classifier. Base commits are the ones the branch's own
  * compare does not list; a two-parent commit Viberr recorded is a clean merge;
  * everything else is authored. Fail-closed on any incomplete compare. Canary:
  * drop the `branchOwn` membership test (every base commit reads as authored).
  */
-describe("classifyRevisionDrift (ruling 132)", () => {
+describe("classifyRevisionDrift (ruling 239)", () => {
   const c = (fullSha: string, parents: string[] = ["p"]) => ({ fullSha, parents });
   const M = "m".repeat(40);
   const recorded = new Set([M]);
@@ -166,14 +166,14 @@ describe("classifyRevisionDrift (ruling 132)", () => {
 });
 
 /**
- * Ruling 238 (pass 37, F37-58): which commit a re-review reads. The pin is
- * ruling 179's and stays, with exactly one exception — a head that moved only
+ * Ruling 239 (pass 37, F37-58): which commit a re-review reads. The pin is
+ * ruling 240's and stays, with exactly one exception — a head that moved only
  * because Viberr refreshed the base. Live on SHOP-18 the missing exception cost
  * an admin force-accept: the verifier's two blockers were fixed on `main` and
  * merged in, and the pin put every re-review back on the base that still had
  * them.
  */
-describe("reviewSubjectSha (ruling 238)", () => {
+describe("reviewSubjectSha (ruling 239)", () => {
   const REVIEWED = "b7c4c907eff3001122334455667788990011aabb";
   const REFRESHED = "aaf5e38b45f5001122334455667788990011ccdd";
   const baseOnly = {
@@ -199,7 +199,7 @@ describe("reviewSubjectSha (ruling 238)", () => {
 
   it("keeps the pin the moment ANY authored commit is in the drift", () => {
     // One authored commit is unreviewed work, and reading it unasked is the
-    // failure ruling 179 exists to prevent. CANARY: test `baseRefresh` without
+    // failure ruling 240 exists to prevent. CANARY: test `baseRefresh` without
     // also testing `authored === 0`.
     for (const drift of [
       { ...baseOnly, authored: 1 },
@@ -249,14 +249,14 @@ describe("reviewSubjectSha (ruling 238)", () => {
 });
 
 /**
- * Ruling 439 (pass 39, F39-62). Live on ax-clone AX-29: the delivered revision
+ * Ruling 239 (pass 39, F39-62). Live on ax-clone AX-29: the delivered revision
  * was `4e6c47d`; the operator merged `main` onto it (merge `278c1ed`, 2 base
  * commits) and dispatched the reviewer before any PR existed. The reviewer was
  * detached at `4e6c47d`, its gates failed on the four tests the merged base had
  * fixed, and the approval it gave on `278c1ed` was thrown away 65 seconds later
  * when the delivery minted `278c1ed` as a new revision.
  */
-describe("the refresh chain (ruling 439)", () => {
+describe("the refresh chain (ruling 239)", () => {
   const DELIVERED = "4e6c47d51283c3f457b040d4d685ccf1edc373d5";
   const MERGED = "278c1ed382729dd7a3ce7ddf755157a5f72f6d35";
   const MERGED_AGAIN = "9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f7a8b9c0";

@@ -15,7 +15,7 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import { readTaskChanges } from "./task-changes.server";
 
 /**
- * Ruling 484 (pass 40, F40-54): the Changes panel's read. A person saw
+ * Ruling 246 (pass 40, F40-54): the Changes panel's read. A person saw
  * `Diff N files · +a −d` and nothing to read; this is the delivered revision's
  * files and patches, bound to that revision, with who a note would reach.
  */
@@ -100,7 +100,7 @@ function read(fetchImpl: typeof fetch, path: string | null = null) {
   );
 }
 
-describe("ruling 484: readTaskChanges", () => {
+describe("ruling 246: readTaskChanges", () => {
   it("reads the delivered revision's files and names who a note reaches", async () => {
     const gh = fakeGithubFetch({
       [`GET ${REPO}/pulls/21`]: detail(HEAD),

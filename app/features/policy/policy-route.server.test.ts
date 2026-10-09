@@ -520,9 +520,9 @@ describe("set-boundary", () => {
 
 });
 
-/** Ruling 178: the Policy loader reads the required-reviewer rules from
+/** Ruling 89: the Policy loader reads the required-reviewer rules from
  *  project.md, resolved to the names the card prints. */
-describe("required reviewers on the Policy loader (ruling 178)", () => {
+describe("required reviewers on the Policy loader (ruling 89)", () => {
   it("lists the rule project.md holds, resolved, and [] when none is declared", async () => {
     expect((await runLoader(ids.arda)).view.requiredReviewers).toEqual([]);
     const { updateProjectFile } = await import("~/server/files/project-writer.server");

@@ -27,7 +27,7 @@ import {
 import { epicHref } from "~/shared/epic-href";
 
 /**
- * Per-user notification rows (orchestrator ruling 9): SQLite-owned,
+ * Per-user notification rows (ruling 74): SQLite-owned,
  * sorted by real timestamp DESC, task/project soft refs (cross-project
  * capable — the seed's DEP-31/BIL-9 rows point at the stub projects).
  * Read state is monotonic (no mark-unread) and idempotent.
@@ -44,7 +44,7 @@ export interface CreateNotificationInput {
   from?: ActorRender | null;
   projectSlug?: string | null;
   taskKey?: string | null;
-  /** Ruling 497: where the row opens, when the notifier knows the exact thing
+  /** Ruling 75: where the row opens, when the notifier knows the exact thing
    *  it is about (the link builders below). Omitted, it opens the task, or the
    *  project's board (`notificationHref`). */
   href?: string | null;
@@ -120,7 +120,7 @@ function taskPath(projectSlug: string, taskKey: string): string {
 }
 
 /**
- * Ruling 497: the links a notifier records (`CreateNotificationInput.href`), one
+ * Ruling 75: the links a notifier records (`CreateNotificationInput.href`), one
  * per thing a row can be about. Each opens inside the row's own project, which
  * `notificationHref` checks.
  */
@@ -131,7 +131,7 @@ export function taskEventLink(projectSlug: string, taskKey: string, occurredAt: 
 }
 
 /** The task's open decision packet (an operator's, or an agent's question).
- *  Ruling 547: named by its id, so {@link followClosedDecision} can find the
+ *  Ruling 75: named by its id, so {@link followClosedDecision} can find the
  *  rows about it; a packet with no id (written before F10-09) is not. */
 export function taskDecisionLink(
   projectSlug: string,
@@ -142,7 +142,7 @@ export function taskDecisionLink(
   return `${taskPath(projectSlug, taskKey)}#${anchor}`;
 }
 
-/** Ruling 547: a decision packet that closed, and the timeline event that
+/** Ruling 75: a decision packet that closed, and the timeline event that
  *  recorded how (the answer, the withdrawal, the fulfilled goal edit, or the
  *  acceptance or archive it ended with). */
 export interface ClosedDecision {
@@ -153,7 +153,7 @@ export interface ClosedDecision {
 }
 
 /**
- * Ruling 547: the rows that opened a decision packet open the event that
+ * Ruling 75: the rows that opened a decision packet open the event that
  * closed it, once it has. Their link named the packet (`taskDecisionLink`),
  * and the task page shows a packet only while it is open, so a click on a row
  * about a question already answered used to move nothing at all. The rows keep
@@ -182,7 +182,7 @@ export function followClosedDecision(
 }
 
 /**
- * Ruling 584: the operator edited or deleted an agent's comment. A mention
+ * Ruling 133: the operator edited or deleted an agent's comment. A mention
  * that quoted it quotes the new words; a row about a deleted comment goes,
  * since it would open an entry the timeline no longer holds. Returns how many
  * rows changed.
@@ -224,7 +224,7 @@ export function projectGithubLink(projectSlug: string): string {
   return `${projectPath(projectSlug)}/github`;
 }
 
-/** An epic's own page (ruling 503). */
+/** An epic's own page (ruling 325). */
 export function epicLink(projectSlug: string, epicId: string): string {
   return epicHref(projectSlug, epicId);
 }
@@ -237,7 +237,7 @@ export function epicLink(projectSlug: string, epicId: string): string {
  * the destination here, once, lets every surface either navigate or render the
  * row as plainly non-clickable instead of each one re-deriving the rule.
  *
- * Ruling 497: a row that recorded where it opens opens there. That link must
+ * Ruling 75: a row that recorded where it opens opens there. That link must
  * stay inside the project the row names, so the orphan rule (F18-1) and a
  * member's removal (`deleteMemberProjectNotifications`) cover it too; one that
  * does not is ignored for the task or board the row names.
@@ -322,7 +322,7 @@ export function indexDecisionInbox(
 }
 
 /** Newest-first by real timestamp (deliberate divergence from the mock's
- * splice order — ruling 9). Joins project display names where resolvable,
+ * splice order — ruling 74). Joins project display names where resolvable,
  * plus the LIVE task decision state (F7-NOTIF1): packet/approval rows are
  * reconciled against task_projections at read time — same-database join,
  * no per-mutation notification writes — so `waitingOnYou` reflects whether
@@ -419,7 +419,7 @@ export function deleteMemberProjectNotifications(
   );
 }
 
-/** What the bell draws without its list (ruling 457): the badge and the
+/** What the bell draws without its list (ruling 300): the badge and the
  *  popover head. */
 export interface BellCounts {
   /** The badge: unread rows that lead somewhere (see below). */
@@ -431,7 +431,7 @@ export interface BellCounts {
 }
 
 /**
- * Ruling 457 (FL-4 / SRV-6): the bell's two counts in one statement. Pages
+ * Ruling 300 (FL-4 / SRV-6): the bell's two counts in one statement. Pages
  * ship these instead of the bell's list, which the bell loads itself
  * (`routes/resources.notifications.ts`).
  *
@@ -474,7 +474,7 @@ const ATTENTION_ITEM_CAP = 10;
 const ATTENTION_BODY_MAX = 180;
 
 /**
- * Ruling 481(c) (F40-51): what reaches a tab nobody is looking at. `waiting`
+ * Ruling 74 (F40-51): what reaches a tab nobody is looking at. `waiting`
  * is the count of unread decision rows (`DECISION_NOTIFICATION_KINDS`: an
  * operator packet, an agent's question, a recommendation to approve) that lead
  * somewhere, under the bell's own orphan rule (F18-1), and it is the number
@@ -583,7 +583,7 @@ export function markAllNotificationsRead(
  * Packet/approval resolution side-effect (contracts §1.2): marks that
  * task's decision notifications (packet, question, approval) read for EVERY
  * user, idempotently. Emits `notification.read` per affected user (their
- * badges drop live). Ruling 481(a): an agent's question is a packet on the
+ * badges drop live). Ruling 74: an agent's question is a packet on the
  * task, so resolving the packet clears its `question` row too.
  */
 export function markTaskPacketApprovalRead(

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 /**
  * D5 — the failure-toast honesty gate.
  *
- * decisions.md §UI porting rules, stated as a rule (as ruling 458(b) rewords
+ * decisions.md §UI rules, stated as a rule (as ruling 288(e) rewords
  * it): *"A failure toast must not render the success tick: a failure passes
  * `"error"` explicitly; success is the default kind."* The toast icon is
  * the WHOLE signal (the message text is the same for both kinds; the glyph

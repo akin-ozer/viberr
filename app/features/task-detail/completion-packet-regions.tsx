@@ -19,7 +19,7 @@ import { ChangesPanel } from "./changes-slot";
 import type { CompletionDiff, CompletionResult } from "./completion-packet";
 
 /**
- * The completion packet's sections (ruling 700(e), the split of
+ * The completion packet's sections (ruling 13(b), the split of
  * `completion-packet.tsx` along the task-page recipe): its head, Operator's
  * summary, a result page's pictures, the sources the result rests on, the
  * notes on what is not shown, the reviewers' verdicts, what the task took and
@@ -122,7 +122,7 @@ export function HiddenFilesNote({ count }: { count: number }) {
 }
 
 /**
- * Ruling 691: Viberr's pictures of a result file that is a page, under its
+ * Ruling 316: Viberr's pictures of a result file that is a page, under its
  * row, and the reason one is missing.
  */
 export function FilePagePictures({
@@ -177,7 +177,7 @@ export function FilePagePictures({
 }
 
 /**
- * Ruling 690: what the result rests on. A fact it states from outside is
+ * Ruling 82: what the result rests on. A fact it states from outside is
  * checked against these, kept as the run read them; a result that is files
  * says so when it rests on none. Listed where there is a route to open one
  * by, as the files are.
@@ -236,7 +236,7 @@ export function CompletionSources({
   );
 }
 
-/** Ruling 693: what the task took, as the server phrased it. */
+/** Ruling 83: what the task took, as the server phrased it. */
 export function CompletionTook({ Label, took }: { Label: "h3" | "h4"; took: TookCard }) {
   return (
     <>
@@ -353,7 +353,7 @@ export function CompletionVerdicts({
 }
 
 /** The change: its pull request and size, Operator's summary of it, the paths
- *  it changed (ruling 668) and, while it is under review, the diff reader. */
+ *  it changed (ruling 103) and, while it is under review, the diff reader. */
 export function CompletionChanges({
   Label,
   packet,

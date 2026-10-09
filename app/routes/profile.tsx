@@ -40,12 +40,12 @@ import { revealTarget, scrollingBox, useHashTarget } from "~/ui/use-hash-target"
 /**
  * /profile — URL-addressable PageOverlay route (phase-4 shell decision,
  * kept). Phase 9C fills it with the full profile.jsx surface: identity,
- * notification routing, MOUNTED Appearance panel (ruling 13), read-only
+ * notification routing, MOUNTED Appearance panel (ruling 30), read-only
  * RBAC access view, GitHub identity, self-serve password change.
  *
  * Theme still goes through the existing /prefs/theme action (cookie +
  * users.theme); tlDefault/notifs live in user_prefs via this route's
- * action (ruling 148(c): there is no motion preference any more).
+ * action (ruling 30: there is no motion preference any more).
  */
 
 export function meta() {
@@ -53,7 +53,7 @@ export function meta() {
 }
 
 /**
- * Ruling 127 form fields. Decoded, never coerced: `backend` names a directory
+ * Ruling 137 form fields. Decoded, never coerced: `backend` names a directory
  * segment and a spawn target, and `method` / `kind` decide which vendor flow
  * runs, so a value outside the vocabulary must be a refusal with a sentence,
  * not a silent default.
@@ -61,7 +61,7 @@ export function meta() {
 const backendField = z.enum(["claude", "codex"]);
 const loginMethodField = z.enum(["claudeai", "console", "device"]);
 const pasteKindField = z.enum(["api_key", "access_token"]);
-/** Ruling 507: an account id, shaped the way `newId("ubc")` mints them. The
+/** Ruling 138: an account id, shaped the way `newId("ubc")` mints them. The
  *  store only ever looks one up together with the session's own user. */
 const accountField = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/);
 
@@ -131,10 +131,10 @@ export async function action({ request }: Route.ActionArgs) {
         const { toast } = disconnectGithubIdentity(db, actor);
         return { ok: true as const, intent, toast };
       }
-      // Ruling 127: the Agent-accounts intents. None of them toasts a success
+      // Ruling 137: the Agent-accounts intents. None of them toasts a success
       // here except the ones that ARE complete when they return; a sign-in is
       // only connected once the vendor's own binary says so, which the panel
-      // learns from /resources/backend-login. Ruling 507 added switching and
+      // learns from /resources/backend-login. Ruling 138 added switching and
       // naming accounts, and made a disconnect name the account it removes.
       case "backend-login-start": {
         startBackendSignIn(
@@ -242,7 +242,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const theme = rootData?.theme ?? "system";
   const csrf = useCsrfToken();
   const push = useToast();
-  // Ruling 532: Home's setup checklist opens `#agent-accounts`. Here, above
+  // Ruling 322: Home's setup checklist opens `#agent-accounts`. Here, above
   // the overlay, the reveal runs after the overlay's own effect has opened
   // its dialog (effects run child first), so the panel it scrolls to and
   // focuses is on screen.
@@ -265,7 +265,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
   const appearanceFetcher = useFetcher<ProfileActionData>();
   const passwordFetcher = useFetcher<ProfileActionData>();
   const githubFetcher = useFetcher<ProfileActionData>();
-  // Ruling 127: the Agent-accounts panel's own action fetcher. Its POLLING is a
+  // Ruling 137: the Agent-accounts panel's own action fetcher. Its POLLING is a
   // separate per-card fetcher inside the panel (`/resources/backend-login`) —
   // a `fetcher.load` on this one would overwrite the intent RESULT the toast
   // and the inline error settle on.
@@ -341,7 +341,7 @@ function isAgentAccountsAnchor(id: string): boolean {
   return id === AGENT_ACCOUNTS_ANCHOR;
 }
 
-/** Ruling 532: the overlay pins its head over the top of what it scrolls
+/** Ruling 322: the overlay pins its head over the top of what it scrolls
  *  (`.page-overlay .board-head`), so the panel comes to rest below it, where
  *  its title shows, instead of under it. */
 function revealUnderHead(id: string): HTMLElement | null {
@@ -354,5 +354,5 @@ function revealUnderHead(id: string): HTMLElement | null {
   return target;
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/profile");

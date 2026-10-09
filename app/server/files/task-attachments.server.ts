@@ -105,7 +105,7 @@ export function listTaskAttachments(
 }
 
 /**
- * Ruling 538: every file name a task's attachments hold, uncapped and
+ * Ruling 71: every file name a task's attachments hold, uncapped and
  * unordered (the display cap of {@link listTaskAttachments} would hide a
  * clash past its hundredth file), dot-files skipped as every reader does.
  */
@@ -143,7 +143,7 @@ export function countTaskAttachments(
  * same name by a later run re-attributes to the later run, which is the honest
  * reading (its content is the later run's).
  *
- * Deliberately UNCAPPED (ruling-105 review): this used to ride
+ * Deliberately UNCAPPED (ruling-78 review): this used to ride
  * `listTaskAttachments`, whose LIST_CAP display bound silently limited the
  * window to the newest 100 files — so a run that wrote more than 100 working
  * artifacts (the exact drowning case the prune targets) permanently orphaned
@@ -163,18 +163,18 @@ export function attachmentNamesSince(
   } catch {
     return []; // no attachments dir yet — the common case
   }
-  // Ruling 691: Viberr's own pictures of the pages this folder holds.
+  // Ruling 86: Viberr's own pictures of the pages this folder holds.
   const pagePictures = pageCapturesAmong(names);
   const inWindow: { name: string; at: string }[] = [];
   for (const name of names) {
     if (name.startsWith(".")) continue;
-    // Ruling 482: a gate log is Viberr's own evidence, written by the gate
+    // Ruling 17: a gate log is Viberr's own evidence, written by the gate
     // runner while any run may be in flight. Claiming it for that run would
     // name the run as its author and, for a deliverer, move `deliveredAt`.
     if (isGateLogName(name)) continue;
-    // Ruling 691: so is a page capture, written by the renderer's job after
+    // Ruling 86: so is a page capture, written by the renderer's job after
     // a delivery is stamped. No run made it, and a reviewer's window that
-    // held it would move `deliveredAt` by "re-saving" it (ruling 587). A
+    // held it would move `deliveredAt` by "re-saving" it (ruling 85). A
     // screenshot an agent named like one, of no page here, is that run's.
     if (pagePictures.has(name)) continue;
     try {
@@ -195,7 +195,7 @@ export function attachmentNamesSince(
 /** A machine-stamped output name (`page-…Z.png`, `console-…Z.log`,
  *  `element-…Z.png`, and whatever prefix a future MCP tool invents): a short
  *  lowercase prefix plus the MCP's dashed-ISO timestamp. A human- or
- *  agent-chosen filename never has this shape — the ruling-105 review showed
+ *  agent-chosen filename never has this shape — the ruling-78 review showed
  *  pinning specific prefixes just leaves the next sibling artifact drowning
  *  the panel, so the stamp itself is the classifier. */
 const MCP_STAMPED_NAME_RE =
@@ -206,7 +206,7 @@ const MCP_STAMPED_NAME_RE =
 const VISUAL_EVIDENCE_RE = /\.(?:png|jpe?g|webp|gif|pdf)$/i;
 
 /**
- * Owner ask 2026-08-31 (ruling 105): `--output-dir` IS the attachments store,
+ * Owner ask 2026-08-31 (ruling 78): `--output-dir` IS the attachments store,
  * so the browser MCP's own WORKING artifacts — the `page-*.yml` aria snapshots
  * and `console-*.log` dumps its tool calls write next to the screenshots —
  * were posted to humans as if the agent chose to share them, drowning the
@@ -222,9 +222,9 @@ export function isBrowserWorkingArtifact(name: string): boolean {
 }
 
 /**
- * Ruling 552: the bytes of one regular file in a task's attachments, read
+ * Ruling 19: the bytes of one regular file in a task's attachments, read
  * through a descriptor opened without following a symlink. The folder is
- * writable by every agent in the group (ruling 460), so a name in it can be a
+ * writable by every agent in the group (ruling 15), so a name in it can be a
  * link an agent planted to a file only the server may read: following it
  * handed that file to a coordinator's reader, and a relay copied it onto
  * another task as an ordinary file every agent can read. Null for a link, a
@@ -251,18 +251,19 @@ export function readAttachmentBytes(
   }
 }
 
-/** Ruling 552: the most of a text attachment read at all (then paged, 551). */
+/** Ruling 19: the most of a text attachment read at all (then paged, ruling
+ *  215). */
 const TEXT_READ_MAX_BYTES = 16 * 1024 * 1024;
-/** Ruling 552: the most of a workbook read (uploads stop at 10 MB; an agent's
+/** Ruling 19: the most of a workbook read (uploads stop at 10 MB; an agent's
  *  own export can be larger). */
 const XLSX_READ_MAX_BYTES = 25 * 1024 * 1024;
 
-/** Ruling 549: the most of one saved file read for its citations. */
+/** Ruling 78: the most of one saved file read for its citations. */
 const SAVED_TEXT_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
- * Ruling 549: the text of the files a run saved for people, where a run whose
- * delivery is files (ruling 531) cites its evidence. On AWSC-1 the findings
+ * Ruling 78: the text of the files a run saved for people, where a run whose
+ * delivery is files (ruling 128) cites its evidence. On AWSC-1 the findings
  * file named eleven browser snapshots and the report named none, so the prune
  * deleted all eleven and the reviewer rejected the findings for citing files
  * that were not there. Text files only (not the working artifacts
@@ -285,7 +286,7 @@ export function savedFilesText(
     } catch {
       continue;
     }
-    // Ruling 552: never through a link. Gone, a link or too large: it cites nothing.
+    // Ruling 19: never through a link. Gone, a link or too large: it cites nothing.
     const read = readAttachmentBytes(abs, SAVED_TEXT_MAX_BYTES);
     if (read && "bytes" in read) parts.push(read.bytes.toString("utf8"));
   }
@@ -295,7 +296,7 @@ export function savedFilesText(
 /**
  * Delete the working artifacts a finished run left behind, KEEPING any whose
  * exact filename the run cited (`citedIn` — reply text, evidence rows, the
- * timeline since the run started, and the files it saved, ruling 549). The persona's contract is "cite the exact
+ * timeline since the run started, and the files it saved, ruling 78). The persona's contract is "cite the exact
  * filename", so a citation is the agent saying "this file is for the humans".
  * Returns the names that survive (the list the producing event should claim)
  * and the names deleted. A file that cannot be deleted stays listed — the
@@ -333,7 +334,7 @@ export function pruneBrowserWorkingArtifacts(
   return { kept, pruned };
 }
 
-/** What a stray store-layout folder in a workspace holds (ruling 159). */
+/** What a stray store-layout folder in a workspace holds (ruling 78). */
 export interface StrayAttachmentsFolder {
   /** The absolute path of the folder inside the workspace checkout. */
   dir: string;
@@ -344,7 +345,7 @@ export interface StrayAttachmentsFolder {
 }
 
 /**
- * Ruling 159 (pass 35, F35-10): an older prompt named the attachments folder
+ * Ruling 78 (pass 35, F35-10): an older prompt named the attachments folder
  * by its STORE-relative path (`projects/<slug>/tasks/<key>/attachments`) and
  * called it reachable from the working directory; an agent whose cwd is the
  * repository checkout created exactly that tree inside the clone, and the
@@ -384,7 +385,7 @@ export function findStrayAttachmentsFolder(
 }
 
 /** Absolute path of one attachment, traversal-contained. Throws on an unsafe
- *  name (the route maps that to 404). Ruling 675: a name typed in another
+ *  name (the route maps that to 404). Ruling 76: a name typed in another
  *  Unicode form than the file was stored in finds that file. */
 export function resolveTaskAttachment(
   slug: string,
@@ -436,7 +437,7 @@ export interface WrittenAttachment {
 }
 
 /**
- * Ruling 675: the `content-disposition` of a served file, whatever its name
+ * Ruling 76: the `content-disposition` of a served file, whatever its name
  * holds. A header value is Latin-1, so a name with a letter outside it made
  * `new Response` throw: the task's own input on AWSC-117, a PDF named in
  * Turkish, answered 500 to the person who attached it. The quoted name is the
@@ -449,15 +450,15 @@ function attachmentDisposition(name: string, inline: boolean): string {
 }
 
 /**
- * Ruling 690: a stored file as the response that serves it, for every route
+ * Ruling 317: a stored file as the response that serves it, for every route
  * that serves one: a task's attachment, a file sent with a controller
- * message, a kept source. One home for the headers ruling 363 turns on. Only
+ * message, a kept source. One home for the headers ruling 317 turns on. Only
  * the whitelisted kinds render inline and everything else, a stored HTML page
  * above all, is a download of a generic type; `nosniff` and a sandbox ride
  * every response, so even an inline kind runs no script and loads no plugin
  * on the app's origin (a browser that will not show a sandboxed PDF inline
  * downloads it, which is acceptable); and `?download=1` asks for the save
- * dialog on an inline kind (ruling 105).
+ * dialog on an inline kind (ruling 317).
  */
 export function servedFileResponse(request: Request, name: string, bytes: Uint8Array): Response {
   const { type, inline } = attachmentContentType(name);
@@ -466,7 +467,7 @@ export function servedFileResponse(request: Request, name: string, bytes: Uint8A
     headers: {
       "content-type": type,
       "content-length": String(bytes.length),
-      // Ruling 675: a name outside Latin-1 cannot stand in a header as it is.
+      // Ruling 76: a name outside Latin-1 cannot stand in a header as it is.
       "content-disposition": attachmentDisposition(name, inline && !forceDownload),
       "x-content-type-options": "nosniff",
       "content-security-policy": "sandbox; default-src 'none'",
@@ -479,11 +480,11 @@ export function servedFileResponse(request: Request, name: string, bytes: Uint8A
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
- * 574: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored: trimmed,
- * and composed (ruling 675), so the name a Mac sends decomposed is stored the
- * way every reader types it. Ruling 533:
- * a task filed with its input checks every file here before its key is
- * allocated, so a refused file costs no key.
+ * 76: any kind is stored; the serving route decides what renders inline.
+ * Returns the name as it will be stored: trimmed, and composed, so the name a
+ * Mac sends decomposed is stored the way every reader types it. A task filed
+ * with its input checks every file here before its key is allocated, so a
+ * refused file costs no key.
  */
 export function checkAttachmentUpload(name: string, byteLength: number): string {
   const cleaned = storedFileName(name.trim());
@@ -498,7 +499,7 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
       `A file name cannot start with a dot: “${cleaned}” would be hidden from this task and from every agent run.`,
     );
   }
-  // Ruling 533: every name the store's resolver refuses is refused here, by a
+  // Ruling 76: every name the store's resolver refuses is refused here, by a
   // sentence, before anything is written or a task key is taken for it.
   if (/[\\/\0]/.test(cleaned)) {
     throw AppError.validation(
@@ -514,7 +515,7 @@ export function checkAttachmentUpload(name: string, byteLength: number): string 
 }
 
 /**
- * Rulings 533 and 573: every file a batch carries is checked before anything
+ * Ruling 76: every file a batch carries is checked before anything
  * is written, by the rules one upload meets, and the batch by its own: at most
  * {@link ATTACHMENT_BATCH_MAX} files and {@link ATTACHMENT_BATCH_MAX_BYTES},
  * and no two names one case apart. One refused file refuses the batch.
@@ -552,13 +553,13 @@ export function checkAttachmentBatch(
 }
 
 /**
- * Ruling 558: the names a writer is putting on a task for someone other than a
+ * Ruling 77: the names a writer is putting on a task for someone other than a
  * run (a person's upload, a relay, a take), from before the file lands until
  * the timeline entry that claims it is written.
  *
  * A completion credits its run with every file saved in the run's window
- * except those a person's note or a relay's comment claims (rulings 533 and
- * 538). Those writers put the file down first and the claim second, so a
+ * except those a person's note or a relay's comment claims (rulings 76 and
+ * 71). Those writers put the file down first and the claim second, so a
  * completion that listed the file between the two read a timeline with no
  * claim on it and took the file as the run's own: for a deliverer, its
  * delivery. Holding the name here closes that gap without reordering the
@@ -659,16 +660,16 @@ function landTaskAttachment(
   const checked = checkAttachmentUpload(name, data.byteLength);
   const dir = taskAttachmentsDir(slug, key, dataRoot);
   // The SAME traversal-refusing resolver the serving route uses, so a name
-  // this accepts is a name that route can serve and vice versa. Ruling 675: a
+  // this accepts is a name that route can serve and vice versa. Ruling 76: a
   // file already here under the same name in another Unicode form is the file
   // this replaces, never a second one no reader could tell from it.
   const abs = resolveStoredSegment(dir, checked);
   const cleaned = path.basename(abs);
   const replaced = existsSync(abs);
   if (replaced && refuseReplace) throw AppError.validation(refuseReplace);
-  // Ruling 460: the same directory agents drop evidence into, as their users.
+  // Ruling 15: the same directory agents drop evidence into, as their users.
   shareDirWithAgents(dir);
-  // Ruling 552: made whole under a fresh name, then renamed over the entry. A
+  // Ruling 19: made whole under a fresh name, then renamed over the entry. A
   // rename replaces the name itself, so a link an agent planted there is
   // replaced, never written through to the file it points at.
   const staging = path.join(dir, `.viberr-write-${randomBytes(6).toString("hex")}`);
@@ -682,7 +683,7 @@ function landTaskAttachment(
   } finally {
     closeSync(fd);
   }
-  // Ruling 558: the file it replaces is set aside, by a rename that moves the
+  // Ruling 77: the file it replaces is set aside, by a rename that moves the
   // entry and never follows it, so a claim that fails can put it back.
   const previous = replaced ? path.join(dir, `.viberr-prev-${randomBytes(6).toString("hex")}`) : null;
   try {
@@ -712,7 +713,7 @@ function quietly(step: () => void): void {
 }
 
 /**
- * Ruling 293 (pass 37, F37-128): the evidence a reviewer was ASKED to attach,
+ * Ruling 79 (pass 37, F37-128): the evidence a reviewer was ASKED to attach,
  * read as text.
  *
  * A task's attachments are where the proof lives. On this board the SHOP-37
@@ -740,23 +741,23 @@ export interface TaskAttachmentRead {
    *  model states half an evidence log as the whole of it. */
   truncated: boolean;
   text: string;
-  /** Ruling 551: where this page starts, when it is not the first. */
+  /** Ruling 117: where this page starts, when it is not the first. */
   offset?: number;
-  /** Ruling 551: the offset the next page starts at, on a truncated read. */
+  /** Ruling 117: the offset the next page starts at, on a truncated read. */
   nextOffset?: number;
-  /** Ruling 676: what this text leaves out of the file, when it embeds
+  /** Ruling 79: what this text leaves out of the file, when it embeds
    *  files a reader takes nothing from. Offsets count the text as returned. */
   leftOut?: string;
 }
 
-/** Ruling 676: a text with its embedded files left out, and the sentence that
+/** Ruling 79: a text with its embedded files left out, and the sentence that
  *  says so; `leftOut` is null when it embedded none. */
 interface EmbeddedFilesLeftOut {
   text: string;
   leftOut: string | null;
 }
 
-/** Ruling 676: an embedded file shorter than this stays in the text: a
+/** Ruling 79: an embedded file shorter than this stays in the text: a
  *  favicon or a one-pixel spacer costs a reader nothing. */
 const EMBEDDED_FILE_MIN_CHARS = 256;
 
@@ -773,7 +774,7 @@ const EMBEDDED_FILE_RE = new RegExp(
 );
 
 /**
- * Ruling 676: a text file as a reader takes it, with the files embedded in it
+ * Ruling 79: a text file as a reader takes it, with the files embedded in it
  * named instead of spelled out.
  *
  * A self-contained HTML page carries its images as `data:` URIs. Live on
@@ -804,7 +805,7 @@ function withoutEmbeddedFiles(text: string): EmbeddedFilesLeftOut {
 }
 
 /**
- * Ruling 551: one page of an attachment's text, from `offset`, and where the
+ * Ruling 117: one page of an attachment's text, from `offset`, and where the
  * next one starts. A read used to stop at the page and offer no way on: the
  * controller asked to copy the table at the end of a 55 KB result could read
  * 11 of its 25 rows, and said so.
@@ -814,7 +815,7 @@ function textPage(
   cutShort: boolean,
   offset: number,
 ): Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> {
-  // Ruling 624: a page is at most `READ_PAGE_BYTES` of UTF-8, the most a Codex
+  // Ruling 215: a page is at most `READ_PAGE_BYTES` of UTF-8, the most a Codex
   // run's code-mode tool output carries whole (it was 40,000 characters).
   const end = pageEnd(whole, offset);
   const page: Pick<TaskAttachmentRead, "text" | "truncated" | "offset" | "nextOffset"> = {
@@ -828,15 +829,15 @@ function textPage(
   return page;
 }
 
-/** Ruling 551: the most of a rendered file's text (a workbook's sheets, ruling
- *  533; a PDF's pages, ruling 629) a reader can page through. The whole of it
+/** Ruling 117: the most of a rendered file's text (a workbook's sheets, ruling
+ *  79; a PDF's pages, ruling 214) a reader can page through. The whole of it
  *  is rendered and sliced like any text, because the renderer stops at whole
  *  lines and a page cut at its budget would skip the rest of the line it
  *  stopped before. */
 const RENDERED_TEXT_MAX_CHARS = 16_000_000;
 
 /**
- * Ruling 533: the pictures a reader is handed as the picture itself. A person
+ * Ruling 79: the pictures a reader is handed as the picture itself. A person
  * on a board that delivers results often hands over a screenshot (a portal's
  * VM list, a spreadsheet they could not export), and a coordinator that could
  * only read text triaged that task from the file's name. The ceiling is the
@@ -930,7 +931,7 @@ function readCap(ext: string): number {
 /** How much of a file's head the text test reads: git's own window. */
 const BINARY_SNIFF_BYTES = 8_000;
 
-/** Ruling 574: a file whose bytes are not text, named with what a reader
+/** Ruling 79: a file whose bytes are not text, named with what a reader
  *  takes instead of guessed at from its name. */
 function binaryFile(name: string, ext: string, bytes: number, where: string): UnreadableFile {
   return {
@@ -954,10 +955,10 @@ function tooLargeToRead(name: string, ext: string, bytes: number, where: string)
 }
 
 /**
- * Ruling 573: one file for a reader, from bytes already in hand: text as
- * text, a spreadsheet as its sheets in CSV (ruling 533), an image as the image
- * after its own header is checked, and (ruling 574) any other file as text
- * unless its bytes are binary. The task's reader and the controller's
+ * Ruling 258: one file for a reader, from bytes already in hand: text as
+ * text, a spreadsheet as its sheets in CSV (ruling 79), an image as the image
+ * after its own header is checked, and any other file as text unless its
+ * bytes are binary. The task's reader and the controller's
  * reader of a message's files share it; `where` says where a person opens the
  * file instead ("on the task page", "in the conversation").
  */
@@ -999,7 +1000,7 @@ interface WholeText {
   text: string;
   /** Whether the renderer stopped before the file's end. */
   truncated: boolean;
-  /** Ruling 676: what was left out of it, when anything was. */
+  /** Ruling 79: what was left out of it, when anything was. */
   leftOut: string | null;
 }
 
@@ -1014,7 +1015,7 @@ function wholeText(name: string, ext: string, bytes: Buffer, where: string): Who
     }
     return { text: text.text, truncated: text.truncated, leftOut: null };
   }
-  // Ruling 629: a PDF reads as its text, through the poppler ruling 566 put in
+  // Ruling 214: a PDF reads as its text, through the poppler ruling 42 put in
   // the image, paged like any text.
   if (ext === ".pdf") {
     const text = pdfToText(bytes, RENDERED_TEXT_MAX_CHARS);
@@ -1023,9 +1024,9 @@ function wholeText(name: string, ext: string, bytes: Buffer, where: string): Who
     }
     return { text: text.text, truncated: text.truncated, leftOut: null };
   }
-  // Ruling 574: any other name reads as text unless it names a binary kind
+  // Ruling 79: any other name reads as text unless it names a binary kind
   // or its bytes say otherwise: a NUL in its head (git's own `-text` test,
-  // ruling 363's) marks a binary.
+  // ruling 317's) marks a binary.
   if (
     !READABLE_TEXT_EXTENSIONS.has(ext) &&
     (BINARY_EXTENSIONS.has(ext.slice(1)) || bytes.subarray(0, BINARY_SNIFF_BYTES).includes(0))
@@ -1037,7 +1038,7 @@ function wholeText(name: string, ext: string, bytes: Buffer, where: string): Who
 }
 
 /**
- * Ruling 684: the whole text of a file as a reader takes it, for a check that
+ * Ruling 267: the whole text of a file as a reader takes it, for a check that
  * must see all of it and not a page. Null for a file no reader takes as text:
  * a picture, a binary kind, a PDF with no text layer, one over its reader's
  * cap.
@@ -1050,7 +1051,7 @@ export function attachmentWholeText(name: string, bytes: Buffer): string | null 
 }
 
 /**
- * Ruling 706: the kinds of file whose indentation does not say which line
+ * Ruling 82: the kinds of file whose indentation does not say which line
  * continues which, by their names. In data and markup an indent is nesting,
  * and a search that took an indented line to continue the line above it
  * would head every place in a printed JSON list with the list's first line.
@@ -1076,20 +1077,20 @@ const INDENT_IS_NESTING = new Set([
   ".xlsx",
 ]);
 
-/** Ruling 706: what a search of one file answers: the places that hold the
+/** Ruling 82: what a search of one file answers: the places that hold the
  *  words, or a sentence saying why the file has no text to search. */
 export type AttachmentFind =
   | (TextFind & {
       /** Whether the file's text was cut where its rendering stopped, so the
        *  search covered that much of it. */
       truncated: boolean;
-      /** Ruling 676: what the text searched leaves out of the file. */
+      /** Ruling 79: what the text searched leaves out of the file. */
       leftOut: string | null;
     })
   | UnreadableFile;
 
 /**
- * Ruling 706: the places in one file that hold `words`, from bytes already in
+ * Ruling 82: the places in one file that hold `words`, from bytes already in
  * hand. The text searched is the text a read of the file pages
  * (`readAttachmentContent`), so a place's `offset` is an offset a read takes:
  * a PDF as its text, a workbook as CSV, an HTML page with its embedded files
@@ -1118,7 +1119,7 @@ export function findInAttachmentContent(
 
 /**
  * One attachment for a reader, or `null` when this task has no such file:
- * text as text, a spreadsheet as its sheets in CSV (ruling 533), an image as
+ * text as text, a spreadsheet as its sheets in CSV (ruling 79), an image as
  * the image. Throws nothing for anything else: the caller is told what the
  * file IS and that this channel does not carry it.
  */
@@ -1128,7 +1129,7 @@ export function readTaskAttachment(
   name: string,
   dataRoot?: string,
   offset = 0,
-  /** Ruling 597: a `deliveredAt` stamp, to read the file as that delivery
+  /** Ruling 198: a `deliveredAt` stamp, to read the file as that delivery
    *  held it rather than as the attachments folder holds it now. */
   delivery?: string,
 ): AttachmentContent | null {

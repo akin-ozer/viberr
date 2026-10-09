@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { consoleTodos } from "./console-todos";
 import type { LogLine } from "./runtime-types";
 
-describe("ruling 499: consoleTodos reads the agent's to-do list off its line", () => {
+describe("ruling 168: consoleTodos reads the agent's to-do list off its line", () => {
   it("reads Claude's TodoWrite: each step, its status, the count done and the step under way", () => {
     const line: LogLine = {
       t: "10:00:00",

@@ -52,7 +52,7 @@ import {
 import { userDisplayName } from "./user-display-name.server";
 
 /**
- * Ruling 503: the chained goals of ruling 99 become epics, once, at boot.
+ * Ruling 17: the chained goals of ruling 273 become epics, once, at boot.
  *
  * A goal was a chain the server advanced: its links became tasks one by one
  * as the work they waited on landed. An epic holds tasks and advances nothing,
@@ -69,7 +69,7 @@ import { userDisplayName } from "./user-display-name.server";
  *   becomes a task now, in the epic, waiting on what the link waited on, so
  *   the release engine starts it when that work lands exactly as the chain
  *   would have. It is made on the goal creator's authority, re-proven here as
- *   the chain re-proved it, and signed by the conversion (ruling 477(b)). A
+ *   the chain re-proved it, and signed by the conversion (ruling 273). A
  *   link that cannot be made that way (the chain was paused or closed, its
  *   creator lost task creation, it waited on something that can never
  *   happen) is listed in the epic's description instead, with its text, so a
@@ -118,7 +118,7 @@ export interface GoalEpicConversion {
 const LEGACY_LINK_STATUS_VALUES = ["pending", "active", "done", "failed", "skipped"] as const;
 const LEGACY_GOAL_STATUS_VALUES = ["active", "paused", "attention", "completed", "cancelled"] as const;
 
-/** A link as ruling 99 stored it, read tolerantly: a goal file is read once
+/** A link as ruling 273 stored it, read tolerantly: a goal file is read once
  *  more, by this conversion, and never written as a goal again. */
 const legacyLinkSchema = z.object({
   index: z.number().int().min(1),
@@ -199,7 +199,7 @@ function readLegacyGoal(dir: string, goalId: string): LegacyGoal | null {
   };
 }
 
-/** `goal-2 link 3`, the second spelling ruling 131(c) gave `blockedBy`. */
+/** `goal-2 link 3`, the second spelling ruling 55 gave `blockedBy`. */
 const LEGACY_LINK_REF_RE = /^goal-(\d+)\s+link\s+(\d+)$/i;
 
 function parseLegacyLinkRef(text: string): { goalId: string; index: number } | null {
@@ -743,7 +743,7 @@ async function rewriteWaits(db: DatabaseSync, state: ProjectConversion, scan: Ta
         : ` It waits on ${next.join(", ")}; Viberr releases it when every entry is done.`;
     } else if (dead) {
       // A wait that can never complete is a person's to settle (ruling
-      // 131(e)), and so is this one: nothing is left to hold the task, and
+      // 57), and so is this one: nothing is left to hold the task, and
       // nothing it waited on will ever happen.
       clearDependencies(parsed);
       if (fm.waiting === "none" && !fm.archived) fm.waiting = "human";

@@ -112,14 +112,14 @@ describe("runtime-registry", () => {
       else process.env[key] = value;
       delete RESTORE[key];
     }
-    // The ruling-142 cases below set DECLARED knobs (NODE_ENV, PORT, the data
+    // The ruling-141(a) cases below set DECLARED knobs (NODE_ENV, PORT, the data
     // root) and `start()` reads the validated env, which caches per process:
     // drop the cache so a later test never sees the values this one set.
     resetEnvCacheForTests();
   });
 
   /**
-   * Ruling 127: this module no longer knows anything about credentials. The
+   * Ruling 137: this module no longer knows anything about credentials. The
    * availability probe, its CLI-auth diagnostics and the two credential-adding
    * spawn-env builders are gone — a run's credential is a fact about the ONE
    * person it bills, resolved by `backend-credentials.server` and assembled
@@ -194,13 +194,13 @@ describe("runtime-registry", () => {
   });
 
   it("createAdapters builds BOTH adapters on the credential-free base env", async () => {
-    // Ruling 127: no config dir, no key, no home — the factory runs once per
+    // Ruling 137: no config dir, no key, no home — the factory runs once per
     // process and could only ever bake in an INSTANCE credential, which is the
     // thing the ruling removes. Whatever a run needs arrives per run on
     // `spec.env` from `runCredentialFor`.
     setEnv("ANTHROPIC_API_KEY", "sk-ant-instance-key");
     setEnv("CODEX_API_KEY", "instance-codex-key");
-    // Ruling 181: the CLI's state-db location is the person's too. An ambient
+    // Ruling 141: the CLI's state-db location is the person's too. An ambient
     // one (a host's own ~/.codex state) must not ride into a child.
     setEnv("CODEX_SQLITE_HOME", "/ambient/codex-state");
     setEnv("VIBERR_CLAUDE_TEST_MARKER", "present");
@@ -227,13 +227,13 @@ describe("runtime-registry", () => {
       // principal's, and arrives on spec.env.
       expect(env?.CLAUDE_CONFIG_DIR).toBeUndefined();
       expect(env?.CODEX_HOME).toBeUndefined();
-      // Ruling 181: the adapter sets CODEX_SQLITE_HOME per run, to the
+      // Ruling 141: the adapter sets CODEX_SQLITE_HOME per run, to the
       // principal's shared home; the base must not carry a host's own.
       expect(env?.CODEX_SQLITE_HOME).toBeUndefined();
     }
   });
 
-  it("ruling 142: filteredSpawnEnv strips every name the env schema declares, and keeps the undeclared rest", () => {
+  it("ruling 141(a): filteredSpawnEnv strips every name the env schema declares, and keeps the undeclared rest", () => {
     // U34-7 (pass 34): the JC-6 Developer's shell inherited the container's
     // NODE_ENV=production and PORT, and the project's own `vitest` and
     // `next start` broke on them until the agent unset them by hand. An
@@ -281,8 +281,8 @@ describe("runtime-registry", () => {
     );
   });
 
-  it("ruling 506: filteredSpawnEnv strips the CLI's prompt-cache and compaction switches, and no other cache setting", () => {
-    // Rulings 374(a) and 376(d): the cache lifetime and the compaction point
+  it("ruling 171: filteredSpawnEnv strips the CLI's prompt-cache and compaction switches, and no other cache setting", () => {
+    // Rulings 171 and 174: the cache lifetime and the compaction point
     // are the CLI's own choice, and Viberr sets none of these. None is
     // credential-shaped or declared, so one on the HOST rode into every Claude
     // child, where a developer's `DISABLE_PROMPT_CACHING=1` would turn caching
@@ -321,7 +321,7 @@ describe("runtime-registry", () => {
     expect(env.PATH).toBeTruthy();
   });
 
-  it("ruling 142: createAdapters builds BOTH adapters on a base that carries none of the app's own configuration", async () => {
+  it("ruling 141(a): createAdapters builds BOTH adapters on a base that carries none of the app's own configuration", async () => {
     // The same invariant where it bites: what each SDK is actually handed.
     // `VIBERR_BROWSER_EXECUTABLE` is the one declared knob a child's tool
     // depends on, and it reaches the browser MCP as argv from the parent, so
@@ -375,7 +375,7 @@ describe("runtime-registry", () => {
  * A specialist is ONE uniform machinery differentiated only by its capability +
  * resource grants (generic-agents, 2026-07-19). The two backends must therefore
  * be interchangeable at every seam Viberr controls, and where they genuinely
- * differ the difference must be DISCLOSED (ruling 51 / R18-5, and the capability
+ * differ the difference must be DISCLOSED (ruling 185 / R18-5, and the capability
  * matrix's "What differs between the two runtimes" list) rather than silent.
  *
  * These tests drive BOTH adapters — built by the production `createAdapters`
@@ -443,7 +443,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     return spec;
   }
 
-  it("ruling 185: withheld repo-write binds on Claude (tool deny) and is ADVISORY on Codex — which is not OS-confined", async () => {
+  it("ruling 183: withheld repo-write binds on Claude (tool deny) and is ADVISORY on Codex — which is not OS-confined", async () => {
     const withheld = await startOnBoth(
       specForGrants(withMode(DELIVERY_GRANTS, "execute-code-or-write-repo", "off")),
     );
@@ -456,7 +456,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     for (const tool of REPO_WRITE_TOOLS) {
       expect(granted.claude.disallowedTools ?? []).not.toContain(tool);
     }
-    // Codex (ruling 185): no OS confinement at all, withheld or granted. The
+    // Codex (ruling 183): no OS confinement at all, withheld or granted. The
     // withholding still reaches the run — it shapes the prompt and the
     // server-owned delivery gate — but it is advisory at the OS layer, and
     // every surface that renders the enforcement says so.
@@ -479,7 +479,7 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     );
     expect(withheld.codex.thread.webSearchMode).toBe("disabled");
     expect(withheld.codex.thread.networkAccessEnabled).toBeUndefined();
-    // Ruling 185: the run is not confined either way, so `webSearchMode` — the
+    // Ruling 183: the run is not confined either way, so `webSearchMode` — the
     // CLI's own tool switch, not the OS sandbox — is the whole of what binds
     // egress on Codex. It still binds, so the capability stays ENFORCED on
     // both backends.
@@ -538,11 +538,11 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     ]);
   });
 
-  it("ruling 185: the operator's write denial binds on Claude by kind; on Codex its contract is what withholds the shell", async () => {
+  it("ruling 144: the operator's write denial binds on Claude by kind; on Codex its contract is what withholds the shell", async () => {
     // R19-1 made this load-bearing: the operator stands beside a full clone of
     // the project repo it must never write. On Claude the adapter removes the
     // repo-mutation built-ins by RUN KIND. On Codex there is no OS confinement
-    // any more (ruling 185) — the operator is told, in its own contract, that
+    // any more (ruling 144) — the operator is told, in its own contract, that
     // the file-writing and shell tools are withheld from it, and its plan
     // executes server-side through gated tools.
     const operator = await startOnBoth({
@@ -559,9 +559,9 @@ describe("UC-16 backend parity (claude ↔ codex, one spec, two adapters)", () =
     );
     // …while the tool-loading path it needs to reach its mcp__viberr__* tools stays.
     expect(operator.claude.disallowedTools).not.toContain("ToolSearch");
-    // Codex (ruling 185): not confined, and its OS network is no longer forced
+    // Codex (ruling 144): not confined, and its OS network is no longer forced
     // off. The operator still has the CLI's shell, so since the sandbox went
-    // its contract (ruling 207(b)) is what keeps it off the tree.
+    // its contract (ruling 106) is what keeps it off the tree.
     expect(operator.codex.thread.sandboxMode).toBe("danger-full-access");
     expect(operator.codex.thread.networkAccessEnabled).toBeUndefined();
     expect(operator.claude.permissionMode).toBe("bypassPermissions");

@@ -226,12 +226,12 @@ describe("edit / role / reset / remove", () => {
   });
 
   /**
-   * Ruling 127: the credential ROWS cascade with the account, but the vendor's
+   * Ruling 137: the credential ROWS cascade with the account, but the vendor's
    * own sign-in file lives on the filesystem, where no foreign key reaches. Left
    * behind it is a live Claude.ai / ChatGPT credential on this server that no
    * row accounts for, that the person can never again reach a disconnect to
    * revoke, and that every backup of the runtime volume carries forward.
-   * Ruling 507: EVERY account goes, the ones not in use included — an inactive
+   * Ruling 138: EVERY account goes, the ones not in use included — an inactive
    * account's sign-in is as live a credential as the active one's.
    */
   it("delete retires the person's agent accounts, sign-in files included", async () => {
@@ -254,7 +254,7 @@ describe("edit / role / reset / remove", () => {
     );
     // The state two hosted sign-ins leave: a `login` row per account carrying
     // no secret, and the vendor client's own credential file inside each
-    // account's own home (ruling 507). The second one is the account in use.
+    // account's own home (ruling 138). The second one is the account in use.
     const credentialFiles: string[] = [];
     for (const email of ["work@example.com", "personal@example.com"]) {
       const target = loginTargetFor(db, user.id, "claude");
@@ -379,7 +379,7 @@ describe("edit / role / reset / remove", () => {
     expect(details.connectionsLost).toEqual(["acme"]);
     expect(details.defaultConnectionLost).toBe("acme");
     expect(details.projectsUnbound).toEqual(["viberr-core"]);
-    // Ruling 540: the unbound project has no credential now, and its board
+    // Ruling 223: the unbound project has no credential now, and its board
     // stops describing the token that went with the leaver.
     expect(readRepoHealth(db, "viberr-core")?.result).toEqual({
       status: "no_pat_configured",
@@ -389,13 +389,13 @@ describe("edit / role / reset / remove", () => {
 });
 
 /**
- * Ruling 154 (pass 35, G35-3): `users.github_handle` had one writer, GitHub
+ * Ruling 29 (pass 35, G35-3): `users.github_handle` had one writer, GitHub
  * OAuth sign-in, so on a deployment without GitHub sign-in a member's PR
- * approval could only ever land as `unlinked_handle` and ruling 68 was
+ * approval could only ever land as `unlinked_handle` and ruling 245 was
  * unreachable. The Edit-user save is now the org admin's door to the column,
  * and the verdict resolver must see what it wrote.
  */
-describe("ruling 154: an org admin links a GitHub handle", () => {
+describe("ruling 29: an org admin links a GitHub handle", () => {
   async function localUser(db: ReturnType<typeof makeDb>, name: string, email: string) {
     const { user } = await createLocalAccount(
       db,

@@ -120,7 +120,7 @@ class ClosesTheTaskOnFirstStart implements RuntimeAdapter {
   }
 }
 
-/** Ruling 177's closures, each the way it reaches a task file. Every one
+/** Ruling 52's closures, each the way it reaches a task file. Every one
  *  enqueues its write before it first awaits, which is what keeps the adapter
  *  above deterministic. */
 async function moveToTerminal(taskKey: string): Promise<void> {
@@ -171,7 +171,7 @@ beforeEach(async () => {
   // Project the project so getProject() has its stages (terminal-stage checks).
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 137: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -335,7 +335,7 @@ describe("scheduleTaskAction", () => {
     ).rejects.toThrow(/future/i);
   });
 
-  it("ruling 177 / U36-9 (pass 36): a closed task refuses the schedule with the closure sentence, naming the terminal stage as the board calls it", async () => {
+  it("ruling 52 / U36-9 (pass 36): a closed task refuses the schedule with the closure sentence, naming the terminal stage as the board calls it", async () => {
     // Live 19:37Z: the controller's schedule_task_action on shipped HLC-15 was
     // refused "That task is already Done — nothing to schedule." on a board
     // whose last stage is Shipped. Canary: put the literal sentence back.
@@ -416,7 +416,7 @@ describe("cancelScheduledAction", () => {
 });
 
 describe("fireDueSchedules", () => {
-  it("ruling 133: a scheduled run-agent for the ENGAGED deliverer fires at a stage its profile does not declare", async () => {
+  it("ruling 181: a scheduled run-agent for the ENGAGED deliverer fires at a stage its profile does not declare", async () => {
     // Canary: reinstate the unconditional `assertStageEligible` in
     // dispatchAgentRun (the occurrence fails at fire time).
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -452,7 +452,7 @@ describe("fireDueSchedules", () => {
     expect(timeline("VIB-1").some((e) => /Scheduled action failed/.test(e.text))).toBe(false);
   });
 
-  it("ruling 131(d): a due run-operator occurrence on a HELD task is retired `fired` as skipped-held with no run; a run-agent occurrence stands", async () => {
+  it("ruling 115: a due run-operator occurrence on a HELD task is retired `fired` as skipped-held with no run; a run-agent occurrence stands", async () => {
     // Canary: drop the `refusedHeld` branch (the note and the outcome vanish).
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -474,7 +474,7 @@ describe("fireDueSchedules", () => {
     expect(fired.map((e) => e.details?.outcome).sort()).toEqual(["claimed", "skipped-held"]);
   });
 
-  it("ruling 141: a due run-operator occurrence on a task with an OPEN packet is retired `fired` as skipped-packet, with no run and no retry", async () => {
+  it("ruling 115: a due run-operator occurrence on a task with an OPEN packet is retired `fired` as skipped-packet, with no run and no retry", async () => {
     // Canary: drop the `refusedPacket` arm (the note and the outcome vanish).
     // Canary 2: route the refusal through the retry branch (`ok = false` on
     // an open-packet refusal) — a retry is spent and the status is not `fired`.
@@ -687,7 +687,7 @@ describe("fireDueSchedules", () => {
     expect(note?.text).toContain("names no agent to run");
   });
 
-  it("ruling 152(c): a run-agent occurrence fired into a known-exhausted backend retires `fired` as held-quota, spends no retry, and the hold's own schedule carries the retry", async () => {
+  it("ruling 151: a run-agent occurrence fired into a known-exhausted backend retires `fired` as held-quota, spends no retry, and the hold's own schedule carries the retry", async () => {
     // Canary: route the hold through the 409 arm and the occurrence goes back
     // to pending, minting a fresh hold and a fresh schedule row every tick.
     const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
@@ -917,7 +917,7 @@ describe("fireDueSchedules", () => {
     // The claim-time re-check (the stale-projection tests below) closes the
     // window it can see. This is the one it cannot: both occurrences were
     // claimed while the task was live, and the FIRST drive's turn closes the
-    // task before the second is driven. Ruling 177 refuses every trigger on a
+    // task before the second is driven. Ruling 52 refuses every trigger on a
     // closed task, so `runOperator` refuses — and the occurrence's own record
     // has to match, because the claim already wrote "Scheduled action
     // starting" to the timeline and an audit row saying `claimed`. A `fired`
@@ -1107,19 +1107,19 @@ describe("fireDueSchedules", () => {
   });
 });
 
-/* ------ ruling 487 (F40-65): the operator schedules its own task's runs ------ */
+/* ------ ruling 125 (F40-65): the operator schedules its own task's runs ------ */
 
 /**
  * Live on WEB-9 the task had to read a deployed cron run at 11:17Z and another
  * at 12:17Z. The operator had no scheduling tool, so it asked the owner to
  * route a 12:25Z run through the controller, and then opened a packet only to
  * record the wait. These are its two tools, driven through the real toolkit:
- * the same entry, firing path, audit row and timeline line as ruling 153's,
+ * the same entry, firing path, audit row and timeline line as ruling 264's,
  * attributed to the operator and gated like its immediate dispatch.
  */
-describe("ruling 487: the operator's schedule_task_action and cancel_task_schedule", () => {
+describe("ruling 125: the operator's schedule_task_action and cancel_task_schedule", () => {
   // `operatorAuthority()` grants no `dispatch-agents`, which resolves to the
-  // catalog default `direct` (ruling 98(b)).
+  // catalog default `direct` (ruling 124).
   const toolkitFor = (taskKey: string, authority = operatorAuthority()) =>
     buildOperatorToolkit({ db: store.db, ctx: dctx(), projectSlug: store.slug, taskKey, authority, orgMcpServers: {} });
   const replyText = z
@@ -1199,7 +1199,7 @@ describe("ruling 487: the operator's schedule_task_action and cancel_task_schedu
       createdBy: "operator",
       createdByLabel: "operator",
     });
-    // The same timeline line as ruling 153's, written by the operator.
+    // The same timeline line as ruling 264's, written by the operator.
     const note = timeline("VIB-1")[0]!;
     expect(note.actor).toEqual({ kind: "operator" });
     expect(note.text).toBe(

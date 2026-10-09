@@ -4,6 +4,7 @@ import { logger } from "~/server/logging/logger.server";
 import {
   deleteSetting,
   getSetting,
+  listSettings,
   setSetting,
 } from "~/server/settings/instance-settings.server";
 
@@ -20,9 +21,10 @@ import {
  *
  * This module keeps the LATEST observed rate-limit reading per backend in the
  * generic `instance_settings` KV store ("the next instance knob is a key, not
- * a column" — instance-settings.server.ts, whose get/set/delete accessors this
- * module uses rather than re-deriving the same tolerant parse and upsert). The
- * sink records; Insights reads.
+ * a column" — instance-settings.server.ts, whose accessors this module uses
+ * rather than re-deriving the same tolerant parse and upsert), and the
+ * refusals below one per account (`accountKey`). The sink records; Insights
+ * reads.
  *
  * Honesty rules, same shape as `backends` on /resources/health (R17-5):
  *  - a backend with NO reading renders neutral ("no reading yet"), never as
@@ -32,8 +34,8 @@ import {
  *
  * ## D5 (pass 31): the exhaustion the card could not see
  *
- * The live `rate_limit_event` channel is CLAUDE-only. (Since ruling 604 a
- * Codex run's rollout supplies live readings too, but only once it makes a
+ * The live `rate_limit_event` channel is CLAUDE-only. (A Codex run's rollout
+ * supplies live readings too, ruling 161(b), but only once it makes a
  * model call.) A Codex subscription that is already spent never emits one — it fails the run with a sentence naming
  * the limit and the date it reopens ("You've hit your usage limit … try again
  * at Sep 18th, 2026 5:20 PM"). So the panel read "no reading yet" for codex on
@@ -55,7 +57,22 @@ const CREDENTIAL_REFUSED_KEY_PREFIX = "backendCredentialRefused.";
 export const BACKENDS = ["claude", "codex"] as const;
 export type QuotaBackend = (typeof BACKENDS)[number];
 
-/** Ruling 130(d) (pass 34): WHOSE account a record is about. Under ruling 127
+/**
+ * Ruling 160(a): an exhaustion or a credential refusal is a record about ONE
+ * account, so each is kept under the person whose account the run billed
+ * (`<prefix><backend>.<credentialUserId>`), never in one slot per backend.
+ * One slot let a second person's refusal replace the first person's, which
+ * lifted the first person's dispatch hold (ruling 151), and let anybody's
+ * completed run delete it. The person stands for the account: exactly one of
+ * their accounts bills a backend (ruling 138), and ruling 160(b) retires the
+ * records whenever that account changes. A record written under the old
+ * per-backend key is never read.
+ */
+function accountKey(prefix: string, backend: QuotaBackend, credentialUserId: string): string {
+  return `${prefix}${backend}.${credentialUserId}`;
+}
+
+/** Ruling 160(a) (pass 34): WHOSE account a record is about. Under ruling 137
  *  a run bills one person's credential, so an instance-wide row that named no
  *  principal presented one person's refusal as everyone's. Stripped from the
  *  unauthenticated health body (`stripQuotaPrincipals`); shown to org admins
@@ -77,9 +94,9 @@ const readingSchema = z.object({
   /** Unix seconds when the window resets; null when omitted. */
   resetsAt: z.number().nullable(),
   isUsingOverage: z.boolean(),
-  /** Ruling 608: every window the provider reported with this reading,
+  /** Ruling 161(b): every window the provider reported with this reading,
    *  shortest first (Codex's five-hour and weekly windows, and the plan
-   *  windows a Claude run's CLI reports, ruling 611); the fields above are the
+   *  windows a Claude run's CLI reports, ruling 161(a)); the fields above are the
    *  binding one. Absent on a reading that knew one. */
   windows: z
     .array(
@@ -108,7 +125,7 @@ const exhaustionSchema = z.object({
   /** How `resetsAt` was derived — `"exact"` for a machine instant the provider
    *  emitted (or the SDK's own `resetsAt`), `"prose"` for one reconstructed
    *  from wall-clock words whose timezone it never named, `"clock"` (ruling
-   *  130(d)) for a UTC wall-clock time ("resets 11:50am (UTC)") resolved to the
+   *  160(a)) for a UTC wall-clock time ("resets 11:50am (UTC)") resolved to the
    *  next occurrence at or after the observation. Records written before this
    *  field existed parse as null and are treated exactly like `"prose"`:
    *  unknown provenance gets the conservative handling, never the precise one. */
@@ -126,15 +143,16 @@ export type BackendQuotaExhaustion = z.infer<typeof exhaustionSchema>;
  * F32-4 (pass 32): the provider REFUSED a run on this backend for its
  * CREDENTIAL — an expired refresh token, a revoked key, a 401. The connection
  * counts on the health probe and `userBackendHealth` judge row/file PRESENCE
- * only (ruling 78: no synthetic token probe; ruling 127 made the reading
+ * only (ruling 149: no synthetic token probe; ruling 137 made the reading
  * per-person without changing that), so after a real refusal both kept
  * answering "connected" and the controller told the admin the credential was
  * fine ten minutes after a run had died on it. Same shape as
  * exhaustion: derived from the failed run, carrying its id and the provider's
- * own sentence; retired by the next run that COMPLETES on the backend (the real
- * run is the re-probe) or by the person it names changing that credential
- * (ruling 165, `retireBackendRecordsFor`), and by nothing else — a dead
- * credential does not heal with time.
+ * own sentence, and kept per account (`accountKey`); retired by the next run
+ * that COMPLETES on the backend billed to the same account (the real run is the
+ * re-probe) or by the person it names changing that credential (ruling 160(b),
+ * `retireBackendRecordsFor`), and by nothing else — a dead credential does not
+ * heal with time.
  */
 const credentialRefusalSchema = z.object({
   ...principalFields,
@@ -149,27 +167,31 @@ export type BackendCredentialRefusal = z.infer<typeof credentialRefusalSchema>;
 
 export interface BackendQuotaRow {
   backend: QuotaBackend;
-  /** Null until a run on this backend has ever reported a reading. */
+  /** Null until a run on this backend has ever reported a reading (on a read
+   *  for one person, until one of THEIR runs has). */
   reading: BackendRateLimitReading | null;
   /**
-   * F32-4: set while the last thing this backend told us was "your credential
-   * is not accepted". Cleared by a run that completes on the backend, or by the
-   * person it names changing their credential on it (ruling 165).
+   * F32-4: set while the last thing this backend told an account was "your
+   * credential is not accepted": the person's own record on a read for one
+   * person, else the latest one standing on any account (ruling 160(a)).
+   * Cleared by a run billed to that account that completes on the backend, or
+   * by the person it names changing their credential on it (ruling 160(b)).
    */
   credentialRefused: BackendCredentialRefusal | null;
   /**
-   * D5: set while the last thing this backend told us was "you are over your
-   * limit". Cleared by the only honest re-probe there is — a real run that
-   * completes (the same rule model availability uses, ruling 19) — by the
-   * person it names changing their credential on the backend (ruling 165), by
-   * the packet option that states the window has reset (ruling 152(c)), and
+   * D5: set while the last thing this backend told an account was "you are
+   * over your limit", chosen like `credentialRefused`. Cleared by the only
+   * honest re-probe there is — a real run billed to that account that
+   * completes (the same rule model availability uses, ruling 149) — by the
+   * person it names changing their credential on the backend (ruling 160(b)),
+   * by the packet option that states the window has reset (ruling 160(b)), and
    * dropped by the reader once the provider's own reset instant has passed
    * (plus a grace window for a prose-derived one) or, for a record that named
    * no reset at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
    */
   exhausted: BackendQuotaExhaustion | null;
   /**
-   * Ruling 481(d) (F40-50): the window `reading` describes has reset since it
+   * Ruling 161(c) (F40-50): the window `reading` describes has reset since it
    * was read (`readingWindowReset`). The reading is kept, as history, but no
    * surface presents its utilization as current: Profile and Insights word it
    * in the past tense and draw no bar.
@@ -178,7 +200,7 @@ export interface BackendQuotaRow {
 }
 
 /**
- * Ruling 481(d) (F40-50): has the window this reading was read in reset?
+ * Ruling 161(c) (F40-50): has the window this reading was read in reset?
  *
  * Only an exhaustion used to age against its reset (`exhaustionExpired`); a
  * reading was returned untouched, so on an idle instance Profile said "The
@@ -197,17 +219,17 @@ function readingWindowReset(
 }
 
 /**
- * Ruling 612: a reading ages window by window.
+ * Ruling 161(c): a reading ages window by window.
  *
- * Since rulings 608 and 611 a reading lists every window it knows, and ruling
- * 481(d) aged it as one piece by its binding window's reset. So once the
- * binding five-hour window reset, Profile and Insights read "five hour window
- * reset" and dropped the weekly figure beside it, which was still current; and
- * a lapsed window kept the figure of a window that is over. Each window now
- * ages on its own reset: a lapsed one keeps its name and reset but loses its
- * figure (no run has reported on the new window), and when the binding window
- * is the one that lapsed, the current window closest to its limit binds in its
- * place. A reading with no current figure left is aged whole, as before.
+ * A reading lists every window it knows, and it used to be aged as one piece by
+ * its binding window's reset. So once the binding five-hour window reset,
+ * Profile and Insights read "five hour window reset" and dropped the weekly
+ * figure beside it, which was still current; and a lapsed window kept the
+ * figure of a window that is over. Each window now ages on its own reset: a
+ * lapsed one keeps its name and reset but loses its figure (no run has reported
+ * on the new window), and when the binding window is the one that lapsed, the
+ * current window closest to its limit binds in its place. A reading with no
+ * current figure left is aged whole, as before.
  */
 function agedReading(reading: BackendRateLimitReading | null, nowMs: number): BackendRateLimitReading | null {
   if (!reading?.windows?.length || !Number.isFinite(nowMs)) return reading;
@@ -394,7 +416,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
     const at = epoch[1]!.length >= 12 ? Math.round(n / 1000) : Math.round(n);
     return { at, precision: "exact" };
   }
-  // Ruling 130(d): the UTC wall-clock shape Claude's session-limit refusal
+  // Ruling 160(a): the UTC wall-clock shape Claude's session-limit refusal
   // uses ("resets 11:50am (UTC)"): the next occurrence at or after the
   // observation, precision `clock` (a real UTC time, rendered to the minute,
   // retired with the prose grace because the day is inferred).
@@ -418,7 +440,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
   if (ms != null && Number.isFinite(ms)) {
     return { at: Math.round(ms / 1000), precision: "prose" };
   }
-  // G35-4 (pass 35, ruling 152(c)): the TIME-ONLY shape a five-hour Codex
+  // G35-4 (pass 35, ruling 151): the TIME-ONLY shape a five-hour Codex
   // window refuses with ("try again at 6:18 PM"): no month, no day, no zone.
   // The Codex CLI prints the wall clock of the PROCESS that ran it (verified
   // live: "6:18 PM" in a UTC container was 18:18Z), so the hour is resolved
@@ -441,7 +463,7 @@ export function parseQuotaResetAt(text: string, observedAtIso?: string): QuotaRe
   return { at: Math.round(local.getTime() / 1000), precision: "clock" };
 }
 
-/** Ruling 130(d): the rows without their principal, for the unauthenticated
+/** Ruling 160(a): the rows without their principal, for the unauthenticated
  *  health body (which documents "never data"). */
 export function stripQuotaPrincipals(rows: BackendQuotaRow[]): BackendQuotaRow[] {
   const strip = <T extends { credentialUserId: string | null; credentialLabel: string | null }>(
@@ -472,16 +494,20 @@ export function recordBackendRateLimit(
   }
 }
 
-/** D5: a run on this backend was REFUSED for being over its limit. Best-effort,
- *  exactly like `recordBackendRateLimit` — this rides the run-line persist path
- *  and must never be able to fail it. */
+/** D5: a run on this backend was REFUSED for being over its limit, recorded
+ *  under the account it billed (ruling 160(a), `accountKey`). A run that billed
+ *  nobody never reached a provider (ruling 137(b)), so it has no account to be
+ *  recorded against and records nothing. Best-effort, exactly like
+ *  `recordBackendRateLimit` — this rides the run-line persist path and must
+ *  never be able to fail it. */
 export function recordBackendQuotaExhaustion(
   db: DatabaseSync,
   backend: QuotaBackend,
   exhaustion: BackendQuotaExhaustion,
 ): void {
+  if (!exhaustion.credentialUserId) return;
   try {
-    setSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`, exhaustion);
+    setSetting(db, accountKey(EXHAUSTED_KEY_PREFIX, backend, exhaustion.credentialUserId), exhaustion);
   } catch (error) {
     logger.warn("backend quota exhaustion not recorded", {
       backend,
@@ -491,17 +517,20 @@ export function recordBackendQuotaExhaustion(
 }
 
 /**
- * D5: a run on this backend just COMPLETED, so the account is demonstrably not
- * refusing work any more. That real run is the re-probe (ruling 19's rule for
- * model availability, applied to the same kind of claim) — there is no synthetic
- * check, and none is wanted. Best-effort.
+ * D5: a run on this backend billed to this person just COMPLETED, so their
+ * account is demonstrably not refusing work any more. That real run is the
+ * re-probe (ruling 149's rule for model availability, applied to the same kind
+ * of claim) — there is no synthetic check, and none is wanted. It proves
+ * nothing about anybody else's account, so only this person's record goes
+ * (ruling 160(a)). Best-effort.
  */
 export function clearBackendQuotaExhaustion(
   db: DatabaseSync,
   backend: QuotaBackend,
+  credentialUserId: string,
 ): void {
   try {
-    deleteSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`);
+    deleteSetting(db, accountKey(EXHAUSTED_KEY_PREFIX, backend, credentialUserId));
   } catch (error) {
     logger.warn("backend quota exhaustion not cleared", {
       backend,
@@ -510,15 +539,18 @@ export function clearBackendQuotaExhaustion(
   }
 }
 
-/** F32-4: a run on this backend was REFUSED for its credential. Best-effort,
- *  exactly like the quota writers — this rides the run-line persist path. */
+/** F32-4: a run on this backend was REFUSED for its credential, recorded under
+ *  the account it billed exactly like an exhaustion (and, like one, not at all
+ *  for a run that billed nobody). Best-effort, exactly like the quota writers —
+ *  this rides the run-line persist path. */
 export function recordBackendCredentialRefusal(
   db: DatabaseSync,
   backend: QuotaBackend,
   refusal: BackendCredentialRefusal,
 ): void {
+  if (!refusal.credentialUserId) return;
   try {
-    setSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`, refusal);
+    setSetting(db, accountKey(CREDENTIAL_REFUSED_KEY_PREFIX, backend, refusal.credentialUserId), refusal);
   } catch (error) {
     logger.warn("backend credential refusal not recorded", {
       backend,
@@ -527,14 +559,16 @@ export function recordBackendCredentialRefusal(
   }
 }
 
-/** F32-4: a run COMPLETED on this backend, so its credential is demonstrably
- *  accepted again. Best-effort. */
+/** F32-4: a run billed to this person COMPLETED on this backend, so their
+ *  credential is demonstrably accepted again; nobody else's is touched
+ *  (ruling 160(a)). Best-effort. */
 export function clearBackendCredentialRefusal(
   db: DatabaseSync,
   backend: QuotaBackend,
+  credentialUserId: string,
 ): void {
   try {
-    deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
+    deleteSetting(db, accountKey(CREDENTIAL_REFUSED_KEY_PREFIX, backend, credentialUserId));
   } catch (error) {
     logger.warn("backend credential refusal not cleared", {
       backend,
@@ -544,7 +578,7 @@ export function clearBackendCredentialRefusal(
 }
 
 /**
- * Ruling 165: the person the records name changed their credential slot on
+ * Ruling 160(b): the person the records name changed their credential slot on
  * this backend — a confirmed sign-in, a pasted key, a disconnect, an account
  * removal — so an exhaustion or credential refusal observed on the PREVIOUS
  * credential is no longer evidence about the one that bills the next run.
@@ -553,13 +587,12 @@ export function clearBackendCredentialRefusal(
  * through and the notice contradicted them, because a completed run was the
  * record's only retirement short of the instant the OLD account had named.
  *
- * Scoped like the dispatch hold (ruling 146): only a record naming THIS person
- * is retired. A record naming somebody else, or nobody (a row older than
- * ruling 130(d)), is untouched — nothing here knows whose account it was
- * about. Signing back into the SAME spent account retires it too: Viberr never
- * stores the vendor identity behind a sign-in (ruling 127), so it cannot tell,
- * and one refused run re-records the window, which is cheaper than a notice
- * that lies about a new account. The dispatch hold rests on the same record,
+ * Scoped like the dispatch hold (ruling 151): only THIS person's records are
+ * retired (they are kept per account, `accountKey`); another person's are
+ * untouched — their account did not change. Signing back into the SAME spent
+ * account retires it too: Viberr never stores the vendor identity behind a
+ * sign-in (ruling 137), so it cannot tell, and one refused run re-records the
+ * window, which is cheaper than a notice that lies about a new account. The dispatch hold rests on the same record,
  * so it lifts with it: the next run on the new credential is the real probe.
  *
  * Best-effort, like every writer here: a credential change must never fail on
@@ -571,20 +604,10 @@ export function retireBackendRecordsFor(
   credentialUserId: string,
 ): void {
   try {
-    const exhausted = getSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`, exhaustionSchema);
-    if (exhausted?.credentialUserId === credentialUserId) {
-      deleteSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`);
-    }
-    const refused = getSetting(
-      db,
-      `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`,
-      credentialRefusalSchema,
-    );
-    if (refused?.credentialUserId === credentialUserId) {
-      deleteSetting(db, `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`);
-    }
-    // Ruling 294 (F37-129): the UTILIZATION READING goes with the account too,
-    // and it did not. Ruling 165's own sentence is "the refusal Viberr observed
+    deleteSetting(db, accountKey(EXHAUSTED_KEY_PREFIX, backend, credentialUserId));
+    deleteSetting(db, accountKey(CREDENTIAL_REFUSED_KEY_PREFIX, backend, credentialUserId));
+    // Ruling 161 (F37-129): the UTILIZATION READING goes with the account too,
+    // and it did not. Ruling 160(b)'s own sentence is "the refusal Viberr observed
     // on the slot goes with it" — and a reading is an observation ABOUT that
     // slot in exactly the same way. It was applied to two of the three records
     // this module keeps and not the third, which is this pass's shape a fourth
@@ -656,8 +679,24 @@ function exhaustionExpired(
   );
 }
 
+/** The record observed last, or null. */
+function latestRecord<T extends { observedAt: string }>(records: T[]): T | null {
+  const at = (record: T) => Date.parse(record.observedAt) || 0;
+  let latest: T | null = null;
+  for (const record of records) {
+    if (!latest || at(record) > at(latest)) latest = record;
+  }
+  return latest;
+}
+
 /**
  * The latest reading per backend; `reading: null` when none was ever seen.
+ *
+ * Ruling 160(a): the refusals are kept per account. Given `credentialUserId`,
+ * a row carries only that person's records, and the backend's one reading only
+ * when it is about their account (Profile's card, the remedy a failed run's
+ * packet quotes). Without it, a row carries the latest record still standing on
+ * any account, naming whose it is (Insights, the health body, `instance_health`).
  *
  * `nowIso` (the caller's generated-at instant) retires an exhaustion record once
  * the provider's OWN reset instant has passed: the window it named is over, so
@@ -666,41 +705,42 @@ function exhaustionExpired(
  * unknown), and a record that named no instant at all expires on age
  * (`UNDATED_EXHAUSTION_TTL_MS`) rather than waiting for a completed run. The
  * same instant marks a reading whose own window has reset
- * (`readingWindowReset`, ruling 481(d)): the one home Profile and Insights
+ * (`readingWindowReset`, ruling 161(c)): the one home Profile and Insights
  * both read, so neither presents a closed window as current. A reading that
  * lists its windows ages each one on its own reset first (`agedReading`,
- * ruling 612).
+ * ruling 161(c)).
  */
 export function latestBackendRateLimits(
   db: DatabaseSync,
   nowIso?: string,
+  credentialUserId?: string,
 ): BackendQuotaRow[] {
   const nowMs = nowIso ? Date.parse(nowIso) : Date.now();
+  const recordsOf = <S extends z.ZodType>(prefix: string, backend: QuotaBackend, schema: S): z.infer<S>[] => {
+    if (credentialUserId === undefined) return listSettings(db, `${prefix}${backend}.`, schema);
+    const own = getSetting(db, accountKey(prefix, backend, credentialUserId), schema);
+    return own === null ? [] : [own];
+  };
   return BACKENDS.map((backend) => {
-    const reading = agedReading(getSetting(db, `${KEY_PREFIX}${backend}`, readingSchema), nowMs);
-    const stored = getSetting(
-      db,
-      `${EXHAUSTED_KEY_PREFIX}${backend}`,
-      exhaustionSchema,
-    );
-    const expired = stored != null && exhaustionExpired(stored, nowMs);
-    const credentialRefused = getSetting(
-      db,
-      `${CREDENTIAL_REFUSED_KEY_PREFIX}${backend}`,
-      credentialRefusalSchema,
+    const stored = getSetting(db, `${KEY_PREFIX}${backend}`, readingSchema);
+    const reading = agedReading(
+      credentialUserId === undefined || stored?.credentialUserId === credentialUserId ? stored : null,
+      nowMs,
     );
     return {
       backend,
       reading,
-      credentialRefused,
-      exhausted: expired ? null : stored,
+      credentialRefused: latestRecord(recordsOf(CREDENTIAL_REFUSED_KEY_PREFIX, backend, credentialRefusalSchema)),
+      exhausted: latestRecord(
+        recordsOf(EXHAUSTED_KEY_PREFIX, backend, exhaustionSchema).filter((record) => !exhaustionExpired(record, nowMs)),
+      ),
       readingWindowReset: readingWindowReset(reading, nowMs),
     };
   });
 }
 
 /**
- * G35-4 / ruling 152(c) (pass 35): the hold a dispatch must honour.
+ * G35-4 / ruling 151 (pass 35): the hold a dispatch must honour.
  *
  * Live, nine Codex deliveries were dispatched one after another into a window
  * the instance had already recorded as spent: each paid a clone, an adapter
@@ -715,10 +755,11 @@ export function latestBackendRateLimits(
  * SHOWING a spent window too long is cheap and holding a dispatch too long
  * is not).
  *
- * Ruling 146: a refusal is a statement about ONE person's account, so a hold
+ * Ruling 151: a refusal is a statement about ONE person's account, so a hold
  * applies to the account it names. Pass the principal the dispatch would
- * bill: a record naming a different person holds nothing for this one, and a
- * record naming nobody (an older row) holds every dispatch on the backend.
+ * bill: only the record kept for that account is read (ruling 160(a),
+ * `accountKey`), so another person's refusal holds nothing for this one and
+ * another person's completed run cannot lift this one's hold.
  */
 export interface BackendDispatchHold {
   /** Unix MILLISECONDS the window reopens; null when the provider named none
@@ -740,15 +781,16 @@ export function backendDispatchHold(
   backend: QuotaBackend,
   input: {
     nowMs?: number;
-    /** The user the dispatch bills (ruling 127); the hold is scoped to it. */
+    /** The user the dispatch bills (ruling 137); the hold is scoped to it. */
     credentialUserId: string;
   },
 ): BackendDispatchHold | null {
-  const stored = getSetting(db, `${EXHAUSTED_KEY_PREFIX}${backend}`, exhaustionSchema);
+  const stored = getSetting(
+    db,
+    accountKey(EXHAUSTED_KEY_PREFIX, backend, input.credentialUserId),
+    exhaustionSchema,
+  );
   if (!stored) return null;
-  if (stored.credentialUserId !== null && stored.credentialUserId !== input.credentialUserId) {
-    return null;
-  }
   const nowMs = input.nowMs ?? Date.now();
   if (!Number.isFinite(nowMs)) return null;
   if (stored.resetsAt != null) {

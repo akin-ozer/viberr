@@ -11,14 +11,14 @@ import { AGENT_PROFILE_KNOWN_KEYS } from "~/server/files/agent-profile-file.serv
  * kinds, and `PACKET_OPTION_KINDS` (app/schemas/task-file.schema.ts) IS the set.
  *
  * The doc said "The 8 kinds" and omitted `archive_task` for the whole life of
- * R14-3's task archive. `decisions.md` ruling 7 was corrected to nine on
+ * R14-3's task archive. `decisions.md` ruling 62(a) was corrected to nine on
  * 2026-08-05; this sibling enumeration was corrected a day later, by hand,
  * after a human happened to read both. Nothing linked the two, which is exactly
  * how the count went stale the first time — and a hand-correction with no gate
  * is a fix with a half-life (audit §2.4).
  *
  * The doc names itself a MIRROR ("the list below mirrors it"), so mirroring is
- * checked the way ruling 27 checks the PRD mirror: mechanically. Add a kind to
+ * checked the way ruling 4 checks the PRD mirror: mechanically. Add a kind to
  * the schema and this fails, naming the missing one and the stale count.
  *
  * Edit the SCHEMA; this test makes the doc a mechanical follow-up instead of a
@@ -110,7 +110,7 @@ describe("C01-A13 (pass 32): file-formats.md documents every frontmatter key the
     expect(missing, `${DOC_REL} §2 does not document these task frontmatter keys`).toEqual([]);
   });
 
-  it("ruling 503: epics/*.md — every EPIC_FRONTMATTER_KEYS entry appears in section 2b", () => {
+  it("ruling 17: epics/*.md — every EPIC_FRONTMATTER_KEYS entry appears in section 2b", () => {
     // CANARY: add a key to the epic schema and not to the doc.
     const text = section("2b. `projects/<slug>/epics/<epic-id>.md`");
     const missing = EPIC_FRONTMATTER_KEYS.filter((key) => !documentsKey(text, key));

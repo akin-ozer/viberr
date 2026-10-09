@@ -184,12 +184,12 @@ describe("correlationFor", () => {
 });
 
 /**
- * Ruling 458(d): one Request names ONE id wherever it is seeded. React Router
+ * Ruling 43: one Request names ONE id wherever it is seeded. React Router
  * hands the same Request to the route middleware, the entry's render, its
  * `handleError` and its data hook; a response the middleware never saw is
  * logged by one and echoed by another, so they must agree.
  */
-describe("correlationFor keeps one correlation per Request (ruling 458(d))", () => {
+describe("correlationFor keeps one correlation per Request (ruling 43)", () => {
   it("answers the same object for the same Request and a fresh id for another", () => {
     const request = new Request("http://localhost/board");
     const first = correlationFor(request);
@@ -200,7 +200,7 @@ describe("correlationFor keeps one correlation per Request (ruling 458(d))", () 
   });
 });
 
-describe("echoRequestId (ruling 458(d))", () => {
+describe("echoRequestId (ruling 43)", () => {
   it("stamps the request's id on the response it was handed", () => {
     const request = new Request("http://localhost/x");
     const response = new Response("ok");
@@ -241,7 +241,7 @@ describe("echoRequestId (ruling 458(d))", () => {
   });
 });
 
-describe("requestContextMiddleware (ruling 458(d))", () => {
+describe("requestContextMiddleware (ruling 43)", () => {
   it("binds the request's id for everything below it and answers with it", async () => {
     const request = new Request("http://localhost/projects/x", {
       headers: { "X-Request-Id": "req_mw" },
@@ -264,13 +264,13 @@ describe("requestContextMiddleware (ruling 458(d))", () => {
 });
 
 /**
- * Ruling 458(d): a run binds its runId and taskKey on its own work. Every
+ * Ruling 43: a run binds its runId and taskKey on its own work. Every
  * continuation of a request shares one correlation object, so the run gets a
  * copy (`forkCorrelation`); a run parked behind the concurrency cap is launched
  * from another run's continuation, so it takes its own request's correlation
  * with it (`carryCorrelation`).
  */
-describe("forkCorrelation and carryCorrelation (ruling 458(d))", () => {
+describe("forkCorrelation and carryCorrelation (ruling 43)", () => {
   /** What a log record made now would carry, copied (the live object mutates). */
   function copyOfCurrent(): RequestCorrelation | undefined {
     const current = currentCorrelation();

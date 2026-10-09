@@ -171,7 +171,7 @@ describe("updateUser", () => {
   });
 
   /**
-   * Ruling 154: the handle is unique among ENABLED accounts, and the holder
+   * Ruling 29: the handle is unique among ENABLED accounts, and the holder
    * lookup ignores disabled rows, exactly as the verdict reader does. So
    * enabling a row whose handle was linked elsewhere while it was disabled is
    * a third way to make `resolveGithubHandle` answer `ambiguous` forever.

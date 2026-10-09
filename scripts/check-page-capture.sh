@@ -1,5 +1,5 @@
 #!/bin/sh
-# Ruling 691's in-image check: the page capture's renderer against the REAL
+# Ruling 42's in-image check: the page capture's renderer against the REAL
 # browser the image ships, as an agent uid, through the launcher.
 #
 # The unit suites drive the renderer with a stand-in browser
@@ -15,7 +15,7 @@
 #   - a markdown file is set as a page;
 #   - a page that stops on `alert()` is pictured behind its dialog, and the
 #     report says it opened one;
-#   - ruling 698: a picture of an exact size (`capture_page` with `width` and
+#   - ruling 194: a picture of an exact size (`capture_page` with `width` and
 #     `height`) is
 #     a PNG of exactly the box times its scale: twice the box at scale 2, drawn
 #     at device scale 2 and not enlarged (the page reads `devicePixelRatio` 2,
@@ -32,7 +32,7 @@
 #   - the renderer reads its pages from a folder it can only pass through, the
 #     way the server hands it a kept delivery: it cannot list the folder or put
 #     a file in it, and it still finds a page and the picture beside it stored
-#     in the other Unicode form (ruling 675), on a disk that holds names byte
+#     in the other Unicode form (ruling 76), on a disk that holds names byte
 #     for byte;
 #   - the renderer writes in a scratch folder made new under a parent it can
 #     only pass through, the way the server makes one in a task's `.captures/`:
@@ -83,14 +83,14 @@ fail() {
 cleanup() {
   [ -n "$listener" ] && kill "$listener" 2>/dev/null
   if [ -d "$WORK" ]; then
-    # What the agent wrote is the agent's to remove (ruling 485).
+    # What the agent wrote is the agent's to remove (ruling 140).
     VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
     rm -rf "$WORK" 2>/dev/null
   fi
 }
 trap cleanup EXIT
 
-echo "page capture check (ruling 691) as $(id -un) with $BROWSER"
+echo "page capture check (ruling 42) as $(id -un) with $BROWSER"
 
 if [ ! -x "$BROWSER" ]; then
   fail "the browser $BROWSER is not on disk"

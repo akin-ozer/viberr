@@ -20,7 +20,7 @@ import {
 } from "./frontmatter.server";
 
 /**
- * Reader/writer for the canonical epic files (ruling 503):
+ * Reader/writer for the canonical epic files (ruling 17):
  * `projects/<slug>/epics/<id>.md`. Same substrate as the task writer, one
  * in-process mutex per file and atomic tmp+rename writes, with the body the
  * goal files it replaced carried: `## Description` prose and `## Timeline`

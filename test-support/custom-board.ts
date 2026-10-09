@@ -5,7 +5,7 @@ import type { StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
  * user produces by editing stages in project settings.
  *
  * It used to be the shipped "Lightweight · 3 stages" workflow template, which
- * P13-AP-04 (owner ruling 2, 2026-07-24) DELETED: creating a project from it
+ * P13-AP-04 (P13 owner decision 2, 2026-07-24) DELETED: creating a project from it
  * preinstalled the built-in Developer/Reviewer, whose eligible stages are the
  * governed ids (`ready`/`impl`/`review`), so no specialist was ever eligible on
  * the resulting board and the operator could not hand work off.

@@ -62,7 +62,7 @@ describe("Markdown", () => {
     expect(container.querySelector("pre code.mono")).not.toBeNull();
   });
 
-  it("ruling 500: a fenced block has a head naming its language, Copy, and the reader's gutter past one line", async () => {
+  it("ruling 313: a fenced block has a head naming its language, Copy, and the reader's gutter past one line", async () => {
     // CANARY: render `<pre>{children}</pre>` for every block again and the
     // head, the Copy and the gutter are gone.
     const writeText = vi.fn(async () => {});
@@ -193,7 +193,7 @@ describe("Markdown", () => {
   });
 });
 
-describe("ruling 478(f): headings under a page heading (F40-35)", () => {
+describe("ruling 313: headings under a page heading (F40-35)", () => {
   const levels = (root: HTMLElement) =>
     [...root.querySelectorAll("h1, h2, h3, h4, h5, h6")].map((h) => h.tagName);
 
@@ -389,7 +389,7 @@ describe("attachment link repair (owner ask 2026-08-20)", () => {
     const refs = [...container.querySelectorAll("a.kp-ref")];
     expect(refs.map((a) => a.getAttribute("href"))).toEqual([
       "#proposal-kp-9f258c9ef4",
-      // Ruling 498: a correction's id links the same way.
+      // Ruling 210: a correction's id links the same way.
       "#correction-kc-0123456789",
     ]);
     expect(refs.every((a) => !a.hasAttribute("target"))).toBe(true);

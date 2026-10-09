@@ -20,7 +20,7 @@ import { userBackendHome } from "./user-homes.server";
  */
 
 let tmp: string;
-/** Ruling 127: transcripts live in the credential PRINCIPAL's own runtime home,
+/** Ruling 137: transcripts live in the credential PRINCIPAL's own runtime home,
  *  so every lookup names the person whose run wrote it. Two people here, so a
  *  probe that ignored the principal would be visible. */
 const OWNER = "u_owner";
@@ -110,7 +110,7 @@ describe("locateTranscript (claude)", () => {
   });
 
   it("never reaches into another person's home, and has none for a null principal", () => {
-    // Ruling 127: a session id names a conversation inside ONE person's
+    // Ruling 137: a session id names a conversation inside ONE person's
     // account. Searching every home for it would hand somebody else's
     // transcript to whoever could name the id — and a run refused before it
     // started (`credential_user_id` null) wrote no transcript at all.
@@ -183,7 +183,7 @@ describe("transcriptExists (loader-path probe)", () => {
 /* ------------------- resume-time continuity probe (P13-D-2) ------------------ */
 
 describe("probeSessionContinuity", () => {
-  it("ruling 434: codex: a rollout whose head is torn is damaged, not present", () => {
+  it("ruling 162: codex: a rollout whose head is torn is damaged, not present", () => {
     /**
      * Live on AX-5 at 01:49: the Developer's resume died with "rollout at … does
      * not start with session metadata (code -32603)". Its rollout opened with a
@@ -261,7 +261,7 @@ describe("probeSessionContinuity", () => {
     const sid = "0199a2c4-7b31-7802-abcd-00000000ff03";
     const dir = codexDir("09");
     const file = path.join(dir, `rollout-2026-07-09T12-00-00-${sid}.jsonl`);
-    // Ruling 434: a resumable rollout opens with its session metadata.
+    // Ruling 162: a resumable rollout opens with its session metadata.
     writeFileSync(file, JSON.stringify({ type: "session_meta", payload: { id: sid } }) + "\n");
     expect(probeSessionContinuity("codex", OWNER, sid)).toBe("present");
     rmSync(file);
@@ -276,7 +276,7 @@ describe("probeSessionContinuity", () => {
   });
 
   it("an owner change reads as MISSING — the resume never enters the old owner's account", () => {
-    // Ruling 127, stated as behaviour: a resumed task run bills the owner AS OF
+    // Ruling 137, stated as behaviour: a resumed task run bills the owner AS OF
     // NOW, and the probe looks in THAT person's home. So a task whose seat
     // changed hands since the original run reports the session gone and takes
     // the continuity-reset path (one fresh run, re-anchored on task.md, with
@@ -335,8 +335,8 @@ describe("buildResumeScript", () => {
     // The run sink redacts Viberr's own .jsonl and the console (P13-U-1), but
     // this bundle embedded the VENDOR's transcript verbatim — the sibling
     // channel that bypassed it. One `env`-printing tool call puts the run's
-    // credential in there, and since ruling 127 that is somebody's PERSONAL
-    // key, while any member of the run's project can download this file.
+    // credential in there, and that is somebody's PERSONAL key (ruling 137),
+    // while any member of the run's project can download this file.
     // Canary: drop the `redact(...)` around the readFileSync and the token
     // below comes back in the decoded payload.
     const leaked = `sk-ant-api03-${"x".repeat(40)}`;
@@ -375,10 +375,10 @@ describe("buildResumeScript", () => {
 });
 
 /**
- * Rulings 369 and 372: the size a resume would replay, read off the provider's
+ * Rulings 172 and 173: the size a resume would replay, read off the provider's
  * own transcript, and a Codex run's per-call figures read off its rollout.
  */
-/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 414). */
+/** The `event_msg` payload fields the Codex rollout reader looks at (ruling 172). */
 interface RolloutEventPayload {
   type: string;
   turn_id?: string;
@@ -474,13 +474,13 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
         line("2026-07-15T05:10:05.000Z", 0, "context_compacted"),
       ].join("\n") + "\n",
     );
-    // Ruling 403: nothing followed the compaction, so the post size was never
+    // Ruling 172: nothing followed the compaction, so the post size was never
     // measured. NULL, not 0 -- a zero here reaches the timeline as a figure.
     expect(codexRolloutRunStats(OWNER, older, null)).toMatchObject({
       compactions: 1,
       compactionEvents: [{ preTokens: 30_000, postTokens: null }],
     });
-    // A compaction that is the run's LAST event (ruling 376): the request's
+    // A compaction that is the run's LAST event (ruling 174): the request's
     // own line carries no prompt, but its total is the compacted context —
     // the post size and what the next resume replays.
     const last = "01a0a30a-e256-7c91-b8da-6093b9f84201";
@@ -508,7 +508,7 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
   });
 
   /**
-   * Ruling 414 (F39-40): the shape the CLI really writes for ONE compaction,
+   * Ruling 172 (F39-40): the shape the CLI really writes for ONE compaction,
    * copied line for line from an ax-clone rollout (AX-24, 19:28:58). Two
    * spellings of the compaction with its own size line BETWEEN them:
    * `compacted`, `thread_settings_applied`, the `token_count` whose prompt is
@@ -575,7 +575,7 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
         ...compaction("2026-09-22T20:00:02.000Z", 17_000),
         call("2026-09-22T20:00:03.000Z", 22_000),
         call("2026-09-22T20:00:04.000Z", 150_000),
-        // The run's end: Viberr compacts it (ruling 376).
+        // The run's end: Viberr compacts it (ruling 174).
         ...compaction("2026-09-22T20:00:05.000Z", 9_000),
       ].join("\n") + "\n",
     );
@@ -591,11 +591,11 @@ describe("sessionContextTokens and codexRolloutRunStats", () => {
   });
 
   /**
-   * Ruling 403 (F39-30): a compaction marker with nothing measurable after it
+   * Ruling 172 (F39-30): a compaction marker with nothing measurable after it
    * (a CLI that died after writing it, or one that writes no size line) has
    * an unknown post size, and the sentence a human reads must say so.
    *
-   * Ruling 414 corrected the premise this test once stated. The completion
+   * Ruling 172 corrected the premise this test once stated. The completion
    * compaction on disk is NOT a lone final marker: its size line sits between
    * two spellings (see the test above), and the figure was measurable all
    * along. This is the genuinely unmeasured case, which the null still serves.

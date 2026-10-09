@@ -101,14 +101,14 @@ async function nudgeMergePendingTasks(
         taskKey: row.key,
         kind: "policy",
         title,
-        // Ruling 207(l): this used to assert "PR #N is still open on GitHub" —
+        // Ruling 237: this used to assert "PR #N is still open on GitHub" —
         // a live fact — from `task_projections.pr_json`, which is a CACHE. The
         // thing that kept that cache honest was the 5-minute reconcile poll,
-        // and ruling 177 excludes terminal-stage tasks from every budgeted
+        // and ruling 52 excludes terminal-stage tasks from every budgeted
         // pass: an accepted task IS terminal, so the exact rows this nudge
         // describes are the rows nothing refreshes. The figure is still worth
         // sending; it just has to say whose reading it is.
-        text: `${row.key} was accepted into Done with its merge still pending. The last state Viberr read for PR #${pr.number} was open. Viberr stops polling a task once it reaches Done (ruling 177), so that is the last thing it saw, not a live reading. If the PR is still open, merge it from the task's Complete-merge button or on GitHub. (A full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused.)`,
+        text: `${row.key} was accepted into Done with its merge still pending. The last state Viberr read for PR #${pr.number} was open. Viberr stops polling a task once it reaches Done (ruling 52), so that is the last thing it saw, not a live reading. If the PR is still open, merge it from the task's Complete-merge button or on GitHub. (A full-autonomy operator can't merge, and a human accept records "merge pending" when GitHub was unreachable or the merge was refused.)`,
         from: POLICY_ENGINE_NOTIFY_FROM,
       },
       ctx,
@@ -176,7 +176,7 @@ function noteReconcileFailure(db: DatabaseSync, slug: string): void {
         projectSlug: slug,
         title,
         text,
-        // Ruling 497: the credential is fixed on the project's GitHub page.
+        // Ruling 75: the credential is fixed on the project's GitHub page.
         href: projectGithubLink(slug),
         from: POLICY_ENGINE_NOTIFY_FROM,
       });
@@ -198,7 +198,7 @@ function noteReconcileFailure(db: DatabaseSync, slug: string): void {
 /**
  * Active projects that have at least one branched task worth reconciling.
  *
- * Ruling 667: and a repository to reconcile against. A project whose
+ * Ruling 224: and a repository to reconcile against. A project whose
  * repository was removed keeps the branch names its finished tasks recorded,
  * and each pass over it answered `no_repo_configured`, which the failure count
  * below read as GitHub failing: three ticks later every admin was told
@@ -274,7 +274,7 @@ export async function pollGithubReconcile(
       err: toError(error),
     });
   }
-  // Ruling 517: a remembered "GitHub won't serve this repository" is taken
+  // Ruling 223: a remembered "GitHub won't serve this repository" is taken
   // again, so the board's banner leaves once GitHub serves it. A project whose
   // clone fails has no branched task, so the reconcile above never reaches it.
   try {

@@ -40,11 +40,11 @@ interface TaskLoaderData {
   taskLinks: TaskLinks;
   /** U39-32. */
   baseBehindBy: number | null;
-  /** Ruling 475. */
+  /** Ruling 244. */
   mergeCollisions: { taskKey: string; prNumber: number; paths: string[]; partial: boolean }[];
-  /** Ruling 521. */
+  /** Ruling 103. */
   completion: CompletionView | null;
-  /** Ruling 693: on a payload that carries a completion view, and no other. */
+  /** Ruling 83: on a payload that carries a completion view, and no other. */
   whatItTook?: TookCard;
 }
 
@@ -226,7 +226,7 @@ describe("U39-31: the task page's task links", () => {
   });
 });
 
-describe("ruling 475 (F40-55 (c)): the accept dialog's merge collisions", () => {
+describe("ruling 244 (F40-55 (c)): the accept dialog's merge collisions", () => {
   it("carries the other open PRs that share a changed path with this task's, and nothing for a task with none", async () => {
     // CANARY: return `mergeCollisions: []` from the loader.
     const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
@@ -267,12 +267,12 @@ describe("U39-32: the accept dialog's base lag", () => {
 });
 
 /**
- * Ruling 521: the loader ships the completion packet the decision card draws:
+ * Ruling 103: the loader ships the completion packet the decision card draws:
  * the reviewers by name with their verdicts on the revision under review, and
  * the screenshots Operator picked, checked against the attachments store for
  * a viewer who may see it.
  */
-describe("ruling 521: the completion packet", () => {
+describe("ruling 103: the completion packet", () => {
   /** VIB-142 with revision `rev_1` delivered and approved, and Operator's
    *  packet written for it. */
   async function deliverAndSummarize() {
@@ -351,7 +351,7 @@ describe("ruling 521: the completion packet", () => {
     });
   });
 
-  it("ruling 668: keeps the packet on an accepted task in the archive, and ships none for a task archived unfinished", async () => {
+  it("ruling 103: keeps the packet on an accepted task in the archive, and ships none for a task archived unfinished", async () => {
     // CANARY: restore `taskFile && !archived` and an accepted task loses its
     // result the day its epic is archived; drop the archive check and a task
     // abandoned at Review shows a summary of work nobody accepted.
@@ -366,7 +366,7 @@ describe("ruling 521: the completion packet", () => {
 
   it("counts the reviewer a project rule requires, though nobody engaged it on the task", async () => {
     // CANARY: hand `completionView` no rule reviewers and Reviewer reads as
-    // not required while acceptance waits on its approval (ruling 178).
+    // not required while acceptance waits on its approval (ruling 89).
     const { updateTaskFile, resolveTaskFilePath } = await import("~/server/files/task-writer.server");
     const { updateProjectFile, resolveProjectFilePath } = await import("~/server/files/project-writer.server");
     const { rebuildPath } = await import("~/server/projections/rebuilder.server");
@@ -389,7 +389,7 @@ describe("ruling 521: the completion packet", () => {
 });
 
 /**
- * Ruling 693: the loader ships what the task took for the completion card to
+ * Ruling 83: the loader ships what the task took for the completion card to
  * print: the facts and the sentences saying what they miss, built from the run
  * rows and the task file it has already read. The arithmetic is the server
  * suite's (`what-it-took.server.test.ts`); this owns what the route sends and
@@ -397,7 +397,7 @@ describe("ruling 521: the completion packet", () => {
  * admin), which this suite cannot prove on anyone: a person who is neither
  * never reaches this loader's body (R15-4 above).
  */
-describe("ruling 693: what the task took", () => {
+describe("ruling 83: what the task took", () => {
   async function ran(taskKey: string, minutes: number, costUsd: number) {
     const { upsertRun } = await import("~/server/runtimes/run-store.server");
     upsertRun(app.db, {
@@ -418,7 +418,7 @@ describe("ruling 693: what the task took", () => {
     });
   }
 
-  it("ruling 693: the loader ships what the task took with the completion card, as its facts and notes alone, and nothing for a task with no card", async () => {
+  it("ruling 83: the loader ships what the task took with the completion card, as its facts and notes alone, and nothing for a task with no card", async () => {
     // CANARY: (a) drop `completion &&` from the loader's condition and a task
     // with nothing delivered ships the key, so every task's payload grows;
     // (b) assign the whole figure (`tookShipped.whatItTook = took`) and the

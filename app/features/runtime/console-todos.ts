@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { ConsoleTodo, LogLine } from "./runtime-types";
 
 /**
- * Ruling 499: an agent's to-do list, read off the console line that states
+ * Ruling 168: an agent's to-do list, read off the console line that states
  * it. Claude writes the whole list with each `TodoWrite` call (its `todos`,
  * each a step, a status and the step's present-tense form); Codex reports its
  * plan as a `todo_list` item, which the projection carries as `todos`. The
@@ -13,7 +13,7 @@ export interface TodoSnapshot {
   done: number;
   /** The step in progress, when the list names one. */
   current: number | null;
-  /** The arguments the list shows in full (ruling 366(d)). */
+  /** The arguments the list shows in full (ruling 168). */
   drawn: readonly string[];
 }
 

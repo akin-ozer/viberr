@@ -1,19 +1,19 @@
 /**
- * Ruling 237 (pass 37, F37-57): a reviewer that objects twice in a row is a
+ * Ruling 94 (pass 37, F37-57): a reviewer that objects twice in a row is a
  * decision for a person, and viberr raises it itself.
  *
- * Ruling 210 already held that a second consecutive `request_changes` from the
+ * Ruling 201 already held that a second consecutive `request_changes` from the
  * same reviewer is the point where another rework stops being the move, and
  * wrote that as a paragraph in the operator's turn instruction ending "Do not
  * send the deliverer back into another round until the reviewer has answered."
- * Ruling 204 gave that paragraph a counter it could read. Live on SHOP-5 the
+ * Ruling 92 gave that paragraph a counter it could read. Live on SHOP-5 the
  * whole apparatus worked and changed nothing: three `request_changes` verdicts
  * from one reviewer, `consecutiveRequestChanges` reading 3, and the operator
  * moving Review to Build forty six seconds after the third verdict and
  * re-dispatching the deliverer sixteen seconds after that, with no question put
  * to the reviewer on any round. SHOP-6 took seven rounds and SHOP-10 five.
  *
- * The same construction ruling 186 refused: a request in a prompt, with nothing
+ * The same construction ruling 56 refused: a request in a prompt, with nothing
  * that notices when the model does something else.
  *
  * The owner's call on the remedy was ESCALATE, not gate. The operator keeps
@@ -23,17 +23,17 @@
  * person by itself, and the completion that raises it does NOT then hand the
  * task to the operator.
  *
- * That last clause is load-bearing and was nearly missed. Ruling 195 records
+ * That last clause is load-bearing and was nearly missed. Ruling 115 records
  * that "a packet opened mid-work does NOT stop the machine triggers", and the
  * react at the end of an agent completion is one (`agent-reply`). Live on
  * SHOP-24 the packet's audit row landed at 13:52:53.488Z and an operator run
  * started at 13:52:53.585Z — 97 milliseconds later — on a card telling a person
  * the task was waiting for them. The card's copy states what HAPPENED rather
- * than promising a future: the other machine triggers keep ruling 195's
+ * than promising a future: the other machine triggers keep ruling 115's
  * carve-out, and a packet is not a lock.
  *
  * Written by the POLICY ENGINE, not through `operatorOpenPacket`, and for
- * ruling 226's reason: that door checks the operator's own `generate-packets`
+ * ruling 243's reason: that door checks the operator's own `generate-packets`
  * grant, and this packet is not the operator's judgement — it is a condition a
  * counter noticed. A project that has told its operator to stop opening packets
  * has said nothing about whether a person should hear that their reviewer has
@@ -55,7 +55,7 @@ import {
 /**
  * Consecutive `request_changes` rounds from ONE reviewer that raise the packet.
  *
- * THREE, on the owner's call of 2026-09-22 (ruling 410). It was two, on the
+ * THREE, on the owner's call of 2026-09-22 (ruling 93). It was two, on the
  * owner's earlier call, and that was right about where a rework stops being
  * the obvious move -- but wrong about whose move it is. Measured on ax-clone:
  * the "ask the reviewer for its complete blocking set instead of reworking
@@ -77,7 +77,7 @@ const REVIEW_DEADLOCK_ROUNDS = 3;
 /**
  * The question the `question_reviewer` resolution puts to the reviewer.
  *
- * Ruling 210 wrote it as a phrase inside the operator's turn instruction
+ * Ruling 201 wrote it as a phrase inside the operator's turn instruction
  * ("name everything you would still block on across your owned surface, now").
  * It lives here now because a person choosing the option is promised exactly
  * this, and a prompt a model composes fresh each time is a promise nobody can
@@ -122,12 +122,12 @@ function ordinal(n: number): string {
 export interface ReviewDeadlock {
   /** The reviewer that keeps objecting. */
   profileId: string;
-  /** Its consecutive `request_changes` rounds, ruling 204's count. */
+  /** Its consecutive `request_changes` rounds, ruling 92's count. */
   rounds: number;
   /** The latest objection's own reason text, as the verdict stored it. */
   latestReason: string;
   /**
-   * Ruling 416(b): the revision, newest first within this streak, on which the
+   * Ruling 92: the revision, newest first within this streak, on which the
    * reviewer read unchanged work again and still objected (more `reviews` than
    * `rounds`): its verdict-shaped answer to the completeness question. Null
    * when no such answer is on record. Live on ax-clone AX-24 the operator put
@@ -136,8 +136,8 @@ export interface ReviewDeadlock {
    */
   answeredOn: string | null;
   /** How the answer on `answeredOn` was given: the reviewer re-read unchanged
-   *  work (`reread`, ruling 416(b)), or the run that returned it put the
-   *  question (`asked`, ruling 421). Null with no answer on record. */
+   *  work (`reread`, ruling 92), or the run that returned it put the
+   *  question (`asked`, ruling 93). Null with no answer on record. */
   answeredHow: "reread" | "asked" | null;
 }
 
@@ -192,14 +192,14 @@ export interface ReviewDeadlockPacketInput {
   /** The deliverer's display name, when one is engaged. */
   delivererName: string | null;
   /**
-   * Ruling 241: what the task waits on (`blockedBy`), because a hold changes
-   * what the recommended option DOES. Ruling 186 refuses every agent dispatch
+   * Ruling 66: what the task waits on (`blockedBy`), because a hold changes
+   * what the recommended option DOES. Ruling 56 refuses every agent dispatch
    * on a held task, so on SHOP-5 the card promised a question it could not put
    * — the option's own description has to say what will really happen.
    */
   heldBy: readonly string[];
   /**
-   * Ruling 416 (F39-42): the objection has NO rework behind it. The reviewer
+   * Ruling 92 (F39-42): the objection has NO rework behind it. The reviewer
    * read the same revision again with no delivered round in between, so this
    * verdict is its answer on work that has not moved: exactly what round two's
    * completeness question asks for. Live on ax-clone AX-19 the operator put
@@ -211,13 +211,22 @@ export interface ReviewDeadlockPacketInput {
   /** The short sha the objection was made on, for the sentence that names it. */
   revisionLabel?: string | null;
   /**
-   * Ruling 421 (F39-43): the run that returned THIS objection put ruling 410's
+   * Ruling 93 (F39-43): the run that returned THIS objection put the
    * completeness question, so the list in it is the reviewer's complete set.
    * Live on ax-clone AX-20, AX-22 and AX-24 the operator folded the question
    * into the review of a fresh rework three times in 25 minutes, and each
    * packet recommended asking it again. Absent reads as false.
    */
   askedWithThisReview?: boolean;
+}
+
+/**
+ * The packet's title, which raising it also writes onto the timeline. It names
+ * the reviewer and the count, and the retry reads it back to tell an
+ * escalation already made from one still owed (ruling 94).
+ */
+export function reviewDeadlockTitle(reviewerName: string, rounds: number): string {
+  return `${reviewerName} has requested changes ${rounds} times running`;
 }
 
 /**
@@ -229,8 +238,8 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
   const handle = `@${input.reviewerName}`;
   const held = input.heldBy.length > 0 ? input.heldBy.join(", ") : "";
   // Two ways the objection itself is the answer: the reviewer re-read work
-  // that had not moved (ruling 416), or the run that returned it put the
-  // question (ruling 421).
+  // that had not moved (ruling 92), or the run that returned it put the
+  // question (ruling 93).
   const rereadNow = input.noReworkBehind === true;
   const askedNow = !rereadNow && input.askedWithThisReview === true;
   const answered = rereadNow || askedNow;
@@ -260,7 +269,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
     type: "input",
     kind: "Decision required",
     from: "policy-engine",
-    title: `${input.reviewerName} has requested changes ${input.deadlock.rounds} times running`,
+    title: reviewDeadlockTitle(input.reviewerName, input.deadlock.rounds),
     body:
       `${handle} returned its ${ordinal(input.deadlock.rounds)} consecutive request for changes on ` +
       `${input.taskKey}, with no approve in between` +
@@ -270,24 +279,24 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
       "reviewer is paying out its findings one at a time, or it is asking for something this " +
       "deliverable cannot give it. Nothing was dispatched on this objection: the task is on " +
       "you.\n\n" +
-      // Ruling 410: the operator owns round two, so this packet means one of
+      // Ruling 93: the operator owns round two, so this packet means one of
       // two things and the timeline says which. Stated rather than implied,
       // because the option below is the same one the operator was told to use
       // and a person should know whether it has already been spent.
       (rereadNow
-        ? // Ruling 416: Viberr knows which, so it says which.
+        ? // Ruling 92: Viberr knows which, so it says which.
           `This objection has no rework behind it: ${handle} read ${revision} again with nothing ` +
           "delivered since its last verdict, so what it returned is its answer on work that has " +
           "not moved. That is what the completeness question asks for, and asking again would get " +
           "the same list. The move it leaves is one rework against exactly this verdict.\n\n"
         : askedNow
-          ? // Ruling 421: the question was put with this very review.
+          ? // Ruling 93: the question was put with this very review.
             `This objection is ${handle}'s answer to the completeness question: the run that returned ` +
             `it was asked for everything ${handle} would still block on, on ${revision}, and this is ` +
             "the list. Asking again would get the same list. The move it leaves is one rework against " +
             "exactly this verdict.\n\n"
           : answeredEarlier
-            ? // Ruling 416(b) and 421: the same fact, one step removed.
+            ? // Ruling 92 and 93: the same fact, one step removed.
               `The completeness question has been answered in this streak: ${handle} ` +
               (input.deadlock.answeredHow === "asked"
                 ? `was asked for everything it would block on with its review of \`${input.deadlock.answeredOn}\` and returned the list, `
@@ -299,7 +308,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
             "reviewer itself, one run with no rework behind it. So either it did and the objection " +
             "outlived the answer, or it did not and this is the first time the question has been " +
             "asked. The reviewer's own verdicts on the timeline say which.\n\n") +
-      // Ruling 329: this ask lives in the BODY, which is read on the card and
+      // Ruling 64: this ask lives in the BODY, which is read on the card and
       // nowhere else. It used to sit on an option's `d`, which `resolvePacket`
       // appends to the GOAL verbatim — so a sentence about a textarea became
       // permanent contract, addressed to agents who have no textarea.
@@ -319,7 +328,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
           `${held ? "Queues" : "Starts"} ${input.reviewerName} with one question and no rework ` +
           "behind it: name everything you would still block on across your own surface, on the " +
           "revision as it stands. " +
-          // Ruling 416: never recommended on top of the answer it would ask for.
+          // Ruling 92: never recommended on top of the answer it would ask for.
           (rereadNow
             ? `It has just read ${revision} again, unchanged, and answered; asking again repeats that.`
             : askedNow
@@ -328,7 +337,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
               ? `It answered this on \`${input.deadlock.answeredOn}\` in this streak; asking again repeats that.`
               : "A verdict is supposed to be the complete set, so the answer either ends the loop or " +
                 "shows it cannot be ended by reworking.") +
-          // Ruling 241: said BEFORE the choice, not discovered after it.
+          // Ruling 66: said BEFORE the choice, not discovered after it.
           (held
             ? ` ${input.taskKey} waits on ${held}, and Viberr refuses every agent run while it ` +
               "does, so the question is held with the task and put the moment the wait clears."
@@ -340,30 +349,28 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
         kind: "custom",
         t: answered ? "Rework once against this verdict" : "Let the rework continue",
         /**
-         * Ruling 329: an option's `d` BECOMES the contract.
+         * Ruling 64: an option's `d` BECOMES the contract.
          *
          * `resolvePacket` appends `${option.t}: ${option.d}` to the task's
          * goal, so every word here is permanent text that every later run
          * reads. This one ended with "Anything you type below is recorded on
-         * the task's contract and every later run reads it (ruling 189), so say
+         * the task's contract and every later run reads it (ruling 64), so say
          * why rather than just yes" — and that is the sentence that landed in
          * the goal, five times across three tasks, twice on SHOP-76.
          *
          * It was false in both directions at once. The note box under a listed
          * option posts `note`, which `resolvePacket` sends to the timeline and
          * to the operator's summon note and never to the goal — it has never
-         * amended the contract, before ruling 284 or after it; 284 only closed
-         * the last route by which any typed words reached a goal. So the card
-         * asked a person for their reasoning on the highest-stakes decision it
-         * raises, promised that reasoning would bind, filed the reasoning in
-         * the timeline, and wrote its own UI instruction into the contract
-         * instead — complete with a bare "(ruling 189)" citation and an
-         * instruction to type in a box no agent reading the goal will ever see.
+         * amended the contract. So the card asked a person for their reasoning
+         * on the highest-stakes decision it raises, promised that reasoning
+         * would bind, filed the reasoning in the timeline, and wrote its own
+         * UI instruction into the contract instead — complete with a bare
+         * "(ruling 64)" citation and an instruction to type in a box no agent
+         * reading the goal will ever see.
          *
          * Whether a person's typed reasoning SHOULD bind the goal is ruling
-         * 284's question and stays answered as 284 answered it. What this fixes
-         * is a promise the product never kept and a decision record that
-         * describes a dialog.
+         * 64's question, and it answers no. What this fixes is a promise the
+         * product never kept and a decision record that describes a dialog.
          */
         d: rereadNow
           ? `Rework once against ${handle}'s latest verdict: it read ${revision} again with ` +

@@ -107,7 +107,7 @@ describe("stripUngovernedRepoCatalog (R18-3 / F18-8)", () => {
     expect(diff).not.toContain(".claude");
   });
 
-  it("ruling 180: the strip is whole — an agent-written catalog goes, and a live run's skills are elsewhere", async () => {
+  it("ruling 185: the strip is whole — an agent-written catalog goes, and a live run's skills are elsewhere", async () => {
     // The in-checkout mount needed a per-process marker (F19-15) so a second
     // run's strip would spare a live run's `.claude/skills`. Skills now live
     // in each run's own plugin beside the checkout, so the strip has nothing
@@ -165,7 +165,7 @@ describe("isSdkSkillName", () => {
 });
 
 describe("mountGrantedSkills", () => {
-  it("ruling 180: writes NOTHING under the checkout — the plugin dir beside it holds the manifest and the skills", async () => {
+  it("ruling 185: writes NOTHING under the checkout — the plugin dir beside it holds the manifest and the skills", async () => {
     // F36-9 (pass 36), live three times: the mount wrote `.claude/` (skills +
     // settings.json) INTO the task checkout, git-excluded but visible to every
     // tool that walks the tree, so the project's own `npm run check`
@@ -208,7 +208,7 @@ describe("mountGrantedSkills", () => {
     );
   });
 
-  it("ruling 180: a settled run's plugin is removed — and only a path under .viberr-plugins ever is", async () => {
+  it("ruling 185: a settled run's plugin is removed — and only a path under .viberr-plugins ever is", async () => {
     // run-service calls this from the exit handler (and from the refusal
     // arm); the dispatch wrapper calls it for a run that failed before it
     // started. Canary: drop the `.viberr-plugins` parent check and the
@@ -264,7 +264,7 @@ describe("mountGrantedSkills", () => {
     );
   });
 
-  it("ruling 495(a): every folder of the plugin is the group's to write and every file the group's to read, whatever the store folder's modes", async () => {
+  it("ruling 140: every folder of the plugin is the group's to write and every file the group's to read, whatever the store folder's modes", async () => {
     // F40-71, live on deploy 10: `cpSync` gave each copy the store folder's
     // own modes, so a settled run's plugin had its files in 0755 folders the
     // person could not write, and its removal as the person failed on every
@@ -360,8 +360,8 @@ describe("mountGrantedSkills", () => {
     }
   });
 
-  it("ruling 495(a): the copy changes nothing already there, so a folder an agent swapped for a link cannot widen what it leads to", () => {
-    // Review of ruling 495: the copy's modes were set by a chmod walk after
+  it("ruling 140: the copy changes nothing already there, so a folder an agent swapped for a link cannot widen what it leads to", () => {
+    // Review of ruling 140: the copy's modes were set by a chmod walk after
     // `cpSync`, through paths whose folders the agents' group writes, so an
     // agent that swapped `skills/<name>` for a link to a folder of the
     // server's had the copy land in it and 2775 and 0644 set on whatever of
@@ -551,7 +551,7 @@ describe("mountGrantedSkills", () => {
     // The workspace is shared by every engagement on a task and survives
     // between runs. A delivering agent can write `.claude/settings.json` into
     // its checkout; no run reads it as a settings source any more (ruling
-    // 180), and the working tree still must not carry an ungoverned catalog.
+    // 185), and the working tree still must not carry an ungoverned catalog.
     // Canary: drop the `stripUngovernedRepoCatalog` call from
     // `mountGrantedSkills` and the settings file is still there.
     const dataRoot = storeWithSkills([{ name: "craft", skillMd: "body\n" }]);

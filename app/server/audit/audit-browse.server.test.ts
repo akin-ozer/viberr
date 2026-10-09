@@ -43,7 +43,7 @@ function insert(
 
 describe("listRecentAuditEvents", () => {
   /**
-   * Ruling 234 (F37-52) — the reconcile heartbeat is not a browse row.
+   * Ruling 33 (F37-52) — the reconcile heartbeat is not a browse row.
    *
    * `github.reconcile.task` is written on every completed poller pass per
    * delivered task, changed or not (F19-22, deliberately). On pass 37's live
@@ -79,7 +79,7 @@ describe("listRecentAuditEvents", () => {
   });
 
   /**
-   * Ruling 234, second half — "Org-scoped" is a QUERY, not a filter over
+   * Ruling 33, second half — "Org-scoped" is a QUERY, not a filter over
    * whatever the unscoped window happened to return. Live, the toggle showed 2
    * rows against 96 org-scoped events on file, because a busy project filled
    * the window it was narrowing.

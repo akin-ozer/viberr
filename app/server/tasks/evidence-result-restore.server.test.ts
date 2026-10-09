@@ -14,7 +14,7 @@ import { insertRunLine, upsertRun } from "~/server/runtimes/run-store.server";
 import { restoreCutEvidenceResults } from "./evidence-result-restore.server";
 
 /**
- * Ruling 639: the old writer kept 39 characters of a result and an ellipsis,
+ * Ruling 16: the old writer kept 39 characters of a result and an ellipsis,
  * and the task file was the row's only copy. Once at boot, a cut row takes the
  * words its run reported: the run of the same task and agent profile that
  * finished nearest before the event, when that run reported one result for the
@@ -138,7 +138,7 @@ function projectedResults(): string[] {
   return projectedRowsSchema.parse(JSON.parse(row.evidence_json)).map((r) => r.result);
 }
 
-describe("restoreCutEvidenceResults (ruling 639)", () => {
+describe("restoreCutEvidenceResults (ruling 16)", () => {
   const WHY =
     "The proposed pay-as-you-go default lists the old tier price and leaves the flat-rate plan out of the totals.";
 

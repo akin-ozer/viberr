@@ -98,7 +98,7 @@ function deployDevSpecialist(): void {
   });
 }
 
-/** Ruling 211(h): a SECOND deployed profile, so a test can mention an agent
+/** Ruling 70: a SECOND deployed profile, so a test can mention an agent
  *  that is real and is not the one under test — the state the cross-agent guard
  *  in `deliverDeferredMention` actually exists for. */
 function deployReviewerSpecialist(): void {
@@ -129,7 +129,7 @@ function deployReviewerSpecialist(): void {
  * answers `unknown`, which resumes exactly as before. A test that wants a LIVE
  * session materializes its transcript with `writeTranscript`.
  *
- * Ruling 127: the transcript lives in the RUN PRINCIPAL's own runtime home
+ * Ruling 137: the transcript lives in the RUN PRINCIPAL's own runtime home
  * (`<dataRoot>/runtimes/users/<id>/claude-home/projects/`), not in a shared
  * home a `CLAUDE_CONFIG_DIR` env var pointed at — so this writes into arda's
  * home under the test's own data root, which is also what makes the probe
@@ -180,7 +180,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 137: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -297,9 +297,9 @@ describe("resolveMentionedAgent", () => {
   });
 
   /**
-   * Ruling 262 (pass 37, F37-92): the DISCLOSURE question, not the dispatch
+   * Ruling 70 (pass 37, F37-92): the DISCLOSURE question, not the dispatch
    * question. `resolveMentionedAgent` returns at most one target because a run
-   * needs exactly one; ruling 252 reused it as a completeness report, so three
+   * needs exactly one; ruling 70 reused it as a completeness report, so three
    * more shapes fell through the stamp on top of the operator case.
    */
   describe("unreachedAgents reports every handle that reads nothing", () => {
@@ -346,7 +346,7 @@ describe("resolveMentionedAgent", () => {
 
     it("says nothing when every handle reaches somebody who reads it", () => {
       // A person's @handle is not an agent handle; the operator is excluded by
-      // ruling 214 because a controller turn's other writes wake it anyway.
+      // ruling 133 because a controller turn's other writes wake it anyway.
       expect(unreachedAgentNote(report("@operator over to you"), "controller")).toBeNull();
       expect(unreachedAgentNote(report("status published, nothing needed"), "controller")).toBeNull();
       // CANARY: return a sentence for an empty report and every ordinary
@@ -791,7 +791,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     t: "", ev: "err", tag: "error", text: "", ...partial,
   });
 
-  it("ruling 130(a): the typed `failure` record wins, rides through, and `session limit` prose classifies quota", () => {
+  it("ruling 155(a): the typed `failure` record wins, rides through, and `session limit` prose classifies quota", () => {
     // Canary: remove the `last.failure` read (the facts vanish; the kind
     // still comes from the tag).
     const facts = {
@@ -804,7 +804,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     expect(prose?.kind).toBe("quota");
   });
 
-  it("ruling 659: an untagged \"model is at capacity\" line is the provider being busy, not `unknown`", () => {
+  it("ruling 155(c): an untagged \"model is at capacity\" line is the provider being busy, not `unknown`", () => {
     // CANARY: drop `at capacity` from the prose fallback's overload pattern
     // and this reads `unknown`, whose packet asks for sharper guidance.
     const busy = classify([
@@ -902,7 +902,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "session_missing" });
   });
 
-  it("ruling 175: a spending-cap cut-off is its own kind, by its tag", () => {
+  it("ruling 159: a spending-cap cut-off is its own kind, by its tag", () => {
     expect(
       classify([
         errLine({
@@ -913,7 +913,7 @@ describe("runFailureReason (F7-RUN1)", () => {
     ).toMatchObject({ kind: "max_budget" });
   });
 
-  it("ruling 599: the completion compaction's lines are never the run's failure", () => {
+  it("ruling 174: the completion compaction's lines are never the run's failure", () => {
     // Live on AWSC-60 a usage-limit refusal was followed by the compaction's
     // "did not happen" line, and the stall packet named that line as the
     // failure: kind unknown, no reset instant, no option to wait for it.
@@ -965,7 +965,7 @@ describe("resumeWorkdir", () => {
     expect(existsSync(fallback)).toBe(true);
   });
 
-  it("ruling 495(a): a workspace the resume makes is handed to the agents' group before anything is made in it", () => {
+  it("ruling 140: a workspace the resume makes is handed to the agents' group before anything is made in it", () => {
     // CANARY: drop the hand-over and a resumed agent's workspace is the
     // server's alone (0775 in the server's group, no setgid): its person
     // writes nothing there, and cannot remove the supporting folder the
@@ -1023,7 +1023,7 @@ describe("resumeWorkdir", () => {
 
 /* ------------------------------------------------------------ commentToAgent */
 
-describe("ruling 133: the @mention resume door is stage-gated like every other door", () => {
+describe("ruling 181: the @mention resume door is stage-gated like every other door", () => {
   /** Redeploy with `dev` (delivers) and `rev` (supporting) both scoped to review only. */
   function scopeBothToReview(): void {
     reconfigureProject(store, {
@@ -1071,7 +1071,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(file.parsed.timeline.some((e) => e.type === "comment" && e.actor.kind === "human")).toBe(true);
   });
 
-  it("ruling 562: the answer to an agent that cannot run at the task's stage now goes to the operator, and says so", async () => {
+  it("ruling 68: the answer to an agent that cannot run at the task's stage now goes to the operator, and says so", async () => {
     // Live on AWSC-6 the task had moved on to Estimate while the Cloud
     // Solutions Architect's mapping question was open, and the answer was
     // posted to it as "Continue from where you stopped" before its run was
@@ -1117,11 +1117,11 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(listRunsForTaskRows(store.db, store.slug, "VIB-1").filter((r) => r.agent_profile_id === "rev")).toHaveLength(1);
   });
 
-  it("ruling 565: the answer to an agent still running on the task waits for that run, and says so", async () => {
+  it("ruling 68: the answer to an agent still running on the task waits for that run, and says so", async () => {
     // Live on AWSC-5 the Cloud Solutions Architect raised its packet and kept
     // working; the answer was refused by the single-flight guard, fell through
     // to the operator with no note, and the operator wrote that it had gone
-    // "straight to" the architect. The completion delivers it (ruling 203), so
+    // "straight to" the architect. The completion delivers it (ruling 69), so
     // it is owed, not lost. CANARY: return `result.triggered !== null` alone
     // and the operator is handed the answer and nothing says it waits.
     reconfigureProject(store, {
@@ -1190,7 +1190,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
   });
 
   it("F37-62: the RESUME door refuses a CLOSED task, like every other dispatch door", async () => {
-    // Ruling 177: "a closed task refuses every coordination door". The
+    // Ruling 52: "a closed task refuses every coordination door". The
     // Run-an-agent control on the same page refuses a Done task by name because
     // `startAgentRun` gates on `taskClosure` — but an @mention RESUMES an
     // existing provider session without going through it, so the same person on
@@ -1223,9 +1223,9 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
   });
 
   it("F37-62: the RESUME door refuses a HELD task, like every other dispatch door", async () => {
-    // Ruling 186's comment claims "Every dispatch door lands here, so every one
-    // of them refuses" — this door does not land in `startAgentRun` at all.
-    // Same hole ruling 240 closed on the delivery path.
+    // `startAgentRun`'s hold comment (ruling 56) claims "Every dispatch door
+    // lands here, so every one of them refuses" — this door does not land in
+    // `startAgentRun` at all. The delivery path had the same hole.
     // CANARY: delete the hold block from `assertResumeEligible`.
     scopeBothToReview();
     writeTask(store.dataRoot, store.slug, {
@@ -1273,7 +1273,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(result.runNotStarted).toBeNull();
   });
 
-  it("ruling 544: a resumed agent's run records what is delivered when the resume is dispatched", async () => {
+  it("ruling 153: a resumed agent's run records what is delivered when the resume is dispatched", async () => {
     // CANARY: drop `resume.reviewSubject` in commentToAgent and the resumed
     // row says nothing, so a verdict it returns binds to whatever is delivered
     // when it finishes.
@@ -1299,7 +1299,7 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
     expect(resumed?.review_subject).toBe("files:2026-09-28T08:37:02.629Z");
   });
 
-  it("ruling 544: a resumed agent judging a commit records the revision its checkout was pinned to", async () => {
+  it("ruling 153: a resumed agent judging a commit records the revision its checkout was pinned to", async () => {
     // A resume re-pins nothing, so the checkout still holds the revision the
     // run it resumes was dispatched on. CANARY: record the task's current
     // subject on every resume and this claims rev_2, which the checkout does
@@ -1358,14 +1358,14 @@ describe("ruling 133: the @mention resume door is stage-gated like every other d
 });
 
 /**
- * Ruling 157 (pass 35, F35-8): the hold lift belongs to every door that starts
+ * Ruling 54 (pass 35, F35-8): the hold lift belongs to every door that starts
  * work. `commentToAgent` has TWO run-start branches, and only the fresh one
  * goes through `dispatchAgentRun`, where the sibling lift sits — the RESUME
  * branch calls `resumeRun` directly. KNC-25 is that branch: the hold exists
  * because an agent's run failed, so the agent HAS a prior session, so a
  * person's "@dev try again" resumes it.
  */
-describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hold", () => {
+describe("ruling 54: an @mention that RESUMES a session lifts a packet-less hold", () => {
   it("readiness returns to ready with a 'Hold lifted' note and task.hold.lifted", async () => {
     // Canary: remove the `liftHoldForRun` call from the `triggered ===
     // "resumed"` branch in commentToAgent.
@@ -1406,7 +1406,7 @@ describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hol
 });
 
 /**
- * Ruling 152(c) (pass 35, G35-4), cluster review: a RESUME is a dispatch. The
+ * Ruling 151 (pass 35, G35-4), cluster review: a RESUME is a dispatch. The
  * hold lived in `dispatchAgentRun` only, so the most common repeat — an
  * @mention of the agent that is already working the task — walked past it,
  * spent the MCP pre-flight and the skill re-mount of
@@ -1415,7 +1415,7 @@ describe("ruling 157: an @mention that RESUMES a session lifts a packet-less hol
  * and both `task-lifecycle.md` and `agents-and-runtime.md` already say every
  * door is held.
  */
-describe("ruling 152(c): an @mention that RESUMES a session is held like any other dispatch", () => {
+describe("ruling 151: an @mention that RESUMES a session is held like any other dispatch", () => {
   it("starts no run, records the hold and its retry, and returns the hold sentence", async () => {
     // Canary: remove the `assertDispatchNotHeld` call from commentToAgent's
     // resume branch — the mention resumes and `triggered` reads "resumed".
@@ -1575,7 +1575,7 @@ describe("commentToAgent", () => {
   });
 
   /**
-   * Ruling 203 (F37-23, live on SHOP-6). A8's refusal used to end with a
+   * Ruling 69 (F37-23, live on SHOP-6). A8's refusal used to end with a
    * promise — "it will see the comment when it next re-anchors" — that nothing
    * kept. The anchor holds the last five timeline events, clamped, and only a
    * FRESH run builds one, so the comment survived only if that agent happened
@@ -1583,7 +1583,7 @@ describe("commentToAgent", () => {
    * correction was eight events back within 75 seconds and the agent it named
    * never ran on that task again.
    */
-  it("ruling 203: the @mention refused while the agent was busy is delivered when that run finishes", async () => {
+  it("ruling 69: the @mention refused while the agent was busy is delivered when that run finishes", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
     devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
@@ -1638,7 +1638,7 @@ describe("commentToAgent", () => {
     ).toHaveLength(1);
   });
 
-  it("ruling 203, end to end: a real run's completion delivers the mention it was too busy to take", async () => {
+  it("ruling 69, end to end: a real run's completion delivers the mention it was too busy to take", async () => {
     deployDevSpecialist();
     // A run that stays live, so the mention below meets the single-flight guard
     // the way a person's comment meets it on a working board.
@@ -1684,15 +1684,15 @@ describe("commentToAgent", () => {
   });
 
   /**
-   * Ruling 203's own claim, tested: "Oldest first, one per completion, which
+   * Ruling 69's own claim, tested: "Oldest first, one per completion, which
    * drains a burst in order — the next one rides the next completion." It does
    * not. The window is `occurredAt > runStartedAt`, so once the FIRST comment
    * starts a redelivery run, the second comment is older than that run's start
    * and the next completion cannot see it. A burst of two loses the second,
-   * silently — the exact failure ruling 203 exists to stop, reintroduced by its
+   * silently — the exact failure ruling 69 exists to stop, reintroduced by its
    * own fix.
    */
-  it("ruling 205: a BURST posted while the agent was busy is delivered whole, not just its first", async () => {
+  it("ruling 69: a BURST posted while the agent was busy is delivered whole, not just its first", async () => {
     deployDevSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
     devRun("run_live_primary", { sessionId: null, state: "running", startedAt });
@@ -1724,7 +1724,7 @@ describe("commentToAgent", () => {
     );
     expect(delivered).toMatchObject({ started: true });
 
-    // CANARY: return after the first match (ruling 203's first implementation)
+    // CANARY: return after the first match (ruling 69's first implementation)
     // and the second instruction never reaches the agent — there is no later
     // completion whose window can still see it.
     const started = startedRunSpecs().at(-1)!;
@@ -1741,7 +1741,7 @@ describe("commentToAgent", () => {
   });
 
   /**
-   * Ruling 211(h): this test's first two versions never reached the guard they
+   * Ruling 70: this test's first two versions never reached the guard they
    * claimed to pin. v1 posted a comment naming NOBODY (resolves to null, a
    * different branch); v2 named a real agent but posted it with `appendComment`,
    * which does not set `toAgent` — and the redelivery scan filters on exactly
@@ -1750,7 +1750,7 @@ describe("commentToAgent", () => {
    * it resolves a named agent, so the fixture has to go through the same door a
    * person does.
    */
-  it("ruling 203: a comment addressed to a DIFFERENT agent is not delivered to this one", async () => {
+  it("ruling 69: a comment addressed to a DIFFERENT agent is not delivered to this one", async () => {
     deployDevSpecialist();
     deployReviewerSpecialist();
     const startedAt = "2026-09-13T10:00:00.000Z";
@@ -1834,7 +1834,7 @@ describe("commentToAgent", () => {
     // P13-D-2: this test's precondition is a LIVE session — give it a real
     // transcript so the resume-time continuity probe reports `present` and the
     // resume happens for the reason the test claims. Asserted, not assumed:
-    // written to the wrong home (ruling 127 moved it into the OWNER's) the
+    // written to the wrong home (ruling 137 moved it into the OWNER's) the
     // probe would answer `unknown` and the resume below would pass for the
     // wrong reason.
     writeTranscript(priorSessionId);
@@ -1955,12 +1955,12 @@ describe("commentToAgent", () => {
   });
 
   /**
-   * Ruling 447 (O39-a), live on ax-clone three of three: an answer that routed
+   * Ruling 68 (O39-a), live on ax-clone three of three: an answer that routed
    * the work to ANOTHER actor summoned the asking agent, which then did the
    * other agent's edits itself (AX-22) or spent a run finding it had no tool
    * for them (AX-20, AX-27).
    */
-  it("ruling 447: an answer names another actor exactly when it routes the work", async () => {
+  it("ruling 68: an answer names another actor exactly when it routes the work", async () => {
     const { answerNamesAnotherActor } = await import("./task-comments.server");
     const agents = [
       { id: "developer", name: "Developer", handle: "developer" },
@@ -1992,7 +1992,7 @@ describe("commentToAgent", () => {
     expect(answerNamesAnotherActor("Use the cooperator pattern.", "developer", agents)).toBeNull();
   });
 
-  it("ruling 447: an answer that names the operator goes to the operator, and the asker is not resumed", async () => {
+  it("ruling 68: an answer that names the operator goes to the operator, and the asker is not resumed", async () => {
     const priorSessionId = "sess_r447_dev";
     devRun("run_r447_prior", { threadId: "t_r447", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
@@ -2039,7 +2039,7 @@ describe("commentToAgent", () => {
    * happens next as often as it names who acts. A person who picks it names
    * nobody, so the answer goes back to the agent that asked.
    */
-  it("ruling 447: an option whose description mentions the operator still answers the asker", async () => {
+  it("ruling 68: an option whose description mentions the operator still answers the asker", async () => {
     const priorSessionId = "sess_r447_desc";
     devRun("run_r447_desc", { threadId: "t_r447_desc", sessionId: priorSessionId, sdk: "test" });
     writeTranscript(priorSessionId);
@@ -2359,7 +2359,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
     const resumed = specs[specs.length - 1]!;
     expect(resumed.skills).toEqual(["conventional-commits"]);
     expect(resumed.systemPrompt ?? "").not.toContain("SENTINEL-SKILL-BODY");
-    // Ruling 180: the resumed run's skills ride its own plugin beside the
+    // Ruling 185: the resumed run's skills ride its own plugin beside the
     // checkout, never inside it (the plugin dir itself is gone once the fake
     // run settles — that removal is the ruling's cleanup, not a defect).
     expect(resumed.skillPlugin?.name).toBe("viberr");
@@ -2370,7 +2370,7 @@ describe("a resumed @mention keeps the run's natively-mounted skills (pass-18)",
   });
 });
 
-describe("a resumed @mention keeps its known-down server optional (ruling 658)", () => {
+describe("a resumed @mention keeps its known-down server optional (ruling 190)", () => {
   it("hands the resumed run the server mounted on a failed probe as one it may start without", async () => {
     // Codex requires every other mounted server (codex-runtime). Without the
     // carry, a resumed run that is told the server may be missing fails on it.
@@ -2417,9 +2417,9 @@ describe("a resumed @mention keeps its known-down server optional (ruling 658)",
   });
 });
 
-describe("a resumed @mention keeps the project's rulings (ruling 239)", () => {
+describe("a resumed @mention keeps the project's rulings (ruling 208(a))", () => {
   it("hands the resumed run the rulings index, which its profile never granted", async () => {
-    // The resume builds its own knowledge list (R18-1 parity), and ruling 239
+    // The resume builds its own knowledge list (R18-1 parity), and ruling 208(a)
     // shipped without it: a reviewer resumed mid-thread silently lost the
     // project's rulings between turns. `dev` grants no knowledge base, so the
     // index can only arrive through the resume's own `withProjectRulings`.
@@ -2685,17 +2685,17 @@ describe("comment routing: agent handles engage agents, teammate handles never d
 });
 
 /**
- * F37-66 (pass 37): ruling 211(b)'s withdrawal note is written AFTER three
+ * F37-66 (pass 37): ruling 69's withdrawal note is written AFTER three
  * early returns, and two of them are the very reasons it exists.
  *
- * Ruling 211(b): `commentToAgent`'s single-flight refusal writes "Viberr starts
+ * Ruling 69: `commentToAgent`'s single-flight refusal writes "Viberr starts
  * it on this comment as soon as that run finishes" onto the canonical record,
  * and when the completion hop cannot keep that promise the person is owed the
  * correction in the same place they were given it. Its own doc names the causes:
  * "the task closed underneath it, the stage stopped admitting the profile, a
  * credential went away."
  *
- * Ruling 211(b) moved the delivery ATTEMPT above the error branch's return and
+ * Ruling 69 moved the delivery ATTEMPT above the error branch's return and
  * the closed-task branch's return, for exactly this reason. The withdrawal was
  * left below all of them — so on a task that closed underneath the run, the
  * attempt runs, fails, reports `owed`, and the function returns before anything
@@ -2749,7 +2749,7 @@ describe("F37-66 — the undelivered-mention withdrawal survives the early retur
     const timeline = () =>
       readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!
         .parsed.timeline;
-    // Ruling 177's note proves we really took the closed-task branch — the
+    // Ruling 52's note proves we really took the closed-task branch — the
     // early return under test. Without this the test could pass on a task that
     // never closed at all.
     const closedNoted = await pollUntil(() =>

@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 /**
- * Ruling 629: a PDF attachment reads as its text.
+ * Ruling 214: a PDF attachment reads as its text.
  *
  * calculator.aws exports an estimate as a PDF, and the board's rulings ask the
- * Estimate Judge to check every delivered export. Ruling 566 put poppler in the
+ * Estimate Judge to check every delivered export. Ruling 42 put poppler in the
  * image so a run's shell could render one, but `read_task_attachment` still
  * named a .pdf as binary and refused it: live on AWSC-85 the Judge wrote that
  * "the attachment reader does not parse its binary contents". `pdftotext
@@ -51,7 +51,7 @@ export function pdfToText(
       // run carries the child's `stderr`, which this reads as an optional string.
       const failure = error as NodeJS.ErrnoException & { stderr?: string };
       if (failure.code === "ENOENT") {
-        return { unreadable: "is a PDF, and this host has no `pdftotext` to read it with (poppler-utils, ruling 566)." };
+        return { unreadable: "is a PDF, and this host has no `pdftotext` to read it with (poppler-utils, ruling 42)." };
       }
       const reason =
         String(failure.stderr || failure.message)

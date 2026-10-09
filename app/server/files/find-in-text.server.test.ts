@@ -3,7 +3,7 @@ import { pageEnd } from "~/server/runtimes/read-page-budget.server";
 import { FIND_HITS_MAX, findInText, findWords } from "./find-in-text.server";
 
 /**
- * Ruling 706: the search behind `read_task_source`'s `find`. The cases are
+ * Ruling 82: the search behind `read_task_source`'s `find`. The cases are
  * the shapes a kept record takes: one entry to a line (this repository's
  * newer rulings), an entry wrapped over indented lines (its older ones), and
  * a file that is one line from end to end.
@@ -30,7 +30,7 @@ const RECORD = record([
   },
 ]);
 
-describe("ruling 706: the places in a text that hold a phrase", () => {
+describe("ruling 82: the places in a text that hold a phrase", () => {
   it("finds a later entry in one call: its line, the head of that line, the words where they stand, and where to read it from", () => {
     // Canary: return the offset of the words in place of their line's start,
     // and a read from there opens in the middle of the entry with its number
@@ -429,7 +429,7 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
 
   it("keeps the places it lists inside 24,000 bytes whatever the text's bytes", () => {
     // Three-byte characters: an excerpt of them weighs about 775 bytes, so
-    // thirty fit, and forty would be 31,000: a whole page (ruling 624) before
+    // thirty fit, and forty would be 31,000: a whole page (ruling 215) before
     // the answer's own fields are added.
     const wide = Array.from({ length: 60 }, (_, i) => `${i + 1}. 記録 ${"東京都".repeat(200)}`).join("\n");
     const weigh = (hit: { line: number; offset: number; text: string }) => Buffer.byteLength(JSON.stringify(hit, null, 1));

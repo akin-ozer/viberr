@@ -285,13 +285,13 @@ describe("pat-store", () => {
 });
 
 /**
- * Ruling 480 (F40-43): a fine-grained token's `repo` and `pull_request:write`
+ * Ruling 220 (F40-43): a fine-grained token's `repo` and `pull_request:write`
  * are proven per repository. Live, the card read "repo unproven (verified on
  * first use)" after pushes and a merge: the attach probe's proof lived only in
  * the token's newest validation, which the connection's repo-less Re-check
  * overwrote, and no push or merge ever proved `repo`.
  */
-describe("ruling 480: repository-scoped proof", () => {
+describe("ruling 220: repository-scoped proof", () => {
   const REPO = "akin-ozer/viberr";
   function bound() {
     // Projected: the chips read the project's repository off its row.
@@ -421,7 +421,7 @@ describe("ruling 480: repository-scoped proof", () => {
 
   it("names the connection holding the token, for the card's Update token link", () => {
     const { store, pat } = bound();
-    // No connection holds it: the key is absent, not null (ruling 457's payload).
+    // No connection holds it: the key is absent, not null (ruling 11's payload).
     expect(getProjectCredentialHealth(store.db, store.slug)).not.toHaveProperty("connectionId");
     store.db
       .prepare(
@@ -434,12 +434,12 @@ describe("ruling 480: repository-scoped proof", () => {
 });
 
 /**
- * Ruling 144(a): the workflow-scope advisory, from a classic token's published
+ * Ruling 221(a): the workflow-scope advisory, from a classic token's published
  * list or from an open violation; never for a fine-grained token, never a
  * verdict. Canary: derive it from `validation.scopes` (return [] when the
  * header lacks the scope).
  */
-describe("credentialAdvisories (ruling 144)", () => {
+describe("credentialAdvisories (ruling 221(a))", () => {
   const validation = (tokenKind: "classic" | "fine_grained", headerScopes: string[] | null) => ({
     status: "valid" as const,
     checkedAt: "2026-09-04T00:00:00.000Z",
@@ -460,7 +460,7 @@ describe("credentialAdvisories (ruling 144)", () => {
     expect(credentialAdvisories(validation("fine_grained", null), [])).toEqual([]);
     expect(credentialAdvisories(null, [])).toEqual([]);
   });
-  it("ruling 360: an open `checks:read` violation is an advisory naming the task and the consequence", () => {
+  it("ruling 237: an open `checks:read` violation is an advisory naming the task and the consequence", () => {
     // CANARY: drop the checks:read arm.
     const advisories = credentialAdvisories(validation("fine_grained", null), [{ scope: "checks:read", taskKey: "BNB-14" }]);
     expect(advisories).toHaveLength(1);

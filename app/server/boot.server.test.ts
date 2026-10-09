@@ -46,10 +46,10 @@ const recoverStrandedOperatorPlans = vi.fn(async () => {
 /** The re-invokes boot's orphan sweep LAUNCHED — still cloning a task
  *  workspace when the chain reaches its reclaim. Reassigned per test. */
 let orphanReinvokes: Promise<void> = Promise.resolve();
-/** The sweep of the orphans' surviving processes (ruling 174) — still
+/** The sweep of the orphans' surviving processes (ruling 142) — still
  *  signalling when the chain reaches its reclaim. Reassigned per test. */
 let orphanReaped: Promise<void> = Promise.resolve();
-/** Ruling 215: what step 1 says it took this boot. Reassigned per test. */
+/** Ruling 164: what step 1 says it took this boot. Reassigned per test. */
 let orphanClaimed: ReadonlySet<string> = new Set<string>();
 const finalizeOrphanedRuns = vi.fn(() => {
   calls.push("orphan-finalize");
@@ -63,7 +63,7 @@ const finalizeOrphanedRuns = vi.fn(() => {
     claimedTasks: orphanClaimed,
   };
 });
-/** Ruling 213: the fourth recovery, and the only one that keys on the BOARD
+/** Ruling 164: the fourth recovery, and the only one that keys on the BOARD
  *  rather than on a run — it must land after the three that may start one. */
 const settleAbandonedWaits = vi.fn(async (..._args: unknown[]) => {
   calls.push("settle-abandoned-waits");
@@ -252,7 +252,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
       "reply-recovery:end",
       "plan-recovery:start",
       "plan-recovery:end",
-      // Ruling 213: the board sweep runs after all three run-keyed passes, so
+      // Ruling 164: the board sweep runs after all three run-keyed passes, so
       // it sees the board they leave behind — a pass that STARTS a run sets
       // `waiting: agent`, and sweeping before it would settle a task that is
       // about to be worked.
@@ -262,7 +262,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
   });
 
   /**
-   * Ruling 215 (F37-35). The deploy that shipped 213 wrote BOTH restart notes
+   * Ruling 164 (F37-35). The deploy that shipped 213 wrote BOTH restart notes
    * on SHOP-4 and SHOP-16: "the run … was still running when the server
    * stopped" and, beside it, "no run was live when the server came back". Step
    * 1's job is to move those live runs to `interrupted`, and its own re-invokes
@@ -271,7 +271,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
    * consecutive timeline entries is the "viberr lying" bar, and the second
    * re-invoke spent a coordination run on top of it.
    */
-  it("tells the board sweep which tasks the orphan sweep already took (ruling 215)", async () => {
+  it("tells the board sweep which tasks the orphan sweep already took (ruling 164)", async () => {
     orphanClaimed = new Set(["shop/SHOP-4"]);
 
     await reconcileRestartedWork(db, reconcileDeps);
@@ -301,7 +301,7 @@ describe("reconcileRestartedWork (P14-RT-09)", () => {
     expect(calls.indexOf("reinvoke:end")).toBeLessThan(calls.indexOf("reclaim"));
   });
 
-  it("reclaims only after the orphans' surviving processes have been swept (ruling 174)", async () => {
+  it("reclaims only after the orphans' surviving processes have been swept (ruling 142)", async () => {
     // A CLI the dead server left running could still be writing the tree the
     // reclaim deletes; its sweep is mid-grace (SIGTERM sent, SIGKILL pending).
     orphanReaped = new Promise<void>((resolve) => {
@@ -414,7 +414,7 @@ describe("logBootIntegrity (gaps 16 + 18)", () => {
     });
   });
 
-  it("ruling 182: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
+  it("ruling 40: carries the host toolchain, resolved here so the first health request does not pay for the probe", () => {
     // The suite's primed reading (setup-env), not a live probe — what matters
     // is that the boot line reads the ONE memoized toolchain.
     expect(bootLine(bootCtx.makeDb())).toHaveProperty("toolchain", HERMETIC_TOOLCHAIN);
@@ -448,7 +448,7 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
 });
 
 /**
- * Ruling 140 (pass 34): the notifications CHECK is the same silent-drift class
+ * Ruling 50 (pass 34): the notifications CHECK is the same silent-drift class
  * as the validation CHECK, one table over — a root that predates a kind
  * rejects every INSERT of it and the fail-open swallows the throw. The boot
  * line now names the gap, table-qualified.
@@ -456,8 +456,8 @@ describe("projectionMissingColumns (pass-21 live-validation catch)", () => {
  * Canary: revert `projectionCheckGaps` to the `task_projections`-only read and
  * the `notifications.kind: ownership` entry is never reported.
  */
-describe("projectionCheckGaps (ruling 140)", () => {
-  it("F21-1 / ruling 225: reads the baseline's own task_projections CHECKs", () => {
+describe("projectionCheckGaps (ruling 50)", () => {
+  it("F21-1 / ruling 45: reads the baseline's own task_projections CHECKs", () => {
     // The positive control behind every drift-free line on a fresh database in
     // this file: a probe whose pattern stopped matching the baseline's CHECK
     // would report nothing there too, and a missing enum member would ship
@@ -520,7 +520,7 @@ describe("projectionCheckGaps (ruling 140)", () => {
     }
   });
 
-  it("ruling 503: reports an epic_projections status CHECK that lacks a declared status", () => {
+  it("ruling 272: reports an epic_projections status CHECK that lacks a declared status", () => {
     // CANARY: drop the `epic_projections.status` arm from `projectionCheckGaps`.
     const ctx = createTestDbContext();
     try {
@@ -552,21 +552,21 @@ describe("projectionCheckGaps (ruling 140)", () => {
 });
 
 /**
- * Ruling 481(a): a root whose `notifications.kind` CHECK predates a kind is
+ * Ruling 74: a root whose `notifications.kind` CHECK predates a kind is
  * widened in place at boot, keeping every row and index, instead of refusing
  * the new kind at INSERT until someone re-baselines (and loses sign-ins).
  *
  * Canary: return `[]` from `widenNotificationKindCheck` before the rebuild and
  * the gap survives, the `question` insert throws, and the index check fails.
  */
-describe("widenNotificationKindCheck (ruling 481)", () => {
+describe("widenNotificationKindCheck (ruling 74)", () => {
   it("rebuilds a lagging notifications table with the shipped CHECK, rows and indexes kept", () => {
     const ctx = createTestDbContext();
     try {
       const db = ctx.makeDb();
       // A current root: nothing to do.
       expect(widenNotificationKindCheck(db)).toEqual([]);
-      // What a root first opened before ruling 481 carries.
+      // What a root first opened before the `question` kind existed carries.
       db.exec(`
         DROP TABLE notifications;
         CREATE TABLE notifications (
@@ -596,7 +596,7 @@ describe("widenNotificationKindCheck (ruling 481)", () => {
           )
           .run();
       expect(insertQuestion).toThrow(/CHECK constraint failed/);
-      // Ruling 503's `epic` postdates this root too.
+      // Ruling 272's `epic` postdates this root too.
       expect(bootLine(db).projectionSchemaDrift).toEqual([
         "notifications.kind: question",
         "notifications.kind: epic",

@@ -8,7 +8,7 @@
 -- produced — minus the mock scope-violation the old 0005 seeded (schema only,
 -- zero demo data).
 --
--- Convention (owner ruling, pass 11; kept at launch by ruling 683): schema
+-- Convention (owner ruling, pass 11; kept at launch by ruling 5): schema
 -- changes are squashed INTO this baseline — no incremental migration chain is
 -- kept. The runner records this filename in schema_migrations and skips by
 -- FILENAME alone, so editing this file reaches FRESH databases only. Every
@@ -19,9 +19,9 @@
 -- `ensureSingleFlightIndexes` and `ensureBaselineColumns`: the columns, tables
 -- and indexes in `BASELINE_COLUMNS` / `BASELINE_TABLES` / `BASELINE_INDEXES`,
 -- and `user_backend_credentials` rebuilt to its several-accounts shape
--- (`ensureBackendAccountsTable`, ruling 507). Server boot also widens a lagging
+-- (`ensureBackendAccountsTable`, ruling 138). Server boot also widens a lagging
 -- `notifications.kind` CHECK in place (`widenNotificationKindCheck`, ruling
--- 481) and logs a `projection schema drift` WARN, with the remedy, for two more
+-- 74) and logs a `projection schema drift` WARN, with the remedy, for two more
 -- shapes: a task_projections / task_events column the DB lacks
 -- (`projectionMissingColumns`; a manual `ALTER TABLE … ADD COLUMN`) and a value
 -- one of the four CHECKs `projectionCheckGaps` reads refuses (a re-baseline, as
@@ -82,7 +82,7 @@ CREATE TABLE projects (
   credential_policy_json TEXT,
   guardrails_json TEXT NOT NULL DEFAULT '[]',
   required_reviewers_json TEXT NOT NULL DEFAULT '[]',
-  -- Ruling 482: the project's declared gates (project.md `gates`), so a task's
+  -- Ruling 104: the project's declared gates (project.md `gates`), so a task's
   -- projected acceptance block can say the gates have not passed without a
   -- file read. '[]' when the project declares none.
   gates_json TEXT NOT NULL DEFAULT '[]',
@@ -106,7 +106,7 @@ CREATE TABLE task_projections (
     ('ready', 'input_required', 'inconsistency_risk_detected', 'blocked')),
   -- Raw stored value from the file (NULL when missing/invalid there).
   stored_readiness TEXT,
-  -- Ruling 225: `schedule` is derived by the projector, never authored in a
+  -- Ruling 45: `schedule` is derived by the projector, never authored in a
   -- task file. It belongs here anyway, because this CHECK is what the store
   -- would have used to refuse the derived value — a refusal that surfaces as
   -- "projection rebuild failed" and a stale row, which is precisely the
@@ -120,7 +120,7 @@ CREATE TABLE task_projections (
     CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
   labels_json TEXT NOT NULL DEFAULT '[]',
   due_date TEXT,
-  -- Ruling 131 (pass 34): the task file's `blockedBy` list, verbatim (JSON
+  -- Ruling 55 (pass 34): the task file's `blockedBy` list, verbatim (JSON
   -- array of canonical spellings). Projected so the release engine can select
   -- held dependents and walk cycles without reading task files; the entries'
   -- STATES are resolved at read time and never stored. Existing roots take the
@@ -175,7 +175,7 @@ CREATE TABLE task_projections (
   repo TEXT,
   pr_json TEXT,
   github_json TEXT,
-  -- Ruling 53 + ruling 88: the DELIVERED revision's head sha
+  -- Ruling 97: the DELIVERED revision's head sha
   -- (`workRevision.headSha`), NULL before delivery. The board's acceptance
   -- ceremony has to DISCLOSE what it accepts, and its echo of that disclosure is
   -- what the server compares against the live task before it merges anything
@@ -209,7 +209,7 @@ CREATE TABLE task_projections (
   event_count INTEGER NOT NULL DEFAULT 0,
   comment_count INTEGER NOT NULL DEFAULT 0,
   diagnostic_count INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 503: the epic this task belongs to (`epic-3`), from task.md `epic`.
+  -- Ruling 272: the epic this task belongs to (`epic-3`), from task.md `epic`.
   -- NULL when it is in none. Projected so the board's epic filter, an epic's
   -- task list and its progress read it without opening task files on a
   -- loader path. An upgraded root gains it at open (`ensureBaselineColumns`)
@@ -228,7 +228,7 @@ CREATE TABLE task_events (
   project_slug TEXT NOT NULL,
   task_key TEXT NOT NULL,
   -- 0 = newest (file order, newest-first). A re-project keeps the rows of
-  -- unchanged events (their id survives, position shifts; ruling 457).
+  -- unchanged events (their id survives, position shifts; ruling 21).
   position INTEGER NOT NULL,
   occurred_at TEXT NOT NULL,
   type TEXT NOT NULL,
@@ -245,7 +245,7 @@ CREATE TABLE task_events (
   -- (JSON array). The directory stays the truth; these attribute producers.
   attachments_json TEXT
 );
--- Epic projections (ruling 503): derived rows over the canonical
+-- Epic projections (ruling 272): derived rows over the canonical
 -- `projects/<slug>/epics/<id>.md` files, rebuilt by the same rebuilder that
 -- owns task/project rows. The epic's TASKS are not here: membership is each
 -- task's own `epic` (task_projections.epic_id), and an epic's progress is
@@ -299,20 +299,20 @@ CREATE TABLE provenance (
 CREATE TABLE notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
-  -- 'controller' (ruling 99): chained-goal progress, addressed to the goal's
-  -- creator. Nothing writes one since ruling 503 retired the chains; the kind
+  -- 'controller' (ruling 273): chained-goal progress, addressed to the goal's
+  -- creator. Nothing writes one since the chains were retired; the kind
   -- stays so the rows an upgraded inbox holds still read. A controller
   -- conversation reply is never a row.
-  -- 'epic' (ruling 503): a task joined or left an epic the reader leads, they
+  -- 'epic' (ruling 272): a task joined or left an epic the reader leads, they
   -- were made its lead, someone else closed or reopened it, or every task in
   -- it is done.
-  -- 'dependency' (ruling 131): the work a task waited on landed (or can never).
-  -- 'ownership' (ruling 140): the reader's task-owner seat changed hands.
-  -- 'question' (ruling 481): an agent's question only a person can answer.
+  -- 'dependency' (ruling 57): the work a task waited on landed (or can never).
+  -- 'ownership' (ruling 50): the reader's task-owner seat changed hands.
+  -- 'question' (ruling 74): an agent's question only a person can answer.
   -- This list IS NOTIFICATION_KINDS in app/shared/mapping/notification.server.ts,
   -- and the boot integrity check compares the live CHECK against it, because a root
   -- that predates a kind would otherwise reject every INSERT of it silently. Boot
-  -- widens a lagging CHECK in place (`widenNotificationKindCheck`, ruling 481).
+  -- widens a lagging CHECK in place (`widenNotificationKindCheck`, ruling 74).
   kind TEXT NOT NULL CHECK (kind IN ('packet', 'question', 'approval', 'mention', 'quality', 'policy', 'controller', 'dependency', 'ownership', 'epic')),
   -- packet kind only: input | blocked (card tint + pill).
   ptype TEXT CHECK (ptype IN ('input', 'blocked')),
@@ -321,7 +321,7 @@ CREATE TABLE notifications (
   actor_json TEXT,
   project_slug TEXT,
   task_key TEXT,
-  -- Ruling 497: where the row opens, written by the notifier that knows the exact
+  -- Ruling 75: where the row opens, written by the notifier that knows the exact
   -- thing it is about (a timeline event, the task's decision, a knowledge-base
   -- proposal, the project's GitHub page, an epic). An app path inside the
   -- row's own project, with an optional #fragment. NULL opens the task, or the
@@ -371,7 +371,7 @@ CREATE TABLE github_pats (
   created_at TEXT NOT NULL,
   last_validated_at TEXT,
   validation_json TEXT,
-  -- Ruling 480: what each repository proved about the token (`repo`,
+  -- Ruling 220: what each repository proved about the token (`repo`,
   -- `pull_request:write`), as the JSON `parseRepoScopeProofs` reads; NULL until
   -- a repository-scoped probe or a write through the token proves something.
   repo_scopes_json TEXT
@@ -382,10 +382,10 @@ CREATE TABLE project_github_credentials (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
--- Ruling 127: a person's connected agent backends. `kind = 'login'` rows carry NO secret: the
+-- Ruling 137: a person's connected agent backends. `kind = 'login'` rows carry NO secret: the
 -- vendor binary holds the credential in the user's runtime home. API keys / access tokens are
 -- sealed boxes (registered in SEALED_STORES so key rotation reaches them).
--- Ruling 507: one row per ACCOUNT, and a person may keep several per backend. Connecting adds an
+-- Ruling 138: one row per ACCOUNT, and a person may keep several per backend. Connecting adds an
 -- account instead of replacing one, and exactly one per (user, backend) is ACTIVE — the one runs
 -- bill: the most recently selected (`selected_at`; ties go to the newer row). Switching accounts
 -- is a write to this table and nothing else; no vendor sign-in runs.
@@ -402,13 +402,14 @@ CREATE TABLE user_backend_credentials (
   -- `claude auth status`, or {"status":"Logged in using ChatGPT"} from `codex login status`.
   detail_json TEXT NOT NULL DEFAULT '{}',
   verified_at TEXT,                          -- last time the provider itself accepted it
-  -- Ruling 507: the person's own name for the account ("Work"); NULL = named by its vendor facts.
+  -- Ruling 138: the person's own name for the account ("Work"); NULL = named by its vendor facts.
   label TEXT,
-  -- Ruling 507: when this account last became the active one (connected, or switched to). The
+  -- Ruling 138: when this account last became the active one (connected, or switched to). The
   -- active account is the newest value, so removing it hands runs back to the one used before.
   selected_at TEXT NOT NULL DEFAULT '',
-  -- Ruling 507: 1 = connected before ruling 507, so its vendor sign-in lives in the person's
-  -- backend home itself (`runtimes/users/<id>/claude-home`); 0 = it has a home of its own,
+  -- Ruling 138: 1 = connected before each account had a home of its own, so its vendor
+  -- sign-in lives in the person's backend home itself (`runtimes/users/<id>/claude-home`);
+  -- 0 = it has a home of its own,
   -- `<backend home>/accounts/<id>`, where its sign-in was written and stays.
   legacy_home INTEGER NOT NULL DEFAULT 0 CHECK (legacy_home IN (0, 1)),
   created_at TEXT NOT NULL,
@@ -416,7 +417,7 @@ CREATE TABLE user_backend_credentials (
 );
 CREATE INDEX idx_user_backend_credentials__user
   ON user_backend_credentials (user_id, backend, selected_at);
--- Ruling 460: the OS user each person's agent processes run as. Allocated once, sequentially
+-- Ruling 139: the OS user each person's agent processes run as. Allocated once, sequentially
 -- from 20001 (`agentUidFor`), and never deleted — deliberately no foreign key to `users`: a
 -- removed account's transcripts stay on disk owned by its uid, and a uid handed to a second
 -- person would own them.
@@ -454,7 +455,7 @@ CREATE TABLE github_connections (
   pat_id TEXT NOT NULL REFERENCES github_pats (id) ON DELETE CASCADE,
   is_default INTEGER NOT NULL DEFAULT 0,
   expires_at TEXT,                    -- token expiry (ISO) when advertised
-  -- Ruling 463: which repositories the token reaches (GET /user/repos), as
+  -- Ruling 222: which repositories the token reaches (GET /user/repos), as
   -- the JSON `readTokenReach` stores; NULL until a validation has read it.
   reach_json TEXT,
   created_at TEXT NOT NULL,
@@ -521,26 +522,26 @@ CREATE TABLE org_mcp_servers (
   -- still settles to `unreachable` instead of re-downloading forever — the
   -- terminal condition R19-17c's honesty depends on.
   heuristic_warmups INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 176: the tools an admin marked as WRITE tools, a JSON array of
+  -- Ruling 188: the tools an admin marked as WRITE tools, a JSON array of
   -- { name, gate: "repo-write" }, denied on runs whose repo-write grant is
   -- withheld. NULL until an admin first saves the editor's "Write tools"
   -- section; '[]' is a reviewed "none". The editor pre-ticks the discovery
   -- suggestion only while it is NULL.
   tool_policy_json TEXT,
-  -- Ruling 176: the tool names the last successful probe listed (a JSON array),
+  -- Ruling 188: the tool names the last successful probe listed (a JSON array),
   -- offered in the editor. An observation like tools_count, but kept across a
   -- failed probe: a stale list is still the right thing to mark from.
   tool_names_json TEXT,
-  -- Ruling 469: an OAuth sign-in. `oauth_ref` is a secret-box (like cred_ref,
+  -- Ruling 192: an OAuth sign-in. `oauth_ref` is a secret-box (like cred_ref,
   -- rotated with it) around the authorization server's endpoints, the client
   -- Viberr registered as and the tokens; `oauth_json` is the public half every
   -- surface reads without opening it (status needs_sign_in | signed_in |
   -- expired, expiry, whether it renews, issuer host). NULL for a connection
-  -- that is not an OAuth one. Ruling 486: the public half also carries the
-  -- scope the server granted.
+  -- that is not an OAuth one. The public half also carries the scope the
+  -- server granted.
   oauth_ref TEXT,
   oauth_json TEXT,
-  -- Ruling 486(c): the scope an admin asks the next OAuth sign-in for
+  -- Ruling 192: the scope an admin asks the next OAuth sign-in for
   -- ("Requested scopes", space-joined), sent as the authorization request's
   -- `scope`. NULL sends the resource's advertised scopes_supported.
   oauth_requested_scope TEXT,
@@ -551,7 +552,7 @@ CREATE TABLE org_mcp_servers (
 -- Org-level (unscoped, like org_mcp_servers): the credential is a deployment
 -- fact, not a project one. Written only from a REAL run's failure whose
 -- redacted text matches MODEL_UNSUPPORTED_RE; cleared by a real run's success.
--- Never written by a synthetic probe (ruling 19). Presence of a row =
+-- Never written by a synthetic probe (ruling 149). Presence of a row =
 -- unavailable; absence = unknown-but-offered (never "proven available", the
 -- claim we cannot make).
 CREATE TABLE model_availability (
@@ -570,7 +571,7 @@ CREATE TABLE org_skills (
   updated_at TEXT NOT NULL
 );
 -- ---------------------------------------------------------------------------
--- Controller conversations (ruling 99). App-owned collaboration state, the
+-- Controller conversations (ruling 249). App-owned collaboration state, the
 -- same family as notifications/sessions/audit (file-formats §5) — nothing
 -- hand-edits a transcript, so it does not ride the file-canonical machinery.
 -- The deep working record (tool calls, token usage) lives on the conversation
@@ -581,7 +582,7 @@ CREATE TABLE controller_conversations (
   -- evaluated against, and (with org admins) the only reader.
   user_id TEXT NOT NULL,
   user_label TEXT NOT NULL,
-  -- The conversation's SCOPE (ruling 121): NULL/NULL = instance; a slug alone
+  -- The conversation's SCOPE (ruling 249): NULL/NULL = instance; a slug alone
   -- binds the conversation to that project's board context (the project-role
   -- axis); slug + task_key anchors it to ONE task, whose canonical file the
   -- server reads into every turn. A task without a project is not a scope.
@@ -598,7 +599,7 @@ CREATE TABLE controller_conversations (
 );
 CREATE INDEX idx_controller_conversations__user
   ON controller_conversations (user_id, last_message_at DESC);
--- The dock (ruling 121) lists ONE scope at a time: this user's threads for one
+-- The dock (ruling 256) lists ONE scope at a time: this user's threads for one
 -- board or one task, newest first.
 CREATE INDEX idx_controller_conversations__scope
   ON controller_conversations (user_id, project_slug, task_key, last_message_at DESC);
@@ -614,35 +615,35 @@ CREATE TABLE controller_messages (
   -- The agent_runs row that produced a controller reply (its console is the
   -- deep record); NULL on user rows and on refusal notes written run-less.
   run_id TEXT,
-  -- Ruling 121: the page the person was looking at when they sent a user
+  -- Ruling 249: the page the person was looking at when they sent a user
   -- message (pathname + query, e.g. /projects/viberr/board?filter=waiting) so
   -- a transcript read back later still says where the ask came from. NULL on
   -- controller rows and on messages sent before the dock existed.
   surface TEXT,
   created_at TEXT NOT NULL,
-  -- Ruling 465: on a controller row, the id of the user message it answers
+  -- Ruling 252: on a controller row, the id of the user message it answers
   -- (a turn's reply, a refusal, a failure or restart note). A user message
   -- takes its seq when it is QUEUED, so seq alone cannot say which reply
   -- belongs to which message. NULL on user rows and on a note that answers
   -- no message (a released project's note).
   reply_to TEXT,
-  -- Ruling 465: 1 on a user message written before reply links whose answer
+  -- Ruling 252: 1 on a user message written before reply links whose answer
   -- the backfill could not prove (a restart or a failed start lost it, or the
   -- writers' order stopped proving anything): earlier history, not linked,
   -- which boot recovery never notes as unanswered. 0 on everything written
   -- since.
   unlinked_history INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 527: on a user message sent while a turn worked and read by that
+  -- Ruling 251: on a user message sent while a turn worked and read by that
   -- turn at one of its steps (steering), the id of the user message the turn
   -- answered. Such a message has no reply of its own: the turn's reply
   -- answers both. NULL on every other row.
   steered_into TEXT,
   UNIQUE (conversation_id, seq)
 );
--- Ruling 573: the files a person sent with a controller message. App-owned
+-- Ruling 258: the files a person sent with a controller message. App-owned
 -- like the message: kept in the row (a message carries at most ten files and
--- 25 MB), so the backup's snapshot carries them, a Retract (ruling 527) or a
--- deleted conversation (ruling 525) takes them with the message, and a message
+-- 25 MB), so the backup's snapshot carries them, a Retract (ruling 251) or a
+-- deleted conversation (ruling 250) takes them with the message, and a message
 -- and its files commit together. A name is unique in its conversation, which
 -- is how the controller's reader asks for one.
 CREATE TABLE controller_message_files (
@@ -660,7 +661,7 @@ CREATE TABLE controller_message_files (
 CREATE INDEX idx_controller_message_files__message
   ON controller_message_files (message_id);
 -- What a controller conversation left itself to do when a task is accepted
--- (ruling 685). The controller cannot wait for a task: its turn ends. It writes
+-- (ruling 259). The controller cannot wait for a task: its turn ends. It writes
 -- the next step here, and the acceptance that moves the task to its last stage
 -- starts the conversation's next turn with it, as the person who asked.
 -- `fired_at` is set once, by the acceptance that claims the row, so two
@@ -699,7 +700,7 @@ CREATE TABLE "agent_runs" (
   -- "Primary specialist"/"Reviewer" literals in the shadow-kind cleanup.
   -- idx_agent_runs__one_delivering below is keyed on this, and reads correctly
   -- BECAUSE 'primary' means delivering.
-  -- 'controller' (ruling 99): a controller conversation turn. Its rows carry
+  -- 'controller' (ruling 251): a controller conversation turn. Its rows carry
   -- project_slug = '' (instance machinery — never a member-visible task scope)
   -- and task_key = the conversation id, so every task-scoped query, which
   -- filters by real (project_slug, task_key) equality, never matches them.
@@ -719,12 +720,12 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
-  -- Ruling 316: this run was dispatched with its VERDICT channel withheld, so a
+  -- Ruling 87: this run was dispatched with its VERDICT channel withheld, so a
   -- reply carrying no envelope verdict is an ANSWER and not silence. The prose
   -- fallback that manufactures a verdict from a reply must not fire here: the
   -- reviewer was told not to judge, and obeying is not an omission to repair.
   verdict_withheld INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 544: what the task's review bound to when this run was dispatched
+  -- Ruling 153: what the task's review bound to when this run was dispatched
   -- (reviewSubjectId: the work revision's id, or files:<deliveredAt>), or 'none'
   -- when nothing on the task had been delivered yet. The run's verdict binds
   -- only if the task still has that subject when it completes: a delivery that
@@ -756,7 +757,7 @@ CREATE TABLE "agent_runs" (
   -- always re-invokes the operator. NULL on runs nobody dispatched by hand.
   dispatched_by_name TEXT,
   dispatched_by_user_id TEXT,
-  -- Ruling 248 (pass 37, F37-77): 1 when this run's workspace checkout could
+  -- Ruling 87 (pass 37, F37-77): 1 when this run's workspace checkout could
   -- NOT be provisioned, so the run executed with no working tree. A run that
   -- could not read the work judges nothing: the verdict path (envelope AND the
   -- prose fallback) is closed for these rows. Persisted rather than held in the
@@ -764,7 +765,7 @@ CREATE TABLE "agent_runs" (
   -- the closure dies with the process, and a recovered no-checkout reviewer
   -- would otherwise have its report re-classified into a verdict.
   no_checkout INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 369: what the prompt cache did for this run, from the provider's
+  -- Ruling 172: what the prompt cache did for this run, from the provider's
   -- own usage figures (Claude: every main-loop API message; Codex: the turn's
   -- usage, and the rollout's per-call figures read at finalize). Every column
   -- is folded by the run sink and read by the console and Insights.
@@ -787,19 +788,19 @@ CREATE TABLE "agent_runs" (
   -- on Codex (no such figure) and before any write has landed.
   cache_ttl_bucket TEXT CHECK (cache_ttl_bucket IN ('5m', '1h', 'mixed')),
   -- The largest prompt any one call of this run carried, and the LAST call's
-  -- prompt — the size a resume of this session would replay (ruling 372 reads
+  -- prompt — the size a resume of this session would replay (ruling 173 reads
   -- the last one; the peak is what the window bounds). 0 until a call lands.
   peak_prompt_tokens INTEGER NOT NULL DEFAULT 0,
   last_prompt_tokens INTEGER NOT NULL DEFAULT 0,
   -- How many times the provider compacted this run's context (a Claude
   -- `compact_boundary`, a Codex context-compaction event).
   compactions INTEGER NOT NULL DEFAULT 0,
-  -- Ruling 369: the KIND of credential this run billed at start (`login`,
+  -- Ruling 172: the KIND of credential this run billed at start (`login`,
   -- `api_key`, `access_token`), which decides the cache TTL the resume policy
-  -- assumes (ruling 372) and is the Insights breakdown's second axis. NULL on a
+  -- assumes (ruling 173) and is the Insights breakdown's second axis. NULL on a
   -- run refused before a credential was opened.
   credential_kind TEXT CHECK (credential_kind IN ('login', 'api_key', 'access_token')),
-  -- Ruling 127: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
+  -- Ruling 137: the CREDENTIAL PRINCIPAL — whose connected backend accounts this
   -- run billed. Task runs (operator, specialist, resume, scheduled, boot recovery,
   -- retry) carry the task owner; controller turns carry the asker. NULL only on a
   -- run refused before any credential was looked up (an unowned task, or one whose
@@ -808,14 +809,14 @@ CREATE TABLE "agent_runs" (
   -- backend still records the owner (refusedPrincipalUserId). Also the key the
   -- transcript lookup uses — a run's session lives in that person's runtime home.
   credential_user_id TEXT,
-  -- Ruling 507: WHICH of the principal's accounts on this backend the run billed
+  -- Ruling 138: WHICH of the principal's accounts on this backend the run billed
   -- (`user_backend_credentials.id`, the account that was active when it started).
   -- No foreign key: the run outlives the account. Boot recovery reads it to hand
   -- an orphaned Codex run's refreshed sign-in back to the account it came from,
   -- and to nobody when that account has since been removed. NULL on a run
   -- refused before a credential was opened, and on runs from before the ruling.
   credential_account_id TEXT,
-  -- Pass 35 U35-7 (ruling 158 addendum): WHY an `interrupted` run stopped when
+  -- Pass 35 U35-7 (ruling 153 addendum): WHY an `interrupted` run stopped when
   -- no person did it. 'restart' = boot recovery (finalizeOrphanedRuns, and the
   -- operator drive's own orphan sweep) found the row still queued/running with
   -- no process behind it. A human interrupt leaves this NULL and stamps
@@ -903,13 +904,13 @@ CREATE UNIQUE INDEX idx_users__email ON users (email);
 CREATE INDEX idx_audit_events__occurred_at ON audit_events (occurred_at);
 CREATE INDEX idx_audit_events__actor_user_id ON audit_events (actor_user_id);
 CREATE INDEX idx_audit_events__action ON audit_events (action);
--- Ruling 457: the task page's "last checked" read (MAX(occurred_at) of one
+-- Ruling 11: the task page's "last checked" read (MAX(occurred_at) of one
 -- task's github.reconcile.task rows, ~288 a day per delivered task) walks one
 -- task's rows in this index instead of every task's under the action index.
 CREATE INDEX idx_audit_events__task_action ON audit_events (project_slug, task_key, action, occurred_at);
 CREATE INDEX idx_project_members__user_id ON project_members (user_id);
 CREATE INDEX idx_task_projections__stage ON task_projections (project_slug, stage);
--- Ruling 503: an epic's tasks and its progress. Partial, so a read that names
+-- Ruling 272: an epic's tasks and its progress. Partial, so a read that names
 -- no epic keeps the plan (and the row order) it had before the column.
 CREATE INDEX idx_task_projections__epic ON task_projections (project_slug, epic_id) WHERE epic_id IS NOT NULL;
 CREATE INDEX idx_task_events__task ON task_events (project_slug, task_key, position);
@@ -917,7 +918,7 @@ CREATE INDEX idx_task_events__occurred_at ON task_events (occurred_at);
 CREATE INDEX idx_diagnostics__source_path ON diagnostics (source_path);
 CREATE INDEX idx_diagnostics__task ON diagnostics (project_slug, task_key);
 CREATE INDEX idx_provenance__source_path ON provenance (source_path);
--- Ruling 457: the per-task reconcile reads filter one path AND one action.
+-- Ruling 11: the per-task reconcile reads filter one path AND one action.
 CREATE INDEX idx_provenance__path_action ON provenance (source_path, action);
 CREATE INDEX idx_provenance__observed_at ON provenance (observed_at);
 CREATE INDEX idx_notifications__user ON notifications (user_id, occurred_at DESC);

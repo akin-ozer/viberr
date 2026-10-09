@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 /**
- * Ruling 364: a stage's colour is one of twenty named presets — nothing else.
+ * Ruling 279: a stage's colour is one of twenty named presets — nothing else.
  *
- * The colour used to be a free string, hex or `var(--*)` (ruling 15), that
+ * The colour used to be a free string, hex or `var(--*)` (ruling 47), that
  * fifteen surfaces handed to CSS as it was. The shopify board was created with
  * `slate` and `amber`; neither is a CSS colour, so its Triage and Review drew
  * NOTHING on the home meter and on every dot while `project.md` said
- * otherwise. Ruling 352 barred the door and left the stored values, so the gap
+ * otherwise. Ruling 279 barred the door and left the stored values, so the gap
  * stayed. Now the NAME is the value: `project.md` stores `amber`, the markup
  * carries `data-stage-color="amber"`, and `app.css` is the one place a name
  * becomes paint — per theme, from the `--stage-amber` tokens. A name is what

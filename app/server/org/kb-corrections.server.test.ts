@@ -17,7 +17,7 @@ import {
 } from "./kb-corrections.server";
 
 /**
- * Ruling 498: an agent's knowledge-base correction is written into the
+ * Ruling 210: an agent's knowledge-base correction is written into the
  * document as it is made, the record keeps what it replaced, and a person's
  * undo puts that back. The owner: "No human can approve all of these while
  * inspecting them thoroughly."
@@ -109,7 +109,7 @@ describe("mergeKbCorrection", () => {
       text: "- T-003: wrangler 4.139.0",
       filedBy: "Platform Engineer",
       actorRef: "agent:claude:platform-engineer",
-      // Ruling 466: UTF-8 bytes of what was written.
+      // Ruling 18(b): UTF-8 bytes of what was written.
       bytes: 25,
     });
     expect(listKbCorrections(store.db, { projectSlug: store.slug })).toEqual([
@@ -173,12 +173,12 @@ describe("mergeKbCorrection", () => {
   });
 
   /**
-   * Ruling 581: an undo finds a correction by the text it wrote, which used to
+   * Ruling 210(b): an undo finds a correction by the text it wrote, which used to
    * refuse any corrected text the document already held. Live on AWSC-18 a
    * Researcher's `live forms` would have stood 4 times in the calculator
    * research. The record now names the lines around it instead.
    */
-  it("ruling 581: text another line repeats is written, and the record names the lines that make it stand once", async () => {
+  it("ruling 210(b): text another line repeats is written, and the record names the lines that make it stand once", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- node 22\n- node 22\n- bun 1.2\n");
     const c = await merged(kb, { replaces: "- bun 1.2", text: "- node 22" });
     expect(read(kb)).toBe("# Facts\n\n- node 22\n- node 22\n- node 22\n");
@@ -191,11 +191,11 @@ describe("mergeKbCorrection", () => {
   });
 
   /**
-   * Ruling 581: a correction deletes a passage with an empty `text`. Live on
+   * Ruling 210(b): a correction deletes a passage with an empty `text`. Live on
    * AWSC-18, 39 of the 138 corrections a Researcher applied were deletions,
    * and the tool refused every empty `text`.
    */
-  it("ruling 581: an empty text deletes the passage, a retry finds its record, and an undo puts it back for good", async () => {
+  it("ruling 210(b): an empty text deletes the passage, a retry finds its record, and an undo puts it back for good", async () => {
     const body = "# Rules\n\n- R1: price the ALB. Evidence: AWSC-6 summary.md.\n- R2: one AZ. Evidence: AWSC-5 mapping.md.\n";
     const kb = await seedKb("research", "calculator.md", body);
     const deletion = { doc: "calculator.md", replaces: " Evidence: AWSC-6 summary.md.", text: "" };
@@ -231,11 +231,11 @@ describe("mergeKbCorrection", () => {
   });
 
   /**
-   * Ruling 581: text standing in the document does not prove a correction is
+   * Ruling 210(b): text standing in the document does not prove a correction is
    * in. " Evidence:" stood 56 times in the calculator research when a
    * Researcher's passage was one character off.
    */
-  it("ruling 581: a passage that is not there is not taken for a made correction because its text stands", async () => {
+  it("ruling 210(b): a passage that is not there is not taken for a made correction because its text stands", async () => {
     const kb = await seedKb("dossier", "facts.md", "# Facts\n\n- T-003: wrangler 4.139.0. Evidence: run 1.\n- T-004: pnpm 9. Evidence: run 2.\n");
     const r = await merge(kb, { replaces: "- T-005: bun 1.2. Evidence: run 3.", text: " Evidence:" });
     const message = r.ok ? "" : r.message;
@@ -351,7 +351,7 @@ describe("undoKbCorrection", () => {
   });
 });
 
-describe("editKbPassage (ruling 637)", () => {
+describe("editKbPassage (ruling 212(b))", () => {
   const edit = (kb: string, was: string, now: string) =>
     editKbPassage(store.db, { kb, doc: "facts.md", was, now, actor: person() }, { dataRoot: store.dataRoot });
 

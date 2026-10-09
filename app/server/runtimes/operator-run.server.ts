@@ -131,7 +131,7 @@ import {
  *     same gated actions as the Claude tools (operator-actions, operator-packets,
  *     operator-dispatch, operator-moves) — so Codex honors the identical RBAC +
  *     autonomy, it just plans-then-executes instead of calling tools live.
- *   no credential principal (ruling 127) → the drive still opens a RUN ROW, but
+ *   no credential principal (ruling 137) → the drive still opens a RUN ROW, but
  *     `startRun` records it as an honest error and the completion hook
  *     escalates a blocked recovery packet. The operator is a TASK run, so its
  *     principal is the task OWNER: an unowned task, a dead owner, or an owner
@@ -179,21 +179,21 @@ export interface RunOperatorInput {
     | "packet-resolved"
     | "dependencies-released"
     | "head-unpushed"
-    /** Ruling 330: the periodic sweep found this task in a state nothing was
+    /** Ruling 122: the periodic sweep found this task in a state nothing was
      *  going to move it out of. */
     | "stranded"
-    /** Ruling 332: a person pressed Accept and the acceptance-time refresh
+    /** Ruling 244: a person pressed Accept and the acceptance-time refresh
      *  found the branch in conflict with the base. */
     | "pr-conflicting"
-    /** Ruling 482: the project's gates, run by Viberr on the revision under
+    /** Ruling 130: the project's gates, run by Viberr on the revision under
      *  review, did not all exit 0. */
     | "gates-failed"
-    /** Ruling 488: work on another task of this project relayed text here
+    /** Ruling 135: work on another task of this project relayed text here
      *  (`relay` carries it). */
     | "relayed"
     | "scheduled"
     | "manual";
-  /** Ruling 141: the schedule occurrence this trigger fires for, so a refusal
+  /** Ruling 115: the schedule occurrence this trigger fires for, so a refusal
    *  that meets it at the front of the lease queue can retire it on the
    *  record. Set by the schedule runner only. */
   scheduleId?: string;
@@ -201,7 +201,7 @@ export interface RunOperatorInput {
    *  turn instruction can tell the operator exactly what was decided rather than
    *  making it re-derive the answer from the timeline (R20-1). */
   resolvedOption?: ResolvedPacketOption;
-  /** `dependencies-released` trigger (ruling 131(e)): what the task waited on
+  /** `dependencies-released` trigger (ruling 57): what the task waited on
    *  and who cleared it, so the turn instruction names the entries and says
    *  the base branch has changed since the hold. */
   dependencyRelease?: DependencyReleasePayload;
@@ -210,16 +210,16 @@ export interface RunOperatorInput {
    *  into the turn instruction — a scheduled run that arrives as a bare
    *  "manual" trigger cannot honor the reason it was scheduled for (B-WF3). */
   scheduleNote?: string;
-  /** `scheduled` trigger, ruling 487: the operator set this re-run itself, so
+  /** `scheduled` trigger, ruling 125: the operator set this re-run itself, so
    *  the turn must not say a human did. Set by the schedule runner only. */
   scheduledByOperator?: boolean;
-  /** `relayed` trigger, ruling 488: the task the text came from, who sent it,
+  /** `relayed` trigger, ruling 135: the task the text came from, who sent it,
    *  the text and its comment's stamp here. It exists nowhere else in the
    *  run's input, so the lease queue keeps it in arrival order. */
   relay?: RelayPayload;
   /** Depth of the react re-invocation chain (bounds the prompt↔react loop). */
   reactDepth?: number;
-  /** Ruling 489(d): react hops since a person last acted (bounded by
+  /** Ruling 119: react hops since a person last acted (bounded by
    *  OPERATOR_REACT_HOP_CEILING in task-action-core). Set by the agent-reply react
    *  and carried by the drive's own follow-ups (the `delivered` follow-up, the
    *  stranded resume); every trigger a person causes omits it, which is what
@@ -240,14 +240,14 @@ export interface RunOperatorInput {
    *  fourteen drives on a no-op task). The turn instruction also reads it, so
    *  the nudged drive is told to either advance or RECORD the hold. */
   strandedResume?: boolean;
-  /** Ruling 228 (F37-47): this nudge exists because the previous drive's plan
+  /** Ruling 120 (F37-47): this nudge exists because the previous drive's plan
    *  was refused in full, not because it left an auto stage idle. The two read
    *  differently to the operator and the turn instruction says which. */
   planRefusedNudge?: boolean;
   /** F39-69: this nudge exists because the previous drive refreshed the
    *  branch and stopped there, so its instruction names the refresh. */
   refreshNudge?: boolean;
-  /** Ruling 400: the refusal sentences the previous drive collected, quoted
+  /** Ruling 121: the refusal sentences the previous drive collected, quoted
    *  into this retry's instruction so it never has to go and find them. */
   refusedPlanSteps?: { tool: string; message: string }[];
   /** transition trigger — what just moved (display names) and who moved it.
@@ -291,22 +291,22 @@ export interface RunOperatorResult {
   /**
    * The trigger was REFUSED at fire time rather than driven. The caller owns the
    * honesty follow-up.
-   *   `closed` (F19-20, widened by ruling 177) — FR39's "a scheduled re-run
+   *   `closed` (F19-20, ruling 52) — FR39's "a scheduled re-run
    *     never fires on a terminal stage", enforced where the run would actually
    *     start rather than only where it was scheduled (the schedule runner
-   *     records the retirement). Ruling 177 refuses EVERY trigger on a closed
+   *     records the retirement). Ruling 52 refuses EVERY trigger on a closed
    *     task, archived or at its terminal stage, with the sentence in
    *     `refusalReason`.
-   *   `open-packet` (R20-1 / F20-5, widened by ruling 141) — a HUMAN pressed
+   *   `open-packet` (R20-1 / F20-5, ruling 115) — a HUMAN pressed
    *     "Run operator" while a decision packet is open, which is a paid no-op
    *     (coordination is paused by the packet). Scoped to the `manual` trigger
-   *     and, since ruling 141, the `scheduled` one, the same turn with nobody
+   *     and the `scheduled` one, the same turn with nobody
    *     watching (`PACKET_REFUSED_TRIGGERS`; the schedule runner records it as
    *     `skipped-packet`). The other machine triggers legitimately run with a
    *     packet open (a `pr-diverged` recovery withdraws a moot packet — ruling
-   *     17; `agent-reply` reacts to a run already in flight). The route turns
+   *     232; `agent-reply` reacts to a run already in flight). The route turns
    *     this into "resolve the open decision to continue".
-   *   `blocked-by` (ruling 131(d), pass 34) — the task WAITS ON OTHER WORK
+   *   `blocked-by` (ruling 115, pass 34) — the task WAITS ON OTHER WORK
    *     (`blockedBy` is non-empty). The `create`, `transition` and `scheduled`
    *     triggers are refused at fire time: no run, no cost. Reactive triggers
    *     (an agent report, a human's question, a resolved packet, a goal edit, a
@@ -314,19 +314,19 @@ export interface RunOperatorResult {
    *     refusal settles the task's waiting flag itself.
    */
   refused?: "closed" | "open-packet" | "blocked-by";
-  /** Ruling 177: the sentence every door shows for a closed task (set with
+  /** Ruling 52: the sentence every door shows for a closed task (set with
    *  `refused: "closed"`). */
   refusalReason?: string;
 }
 
-/** The operator triggers a held task refuses (ruling 131(d)). */
+/** The operator triggers a held task refuses (ruling 115). */
 const HELD_TRIGGERS: ReadonlySet<string> = new Set(["create", "transition", "scheduled"]);
-/** Ruling 76 + ruling 141: the triggers an open decision packet refuses — a
+/** Ruling 63 + ruling 115: the triggers an open decision packet refuses — a
  *  person pressing Run operator, and the same turn they scheduled. */
 const PACKET_REFUSED_TRIGGERS: ReadonlySet<string> = new Set(["manual", "scheduled"]);
 
 /**
- * Ruling 227 (F37-46): the triggers whose refusal AT THE DOOR is written on the
+ * Ruling 115 (F37-46): the triggers whose refusal AT THE DOOR is written on the
  * task, not only logged. Exactly one — `manual`.
  *
  * `manual` is a PERSON: a mention, or the Run operator button. A person who is
@@ -335,7 +335,7 @@ const PACKET_REFUSED_TRIGGERS: ReadonlySet<string> = new Set(["manual", "schedul
  * the mention rendered as routed, the composer's own footer promising
  * "@mentions route to agents", and the refusal only in the server log.
  *
- * NOT `scheduled`, though ruling 141's reasoning covers it: the schedule runner
+ * NOT `scheduled`, though ruling 115's reasoning covers it: the schedule runner
  * already notes and retires its own fire-time refusals
  * (`refusedTerminal`/`refusedHeld`/`refusedPacket` in `schedule.server.ts`), so
  * adding it here would write the same note twice. Its tests are the proof, and
@@ -413,7 +413,7 @@ interface OperatorLeaseEntry {
    *  must record a deliberate hold instead of nudging again (see
    *  RunOperatorInput.strandedResume). */
   strandedResume: boolean;
-  /** Ruling 152(a): the drive's own `ctx.operatorRun` state (the same object),
+  /** Ruling 120: the drive's own `ctx.operatorRun` state (the same object),
    *  so the settle can read `movedToStageId`: a transition THIS drive made
    *  queues no re-trigger any more, and the stranded backstop must judge the
    *  stage the drive left the task at. Null for refs that never drove. */
@@ -484,7 +484,7 @@ interface PendingTriggers {
   latest: RunOperatorInput | null;
   /** Queued triggers carrying a reason that exists NOWHERE else in the run's
    *  input: human `@operator …` comments, `scheduled` re-checks and relays
-   *  from another task (ruling 488). Oldest first. */
+   *  from another task (ruling 135). Oldest first. */
   carried: RunOperatorInput[];
 }
 
@@ -517,7 +517,7 @@ function queueOperatorTrigger(
   // as delivered, that never happens. Like a human question, it is kept in
   // arrival order rather than replaced by the next machine trigger.
   const comment = input.humanComment?.trim();
-  // Ruling 488: a relay carries another task's text, which the newest machine
+  // Ruling 135: a relay carries another task's text, which the newest machine
   // trigger would otherwise overwrite before any turn read it.
   if (comment || input.trigger === "scheduled" || input.relay) {
     const previous = queue.carried[queue.carried.length - 1];
@@ -560,7 +560,7 @@ function queueOperatorTrigger(
     if (priorDepth > (input.transitionDepth ?? 0)) {
       queue.latest = { ...queue.latest, transitionDepth: priorDepth };
     }
-    // Ruling 489(d): the same for the react hop count, but only between two
+    // Ruling 119: the same for the react hop count, but only between two
     // triggers of the chain itself (each carries a count). A trigger a person
     // caused carries none, and it restarts the count by overwriting.
     const priorHops = prior?.reactHops ?? 0;
@@ -644,7 +644,7 @@ function takePendingTrigger(key: string): RunOperatorInput | null {
 }
 
 /**
- * Ruling 357 (pass 38, F38-11): the `delivered` follow-up a drive's OWN
+ * Ruling 127 (pass 38, F38-11): the `delivered` follow-up a drive's OWN
  * delivery owes, judged at its lease release. A delivery made inside a drive
  * used to queue a `delivered` turn behind that drive's own lease at once;
  * 140 of 148 such drives then moved the task or dispatched the reviewer
@@ -671,12 +671,12 @@ function deliveredFollowUpFor(entry: {
     transitionDepth: entry.transitionDepth + 1,
   };
   if (entry.dataRoot) input.dataRoot = entry.dataRoot;
-  // Ruling 489(d): the drive's own follow-up continues its chain's hop count.
+  // Ruling 119: the drive's own follow-up continues its chain's hop count.
   if (own.reactHops) input.reactHops = own.reactHops;
   return input;
 }
 
-/** Ruling 357 tests: the live drive's own-run stamps, by task. */
+/** Ruling 127 tests: the live drive's own-run stamps, by task. */
 export function ownOperatorRunForTests(projectSlug: string, taskKey: string): OwnOperatorRun | null {
   return leaseState().held.get(leaseKeyFor(projectSlug, taskKey))?.ownRun ?? null;
 }
@@ -699,7 +699,7 @@ function releaseOperatorLease(
   const current = state.held.get(key);
   if (token !== undefined && current !== token) return; // stale release — ignore
   state.held.delete(key);
-  // Ruling 357: a drive that delivered and then stopped is owed the
+  // Ruling 127: a drive that delivered and then stopped is owed the
   // `delivered` follow-up its delivery used to queue at once; a drive that
   // kept going is owed nothing. The follow-up fills the machine slot only when
   // that slot is empty, so a queued human question still goes first and a
@@ -769,27 +769,27 @@ function leaseRefFromKey(key: string) {
 }
 
 /**
- * Ruling 141 (pass 34, F34-8): a queued trigger that is REFUSED when it reaches
+ * Ruling 115 (pass 34, F34-8): a queued trigger that is REFUSED when it reaches
  * the front of the lease queue says so on the task — the refusal used to exist
  * only in the server log while the timeline still said "Scheduled action
  * starting". Mirrors {@link noteQueuedTriggerFireFailed} but SETTLES NOTHING:
  * every refusal arm (`closed`, `blocked-by`, `open-packet`) already settled
- * inside `runOperator` (ruling 195 made the open-packet arm settle too). When
+ * inside `runOperator` (ruling 115). When
  * the trigger carries a schedule occurrence (`scheduleId`) the occurrence is
  * retired the same way the schedule runner retires a fire-time refusal
  * (`fired`, `claimedAt: null`) and the final `task.schedule.fired` row records
  * the outcome. A `blocked-by` refusal is
  * noted only for a schedule occurrence: a drained transition on a held task is
- * the ruling-131 hold itself, already on the record.
+ * the ruling-115 hold itself, already on the record.
  */
 async function noteQueuedTriggerRefused(
   db: DatabaseSync,
   queued: RunOperatorInput,
   refused: NonNullable<RunOperatorResult["refused"]>,
   /**
-   * Ruling 227 (F37-46): WHERE the refusal happened. Ruling 141 taught the
-   * refusal to speak when a trigger met it at the front of the lease queue, and
-   * left the three refusals at the DOOR silent — so a person who wrote
+   * Ruling 115 (F37-46): WHERE the refusal happened. A trigger refused at the
+   * front of the lease queue already spoke, and the three refusals at the DOOR
+   * were silent — so a person who wrote
    * "@operator do X" on a task with an open packet got a comment on the
    * timeline, an accepted-looking mention, and nobody coming, with the refusal
    * only in the server log. Live on SHOP-2 at 02:44. Same note, same reasons;
@@ -799,7 +799,7 @@ async function noteQueuedTriggerRefused(
 ): Promise<void> {
   // At the door a `manual` trigger is a PERSON who just typed something and is
   // owed an answer, so the blocked-by silence (a drained transition on a held
-  // task is the ruling-131 hold itself, already on the record) does not apply
+  // task is the ruling-115 hold itself, already on the record) does not apply
   // to it.
   const owedAnyway = arrival === "door" && (queued.trigger ?? "manual") === "manual";
   if (refused === "blocked-by" && !queued.scheduleId && !owedAnyway) return;
@@ -831,7 +831,7 @@ async function noteQueuedTriggerRefused(
           ? `a decision packet is open on ${queued.taskKey}${packetTitle ? ` ("${packetTitle}")` : ""} and coordination is paused until it is resolved`
           : refused === "closed"
             ? `${queued.taskKey} is closed (${parsed.frontmatter.archived ? "archived" : "at its terminal stage"})`
-            : // Ruling 356: a done entry reads as done, not as still waited on.
+            : // Ruling 58: a done entry reads as done, not as still waited on.
               `${queued.taskKey} waits on other work (${holdEntriesSentence(resolveDependencies(db, queued.projectSlug, parsed.frontmatter.blockedBy))})`;
       const arrived =
         arrival === "door" ? "" : " when it reached the front of the queue";
@@ -844,7 +844,7 @@ async function noteQueuedTriggerRefused(
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
-        // Ruling 227: a door refusal never touched the lease queue, so
+        // Ruling 115: a door refusal never touched the lease queue, so
         // attributing it to the lease would be a small lie in the one column
         // a reader uses to tell viberr's mechanisms apart. `policy-engine` is
         // the actor viberr's own rules already write under.
@@ -946,13 +946,13 @@ async function noteQueuedTriggerFireFailed(
  * operator for its own `set_goal`, so the task sat at an auto stage labeled
  * "waiting on a human" with nothing for the human to decide.
  *
- * Ruling 152(a) (pass 35, G35-5): `ownMoveLandedHere` widens the LAST test,
+ * Ruling 120 (pass 35, G35-5): `ownMoveLandedHere` widens the LAST test,
  * never the guards above it. Since the drive's own transitions queue no
  * re-trigger, a stage the drive itself moved the task onto is a stage nothing
  * else will follow up on — and on the shipped board of the time the operator's
  * own move landed on In Progress, whose outbound boundary was `approval` (it
- * still is on a strict board; ruling 519 made it `auto` on the Standard
- * template), so the `auto` test alone left every such move with no follow-up
+ * still is on a strict board; the Standard template makes it `auto`, ruling
+ * 91), so the `auto` test alone left every such move with no follow-up
  * at all: no re-trigger, no resume, and `clearWaitingToHuman` flipped the
  * board to "waiting on you" with no agent engaged and no packet.
  */
@@ -962,16 +962,16 @@ export function operatorLeftTaskStranded(
     stage: string;
     packet: unknown;
     recommendations: readonly unknown[];
-    /** Ruling 131(d): a non-empty `blockedBy` is a RECORDED hold. */
+    /** Ruling 115: a non-empty `blockedBy` is a RECORDED hold. */
     blockedBy: readonly unknown[];
-    /** Ruling 487: a pending schedule is a RECORDED wait with its time on it. */
+    /** Ruling 120: a pending schedule is a RECORDED wait with its time on it. */
     schedules: readonly { status: string }[];
   },
   workflow: readonly { from: string; to: string; boundary: string }[],
   /** The finished drive's OWN last transition landed the task on this stage. */
   ownMoveLandedHere = false,
   /**
-   * Ruling 228 (F37-47): every step the drive planned was refused, so it did
+   * Ruling 120 (F37-47): every step the drive planned was refused, so it did
    * nothing. Stranded regardless of the outbound boundary — the boundary test
    * below asks "is something expected to happen here without a human?", which
    * is the right question for a drive that CHOSE to stop and the wrong one for
@@ -989,12 +989,12 @@ export function operatorLeftTaskStranded(
   if (task.archived) return false;
   if (task.packet) return false; // a decision IS pending — the human's move
   if (task.recommendations.length > 0) return false; // ditto
-  // Ruling 131(d): a task waiting on other work is holding on purpose; the
+  // Ruling 115: a task waiting on other work is holding on purpose; the
   // paid nudge would only rediscover the wait (JC-9: five runs, no dispatch).
   if (task.blockedBy.length > 0) return false;
-  // Ruling 487 (F40-65): so is a task holding on a pending schedule. Something
+  // Ruling 120 (F40-65): so is a task holding on a pending schedule. Something
   // WILL move it, at a time on the record, which is the reason for quiet the
-  // stranded sweep already honours (ruling 330). Nudging it anyway asked the
+  // stranded sweep already honours (ruling 122). Nudging it anyway asked the
   // operator to "record the hold", and live on WEB-9 it did so with a packet
   // whose own body said it existed only so the stage was not left idle.
   if (task.schedules.some((s) => s.status === "pending")) return false;
@@ -1082,7 +1082,7 @@ export async function maybeResumeStrandedOperator(
   // and may not have reached the lease queue yet, so resuming here would
   // double-drive the task (observed: the displaced re-trigger then queued
   // behind the resume's run and re-fired after a packet was already open).
-  // Ruling 152(a): the drive's OWN moves queue no re-trigger any more, so the
+  // Ruling 120: the drive's OWN moves queue no re-trigger any more, so the
   // stage its last transition landed on (`movedToStageId`) is the stage to
   // judge: a chain the model abandons at an `auto` stage gets the one nudge.
   const stageLeftAt = ref.ownRun?.movedToStageId ?? ref.stageAtStart;
@@ -1112,7 +1112,7 @@ export async function maybeResumeStrandedOperator(
     // on its own move any more, whatever the new stage's outbound boundary is.
     ref.ownRun?.movedToStageId !== undefined &&
       ref.ownRun.movedToStageId === file.parsed.frontmatter.stage,
-    // Ruling 228: or it planned only steps it was not allowed to take.
+    // Ruling 120: or it planned only steps it was not allowed to take.
     ref.ownRun?.planWhollyRefused === true,
     refreshedAndStopped,
   );
@@ -1146,11 +1146,11 @@ export async function maybeResumeStrandedOperator(
   // to human instead of looping paid drives until the chain cap (which only
   // pauses the burst — the next trigger re-armed it, fourteen drives on one
   // no-op task).
-  // Ruling 152(a): a nudged drive that MOVED the task and then stopped at the
+  // Ruling 120: a nudged drive that MOVED the task and then stopped at the
   // next `auto` stage made progress; its transition queued no re-trigger any
   // more, so the chain continues with a fresh nudge, bounded by the chain cap
   // below. Only a nudge that ends where it started is the deliberate hold.
-  // Ruling 202 (F37-22): DELIVERY is progress too. The three other ways a drive
+  // Ruling 121 (F37-22): DELIVERY is progress too. The three other ways a drive
   // can act are already covered — a transition by `movedToStageId`, a dispatch
   // by the live-run check in `settleWaitingAfterOperator`, a packet or a
   // recommendation by `operatorLeftTaskStranded` — and delivery was covered by
@@ -1158,7 +1158,7 @@ export async function maybeResumeStrandedOperator(
   // recorded as having "held the stage without advancing, dispatching, or
   // opening a packet" and coordination was declared paused on a task that was
   // being delivered.
-  // Ruling 406: and ANY action it carried out is progress. The three clauses
+  // Ruling 121: and ANY action it carried out is progress. The three clauses
   // above are effects Viberr thought to enumerate; this one is the fact.
   const nudgeMadeProgress =
     (ref.ownRun?.movedToStageId !== undefined &&
@@ -1239,12 +1239,12 @@ export async function maybeResumeStrandedOperator(
   if (refreshedAndStopped && ref.ownRun?.planWhollyRefused !== true) {
     nudge.refreshNudge = true;
   }
-  // Ruling 489(d): the nudge continues the stranded drive's chain, so its hop
+  // Ruling 119: the nudge continues the stranded drive's chain, so its hop
   // count carries on rather than starting over.
   if (ref.ownRun?.reactHops) nudge.reactHops = ref.ownRun.reactHops;
   if (ref.ownRun?.planWhollyRefused === true) {
     nudge.planRefusedNudge = true;
-    // Ruling 400: carry the refusals into the retry's own instruction.
+    // Ruling 121: carry the refusals into the retry's own instruction.
     if (ref.ownRun.refusedPlanSteps?.length) {
       nudge.refusedPlanSteps = ref.ownRun.refusedPlanSteps;
     }
@@ -1264,13 +1264,13 @@ export async function maybeResumeStrandedOperator(
  * carried nothing out, so a drive Viberr refused was refused every time.
  */
 function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boolean): string {
-  // Ruling 399: on either backend a refused drive was stopped, and these are
+  // Ruling 121: on either backend a refused drive was stopped, and these are
   // the three remedies that can end it.
   const stopped = "**Note:** the operator did not hold this stage; it was stopped. ";
   const remedies =
     "do the thing a refusal names, change what made the step impossible, or take the action yourself.";
   if (ownRun?.planWhollyRefused === true) {
-    // Ruling 399 (F39-26): the operator did not choose anything here. Every
+    // Ruling 121 (F39-26): the operator did not choose anything here. Every
     // action it planned was REFUSED — which Viberr knows in this exact scope
     // (`planWhollyRefused`, which decided the task was stranded at all) and
     // which the refusal notes say in their own words, directly above this
@@ -1278,7 +1278,7 @@ function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boo
     // the same function is holding, and the remedy it offered — run the
     // operator again — is the one move that reproduces it: the run Viberr
     // refused WAS the automatic re-run. The drive before it was refused too
-    // only when this was ruling 228's plan-refused nudge; a nudge for an idle
+    // only when this was ruling 120's plan-refused nudge; a nudge for an idle
     // `auto` stage, the drive's own move or a refresh can follow a drive that
     // carried out its whole plan, and then the note says nothing of it.
     const when = ownRun.planRefusedNudge
@@ -1294,7 +1294,7 @@ function heldNudgeNote(ownRun: OwnOperatorRun | null | undefined, autoStage: boo
     );
   }
   if (ownRun?.refusedCalls?.length) {
-    // Ruling 399 on Claude (ruling 705): the same verdict, said truly where no
+    // Ruling 121 on Claude: the same verdict, said truly where no
     // refusal note exists. A Claude drive's tools answered each refusal to the
     // model as it called them, so the note quotes them itself, and it says
     // nothing of the drive before the nudge, whose refusals it cannot quote.
@@ -1496,7 +1496,7 @@ function operatorCheckoutTarget(input: TaskFileRef): {
  *
  * The Claude operator physically cannot write: `Bash`/`Edit`/`Write`/`MultiEdit`/
  * `NotebookEdit` are removed from its context. The Codex operator has no such
- * denylist channel, and since ruling 185 no OS sandbox either: every Codex
+ * denylist channel, and no OS sandbox either (ruling 144): every Codex
  * thread starts `danger-full-access`, so nothing refuses a write anywhere.
  * What the folder still buys is where the run STANDS. Left at the task folder
  * (the default), the cwd would contain `task.md` (the canonical governance
@@ -1505,14 +1505,14 @@ function operatorCheckoutTarget(input: TaskFileRef): {
  * file or the delivery clone. Root it instead at a dedicated empty scratch
  * folder that is a SIBLING of `task.md`, never its parent: the governance file
  * and the checkout stay readable by absolute path and outside the cwd, and the
- * prompt states their read-only posture as a rule, not a wall (ruling 207(b)).
+ * prompt states their read-only posture as a rule, not a wall (ruling 106).
  */
 function ensureOperatorScratchDir(input: TaskFileRef): string {
   const dir = path.join(
     taskDir(input.projectSlug, input.taskKey, input.dataRoot),
     ".operator-scratch",
   );
-  // Ruling 460: the operator runs as its principal's own user and writes here.
+  // Ruling 15: the operator runs as its principal's own user and writes here.
   shareDirWithAgents(dir);
   return dir;
 }
@@ -1557,16 +1557,16 @@ export async function ensureOperatorRepoCheckout(
   /** F27-U1: 0..1 progress for the cold clone the operator drive often pays
    *  first on a project (see the reservation set up by the caller). */
   onCloneProgress?: (fraction: number) => void,
-  /** Ruling 468: the GitHub transport for the empty-repository bootstrap
+  /** Ruling 227: the GitHub transport for the empty-repository bootstrap
    *  (tests inject one; production uses the global fetch). */
   options: { fetchImpl?: typeof fetch } = {},
 ): Promise<OperatorWorkspaceView> {
   const target = operatorCheckoutTarget(input);
   if (!target) return { kind: "none" };
   const { repo, dir, relativeDir, defaultBranch } = target;
-  // Ruling 468 (F40-12): a checkout of an EMPTY repository has an unborn
+  // Ruling 227 (F40-12): a checkout of an EMPTY repository has an unborn
   // HEAD, and the operator read that as a chore for a person ("push one
-  // initial commit"). Viberr makes the first commit itself (ruling 128's
+  // initial commit"). Viberr makes the first commit itself (ruling 227's
   // bootstrap) and moves the checkout onto it, here as before a task branch.
   const initialize = () =>
     initializeUnbornCheckout(
@@ -1574,7 +1574,7 @@ export async function ensureOperatorRepoCheckout(
       { projectSlug: input.projectSlug, taskKey: input.taskKey, repo, dir, defaultBranch, dataRoot: input.dataRoot },
       options,
     );
-  // Ruling 670: initializing an unborn checkout can move the project onto the
+  // Ruling 227: initializing an unborn checkout can move the project onto the
   // repository's own default branch, so the view names the branch read after.
   const view = async (): Promise<OperatorWorkspaceView> => {
     const settled =
@@ -1586,25 +1586,25 @@ export async function ensureOperatorRepoCheckout(
   if (existsSync(path.join(dir, ".git", "HEAD"))) return view();
 
   let token: string | null = null;
-  // Ruling 249: the operator's checkout is always a network clone, and the
+  // Ruling 197: the operator's checkout is always a network clone, and the
   // credential is resolved before it — so this arm only ever says supplied or
-  // absent, and both are true when it says them. Ruling 485: a local step's
+  // absent, and both are true when it says them. Ruling 197: a local step's
   // fault (the person, the directory, the heal below, the strip) says
   // `not_involved` in the catch.
   let credential: CloneCredential = "absent";
   try {
-    // Ruling 485: a tree in the workspace is removed as the task's person,
+    // Ruling 140: a tree in the workspace is removed as the task's person,
     // as its git runs (null: the server's own user, isolation off).
     const workspace = { projectSlug: input.projectSlug, taskKey: input.taskKey, dataRoot: input.dataRoot };
     const person = await workspaceStep(`\`${path.dirname(dir)}\` has no person to work in it as`, () =>
       taskWorkspaceLaunch(db, workspace),
     );
-    // Ruling 460: `workspace/` is shared with the agent group, so what the
+    // Ruling 15: `workspace/` is shared with the agent group, so what the
     // clone writes below it stays editable by the agents that run there.
     await workspaceStep(`\`${path.dirname(dir)}\` could not be created`, () =>
       shareDirWithAgentsOrWarn(path.dirname(dir)),
     );
-    // Ruling 485 (3): a checkout with no `.git/HEAD` (a clone killed mid-way,
+    // Ruling 195 (3): a checkout with no `.git/HEAD` (a clone killed mid-way,
     // a tree an older build's server-side remove left half-removed) would
     // block the clone into its path on every run: removed as its person.
     if (existsSync(dir)) {
@@ -1662,7 +1662,7 @@ export async function ensureOperatorRepoCheckout(
     if (error instanceof WorkspaceFault) credential = "not_involved";
     const details = cloneFailureLogDetails(error, { token });
     // F19-6: git's own complaint, redacted by value — "git exit 128" alone told
-    // a human with a working credential nothing they could act on. Ruling 485:
+    // a human with a working credential nothing they could act on. Ruling 197:
     // for a workspace fault, the failing program's own words (rm's, git's).
     const stderrExcerpt = details.detail ?? "";
     const failureFields = {
@@ -1708,7 +1708,7 @@ export async function runOperator(
   const authority = resolveOperatorAuthority(ctx, input.projectSlug, overrides);
   const backend = authority.backend;
 
-  // Ruling 177 (pass 36, F36-4 / F36-5): a CLOSED task — terminal stage or
+  // Ruling 52 (pass 36, F36-4 / F36-5): a CLOSED task — terminal stage or
   // archived — refuses EVERY trigger here, where the run starts. FR39 / F19-20
   // used to scope this to the `scheduled` trigger ("every other trigger on a
   // terminal task is legitimate — a pr-diverged recovery, an @operator
@@ -1750,7 +1750,7 @@ export async function runOperator(
       // It is a no-op unless the flag is `agent` and nothing else is live, and
       // it settles a closed task to `none` rather than "waiting on a human".
       settleWaitingAfterOperator(db, taskFileRef(input));
-      // Ruling 227: and SAY so, on the task, for a trigger somebody is waiting
+      // Ruling 115: and SAY so, on the task, for a trigger somebody is waiting
       // on — see `noteQueuedTriggerRefused`. Fire-and-forget: the refusal is
       // the answer, and failing to record it must not turn into a thrown error
       // for the caller.
@@ -1768,7 +1768,7 @@ export async function runOperator(
     }
   }
 
-  // Ruling 131(d) (pass 34, Q34-11): a task waiting on other work is held,
+  // Ruling 115 (pass 34, Q34-11): a task waiting on other work is held,
   // not coordinated. The triggers that would start ordinary coordination are
   // refused before any run row exists (no run, no cost); JC-9 paid five
   // operator turns to rediscover the same wait. Reactive triggers still run
@@ -1803,13 +1803,13 @@ export async function runOperator(
   // R20-1 (F20-5): a HUMAN-pressed "Run operator" while a decision packet is
   // open is a paid no-op — coordination is paused by the packet, so the run
   // completes several turns and can take no action (live: 6 turns / $0.27, only
-  // get_task). Refuse it and say why. Ruling 141 (pass 34, F34-8): a SCHEDULED
+  // get_task). Refuse it and say why. Ruling 115 (pass 34, F34-8): a SCHEDULED
   // re-run is the same turn with nobody watching, so it takes the same refusal.
   // Machine reaction triggers still run with a packet open — `pr-diverged`
-  // recovery WITHDRAWS a moot packet (ruling 17), and `agent-reply` reacts to a
+  // recovery WITHDRAWS a moot packet (ruling 232), and `agent-reply` reacts to a
   // run that was already in flight.
   //
-  // Ruling 195 (F37-17): this arm used to say "the packet already owns
+  // Ruling 115 (F37-17): this arm used to say "the packet already owns
   // `waiting: human`, so there is no settle to do here". That is not an
   // invariant — it is usually true, and SHOP-6 showed how it breaks. A packet
   // opened mid-work does NOT stop the machine triggers, so the operator kept
@@ -1938,20 +1938,20 @@ export async function runOperator(
     backend,
     autonomy: authority.autonomy,
     reactDepth: input.reactDepth ?? 0,
-    // Ruling 489(d): threaded to every agent this drive dispatches, whose
+    // Ruling 119: threaded to every agent this drive dispatches, whose
     // completion counts one more hop toward the ceiling.
     reactHops: input.reactHops ?? 0,
     // Threaded so a transition THIS drive makes carries the chain depth into
     // transitionStage's re-trigger (see OPERATOR_TRANSITION_CHAIN_CAP).
     transitionDepth: input.transitionDepth ?? 0,
   };
-  // Ruling 399: why this drive was nudged, for its own hold note, which says
+  // Ruling 121: why this drive was nudged, for its own hold note, which says
   // the drive before it was refused too only when it was.
   if (input.planRefusedNudge) ctx.operatorRun.planRefusedNudge = true;
-  // Ruling 152(a): the settle reads this drive's own moves off the same object.
+  // Ruling 120: the settle reads this drive's own moves off the same object.
   leaseToken.ownRun = ctx.operatorRun;
 
-  // Ruling 157 (pass 35, F35-8): a person starting the operator (Run operator,
+  // Ruling 54 (pass 35, F35-8): a person starting the operator (Run operator,
   // an `@operator` comment, the controller; every one of them carries `actor`)
   // or a schedule they set lifts a packet-less hold on the record. A bare
   // `manual` with no actor (boot recovery) and every machine trigger lift
@@ -1974,7 +1974,7 @@ export async function runOperator(
       byName,
       by: input.actor,
     });
-    // Ruling 216 (F37-36): the SAME press also re-litigates the deliberate
+    // Ruling 120 (F37-36): the SAME press also re-litigates the deliberate
     // STAGE hold, which is the one the "Coordination is paused here" note
     // tells the reader to end by running the operator manually. Only a
     // person's press: a schedule re-arming this is exactly what V18 stopped.
@@ -2000,7 +2000,7 @@ export async function runOperator(
   // rather than in the two start functions so the reserved row and the launched
   // run are the same thread.
   const threadId = "op-" + newId("t").replace("t_", "").slice(0, 8);
-  // Ruling 127: whose accounts this drive bills — the task owner. Resolved
+  // Ruling 137: whose accounts this drive bills — the task owner. Resolved
   // BEFORE the clone and the reservation, because a refused drive must pay for
   // neither; `startRun` turns the refusal into the run's whole outcome.
   const principal = resolveTaskRunPrincipal(
@@ -2042,8 +2042,8 @@ export async function runOperator(
     // `unavailable` arm rather than stranding the run, and the prompt then SAYS
     // the operator is blind instead of letting it read its empty task folder as
     // "the repo" (F19-4).
-    // Ruling 127: a drive with no credential principal is about to be recorded
-    // as a refusal, so it clones nothing — the same posture the pre-127
+    // Ruling 137: a drive with no credential principal is about to be recorded
+    // as a refusal, so it clones nothing — the same posture the instance-credential
     // "backend unavailable" arm had. `kind: "none"` is exactly what the prompt
     // builders already handle for a project with no repo.
     const workspace: OperatorWorkspaceView = principal.ok
@@ -2080,7 +2080,7 @@ interface OperatorRunStart {
   threadId: string;
   /** The reserved, already-`running` row, when the drive had to clone. */
   reservation: RunReservation | null;
-  /** Ruling 127: whose accounts this drive bills, or why it cannot run. */
+  /** Ruling 137: whose accounts this drive bills, or why it cannot run. */
   principal: RunPrincipalResolution;
 }
 
@@ -2098,7 +2098,7 @@ async function startCodexOperatorRun(
   /** R21-4: the identity (and any reserved row) claimed before the clone. */
   start: OperatorRunStart,
 ): Promise<RunOperatorResult> {
-  // Ruling 415: this operator returns a plan and cannot call tools, so the
+  // Ruling 117: this operator returns a plan and cannot call tools, so the
   // snapshot carries content where it would otherwise carry an address.
   const snapshot = operatorSnapshot(
     db,
@@ -2114,12 +2114,12 @@ async function startCodexOperatorRun(
   // was real on one backend and decorative on the other — a Codex operator could
   // not call the read tools that would inform its plan. The CLI translation
   // drops credentials and stamps approve-mode (codex-runtime). The CLI, not
-  // the operator's shell, connects to MCP servers, and since ruling 185 no OS
-  // sandbox sits between either of them and the network.
+  // the operator's shell, connects to MCP servers, and no OS sandbox sits
+  // between either of them and the network (ruling 144).
   // Resolved BEFORE the persona (B8) so the prompt describes what MOUNTS.
   // F21-3: that resolve now pre-flights the stdio mounts, so "what mounts" is
   // what actually starts, not what the registry row remembers.
-  // Ruling 127: which is why a REFUSED drive skips it — the pre-flight starts
+  // Ruling 137: which is why a REFUSED drive skips it — the pre-flight starts
   // each stdio server to handshake it and corrects its registry row, real
   // child processes and org-level writes for a run that will never exist. The
   // same posture `ensureOperatorRepoCheckout` already takes above.
@@ -2129,7 +2129,7 @@ async function startCodexOperatorRun(
   // Pass-24 B-1 (owner ruling): the Codex operator's cwd is a dedicated empty
   // scratch folder, so the directory it works in does NOT contain `task.md` or
   // the shared deliverer checkout. Nothing refuses a write to either (ruling
-  // 185: `danger-full-access`); the prompt describes that posture as a rule.
+  // 144: `danger-full-access`); the prompt describes that posture as a rule.
   const scratchDir = ensureOperatorScratchDir(taskFileRef(input));
   const promptBuild = buildOperatorSystemPrompt(
     authority,
@@ -2180,7 +2180,7 @@ async function startCodexOperatorRun(
     // cwd. It is placement, not confinement: the thread is `danger-full-access`.
     workdir: scratchDir,
     // R19-1: the same read-only policy the Claude operator carries. Codex has no
-    // denylist channel and, since ruling 185, no OS sandbox, so the read-only
+    // denylist channel and no OS sandbox (ruling 144), so the read-only
     // half does not bind there; a withheld web grant still does, because
     // `startRun` derives `webSearchWithheld` from this list (as it does
     // `repoWriteWithheld`). The spec STATES the run's policy rather than
@@ -2191,7 +2191,7 @@ async function startCodexOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
-    // Ruling 127: the task owner's Codex account, or the refusal that says
+    // Ruling 137: the task owner's Codex account, or the refusal that says
     // why there is none.
     credentialUserId: start.principal.ok
       ? start.principal.principal.userId
@@ -2199,20 +2199,20 @@ async function startCodexOperatorRun(
   };
   if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort is sent as the Codex catalog default, `medium`, by
-  // startRun (ruling 687); an absent mcpServers key is what the adapters read
+  // startRun (ruling 149); an absent mcpServers key is what the adapters read
   // as "this run mounts none".
   if (authority.effort) spec.effort = authority.effort;
   if (Object.keys(orgMcpServers).length) spec.mcpServers = orgMcpServers;
-  // Ruling 176: Codex sends these as each server's `disabled_tools`.
+  // Ruling 188: Codex sends these as each server's `disabled_tools`.
   if (mcp.toolDenials.length) spec.mcpToolDenials = mcp.toolDenials;
-  // Ruling 658: what the prompt names as possibly missing need not start.
+  // Ruling 190: what the prompt names as possibly missing need not start.
   if (mcp.unhealthy.length) spec.mcpOptional = mcp.unhealthy;
   // R21-4: adopt the row the human has been watching since before the clone,
   // instead of opening a second one beside it.
   if (start.reservation) spec.reservation = start.reservation;
 
   const { runId } = await startRun(db, spec);
-  // Ruling 344: the coordinator discloses what it was given, like every other
+  // Ruling 167: the coordinator discloses what it was given, like every other
   // run. Best-effort by construction (`recordRunInputs` swallows its own
   // failures) — a drive must never fail because its disclosure could not be
   // written.
@@ -2248,7 +2248,7 @@ async function startCodexOperatorRun(
     // Provider output is only executable after a clean terminal completion.
     // A failed/interrupted turn may have persisted a syntactically valid
     // partial agent_message before it stopped; never treat that as a plan.
-    // R20-3 (F20-4) / ruling 19, the half the Codex path never got: a run that
+    // R20-3 (F20-4) / ruling 149, the half the Codex path never got: a run that
     // reached completion PROVES its model is usable on this account, and
     // clearing on a real success is the re-probe (there is no synthetic
     // check). The Claude operator's completion handler does this; this one did
@@ -2375,7 +2375,7 @@ async function startRealOperatorRun(
   // F21-3: resolved (and stdio-pre-flighted) ONCE, then handed to the toolkit —
   // a second resolve inside the toolkit would re-mount a server the pre-flight
   // had just dropped, so the prompt and the mount would disagree.
-  // Ruling 127: skipped entirely on a refused drive, which spawns nothing —
+  // Ruling 137: skipped entirely on a refused drive, which spawns nothing —
   // the pre-flight would otherwise start every declared stdio server (and
   // rewrite its health row) for a run recorded as "no agent process was
   // started".
@@ -2398,9 +2398,9 @@ async function startRealOperatorRun(
       defaultBranch: workspace.defaultBranch,
     };
   }
-  // Ruling 344: built BEFORE the prompt, because the prompt build now also
+  // Ruling 167: built BEFORE the prompt, because the prompt build now also
   // produces this run's input disclosure and the honest answer to "which tools"
-  // is the names off these definitions — ruling 339's rule, which exists
+  // is the names off these definitions — ruling 167's rule, which exists
   // because a hand-restated toolkit under-reported 460 specialist runs. Nothing
   // in the toolkit reads the prompt, so the order is free.
   const toolkit = buildOperatorToolkit(toolkitDeps);
@@ -2453,7 +2453,7 @@ async function startRealOperatorRun(
     autonomous: true,
     actor: input.actor ?? OPERATOR_AUDIT_ACTOR,
     dataRoot: input.dataRoot,
-    // Ruling 127: the task owner's Claude account, or the refusal that says
+    // Ruling 137: the task owner's Claude account, or the refusal that says
     // why there is none.
     credentialUserId: start.principal.ok
       ? start.principal.principal.userId
@@ -2462,14 +2462,14 @@ async function startRealOperatorRun(
   if (!start.principal.ok) spec.principalRefusal = start.principal.refusal;
   // An absent effort leaves the SDK on its own default.
   if (authority.effort) spec.effort = authority.effort;
-  // Ruling 176: `startRun` denies each by name, after the toolkit's approvals.
+  // Ruling 188: `startRun` denies each by name, after the toolkit's approvals.
   if (mcp.toolDenials.length) spec.mcpToolDenials = mcp.toolDenials;
   // R21-4: adopt the row the human has been watching since before the clone,
   // instead of opening a second one beside it.
   if (start.reservation) spec.reservation = start.reservation;
 
   const { runId } = await startRun(db, spec);
-  // Ruling 344: the same disclosure the Codex drive and every specialist write.
+  // Ruling 167: the same disclosure the Codex drive and every specialist write.
   recordRunInputs(db, {
     runId,
     projectSlug: input.projectSlug,
@@ -2509,7 +2509,7 @@ async function startRealOperatorRun(
     // still being written; whichever landed second silently replaced the other.
     // R20-3 (F20-4): a coordinating run that reached completion proves its model
     // is usable on this account — clear any stale unavailability mark (ruling
-    // 19: clearing on a real success is the re-probe, no synthetic check).
+    // 149: clearing on a real success is the re-probe, no synthetic check).
     if (finished.state === "finished") {
       const ranModel = getRun(db, runId)?.model ?? null;
       if (ranModel) clearModelMark(db, input.backend ?? "claude", ranModel);
@@ -2557,9 +2557,9 @@ async function escalateFailedOperatorRun(
   // a caller overrides it from the Run-operator picker, so every machine
   // trigger fell back to "claude" and the packet named the wrong provider.
   const backend: RealBackend = authority.backend;
-    // Ruling 130(b) (pass 34, F34-12): the ONE failure-to-words mapping. A
+    // Ruling 156(a) (pass 34, F34-12): the ONE failure-to-words mapping. A
     // quota or credential refusal names the person whose account was refused
-    // (ruling 127's credential principal, the task owner) and their own move:
+    // (ruling 137's credential principal, the task owner) and their own move:
     // wait until the reset instant, or connect a different account or an API
     // key on Profile → Agent accounts. The old body ended "Retry on the other
     // backend, fix the credential, or redirect the task" for EVERY kind and
@@ -2576,7 +2576,7 @@ async function escalateFailedOperatorRun(
     };
     if (ctx.dataRoot) describeInput.dataRoot = ctx.dataRoot;
     const described = describeRunFailure(db, describeInput);
-    // Ruling 127: a drive refused for want of a credential principal already
+    // Ruling 137: a drive refused for want of a credential principal already
     // recorded the ONE sentence that names the person and their remedy
     // (`principalRefusalMessage`, on the run's `run·unavailable` line); the
     // leaf hands that sentence back as the reason, and no second remedy is

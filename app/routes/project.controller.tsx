@@ -16,8 +16,8 @@ import { undoKbCorrectionOnTask } from "~/server/tasks/kb-correction-actions.ser
 
 /**
  * /projects/:slug/controller — the controller addressed INSIDE one project
- * (ruling 99): the same conversation machinery bound to this board, plus the
- * knowledge-base panel. The board's planned work is its epics (ruling 503),
+ * (ruling 249): the same conversation machinery bound to this board, plus the
+ * knowledge-base panel. The board's planned work is its epics (ruling 273),
  * on the Epics page.
  */
 
@@ -42,7 +42,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   const auth = await requireAuth(request);
   const db = getDb();
   const formData = await request.formData();
-  // UI-32 (ruling 121 brought it here): a stale token answers a toast-shaped
+  // UI-32 (ruling 256 brought it here): a stale token answers a toast-shaped
   // result, not a thrown 403 that replaces the page with the root boundary.
   const csrfFailure = await csrfError(request, auth.sessionId, formData);
   if (csrfFailure) return csrfFailure;
@@ -53,7 +53,7 @@ export async function action({ request, params }: Route.ActionArgs) {
   }, "talk to the controller about this project");
   try {
     if (intent === "kb-correction-undo") {
-      // Ruling 498: the Knowledge base panel's Undo, confirmed on the page.
+      // Ruling 321: the Knowledge base panel's Undo, confirmed on the page.
       // Direct, not through the controller: an undo is the recorded edit in
       // reverse, with nothing to compose. Org admins, because it edits an org
       // knowledge base.
@@ -94,5 +94,5 @@ export default function ProjectControllerRoute({
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.controller");

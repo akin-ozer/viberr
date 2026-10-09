@@ -38,7 +38,7 @@ import { callToolText, publishedSchemas } from "../../../test-support/mcp-tool-m
 import { z } from "zod";
 
 /**
- * Ruling 672 (owner, 2026-10-06): "operator creates a packet to remind to
+ * Ruling 224 (owner, 2026-10-06): "operator creates a packet to remind to
  * user to connect a repo. If they refuse that's stored as a ruling on project
  * kb never asked again. If they decide to connect a repo, controller spawns on
  * board level and reverts the ruling on kb."
@@ -175,7 +175,7 @@ function answer(
 const startedOn = (runOperator: ReturnType<typeof operatorRuns>) =>
   runOperator.mock.calls.map((call) => call[1].taskKey);
 
-describe("the operator asks for a repository (ruling 672)", () => {
+describe("the operator asks for a repository (ruling 224)", () => {
   it("opens one packet with both answers: connecting is recommended and needs the repository typed, opened with the one the task named", async () => {
     // CANARY: drop `keep_without_repository` and a person cannot refuse, so
     // nothing ever stops the question; drop `reply` and an empty Confirm
@@ -231,7 +231,7 @@ describe("the operator asks for a repository (ruling 672)", () => {
   });
 });
 
-describe("a person keeps the board without a repository (ruling 672)", () => {
+describe("a person keeps the board without a repository (ruling 224)", () => {
   it("writes the decision into the project's rulings, answers every task that asked, and the question is never asked again", async () => {
     // CANARY: clear the packet without writing the ruling and the next task
     // asks again; leave the second task's packet open and the person is asked
@@ -283,11 +283,11 @@ describe("a person keeps the board without a repository (ruling 672)", () => {
   });
 });
 
-describe("a person connects a repository from the packet (ruling 672)", () => {
+describe("a person connects a repository from the packet (ruling 224)", () => {
   it("attaches what they typed through the settings door, with GitHub's default branch and the connection bound", async () => {
     // CANARY: clear the packet without the attach and the board has no
     // repository under a record that says it does; attach without the probe
-    // and `defaultBranch` is a guess (rulings 669, 671).
+    // and `defaultBranch` is a guess (rulings 226, 225).
     const store = board("direct");
     connect(store);
     await ask(store);
@@ -358,7 +358,7 @@ describe("a person connects a repository from the packet (ruling 672)", () => {
   });
 });
 
-describe("the controller is started on the board, and the operators carry on when the board can deliver (ruling 672)", () => {
+describe("the controller is started on the board, and the operators carry on when the board can deliver (ruling 259)", () => {
   it("on a board no agent may write yet: the controller starts as the person who connected it, is told which operators wait, and they are not started", async () => {
     // CANARY: start the operators with the answer and each finds a
     // repository nobody may write, and opens a packet about it the moment a
@@ -441,7 +441,7 @@ describe("the controller is started on the board, and the operators carry on whe
   });
 });
 
-describe("what the review of ruling 672 found (each a refusal or a record that was missing)", () => {
+describe("what the review of ruling 224 found (each a refusal or a record that was missing)", () => {
   it("states the records an earlier repository left beside the answers, and Connect goes through on that", async () => {
     // CANARY: drop `confirmFootprint` from the answer and a board that once
     // had a repository (the AWS board) can never connect one from the card:
@@ -658,7 +658,7 @@ describe("what the review of ruling 672 found (each a refusal or a record that w
   });
 });
 
-describe("a repository connected in the project's settings (ruling 672)", () => {
+describe("a repository connected in the project's settings (ruling 224)", () => {
   const attach = (store: TestStore) =>
     changeProjectRepo(store.db, { projectSlug: store.slug, repo: REPO }, actorOf(store.users.arda), at(store), {
       fetchImpl: github(),
@@ -710,7 +710,7 @@ describe("a repository connected in the project's settings (ruling 672)", () => 
   });
 });
 
-describe("the controller connects a repository (ruling 672)", () => {
+describe("the controller connects a repository (ruling 224)", () => {
   /** The controller's toolkit as the store's project admin, on the board. */
   const controller = (store: TestStore, fetchImpl: typeof fetch = github()) =>
     buildControllerToolkit({
@@ -781,7 +781,7 @@ describe("the controller connects a repository (ruling 672)", () => {
     // had a repository can never be connected by the controller.
     const store = board("direct");
     expect(await callToolText(controller(store), "list_github_connections", {})).toContain(
-      "Any board can start without one (ruling 672): create it with no `owner` or `repoName`",
+      "Any board can start without one (ruling 224): create it with no `owner` or `repoName`",
     );
     connect(store);
     writeTask(store.dataRoot, store.slug, {
@@ -805,7 +805,7 @@ describe("the controller connects a repository (ruling 672)", () => {
   });
 });
 
-describe("the card says the answer reaches the other tasks (ruling 672)", () => {
+describe("the card says the answer reaches the other tasks (ruling 65)", () => {
   it("names them as the same question, not as a failure", async () => {
     // CANARY: reuse the account-failure sentence and a person reads that a
     // failure stopped tasks nothing stopped.

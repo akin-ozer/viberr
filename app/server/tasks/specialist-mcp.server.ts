@@ -20,7 +20,7 @@ import { toError } from "~/shared/errors";
 import { sortedBy } from "~/server/runtimes/prompt-prefix.server";
 import { startMcpWarmup } from "~/server/org/mcp-warmup.server";
 
-/** How a run's grants shape what its org servers expose (ruling 176). */
+/** How a run's grants shape what its org servers expose (ruling 188). */
 export interface McpResolveOptions {
   /** The run withholds `execute-code-or-write-repo` (every operator run does):
    *  each server's marked write tools are denied on it. */
@@ -29,28 +29,28 @@ export interface McpResolveOptions {
 
 /** A stdio mount: the registered command and its parsed argv. A stdio server
  *  with a credential is never mounted this way — the server spawns it behind
- *  the gateway (ruling 461). */
+ *  the gateway (ruling 191). */
 export interface StdioMcpServerConfig {
   command: string;
   args: string[];
 }
 
 /** An HTTP mount. `headers` exists only on a gateway mount, set by `startRun`
- *  (`bindRunToMcpGateway`): the RUN's token, never a credential (ruling 461). */
+ *  (`bindRunToMcpGateway`): the RUN's token, never a credential (ruling 191). */
 export interface HttpMcpServerConfig {
   type: "http";
   url: string;
   headers?: { Authorization: string };
-  /** Ruling 176: the Claude SDK's per-tool policy for a remote server, set to
+  /** Ruling 188: the Claude SDK's per-tool policy for a remote server, set to
    *  `always_deny` for each marked write tool on a run that withholds repo
    *  write. The `disallowedTools` name `startRun` adds is what binds on every
    *  transport; this is the SDK's own channel for HTTP, carried as well. */
   tools?: { name: string; permission_policy: "always_deny" }[];
-  /** Ruling 585: set only on the gateway's knowledge mount. The gateway keeps
+  /** Ruling 216: set only on the gateway's knowledge mount. The gateway keeps
    *  it (the knowledge bases it may read for the run) and hands the run the
    *  mount without it. */
   knowledge?: KnowledgeMount;
-  /** Ruling 589: set only on the gateway's board mount, kept the same way. */
+  /** Ruling 216: set only on the gateway's board mount, kept the same way. */
   board?: BoardMount;
 }
 
@@ -66,7 +66,7 @@ export type SpecialistMcpServerConfig =
 // backends would disagree about what the agent can do (P14-KM-15). The list is
 // `~/shared/mcp-reserved`, shared with the writer and the picker: the private
 // copy that used to live here fell two rulings behind and stopped covering the
-// controller's own servers (ruling 107).
+// controller's own servers (ruling 269).
 
 /** A declared MCP grant that reached no run, or that is known to be down. */
 export interface UnresolvedMcpGrant {
@@ -83,7 +83,7 @@ export interface UnresolvedMcpGrant {
 }
 
 /**
- * Ruling 310: what a run is told about a grant that did not arrive.
+ * Ruling 190: what a run is told about a grant that did not arrive.
  *
  * Both prompts used to say the same hardcoded sentence — "no such server is in
  * the org registry" — for every unresolved grant, which is an assertion about a
@@ -120,7 +120,7 @@ export function unavailableMcpSection(grants: readonly UnresolvedMcpGrant[]): st
 /**
  * C1: the skill and knowledge-base grants that resolved to nothing, or to less
  * than they name, said in the run's own prompt, for the operator and the
- * specialist alike, in one wording. Ruling 253: "did NOT reach" was true of
+ * specialist alike, in one wording. Ruling 205: "did NOT reach" was true of
  * every row when only a total miss could appear here. A partial now appears
  * too, so the heading and the instruction cover both.
  */
@@ -150,27 +150,27 @@ export interface SpecialistMcpResolution {
    */
   unresolved: UnresolvedMcpGrant[];
   /**
-   * Ruling 176: per mounted server, the marked write tools this run withholds.
+   * Ruling 188: per mounted server, the marked write tools this run withholds.
    * Empty unless the caller withheld write tools AND a mounted server has
    * marks. The caller hands it to `startRun`, which denies each by name on
    * Claude and as `disabled_tools` on Codex.
    */
   toolDenials: McpToolDenial[];
   /**
-   * Ruling 461: the mounted servers reached through Viberr's MCP gateway —
+   * Ruling 191: the mounted servers reached through Viberr's MCP gateway —
    * those with a stored credential. Their prompt sentence says the credential
    * is held by Viberr and a 401 from the gateway means the run ended.
    */
   proxied: string[];
   /**
-   * Ruling 486: the proxied servers signed in with OAuth, each with the scope
+   * Ruling 192: the proxied servers signed in with OAuth, each with the scope
    * its sign-in was granted (null when the server did not say), so the prompt
    * tells the run what the connection may do before a write is refused.
    */
   oauthGrants: McpRunGrant[];
 }
 
-/** Ruling 486: an OAuth-signed-in server a run mounts, and its sign-in's grant. */
+/** Ruling 192: an OAuth-signed-in server a run mounts, and its sign-in's grant. */
 export interface McpRunGrant {
   name: string;
   /** The granted scope, space-joined (`McpOAuthView.scope`). */
@@ -178,7 +178,7 @@ export interface McpRunGrant {
 }
 
 /**
- * Ruling 486: one line per OAuth-signed-in server, naming its grant. A
+ * Ruling 192: one line per OAuth-signed-in server, naming its grant. A
  * read-only grant says what a write will meet and whose act the remedy is.
  * A known grant points at the gateway's grant tool (F40-66): the line carries
  * only the summary, so an agent that needs one scope asks the tool instead of
@@ -205,9 +205,9 @@ function grantLine(grant: McpRunGrant): string {
 }
 
 /**
- * Ruling 461: what a run is told about the servers it reaches through Viberr's
+ * Ruling 191: what a run is told about the servers it reaches through Viberr's
  * gateway. One renderer for the specialist, operator and controller prompts.
- * Ruling 486: an OAuth-signed-in server's grant is named with it.
+ * Ruling 192: an OAuth-signed-in server's grant is named with it.
  */
 export function gatewayMcpSection(
   proxied: readonly string[],
@@ -215,7 +215,7 @@ export function gatewayMcpSection(
 ): string {
   if (proxied.length === 0) return "";
   const names = [...proxied].sort().join(", ");
-  // Ruling 506: the grant lines in the names' own code-point order. The
+  // Ruling 169: the grant lines in the names' own code-point order. The
   // specialist and the controller carry this section in their static prefix,
   // and `localeCompare` follows the process locale.
   const signedIn = sortedBy(
@@ -243,7 +243,7 @@ export function gatewayMcpSection(
  *   - HTTP  → `{ type: "http", url: <target> }`
  *   - stdio → `{ command, args }`
  *   - a server with a stored credential, either transport →
- *     `{ type: "http", url: <Viberr's gateway>/mcp/<name> }` (ruling 461)
+ *     `{ type: "http", url: <Viberr's gateway>/mcp/<name> }` (ruling 191)
  *
  * `viberr` and `viberr_agent` are skipped (Viberr's own in-process governance
  * and collaboration servers, built separately and never resolved from the org
@@ -251,7 +251,7 @@ export function gatewayMcpSection(
  * resolves, so callers can spread it unconditionally, and `unresolved` says
  * what failed to resolve and why.
  *
- * CREDENTIALS (F7-MCP1, ruling 461): a server's credential is stored SEALED in
+ * CREDENTIALS (F7-MCP1, ruling 191): a server's credential is stored SEALED in
  * the org registry (secret-box) and never leaves the server process. It used
  * to be decrypted here and attached to the run's own config — an
  * `Authorization: Bearer` header, or `MCP_CREDENTIAL` in a stdio server's env —
@@ -342,7 +342,7 @@ export function resolveSpecialistMcpServersDetailed(
     // mounted as unavailable would be false (C02-R5, pass 32: deliberate,
     // pinned in tests).
     //
-    // Ruling 310: pass 32 wrote this exclusion because it saw that the
+    // Ruling 190: pass 32 wrote this exclusion because it saw that the
     // persona's one hardcoded sentence — "no such server is in the org
     // registry" — would be a lie here, and it fixed the case rather than the
     // sentence. The sentence was already a lie for two other reasons this same
@@ -363,14 +363,14 @@ export function resolveSpecialistMcpServersDetailed(
     // Refuse the mount and tell the RUN why, in the same structured shape a
     // missing server uses.
     const credential = getMcpCredentialState(db, name);
-    // Ruling 469: a server that asks for an OAuth sign-in it does not have
+    // Ruling 192: a server that asks for an OAuth sign-in it does not have
     // (or whose sign-in expired) would answer every call 401; the run is told
     // why instead.
     if (credential.state === "unreadable" || credential.state === "signed_out") {
       drop(name, credential.reason);
       continue;
     }
-    // Ruling 176: the admin's marks bind only on a run that withholds repo
+    // Ruling 188: the admin's marks bind only on a run that withholds repo
     // write; a server with none marked is mounted exactly as before.
     const denied = options.withholdWriteTools ? row.writeTools : [];
     const parts = row.transport === "stdio" ? splitMcpCommand(row.target) : [];
@@ -380,10 +380,10 @@ export function resolveSpecialistMcpServersDetailed(
       continue;
     }
     if (credential.state === "ok" || credential.state === "oauth") {
-      // Ruling 461: the credential stays in this process. The run mounts the
+      // Ruling 191: the credential stays in this process. The run mounts the
       // gateway's URL for the server (either transport — the gateway spawns a
       // stdio command itself) and `startRun` adds the run's own token. An
-      // OAuth sign-in's tokens take the same road (ruling 469).
+      // OAuth sign-in's tokens take the same road (ruling 192).
       const url = mcpGatewayMountUrl(name);
       if (!url) {
         drop(
@@ -398,7 +398,7 @@ export function resolveSpecialistMcpServersDetailed(
       }
       servers[name] = gateway;
       proxied.push(name);
-      // Ruling 486: the run is told what the sign-in may do.
+      // Ruling 192: the run is told what the sign-in may do.
       if (credential.state === "oauth") oauthGrants.push({ name, scope: row.oauth?.scope ?? null });
     } else if (command) {
       servers[name] = { command, args: parts.slice(1) };
@@ -420,12 +420,12 @@ export function resolveSpecialistMcpServersDetailed(
 }
 
 /**
- * Ruling 585: the knowledge server a Codex specialist that holds a knowledge
+ * Ruling 216: the knowledge server a Codex specialist that holds a knowledge
  * base mounts, or null.
  *
  * A Claude run's toolkit gives it `read_knowledge_doc` and
  * `correct_knowledge_doc`; a Codex run mounts no in-process tools (ruling
- * 422), so it could not read a private knowledge base (ruling 578) and had to
+ * 217(a)), so it could not read a private knowledge base (ruling 209) and had to
  * put a correction in its report for the operator to write. The mount is the
  * gateway's own URL for `viberr_knowledge`, carrying the run's knowledge bases
  * and its agent for the gateway; `startRun` binds the run's token onto it and
@@ -449,18 +449,18 @@ export function resolveKnowledgeMcp(input: {
 }
 
 /**
- * Ruling 589: the board server a Codex specialist that holds a collaboration
+ * Ruling 216: the board server a Codex specialist that holds a collaboration
  * grant mounts, or null.
  *
  * A Claude run with any collaboration grant has `read_board` and
- * `read_timeline_entry` in its toolkit; a Codex run had neither (ruling 422),
+ * `read_timeline_entry` in its toolkit; a Codex run had neither (ruling 217(a)),
  * so it could not read another task's verdicts or a clipped entry of its own
  * task. The mount is the gateway's own URL for `viberr_board`, carrying the
  * run's store; the gateway already holds the run's project and task. A run
  * with no collaboration grant mounts nothing, as on Claude, and so does a
  * Claude run or a gateway that is not running.
  *
- * Ruling 690: a run that may save files on its task (`keepsSources`, the
+ * Ruling 82: a run that may save files on its task (`keepsSources`, the
  * `attach-evidence-references` grant) also keeps sources there, so its mount
  * carries the agent a source is kept as and the board server offers
  * `keep_source`. `webEgress` is the run's `use-web-search-fetch` grant: the
@@ -484,7 +484,7 @@ export function resolveBoardMcp(input: {
 }
 
 /**
- * Ruling 700(b): how many stdio pre-flight handshakes a run start keeps in
+ * Ruling 190: how many stdio pre-flight handshakes a run start keeps in
  * flight. Each may take its full 20 s, so a run mounting four waited 80 s
  * before it began; two halves that. Three would save more only on a run
  * mounting three or more, at the price of a third concurrent first-run
@@ -505,7 +505,7 @@ const STDIO_PREFLIGHT_CONCURRENCY = 2;
  * module 'ajv'`, contributing zero tools while every surface said healthy).
  *
  * This re-runs the real discovery handshake for each mounted stdio server, two
- * at a time (ruling 700(b), below). On a failure it (1) DROPS the server from
+ * at a time (ruling 190, below). On a failure it (1) DROPS the server from
  * the config so the run is not told it has tools it will never get, (2) joins
  * the existing `unresolved` disclosure by name with `mounted: false` (a hard
  * mount failure, distinct from the stale `mounted: true` "probe was old" note),
@@ -522,7 +522,7 @@ const STDIO_PREFLIGHT_CONCURRENCY = 2;
  * `operator-prompt.server.ts`, F21-3) and the controller
  * (`controller-run.server.ts`).
  *
- * Ruling 461: the pre-flight runs WITH the server's credential on every
+ * Ruling 190: the pre-flight runs WITH the server's credential on every
  * backend. A credentialed stdio server is started by Viberr's gateway with
  * `MCP_CREDENTIAL` for Claude and Codex runs alike, so the Codex-only
  * credential-less pre-flight (B-4) and the re-probe that kept it from
@@ -545,7 +545,7 @@ export async function verifyStdioMcpMountsForRun(
   const servers = { ...resolution.servers };
   const unresolved = [...resolution.unresolved];
 
-  // Ruling 700(b): the handshakes run STDIO_PREFLIGHT_CONCURRENCY at a time,
+  // Ruling 190: the handshakes run STDIO_PREFLIGHT_CONCURRENCY at a time,
   // taken in mount order, and each verdict is applied in mount order as soon
   // as every earlier mount's verdict is in. The mounted set, the health rows,
   // the warn lines and `unresolved` therefore come out as the one-at-a-time
@@ -580,7 +580,7 @@ export async function verifyStdioMcpMountsForRun(
     // correct the shared row so Settings stops calling it healthy.
     delete servers[name];
     markMcpServerUnreachableFromRun(db, name, disc.reason);
-    // Ruling 606: the probe gave up on a visible install and killed it, and uv
+    // Ruling 190: the probe gave up on a visible install and killed it, and uv
     // commits to its cache only when an install completes, so every run
     // restarted the same download and lost the server (R19-18's loop, on the
     // run path; live 2026-09-30, `uvx awslabs.aws-pricing-mcp-server@latest`).

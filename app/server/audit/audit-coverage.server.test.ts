@@ -74,11 +74,11 @@ import {
 
 let ctx: TestDbContext;
 let store: TestStore;
-/** Ruling 127: the sign-in actions are audited by a driver that spawns the
+/** Ruling 137: the sign-in actions are audited by a driver that spawns the
  *  vendor's own binary, so the sweep drives real (fake) executables. */
 let vendors: FakeVendorBinaries;
 
-/** The vendors' free key probe, answered without a network (ruling 127). */
+/** The vendors' free key probe, answered without a network (ruling 137). */
 const acceptingProvider: typeof fetch = () =>
   Promise.resolve(new Response("{}", { status: 200 }));
 
@@ -118,7 +118,7 @@ beforeEach(async () => {
   });
   rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
   installFakeRuntime();
-  // Ruling 127: an agent run bills the TASK OWNER's own accounts, so a run
+  // Ruling 137: an agent run bills the TASK OWNER's own accounts, so a run
   // only reaches an adapter when the owner has that backend connected. Arda
   // owns the tasks in this file; connecting both backends for him is the
   // ordinary state of somebody using the product.
@@ -172,7 +172,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
-        // Ruling 131: the dependency writer and the human release.
+        // Ruling 55: the dependency writer and the human release.
         name: "setTaskDependencies",
         action: "task.dependencies.updated",
         taskKey: "VIB-1",
@@ -207,7 +207,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 137: a withdrawal writes its own row. The accept card is
+        // Ruling 99: a withdrawal writes its own row. The accept card is
         // seeded on a task with NO open packet, and the packet the question
         // opens is cleared afterwards so later rows in this sequential store
         // are unaffected.
@@ -236,7 +236,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 521: the completion packet the operator writes before it
+        // Ruling 130: the completion packet the operator writes before it
         // offers a task for acceptance, here over files a run delivered.
         name: "writeCompletionPacket",
         action: "task.completion_packet.written",
@@ -258,7 +258,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 690: a run keeps a source its result rests on, from a file
+        // Ruling 82: a run keeps a source its result rests on, from a file
         // it staged in the task's attachments folder. CANARY: remove
         // recordAudit from keepTaskSource and the sweep reports the action
         // as unaudited.
@@ -283,7 +283,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 488: a relay from one task to another, audited on the target.
+        // Ruling 71: a relay from one task to another, audited on the target.
         name: "relayToTask",
         action: "task.relayed",
         taskKey: "VIB-2",
@@ -401,7 +401,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
-        // Ruling 157 (pass 35, F35-8): the one lift of a packet-less hold.
+        // Ruling 54 (pass 35, F35-8): the one lift of a packet-less hold.
         // VIB-1 carries no packet and no dependency list in this store, so a
         // stored `blocked` is the hold shape a dispatch lifts.
         name: "liftHoldForRun (a dispatch lifts a hold)",
@@ -438,7 +438,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           ),
       },
       {
-        // Ruling 161 (pass 35): the discard row now carries `localSha`,
+        // Ruling 234 (pass 35): the discard row now carries `localSha`,
         // `remoteSha` (null for a local-only discard) and the retired revision.
         name: "resolvePacket (discard_branch)",
         action: "task.branch.discarded",
@@ -551,7 +551,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 461: a call to an admin-marked MCP write tool, made through
+        // Ruling 191: a call to an admin-marked MCP write tool, made through
         // Viberr's gateway by a run whose token opens that server.
         name: "an MCP write-tool call through the gateway",
         action: "task.agent.mcp_write_call",
@@ -631,7 +631,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 128 (pass 34): an empty repository is bootstrapped, and the
+        // Ruling 227 (pass 34): an empty repository is bootstrapped, and the
         // repository-level write is audited like a credential assignment.
         name: "ensureDefaultBranch (bootstraps an empty repository)",
         action: "github.repo.bootstrapped",
@@ -739,7 +739,7 @@ describe("governed actions record audit rows (table-driven)", () => {
       },
       ...(["updated", "update_failed"] as const).map(
         (outcome): CoverageRow => ({
-          // Ruling 474: a re-delivery brings the reused PR's body up to date,
+          // Ruling 231(c): a re-delivery brings the reused PR's body up to date,
           // and a PATCH GitHub refuses is recorded too.
           name: `openTaskPr (a reused PR's body, ${outcome === "updated" ? "rewritten" : "refused"})`,
           action: `github.pr.body_${outcome}`,
@@ -803,7 +803,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         }),
       ),
       {
-        // Ruling 136: one row per collision ceremony with its typed outcome.
+        // Ruling 233: one row per collision ceremony with its typed outcome.
         // No credential here, so the ceremony refuses (`no_context`) and is
         // still audited; the fuller arms are locked in task-governance and
         // delivery-actionable, which supply `fetchImpl` and the delivery deps.
@@ -875,7 +875,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
-        // Ruling 127: connecting and disconnecting a PERSONAL agent account is
+        // Ruling 137: connecting and disconnecting a PERSONAL agent account is
         // governed — it changes whose provider account this instance's runs
         // bill — so both leave an audit row. Instance-wide: a personal
         // credential belongs to no project and no task.
@@ -911,7 +911,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 507: which of a person's accounts bills their runs is the
+        // Ruling 138: which of a person's accounts bills their runs is the
         // same governed fact as connecting one, so switching leaves a row too.
         name: "switchBackendAccount",
         action: "profile.backend.switched",
@@ -953,7 +953,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 127: a hosted sign-in is a governed action at every step. The
+        // Ruling 137: a hosted sign-in is a governed action at every step. The
         // vendor's own binary is spawned here (a fake executable), so what the
         // sweep proves is the DRIVER's audit trail, not a stub's.
         name: "startBackendLogin",
@@ -1026,7 +1026,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           }),
       },
       {
-        // Ruling 462: a repository created on GitHub for a project being
+        // Ruling 225: a repository created on GitHub for a project being
         // created. Its row names the NEW project, not the fixture's.
         name: "createProject (createRepository: a missing repository is created)",
         action: "project.repository.created",
@@ -1074,7 +1074,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 463: Re-check on a GitHub connection's card re-validates the
+        // Ruling 222: Re-check on a GitHub connection's card re-validates the
         // stored token and re-reads what it reaches. Instance-wide.
         name: "recheckConnection",
         action: "org.connection.rechecked",
@@ -1101,7 +1101,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 464: the controller's `remove_agent_deployment` reaches the
+        // Ruling 266: the controller's `remove_agent_deployment` reaches the
         // Agents page's own removal, with its reason and the open-engagement
         // refusal, and records the page's own audit action.
         name: "deleteAgentProfile (the controller's removal, with a reason)",
@@ -1136,7 +1136,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 156 (pass 35): a template's grants copied onto a project's
+        // Ruling 177 (pass 35): a template's grants copied onto a project's
         // deployment, one row per project.
         name: "propagateTemplateResources",
         action: "project.agent_profile.resources_synced",
@@ -1172,7 +1172,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 482: the project's gates (Settings → Gates, the controller's
+        // Ruling 17: the project's gates (Settings → Gates, the controller's
         // set_project_gates).
         name: "setProjectGates",
         action: "project.gates.updated",
@@ -1189,7 +1189,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 482: a person asks Viberr to run the gates again.
+        // Ruling 104: a person asks Viberr to run the gates again.
         name: "runProjectGatesByHand",
         action: "task.gates.requested",
         taskKey: "VIB-2",
@@ -1204,7 +1204,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 525: a person deletes a controller conversation, here their
+        // Ruling 33: a person deletes a controller conversation, here their
         // own thread anchored to a task, so the row names the task it was
         // about.
         name: "deleteControllerConversation",
@@ -1231,7 +1231,7 @@ describe("governed actions record audit rows (table-driven)", () => {
         },
       },
       {
-        // Ruling 691: Viberr's own render of a files delivery's pages. Here
+        // Ruling 86: Viberr's own render of a files delivery's pages. Here
         // the pinned browser is not on disk, and the job still records what it
         // could not picture. CANARY: remove the recordAudit call at the end
         // of the delivery job.
@@ -1254,7 +1254,7 @@ describe("governed actions record audit rows (table-driven)", () => {
           );
         },
       },
-      // Ruling 469: an MCP connection's OAuth sign-in, against the in-test
+      // Ruling 192: an MCP connection's OAuth sign-in, against the in-test
       // authorization server. Instance-wide: the registry is org-level.
       ...(["org.mcp.oauth_connected", "org.mcp.oauth_failed", "org.mcp.oauth_signed_out"] as const).map(
         (action): CoverageRow => ({
@@ -1304,28 +1304,28 @@ describe("governed actions record audit rows (table-driven)", () => {
         "github.credential.revalidated",
         "projection.rescan",
         "projection.rebuild",
-        // Ruling 127: a person's own agent account, connected on their profile.
+        // Ruling 137: a person's own agent account, connected on their profile.
         "profile.backend.connected",
         "profile.backend.disconnected",
         "profile.backend.login_started",
         "profile.backend.login_failed",
         "profile.backend.login_cancelled",
-        // Ruling 507: which of those accounts runs bill, and its name.
+        // Ruling 138: which of those accounts runs bill, and its name.
         "profile.backend.switched",
         "profile.backend.renamed",
-        // Ruling 156: a project-scoped row with no task.
+        // Ruling 177: a project-scoped row with no task.
         "project.agent_profile.resources_synced",
-        // Ruling 462: the repository a new project is created with.
+        // Ruling 225: the repository a new project is created with.
         "project.repository.created",
-        // Ruling 463: a GitHub connection belongs to the instance.
+        // Ruling 222: a GitHub connection belongs to the instance.
         "org.connection.rechecked",
-        // Ruling 464: a deployment taken off a project's roster.
+        // Ruling 266: a deployment taken off a project's roster.
         "project.agent_profile.deleted",
-        // Ruling 469: an org MCP connection's OAuth sign-in.
+        // Ruling 192: an org MCP connection's OAuth sign-in.
         "org.mcp.oauth_connected",
         "org.mcp.oauth_failed",
         "org.mcp.oauth_signed_out",
-        // Ruling 482: the project's gate list, a project-scoped row.
+        // Ruling 17: the project's gate list, a project-scoped row.
         "project.gates.updated",
       ].includes(row.action);
       if (!taskless) {

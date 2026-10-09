@@ -10,7 +10,7 @@ import {
  * (docs/architecture/decisions.md: "Derivation lives ONLY in
  * app/server/interpretation/readiness-policy.server.ts").
  *
- * Rules (orchestrator ruling 1 + phase brief):
+ * Rules (ruling 44 + phase brief):
  * - The file's STORED readiness is respected unless derivation must
  *   downgrade (worsen) it:
  *     · parse diagnostics — warning → floor `input_required`,
@@ -31,7 +31,7 @@ export interface ReadinessDerivation {
   downgraded: boolean;
   /** The floor imposed by diagnostics, when any. */
   diagnosticsFloor: Readiness | null;
-  /** Ruling 131: the floor imposed by a non-empty `blockedBy` list (`blocked`),
+  /** Ruling 55: the floor imposed by a non-empty `blockedBy` list (`blocked`),
    *  or null when the task waits on nothing. */
   dependencyFloor: Readiness | null;
 }
@@ -40,7 +40,7 @@ export function deriveReadiness(input: {
   /** Parsed stored readiness; null when missing/invalid in the file. */
   storedReadiness: Readiness | null;
   diagnostics: FileDiagnostic[];
-  /** Ruling 131 (pass 34): the task's `blockedBy` list is non-empty. While it
+  /** Ruling 55 (pass 34): the task's `blockedBy` list is non-empty. While it
    *  is, readiness floors at `blocked` (rank 3, so it can never IMPROVE a
    *  stored value): the task waits on other work and nothing on it should
    *  read as ready. The list's states are resolved at read time; the floor

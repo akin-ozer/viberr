@@ -122,7 +122,7 @@ describe("global agent profiles", () => {
       ACTOR,
       ctx,
     );
-    // P13-AP-05 (owner ruling 1): a template is ADOPTED by a project from the
+    // P13-AP-05 (P13 owner decision 1): a template is ADOPTED by a project from the
     // Agents → Add from library action; it is never auto-deployed, and the old
     // toast pointed at a "grant eligibility in a project's policy" surface that
     // did not exist.
@@ -185,11 +185,11 @@ describe("global agent profiles", () => {
   });
 
   /**
-   * Ruling 153 (pass 35, G35-2): a template carries its default model and
-   * effort, checked by name against its backend (ruling 139); an edit that
-   * omits both keeps them. Canary: drop `effort` from the created frontmatter.
+   * Ruling 261 (G35-2): a template carries its default model and effort,
+   * checked by name against its backend; an edit that omits both keeps them.
+   * Canary: drop `effort` from the created frontmatter.
    */
-  it("ruling 153: create stores model and effort, a foreign model is refused, and an edit omitting both keeps them", async () => {
+  it("ruling 261: create stores model and effort, a foreign model is refused, and an edit omitting both keeps them", async () => {
     const { db, dataRoot, ctx } = setup();
     await saveGlobalAgentProfile(
       db,

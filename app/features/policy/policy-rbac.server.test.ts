@@ -440,7 +440,7 @@ function matrixDrivers() {
         },
       },
     ],
-    // Ruling 503: an epic is planning, the tier that creates the tasks it
+    // Ruling 26: an epic is planning, the tier that creates the tasks it
     // groups.
     "manage-epics": [
       {
@@ -597,7 +597,7 @@ function matrixDrivers() {
     ],
     "delete-controller-conversations": [
       {
-        // Ruling 525: somebody ELSE's conversation about the board. Its starter
+        // Ruling 26: somebody ELSE's conversation about the board. Its starter
         // is none of the actors, so their own path (a starter may always
         // delete) never stands in for the grant. A fresh one before each
         // actor, since an allowed delete takes it away and the next attempt
@@ -673,7 +673,7 @@ function matrixDrivers() {
         },
       },
     ],
-    // Ruling 582: the writer refuses by role before it looks for the file, so
+    // Ruling 80: the writer refuses by role before it looks for the file, so
     // a name the task does not hold still proves it.
     "remove-from-record": [
       {
@@ -1080,7 +1080,7 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
     ],
     refreshAndReview: [
       {
-        // Ruling 449: the accept dialog's "update the branch and re-review
+        // Ruling 97: the accept dialog's "update the branch and re-review
         // first" holds the acceptance authority, owner exception included.
         label: "refreshAndReview (update the branch and re-review first)",
         stage: "review",
@@ -1093,7 +1093,7 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
     ],
     runProjectGatesByHand: [
       {
-        // Ruling 482: "Run gates" on the PR card — the owner runs the gates on
+        // Ruling 104: "Run gates" on the PR card — the owner runs the gates on
         // their OWN task's delivered revision; anyone else needs run-agents.
         label: "runProjectGatesByHand (the PR card's Run gates)",
         stage: "review",
@@ -1185,7 +1185,7 @@ describe("R6-2: EVERY owner-exception consumer is scoped to the owner's own task
     //     below — the scan reports "I could not attribute this" instead of
     //     silently crediting whichever name it happened to be holding.
     //
-    // Ruling 654 split task-actions.server.ts by action family and exports the
+    // Ruling 13(a) split task-actions.server.ts by action family and exports the
     // three helpers from task-action-core.server.ts, so any server module can
     // consult them now: the scan reads every one, not a single file.
     const serverDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../server");
@@ -1323,7 +1323,7 @@ describe("ALWAYS_HUMAN capabilities are unreachable whatever the grants say", ()
     })!;
     expect(after.parsed.frontmatter.stage).toBe("review");
     // …and the refusal is about the TERMINAL stage, not about the operator: the
-    // same call across an `auto` boundary goes through (ruling 151: an
+    // same call across an `auto` boundary goes through (ruling 111: an
     // `approval` boundary is a human's, so the auto edge is the one that
     // proves the operator itself is not refused).
     resetTaskStage("ready");

@@ -1,5 +1,5 @@
 /**
- * Ruling 486 (F40-63): the scope Cloudflare's API MCP server
+ * Ruling 192 (F40-63): the scope Cloudflare's API MCP server
  * (`https://mcp.cloudflare.com/mcp`) granted Viberr's live `cloudflare-api`
  * sign-in on 2026-09-25, as the `org.mcp.oauth_connected` audit row recorded
  * it: 194 scopes, every one of them a read. It is Cloudflare's own

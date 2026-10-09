@@ -117,7 +117,7 @@ describe("assertTrustedOrigin", () => {
 });
 
 /**
- * Ruling 687: behind the TLS-terminating proxy deployment.md requires,
+ * Ruling 28: behind the TLS-terminating proxy deployment.md requires,
  * react-router-serve builds request.url from the plain-HTTP socket while the
  * browser sends the https:// origin it is on. The guard accepts the configured
  * public origin (BETTER_AUTH_URL) as well as the request's own, except the

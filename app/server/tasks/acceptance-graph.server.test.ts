@@ -460,7 +460,7 @@ describe("P14-LV-07: a merge GitHub refuses refuses the acceptance", () => {
     ).toContain("conflicts");
   });
 
-  it("ruling 135: an admin forcing past a conflict on an UNPUSHED revision is told to deliver, never to rebase", async () => {
+  it("ruling 243: an admin forcing past a conflict on an UNPUSHED revision is told to deliver, never to rebase", async () => {
     // Canary: keep the rebase sentence in `attemptAcceptanceMerge`'s
     // not_mergeable arm regardless of the record.
     const store = setupProjectedStore(ctx);

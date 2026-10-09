@@ -155,7 +155,7 @@ describe("SsoPanel", () => {
 });
 
 /**
- * Ruling 368: a provider test or switch in flight shows itself on the button
+ * Ruling 286: a provider test or switch in flight shows itself on the button
  * that started it. Both went `disabled` for the whole wait with their resting
  * label, so a click painted the .45 refused step and said nothing while the
  * server called the provider. Now the starter carries `aria-busy`, the loader

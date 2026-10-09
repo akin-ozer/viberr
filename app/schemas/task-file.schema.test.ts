@@ -86,13 +86,13 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
   });
 
   /**
-   * Ruling 388 (F39-15), live on ax-clone AX-12. A research task delivers a
+   * Ruling 84 (F39-15), live on ax-clone AX-12. A research task delivers a
    * report, not a commit. Keyed on `workRevision` alone this was forced to
    * `none` however the reviewer had ruled, which printed "**Validation:** none.
    * Review & validation requested changes." in one sentence and shut the rework
-   * route ruling 163 licenses, because that needs `failing` or `changed`.
+   * route ruling 90 licenses, because that needs `failing` or `changed`.
    */
-  it("ruling 388: a verdict on a non-commit DELIVERY derives like any other", () => {
+  it("ruling 84: a verdict on a non-commit DELIVERY derives like any other", () => {
     const at = "2026-09-22T06:23:28.646Z";
     const onFiles = (result: "approve" | "request_changes") => ({
       profileId: "reviewer",
@@ -125,13 +125,13 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
   });
 
   /**
-   * Ruling 531: the ENGAGED reviewer's gate reads the same subject. Ruling 388
+   * Ruling 81: the ENGAGED reviewer's gate reads the same subject. Ruling 84
    * moved the verdict, the derivation and the project's rule onto the files a
    * delivering run saved, and this gate still keyed on `workRevision`, so a
-   * results task (ruling 530) whose reviewer approved its files was refused
+   * results task (ruling 268) whose reviewer approved its files was refused
    * with "No reviewed revision yet".
    */
-  it("ruling 531: an engaged reviewer's approval of the delivered files releases acceptance, and a later save holds it again", () => {
+  it("ruling 81: an engaged reviewer's approval of the delivered files releases acceptance, and a later save holds it again", () => {
     const at = "2026-09-27T22:31:54.701Z";
     const fm = {
       engagements: [deliverer, reviewerA],
@@ -372,7 +372,7 @@ describe("revision-bound review helpers (F10-15/F10-32)", () => {
     expect(diff.revision.id).toBe("rev_2");
   });
 
-  it("ruling 439: a head the revision reaches by Viberr's own base refreshes is the same subject", () => {
+  it("ruling 239: a head the revision reaches by Viberr's own base refreshes is the same subject", () => {
     // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it as
     // 278c1ed, the reviewer approved, and the delivery 65 seconds later minted
     // 278c1ed as a new revision because the merge changed the tree. CANARY:
@@ -419,7 +419,7 @@ const valid = {
   updatedAt: "2026-07-04T06:58:00.000Z",
 };
 
-describe("ruling 703: the files delivery a reviewer judged last", () => {
+describe("ruling 81: the files delivery a reviewer judged last", () => {
   const FIRST = "2026-10-08T15:03:04.630Z";
   const SECOND = "2026-10-08T15:32:35.992Z";
   const verdict = (profileId: string, revisionId: string, at: string): ReviewVerdict => ({
@@ -856,7 +856,7 @@ describe("packet block parse (tolerant)", () => {
     expect(diagnostics.some((d) => d.code === "packet.rec_count")).toBe(true);
   });
 
-  it("ruling 478(e): no recommended option is a legitimate packet, with no diagnostic", () => {
+  it("ruling 68: no recommended option is a legitimate packet, with no diagnostic", () => {
     // An agent's question it has no pick on carries no `rec`; the task page
     // printed "0 recommended options (expected exactly 1)" as a heads-up on
     // every such packet. CANARY: restore `recCount !== 1`.
@@ -1067,7 +1067,7 @@ describe("parseTaskFrontmatter — per-entry verdict/schedule tolerance", () => 
 describe("pass 34 frontmatter additions", () => {
   const base = { key: "VIB-9", title: "T", stage: "impl", readiness: "ready", waiting: "none" };
 
-  it("ruling 131: `blockedBy` round-trips canonicalized, absent reads [] with no diagnostic, a malformed row drops only itself", () => {
+  it("ruling 55: `blockedBy` round-trips canonicalized, absent reads [] with no diagnostic, a malformed row drops only itself", () => {
     // Canary: delete the `blockedBy: tolerantRows(...)` line from the parse
     // (falling back to `[]`) and the first assertion reads `[]`.
     const ok = parseTaskFrontmatter({ ...base, blockedBy: ["jc-6", "ax-12"] });
@@ -1086,7 +1086,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(diag?.path).toBe("blockedBy[0]");
     expect(diag?.message).toContain("nope");
 
-    // Ruling 503: a goal link is no longer a spelling. The boot conversion
+    // Ruling 55: a goal link is no longer a spelling. The boot conversion
     // respelled every stored one by task key, so one written by hand since is
     // a malformed row like any other, and drops only itself.
     const legacy = parseTaskFrontmatter({ ...base, blockedBy: ["goal-1 link 3", "JC-7"] });
@@ -1094,7 +1094,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(legacy.diagnostics.find((d) => d.path === "blockedBy[0]")?.message).toContain("goal-1 link 3");
   });
 
-  it("ruling 132: `baseRefreshes` round-trips per row and absent reads []", () => {
+  it("ruling 239: `baseRefreshes` round-trips per row and absent reads []", () => {
     const row = {
       mergeSha: "m".repeat(40),
       baseSha: "b".repeat(40),
@@ -1108,7 +1108,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(parseTaskFrontmatter(base).frontmatter.baseRefreshes).toEqual([]);
   });
 
-  it("ruling 132: `pr.revisionDrift` is the authored/baseRefresh record, and a fast-forward refresh (merges: 0) is legal", () => {
+  it("ruling 239: `pr.revisionDrift` is the authored/baseRefresh record, and a fast-forward refresh (merges: 0) is legal", () => {
     const pr = {
       number: 1,
       state: "review",
@@ -1127,7 +1127,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(legacy.frontmatter.pr?.revisionDrift).toBeNull();
   });
 
-  it("ruling 135: `pr.headSha` and `pr.unpushedRevision` are optional keys that round-trip", () => {
+  it("ruling 243: `pr.headSha` and `pr.unpushedRevision` are optional keys that round-trip", () => {
     const pr = {
       number: 10,
       state: "review",
@@ -1144,7 +1144,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(bare.pr).not.toHaveProperty("unpushedRevision");
   });
 
-  it("ruling 138: a packet records `decided` and an edit_goal option carries `goalDraft`", () => {
+  it("ruling 63: a packet records `decided` and an edit_goal option carries `goalDraft`", () => {
     const parsed = parseTaskFileContent(
       [
         "---",
@@ -1196,7 +1196,7 @@ describe("pass 34 frontmatter additions", () => {
     expect(packet.options[0]).not.toHaveProperty("goalDraft");
   });
 
-  it("ruling 137: a recommendation carries `forHeadSha`", () => {
+  it("ruling 99: a recommendation carries `forHeadSha`", () => {
     const fm = parseTaskFrontmatter({
       ...base,
       recommendations: [
@@ -1210,14 +1210,14 @@ describe("pass 34 frontmatter additions", () => {
 });
 
 /**
- * Ruling 135 (pass 34, F34-11): the unpushed-revision gate. Its answers depend
+ * Ruling 243 (pass 34, F34-11): the unpushed-revision gate. Its answers depend
  * on the CURRENT revision (a record for an older one is stale and reads as
  * nothing) and its remedy is always "deliver", never "rebase".
  *
  * Canary: drop the `record.revisionSha !== currentRevisionSha` comparison in
  * `unpushedRevisionOf` and the stale case answers the record.
  */
-describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () => {
+describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 243)", () => {
   const rev = "385047c".padEnd(40, "0");
   const old = "6004958".padEnd(40, "0");
   const pr = (relation: "behind" | "diverged" | "unknown", revisionSha = rev) => ({
@@ -1247,7 +1247,7 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
     expect(behind).toContain("`6004958`");
     expect(behind).toContain("Deliver the branch to push it");
     expect(behind).not.toMatch(/rebase/i);
-    // Ruling 207(k): `unknown` used to take the `behind` sentence, whose
+    // Ruling 243: `unknown` used to take the `behind` sentence, whose
     // premise ("a behind or absent remote reaches the PR by a plain push") it
     // does not satisfy — it is written when the compare could not be READ, so
     // the remote may be diverged. CANARY: fall through to the behind arm and
@@ -1259,11 +1259,11 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
     expect(unknown).not.toMatch(/rebase/i);
     const diverged = unpushedRevisionBlockedReason(pr("diverged"), rev, "JC-3")!;
     expect(diverged).toContain("holds commits this workspace does not");
-    // Ruling 321: this used to say "Resolve the branch history" and stop —
+    // Ruling 230: this used to say "Resolve the branch history" and stop —
     // an obligation with no act in it, in a sentence whose own header claimed
     // it "says which". It now carries the shared remedy.
     expect(diverged).toContain(DIVERGED_BRANCH_REMEDY);
-    // Ruling 135's guard survives inverted: the word may appear ONLY as the
+    // Ruling 243's guard survives inverted: the word may appear ONLY as the
     // thing not to do. Anything that reads as an instruction to rebase is what
     // this line has always been here to catch.
     expect(diverged).toContain("never a rebase");
@@ -1272,7 +1272,7 @@ describe("unpushedRevisionOf / unpushedRevisionBlockedReason (ruling 135)", () =
   });
 });
 
-describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not under review", () => {
+describe("ruling 234 (pass 35, G35-6): a discarded revision is retired, not under review", () => {
   const delivered: WorkRevision = {
     id: "rev_d1",
     headSha: "d".repeat(40),
@@ -1368,7 +1368,7 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
   });
 
   it("the acceptance gate refuses a discarded revision by naming delivery, not an approval nobody can give", () => {
-    // Ruling 161(b) lists "the acceptance gates" among the readers that go
+    // Ruling 234 lists "the acceptance gates" among the readers that go
     // through `activeWorkRevision`. Canary: read `fm.workRevision` raw at the
     // first arm of `acceptanceBlockedReason` — the retired record takes the
     // required-reviewer arm, so this task is told to wait for an approval of a
@@ -1388,7 +1388,7 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
 });
 
 /**
- * Ruling 321 — a diverged branch has ONE remedy sentence.
+ * Ruling 230 — a diverged branch has ONE remedy sentence.
  *
  * The phrase was invented five times, in five files, and every one of them
  * said that a person should resolve the history without naming the act that
@@ -1396,7 +1396,7 @@ describe("ruling 161 (pass 35, G35-6): a discarded revision is retired, not unde
  * delivery, update-branch, the packet outcome (react-progress) and
  * delivery-decision.
  */
-describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
+describe("DIVERGED_BRANCH_REMEDY (ruling 230)", () => {
   it("names the act and the thing that causes the divergence", async () => {
     const { DIVERGED_BRANCH_REMEDY } = await import("./task-file.schema");
     expect(DIVERGED_BRANCH_REMEDY).toContain("MERGE");
@@ -1407,7 +1407,7 @@ describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
 });
 
 /**
- * Ruling 405 (F39-32), measured live on ax-clone AX-18.
+ * Ruling 242 (F39-32), measured live on ax-clone AX-18.
  *
  * The Surface Developer resolved the conflict in `internal/cli/render.go` and
  * the operator pushed the merge commit `d44e874` to PR #16. GitHub recomputes
@@ -1418,10 +1418,10 @@ describe("DIVERGED_BRANCH_REMEDY (ruling 321)", () => {
  * fifteen seconds on a conflict that no longer existed, and the policy engine
  * then told the human the operator had held the stage deliberately.
  *
- * `paths` has been pinned to its head since ruling 236. The verdict that
- * BLOCKS had no pin at all.
+ * `paths` was already pinned to its head. The verdict that BLOCKS had no pin
+ * at all.
  */
-describe("ruling 405: a conflict verdict belongs to the head it was measured on", () => {
+describe("ruling 242: a conflict verdict belongs to the head it was measured on", () => {
   const prAt = (mergeableAt: string | null, headSha: string) => {
     const pr: PrRef = {
       number: 16,
@@ -1438,7 +1438,7 @@ describe("ruling 405: a conflict verdict belongs to the head it was measured on"
   it("blocks while the verdict and the live head are the same commit", () => {
     const reason = conflictingPrBlockedReason(prAt("5ae0752", "5ae0752"), "AX-18");
     expect(reason).toContain("conflicts with the base branch");
-    // Ruling 291: the remedy is a merge, and the sentence FORBIDS the rebase
+    // Ruling 230: the remedy is a merge, and the sentence FORBIDS the rebase
     // rather than leaving it open to the one reader with no tool.
     expect(reason).toContain("merging the base INTO it");
     expect(reason).toContain("never by rebasing");

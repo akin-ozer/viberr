@@ -1,8 +1,8 @@
 /**
  * A token count in whole thousands: 112_400 → "112k", 1_500 → "2k", 400 → "0k".
  *
- * The one form the compaction console line (ruling 369) and the stale-session
- * sentences (ruling 372) print a context size in. The run console's usage line
+ * The one form the compaction console line (ruling 172) and the stale-session
+ * sentences (ruling 173) print a context size in. The run console's usage line
  * keeps its own one-decimal form (`wire-format.server.ts`), which is a
  * different number.
  *

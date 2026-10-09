@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { diffRows, noteLine, noteRange } from "./diff-rows";
 
 /**
- * Ruling 484: the Changes panel quotes a note's `file:line`, so each drawn row
+ * Ruling 246: the Changes panel quotes a note's `file:line`, so each drawn row
  * must carry the number the line has in the file it belongs to: the new file
  * for an added or context line, the old one for a removed line.
  */
-describe("ruling 484: diffRows numbers every line the way a note quotes it", () => {
+describe("ruling 246: diffRows numbers every line the way a note quotes it", () => {
   it("counts both sides from each hunk header", () => {
     const rows = diffRows(
       [
@@ -54,11 +54,11 @@ describe("ruling 484: diffRows numbers every line the way a note quotes it", () 
 });
 
 /**
- * Ruling 509: a note may cover several lines. The panel asks `noteRange` which
+ * Ruling 296: a note may cover several lines. The panel asks `noteRange` which
  * rows a drag or a shift-click from one line towards another covers, so the
  * range never leaves its hunk and never shares a line with another note.
  */
-describe("ruling 509: noteRange keeps a note's lines inside one hunk and off other notes", () => {
+describe("ruling 296: noteRange keeps a note's lines inside one hunk and off other notes", () => {
   const rows = diffRows(
     [
       "@@ -10,4 +10,5 @@",

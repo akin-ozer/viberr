@@ -25,7 +25,7 @@ import {
 } from "./user-homes.server";
 
 /**
- * Ruling 127: every run bills ONE person — the task owner on a task, the asker
+ * Ruling 137: every run bills ONE person — the task owner on a task, the asker
  * on the controller — and a run that cannot name that person does not start.
  */
 
@@ -197,7 +197,7 @@ describe("resolveTaskRunPrincipal", () => {
     expect(message).toContain("sign-in file is missing from this server");
 
     // …and the moment the file is back — in the account's own home (ruling
-    // 507) — the same task resolves.
+    // 138) — the same task resolves.
     const { home } = ensureBackendAccountHome(
       store.users.murat.id,
       "claude",
@@ -261,13 +261,13 @@ describe("resolveUserRunPrincipal (the controller's asker)", () => {
 });
 
 describe("principalRefusalMessage", () => {
-  it("uses the ruling-92 backend labels", () => {
+  it("uses the ruling-298 backend labels", () => {
     const unowned = { kind: "unowned", taskKey: "VIB-9" } as const;
     expect(principalRefusalMessage(unowned, "claude").startsWith("Claude runs on VIB-9")).toBe(true);
     expect(principalRefusalMessage(unowned, "codex").startsWith("Codex runs on VIB-9")).toBe(true);
   });
 
-  it("names no environment variable — ruling 127 left none to set", () => {
+  it("names no environment variable — ruling 137 left none to set", () => {
     // CANARY: bring back the deployment-wide answer (a key, a token or a home
     // to set) in any of the three sentences and this fails.
     writeOwnedTask("VIB-5", store.users.murat.id);

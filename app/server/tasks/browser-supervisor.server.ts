@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 
 /**
- * Ruling 554: a page that stops answering must not take the agent's browser
+ * Ruling 193: a page that stops answering must not take the agent's browser
  * with it.
  *
  * Playwright MCP builds every answer from the page: an action's answer carries

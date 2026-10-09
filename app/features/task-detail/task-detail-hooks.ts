@@ -14,7 +14,7 @@ import type { TaskRunPrincipalView } from "./run-principal-view";
  * (pass 16 — the file was 1811 lines and the most conflict-prone in the tree);
  * a pure structural refactor, no behaviour or copy change. The page's own
  * posts, each with its fetcher and confirm, are in `task-detail-actions.tsx`
- * (ruling 700(d)); `useRunConsole` there calls the two hooks below.
+ * (ruling 13(b)); `useRunConsole` there calls the two hooks below.
  */
 
 export type ActionResult =
@@ -46,7 +46,7 @@ export function useRunControls({
   runtime: RunView[];
   myRole: string | null;
   canRunAgents: boolean;
-  /** Ruling 127: whose accounts a run on this task would bill, and what those
+  /** Ruling 137: whose accounts a run on this task would bill, and what those
    *  accounts can run. `null` = nobody to bill (no owner, or a seat pointing at
    *  a gone/disabled account), which no backend switch fixes. */
   runPrincipal: TaskRunPrincipalView | null;
@@ -61,7 +61,7 @@ export function useRunControls({
   const runFetcher = useFetcher<ActionResult>();
   useActionToast(runFetcher);
   const runBusy = runFetcher.state !== "idle";
-  // Ruling 368: this one fetcher carries four requests (interrupt, the backend
+  // Ruling 286: this one fetcher carries four requests (interrupt, the backend
   // retry, complete-merge, force-accept), so the page reads which one — and
   // for which run or agent — off its form data. The button that started it
   // shows the work; every other one only waits on `runBusy`.
@@ -89,7 +89,7 @@ export function useRunControls({
     fd.set("runId", run.serverRunId);
     runFetcher.submit(fd, { method: "post" });
   };
-  // Ruling 127: which backends a retry could actually RUN on. A retry dispatch
+  // Ruling 137: which backends a retry could actually RUN on. A retry dispatch
   // bills the task owner exactly as the failed run did, so offering one on a
   // backend they have not connected promises a one-click fix that fails
   // identically the moment it is clicked — which is why the blocked packet
@@ -99,7 +99,7 @@ export function useRunControls({
   // so the two surfaces on one task disagreed. An unowned task (null principal)
   // has nobody to bill on either backend.
   //
-  // Ruling 457 (TASK-4): kept as one array while the answer is the same, so the
+  // Ruling 11 (TASK-4): kept as one array while the answer is the same, so the
   // memoised console does not re-render on a revalidation that changed nothing.
   const claudeAvailable = runPrincipal?.claude.available ?? false;
   const codexAvailable = runPrincipal?.codex.available ?? false;
@@ -174,7 +174,7 @@ export function useRunControls({
   const canForceAccept =
     roleCan(asProjectRole(myRole), "force-accept-completion") &&
     !acceptanceTerminallyBlocked;
-  // Ruling 88 (F21-2): the force ceremony discloses MORE than the ordinary one
+  // Ruling 97 (F21-2): the force ceremony discloses MORE than the ordinary one
   // (the skipped stages, the bypassed refusal), so it echoes on the same terms
   // — the server refuses a force-accept POST that carries no acknowledgment,
   // and records no `task.acceptance.forced` row for the attempt.
@@ -220,7 +220,7 @@ export function useLogSelection(runtime: RunView[]) {
   const pendingLogReady =
     pendingLogSel !== null && runtime.some((r) => r.id === pendingLogSel);
   const shownLogSel = pendingLogReady ? pendingLogSel : logSel;
-  // Ruling 457 (TASK-4): stable while `pendingLogReady` holds, so the memoised
+  // Ruling 11 (TASK-4): stable while `pendingLogReady` holds, so the memoised
   // console and run card do not re-render on a revalidation that changed
   // nothing they draw.
   const selectLog = useCallback(

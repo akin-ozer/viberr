@@ -35,7 +35,7 @@ import {
 import { useRunLogStream } from "~/features/runtime/use-run-log-stream";
 
 /**
- * Ruling 457: a browser tab's revalidation behaviour, measured in jsdom the way
+ * Ruling 11: a browser tab's revalidation behaviour, measured in jsdom the way
  * the app runs it (`revalidation.perf.test.tsx` and the live-update policy
  * tests).
  *
@@ -426,7 +426,7 @@ export function mountHarness(options: HarnessOptions): Harness {
     version += 1;
     return { id, n, version };
   };
-  // Each route revalidates as its module's `shouldRevalidate` says (ruling 457).
+  // Each route revalidates as its module's `shouldRevalidate` says (ruling 11).
   const routes: RouteObject[] = [
     {
       id: "root",

@@ -81,6 +81,6 @@ export async function recordPrAdoption(
       source: input.source,
     },
   });
-  // Ruling 497: when the `github` event was written, so a notice opens on it.
+  // Ruling 75: when the `github` event was written, so a notice opens on it.
   return at;
 }

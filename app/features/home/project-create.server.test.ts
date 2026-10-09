@@ -28,7 +28,7 @@ const idRow = z.object({ id: z.string() });
 
 const ctx = createTestDbContext();
 /**
- * GitHub confirming the repository a project is created against. Ruling 671:
+ * GitHub confirming the repository a project is created against. Ruling 225:
  * a creation it does not confirm is refused, so a test about anything else
  * needs the answer.
  */
@@ -62,19 +62,19 @@ function seedConnection(db: import("node:sqlite").DatabaseSync, userId: string) 
 }
 
 /**
- * Ruling 671 (owner, 2026-10-06): a creation GitHub does not confirm is
+ * Ruling 225 (owner, 2026-10-06): a creation GitHub does not confirm is
  * refused. It used to go on with a warning and `defaultBranch: main`, a guess
  * nothing confirmed later, and `defaultBranch` is what keeps a delivery's
  * push off the repository's real default branch.
  */
-describe("createProject refuses a repository GitHub does not confirm (ruling 671)", () => {
+describe("createProject refuses a repository GitHub does not confirm (ruling 225)", () => {
   const ghost = { name: "Ghost", key: "GHO", owner: "akin-ozer", repoName: "ghost", policy: "balanced" } as const;
 
   it("refuses one GitHub does not show, a rejected token, a refusal of GitHub's own, an unreachable GitHub and an answer naming no default branch, and writes nothing", async () => {
     // CANARY: let any of them through and a project is written against a
     // repository nobody confirmed, with a default branch nobody read; call a
     // 403 a bad token and a person replaces a token that single sign-on, not
-    // its age, is holding back. Ruling 672: each one names the way on, so
+    // its age, is holding back. Ruling 224: each one names the way on, so
     // dropping `START_WITHOUT_REPOSITORY` leaves the person at a dead end.
     const answered = (spec: Parameters<typeof fakeGithubFetch>[0][string]) =>
       fakeGithubFetch({ "GET /repos/akin-ozer/ghost": spec }).fetchImpl;
@@ -342,7 +342,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const f = fm(store, r.slug);
     expect(boundary(f.workflow, "triage", "ready")).toBe("auto");
     expect(boundary(f.workflow, "ready", "impl")).toBe("auto");
-    // Ruling 519: nobody confirms the move into Review on a new board; the
+    // Ruling 91: nobody confirms the move into Review on a new board; the
     // operator makes it. CANARY: put the template's edge back to `approval`.
     expect(boundary(f.workflow, "impl", "review")).toBe("auto");
     expect(opAutonomy(f.agents)).toBeUndefined(); // supervised (default)
@@ -406,7 +406,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     const f = fm(store, r.slug);
     expect(boundary(f.workflow, "triage", "ready")).toBe("approval");
     expect(boundary(f.workflow, "ready", "impl")).toBe("approval");
-    // Ruling 519 made the move into Review automatic on the template; a strict
+    // Ruling 91 made the move into Review automatic on the template; a strict
     // board still has a person approve it. CANARY: let `presetWorkflow` gate
     // only the boundaries before work starts and this reads `auto`.
     expect(boundary(f.workflow, "impl", "review")).toBe("approval");
@@ -445,7 +445,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
     ).toBe("direct");
   });
 
-  // P13-AP-04 / LV-01 (owner ruling 2): the "Lightweight · 3 stages" preset was
+  // P13-AP-04 / LV-01 (P13 owner decision 2): the "Lightweight · 3 stages" preset was
   // DELETED because it created a todo/doing/done board while the preinstalled
   // roster's eligible stages are the governed ids — no specialist was ever
   // stage-eligible and the operator could not hand work off. The rule this
@@ -486,10 +486,8 @@ describe("createProject — policy preset shapes REAL governance", () => {
     }
   });
 
-  // Ruling 672: a repository is named whole, connection and name, or not at
-  // all, whatever the board delivers. (Every project took one under the
-  // 2026-07-17 ruling; ruling 667 lifted that for a board that delivers
-  // results, and 672 for one that delivers software.)
+  // Ruling 224: a repository is named whole, connection and name, or not at
+  // all, whatever the board delivers.
   it.each([
     ["a blank repository name", "akin-ozer", "   "],
     ["a repository name with no owner", "", "some-repo"],
@@ -514,7 +512,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
 
   it("refuses the reserved EPIC prefix before it creates anything", async () => {
     // Canary: drop the isReservedTaskPrefix guard in createProject — the
-    // project is created and its task keys read as epic ids (ruling 503).
+    // project is created and its task keys read as epic ids (ruling 55).
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
     vi.stubGlobal("fetch", vi.fn());
@@ -533,12 +531,12 @@ describe("createProject — policy preset shapes REAL governance", () => {
 });
 
 /**
- * Ruling 672 (owner, 2026-10-06): "repoless boards should exist … at
+ * Ruling 224 (owner, 2026-10-06): "repoless boards should exist … at
  * creation". A board that delivers software may start with no repository:
  * the dead end the 2026-07-17 ruling closed is gone, because the operator
  * asks for one the first time a task needs it.
  */
-describe("ruling 672: a board that delivers software can start with no repository", () => {
+describe("ruling 224: a board that delivers software can start with no repository", () => {
   it("is created with none, reaches GitHub for nothing, keeps its agents' repo-write and says what happens next", async () => {
     // CANARY: require a repository of a software board and this throws;
     // withhold repo-write as a results board does and connecting a repository
@@ -574,7 +572,7 @@ describe("ruling 672: a board that delivers software can start with no repositor
 });
 
 /**
- * Ruling 667 (owner, 2026-10-06): "now this is a no-code development board. So
+ * Ruling 224 (owner, 2026-10-06): "now this is a no-code development board. So
  * let's just make the github connection for this board type optional." A
  * board that delivers results hands back the files its agents save on each
  * task, so creation asks what the board delivers and takes a results board
@@ -582,7 +580,7 @@ describe("ruling 672: a board that delivers software can start with no repositor
  * be given `akin-ozer/aws-calculator`, to which ten rounds of work committed
  * nothing and on which 92 empty task branches piled up.
  */
-describe("ruling 667: a board that delivers results needs no repository", () => {
+describe("ruling 224: a board that delivers results needs no repository", () => {
   const REPO_WRITE = ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"];
   /** Each specialist's repo-write grants, as project.md holds them. */
   const repoWriteModes = (dataRoot: string, slug: string) =>
@@ -677,7 +675,7 @@ describe("ruling 667: a board that delivers results needs no repository", () => 
   });
 });
 
-describe("ruling 364: a stage colour is one of twenty preset names, or the door refuses it", () => {
+describe("ruling 279: a stage colour is one of twenty preset names, or the door refuses it", () => {
   it("accepts a preset name, refuses a hex naming the presets, and colours omitted stages from the presets", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);
@@ -697,7 +695,7 @@ describe("ruling 364: a stage colour is one of twenty preset names, or the door 
         { dataRoot: store.dataRoot },
       );
     // Live: the shopify board's `slate` and `amber` drew nothing for two days
-    // because ruling 352 refused NAMES and kept hexes — the inverse of what the
+    // because ruling 279 refused NAMES and kept hexes — the inverse of what the
     // stylesheet can paint now. CANARY: let isStageColor accept anything.
     await expect(create("CLA", "slate")).resolves.toBeTruthy();
     await expect(create("CLB", "#8b8b8b")).rejects.toThrow(
@@ -713,7 +711,7 @@ describe("ruling 364: a stage colour is one of twenty preset names, or the door 
 });
 
 /**
- * Ruling 462 (F40-5): creating a project can create its GitHub repository.
+ * Ruling 225 (F40-5): creating a project can create its GitHub repository.
  * No product path did: the owner asked the controller to "create everything:
  * the repo and project" and had to make `akin-ozer/website` by hand first,
  * because creation only PROBED an existing repository and warned "create it
@@ -722,7 +720,7 @@ describe("ruling 364: a stage colour is one of twenty preset names, or the door 
  * Every case runs against a fake GitHub handed in as `fetchImpl`; nothing here
  * reaches the network.
  */
-describe("ruling 462: createRepository creates the repository before the project", () => {
+describe("ruling 225: createRepository creates the repository before the project", () => {
   const TOKEN_LOGIN = "akin-ozer";
 
   /** A connection for `owner` whose stored validation names the token's login,
@@ -824,7 +822,7 @@ describe("ruling 462: createRepository creates the repository before the project
     expect(listAuditEvents(store.db, { action: "project.created" })).toHaveLength(1);
   });
 
-  it("ruling 671: a repository Viberr just made, which GitHub then does not confirm, is said to be there and no project is written", async () => {
+  it("ruling 225: a repository Viberr just made, which GitHub then does not confirm, is said to be there and no project is written", async () => {
     // The create answered 201 and the read after it found nothing: GitHub
     // lagging. CANARY: answer with the plain not-found refusal and a person is
     // told to check the name of a repository Viberr created a moment ago.
@@ -1144,12 +1142,12 @@ describe("ruling 462: createRepository creates the repository before the project
 });
 
 /**
- * Ruling 464 (pass 40, F40-7): a controller that designed six specialists got
+ * Ruling 266 (pass 40, F40-7): a controller that designed six specialists got
  * the template's generic Developer and Reviewer written beside them, both
  * dispatchable, and no tool to take them off. `agents` names the roster; the
  * base one is written only when it is absent.
  */
-describe("ruling 464: a designed roster replaces the base specialists", () => {
+describe("ruling 266: a designed roster replaces the base specialists", () => {
   /** A claude specialist template in the store, the way a shipped one reads. */
   function writeTemplate(dataRoot: string, id: string, name: string) {
     writeFileSync(
@@ -1245,7 +1243,7 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
     expect(audit.details).toMatchObject({ agents: ["operator", "site-builder", "content-editor"] });
   });
 
-  it("ruling 545: the operator runs on the backend `operator` names, with that backend's model and effort", async () => {
+  it("ruling 266: the operator runs on the backend `operator` names, with that backend's model and effort", async () => {
     // CANARY: drop the backend switch in withOperatorOverrides and the Codex
     // model is refused against the operator's own Claude.
     const { store, gh } = setup();
@@ -1285,7 +1283,7 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
     ["a bad effort", { agents: [{ profileId: "site-builder", effort: "ludicrous" }] }, /"ludicrous" is not an effort tier Claude offers/],
     ["a foreign model", { agents: [{ profileId: "site-builder", model: "gpt-5.6-terra" }] }, /Claude cannot run it/],
     ["a bad operator effort", { operator: { effort: "ludicrous" } }, /"ludicrous" is not an effort tier Claude offers/],
-    // Ruling 545: the refusal names the backend the model needs.
+    // Ruling 266: the refusal names the backend the model needs.
     [
       "a Codex model for the operator without its backend",
       { operator: { model: "gpt-6-luna", effort: "max" } },
@@ -1309,12 +1307,12 @@ describe("ruling 464: a designed roster replaces the base specialists", () => {
 });
 
 /**
- * Ruling 468 (F40-12): project creation tells an EMPTY repository from one
+ * Ruling 227 (F40-12): project creation tells an EMPTY repository from one
  * with commits, records it on the project's repo access, and says Viberr will
  * make the first commit. Live, `akin-ozer/website` was accepted as `ok` and the
  * first operator run asked the owner to push a README.
  */
-describe("ruling 468: an empty repository is recognised at creation", () => {
+describe("ruling 227: an empty repository is recognised at creation", () => {
   it("records `empty` on the repo access and says the first commit is Viberr's", async () => {
     const store = setupTestStore(ctx);
     seedConnection(store.db, store.users.arda.id);

@@ -65,22 +65,22 @@ function renderPage(props: {
   runtime?: RunView[];
   deployedSpecialists?: DeployedSpecialistView[];
   liveAgentRuns?: LiveAgentRun[];
-  /** Ruling 368: hold every action until the test answers it, so the
+  /** Ruling 286: hold every action until the test answers it, so the
    *  in-flight state can be read. */
   held?: { reply: Promise<unknown> };
-  /** U39-32 / ruling 449: base commits the branch lacked at the last compare. */
+  /** U39-32 / ruling 97: base commits the branch lacked at the last compare. */
   baseBehindBy?: number | null;
-  /** Ruling 484: the Changes panel's read. */
+  /** Ruling 246: the Changes panel's read. */
   changesUrl?: string | null;
-  /** Ruling 484: what the reader reads at `changesUrl`. */
+  /** Ruling 246: what the reader reads at `changesUrl`. */
   changes?: TaskChangesView;
-  /** Ruling 497: where the page opens (a notification's `#decision`). */
+  /** Ruling 75: where the page opens (a notification's `#decision`). */
   entry?: string;
-  /** Ruling 521: the completion packet as the loader read it. */
+  /** Ruling 103: the completion packet as the loader read it. */
   completion?: CompletionView | null;
-  /** Ruling 693: what the task took, as the loader sent it. */
+  /** Ruling 83: what the task took, as the loader sent it. */
   whatItTook?: TookCard | null;
-  /** Ruling 550: the task is delivered as the files saved on it. */
+  /** Ruling 316: the task is delivered as the files saved on it. */
   filesDeliveredAt?: string | null;
 }) {
   const submitted: Record<string, string>[] = [];
@@ -148,11 +148,11 @@ function renderPage(props: {
 }
 
 /**
- * Ruling 484 (pass 40, F40-54): the Changes panel stands on the page while
+ * Ruling 246 (pass 40, F40-54): the Changes panel stands on the page while
  * the review PR is open and carries a delivered revision, and nowhere else: a
  * merged PR's review is over, and without a delivery there is nothing to read.
  */
-describe("ruling 484: the task page offers the Changes panel for an open review PR", () => {
+describe("ruling 246: the task page offers the Changes panel for an open review PR", () => {
   const openPr: PrRef = { number: 3, state: "review", title: "Notes" };
   const heading = (container: HTMLElement) =>
     [...container.querySelectorAll(".panel-head h2")].some((h) => h.textContent === "Changes");
@@ -180,12 +180,12 @@ describe("ruling 484: the task page offers the Changes panel for an open review 
 });
 
 /**
- * Ruling 521: the completion packet stands where the task is offered for
+ * Ruling 316: the completion packet stands where the task is offered for
  * acceptance, inside the decision that offers it or on its own card beside an
  * acceptance recommendation, and carries the page's one diff reader while it
  * shows.
  */
-describe("ruling 521: the completion packet stands with the offer to accept", () => {
+describe("ruling 316: the completion packet stands with the offer to accept", () => {
   const openPr: PrRef = { number: 3, state: "review", title: "Notes" };
   const COMPLETION: CompletionView = {
     subjectSha: "5d1f0e2",
@@ -312,7 +312,7 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     }
   });
 
-  it("ruling 668: stays on the accepted task as its result, in the archive too, with its pull request and no diff reader", () => {
+  it("ruling 103: stays on the accepted task as its result, in the archive too, with its pull request and no diff reader", () => {
     // CANARY: restore `!taskClosed` over the whole condition and the summary a
     // person accepted on is gone from the task the moment they accept it; key
     // the result on `taskClosed` and a task archived unfinished shows one.
@@ -323,7 +323,7 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
       [{ task: done, archived: true, acceptance: { atBoundary: false }, completion: COMPLETION }, true],
       [{ task: done, acceptance: { atBoundary: false }, completion: { ...COMPLETION, packet: null } }, false],
       [{ archived: true, acceptance: { atBoundary: false }, completion: COMPLETION }, false],
-      // Ruling 667: the project gave its repository up since. The pull
+      // Ruling 226: the project gave its repository up since. The pull
       // request's record stays on the result, with nowhere to link.
       [{ task: { ...done, repo: null }, acceptance: { atBoundary: false }, completion: COMPLETION }, true],
     ];
@@ -347,10 +347,10 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
     }
   });
 
-  it("ruling 693: hands what the task took to the card, as the offer and as the result", () => {
+  it("ruling 83: hands what the task took to the card, as the offer and as the result", () => {
     // CANARY: drop `took={took}` from TaskDecisionRegion's `<CompletionPacket>`
     // (task-detail-regions.tsx) and the loader's figure is read, sent and never
-    // drawn (ruling 320's shape: both ends default to nothing, so nothing fails).
+    // drawn (ruling 10's shape: both ends default to nothing, so nothing fails).
     const whatItTook: TookCard = { facts: ["2 runs, 40m of agent time"], notes: [] };
     const merged: PrRef = { number: 3, state: "merged", title: "Notes" };
     const rows: Parameters<typeof renderPage>[0][] = [
@@ -367,10 +367,10 @@ describe("ruling 521: the completion packet stands with the offer to accept", ()
 });
 
 /**
- * Ruling 667: a project with no repository is a board that delivers results,
+ * Ruling 224: a project with no repository is a board that delivers results,
  * so nothing on its task page promises a branch or names a repository.
  */
-describe("ruling 667: a task on a project with no repository", () => {
+describe("ruling 224: a task on a project with no repository", () => {
   const githubPanel = (container: HTMLElement) =>
     [...container.querySelectorAll<HTMLElement>(".detail-side .panel")].find(
       (panel) => panel.querySelector(".panel-head h2")?.textContent === "GitHub",
@@ -397,11 +397,11 @@ describe("ruling 667: a task on a project with no repository", () => {
 });
 
 /**
- * Ruling 529: a question the work does not wait on says so. CALC-1's owner
+ * Ruling 312: a question the work does not wait on says so. CALC-1's owner
  * read a decision packet as the thing the task was stuck on while an agent
  * kept working beside it.
  */
-describe("ruling 529: a question asked while an agent works reads as not blocking", () => {
+describe("ruling 312: a question asked while an agent works reads as not blocking", () => {
   const question: PacketRender = {
     type: "input",
     kind: "Decision required",
@@ -494,7 +494,7 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
     ...packet,
     options: [packet.options[0]!, { kind: "archive_task", t, d: "", rec: false }],
   });
-  /** The packet as ruling 672's repository question, naming `repo`. */
+  /** The packet as ruling 224's repository question, naming `repo`. */
   const askingRepository = (packet: PacketRender, repo: string): PacketRender => ({
     ...packet,
     options: [
@@ -589,7 +589,7 @@ describe("F10-09: a replacement packet opens as a fresh card", () => {
   });
 });
 
-/** An action the test answers when it decides to (ruling 368). */
+/** An action the test answers when it decides to (ruling 286). */
 function heldAction() {
   let answer: () => void = () => {};
   const reply = new Promise<void>((resolve) => {
@@ -649,7 +649,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
     expect(findButton(container, "Accept → Done & merge")).toBeDefined();
   });
 
-  it("ruling 449: the Accept dialog's re-review first submits refresh-and-review, and accepts nothing", async () => {
+  it("ruling 97: the Accept dialog's re-review first submits refresh-and-review, and accepts nothing", async () => {
     const { container, submitted } = renderPage({
       task: { pr: { number: 117, state: "review", title: "[VIB-151] x" } },
       workRevisionSha: "abcdef1234567890",
@@ -678,12 +678,12 @@ describe("P14-LV-06: the acceptance affordance", () => {
   });
 
   /**
-   * Ruling 471: the page hands the dialog the loader's answer for the door
+   * Ruling 316: the page hands the dialog the loader's answer for the door
    * that was pressed: `acceptAnswersWith` for Accept, `forceAnswersWith` for
    * Force accept. Live on WEB-1 the Accept dialog said the recommended
    * "Accept WEB-1 and merge PR #1" decision "closes unanswered".
    */
-  describe("ruling 471: the open-decision row follows the loader's answer for the pressed door", () => {
+  describe("ruling 316: the open-decision row follows the loader's answer for the pressed door", () => {
     const decision = (answers: Partial<Pick<PacketRender, "acceptAnswersWith" | "forceAnswersWith">>): PacketRender => ({
       type: "input",
       kind: "Completion report",
@@ -822,7 +822,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
       },
     });
     // The force-accept row is now just the override button — no reason
-    // paragraph. Ruling 511: it stands with the card's other actions.
+    // paragraph. Ruling 315: it stands with the card's other actions.
     const forceAccept = container.querySelector(".pr-acts")!;
     expect(forceAccept.textContent).toContain("Force accept");
     expect(forceAccept.querySelector(".hint")).toBeNull();
@@ -926,7 +926,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
       Array.from(force.classList),
       "the wrapping override only applies to `.btn.full`; a content-sized force button overflows its panel",
     ).toContain("full");
-    // Ruling 149: force-accept is destructive, and the confirm it opens
+    // Ruling 278: force-accept is destructive, and the confirm it opens
     // already commits in red — the trigger says so too.
     expect(Array.from(force.classList)).toContain("danger");
   });
@@ -939,7 +939,7 @@ describe("P14-LV-06: the acceptance affordance", () => {
     });
     // Fails on main: the Accept button and the run controls stayed live.
     expect(findButton(container, "Accept completion")).toBeUndefined();
-    // Ruling 625: the operator's run control is withdrawn, not disabled.
+    // Ruling 310: the operator's run control is withdrawn, not disabled.
     expect(findButton(container, "Run operator")).toBeUndefined();
     expect(queryByText("Task closed. Reopen it to run the operator.")).toBeTruthy();
     // The run-agent control withdraws itself with the closed copy rather than
@@ -950,11 +950,11 @@ describe("P14-LV-06: the acceptance affordance", () => {
 
 /**
  * Pass 19 — the acceptance-writer matrix. Five code paths end in "task Done +
- * a real GitHub merge"; ruling 20 (R15-1) says every one of them confirms first,
- * and ruling 42 (R17-1) says the confirm discloses the ACTUAL merge head when it
+ * a real GitHub merge"; ruling 97 (R15-1) says every one of them confirms first,
+ * and ruling 96 (R17-1) says the confirm discloses the ACTUAL merge head when it
  * has drifted ahead of the reviewed revision. Three of the five never asked.
  */
-describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", () => {
+describe("ruling 97 — every acceptance writer passes the confirm (pass 19)", () => {
   const acceptedPr = (patch: Partial<PrRef> = {}): PrRef => ({
     number: 147,
     state: "accepted",
@@ -998,7 +998,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
 
   it("F19-14: the ceremony renders the canonical PR-state label, never the raw internal token", () => {
     // "PR #147 accepted" is the projection's word; every other surface says
-    // "merge pending" through the ONE prStatePill map (ruling 12).
+    // "merge pending" through the ONE prStatePill map (ruling 237).
     const { container } = renderPage({
       myRole: "admin",
       task: { pr: acceptedPr() },
@@ -1043,7 +1043,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     // the owner-authority seam that `accept-completion` would skip.
     expect(submitted[0]!.intent).toBe("apply-recommendation");
     expect(submitted[0]!.recId).toBe("rec-1");
-    // Ruling 88: and it carries this dialog's own echo of the three facts it
+    // Ruling 97: and it carries this dialog's own echo of the three facts it
     // just stated. The server refuses the apply without it, so a submit that
     // dropped the fields would look identical here and fail live.
     expect(submitted[0]!.ackPr).toBe("review");
@@ -1135,7 +1135,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     await waitFor(() => expect(submitted).toHaveLength(1));
     expect(submitted[0]!.intent).toBe("resolve-packet");
     expect(submitted[0]!.option).toBe("0");
-    // Ruling 88: the resolution carries the ceremony's echo — the packet
+    // Ruling 97: the resolution carries the ceremony's echo — the packet
     // identity the server pins says WHICH decision this is, not what the human
     // saw merging.
     expect(submitted[0]!.ackPr).toBe("review");
@@ -1144,12 +1144,12 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
   });
 
   /**
-   * Ruling 164 (pass 35, F35-14): a `force_accept` option performs the admin
+   * Ruling 131 (pass 35, F35-14): a `force_accept` option performs the admin
    * override, so it opens the same ceremony the Force accept button opens (the
    * force form: skipped stages, the bypassed refusal, the danger confirm) and
    * still travels as the packet resolution the server dispatches on.
    */
-  it("ruling 164: a force_accept option opens the FORCE ceremony and resolves the packet with its echo", async () => {
+  it("ruling 131: a force_accept option opens the FORCE ceremony and resolves the packet with its echo", async () => {
     // Canary: route the option through the plain packet ceremony (or through no
     // ceremony at all) and the heading is "Accept this completion?", with an
     // echo-less POST the server refuses.
@@ -1203,7 +1203,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(submitted[0]!.ackVerdict).toBe("failing");
   });
 
-  it("ruling 672: the repository question's answers are a project admin's on the page, and Confirm sends the repository typed", async () => {
+  it("ruling 65: the repository question's answers are a project admin's on the page, and Confirm sends the repository typed", async () => {
     // CANARY: stop passing `canEditPolicy` to the card and an admin finds
     // both answers inert; pass it to everyone and a maintainer is handed a
     // Confirm the server refuses.
@@ -1240,7 +1240,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
   });
 
   /**
-   * Pass-35 cluster review of ruling 164. A `force_accept` option is offered
+   * Pass-35 cluster review of ruling 131. A `force_accept` option is offered
    * FROM a blocked packet, and the resolution clears that packet BEFORE
    * `forceAcceptCompletion` runs, so the open-blocked-decision sentence is not
    * a gate this override bypasses. Both `task.blockReason` (the projection's
@@ -1250,7 +1250,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
    * resolves, while `task.acceptance.forced` recorded something else, being
    * computed after the packet is gone.
    */
-  it("ruling 164 + F19-7: the force ceremony never bypasses the packet it is resolving", async () => {
+  it("ruling 131 + F19-7: the force ceremony never bypasses the packet it is resolving", async () => {
     // Canary: restore `task.blockReason ?? acceptance.blockedReason` for the
     // forced ceremony and the dialog quotes the open blocked decision.
     const openPacketSentence =
@@ -1295,7 +1295,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
   });
 
   /**
-   * Live validation of ruling 164 (2026-09-07): the force ceremony opened from
+   * Live validation of ruling 131 (2026-09-07): the force ceremony opened from
    * a `force_accept` option still carried the Withdraws row, naming the very
    * packet the click answers and saying it "closes unanswered with the task".
    * The `task.acceptance.forced` audit row written by that same click reads
@@ -1304,7 +1304,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
    * Bypassing row above was already fixed for. A packet resolution answers the
    * decision; only the direct doors withdraw one.
    */
-  it("ruling 164: a packet resolution withdraws nothing, so the ceremony claims no withdrawal", async () => {
+  it("ruling 131: a packet resolution withdraws nothing, so the ceremony claims no withdrawal", async () => {
     // Canary: pass `task.packet?.title` unconditionally again and both halves
     // of this test go red — the force ceremony and the plain packet accept both
     // print "Withdraws" for the decision they resolve.
@@ -1394,7 +1394,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(
       container.ownerDocument.querySelector('dialog[data-screen-label="Packet archive dialog"]'),
     ).toBeNull();
-    // Ruling 88's scope, on the client: a decision that accepts nothing sends
+    // Ruling 97's scope, on the client: a decision that accepts nothing sends
     // no acknowledgment, and the server asks it for none.
     expect(submitted[0]!.ackPr).toBeUndefined();
     expect(submitted[0]!.ackRevision).toBeUndefined();
@@ -1450,7 +1450,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
     expect(queryByText(/accepts this completion/)).toBeNull();
   });
 
-  it("ruling 381: a BACKWARD move asks why first, and sends the answer with the move", async () => {
+  it("ruling 47: a BACKWARD move asks why first, and sends the answer with the move", async () => {
     // The seventh writer on this menu. A send-back is the strongest instruction
     // a human posts on a board and it used to be mute; the operator then
     // inferred the work from an older decision. Canary: submit straight from
@@ -1485,7 +1485,7 @@ describe("ruling 20 — every acceptance writer passes the confirm (pass 19)", (
  *
  * `completeTaskMerge` gates on `requireAcceptCompletion(…, "complete a PR
  * merge")` → `ownerException`: the task's own human owner passes whatever their
- * project role, as long as they still hold `own-task` (ruling 22 / R14-2 / FR37
+ * project role, as long as they still hold `own-task` (ruling 50 / R14-2 / FR37
  * — the owner is the acceptance authority ON THEIR OWN TASK, and completing a
  * merge-pending acceptance is part of that same authority). The client asked
  * `roleCan(myRole, "accept-completion")` instead — admin|maintainer only — so a
@@ -1737,14 +1737,14 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(submitted[0]!.intent).toBe("deliver-review");
   });
 
-  it("ruling 647: offers no delivery for a task delivered as the files saved on it", () => {
+  it("ruling 102: offers no delivery for a task delivered as the files saved on it", () => {
     // CANARY: hand the panel `onDeliver` whatever the delivery is, and every
     // estimate on the AWS board offers to push a branch and open a PR again.
     const { container } = renderPage({ canDeliver: true, filesDeliveredAt: "2026-10-03T19:15:48.581Z" });
     expect(findButton(container, "Deliver branch & open PR")).toBeUndefined();
   });
 
-  it("ruling 134(c): offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {
+  it("ruling 229: offers the push control when the open PR does not carry the delivered revision, and it submits deliver-review", async () => {
     // Canary: revert the visibility condition to "no live PR" and the button
     // is gone while PR #9 is open.
     const rev = "9".repeat(40);
@@ -1768,7 +1768,7 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(submitted[0]!.intent).toBe("deliver-review");
   });
 
-  it("ruling 134(c): hides the push control when the recorded record is stale", () => {
+  it("ruling 229: hides the push control when the recorded record is stale", () => {
     // Canary: drop the revision comparison in `unpushedRevisionOf`.
     const { container } = renderPage({
       canDeliver: true,
@@ -1785,7 +1785,7 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(container.textContent).not.toContain("Unpushed");
   });
 
-  it("ruling 134(c): a diverged relation renders the row and a DISABLED control naming the refusal", () => {
+  it("ruling 229: a diverged relation renders the row and a DISABLED control naming the refusal", () => {
     // Canary: render the primary (enabled) control for `diverged`.
     const rev = "9".repeat(40);
     const { container } = renderPage({
@@ -1805,7 +1805,7 @@ describe("R15-2 safety net (b): the manual delivery control", () => {
     expect(container.textContent).toContain("Unpushed");
   });
 
-  // Ruling 134(c): the record's journey through the REAL projection (write the
+  // Ruling 229: the record's journey through the REAL projection (write the
   // task file, run the workspace reconcile, rebuild, load the detail, evaluate
   // the exact expression this panel renders from) is proven in
   // app/server/projections/task-detail-unpushed.server.test.ts, a node-env
@@ -1914,7 +1914,7 @@ describe("R14-3: the task archive", () => {
     expect(dialog.textContent).not.toMatch(/PR #147\s*(·\s*)?accepted/);
   });
 
-  it("ruling 149: Archive wears the danger label; Restore, a recovery, does not", () => {
+  it("ruling 278: Archive wears the danger label; Restore, a recovery, does not", () => {
     // The archive ceremony already commits in red (`ArchiveConfirm`). jsdom
     // computes no colour, so the class IS the assertion: it is the only thing
     // that decides whether `.btn.ghost.danger` ever reaches this trigger.
@@ -2074,9 +2074,9 @@ describe("F19-14: the accept dialog speaks the product's PR vocabulary", () => {
 /**
  * UX19-9 — the packet's `archive_task` option, and above all its
  * `deleteBranch: true` variant, resolved straight to the server from the card's
- * generic "Confirm decision" button. Ruling 17 makes that resolution the only
+ * generic "Confirm decision" button. Ruling 233 makes that resolution the only
  * remote-branch deletion the product has ("Remote-branch deletion exists only
- * as that packet resolution"); rulings 20 (R15-1) and 53 (R18-7) put a confirm
+ * as that packet resolution"); rulings 97 (R15-1) and 53 (R18-7) put a confirm
  * that states the consequence on every one-way write, and pass 19 closed the
  * last four gaps in that family. This one inverted the app's own ceremony: the
  * REVERSIBLE archive (the Current-state button) opened `ArchiveConfirm` and
@@ -2412,7 +2412,7 @@ describe("D6: consequential actions confirm before they act", () => {
     await settle();
     expect(submitted).toHaveLength(0);
     const dismissCommit = findButton(container, "Dismiss recommendation")!;
-    // Rulings 149 and 150: the red commit belongs to the controls that take
+    // Ruling 278: the red commit belongs to the controls that take
     // something away. A dismissal is recorded on the timeline and the operator
     // may raise it again, so this one commits primary — like the neutral
     // trigger that opened it. Canary: drop `tone="primary"` and the shared
@@ -2430,8 +2430,8 @@ describe("D6: consequential actions confirm before they act", () => {
       runtime: [runningRun()],
     });
     const trigger = findButton(container, "Interrupt")!;
-    // Ruling 150: the stop discards the work in flight, so BOTH ends of the
-    // action wear ruling 149's red — the shared `LiveRunPanel` trigger and the
+    // Ruling 278: the stop discards the work in flight, so BOTH ends of the
+    // action wear the danger red — the shared `LiveRunPanel` trigger and the
     // commit below, which keeps the confirm's `danger` default. Canary: drop
     // `danger` from the trigger's class, or pass `tone="primary"` to the
     // dialog, and one of the two assertions fails.
@@ -2439,7 +2439,7 @@ describe("D6: consequential actions confirm before they act", () => {
     fireEvent.click(trigger);
     // The button opens a confirm; the run keeps going until it is confirmed.
     expect(getByText("Interrupt this run?")).toBeTruthy();
-    // Ruling 272 (F37-104): the body used to promise that uncommitted work is
+    // Ruling 310 (F37-104): the body used to promise that uncommitted work is
     // lost, and an interrupt never touches the workspace — `cloneRepo`'s reuse
     // path hands the NEXT run that same checkout, fast-forwarding only a tree
     // that is clean. CANARY: restore "Anything it has not already committed or
@@ -2477,7 +2477,7 @@ describe("D6: consequential actions confirm before they act", () => {
  * open packet — owner, 2026-09-08: its own region so the desktop paint can put
  * it at the top of the main column with the side column beside it), then
  * `.detail-side` (the GitHub trace, then Current state with the next action,
- * then Details — ruling 170 put GitHub at the top right beside the goal, and
+ * then Details — ruling 308 put GitHub at the top right beside the goal, and
  * the DOM says the same), then
  * `.detail-main` (runs and the timeline); placed by grid cell in app.css, so the
  * desktop paint keeps two columns while one order serves both. This asserts the
@@ -2485,7 +2485,7 @@ describe("D6: consequential actions confirm before they act", () => {
  * alone. Canary: swap the JSX regions back and the order assert is red.
  */
 /**
- * Ruling 497: a decision's notification opens the decision itself: the open
+ * Ruling 302: a decision's notification opens the decision itself: the open
  * packet at `#decision`, the pending recommendation cards at
  * `#recommendations`. The page marks the region and focuses it; the G7
  * focus on `.detail` does not take it back.
@@ -2494,7 +2494,7 @@ describe("D6: consequential actions confirm before they act", () => {
  * the G7 effect focus `.detail` unconditionally and the event, which the
  * timeline (a child, whose effects run first) focused, loses its focus.
  */
-describe("ruling 497: a decision's notification opens the decision", () => {
+describe("ruling 302: a decision's notification opens the decision", () => {
   it("marks and focuses the open packet at #decision, and the cards at #recommendations", async () => {
     const { container } = renderPage({
       entry: "/#decision",
@@ -2560,14 +2560,14 @@ describe("ruling 497: a decision's notification opens the decision", () => {
 });
 
 /**
- * Ruling 547: a decision's link names its packet (`#decision-<id>`), and the
+ * Ruling 302: a decision's link names its packet (`#decision-<id>`), and the
  * page opens the card only for that packet. A link to a place the page no
  * longer shows (a decision answered or withdrawn, recommendations applied or
  * dismissed) lands on the timeline, where what became of it is recorded,
  * marked and focused; it used to move nothing, and hand the focus back to the
  * bell (live on AWSC-2, 2026-09-28).
  */
-describe("ruling 547: a region link lands where the page still shows it", () => {
+describe("ruling 302: a region link lands where the page still shows it", () => {
   const OPEN = {
     id: "pkt_open",
     type: "input" as const,
@@ -2587,7 +2587,7 @@ describe("ruling 547: a region link lands where the page still shows it", () => 
     // an answered question rings the next one.
     ["the timeline, for a packet closed since", "/#decision-pkt_gone", OPEN, "#timeline"],
     ["the timeline, with no packet open", "/#decision-pkt_gone", null, "#timeline"],
-    ["the timeline, for a row written before ruling 547", "/#decision", null, "#timeline"],
+    ["the timeline, for a bare #decision with no packet open", "/#decision", null, "#timeline"],
     ["the timeline, with no recommendation pending", "/#recommendations", null, "#timeline"],
   ])("%s", async (_place, entry, packet, landsOn) => {
     const { container } = renderPage({ entry, task: { packet } });
@@ -2642,7 +2642,7 @@ describe("U7 / U35-2: the task detail's reading order matches its stacking rule"
     // The consequential action really is in the region that comes second…
     expect(side.textContent).toContain("Accept completion → Done");
     expect(main.textContent).not.toContain("Accept completion → Done");
-    // …the GitHub trace leads it (ruling 170: top right, beside the goal) and
+    // …the GitHub trace leads it (ruling 308: top right, beside the goal) and
     // Current state comes second, so the desktop paint and the DOM agree…
     expect(side.children[0].textContent).toMatch(/GitHub|no PR|PR #/);
     expect(side.children[0].textContent).not.toContain("Accept completion → Done");
@@ -2742,7 +2742,7 @@ describe("C3: the collision confirm describes the right branch, and warns before
     // Canary: hardcode `openPr: null` in `packetArchiveDisclosure`
     // (task-detail-derive.ts) (or drop the row) — the person is told nothing
     // about the PR the ceremony is actually about.
-    // Pass 34 review: the row used to promise a refusal, which ruling 136(b)
+    // Pass 34 review: the row used to promise a refusal, which ruling 233
     // replaced with a real delivery to that same PR.
     const { container } = renderPage({
       task: {
@@ -2819,14 +2819,14 @@ describe("C3: the archive dialog's open-PR row tells the truth about what still 
 });
 
 /**
- * Ruling 368: the card whose request is in flight shows it on the button that
+ * Ruling 286: the card whose request is in flight shows it on the button that
  * started it — the loader spinning where the glyph was, a label naming the
  * work — while the sibling control only waits. The accept confirm has closed
  * by then, and a card that merely dimmed read as refused. Canary: pass
  * `inFlight={null}` to OperatorRecommendations in task-main-column.tsx and
  * the busy label never appears.
  */
-describe("ruling 368: a recommendation's request in flight", () => {
+describe("ruling 286: a recommendation's request in flight", () => {
   const card = (kind: RecommendationView["kind"]): RecommendationView => {
     const rec: RecommendationView = {
       id: "rec-1",
@@ -2850,7 +2850,7 @@ describe("ruling 368: a recommendation's request in flight", () => {
       held,
     });
     const apply = findButton(container, "Apply")!;
-    // Ruling 459: the check and the loader share one cell (GlyphSwap) and
+    // Ruling 284: the check and the loader share one cell (GlyphSwap) and
     // trade on `data-copied`; at rest the check shows.
     const cell = apply.querySelector(".copy-glyph")!;
     expect(cell.hasAttribute("data-copied")).toBe(false);
@@ -2911,11 +2911,11 @@ describe("ruling 368: a recommendation's request in flight", () => {
 });
 
 /**
- * Ruling 368 across the task page: each request shows itself on the button that
+ * Ruling 286 across the task page: each request shows itself on the button that
  * started it, read off its own fetcher, and a control that merely waits claims
  * nothing. These go through the real fetchers and the page's own wiring.
  */
-describe("ruling 368: the task page's requests in flight", () => {
+describe("ruling 286: the task page's requests in flight", () => {
   it("a Schedule click reads Scheduling…, not Running…", async () => {
     // Canary: map every run-operator request to "run" in task-main-sections.tsx
     // (`runKind`) and this reads Starting… for a schedule, as it read Running….
@@ -2974,7 +2974,7 @@ describe("ruling 368: the task page's requests in flight", () => {
   });
 
   it("a details save reads Saving… on the property that started it, busy, the loader spinning", async () => {
-    // Ruling 501: a Details property is its own control, so its trigger is
+    // Ruling 309: a Details property is its own control, so its trigger is
     // the button that started the save. Canary: drop `aria-busy` from the
     // property trigger in task-details-panel.tsx.
     const held = heldAction();

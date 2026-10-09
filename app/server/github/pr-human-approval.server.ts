@@ -324,7 +324,7 @@ export function verdictGateReason(
    */
   noChangeVerified?: boolean,
 ): string | null {
-  // Ruling 161: a discarded revision is no delivered work.
+  // Ruling 234: a discarded revision is no delivered work.
   const revision = activeWorkRevision(fm.workRevision);
   if (!revision) return null;
   // Delivered work with no PR: nothing stands for review, so acceptance would

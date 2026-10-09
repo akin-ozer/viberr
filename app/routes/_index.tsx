@@ -60,8 +60,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     user,
     greet,
     projects,
-    // Ruling 532: the setup checklist's steps, null once all are done. Ruling
-    // 621: null too while this session has closed it, which counts once the
+    // Ruling 322: the setup checklist's steps, null once all are done. Ruling
+    // 322: null too while this session has closed it, which counts once the
     // viewer has a project; before that the card is Home's way to start one.
     setup:
       projects.length > 0 && isSetupHidden(request, sessionId)
@@ -69,7 +69,7 @@ export async function loader({ request }: Route.LoaderArgs) {
         : getHomeSetup(db, viewer, projects.length),
     prefs: getHomePrefs(db, user.id),
     org: getHomeOrgSummary(db),
-    // Ruling 457 (FL-4): the bell's counts; the bell loads its own list.
+    // Ruling 300 (FL-4): the bell's counts; the bell loads its own list.
     ...bellCounts(db, user.id),
     // B-FD4: `VIBERR_DATA_ROOT` is a HOST filesystem path. It exists here only
     // for the New-project modal's "creates …/projects/<slug>/" hint, and every
@@ -149,7 +149,7 @@ export async function action({ request }: Route.ActionArgs) {
       });
       return { ok: true as const, intent: "view" as const };
     }
-    // Ruling 621: the setup checklist's close, personal UI state like a pin.
+    // Ruling 322: the setup checklist's close, personal UI state like a pin.
     // The cookie names this sign-in, so the card is back for the next one.
     if (intent === "hide-setup") {
       return data(
@@ -191,13 +191,13 @@ export async function action({ request }: Route.ActionArgs) {
       const input: CreateProjectInput = {
         name: String(formData.get("name") ?? ""),
         key: String(formData.get("key") ?? ""),
-        // Ruling 667: what the board delivers; a results board may leave the
+        // Ruling 224: what the board delivers; a results board may leave the
         // repository out.
         delivers: asBoardDelivers(formData.get("delivers")),
         owner: String(formData.get("owner") ?? ""),
         repoName: String(formData.get("repoName") ?? ""),
         // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
-        // ruling 2) — the Standard 5-stage board is the only template, so
+        // ruling 47) — the Standard 5-stage board is the only template, so
         // there is no `template` field to read.
         policy:
           formData.get("policy") === "strict"
@@ -206,7 +206,7 @@ export async function action({ request }: Route.ActionArgs) {
               ? "auto"
               : "balanced",
       };
-      // Ruling 462: the modal's "Create this repository on GitHub if it does
+      // Ruling 225: the modal's "Create this repository on GitHub if it does
       // not exist" choice, carrying its visibility; absent (or anything else)
       // asks for no creation.
       const createRepository = formData.get("createRepository");
@@ -243,5 +243,5 @@ export default function Index({ loaderData }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/_index");

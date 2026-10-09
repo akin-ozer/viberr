@@ -115,7 +115,7 @@ const EMPTY_RETENTION: RetentionResult = {
 
 /**
  * Runs that could be holding a working tree open right now: the live ones, and
- * (ruling 701) a finished specialist run whose session is still being
+ * (ruling 175) a finished specialist run whose session is still being
  * compacted, whose CLI works in the run's folder until it is done. A mark
  * older than twice the compaction's deadline is nobody's compaction: its
  * clear failed, and it must not hold every folder until the next restart.
@@ -153,7 +153,7 @@ export function runMaintenancePass(
 
   let retention = EMPTY_RETENTION;
   try {
-    // The audit purge's export-before-delete (ruling 102) writes into the data
+    // The audit purge's export-before-delete (ruling 33) writes into the data
     // root, so the pass's own root override must reach it — the same forwarding
     // the transcript/workspace sweeps below already do.
     retention = applyRetention(
@@ -268,7 +268,7 @@ function recordPass(reason: MaintenanceReason, freedBytes: number): void {
 
 /** The two timer periods in ms. The env schema owns them in seconds (defaults,
  *  the one-day cap and the refusal of a value that does not parse live there:
- *  rulings 458(c) and 458(i)). */
+ *  ruling 39). */
 function configuredPeriodsMs(): Pick<MaintenanceState, "intervalMs" | "diskCheckIntervalMs"> {
   const env = getEnv();
   return {

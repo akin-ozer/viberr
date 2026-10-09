@@ -23,7 +23,7 @@ import { cardStatus, type CardStatus } from "~/features/board/card-status";
 import type { WorkspaceRead } from "~/routes/project-workspace.server";
 
 /**
- * Ruling 503: what the Epics pages read. Both answer from the workspace read
+ * Ruling 325: what the Epics pages read. Both answer from the workspace read
  * the layout already made for the same request (`readWorkspace`), so the
  * membership refusal, the project's stages and members and its task rows are
  * read once, and from the epic projection (`epic-query.server.ts`), whose
@@ -61,7 +61,7 @@ export interface EpicTaskView {
   status: CardStatus | null;
   /** Its human owner's name, when a person owns it. */
   owner: { name: string; initials: string; tone: string } | null;
-  /** How many of what it waits on are not done yet (ruling 131). */
+  /** How many of what it waits on are not done yet (ruling 55). */
   waitsOn: number;
 }
 
@@ -73,7 +73,7 @@ export interface EpicCandidateView {
   epicId: string | null;
 }
 
-/** Ruling 476(h), kept for epics: the conversation an epic was planned in,
+/** Ruling 273, kept for epics: the conversation an epic was planned in,
  *  as a link, when the viewer may open it. */
 export interface PlannedConversation {
   id: string;
@@ -181,7 +181,7 @@ function listOtherEpics(db: DatabaseSync, slug: string, epicId: string): { id: s
 }
 
 /**
- * The board card's status word per task (ruling 476(g), which the goal rail
+ * The board card's status word per task (ruling 272, which the goal rail
  * followed and the epic page keeps): `waitingOnMe` from `waitingOnViewer`
  * over the same review queue the board reads, the run row's queued state
  * (`withLiveRun`), then `cardStatus`.
@@ -207,7 +207,7 @@ function boardStatuses(
 }
 
 /**
- * Ruling 476(h): the conversation an epic was planned in, as a link, when the
+ * Ruling 273: the conversation an epic was planned in, as a link, when the
  * viewer may open it (its owner, or an org admin: `canAccessConversation`).
  * Conversations belong to the person who had them, so anyone else is shown no
  * link and no title.

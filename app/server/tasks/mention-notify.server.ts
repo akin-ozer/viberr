@@ -53,7 +53,7 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
  * of the project is ever notified. The fan-out used to write a `mention` row for
  * any enabled account, so tagging someone who belongs to a different project put
  * a row in their inbox naming this project, this task and the comment text — and
- * the link then served them the members-only 404. That is ruling 25 read
+ * the link then served them the members-only 404. That is ruling 27 read
  * backwards: the layout loader and every action return the SAME bytes for a
  * non-member as for an unknown slug precisely so "a probe cannot learn a project
  * exists", and the notification told them. A handle that resolves to exactly one
@@ -67,7 +67,7 @@ import type { TaskFileEvent } from "~/schemas/task-file.schema";
 
 /** Handles that route to agents, never to a person named e.g. "Claude": the
  *  reserved handles (their one home is ~/ui/mention-spans) plus the instance
- *  controller's, which never maps to a human either (ruling 99). */
+ *  controller's, which never maps to a human either (ruling 247). */
 const RESERVED_HANDLES = new Set<string>([
   ...RESERVED_MENTION_HANDLES,
   CONTROLLER_MENTION_HANDLE,
@@ -89,7 +89,7 @@ function clip(text: string): string {
 }
 
 /**
- * Ruling 233 — the quote a mention notification carries must contain the
+ * Ruling 70 — the quote a mention notification carries must contain the
  * mention that caused it.
  *
  * `clip` takes the head of the comment, which is the right window only when the
@@ -147,7 +147,7 @@ export interface MentionResolution {
   /** Users to notify, in the input (users-table) order, deduplicated. */
   userIds: string[];
   /** Which handle won which user, for a caller that needs to point at the
-   *  mention itself rather than just know that one happened (ruling 233). */
+   *  mention itself rather than just know that one happened (ruling 70). */
   matchedBy: Map<string, string>;
   /** Handles that matched more than one person and so notified NOBODY. */
   ambiguous: string[];
@@ -328,7 +328,7 @@ function resolveIn(
   text: string,
   projectSlug: string | undefined,
 ): MentionResolution {
-  // Ruling 457 (CS-5): every mention starts at an `@` (findMentionSpans), so a
+  // Ruling 11 (CS-5): every mention starts at an `@` (findMentionSpans), so a
   // text without one resolves to nobody — answered here, before the user and
   // member reads the ladder needs. The same answer the ladder gives, sooner.
   if (!text.includes("@")) {
@@ -394,13 +394,13 @@ export function withAmbiguityDisclosure(
   text: string,
   projectSlug?: string,
   /**
-   * Ruling 232 amendment: a comment whose declared audience is the agent
+   * Ruling 70 amendment: a comment whose declared audience is the agent
    * notifies nobody, so BOTH disclosures below become misleading on it. Each
    * one names a remedy — "mention the full name", "add them to the project
    * first" — that assumes a correctly-spelled tag would have notified. On a
    * directive it would not, however it is spelled and whoever is a member, so
    * the note would send a reader to fix something that is not the reason.
-   * Found by reviewing ruling 232 against the disclosure it did not touch.
+   * Found by reviewing ruling 70 against the disclosure it did not touch.
    */
   audience?: "agent" | "open",
 ): string {
@@ -411,9 +411,9 @@ export function withAmbiguityDisclosure(
     .join("\n\n");
   if (note.length === 0) return text;
   // Balance an unclosed ``` fence before appending, or the note renders as
-  // code (and the reader never sees the disclosure as prose). This was done by
-  // the operator-brevity truncation until ruling 104 removed it; the append
-  // site is the one place a tail is added to author text, so it owns the check.
+  // code (and the reader never sees the disclosure as prose). There is no
+  // write-time cut to do it (ruling 134); the append site is the one place a
+  // tail is added to author text, so it owns the check.
   const fenceCount = (text.match(/^```/gm) ?? []).length;
   const closed = fenceCount % 2 === 1 ? `${text}\n\`\`\`` : text;
   return `${closed}\n\n${note}`;
@@ -431,11 +431,11 @@ export interface NotifyMentionsInput {
   occurredAt?: string;
   /** Users a PRIOR comment already notified for the same content — skipped so a
    *  reply whose body duplicates an earlier comment but adds new @tags (the
-   *  dispatch-completion cc line, ruling 98) pings only the added handles,
+   *  dispatch-completion cc line, ruling 124) pings only the added handles,
    *  never re-notifying anyone the earlier comment already reached. */
   skipUserIds?: ReadonlySet<string>;
   /**
-   * Ruling 232 (owner, 2026-09-14) — the comment's DECLARED audience.
+   * Ruling 70 (owner, 2026-09-14) — the comment's DECLARED audience.
    *
    * `"agent"` is a machine-authored directive handed to a specialist: its
    * handles address that agent, and a person named inside it is being described
@@ -469,7 +469,7 @@ export function notifyMentionedUsers(
   db: DatabaseSync,
   input: NotifyMentionsInput,
 ): string[] {
-  // Ruling 232: a directive addressed to an agent notifies no person.
+  // Ruling 70: a directive addressed to an agent notifies no person.
   if (input.audience === "agent") return [];
   const { userIds, matchedBy } = resolveIn(db, input.text, input.projectSlug);
   // Only needed to quote a recipient, so only read when there is one.
@@ -488,7 +488,7 @@ export function notifyMentionedUsers(
       taskKey: input.taskKey,
     };
     // No caller timestamp ⇒ leave the key off and let the writer stamp `now`.
-    // Ruling 497: the timestamp is the comment's, so the row opens on it.
+    // Ruling 75: the timestamp is the comment's, so the row opens on it.
     if (input.occurredAt) {
       notification.occurredAt = input.occurredAt;
       notification.href = taskEventLink(input.projectSlug, input.taskKey, input.occurredAt);
@@ -511,7 +511,7 @@ export function mentionedUserIdsOf(
 }
 
 /**
- * Ruling 382 (F39-9): record on the event itself who its notification reached,
+ * Ruling 20 (F39-9): record on the event itself who its notification reached,
  * so compaction can see it.
  *
  * A separate, tiny write rather than a field on the first one: the fan-out runs
@@ -525,12 +525,12 @@ export function mentionedUserIdsOf(
  * of comments. Never throws: the notification and the comment are both already
  * real, and failing to annotate one is not worth losing either.
  *
- * Ruling 644: the event is named by its stamp AND its type. One write often
+ * Ruling 72: the event is named by its stamp AND its type. One write often
  * stamps two entries with one instant (an agent's reply and its quality marker,
  * a failed run's report and its failure), and the stamp alone took whichever
  * came first in the file.
  *
- * Ruling 457 (CS-4): the stamp is re-projected right here, like every other
+ * Ruling 11 (CS-4): the stamp is re-projected right here, like every other
  * task write. It used to be the one write nothing re-projected, so the file
  * watcher did it ~250 ms later: a second `task.updated` to every open board and
  * task page of the project, outside the page's own revalidation window, for a

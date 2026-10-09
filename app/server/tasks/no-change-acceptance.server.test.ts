@@ -40,7 +40,7 @@ import { operatorSnapshot } from "./operator-snapshot.server";
 import { resolveOperatorAuthority } from "./operator-authority.server";
 
 /**
- * R19-8 (ruling 62) — "Completed — no changes", end to end.
+ * R19-8 (ruling 101) — "Completed — no changes", end to end.
  *
  * The live dead end (F19-21): VC-5 was a verification-only task. The operator
  * correctly engaged the reviewer alone with NO deliverer; the reviewer approved;
@@ -317,10 +317,11 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(quality?.title).toBe("Approval noted");
   });
 
-  it("ruling 543: files another agent saved are not \"nothing to deliver\": no mint, and the note says to hand delivery", async () => {
+  it("ruling 101: files another agent saved are not \"nothing to deliver\": no mint, and the note says to hand delivery", async () => {
     // Live on AWSC-2 the Workflow Researcher saved the result as a supporting
-    // agent (before ruling 535 let it deliver), and the Estimate Judge's
-    // approval would have been recorded against `main` as "no changes".
+    // agent (it could not yet deliver, as ruling 128 lets it), and the
+    // Estimate Judge's approval would have been recorded against `main` as
+    // "no changes".
     // CANARY: drop the `filesSavedByOtherAgents` precondition and this mints.
     deployAgents();
     seedVerificationTask();
@@ -348,7 +349,7 @@ describe("the verdict binds — a verification revision is minted at review time
     );
   });
 
-  it("ruling 583: an objection with nothing delivered says it binds to nothing", async () => {
+  it("ruling 245: an objection with nothing delivered says it binds to nothing", async () => {
     // Live on AWSC-19 the event read "Validation: none. Estimate Judge
     // requested changes." over a record that held no verdict at all.
     // CANARY: word the unbound objection like a bound one again.
@@ -364,13 +365,13 @@ describe("the verdict binds — a verification revision is minted at review time
     });
     expect(task().frontmatter.verdicts).toEqual([]);
     const quality = task().timeline.find((e) => e.type === "quality");
-    // Ruling 693: its title says so too, which keeps it out of the count of
+    // Ruling 83: its title says so too, which keeps it out of the count of
     // times the work was sent back.
     expect(quality?.title).toBe("Changes requested, not counted");
     expect(quality?.text).toContain(
       "requested changes, but nothing on this task has been delivered for the verdict to bind to, so it does not count.",
     );
-    // The timeline still draws it as the reviewer's verdict (ruling 526): the
+    // The timeline still draws it as the reviewer's verdict (ruling 313): the
     // card with the cross, and why it does not count under its head.
     // CANARY: read the bare title alone as a request for changes in
     // `verdictNoteView` and this note is drawn as a line of text, with no
@@ -380,8 +381,8 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(card?.detail).toContain("so it does not count.");
   });
 
-  it("ruling 543: an approval of the files a result was delivered in says it bound to them", async () => {
-    // Ruling 388 bound it all along; the note read "there is no delivered
+  it("ruling 88: an approval of the files a result was delivered in says it bound to them", async () => {
+    // Ruling 84 bound it all along; the note read "there is no delivered
     // revision to bind the verdict to yet" beside a healthy validation.
     // CANARY: branch the note on `rev` again instead of the review subject.
     deployAgents();
@@ -396,7 +397,7 @@ describe("the verdict binds — a verification revision is minted at review time
     expect(quality?.text).toContain("approved the work on the files delivered on this task");
   });
 
-  it("ruling 544: a sibling reviewer's approval binds to the verification a first approval minted", async () => {
+  it("ruling 84: a sibling reviewer's approval binds to the verification a first approval minted", async () => {
     // Both reviewers were sent to judge a task with nothing delivered. The
     // first approval minted a verification revision of the base; the second
     // judged that same base, and its approval is not about a delivery it
@@ -508,7 +509,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.text).not.toMatch(/merged/i);
   });
 
-  it("ruling 550: a task delivered as files is accepted as delivered, never as \"completed with no changes\"", async () => {
+  it("ruling 102: a task delivered as files is accepted as delivered, never as \"completed with no changes\"", async () => {
     // Live on AWSC-2 the acceptance of a research task whose delivery is two
     // files would have probed GitHub, found no branch (a files task never has
     // one) and recorded the delivered result as having no changes.
@@ -615,7 +616,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     expect(completion?.title).toBe("Completed with no changes");
     expect(completion?.text).toContain("WITHOUT a passing remote re-check");
     expect(completion?.text).not.toContain("completed with no changes");
-    // Ruling 393: the row names the re-check the force closed over, which the
+    // Ruling 98: the row names the re-check the force closed over, which the
     // event quotes in its own words, so its Bypassed clause does not say it
     // twice. CANARY: leave `noChange.refusal` out of the force disclosure and
     // the row reads "no gate (already acceptable)"; drop the clause's filter
@@ -632,7 +633,7 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
     // A branch verified empty: the probe cleared "no review pull request".
     { aheadBy: 0, gates: [] },
   ])(
-    "ruling 393: a force-accept's audit row and completion event name the gates the probe found ($aheadBy ahead)",
+    "ruling 98: a force-accept's audit row and completion event name the gates the probe found ($aheadBy ahead)",
     async ({ aheadBy, gates }) => {
       // CANARY: build the audit row's disclosure without the probe — ahead by 2
       // the row drops the counted gate the event names; ahead by 0 it names the
@@ -696,15 +697,15 @@ describe("acceptance closes it — with its OWN completion event, and no merge",
 });
 
 /**
- * Ruling 576: live on AWSC-11 the Estimate Judge, the board's required
- * reviewer, ran as a supporting agent (ruling 556), corrected its golden-set
+ * Ruling 101: live on AWSC-11 the Estimate Judge, the board's required
+ * reviewer, ran as a supporting agent (ruling 89), corrected its golden-set
  * entry three times and approved. Nothing went to the repository, so the task
  * read as R19-8's shape: the approval said "there is nothing to deliver", the
  * operator's card offered "Complete AWSC-11 with no changes" and the record
  * says "completed with no changes", of a task whose whole outcome was the
  * three corrections.
  */
-describe("ruling 576: a task that corrected a knowledge base did not complete with no changes", () => {
+describe("ruling 101: a task that corrected a knowledge base did not complete with no changes", () => {
   /** A correction written on VIB-1 by `actorRef`, the way the agent tool writes it. */
   async function correctOnTask(actorRef: FileActorRef, filedBy: string): Promise<{ id: string; dir: string }> {
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");

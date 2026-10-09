@@ -10,7 +10,7 @@ import { Icon } from "~/ui/icon";
 import { Markdown } from "~/ui/markdown";
 import { LocalDayDotTime } from "~/ui/local-time";
 
-/** Ruling 527: what the sender's Send now and Retract post with. */
+/** Ruling 251: what the sender's Send now and Retract post with. */
 export interface MessageListWaiting {
   conversationId: string;
   csrf: string;
@@ -20,12 +20,12 @@ export interface MessageListWaiting {
 
 /**
  * A conversation's messages, as the page's transcript and the dock's draw them
- * (ruling 657: one list where each kept a copy).
+ * (ruling 12: one list where each kept a copy).
  *
- * Ruling 465 (F40-8): each reply sits under the message it answers, an
+ * Ruling 320 (F40-8): each reply sits under the message it answers, an
  * unanswered message says where it stands ("answering now", "queued · N
  * ahead"), and `working`, the "is working…" row, sits under the message the
- * live turn answers, never under a later one. Ruling 527: a message that
+ * live turn answers, never under a later one. Ruling 251: a message that
  * steered the turn, or waits to, sits in it.
  */
 export function MessageList({
@@ -44,14 +44,14 @@ export function MessageList({
   inDock?: boolean;
   messages: readonly ControllerMessage[];
   turn: ConversationTurnState | null;
-  /** Ruling 451(d): the messages that arrived while the list was on screen. */
+  /** Ruling 284: the messages that arrived while the list was on screen. */
   fresh: ReadonlySet<string>;
   controllerName: string;
   userLabel: ReactNode;
-  /** Ruling 121: the page names the surface a message was sent from. */
+  /** Ruling 249: the page names the surface a message was sent from. */
   surfaceLabel?: (surface: string) => string;
   taskLinks: TaskLinks;
-  /** Ruling 527: Send now and Retract, when the viewer sent the messages. */
+  /** Ruling 251: Send now and Retract, when the viewer sent the messages. */
   waiting: MessageListWaiting | null;
   working: ReactNode;
 }) {

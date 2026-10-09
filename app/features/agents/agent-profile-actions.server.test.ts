@@ -10,7 +10,7 @@ import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
 import { deployAgentProfileFromLibrary } from "./agent-profile-actions.server";
 
 /**
- * Ruling 153 (pass 35, G35-2): a template carries a default `effort`, and a
+ * Ruling 261 (pass 35, G35-2): a template carries a default `effort`, and a
  * library deploy takes it when no override is given (an override still wins;
  * a tier the backend does not offer falls back to the backend default).
  */
@@ -18,7 +18,7 @@ import { deployAgentProfileFromLibrary } from "./agent-profile-actions.server";
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-describe("deployAgentProfileFromLibrary takes the template's effort (ruling 153)", () => {
+describe("deployAgentProfileFromLibrary takes the template's effort (ruling 261)", () => {
   it("writes the template's effort to project.md when no override is given", async () => {
     const store = setupTestStore(ctx);
     seedDefaultAgentAssets(store.dataRoot);
@@ -63,10 +63,10 @@ describe("deployAgentProfileFromLibrary takes the template's effort (ruling 153)
 });
 
 /**
- * Ruling 264 (pass 37, F37-94): a deploy reports the delivery posture it
+ * Ruling 183 (pass 37, F37-94): a deploy reports the delivery posture it
  * actually stored.
  *
- * Ruling 156 made a library deploy COPY the template's grants, and the shipped
+ * Ruling 177 made a library deploy COPY the template's grants, and the shipped
  * `developer` template carries `execute-code-or-write-repo: direct` — so on the
  * live instance a deploy of it produces a profile that can write the repo,
  * while `deploy_agent` answered "Delivery starts withheld; open it up with
@@ -74,7 +74,7 @@ describe("deployAgentProfileFromLibrary takes the template's effort (ruling 153)
  * time. That sentence is read by the one person whose next decision (engage it
  * as the deliverer, or not) turns on the answer.
  */
-describe("deployAgentProfileFromLibrary reports the delivery it stored (ruling 264)", () => {
+describe("deployAgentProfileFromLibrary reports the delivery it stored (ruling 183)", () => {
   /** Write a global template file directly: `saveGlobalAgentProfile` has no
    *  capability field, and the grants are the whole point here. */
   function writeTemplate(dataRoot: string, id: string, repoWrite: boolean): void {

@@ -83,14 +83,14 @@ describe("runLabel / roleShort", () => {
     expect(roleShort({ ...base, kind: "reviewer", role: "Anything" })).toBe("supporting");
   });
 
-  it("ruling 419(d): a controller turn has no engagement, so it prints no role", () => {
+  it("ruling 321: a controller turn has no engagement, so it prints no role", () => {
     // Live on the ax-clone controller page the console read "Controller ·
     // supporting". Canary: drop the `kind === "controller"` return.
     expect(roleShort({ ...base, kind: "controller", role: "Controller" })).toBeNull();
   });
 });
 
-describe("runStatePill (ruling 11 lifecycle mapping)", () => {
+describe("runStatePill (ruling 165 lifecycle mapping)", () => {
   it("a finished run reads 'finished', an unclassified error 'continuity error'", () => {
     expect(runStatePill({ ...base, state: "done", lifecycle: "finished" }).label).toBe("finished");
     expect(runStatePill({ ...base, state: "error", lifecycle: "error" }).label).toBe("continuity error");
@@ -98,13 +98,13 @@ describe("runStatePill (ruling 11 lifecycle mapping)", () => {
   it("queued → neutral 'queued'", () => {
     expect(runStatePill({ ...base, state: "idle", lifecycle: "queued" })).toEqual({ kind: "neutral", label: "queued" });
   });
-  it("a classified provider overload → blocked 'provider overloaded', not 'continuity error' (ruling 130(a) reader)", () => {
+  it("a classified provider overload → blocked 'provider overloaded', not 'continuity error' (ruling 155(a) reader)", () => {
     expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "overloaded" })).toEqual({
       kind: "blocked",
       label: "provider overloaded",
     });
   });
-  it("ruling 175: a run the spending cap stopped reads 'cut off · spending cap', not 'continuity error'", () => {
+  it("ruling 159: a run the spending cap stopped reads 'cut off · spending cap', not 'continuity error'", () => {
     expect(runStatePill({ ...base, state: "error", lifecycle: "error", failureKind: "max_budget" })).toEqual({
       kind: "blocked",
       label: "cut off · spending cap",
@@ -163,8 +163,8 @@ describe("runInputRows (P19-G11)", () => {
   });
 
   /**
-   * Ruling 346 (pass 37, F37-182): two of these rows describe an ABSENCE, and
-   * ruling 344 gave that absence two new meanings the same day.
+   * Ruling 167 (F37-182): two of these rows describe an ABSENCE, which for a
+   * coordinator is by design.
    *
    * The operator and the controller both legitimately record `cwd: null` and
    * `anchor: null` — neither has a checkout, and neither is handed a canonical
@@ -175,7 +175,7 @@ describe("runInputRows (P19-G11)", () => {
    * drive whose first act is `get_task`. Pass 24's shape: a fix wired into a
    * surface whose prose assumed the old set of callers.
    */
-  it("ruling 346: a coordinator's missing workspace and anchor are described as what they are", () => {
+  it("ruling 167: a coordinator's missing workspace and anchor are described as what they are", () => {
     // CANARY: drop the `kind` argument from `runInputRows` and both of these
     // fall back to the specialist sentences, which are false here.
     const drive = Object.fromEntries(
@@ -217,7 +217,7 @@ describe("runInputRows (P19-G11)", () => {
     expect(anchored.pre).toBe(true);
   });
 
-  it("ruling 185: no sandbox row on either backend — Viberr confines neither", () => {
+  it("ruling 144: no sandbox row on either backend — Viberr confines neither", () => {
     // The row existed for the Codex OS sandbox; the sandbox is gone (F36-1 and
     // F36-11 cost more than it bought), so a run that claims one would be a
     // claim about nothing. Canary: re-add a `sandbox` row to `runInputRows`.
@@ -231,7 +231,7 @@ describe("runInputRows (P19-G11)", () => {
     expect(denied.find((r) => r.tag === "tools")?.text).toContain("Edit");
   });
 
-  it("ruling 185: a Codex run's denied-tool list names the web-search toggle as the one binding entry", () => {
+  it("ruling 183: a Codex run's denied-tool list names the web-search toggle as the one binding entry", () => {
     // The sentence used to credit a sandbox with the repo-write family ("bind
     // via sandbox and search toggles"); that sandbox is gone, so on Codex a
     // withheld Edit/Write or `git push` is advisory and only the CLI's web
@@ -258,7 +258,7 @@ describe("runInputRows (P19-G11)", () => {
     );
   });
 
-  it("ruling 564: a run whose file tools are confined says where they write", () => {
+  it("ruling 217(d): a run whose file tools are confined says where they write", () => {
     // Canary: drop the `fileWriteRoots` clause from `runInputRows` and the row
     // reads as if the run had no way to write its files.
     const row = runInputRows(
@@ -278,7 +278,7 @@ describe("runInputRows (P19-G11)", () => {
     );
   });
 
-  it("ruling 175: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {
+  it("ruling 159: states the spending cap, honest that Codex has no budget option, and 'none' when unset", () => {
     const spend = (inputs: RunInputs, backend: "claude" | "codex") =>
       runInputRows(inputs, backend).find((r) => r.tag === "spend")?.text;
     expect(spend({ ...emptyInputs, spendCapUsd: 2.5 }, "claude")).toBe(
@@ -323,7 +323,7 @@ describe("runInputRows (P19-G11)", () => {
       unresolvedResources: [{ name: "house-style", reason: "no such knowledge base" }],
     });
     const byTag = Object.fromEntries(rows.map((r) => [r.tag, r.text]));
-    // Ruling 310: the strip names the miss and asserts no cause — the record keeps
+    // Ruling 190: the strip names the miss and asserts no cause — the record keeps
     // names only, and "(no such server)" was the invented cause the prompts lost.
     expect(byTag.mcp).toContain("granted but NOT mounted: vm-memory");
     expect(byTag.mcp).not.toContain("no such server");
@@ -331,7 +331,7 @@ describe("runInputRows (P19-G11)", () => {
     expect(byTag.missing).toContain("house-style (no such knowledge base)");
   });
 
-  it("ruling 176: names the org servers' write tools the run withheld", () => {
+  it("ruling 188: names the org servers' write tools the run withheld", () => {
     const rows = runInputRows({
       ...emptyInputs,
       mcp: {
@@ -401,7 +401,7 @@ describe("toolChip (P19-RC1)", () => {
     });
   });
 
-  it("knows whose tool it is (ruling 366): the product's own get the mark, the prefix goes", () => {
+  it("knows whose tool it is (ruling 168): the product's own get the mark, the prefix goes", () => {
     const chip = toolChip(L({ ev: "tool", name: "mcp__viberr__deliver_for_review", text: "reason: rework landed" }))!;
     expect(chip.who).toMatchObject({ kind: "viberr", label: "deliver_for_review" });
     expect(chip.detail).toBe("reason: rework landed");
@@ -533,10 +533,10 @@ describe("agentMessageProse (N20-18)", () => {
 });
 
 /**
- * Ruling 366: a call's heartbeats are ONE wait row (folded by console-fold.ts),
+ * Ruling 168: a call's heartbeats are ONE wait row (folded by console-fold.ts),
  * in the tense its liveness sets.
  */
-describe("waitText (ruling 366)", () => {
+describe("waitText (ruling 168)", () => {
   const beat = (call: string, elapsed: number | null, t = "10:00:30"): LogLine =>
     L({
       t,
@@ -576,12 +576,12 @@ describe("waitText (ruling 366)", () => {
 });
 
 /**
- * Ruling 366(d): a tool row links to what its one-line summary CUT, named,
+ * Ruling 168: a tool row links to what its one-line summary CUT, named,
  * and to nothing else. Canary: count every omitted key and the Bash case
  * below grows a link for its `timeout`; drop the clip check and a clipped
  * prompt reads as shown.
  */
-describe("filePathOf (ruling 499)", () => {
+describe("filePathOf (ruling 168)", () => {
   it("names the file a row's whole summary is, and nothing inside a command", () => {
     const row = (name: string, text: string, input: LogLine["input"]) => L({ ev: "tool", tag: "tool_use", name, text, input });
     expect(filePathOf(row("Read", "/w/a.md", { file_path: "/w/a.md", limit: 5 }))).toBe("/w/a.md");
@@ -591,7 +591,7 @@ describe("filePathOf (ruling 499)", () => {
   });
 });
 
-describe("hiddenArguments + argumentRows + commandNote (ruling 366(d))", () => {
+describe("hiddenArguments + argumentRows + commandNote (ruling 168)", () => {
   const tool = (name: string, text: string, input: LogLine["input"] = null) => L({ ev: "tool", tag: "tool_use", name, text, input });
 
   it("names a clipped string, a collection by its size, and a long omitted string", () => {
@@ -630,7 +630,7 @@ describe("hiddenArguments + argumentRows + commandNote (ruling 366(d))", () => {
     expect(commandNote(tool("mcp__viberr__run_agent", "x", { description: "not a shell" }))).toBeNull();
   });
 
-  it("ruling 499: names nothing the row already draws in full (an edit's diff, a to-do list)", () => {
+  it("ruling 168: names nothing the row already draws in full (an edit's diff, a to-do list)", () => {
     const edit = tool("Edit", "app/a.ts", { file_path: "app/a.ts", old_string: "const a = 1;\nconst b = 2;", new_string: "const a = 2;\nconst b = 3;" });
     expect(hiddenArguments(edit, ["old_string", "new_string"])).toBeNull();
     // Only what is drawn drops out: another cut argument keeps its link.

@@ -22,7 +22,7 @@ import type { EnvelopeFacts } from "./wire-format.server";
  * inside the app's runtime (in Docker, on the data volume); each provider keeps
  * its own resumable transcript there, keyed by the session id the UI shows.
  *
- * Ruling 127: "there" is the CREDENTIAL PRINCIPAL's own runtime home — the run
+ * Ruling 137: "there" is the CREDENTIAL PRINCIPAL's own runtime home — the run
  * row's `credential_user_id` — because that is the home the binary was spawned
  * with:
  *
@@ -55,7 +55,7 @@ export interface LocatedTranscript {
 }
 
 /** The `…/sessions` dir of ONE person's codex home — the only place a run
- *  billed to them could have written a rollout (ruling 127). Empty when the
+ *  billed to them could have written a rollout (ruling 137). Empty when the
  *  home does not exist, or when the run had no principal. */
 function codexSessionDirs(userId: string | null, dataRoot?: string): string[] {
   if (!userId) return [];
@@ -237,7 +237,7 @@ const transcriptExistsCache = new Map<string, { ok: boolean; at: number }>();
 
 export function transcriptExists(
   backend: RealBackend,
-  /** Ruling 127: the run row's `credential_user_id` — whose home to look in.
+  /** Ruling 137: the run row's `credential_user_id` — whose home to look in.
    *  Null (a refused run) has no transcript by construction. */
   userId: string | null,
   sessionId: string,
@@ -284,7 +284,7 @@ export function transcriptExists(
  * writes transcripts somewhere this process cannot see — degrading continuity
  * to fix a continuity bug. `unknown` resumes exactly as before.
  *
- * Ruling 434: `damaged` — the transcript is there and the CLI will refuse it.
+ * Ruling 162: `damaged` — the transcript is there and the CLI will refuse it.
  * A Codex rollout must open with its `session_meta` line; three on this
  * instance (Codex CLI 0.156) had a `task_started` line written over the head
  * of it, and every resume of those sessions failed.
@@ -303,7 +303,7 @@ export const SESSION_MISSING_RE =
   /no conversation found|conversation not found|session not found|no session (?:with|found)|unknown session|no such session|rollout not found|no rollout/i;
 
 /**
- * Ruling 434: what the Codex CLI says when a rollout's head is torn —
+ * Ruling 162: what the Codex CLI says when a rollout's head is torn —
  * "rollout at <path> does not start with session metadata (code -32603)".
  * The session cannot be resumed and fresh runs still work, which is
  * `session_missing`'s outcome; the classifier gives it its own sentence.
@@ -311,7 +311,7 @@ export const SESSION_MISSING_RE =
 export const SESSION_DAMAGED_RE = /does not start with session metadata/i;
 
 /**
- * Ruling 221 (F37-41): the same outcome by a different road — the store the
+ * Ruling 162 (F37-41): the same outcome by a different road — the store the
  * CLI keeps its conversations in is THERE and cannot be opened.
  *
  * Live on pass 37, after the host corrupted a SQLite file under load:
@@ -334,7 +334,7 @@ export const SESSION_DAMAGED_RE = /does not start with session metadata/i;
  * code it was writing hit a bad file.
  */
 /**
- * Ruling 221: the clause viberr's OWN sentence about an unreadable store
+ * Ruling 162: the clause viberr's OWN sentence about an unreadable store
  * carries, so the remedy layer can tell the two roads into `session_missing`
  * apart without re-parsing the provider's prose a second time. The adapter
  * writes it; `runFailureReason` reads it; both sides pin it in their tests.
@@ -357,7 +357,7 @@ export const SESSION_STORE_UNREADABLE_RE =
  */
 export function probeSessionContinuity(
   backend: RealBackend,
-  /** Ruling 127: whose home holds the transcript — the principal of the RESUMED
+  /** Ruling 137: whose home holds the transcript — the principal of the RESUMED
    *  turn, which is the task owner as of now, so this never reads one person's
    *  transcript on behalf of another (agents-and-runtime.md §3.6). An owner
    *  CHANGE is not decided here: `resumeRun` treats a principal that differs
@@ -376,12 +376,12 @@ export function probeSessionContinuity(
     if (codexSessionDirs(userId, dataRoot).length === 0) return "unknown";
     const rollout = locateCodex(userId, sessionId, dataRoot);
     if (!rollout) return "missing";
-    // Ruling 434: found is not resumable. Asked here, before the spawn, so a
+    // Ruling 162: found is not resumable. Asked here, before the spawn, so a
     // torn rollout starts a fresh session instead of a run that fails.
     return codexRolloutOpensWithMeta(rollout) ? "present" : "damaged";
   }
   const projectsDir = claudeProjectsDir(userId, dataRoot);
-  // Ruling 507: an EMPTY store proves no more than an absent one. Viberr now
+  // Ruling 138: an EMPTY store proves no more than an absent one. Viberr now
   // creates the shared `projects/` itself, before any CLI has run, so that
   // each account home's link to it resolves; its existence is no longer the
   // CLI's evidence of having written a transcript here.
@@ -405,7 +405,7 @@ const rolloutHeadSchema = z.object({ type: z.string() });
 const ROLLOUT_HEAD_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
- * Ruling 434: does this rollout open with its `session_meta` line, which the
+ * Ruling 162: does this rollout open with its `session_meta` line, which the
  * CLI needs to resume it? Reads only as far as the first newline.
  *
  * An unreadable file answers true: the probe's job is to catch a file it can
@@ -440,7 +440,7 @@ function codexRolloutOpensWithMeta(rollout: string): boolean {
 // ------------------------------------------------- context size readers
 
 /**
- * Ruling 372: ONE main-loop assistant line of a Claude transcript — the fields
+ * Ruling 173: ONE main-loop assistant line of a Claude transcript — the fields
  * the context-size reader needs. `isSidechain` marks a subagent's line, which
  * is not part of the session a resume replays.
  */
@@ -462,7 +462,7 @@ const claudeTranscriptUsageLineSchema = z.object({
     .catch(null),
 });
 
-/** Ruling 369/372: one `token_count` line of a Codex rollout: the last call's
+/** Ruling 172/173: one `token_count` line of a Codex rollout: the last call's
  *  usage (the prompt it carried, cached slice inside it) and when. */
 const codexRolloutLineSchema = z.object({
   timestamp: z.string().catch(""),
@@ -510,7 +510,7 @@ function transcriptLines(filePath: string): unknown[] {
 }
 
 /**
- * Ruling 372: the size a resume of this session would REPLAY — the last
+ * Ruling 173: the size a resume of this session would REPLAY — the last
  * main-loop call's whole prompt as the provider's own transcript records it
  * (Claude: the last non-sidechain assistant line's usage, uncached + written +
  * read; Codex: the rollout's last `token_count`, whose `last_token_usage`
@@ -557,13 +557,13 @@ export function sessionContextTokens(
  * One compaction as the rollout shows it: the last prompt the CLI sent before
  * it, and the size of the context it left.
  *
- * Ruling 403: `postTokens` is NULL when nothing measured it, never 0. A zero
+ * Ruling 172: `postTokens` is NULL when nothing measured it, never 0. A zero
  * seeded as "not measured yet" survived all the way to the timeline, where it
  * told a human that a 100k-213k token conversation had been summarized "to 0k
  * tokens". Null is the value the whole chain treats as unmeasured (the
  * completion line on the run's console renders it "a summary").
  *
- * Ruling 414 corrected why it was missing. The CLI writes one compaction as
+ * Ruling 172 corrected why it was missing. The CLI writes one compaction as
  * `compacted`, then its own size line (a `token_count` whose prompt is 0 and
  * whose total is the compacted context), then a `ContextCompaction` item. The
  * size line used to CLOSE the compaction, so the item opened a second one with
@@ -585,7 +585,7 @@ interface OpenCompaction {
   event: CodexCompactionEvent | null;
 }
 
-/** Ruling 369: what a Codex run's calls carried, read off its rollout. */
+/** Ruling 172: what a Codex run's calls carried, read off its rollout. */
 export interface CodexRolloutRunStats {
   /** The largest prompt any call in the window carried. */
   peakPromptTokens: number;
@@ -609,7 +609,7 @@ export interface CodexRolloutRunStats {
 }
 
 /**
- * Ruling 369: the per-call prompt figures the Codex SDK does not stream (its
+ * Ruling 172: the per-call prompt figures the Codex SDK does not stream (its
  * `turn.completed` is a turn TOTAL), read at finalize off the rollout the CLI
  * writes into the principal's home: every `token_count` line from `sinceIso`
  * on is one call, and a `context_compacted` event is one compaction. A thread
@@ -639,7 +639,7 @@ export function codexRolloutRunStats(
   // shape measured live on 2026-09-21), an `event_msg` whose item is a
   // `ContextCompaction` (written beside it), and an older `context_compacted`
   // event. One compaction appears under two of them, with its own size line
-  // BETWEEN the two (ruling 414), so every marker until the next real call is
+  // BETWEEN the two (ruling 172), so every marker until the next real call is
   // the same compaction.
   let lastPrompt = 0;
   // A holder, so the marking below is one statement the flow analysis follows.
@@ -673,7 +673,7 @@ export function codexRolloutRunStats(
     if (prompt <= 0) {
       // The compaction request's own line: no prompt, but `total_tokens` is
       // the compacted context, the size a resume replays. It MEASURES the
-      // open compaction and does not end it (ruling 414): the CLI writes the
+      // open compaction and does not end it (ruling 172): the CLI writes the
       // compaction's second spelling after it.
       const compacted = usage?.total_tokens ?? 0;
       if (open.event && open.event.postTokens === null && compacted > 0) {
@@ -708,7 +708,7 @@ export function codexRolloutRunStats(
 // ------------------------------------------------------- live usage (541)
 
 /**
- * Ruling 541: one `token_usage_record` line of a Codex rollout. The pinned CLI
+ * Ruling 165(b): one `token_usage_record` line of a Codex rollout. The pinned CLI
  * (0.156.0) writes one the moment a model call completes, before the tool the
  * call asked for runs (the `token_count` event waits for the tool's output),
  * with that call's usage, the turn's running total and the thread's. Only the
@@ -730,7 +730,7 @@ const codexUsageRecordSchema = z.object({
 /** What a record's line holds, verbatim, for a scan that parses no other line. */
 const USAGE_RECORD_MARK = '"token_usage_record"';
 
-/** Ruling 541: what a live Codex run's rollout says the run has used so far. */
+/** Ruling 165(b): what a live Codex run's rollout says the run has used so far. */
 export interface CodexLiveUsage {
   /** The model calls the run has made, one record each: a Codex run's Turns. */
   calls: number;
@@ -739,7 +739,7 @@ export interface CodexLiveUsage {
 }
 
 /**
- * Ruling 604: the account's rate-limit snapshot a rollout `token_count` event
+ * Ruling 161(b): the account's rate-limit snapshot a rollout `token_count` event
  * carries beside each call's usage (0.156.0: `limit_id` "codex", a five-hour
  * `primary` and a seven-day `secondary` window, `resets_at` in unix seconds).
  * The protocol calls these sparse updates: a null window is unavailable in
@@ -771,7 +771,7 @@ type CodexRateWindow = NonNullable<CodexRateSnapshot["primary"]>;
 /** What a rate-limit line holds, verbatim, for the same one-mark scan. */
 const RATE_LIMITS_MARK = '"rate_limits"';
 
-/** Ruling 604: a Codex account's usage, in the reading shape Claude's
+/** Ruling 161(b): a Codex account's usage, in the reading shape Claude's
  *  `rate_limit_event` fills (`EnvelopeFacts.rateLimit`). */
 export type CodexRateLimitReading = NonNullable<EnvelopeFacts["rateLimit"]>;
 
@@ -788,10 +788,10 @@ const utilizationOf = (window: CodexRateWindow) =>
   Math.min(1, Math.max(0, window.used_percent / 100));
 
 /**
- * Ruling 604: the window closest to its limit across the account's latest
+ * Ruling 161(b): the window closest to its limit across the account's latest
  * snapshots, one per limit. Null while no snapshot has named a window.
  *
- * Ruling 608: and every window beside it, shortest first. The weekly window
+ * And every window beside it, shortest first. The weekly window
  * at 42% hid the five-hour one a controller pacing runs to it needs.
  */
 function codexRateLimitReading(
@@ -828,16 +828,16 @@ function codexRateLimitReading(
   };
 }
 
-/** Ruling 541: a live Codex run's rollout, read as the CLI writes it. */
+/** Ruling 165(b): a live Codex run's rollout, read as the CLI writes it. */
 export interface CodexUsageTail {
   /** The run's records so far, reading only what the CLI wrote since the last
    *  call; null before the first. `sessionId` is the thread the run streamed,
    *  once it has named it. */
   read(sessionId: string | null): CodexLiveUsage | null;
-  /** Ruling 604: the account's usage as the rollout lines `read` has consumed
+  /** Ruling 161(b): the account's usage as the rollout lines `read` has consumed
    *  report it; null before the first snapshot that names a window. */
   rateLimit(): CodexRateLimitReading | null;
-  /** Ruling 595: when the CLI last wrote to the rollout (its mtime, epoch ms),
+  /** Ruling 158(a): when the CLI last wrote to the rollout (its mtime, epoch ms),
    *  or null while the file is not known. The CLI appends a line for every
    *  item the model completes, a reasoning step included, and the stream
    *  carries no event for a reasoning step whose summary is empty. */
@@ -845,7 +845,7 @@ export interface CodexUsageTail {
 }
 
 /**
- * Ruling 541: follow the rollout of the run about to start in `codexHome`.
+ * Ruling 165(b): follow the rollout of the run about to start in `codexHome`.
  *
  * A new thread's rollout is found by its id once the stream has named it (the
  * CLI creates the file right after `thread.started`). A resumed thread's is
@@ -947,7 +947,7 @@ function bytesFrom(file: string, offset: number): Buffer {
 
 /**
  * Where a session's transcript is on disk, or null: {@link locateTranscript}
- * without the read it makes for the size. Ruling 525's purge of a deleted
+ * without the read it makes for the size. Ruling 250's purge of a deleted
  * controller conversation needs only the path.
  */
 export function transcriptFile(
@@ -968,7 +968,7 @@ export function transcriptFile(
  */
 export function locateTranscript(
   backend: RealBackend,
-  /** Ruling 127: the run row's `credential_user_id`. A run with none never
+  /** Ruling 137: the run row's `credential_user_id`. A run with none never
    *  spawned a process, so it has no transcript to export. */
   userId: string | null,
   sessionId: string,
@@ -1023,7 +1023,7 @@ export function buildResumeScript(
   // run sink's P13-U-1 redaction covers Viberr's `.jsonl` and the console, and
   // this is the sibling channel that bypassed it. One `env`-printing tool call
   // puts the run's credential into the provider transcript verbatim — and
-  // since ruling 127 that is somebody's PERSONAL key, while this bundle is
+  // that is somebody's PERSONAL key (ruling 137), while this bundle is
   // downloadable by any member of the run's project. Scrub before embedding,
   // with the same redactor and the same token patterns ("secrets wherever they
   // came from"). The marker carries no quote or backslash, so the JSONL stays

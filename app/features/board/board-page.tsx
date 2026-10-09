@@ -86,7 +86,7 @@ import {
  * Board view over the task projections. Stage transitions are governed
  * actions rather than drag and drop.
  *   - filter/view/search live in URL params (survive refresh/share);
- *   - list view gains a minimal empty state (ruling 16);
+ *   - list view gains a minimal empty state (ruling 295);
  *   - re-scan toasts fire on real action completion, ".viberr" wording
  *     aligned to the real store (contracts §7.3);
  *   - create modal gets Escape/focus-trap/aria-modal and shows server
@@ -100,7 +100,7 @@ import {
  *     stop, in both layouts — see `onCardKeyDown` in `useBoardKeyboard`
  *     (board-page-actions.tsx).
  *
- * Ruling 700(e) split the page along the task-page recipe: its state and posts
+ * Ruling 13(b) split the page along the task-page recipe: its state and posts
  * are hooks in `board-page-actions.tsx`, what it derives from its props and
  * URL is `board-page-derive.ts`, and the acceptance ceremony is
  * `board-accept-confirm.tsx`.
@@ -130,7 +130,7 @@ const SR_ONLY: CSSProperties = {
 };
 
 /**
- * A board card's task: the board card projection (ruling 457, BOARD-3,
+ * A board card's task: the board card projection (ruling 11, BOARD-3,
  * `board-card.ts`), which carries the Gap-10 `quiet` annotation and the
  * loader's viewer annotations beside the fields the card, its filters and the
  * acceptance ceremony read.
@@ -157,7 +157,7 @@ const BOARD_PLUGINS = defaultPreset.plugins.filter(
  * dnd-kit's default drop animation returns the lifted card to the placeholder
  * it left — the OLD lane — and the card then jumped to the new lane when the
  * server answered: a fly-back, a pause, a teleport. The board still commits
- * nothing client-side (§UI porting rules: no optimistic UI for governed
+ * nothing client-side (§Behavior rules: no optimistic UI for governed
  * state), so instead the card flies to the slot it asked for, where the
  * landing preview already stands as the request, and the source stays hidden
  * (`.in-flight`) until the server's answer renders the real card there — or
@@ -275,7 +275,7 @@ const boardDropAnimation: DropAnimationFunction = async ({ feedbackElement, plac
  * Deliberately no dependency array: `StageMenu` re-renders its trigger on
  * open/busy/stage change, and React never writes `tabIndex` on that button, so
  * re-applying on every render is both necessary and free of any tug-of-war with
- * React's own attribute reconciliation. Ruling 457: it writes only a value
+ * React's own attribute reconciliation. Ruling 11: it writes only a value
  * that differs, because an unconditional write is a DOM mutation on every
  * card each time the board renders (40 per revalidation).
  */
@@ -292,8 +292,8 @@ function useRovingStageMenu(active: boolean) {
 }
 
 /**
- * Ruling 365: the trace mark in the card's head — the PR number when a PR
- * exists (the stronger trace; it implies the branch, ruling 171(d)), else the
+ * Ruling 306(d): the trace mark in the card's head — the PR number when a PR
+ * exists (the stronger trace; it implies the branch), else the
  * branch glyph alone with the branch name as its tooltip and accessible name,
  * else nothing. The chip used to print the branch name, which at the board's
  * 218px lanes cut to "shop-6…" and told nobody anything the key beside it had
@@ -326,10 +326,10 @@ function TraceMark({ task }: { task: BoardTask }) {
 }
 
 /**
- * Ruling 365: the card's two seats as one stack at the head's right end — the
- * agent's badge, when an agent carries the task (ruling 171(a)'s carrier seat,
- * its profile name now the badge's tooltip and accessible name rather than
- * printed text), then the owner's avatar (ruling 171(b), unchanged). Nobody
+ * Ruling 306(c): the card's two seats as one stack at the head's right end —
+ * the agent's badge, when an agent carries the task (its profile name is the
+ * badge's tooltip and accessible name rather than printed text), then the
+ * owner's avatar. Nobody
  * carrying the task draws nothing: the ghost owner avatar and a "ready" status
  * already say so, and "no agent" on every Triage card was noise.
  */
@@ -344,9 +344,9 @@ function WhoStack({ task }: { task: BoardTask }) {
 }
 
 /**
- * Ruling 365: the status chip — the ONE tinted chip on a card, whose tint is
+ * Ruling 306: the status chip — the ONE tinted chip on a card, whose tint is
  * its meaning (`cardStatus`, card-status.ts). "agent working" keeps the live
- * pulse for its mark (R21-8); a clock rest names its instant (ruling 225) and
+ * pulse for its mark (R21-8); a clock rest names its instant (ruling 45) and
  * falls back to "on its own" for a schedule the read boundary could not parse.
  */
 function StatusChip({ task }: { task: BoardTask }) {
@@ -370,11 +370,11 @@ function StatusChip({ task }: { task: BoardTask }) {
 }
 
 /**
- * Ruling 365: the problems, most severe first (`cardProblems`). Two draw at
+ * Ruling 306: the problems, most severe first (`cardProblems`). Two draw at
  * full strength and the rest fold into one "+N" whose title lists them — the
  * pass-30 rule, with the cap at two now that the chips are outlined objects
  * rather than filled pills. Every fact stays visible, on hover here and in
- * full on the task page (rulings 40/12/14).
+ * full on the task page (rulings 244/237/297).
  */
 function ProblemChips({ task }: { task: BoardTask }) {
   const problems = cardProblems(task);
@@ -402,8 +402,8 @@ function ProblemChips({ task }: { task: BoardTask }) {
 
 /** The card's property row: the status chip, then the problems. Drawn by the
  *  card and the list row alike (F19-13: one state block, both layouts), and
- *  absent when there is nothing to say. Ruling 503 keeps the epic off it, as
- *  ruling 172 kept the goal link off it: the board's epic filter and the task
+ *  absent when there is nothing to say. Ruling 325 keeps the epic off it, as
+ *  ruling 306(e) kept the goal link off it: the board's epic filter and the task
  *  page say which epic a task is in. */
 function CardChips({ task }: { task: BoardTask }) {
   if (cardStatus(task) === null && cardProblems(task).length === 0) return null;
@@ -416,9 +416,9 @@ function CardChips({ task }: { task: BoardTask }) {
 }
 
 /** The list row's agent: the badge and the name — the row has the room the
- *  card does not, and ruling 168(c)'s name stays printed here. Ruling 625: a
- *  row with no agent keeps the empty seat, so the chips before it hold one
- *  column instead of sliding 7rem right. */
+ *  card does not, so the name stays printed here. A row with no agent keeps
+ *  the empty seat, so the chips before it hold one column instead of sliding
+ *  7rem right (ruling 306). */
 function ListAgent({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   if (!sp) return <span className="list-agent" aria-hidden="true" />;
@@ -431,7 +431,7 @@ function ListAgent({ task }: { task: BoardTask }) {
 }
 
 /**
- * Ruling 171: the OWNER seat — the row's right end, on every card. The human
+ * Ruling 306: the OWNER seat — the row's right end, on every card. The human
  * owner's avatar (initials; the name is the accessible label and the title),
  * or the empty seat when nobody owns the task yet: "awaiting owner" while an
  * operator is assigned and will be asked to find one, "unassigned" before
@@ -461,7 +461,7 @@ function OwnerSeat({ task }: { task: BoardTask }) {
 }
 
 /**
- * The card's sortable plugins, made once (ruling 457). dnd-kit compares the
+ * The card's sortable plugins, made once (ruling 11). dnd-kit compares the
  * option by reference and re-resolves it whenever it changes, so an inline
  * function rebuilt the card's plugins on every render of every card.
  */
@@ -475,7 +475,7 @@ const taskKeyOf = (task: BoardTask) => task.key;
 const stageIdOf = (stage: BoardStage) => stage.id;
 
 /**
- * Ruling 457: memoised, so a revalidation or a drag renders only the cards
+ * Ruling 11: memoised, so a revalidation or a drag renders only the cards
  * whose props changed. Its lanes hand it the task object the page already held
  * when the task is unchanged (`useStableRows`), and the board keeps the stage
  * list and the move callback stable; before this every live update rendered
@@ -614,7 +614,7 @@ const TaskCard = memo(function TaskCard({
  * and, faded, by the drop preview, so a preview stands exactly as tall as the
  * card that will replace it.
  *
- * Ruling 365 — the anatomy, top to bottom: the head (the key and the trace
+ * Ruling 306 — the anatomy, top to bottom: the head (the key and the trace
  * mark in secondary ink, the seats as a stack at the right), the title (the
  * only primary text on the card), and the property row (the one tinted status
  * chip, then the problems). The old top pill / owner row / two-cell foot, and
@@ -670,7 +670,7 @@ function DropPreview({ task, landing = false }: { task: BoardTask; landing?: boo
 }
 
 /**
- * An empty lane's one child (ruling 700(e), split out of `Column`): the drop
+ * An empty lane's one child (ruling 13(b), split out of `Column`): the drop
  * preview while a drag hovers the lane, else the landing of a move awaiting the
  * server, else the empty copy — with, in a virgin board's entry lane, its call
  * to action. `Column` renders it only while its lane draws no cards.
@@ -791,13 +791,13 @@ function Column({
     id: `stage:${stage.id}`,
     collisionPriority: 1,
   });
-  // Ruling 457: the task objects this lane already drew, wherever a
+  // Ruling 11: the task objects this lane already drew, wherever a
   // revalidation brought the same task back, so the memoised cards skip.
   const tasks = useStableRows(laneTasks, taskKeyOf);
   const showPreview = dropTarget && previewTask !== null;
   const preview = showPreview ? <DropPreview task={previewTask!} /> : null;
   const landingEl = landing ? <DropPreview task={landing.task} landing /> : null;
-  // Ruling 661: a lane takes the dock reserve (`.col-body.overflows`) only
+  // Ruling 307: a lane takes the dock reserve (`.col-body.overflows`) only
   // while its cards overflow it, so a lane whose cards fit does not scroll.
   // The read leaves the reserve out (the lane's own foot matches its top):
   // counted in, it would keep a lane scrolling once its cards fit again,
@@ -913,7 +913,7 @@ function Column({
 }
 
 /** D19: extracted from `ListView`'s map so the row can hold the roving-tab-stop
- *  hook — a hook cannot be called inside a `.map` callback. Ruling 457:
+ *  hook — a hook cannot be called inside a `.map` callback. Ruling 11:
  *  memoised like the card, for the same reason. */
 const ListRow = memo(function ListRow({
   task,
@@ -956,8 +956,8 @@ const ListRow = memo(function ListRow({
       {/* F19-13: the card's state block verbatim — the row used to draw
           validation and the wait tag alone, so the PR-state, checks and
           review pills existed on one board layout and not the other. Ruling
-          365: the same status chip and problem chips the card draws. Ruling
-          625: before the seats, so the stage and the owner — fixed widths at
+          306: the same status chip and problem chips the card draws. Ruling
+          306: before the seats, so the stage and the owner — fixed widths at
           the row's end — start on one x on every row whatever the chips say. */}
       <CardChips task={task} />
       <ListAgent task={task} />
@@ -976,13 +976,13 @@ const ListRow = memo(function ListRow({
         // name), not a bare neutral pill — one fact, one treatment.
         <span className="stage-static">
           <span className="col-stage-dot sm" data-stage-color={stage?.color} />
-          {/* Ruling 148: one fact, one wording — the stage menu and the task
+          {/* Ruling 291: one fact, one wording — the stage menu and the task
               page say "unknown stage" too, and the raw internal id is not
               rendered copy. */}
           {stageLabel(stage)}
         </span>
       )}
-      {/* Ruling 625: no per-row "OWNER" eyebrow — the seat's place in the
+      {/* Ruling 306: no per-row "OWNER" eyebrow — the seat's place in the
           row and its accessible name say what it is. */}
       <OwnerSeat task={task} />
     </div>
@@ -1012,7 +1012,7 @@ function ListView({
   rovingKey: string | null;
   onCardKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }) {
-  // Ruling 457: unchanged tasks keep the objects the rows already drew.
+  // Ruling 11: unchanged tasks keep the objects the rows already drew.
   const tasks = useStableRows(visibleTasks, taskKeyOf);
   return (
     <div className="board list">
@@ -1045,10 +1045,10 @@ function ListView({
 /* ---------- New task modal (board spec §4.6) ---------- */
 
 /**
- * Ruling 694: what the New task dialog asks for, in the words of the board it
+ * Ruling 307: what the New task dialog asks for, in the words of the board it
  * is on. A board with a repository files a change, and its goal is what counts
  * as done. A board with none files a piece of a person's own work (ruling
- * 667), and a person who came to hand over a subject and a few notes was asked
+ * 224), and a person who came to hand over a subject and a few notes was asked
  * for a "goal" a triage gate would flag, under an example about a force-push.
  */
 const NEW_TASK_COPY = {
@@ -1076,12 +1076,12 @@ function NewTaskModal({
 }: {
   /** R19-14: every task is created at the entry stage — the modal names it. */
   entryStageName: string;
-  /** Ruling 694: whether the project has a repository, which decides the
+  /** Ruling 307: whether the project has a repository, which decides the
    *  dialog's words. */
   hasRepository: boolean;
   /** Labels already used across the board, offered as label autocomplete. */
   labelSuggestions: string[];
-  /** Ruling 503: the project's open epics, a new task can start in one. */
+  /** Ruling 325: the project's open epics, a new task can start in one. */
   epics: readonly EpicOption[];
   /** The epic the board is filtered to, so a task made there lands in it. */
   initialEpic: string | null;
@@ -1094,7 +1094,7 @@ function NewTaskModal({
   const [priority, setPriority] = useState<TaskPriority>("normal");
   const [labels, setLabels] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
-  // Ruling 533: the files the task is filed with, and the first one refused.
+  // Ruling 76: the files the task is filed with, and the first one refused.
   const [files, setFiles] = useState<File[]>([]);
   const [filesProblem, setFilesProblem] = useState<string | null>(null);
   const addFiles = (incoming: File[]) => {
@@ -1138,7 +1138,7 @@ function NewTaskModal({
           fetcher.data.stageName +
           ". Its task.md is in the store",
       );
-      // Ruling 459: the same exit Cancel plays; close() then calls onClose.
+      // Ruling 287: the same exit Cancel plays; close() then calls onClose.
       close();
     }
   }, [fetcher.data, close, push]);
@@ -1177,8 +1177,9 @@ function NewTaskModal({
     <dialog
       className="modal-card modal-narrow"
       aria-label="New task"
+      data-screen-label="New task modal"
       ref={panelRef}
-      // Ruling 533: a screenshot pasted anywhere in the dialog is filed with
+      // Ruling 76: a screenshot pasted anywhere in the dialog is filed with
       // the task; copied text pasted into a field stays text.
       onPaste={(e) => {
         const intoTextField =
@@ -1311,7 +1312,7 @@ function NewTaskModal({
             suggestions={labelSuggestions}
           />
         </div>
-        {/* Ruling 503: a task can start in an epic; it can join or leave one
+        {/* Ruling 325: a task can start in an epic; it can join or leave one
             at any time afterwards, from its own page or the epic's. */}
         {epics.length > 0 && (
           <div className="field">
@@ -1342,7 +1343,7 @@ function NewTaskModal({
 }
 
 /**
- * The new-task dialog's foot (ruling 700(e), split out of `NewTaskModal`): the
+ * The new-task dialog's foot (ruling 13(b), split out of `NewTaskModal`): the
  * one hint line — the title's length rule once it is unmet, else the server's
  * refusal, else how the key is assigned — and the two actions. The modal owns
  * the form and the post and hands this what it shows.
@@ -1540,7 +1541,7 @@ function FilterBar({
    *  vocabulary offered as filter chips. */
   labelFilter: string | null;
   projectLabels: string[];
-  /** Ruling 503: the active epic filter (`?epic=`, an epic's id or `none`),
+  /** Ruling 325: the active epic filter (`?epic=`, an epic's id or `none`),
    *  and the project's epics it picks from. */
   epicFilter: string | null;
   epics: readonly EpicOption[];
@@ -1580,7 +1581,7 @@ function FilterBar({
       {/* R15-5: the term input lives on the BOARD now. The topbar's box read
           "Search tasks, branches, agents…" while only ever filtering the open
           board; the global question moved to the ⌘K palette and this one says
-          exactly what it does. Ruling 625: it leads the row, the left end that
+          exactly what it does. Ruling 280: it leads the row, the left end that
           the open controller dock (anchored bottom right) never covers; at the
           row's right end it sat under the dock's panel at 1280×720. */}
       <label className="board-filter-input">
@@ -1593,7 +1594,7 @@ function FilterBar({
           onChange={(e) => setParam("q", e.target.value || null)}
         />
       </label>
-      {/* Ruling 625: the chips as one row — no box on a wide screen (the row
+      {/* Ruling 307: the chips as one row — no box on a wide screen (the row
           is `display: contents` there), one line that scrolls sideways on a
           phone, where seven wrapped chips took three rows above the lanes. */}
       <div className="fchip-row">
@@ -1609,7 +1610,7 @@ function FilterBar({
             key={f.id}
             className={"fchip" + (filter === f.id ? " on" : "")}
             aria-pressed={filter === f.id}
-            // Ruling 632: clicking the active chip clears it, back to All tasks.
+            // Ruling 307: clicking the active chip clears it, back to All tasks.
             onClick={() => setParam("filter", f.id === "all" || filter === f.id ? null : f.id)}
           >
             <Icon name={f.icon} />
@@ -1673,7 +1674,7 @@ function FilterBar({
           </button>
         )}
       </div>
-      {/* Ruling 503: only when the project has epics, or the filter is
+      {/* Ruling 325: only when the project has epics, or the filter is
           already on (`EpicFilter`). */}
       {(epics.length > 0 || epicFilter) && (
         <EpicFilter epicFilter={epicFilter} epics={epics} setParam={setParam} />
@@ -1698,9 +1699,9 @@ function FilterBar({
 }
 
 /**
- * Ruling 503: one epic's tasks, or those in none. A select rather than chips: a
+ * Ruling 325: one epic's tasks, or those in none. A select rather than chips: a
  * project can hold many epics, and their names are long. Split out of
- * `FilterBar` by ruling 700(e); the bar draws it only when the project has
+ * `FilterBar` by ruling 13(b); the bar draws it only when the project has
  * epics, or the filter is already on.
  */
 function EpicFilter({
@@ -1878,7 +1879,7 @@ export function StageBoard({
   onNudgeTask: (taskKey: string, stageId: string, dir: -1 | 1) => void;
 }) {
   // All stages, for the per-card keyboard "Move to stage" menu (F10-25). The
-  // same array while the stages are unchanged (ruling 457): every card takes it.
+  // same array while the stages are unchanged (ruling 11): every card takes it.
   const allStages = useStableRows(
     columns.map((c) => c.stage),
     stageIdOf,
@@ -2029,16 +2030,16 @@ interface BoardPageProps {
   defaultBranch?: string;
   /**
    * U33-2: GitHub's own answer for this project's repository, the last one
-   * recorded (`readRepoHealth`, ruling 517). The board must NOT reach for
+   * recorded (`readRepoHealth`, ruling 223). The board must NOT reach for
    * GitHub itself — the check is a live `GET /repos/:repo`, and project-scope
    * SSE revalidates this view on every task event. Null or absent means "nobody
    * has established it", which the banner reads as silence, never as health.
    */
   repoAccess?: RepoAccessResult | null;
-  /** Ruling 694: false on a board with no repository, whose New task dialog
+  /** Ruling 307: false on a board with no repository, whose New task dialog
    *  asks for what a person files there. */
   hasRepository?: boolean;
-  /** Ruling 503: the project's epics, for the epic filter and the New-task
+  /** Ruling 325: the project's epics, for the epic filter and the New-task
    *  Epic pick. */
   epics?: readonly EpicOption[];
 }
@@ -2067,7 +2068,7 @@ export function BoardPage({
   // re-scan's here, the moves' below.
   const rescan = useRescan(csrf);
 
-  // One array while the stages are unchanged (ruling 457): every list row takes it.
+  // One array while the stages are unchanged (ruling 11): every list row takes it.
   const stages = useStableRows(
     columns.map((c) => c.stage),
     stageIdOf,
@@ -2260,7 +2261,7 @@ export function BoardPage({
         />
       )}
 
-      {/* Ruling 381 and B1 / D3: the move-back reason and the acceptance
+      {/* Ruling 47 and B1 / D3: the move-back reason and the acceptance
           ceremony, each while its move waits on it (`useMoveConfirms`). */}
       {confirms.moveBackDialog}
       {confirms.acceptDialog}

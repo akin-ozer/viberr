@@ -20,7 +20,7 @@ import { countUsers, insertUser } from "./user-store.server";
 export const DEFAULT_SEED_ADMIN_EMAIL = "admin@viberr.dev";
 
 /**
- * Ruling 532: the account this bootstrap made, in `users` as `listUsers`
+ * Ruling 322: the account this bootstrap made, in `users` as `listUsers`
  * orders it (oldest first). It is the first row an instance ever holds, made by
  * nobody (`created_by` null) with a password of its own (`idp` local); an
  * account an admin makes names its maker, and one a GitHub or Google sign-in

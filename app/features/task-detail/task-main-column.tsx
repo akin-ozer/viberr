@@ -22,7 +22,7 @@ import { DiagnosticsPanel, ExecutionSection } from "./task-main-sections";
 import { Timeline, type TimelineFilterId } from "./timeline";
 
 /**
- * U35-2: `.detail-main`, the task page's main column (ruling 700(d), the pilot
+ * U35-2: `.detail-main`, the task page's main column (ruling 13(b), the pilot
  * split of `task-detail-page.tsx`): the live run, diagnostics, continuity,
  * recommendations, the run controls, the console, the changes, the
  * attachments and the timeline. It calls no hook: the page owns every fetcher
@@ -69,7 +69,7 @@ export function TaskMainColumn({
   taskLinks,
 }: {
   task: TaskDetail;
-  /** The page's stable run projection (ruling 457, `useStableRows`). */
+  /** The page's stable run projection (ruling 11, `useStableRows`). */
   runtime: RunView[];
   runConsole: RunConsole;
   can: TaskPermissions;
@@ -79,7 +79,7 @@ export function TaskMainColumn({
   /** The timeline composer's focus signal; `onAsk` raises it. */
   ask: number;
   onAsk: () => void;
-  /** Ruling 497: the anchor a notification's link landed on, or null. */
+  /** Ruling 302: the anchor a notification's link landed on, or null. */
   regionMark: string | null;
   acceptanceRefusal: AcceptanceAffordance["blockedReason"];
   terminalStageId: string | null;
@@ -93,13 +93,13 @@ export function TaskMainColumn({
   runPrincipal: TaskRunPrincipalView | null;
   liveAgentRuns: LiveAgentRun[];
   schedules: TaskSchedule[];
-  /** Ruling 484: the Changes panel's reader, or null while it hides. */
+  /** Ruling 246: the Changes panel's reader, or null while it hides. */
   changesReader: CompletionDiff | null;
   attachmentsBase: string | null;
   attachments: TaskAttachmentEntry[];
   attachmentsTotal: number | undefined;
   attachmentProducers: Record<string, { actor: string; occurredAt: string }>;
-  /** Ruling 690: the sources the task keeps, newest first. */
+  /** Ruling 317: the sources the task keeps, newest first. */
   sources: TaskSourceRow[];
   sourcesTotal: number;
   /** The sources route, or null to show no Sources panel. */
@@ -150,7 +150,7 @@ export function TaskMainColumn({
         runtime={runtime}
         agents={deployedSpecialists}
         canRunAgents={can.canRunAgents}
-        // Ruling 380: the run card's `onViewLogs` is a Show/Hide toggle; from
+        // Ruling 311: the run card's `onViewLogs` is a Show/Hide toggle; from
         // this panel the console is elsewhere, so its door travels instead.
         onOpenConsole={runConsole.onAgentLog}
         onAsk={onAsk}
@@ -164,7 +164,7 @@ export function TaskMainColumn({
         busy={recs.busy}
         onApply={recs.onApply}
         onDismiss={recs.onDismiss}
-        // Ruling 162: the same gate verdict the sidebar and the accept
+        // Ruling 95: the same gate verdict the sidebar and the accept
         // dialog read, so an acceptance card never offers a refused click.
         acceptanceRefusal={acceptanceRefusal}
         terminalStageId={terminalStageId}
@@ -194,7 +194,7 @@ export function TaskMainColumn({
           run card above instead — one console either way, never two. */}
       {runtime.length > 0 && !runConsole.liveRun ? runConsole.agentLogs : null}
 
-      {/* Ruling 484 (F40-54): the Changes panel (`changesPanelReader`). */}
+      {/* Ruling 246 (F40-54): the Changes panel (`changesPanelReader`). */}
       {changesReader ? (
         <ChangesPanel
           url={changesReader.url}
@@ -221,7 +221,7 @@ export function TaskMainColumn({
         />
       ) : null}
 
-      {/* Ruling 690: what the work rests on, under the files of the work.
+      {/* Ruling 317: what the work rests on, under the files of the work.
           Nothing on a task that keeps no sources. */}
       {sourcesBase && sources.length > 0 ? (
         <SourcesPanel base={sourcesBase} sources={sources} total={sourcesTotal} />
@@ -240,7 +240,7 @@ export function TaskMainColumn({
         runPrincipal={runPrincipal}
         onAgentLog={runConsole.onAgentLog}
         taskClosed={taskClosed}
-        // Ruling 573: a comment carries files for whoever may attach one
+        // Ruling 76: a comment carries files for whoever may attach one
         // (the attachments panel's own rule, F39-6).
         canAttach={can.canAttach}
         // U33-1 was inert: the Timeline accepted `runLive` and no production
@@ -249,7 +249,7 @@ export function TaskMainColumn({
         // loop" — directly under the Live-run strip saying otherwise. Same
         // condition that renders that strip, so the two cannot disagree.
         runLive={runtime.length > 0}
-        // Rulings 483 and 498: a proposal or a correction links to the
+        // Rulings 267 and 210: a proposal or a correction links to the
         // project's Controller page, where its panel lists them.
         knowledgeHref={`/projects/${encodeURIComponent(task.projectSlug)}/controller`}
         {...(attachmentsBase

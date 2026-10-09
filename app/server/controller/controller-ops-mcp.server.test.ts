@@ -10,14 +10,14 @@ import { runConcurrencySnapshot } from "~/server/runtimes/run-service.server";
 import type { JsonValue } from "~/features/runtime/runtime-types";
 
 /**
- * Ruling 107 — `viberr_ops`, the controller's built-in diagnostics server.
+ * Ruling 269 — `viberr_ops`, the controller's built-in diagnostics server.
  *
  * The contract under test: three READ-ONLY tools, each resolving the ASKING
  * PERSON's authority live, per call, and refusing in the toolkit's own voice.
  * `instance_health` answers anyone (the health probe is unauthenticated by
  * design); `read_run_log` applies the run-log route's exact gate and answers
  * ONE not-visible sentence to a missing run, a forbidden project and a
- * forbidden conversation alike; `list_runs` (ruling 265) answers the run ids
+ * forbidden conversation alike; `list_runs` (ruling 269) answers the run ids
  * that gate admits and silently drops the rest; `read_store_doc` is org-admin
  * only.
  *
@@ -41,14 +41,17 @@ const LONG_LINES = 620;
 /** The tool's own page bounds, restated so the arithmetic below is readable. */
 const DEFAULT_PAGE = 200;
 const MAX_PAGE = 250;
-/** Ruling 677: a run whose every line is long, so a page of them is bounded
+/** Ruling 269: a run whose every line is long, so a page of them is bounded
  *  by what a reply carries before it is bounded by its count. */
 const WORDY_RUN = "run_ops_wordy";
 const WORDY_LINES = 60;
 const WORDY_TEXT = "w".repeat(2_000);
-/** `readStoreDoc`'s own per-read ceiling: the most of a document it takes. */
+/** `readStoreDoc`'s default ceiling, the most of a document the editor opens;
+ *  `read_store_doc` must page past it (ruling 269). */
 const READ_DOC_BYTES = 256 * 1024;
-/** Ruling 677: one page of a store document, in bytes (`READ_PAGE_BYTES`). */
+/** The long fixture document: longer than that ceiling. */
+const LONG_DOC = "x".repeat(READ_DOC_BYTES) + "\n## Tail\n".padEnd(4_096, "t");
+/** Ruling 269: one page of a store document, in bytes (`READ_PAGE_BYTES`). */
 const READ_PAGE = 32_000;
 
 interface Actors {
@@ -103,7 +106,7 @@ beforeAll(async () => {
   });
   upsertRun(app.db, {
     id: CONTROLLER_RUN,
-    // Ruling 99's controller scope: no project, task_key = conversation id.
+    // Ruling 251's controller scope: no project, task_key = conversation id.
     projectSlug: "",
     taskKey: conversation.id,
     threadId: "thread_ops_controller",
@@ -181,15 +184,7 @@ beforeAll(async () => {
   );
   // A document that really is longer than one read: `truncated` has to be a
   // measurement, not a constant nobody can tell apart from the honest answer.
-  writeStoreDoc(
-    app.db,
-    target,
-    [],
-    "ops-long.md",
-    "x".repeat(READ_DOC_BYTES + 4_096),
-    storeActor,
-    { overwrite: true },
-  );
+  writeStoreDoc(app.db, target, [], "ops-long.md", LONG_DOC, storeActor, { overwrite: true });
 });
 afterAll(() => app.cleanup());
 
@@ -227,7 +222,7 @@ const HEALTH_REPLY = z.object({
   }),
   maintenance: z.object({ scheduled: z.boolean() }),
   build: z.object({ version: z.string().nullable() }),
-  // Ruling 127: strict, and NOTHING is authority-gated any more — the org-admin
+  // Ruling 137: strict, and NOTHING is authority-gated any more — the org-admin
   // detail arm named a deployment config path, and there is no such path left.
   // Every asker gets the same two facts, one of which is about their own
   // account.
@@ -241,7 +236,7 @@ const HEALTH_REPLY = z.object({
   runs: z.object({ cap: z.number(), live: z.number(), queued: z.number() }),
   // C05-A (pass 32): the pinned browser executable's PATH, org admins only.
   browserDetail: z.string().optional(),
-  // Ruling 182: the host toolchain. Its key list is toolchain.server.test.ts's;
+  // Ruling 40: the host toolchain. Its key list is toolchain.server.test.ts's;
   // this reply relays the snapshot's (asserted at the first instance_health case).
   toolchain: z.record(z.string(), z.string().nullable()),
   // F32-9 (pass 32): what each backend last told us — the reading the
@@ -370,13 +365,13 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     expect(body.runs.cap).toBe(runConcurrencySnapshot(app.db).cap);
     // F32-9: the quota/credential store rides along, one row per backend.
     expect(body.quota.map((q) => q.backend)).toEqual(["claude", "codex"]);
-    // Ruling 182: the toolchain, the same reading the health route serves —
+    // Ruling 40: the toolchain, the same reading the health route serves —
     // the controller answers "can this host build a Go service" from the
     // probe, not from a guess.
     expect(body.toolchain).toEqual(snapshot.toolchain);
   });
 
-  it("ruling 130(d): instance_health carries the refusal's principal, which the unauthenticated body strips", async () => {
+  it("ruling 160(a): instance_health carries the refusal's principal, which the unauthenticated body strips", async () => {
     // Canary: omit `{ principal: true }` from the tool's snapshot call.
     const { recordBackendCredentialRefusal, clearBackendCredentialRefusal } = await import(
       "~/server/runtimes/backend-quota.server"
@@ -392,7 +387,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       const { healthSnapshot } = await import("~/server/ops/health-snapshot.server");
       expect(healthSnapshot(app.db).quota.find((q) => q.backend === "codex")!.credentialRefused?.credentialLabel).toBeNull();
     } finally {
-      clearBackendCredentialRefusal(app.db, "codex");
+      clearBackendCredentialRefusal(app.db, "codex", ids.nonMember);
     }
   });
 
@@ -442,7 +437,7 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
     });
   });
 
-  it("ruling 146: carries a refused credential and a spent quota window, and neither is an INSTANCE fault", async () => {
+  it("ruling 40: carries a refused credential and a spent quota window, and neither is an INSTANCE fault", async () => {
     const {
       clearBackendCredentialRefusal,
       clearBackendQuotaExhaustion,
@@ -450,15 +445,15 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       recordBackendQuotaExhaustion,
     } = await import("~/server/runtimes/backend-quota.server");
     recordBackendCredentialRefusal(app.db, "codex", {
-      credentialUserId: null,
-      credentialLabel: null,
+      credentialUserId: ids.nonMember,
+      credentialLabel: "Non Member",
       providerText: "The provider reported: refresh token was already used",
       runId: "run_auth_probe",
       observedAt: new Date().toISOString(),
     });
     recordBackendQuotaExhaustion(app.db, "claude", {
-      credentialUserId: null,
-      credentialLabel: null,
+      credentialUserId: ids.nonMember,
+      credentialLabel: "Non Member",
       resetsAt: null,
       resetsAtPrecision: null,
       providerText: "The provider reported: You've hit your usage limit",
@@ -478,9 +473,9 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       const claude = body.quota.find((q) => q.backend === "claude")!;
       expect(claude.exhausted?.runId).toBe("run_quota_probe");
 
-      // What ruling 146 (owner, 2026-09-06) changed: since ruling 127 an
-      // agent-backend credential belongs to a PERSON, so one member's refused
-      // key or spent window is not a statement about this deployment. It used
+      // Ruling 40: an agent-backend credential belongs to a PERSON (ruling
+      // 137), so one member's refused key or spent window is not a statement
+      // about this deployment. It used
       // to push `credential:<backend>` / `quota:<backend>` into `degraded`,
       // which made `/resources/health?probe=readiness` answer 503 for the whole
       // instance and drained traffic from a deployment serving everyone else.
@@ -491,15 +486,15 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       expect(body.degraded).not.toContain("credential:codex");
       expect(body.degraded).not.toContain("quota:claude");
     } finally {
-      clearBackendCredentialRefusal(app.db, "codex");
-      clearBackendQuotaExhaustion(app.db, "claude");
+      clearBackendCredentialRefusal(app.db, "codex", ids.nonMember);
+      clearBackendQuotaExhaustion(app.db, "claude", ids.nonMember);
     }
   });
 
-  it("answers every asker the same two facts, and `askerConnected` is about THEM (ruling 127)", async () => {
-    // Ruling 107 split this reading in two — everyone learned WHETHER a backend
+  it("answers every asker the same two facts, and `askerConnected` is about THEM (ruling 137)", async () => {
+    // Ruling 269 split this reading in two — everyone learned WHETHER a backend
     // could run, only org admins learned WHY — because the "why" sentence
-    // interpolated the deployment's config directory. Ruling 127 deleted that
+    // interpolated the deployment's config directory. Ruling 137 deleted that
     // sentence along with the instance credential it described, so the split
     // has nothing left to protect: the org-admin arm is gone, and no row here
     // names a host path, an environment variable or another person.
@@ -590,20 +585,20 @@ describe("read_run_log: the run-log route's gate, in one sentence", () => {
 });
 
 /**
- * Ruling 265 (pass 37, F37-95): `read_run_log` takes a run id, and until this
+ * Ruling 269 (pass 37, F37-95): `read_run_log` takes a run id, and until this
  * existed nothing in either toolkit produced one. Its own description could
  * only point at "a task's console" — a place a model cannot look. Live, the
  * controller knew from `instance_health` that five runs were going, could not
  * learn which five, and read every task on the board matching `waiting:
  * "agent"` against timeline events to reconstruct it.
  */
-describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
+describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
   const LIVE_RUN = "run_ops_live";
   const HIDDEN_LIVE = "run_ops_live_hidden";
 
   const RUNS_REPLY = z.object({
     scope: z.string(),
-    // Ruling 302: always the real count, and the note only when it clipped.
+    // Ruling 117: always the real count, and the note only when it clipped.
     total: z.number(),
     truncated: z.string().optional(),
     runs: z.array(
@@ -672,14 +667,14 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
   });
 
   /**
-   * Ruling 268 (F37-100): ruling 99 stores a controller turn's CONVERSATION id
+   * Ruling 269 (F37-100): ruling 251 stores a controller turn's CONVERSATION id
    * in the runs table's `task_key` column, because that table has one identity
    * column. Reporting it raw put a `cnv_…` in a field named `taskKey` with
    * `projectSlug: ""` — the controller's own words: "a conversation id in a
    * field named taskKey, so anything filtering by task has to know to discard
    * that row". A storage shape is not a reply shape.
    */
-  it("a controller turn names its conversation and carries no task (ruling 268)", async () => {
+  it("a controller turn names its conversation and carries no task (ruling 269)", async () => {
     const { upsertRun } = await import("~/server/runtimes/run-store.server");
     const { createConversation } = await import("./controller-conversations.server");
     const conversation = createConversation(app.db, {
@@ -723,14 +718,14 @@ describe("list_runs: the run ids read_run_log needs (ruling 265)", () => {
   });
 
   /**
-   * Ruling 302's third sibling. `list_runs` clipped at `limit` and said
+   * Ruling 117's third sibling. `list_runs` clipped at `limit` and said
    * nothing: a caller asking "which runs are live right now" got a list that
    * looked complete and could not reconcile it with the count
    * `instance_health` reports for the same instant. `read_run_log` beside it
-   * has carried `olderExist`/`newerExist` since pass 32, and
-   * `inspect_audit_log` has carried `total`/`shown` since ruling 279.
+   * carries `olderExist`/`newerExist`, and `inspect_audit_log` carries
+   * `total`/`shown`.
    */
-  it("ruling 302: a clipped listing says how many it left out, and is silent when it left out none", async () => {
+  it("ruling 117: a clipped listing says how many it left out, and is silent when it left out none", async () => {
     const full = parsed(
       RUNS_REPLY,
       await call(ids.projectAdmin, "list_runs", { projectSlug: SLUG, taskKey: "VIB-142" }),
@@ -868,10 +863,10 @@ describe("read_run_log: every page is bounded, and says where it sits", () => {
   });
 
   /**
-   * Ruling 677: a count alone bounds nothing. A line's `display` runs to
+   * Ruling 269: a count alone bounds nothing. A line's `display` runs to
    * kilobytes, and a page of 200 of those is a reply no turn receives.
    */
-  it("ruling 677: a page of long lines holds what a reply carries, from the end the cursor reads from, and its cursors reach the rest", async () => {
+  it("ruling 269: a page of long lines holds what a reply carries, from the end the cursor reads from, and its cursors reach the rest", async () => {
     const wordy = (args: Record<string, JsonValue>) =>
       call(ids.projectAdmin, "read_run_log", { runId: WORDY_RUN, ...args });
     // CANARY: return every line the count allows and this reply is 125 KB,
@@ -985,34 +980,51 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     expect(body.characters).toBe(16);
     expect(body).not.toHaveProperty("nextOffset");
 
-    // Ruling 677: a document longer than one page comes back a page at a time
+    // Ruling 269: a document longer than one page comes back a page at a time
     // and says so. Without this arm `truncated` could be the constant `false`
     // and read identically, which is how a model states half a file as the
     // whole of it.
-    // CANARY: return the document whole and this reply is 256 KB, which no
+    // CANARY: return the document whole and this reply is 260 KB, which no
     // turn receives: the document cannot be read at all.
     const doc = { kind: "kb", id: kbId, path: ["ops-long.md"] };
     const read = (offset: number) => call(ids.orgAdmin, "read_store_doc", { ...doc, offset });
     const first = parsed(STORE_DOC_REPLY, await call(ids.orgAdmin, "read_store_doc", doc));
     expect(first.text).toBe("x".repeat(READ_PAGE));
-    expect(first).toMatchObject({ truncated: true, characters: READ_DOC_BYTES, nextOffset: READ_PAGE });
+    expect(first).toMatchObject({ truncated: true, characters: LONG_DOC.length, nextOffset: READ_PAGE });
     expect(first).not.toHaveProperty("offset");
     // CANARY: start every page at 0 and the second read is the first again.
     const second = parsed(STORE_DOC_REPLY, await read(first.nextOffset!));
     expect(second).toMatchObject({ offset: READ_PAGE, nextOffset: 2 * READ_PAGE, truncated: true });
-    // The last page of a document longer than the reader takes still says it
-    // was cut, and offers no page after it.
-    const last = parsed(STORE_DOC_REPLY, await read(READ_DOC_BYTES - 100));
-    expect(last.text).toBe("x".repeat(100));
-    expect(last.truncated).toBe(true);
-    expect(last).not.toHaveProperty("nextOffset");
-    expect(await read(READ_DOC_BYTES)).toBe(
-      "[error] `ops-long.md` reads as 262,144 characters; offset 262,144 is past its end.",
+    expect(await read(LONG_DOC.length)).toBe(
+      "[error] `ops-long.md` reads as 266,240 characters; offset 266,240 is past its end.",
     );
   });
 
+  it("ruling 269: pages a document past 256 KB to its end, so a replace never drops a tail it did not read", async () => {
+    // A replace names a version hashed from the whole file (ruling 212(a)), so
+    // the pages must reach the whole file too. Pages that stopped at the store
+    // reader's 256 KB cap ended with no `nextOffset`, and a caller that read
+    // every page and sent the document back deleted the tail under a version
+    // that matched.
+    // CANARY: read through `readStoreDoc`'s default cap again and the joined
+    // pages stop at 262,144 characters, without the tail.
+    const doc = { kind: "kb", id: kbId, path: ["ops-long.md"] };
+    const pages: string[] = [];
+    let offset: number | undefined = 0;
+    let last: z.infer<typeof STORE_DOC_REPLY> | undefined;
+    while (offset !== undefined && pages.length < 20) {
+      last = parsed(STORE_DOC_REPLY, await call(ids.orgAdmin, "read_store_doc", { ...doc, offset }));
+      expect(last.characters).toBe(LONG_DOC.length);
+      pages.push(last.text);
+      offset = last.nextOffset;
+    }
+    expect(pages.join("")).toBe(LONG_DOC);
+    // The last page says nothing follows, because nothing does.
+    expect(last?.truncated).toBe(false);
+  });
+
   it("says so when the target or the file is gone", async () => {
-    // Ruling 246's rule holds for the resource too: an id that never named one
+    // Ruling 260's rule holds for the resource too: an id that never named one
     // is not one that "no longer exists". CANARY: restore "That resource no
     // longer exists." and a mistyped id reads as a deletion, with no pointer
     // to the ids that are real.
@@ -1030,7 +1042,7 @@ describe("read_store_doc: org admins only, like the store browser", () => {
         path: ["SKILL.md"],
       }),
     ).toBe("[error] No skill has the id sk_nope; list_skills names them.");
-    // Ruling 246 (F37-75): "no longer exists" claimed the file once did, and
+    // Ruling 260 (F37-75): "no longer exists" claimed the file once did, and
     // sent the controller looking for a deletion that never happened. The
     // message now says what this reader IS. CANARY: restore the old sentence
     // and the caller most likely to hit this — one that confused the store
@@ -1042,8 +1054,8 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     });
     expect(missing).toContain("has no `gone.md`");
     expect(missing).toContain("not a git repository");
-    // Ruling 246: and the doors that do read a repo file, which since ruling
-    // 299 include the controller's own. CANARY: say "Viberr has no tool that
+    // Ruling 260: and the doors that do read a repo file, which since ruling
+    // 265 include the controller's own. CANARY: say "Viberr has no tool that
     // returns repository file contents" again and the controller is told it
     // cannot do what read_default_branch_file does.
     expect(missing).toContain(

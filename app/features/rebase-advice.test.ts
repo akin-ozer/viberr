@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ruling 291 (pass 37, F37-126) — Viberr never tells anyone to REBASE.
+ * Ruling 230 (pass 37, F37-126) — Viberr never tells anyone to REBASE.
  *
  * `update_branch_from_base` "merge[s] the base into the branch and push[es] it",
  * and its own tool text tells the operator to "never ask an agent to rebase,
@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
  * product forbids. Counting the sites is the only way to know they are all
  * closed, so this counts them rather than trusting a grep I ran by hand.
  */
-describe("ruling 291: no surface tells a person to rebase", () => {
+describe("ruling 230: no surface tells a person to rebase", () => {
   const appDir = fileURLToPath(new URL("../", import.meta.url));
 
   /** Every source file under `app/`, excluding tests — the assertion cannot be

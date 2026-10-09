@@ -1,5 +1,5 @@
 /**
- * Ruling 492 (pass 40, F40-69): what a task's done signal can be.
+ * Ruling 105 (pass 40, F40-69): what a task's done signal can be.
  *
  * Acceptance moves the task to Done and no stage sits after it, and the owner
  * declined a post-merge Verify stage (F40-64): a proof only the merged code
@@ -24,7 +24,7 @@
  *
  * This is the rule's one home. Every door that writes a goal carries it in the
  * goal field's description: the controller's `create_task` and `update_task`
- * (ruling 503 retired `create_goal` and `update_goal` with the chains), and
+ * (ruling 273 retired `create_goal` and `update_goal` with the chains), and
  * the operator's `set_goal`, `edit_goal` option (`goalDraft`) and `create_task`
  * option (`newTask.goal`), on the Claude toolkit and in the Codex plan schema.
  * The shipped controller guide and operator doctrine quote it word for word,

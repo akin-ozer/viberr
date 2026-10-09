@@ -23,9 +23,9 @@ import { createPat, setProjectCredential } from "~/server/secrets/pat-store.serv
 import { ensureOperatorRepoCheckout } from "~/server/runtimes/operator-run.server";
 
 /**
- * Ruling 468 (F40-12): viberr initializes an empty repository instead of
- * asking a person to push a commit. Ruling 128 already bootstrapped the base
- * before a task BRANCH; the operator runs before any branch, and live its first
+ * Ruling 227 (F40-12): viberr initializes an empty repository instead of
+ * asking a person to push a commit. The base was already bootstrapped before
+ * a task BRANCH; the operator runs before any branch, and live its first
  * checkout of `akin-ozer/website` held an unborn `main` and it opened a packet
  * asking the owner to "push one initial commit (a README)". Its checkout is now
  * the other path that needs the base: an unborn checkout gets the first commit
@@ -116,7 +116,7 @@ async function emptyRepoTask() {
   return { store, gh, checkout, control, pushOwn, head: () => head };
 }
 
-describe("the operator's checkout of an empty repository (ruling 468)", () => {
+describe("the operator's checkout of an empty repository (ruling 227)", () => {
   it("creates the first commit, moves the checkout onto it, and says so on the timeline and the audit", async () => {
     const { store, gh, checkout, head } = await emptyRepoTask();
     const view = await checkout();
@@ -162,7 +162,7 @@ describe("the operator's checkout of an empty repository (ruling 468)", () => {
     expect(existsSync(path.join(again.dir, "README.md"))).toBe(true);
   });
 
-  it("ruling 670: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and every unborn checkout moves onto it", async () => {
+  it("ruling 227: a repository whose first push was a person's own branch is not given a `main`: the project takes that branch and every unborn checkout moves onto it", async () => {
     const { store, gh, checkout, control, pushOwn } = await emptyRepoTask();
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-2", { stage: "triage" }),

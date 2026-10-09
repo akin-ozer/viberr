@@ -3,11 +3,11 @@ import type { NotificationKind } from "~/shared/mapping/notification.server";
 
 /**
  * Notification-routing preference schema (Phase 9C, profile.md §3.4/§3.5 +
- * ruling 13). Client-safe: catalog copy + defaults + the EXPLICIT plural
+ * ruling 30). Client-safe: catalog copy + defaults + the EXPLICIT plural
  * pref-id ↔ singular notification-kind mapping (contracts §4 flags the
  * mismatch — keep both vocabularies, map once here).
  *
- * V1 routes to the in-app channel ONLY (no mailer, ruling 13): each category
+ * V1 routes to the in-app channel ONLY (no mailer, ruling 30): each category
  * carries a single `app` toggle. The dead email booleans and the nudge shape
  * (which no UI ever surfaced and no code ever read) were removed. The mock's
  * `ghConnected` pref is dropped entirely (derived from the user row instead).
@@ -15,21 +15,21 @@ import type { NotificationKind } from "~/shared/mapping/notification.server";
 
 const NOTIF_PREF_CATEGORIES = [
   "packets",
-  // Ruling 481(a): an agent's question, its own toggle. It used to ride
+  // Ruling 74: an agent's question, its own toggle. It used to ride
   // "approvals", so silencing stage-approval noise silenced every question.
   "questions",
   "approvals",
   "mentions",
   "policy",
   "quality",
-  // Ruling 503: the epics this person leads. It replaced ruling 99's
+  // Ruling 272: the epics this person leads. It replaced ruling 273's
   // `controller` category, whose only writer was the chained-goal progress
   // note that epics retired.
   "epics",
-  // Ruling 131: a task this person owns or supervises was released from (or
+  // Ruling 57: a task this person owns or supervises was released from (or
   // stranded on) the work it waited for.
   "dependencies",
-  // Ruling 140: this person's owner seat on a task changed hands.
+  // Ruling 50: this person's owner seat on a task changed hands.
   "ownership",
 ] as const;
 
@@ -74,7 +74,7 @@ const KIND_TO_CATEGORY = {
   mention: "mentions",
   policy: "policy",
   quality: "quality",
-  // Ruling 503: the rows an upgraded inbox holds from goal chains were epic
+  // Ruling 273: the rows an upgraded inbox holds from goal chains were epic
   // progress in all but name, so they answer to the category that replaced
   // theirs.
   controller: "epics",
@@ -88,10 +88,10 @@ export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory 
 }
 
 /** The routing categories — PROFILE_NTF (the rows of profile.jsx;
- *  `dependencies` per ruling 131, `ownership` per ruling 140, `questions` per
- *  ruling 481 and `epics` per ruling 503).
+ *  `dependencies` per ruling 57, `ownership` per ruling 50, `questions` per
+ *  ruling 74 and `epics` per ruling 272).
  *
- *  Ruling 481(a) (F40-48): each description names what its kind's writers
+ *  Ruling 74 (F40-48): each description names what its kind's writers
  *  actually send. "Approval requests" said "Operator transition requests at
  *  boundaries you can approve" while it carried every agent question, so a
  *  person who switched it off to quiet stage traffic stopped hearing from the
@@ -180,20 +180,20 @@ const storedChannelPrefsSchema = z
  *  `.catch` keeps one junk entry from discarding the others. */
 const storedNotifPrefsSchema = z.object({
   packets: storedChannelPrefsSchema,
-  // Ruling 481: absent on prefs stored before agent questions had their own
+  // Ruling 74: absent on prefs stored before agent questions had their own
   // category — the per-field catch reads it as ON.
   questions: storedChannelPrefsSchema,
   approvals: storedChannelPrefsSchema,
   mentions: storedChannelPrefsSchema,
   policy: storedChannelPrefsSchema,
   quality: storedChannelPrefsSchema,
-  // Ruling 503: absent on prefs stored before epics — the per-field catch
+  // Ruling 272: absent on prefs stored before epics — the per-field catch
   // reads it as ON, the opt-out default every category has. A person who had
-  // silenced ruling 99's `controller` category keeps it silenced here, since
+  // silenced ruling 273's `controller` category keeps it silenced here, since
   // that category carried the goal-chain notes epics replaced
   // (`mergeNotifPrefs`).
   epics: storedChannelPrefsSchema,
-  // Rulings 131 / 140 (pass 34): same posture — absent reads ON.
+  // Rulings 57 / 50 (pass 34): same posture — absent reads ON.
   dependencies: storedChannelPrefsSchema,
   ownership: storedChannelPrefsSchema,
 });
@@ -206,7 +206,7 @@ export function mergeNotifPrefs(raw: StoredPrefJson | null): NotifPrefs {
 }
 
 /**
- * Ruling 503: a value stored before epics names the retired `controller`
+ * Ruling 273: a value stored before epics names the retired `controller`
  * category, whose only notes were goal-chain progress. Read it as `epics`
  * when `epics` itself was never stored, so silencing goal-chain notes keeps
  * epic notes silenced instead of turning them back on at the upgrade.

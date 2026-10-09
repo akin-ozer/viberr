@@ -1,5 +1,5 @@
 /**
- * Ruling 624: the most one page of an agent's read carries, in UTF-8 bytes,
+ * Ruling 215: the most one page of an agent's read carries, in UTF-8 bytes,
  * whichever backend the run is on.
  *
  * A Codex model in code mode (`tool_mode: code_mode_only` in the CLI's model
@@ -18,7 +18,7 @@
  *
  * 32,000 bytes is 8,000 of those tokens, which leaves room for a page's own
  * note and for a print that JSON-escapes it. The Claude CLI refuses an MCP
- * result over 25,000 real tokens (ruling 436), far above this. The budget is
+ * result over 25,000 real tokens (ruling 219(c)), far above this. The budget is
  * not keyed on a model, so a new code-mode model needs no entry here.
  */
 export const READ_PAGE_BYTES = 32_000;

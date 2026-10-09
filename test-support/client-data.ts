@@ -6,7 +6,7 @@ import type {
 } from "react-router";
 
 /**
- * Ruling 457: a resource route's `clientLoader` and `clientAction` under
+ * Ruling 11: a resource route's `clientLoader` and `clientAction` under
  * `createRoutesStub`. A stub route whose loader or action comes from here runs
  * a fetcher's request the way framework mode runs it (react-router
  * `lib/dom/ssr/routes.js`, `createClientRoutes`): through the route module's

@@ -20,9 +20,9 @@ async function coloured(line: string): Promise<[string, string][]> {
   );
 }
 
-/* Ruling 508: the reader's log grammar colours a number whole or not at all,
+/* Ruling 317: the reader's log grammar colours a number whole or not at all,
    and each level by its severity. */
-describe("log grammar (ruling 508)", () => {
+describe("log grammar (ruling 317)", () => {
   it("colours Node's test durations whole and leaves the digits of a name alone (the owner's screenshot)", async () => {
     expect(
       await coloured(

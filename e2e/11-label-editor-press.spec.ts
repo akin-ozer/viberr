@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 /**
- * Ruling 561 in a browser: one press on the Labels editor's Save, with the
+ * Ruling 289 in a browser: one press on the Labels editor's Save, with the
  * label list open under the field, saves. The press takes the focus out of the
  * field, which folds the list, and folded as the press began the list took its
  * height with it: Save rose before the release, the release landed on no

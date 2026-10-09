@@ -45,7 +45,7 @@ const KB: KbView = {
 const noop = () => {};
 
 /**
- * Ruling 368: a probe in flight shows itself on the row control that started
+ * Ruling 286: a probe in flight shows itself on the row control that started
  * it. The Test and Re-scan icons spun, but the button stayed pressable (a
  * second press re-posted the probe) and its name still offered the action.
  * Now the one in flight is `aria-busy` and disabled, the loader spins where
@@ -73,7 +73,7 @@ describe("resource rows: the probe in flight", () => {
     const idle = getByLabelText("Test linear-mcp");
     expect(idle.hasAttribute("aria-busy")).toBe(false);
     expect(idle.hasAttribute("disabled")).toBe(false);
-    // Ruling 459: the loader rests hidden in the glyph's cell (GlyphSwap).
+    // Ruling 284: the loader rests hidden in the glyph's cell (GlyphSwap).
     expect(idle.querySelector(".copy-glyph[data-copied]")).toBeNull();
   });
 
@@ -97,7 +97,7 @@ describe("resource rows: the probe in flight", () => {
   });
 });
 
-describe("resource rows: a private knowledge base (ruling 578)", () => {
+describe("resource rows: a private knowledge base (ruling 209)", () => {
   it("says who reads a private one, and keeps the live-folder line for an open one", () => {
     // CANARY: drop the `kb.private` branch and the private row reads like an
     // open one, which every agent's shell can read.

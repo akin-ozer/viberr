@@ -3,7 +3,7 @@ import { buildCodexOperatorPrompt, buildOperatorTurnPrompt } from "./operator-pr
 import { operatorSnapshot } from "../../../test-support/operator-snapshot";
 
 /**
- * Ruling 482 (pass 40, F40-52): the operator reads the project's gates from
+ * Ruling 130 (pass 40, F40-52): the operator reads the project's gates from
  * Viberr's own record, and a failing gate reaches it as a turn of its own.
  *
  * Live on akinozer-com every directive re-typed the gate commands from the
@@ -36,7 +36,7 @@ const SNAPSHOT = operatorSnapshot({
   },
 });
 
-describe("the operator and the project's gates (ruling 482)", () => {
+describe("the operator and the project's gates (ruling 130)", () => {
   it("a gates-failed turn names the failing gate, its log and the rework, and forbids a report of the gates", () => {
     // CANARY: drop the `gates-failed` branch of operatorTurnDoctrine and this
     // turn falls through to the ordinary stage rule.
@@ -51,9 +51,9 @@ describe("the operator and the project's gates (ruling 482)", () => {
   it("every ordinary turn carries the gate rule while gates are declared, and none without them", () => {
     // CANARY: drop `projectGatesRule` from stageRule.
     const prompt = buildOperatorTurnPrompt(SNAPSHOT, "manual");
-    expect(prompt).toContain("Project gates (ruling 482): Gates on a95c337: 3/4 exit 0 (run by Viberr).");
+    expect(prompt).toContain("Project gates (ruling 130): Gates on a95c337: 3/4 exit 0 (run by Viberr).");
     expect(prompt).toContain("never offer or perform `accept_completion` while `gates.state` is not `passed`");
     const without = buildOperatorTurnPrompt({ ...SNAPSHOT, gates: null }, "manual");
-    expect(without).not.toContain("Project gates (ruling 482)");
+    expect(without).not.toContain("Project gates (ruling 130)");
   });
 });

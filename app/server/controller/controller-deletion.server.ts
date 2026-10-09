@@ -22,10 +22,10 @@ import { purgeDeletedConversationLogs } from "./controller-purge.server";
 import { dropConversationLease } from "./controller-run.server";
 
 /**
- * Ruling 525: deleting a controller conversation.
+ * Ruling 250: deleting a controller conversation.
  *
- * WHO. The person who started it, always: it is theirs (ruling 99(d)). An org
- * admin, any: they already read every one (ruling 100(b)). And, for a
+ * WHO. The person who started it, always: it is theirs (ruling 249). An org
+ * admin, any: they already read every one (ruling 27). And, for a
  * conversation about a project (bound to its board or anchored to one of its
  * tasks), whoever holds `delete-controller-conversations` there, a project
  * admin by default (`app/shared/rbac.ts`); an org admin passes that gate as
@@ -74,7 +74,7 @@ export interface DeleteConversationInput {
    * The scope of the page it is deleted from, which only lists its own: null
    * is the instance page, a slug that project's page (its board's threads and
    * its tasks'). A conversation of another scope is not found here, as the
-   * page's loader would not open it (ruling 121).
+   * page's loader would not open it (ruling 249).
    */
   projectSlug: string | null;
   dataRoot?: string;
@@ -91,7 +91,7 @@ export interface DeleteConversationResult {
 type DeletedAs = "starter" | "org-admin" | "project-role";
 
 function notFound(): AppError {
-  // The 404 every non-reader gets about a conversation (ruling 99(d)).
+  // The 404 every non-reader gets about a conversation (ruling 249).
   return AppError.notFound("Conversation not found.");
 }
 
@@ -154,7 +154,7 @@ export function deleteControllerConversation(
       )
       .get(conversation.id, conversation.id),
   );
-  // Ruling 685: the steps it left on tasks go with it (their rows follow the
+  // Ruling 259: the steps it left on tasks go with it (their rows follow the
   // conversation's), and each of those tasks still says the controller will
   // continue on its acceptance, so each is told it will not. Not a task that
   // is archived, or in an archived project: those are read-only, nobody can

@@ -3,14 +3,14 @@ import type { McpView } from "~/server/org/resources.server";
 import { looksLikeWriteTool, MCP_TOOL_NAME_RE } from "~/shared/mcp-tools";
 
 /**
- * The MCP-server editor's write-tool draft (ruling 700(e), the split of
+ * The MCP-server editor's write-tool draft (ruling 13(b), the split of
  * `resource-modals.tsx`): the marks and the names typed in. McpModal calls it
  * where its state always registered, after the connection's own fields. No
  * component lives here, so the module is not a Fast Refresh boundary.
  */
 
 /**
- * Ruling 176: the write-tool marks. The editor proposes and the admin
+ * Ruling 188: the write-tool marks. The editor proposes and the admin
  * decides: a server nobody has reviewed opens with the discovery suggestion
  * selected; a reviewed one opens with exactly what was saved.
  */

@@ -81,7 +81,7 @@ describe("UI-29: the last-admin guard counts LIVE accounts only", () => {
     store.db.prepare(`DELETE FROM users WHERE id = ?`).run(store.users.arda.id);
   }
 
-  // Ruling 705: a DISABLED admin cannot sign in either, so it neither
+  // Ruling 26: a DISABLED admin cannot sign in either, so it neither
   // satisfies the guard nor is ever the last admin. The live admin beside it is
   // still refused their own demotion, and its demotion goes, as its removal
   // does (F18-6).

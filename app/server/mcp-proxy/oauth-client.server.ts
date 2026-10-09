@@ -24,7 +24,7 @@ import { errorMessage } from "~/shared/errors";
 import type { McpFetch } from "./upstream.server";
 
 /**
- * Ruling 469: the MCP authorization flow, as a client (the protocol half; the
+ * Ruling 192: the MCP authorization flow, as a client (the protocol half; the
  * registry half, which seals what this returns, is `org/mcp-oauth.server.ts`).
  *
  * An HTTP MCP server that answers 401 with `WWW-Authenticate: Bearer …

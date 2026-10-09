@@ -6,7 +6,7 @@ import type { ResourceConfirm } from "./resources-panel-derive";
 import { useOrgAction } from "./use-org-action";
 
 /**
- * The Agent resources tab's state and posts (ruling 700(e), the split of
+ * The Agent resources tab's state and posts (ruling 13(b), the split of
  * `resources-panel.tsx`): which store folder's browser is open and the
  * creates waiting to open one, the row posts (removal, re-scan, connection
  * test) with their busy rows, and the re-read while a server installs. The
@@ -19,10 +19,10 @@ import { useOrgAction } from "./use-org-action";
  *  knowledge-base proposal's link names, and the files-mode creates that open
  *  it once the revalidated list delivers the new row. */
 export function useResourceBrowsing(kbs: KbView[], skills: SkillView[]) {
-  // Ruling 483: `?kb=<dir>&doc=<path>` arrives from a knowledge-base proposal's
+  // Ruling 267: `?kb=<dir>&doc=<path>` arrives from a knowledge-base proposal's
   // "Open document" and opens that base's browser on that document. Read on
   // arrival, like the page's other arrival links (`?update=`, `?add`, rulings
-  // 480 and 532): the document rides on the browse the link opened, so the
+  // 222 and 322): the document rides on the browse the link opened, so the
   // base reopened from its row starts at its root while the link is still in
   // the URL.
   const [searchParams] = useSearchParams();
@@ -93,7 +93,7 @@ export function useResourcePosts() {
       if (kind === "skill") rowAction.submit({ intent: "skill-delete", skillId: item.id });
       if (kind === "agent") rowAction.submit({ intent: "agent-delete", profileId: item.id });
       // No setConfirm(null): the dialog plays its exit, then its onCancel
-      // clears it (ruling 459).
+      // clears it (ruling 287).
     },
   };
 }
@@ -118,6 +118,5 @@ export function useWarmingRevalidation(mcps: McpView[]) {
     return () => clearInterval(id);
     // `revalidator` is stable enough to omit; re-arming on every render would
     // reset the 20s window each time the page re-read itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warming]);
 }

@@ -117,19 +117,19 @@ describe("board action — a non-member never learns the project exists (E2)", (
 });
 
 /**
- * F21-2 / ruling 88 — the board's drop on the FINAL column is an acceptance.
+ * F21-2 / ruling 97 — the board's drop on the FINAL column is an acceptance.
  *
  * `reorderTask` routes a move into the terminal stage through the full
  * acceptance contract (→ `transitionStage` → `acceptCompletion` — the real,
- * irreversible merge), and the board has fronted it with the shared
- * `AcceptConfirm` ceremony since ruling 53 (R18-7). The POST behind that
+ * irreversible merge), and the board fronts it with the shared
+ * `AcceptConfirm` ceremony (ruling 97, R18-7). The POST behind that
  * ceremony carried nothing back from it: a drag whose confirmation was never
  * rendered — a stale tab, a replayed form, a script — merged to the default
  * branch on an unadorned request. The ordinary column move above (`to: "impl"`,
  * which the 403 case exercises) is the counterweight: only a move that IS an
  * acceptance is held to the ceremony.
  */
-describe("board reorder — the acceptance disclosure (ruling 88)", () => {
+describe("board reorder — the acceptance disclosure (ruling 97)", () => {
   it("refuses a drop on the terminal column that carries no acknowledgment", async () => {
     // SAFETY: arda is the project admin, so `reorder-board` and the acceptance
     // authority both pass — the refusal that answers is the disclosure.
@@ -164,7 +164,7 @@ describe("board reorder — the acceptance disclosure (ruling 88)", () => {
     expect(result.error).toContain("changed after the accept dialog");
   });
 
-  it("ruling 381: a backward drop with no reason is refused by the route", async () => {
+  it("ruling 47: a backward drop with no reason is refused by the route", async () => {
     // Runs BEFORE the move below, which lands VIB-142 on impl for good.
     const result = reply(
       await post("viberr-core", ids.arda, {
@@ -180,7 +180,7 @@ describe("board reorder — the acceptance disclosure (ruling 88)", () => {
 
   it("an ordinary column move needs no acceptance echo", async () => {
     // Same intent, a non-terminal target: no acceptance, no ceremony, no echo.
-    // It carries a ruling 381 reason because the drop is backward, which is a
+    // It carries a ruling 47 reason because the drop is backward, which is a
     // different rule with a different shape (a sentence, not three fields).
     const result = await post("viberr-core", ids.arda, {
       intent: "reorder",
@@ -240,7 +240,7 @@ describe("create-task carries the metadata fields from the form", () => {
 });
 
 /**
- * Ruling 533: the New task form posts its files as multipart, and the route
+ * Ruling 76: the New task form posts its files as multipart, and the route
  * hands every one of them to `createTask`, which saves them before triage.
  */
 describe("create-task carries the files the task is filed with", () => {

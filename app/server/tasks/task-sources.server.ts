@@ -26,11 +26,11 @@ import { toError } from "~/shared/errors";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 690: keeping a source, the action behind `keep_source`.
+ * Ruling 82: keeping a source, the action behind `keep_source`.
  *
  * The run saves the bytes itself, with its own tools, as a file in the task's
  * attachments folder: the one task folder a run writes, and the one the
- * server reads without following a link (ruling 552). It saves them under a
+ * server reads without following a link (ruling 19). It saves them under a
  * name that starts with `.source-` and then names that file here. The server
  * takes its own copy into the task's sources (`files/task-sources.server.ts`),
  * where no run can change it, and removes the staged file. The server fetches
@@ -39,15 +39,15 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  *
  * The staged name is what keeps a source out of the task's files. That folder
  * also holds what people attached and what runs posted and delivered, and a
- * completing run takes every file saved in its window as its own (rulings 593
- * and 627), a deliverer as its delivery (ruling 610). A page a researcher had
+ * completing run takes every file saved in its window as its own (rulings 78
+ * and 85), a deliverer as its delivery (ruling 81). A page a researcher had
  * saved under an ordinary name and not yet kept was a deliverer's file the
  * moment the deliverer finished beside it: delivered, copied into the kept
  * delivery, and then refused as a source for being somebody's file. No lister
  * of the folder returns a dot-name, so a staged file is nobody's file at any
  * instant, and the keep takes nothing else: a file under any other name
  * belongs to the task (a person's upload, a relay, a delivery, a gate's log,
- * a name a writer holds in flight under ruling 558) and stays there.
+ * a name a writer holds in flight under ruling 77) and stays there.
  */
 
 /** A source's bytes are read for a credential only this far in. */
@@ -161,12 +161,12 @@ export function keepTaskSource(db: DatabaseSync, ctx: TaskMutationContext, input
       `\`${wanted}\` is not one file name in the task's attachments folder. Give the file's name alone, with no folder.`,
     );
   }
-  // Ruling 675: the folder's own entry, whichever Unicode form was typed.
+  // Ruling 76: the folder's own entry, whichever Unicode form was typed.
   const stored = path.basename(abs);
   const name = stagedSourceName(stored) ?? stored;
   const staged = { projectSlug, taskKey, file: stored };
 
-  // Ruling 552: never through a link.
+  // Ruling 19: never through a link.
   const read = readAttachmentBytes(abs, SOURCE_MAX_BYTES);
   if (!read) {
     return refused(
@@ -319,7 +319,7 @@ function keptByRun(sources: readonly TaskSource[], note: RunSourcesNote): TaskSo
 }
 
 /**
- * Ruling 690: one entry on the timeline for a run that kept sources, written
+ * Ruling 82: one entry on the timeline for a run that kept sources, written
  * when the run settles, whatever its end. A keep writes no entry of its own:
  * a run that keeps seventy pages would bury the thread. The entry is the
  * agent's, names the ids and points at the Sources panel.
@@ -377,7 +377,7 @@ export interface TaskSourceRow {
 const SOURCES_LISTED = 100;
 
 /**
- * Ruling 690: a task's sources for its page, newest first and at most
+ * Ruling 317: a task's sources for its page, newest first and at most
  * `SOURCES_LISTED` of them. `nameOf` names the agent that kept one, as the
  * rest of the page names it.
  */

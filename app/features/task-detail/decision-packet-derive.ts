@@ -6,7 +6,7 @@ import type { PacketArchiveDisclosure } from "./decision-packet";
 
 /**
  * What the decision packet card reads off its packet, its viewer's authority
- * and the person's choice before it draws (ruling 700(e), the split of
+ * and the person's choice before it draws (ruling 13(b), the split of
  * `decision-packet.tsx` along the task-page recipe): the authority gate table,
  * the choice the card opens on, the refusals a Confirm can meet, who may
  * answer at all, and the words of the archive ceremony. Pure functions of the
@@ -31,7 +31,7 @@ type PacketOption = PacketRender["options"][number];
  */
 export function observationLabel(key: string): string {
   const raw = key.trim();
-  // Ruling 470: a path-shaped key (`origin/main`, `CI/CD`, `src/pages`) is the
+  // Ruling 62: a path-shaped key (`origin/main`, `CI/CD`, `src/pages`) is the
   // agent's own label and is shown as written, only capped. It used to be
   // replaced with "detail" on the theory that it was a mis-slotted value, and a
   // live packet lost the one word saying what its row was about.
@@ -72,12 +72,12 @@ export interface PacketTierGrants {
   canEditGoal: boolean;
   canArchive: boolean;
   canDiscardBranch: boolean;
-  /** Ruling 164: `force-accept-completion` is admin-only, the tier the task
+  /** Ruling 131: `force-accept-completion` is admin-only, the tier the task
    *  page's own Force accept button holds. */
   canForceAccept: boolean;
-  /** Ruling 164: `approve-transition`, the tier the stage picker holds. */
+  /** Ruling 131: `approve-transition`, the tier the stage picker holds. */
   canMoveStage: boolean;
-  /** Ruling 672: `edit-policy`, the tier the project's repository setting
+  /** Ruling 65: `edit-policy`, the tier the project's repository setting
    *  holds. Both answers to the repository question decide the board. */
   canEditPolicy: boolean;
 }
@@ -97,7 +97,7 @@ export interface PacketTierGate {
    * instead of 403ing on click (adversarial-review #15).
    *
    * The repository question's two kinds have neither a title nor a note
-   * (ruling 673): they stand together, on a card whose one note under the
+   * (ruling 312(d)): they stand together, on a card whose one note under the
    * options says who answers, and each inert option is described by that
    * note. Their `denyNote` is printed only on a packet that is not that
    * card, which no writer in the app makes.
@@ -168,7 +168,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
   [
     "force_accept",
     {
-      // Ruling 164 (pass 35, F35-14): the resolution runs the admin override
+      // Ruling 131 (pass 35, F35-14): the resolution runs the admin override
       // itself, so the option carries the Force accept button's own tier.
       held: (grants) => grants.canForceAccept,
       denyNote: "Force-accepting past the review gate is reserved for admins.",
@@ -181,7 +181,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
   [
     "move_stage",
     {
-      // Ruling 164: the move runs on the stage picker's path, which takes the
+      // Ruling 131: the move runs on the stage picker's path, which takes the
       // same `approve-transition` tier the picker itself takes.
       held: (grants) => grants.canMoveStage,
       denyNote: "Moving the task to another stage is reserved for maintainers and admins.",
@@ -209,7 +209,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
   [
     "connect_repository",
     {
-      // Ruling 672: the resolution attaches the repository through the
+      // Ruling 65: the resolution attaches the repository through the
       // settings door, so the option carries that door's tier.
       held: (grants) => grants.canEditPolicy,
       denyNote: "Connecting a repository to the board is reserved for project admins.",
@@ -219,7 +219,7 @@ const PACKET_TIER_GATES = new Map<PacketOptionKind, PacketTierGate>([
   [
     "keep_without_repository",
     {
-      // Ruling 672: it writes a standing ruling for the whole board.
+      // Ruling 65: it writes a standing ruling for the whole board.
       held: (grants) => grants.canEditPolicy,
       denyNote: "Deciding that the board keeps no repository is reserved for project admins.",
       option: {},
@@ -241,9 +241,9 @@ export function gateFor(kind: PacketOptionKind, grants: PacketTierGrants): Packe
 
 /**
  * The option kinds whose ask-first ceremony interposes before the resolve is
- * dispatched (rulings 20/53: a one-way write states what it destroys and offers
+ * dispatched (ruling 97: a one-way write states what it destroys and offers
  * a way out). `archive_task` with `deleteBranch` performs the product's ONLY
- * remote-branch deletion (ruling 17), `discard_branch` destroys local commits,
+ * remote-branch deletion (ruling 233), `discard_branch` destroys local commits,
  * and `resolve_remote_collision` deletes a remote ref and closes a PR.
  */
 export const CONFIRM_FIRST_KINDS: ReadonlySet<PacketOptionKind> = new Set([
@@ -253,29 +253,29 @@ export const CONFIRM_FIRST_KINDS: ReadonlySet<PacketOptionKind> = new Set([
 ]);
 
 /**
- * Ruling 478(e) (F40-31, F40-57): the choice a card opens on. With no authored
+ * Ruling 68 (F40-31, F40-57): the choice a card opens on. With no authored
  * option, the composed directive (index 0) is the one choice there is, and it
  * asks for the words itself. Nothing is preselected on an agent's question,
  * whose answer only the person can give (WEB-3's "Connected; the first build
  * succeeded" was one Confirm from telling the agent a build had passed), nor
  * on a packet that recommends nothing. -1 is "no choice yet"; Confirm then
- * refuses in place (ruling 147).
+ * refuses in place (ruling 288).
  */
 export function initialChoice(p: PacketRender): number {
   if (p.options.length === 0) return 0;
   return p.answerTo ? -1 : p.options.findIndex((o) => o.rec);
 }
 
-/** Ruling 672: a `connect_repository` answer's box opens with the repository
+/** Ruling 224: a `connect_repository` answer's box opens with the repository
  *  the operator could name. */
 export function initialRepository(p: PacketRender): string {
   return p.options.find((o) => o.kind === "connect_repository")?.repo ?? "";
 }
 
 /**
- * Ruling 625 (B11): a decision that waits on a person is ONE colour, the info
+ * Ruling 312 (B11): a decision that waits on a person is ONE colour, the info
  * blue it wears on Home, Notifications, the board and the queue; the amber
- * stays an agent's question (`answerTo`, ruling 478(e)'s predicate), the coral
+ * stays an agent's question (`answerTo`, ruling 68's predicate), the coral
  * a block.
  */
 export function packetTone(p: PacketRender): "blocked" | "input" | "decision" {
@@ -317,13 +317,13 @@ export interface PacketStanding {
    */
   everyOptionForbidden: boolean;
   /**
-   * Ruling 672: the repository question, whose every answer is a project
+   * Ruling 65: the repository question, whose every answer is a project
    * admin's. A maintainer is stranded on it as a contributor-owner is on a
    * maintainer's, so the note and the way up name the admin.
    */
   boardDecision: boolean;
   /**
-   * Ruling 673 (owner, 2026-10-06: "trim the repeated \"project admin\"
+   * Ruling 312(d) (owner, 2026-10-06: "trim the repeated \"project admin\"
    * wording on the card"): that card says who answers ONCE, in the note under
    * the options. Its answers carry no clause and no hover title of their own
    * and the selected one's refusal is not printed beside it; the note takes
@@ -416,17 +416,17 @@ export function packetChoiceView(
   // R14-3 / F20-6 / F31-6 the three that touch a branch.
   const selectedGate = selected ? gateFor(selected.kind, grants) : null;
   const blockReason = selectedGate?.denyNote ?? null;
-  // Ruling 478(e): the two refusals a Confirm can meet before any request.
+  // Ruling 68: the two refusals a Confirm can meet before any request.
   // Both clear the moment the person does what they name.
   const noChoice = sel < 0;
   const needsReply = selected?.reply === true;
   const choiceInvalid = refused > 0 && noChoice;
-  // Ruling 672: which text the box under the options holds, and sends.
+  // Ruling 224: which text the box under the options holds, and sends.
   const connectsRepository = selected?.kind === "connect_repository";
   const answer = connectsRepository ? state.repository : state.note;
   const replyInvalid = refused > 0 && needsReply && answer.trim() === "";
   // Hidden while the custom choice is selected: the directive IS the message,
-  // and two competing textareas would ask which one counts. Ruling 674 (owner,
+  // and two competing textareas would ask which one counts. Ruling 312(d) (owner,
   // 2026-10-06: "hide the repository box too"): and hidden under "Connect a
   // repository" for a person who cannot connect one, where it asked for a
   // required value nothing reads.
@@ -443,7 +443,7 @@ export function packetChoiceView(
     (o) => (gateFor(o.kind, grants)?.option ?? null) !== null || !canResolve,
   );
   // Roving tabindex: with nothing chosen yet, the first choice the viewer can
-  // make is the group's one tab stop (APG radio group, ruling 478(e)), and a
+  // make is the group's one tab stop (APG radio group, ruling 68), and a
   // refused Confirm focuses it; the composed directive counts, as it is never
   // inert. With every choice inert it is the first, so Tab still reaches the
   // group and its options can be read.
@@ -471,7 +471,7 @@ export function packetChoiceView(
 }
 
 /**
- * E4 / ruling 673: whether the selected option's refusal is printed beside
+ * E4 / ruling 312(d): whether the selected option's refusal is printed beside
  * Confirm. Only for a viewer who can resolve, and not on the card that says
  * who answers once (`saidOnce`), whose note under the options describes the
  * refused Confirm instead.
@@ -511,12 +511,12 @@ export function answerBoxCopy(
   needsReply: boolean,
 ): AnswerBoxCopy {
   return {
-    // Ruling 478(e) (F40-31): on an agent's question this box is the
+    // Ruling 68 (F40-31): on an agent's question this box is the
     // person's answer to THAT agent, which `resolvePacket` sends it
     // back to. "Note for the operator · optional" told them their
     // reply was a side note for someone else, and a note that named
     // the operator, as the label invited, re-routed the answer away
-    // from the agent that asked (ruling 447).
+    // from the agent that asked (ruling 68).
     label: connectsRepository
       ? "Repository to connect"
       : answerTo
@@ -524,7 +524,7 @@ export function answerBoxCopy(
         : "Note for the operator",
     // U39-7: this box sits under every packet, and "before
     // reopening" fitted only the closed-pull-request one. Ruling
-    // 643: a required answer has no example; its label already says
+    // 312(c): a required answer has no example; its label already says
     // whose answer it is, and the one example ("what it asked for,
     // exactly as you see it") fitted only a question about a value
     // on the person's screen.
@@ -575,7 +575,7 @@ export function archiveCeremonyCopy(
     `the open “${packetTitle}” decision`,
     ...(pending > 0
       ? [
-          // Inline plural, not `countLabel`: ruling 457 (shared/text/plural.ts).
+          // Inline plural, not `countLabel`: ruling 11 (shared/text/plural.ts).
           `${pending} pending operator recommendation${
             pending === 1 ? "" : "s"
           }`,

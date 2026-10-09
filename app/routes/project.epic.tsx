@@ -18,13 +18,13 @@ import { requireProjectFormAction } from "./project-visibility.server";
 import { readWorkspace } from "./project-workspace.server";
 
 /**
- * /projects/:slug/epics/:epicId — one epic (ruling 503): what it is for, its
+ * /projects/:slug/epics/:epicId — one epic (ruling 325): what it is for, its
  * tasks and where each stands, its progress and its history. Actions (all
  * CSRF-checked, the grant checked inside each writer):
  *   update-epic (`manage-epics`) · add-tasks · remove-task (`edit-task-meta`)
  *   · create-task (`create-task`, in this epic from its first line)
  *   · archive-task · restore-task · archive-epic-tasks (`approve-transition`,
- *   ruling 651: one task from its row, or every task of a Done epic)
+ *   ruling 274: one task from its row, or every task of a Done epic)
  */
 
 export function meta({ params, loaderData }: Route.MetaArgs) {
@@ -134,5 +134,5 @@ export default function Epic({ loaderData, params }: Route.ComponentProps) {
   );
 }
 
-/** Ruling 457: when this loader re-runs (`revalidation-policy.ts`). */
+/** Ruling 11: when this loader re-runs (`revalidation-policy.ts`). */
 export const shouldRevalidate = revalidateWhen("routes/project.epic");

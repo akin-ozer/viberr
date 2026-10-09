@@ -1,7 +1,7 @@
 /**
- * Who owns a task (ruling 654): taking or assigning the owner seat, releasing
+ * Who owns a task (ruling 13(a)): taking or assigning the owner seat, releasing
  * it, and releasing every task a departing member owned. The owner is the
- * task's acceptance authority and the person its agent runs bill (ruling 127).
+ * task's acceptance authority and the person its agent runs bill (ruling 137).
  */
 
 import type { DatabaseSync } from "node:sqlite";
@@ -75,7 +75,7 @@ export async function setOwner(
       `${input.taskKey} is archived. Restore it before changing its owner.`,
     );
   }
-  // E32-9 / ruling 118 (owner, 2026-09-02): a task at the terminal stage is
+  // E32-9 / ruling 50 (owner, 2026-09-02): a task at the terminal stage is
   // CLOSED — every runtime control on its page says so (G9) — and the owner
   // seat's authority (review, acceptance, packet resolution) has nothing left
   // to act on. Contributors and maintainers cannot take it; a project ADMIN may
@@ -146,7 +146,7 @@ export async function setOwner(
   });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
-  // Ruling 140(b): tell the person whose seat changed — the new owner on a
+  // Ruling 50: tell the person whose seat changed — the new owner on a
   // hand-off, the DISPLACED owner on a takeover. Losing the seat takes away
   // the credential principal role, the review duty and the acceptance
   // authority, so it is not a smaller fact than gaining it. Nobody is told
@@ -262,7 +262,7 @@ export async function releaseOwner(
   await appendTimelineEvent(taskRef(ctx, input.projectSlug, input.taskKey), event, { ownerUserId: null });
   reprojectTask(db, ctx, input.projectSlug, input.taskKey);
 
-  // Ruling 140(b): an ADMIN release takes the seat away from someone; they are
+  // Ruling 50: an ADMIN release takes the seat away from someone; they are
   // told, in the same shape a hand-off uses. A self-release notifies nobody.
   const releaseNotified = isSelf
     ? null

@@ -43,7 +43,7 @@ const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
 describe("notifications", () => {
-  it("lists per-user rows sorted by real timestamp DESC (ruling 9)", () => {
+  it("lists per-user rows sorted by real timestamp DESC (ruling 74)", () => {
     const db = ctx.makeDb();
     // Inserted deliberately out of order (the mock fixture is unsorted).
     createNotification(db, { id: "a", userId: "u_1", kind: "packet", ptype: "input", text: "t", occurredAt: "2026-07-04T06:41:00.000Z" });
@@ -93,7 +93,7 @@ describe("notifications", () => {
     createNotification(db, { id: "gone", userId: "u_1", kind: "packet", ptype: "input", text: "t", projectSlug: "wiped-proj", taskKey: "WIP-9" });
     // The orphan ("gone") does not inflate the badge — only org + live count.
     expect(countUnreadNotifications(db, "u_1")).toBe(2);
-    // Ruling 457 / F19-25: the bell's head counts the orphan beside the badge,
+    // Ruling 300 / F19-25: the bell's head counts the orphan beside the badge,
     // from the server now that pages no longer ship the list; read rows and
     // other people's rows count in neither.
     createNotification(db, { id: "gone-read", userId: "u_1", kind: "packet", text: "t", projectSlug: "wiped-proj", readAt: "2026-07-04T00:00:00Z" });
@@ -207,7 +207,7 @@ describe("notifications", () => {
   });
 
   /**
-   * Ruling 481(a): an agent's question is a packet on the task, so the packet's
+   * Ruling 74: an agent's question is a packet on the task, so the packet's
    * resolution clears its `question` row too. Otherwise an answered question
    * stayed unread in every watcher's bell and tab title.
    *
@@ -215,7 +215,7 @@ describe("notifications", () => {
    * row stays unread.
    */
   /**
-   * Ruling 481(c) (F40-51): what a tab nobody is looking at reads. It counts
+   * Ruling 74 (F40-51): what a tab nobody is looking at reads. It counts
    * the viewer's UNREAD decisions (packet, agent question, approval) that lead
    * somewhere, and words the newest for a desktop notification with the
    * bell's own destination.
@@ -223,7 +223,7 @@ describe("notifications", () => {
    * Canary: drop `question` from `DECISION_NOTIFICATION_KINDS`, or the orphan
    * condition, and the count is wrong.
    */
-  it("attentionSnapshot counts the unread decisions and words the newest (ruling 481)", () => {
+  it("attentionSnapshot counts the unread decisions and words the newest (ruling 74)", () => {
     const db = ctx.makeDb();
     db.prepare(
       `INSERT INTO projects (slug, name, task_prefix, stages_json, workflow_json, source_path, content_hash, parsed_at)
@@ -247,13 +247,13 @@ describe("notifications", () => {
       id: "q",
       title: "Platform Engineer asks: Connect Workers Builds",
       body: "WEB-3 · akinozer.com\nOnly the owner can press Connect.",
-      // Ruling 497: a desktop notification opens where the bell's row does.
+      // Ruling 75: a desktop notification opens where the bell's row does.
       href: "/projects/akinozer-com/tasks/WEB-3#decision",
     });
     expect(attentionSnapshot(db, "u_nobody")).toEqual({ waiting: 0, items: [] });
   });
 
-  it("markTaskPacketApprovalRead clears an agent question with the packet (ruling 481)", () => {
+  it("markTaskPacketApprovalRead clears an agent question with the packet (ruling 74)", () => {
     const db = ctx.makeDb();
     createNotification(db, { id: "q", userId: "u_1", kind: "question", text: "t", projectSlug: "viberr-core", taskKey: "VIB-142" });
     expect(markTaskPacketApprovalRead(db, "viberr-core", "VIB-142")).toBe(1);
@@ -542,7 +542,7 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
   });
 
   /**
-   * Ruling 497: a row opens the exact thing its notifier said it is about, and
+   * Ruling 75: a row opens the exact thing its notifier said it is about, and
    * only inside the project the row names, so the orphan rule (F18-1) and a
    * member's removal still decide whether it opens at all.
    *
@@ -550,7 +550,7 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
    * lookalike rows open other projects; drop the stored link and every row
    * opens its task's top, which is the dead click this ruling fixes.
    */
-  it("ruling 497: a row opens the link its notifier recorded, inside its own project only", () => {
+  it("ruling 75: a row opens the link its notifier recorded, inside its own project only", () => {
     const store = setupProjectedStore(ctx);
     const uid = store.users.murat.id;
     const slug = store.slug;
@@ -574,10 +574,10 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
     row("event", 9, taskEventLink(slug, "VIB-1", "2026-07-01T02:59:00.123Z"));
     row("decision", 8, taskDecisionLink(slug, "VIB-1"));
     row("recs", 7, taskRecommendationsLink(slug, "VIB-1"));
-    // A proposal's row from before ruling 498 (no writer files one now).
+    // A proposal's row (no writer files one now, ruling 210(c)).
     row("proposal", 6, `/projects/${slug}/controller#proposal-kp-0123456789`);
     row("github", 5, projectGithubLink(slug), { taskKey: null });
-    // Ruling 503: an epic's page, where the goal-chain anchor used to go.
+    // Ruling 272: an epic's page, where the goal-chain anchor used to go.
     row("epic", 4, epicLink(slug, "epic-2"), { kind: "epic", taskKey: null });
     row("foreign", 3, "/projects/other/tasks/OTH-1#decision");
     row("lookalike", 2, `/projects/${slug}x/tasks/VIB-1`);

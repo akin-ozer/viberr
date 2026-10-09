@@ -30,7 +30,7 @@ import {
 } from "./agent-isolation.server";
 
 /**
- * Ruling 460: every agent process runs as the OS user of the person it bills.
+ * Ruling 139: every agent process runs as the OS user of the person it bills.
  * What the kernel enforces is checked inside the image
  * (`scripts/check-agent-isolation.sh`, run by the e2e job); these pin what the
  * server decides: the uid each person gets, the layout it asserts at boot, and
@@ -76,7 +76,7 @@ function mode(file: string): number {
   return statSync(file).mode & 0o7777;
 }
 
-describe("agentUidFor: one stable, unique, never-reused uid per person (ruling 460)", () => {
+describe("agentUidFor: one stable, unique, never-reused uid per person (ruling 139)", () => {
   it("allocates from the floor, keeps a person's uid, and never hands a removed person's uid on", () => {
     const db = ctx.makeDb();
     for (const id of ["u_ada", "u_bo", "u_cy"]) {
@@ -112,7 +112,7 @@ describe("agentUidFor: one stable, unique, never-reused uid per person (ruling 4
   });
 });
 
-describe("the launcher's compiled numbers are the server's (ruling 460)", () => {
+describe("the launcher's compiled numbers are the server's (ruling 139)", () => {
   it("the Dockerfile's ARG defaults equal the constants the server allocates and chgrps with", () => {
     const dockerfile = readFileSync(path.join(ROOT, "Dockerfile"), "utf8");
     const arg = (name: string) => Number(new RegExp(`^ARG ${name}=(\\d+)$`, "m").exec(dockerfile)?.[1]);
@@ -122,7 +122,7 @@ describe("the launcher's compiled numbers are the server's (ruling 460)", () => 
   });
 });
 
-describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", () => {
+describe("enforceStoreLayout: the store layout asserted at boot (ruling 15)", () => {
   const gid = process.getgid?.() ?? 0;
 
   function preRulingStore(): string {
@@ -140,7 +140,7 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
     return root;
   }
 
-  it("ruling 578: never opens a private knowledge base, and leaves an open one as it is", () => {
+  it("ruling 209: never opens a private knowledge base, and leaves an open one as it is", () => {
     // `kb/` itself is set 0755 at every boot; the folders inside it keep their
     // own mode, which is the privacy flag. CANARY: have the layout walk `kb/`
     // and set its folders, and the private one opens on the next restart.
@@ -156,7 +156,7 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
     expect(mode(path.join(root, "kb", "mapping"))).toBe(0o775);
   });
 
-  it("closes what holds secrets, opens what runs write, and hands a pre-460 checkout over once", () => {
+  it("closes what holds secrets, opens what runs write, and hands a pre-isolation checkout over once", () => {
     const root = preRulingStore();
     const homes: string[] = [];
     const report = enforceStoreLayout(root, {
@@ -249,7 +249,7 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
   });
 
   /**
-   * Ruling 495: a removal's server step (`chmod -R -P g+rwX`,
+   * Ruling 140: a removal's server step (`chmod -R -P g+rwX`,
    * `agent-trees.server.ts`) can reach a checkout's object linked from the
    * mirror, and opens it to the group it is in. The hand-over before
    * R-seams-1 had moved such objects to the agents' group, and taking their
@@ -296,7 +296,7 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 460)", (
   );
 });
 
-describe("agentIsolation in /resources/health (ruling 460)", () => {
+describe("agentIsolation in /resources/health (ruling 40)", () => {
   function dataRootWithStore(): string {
     const root = ctx.makeTempDir("viberr-probe-");
     mkdirSync(path.join(root, "state"), { recursive: true });
@@ -346,7 +346,7 @@ describe("agentIsolation in /resources/health (ruling 460)", () => {
   });
 });
 
-describe("agentLaunchFor (ruling 460)", () => {
+describe("agentLaunchFor (ruling 139)", () => {
   it("launches nothing where there is no launcher: the run spawns as before", () => {
     resetAgentIsolationForTests(null, { launcher: path.join(ctx.makeTempDir(), "absent") });
     const db = ctx.makeDb();
@@ -394,7 +394,7 @@ describe("agentLaunchFor (ruling 460)", () => {
   });
 });
 
-describe("passThroughDirForAgents: the root of the runs' temporary directories (ruling 636)", () => {
+describe("passThroughDirForAgents: the root of the runs' temporary directories (ruling 141(c))", () => {
   const gid = process.getgid?.() ?? 0;
 
   it("is the server's own, in the agent group, 0710: entered by a known path, never listed", () => {

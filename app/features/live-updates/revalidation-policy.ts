@@ -8,7 +8,7 @@ import {
 } from "react-router";
 
 /**
- * Ruling 457: WHEN a loader re-runs, in one home. Every route with a loader
+ * Ruling 11: WHEN a loader re-runs, in one home. Every route with a loader
  * exports `shouldRevalidate = revalidateWhen("<its route id>")`, and the rule
  * table below says what that loader reads.
  *
@@ -58,7 +58,7 @@ import {
  * ran, or (d) the navigation is to the URL already on screen, its hash
  * included (a link to where you are reloads, as React Router's default does;
  * one that only takes the hash away leaves a place inside the page and reloads
- * nothing, ruling 523). Nothing else skips an obligation: a trigger that
+ * nothing, ruling 302(c)). Nothing else skips an obligation: a trigger that
  * interrupts an in-flight load finds the obligation still in the ledger and
  * loads it. No optimistic UI for governed state follows from this: every
  * change the server announced reaches the page through a loader, only the
@@ -125,7 +125,7 @@ export const REVALIDATION_RULES = {
   "routes/notifications": { params: [], search: [], reads: ["domain", "bell"] },
   "routes/project": { params: ["slug"], search: [], reads: SHELL },
   "routes/project.board": { params: ["slug"], search: [], reads: PAGE },
-  // Ruling 503: the Open / Closed / All switch is the page's own; the loader
+  // Ruling 325: the Open / Closed / All switch is the page's own; the loader
   // reads every epic.
   "routes/project.epics": { params: ["slug"], search: [], reads: PAGE },
   "routes/project.epic": { params: ["slug", "epicId"], search: [], reads: PAGE },
@@ -174,7 +174,7 @@ function liveEventFacts(name: string): readonly Fact[] {
 const NARROW_ACTIONS = new Map<string, readonly Fact[]>([
   ["/notifications/read", ["bell"]],
   ["/prefs/theme", ["theme"]],
-  // The dock's send (ruling 121); it also opts out at the call site.
+  // The dock's send (ruling 256); it also opts out at the call site.
   ["/resources/controller", ["conversation"]],
   ["/login", EVERY_FACT],
   ["/logout", EVERY_FACT],
@@ -238,7 +238,7 @@ function loadsInFlight(state: RouterState): string[] {
 
 /**
  * A route load is in flight, whose landing may cover what the live flush would
- * load. Ruling 457 (RV-6): a submission still running is not one. The flush
+ * load. Ruling 11 (RV-6): a submission still running is not one. The flush
  * used to wait for those too, so another member's change reached the page only
  * after the person's own slowest action answered (an upload, a GitHub sync),
  * and a stalled request froze live updates in the tab. An action's echo is
@@ -259,14 +259,14 @@ const RECENT_EVENTS = 256;
 class LiveLedger {
   readonly router: DataRouter;
   /**
-   * Ruling 457 (RF-1): the broker event id this tab stands at, for the first
+   * Ruling 11 (RF-1): the broker event id this tab stands at, for the first
    * stream a surface opens (a surface's reopens use their own position). Seeded
    * from root's `liveHead` on the document load, then moved by every stream's
    * hello and events.
    */
   position: number | null = null;
   /**
-   * Ruling 457 (RV-2): the tab's position when the loads that brought the
+   * Ruling 11 (RV-2): the tab's position when the loads that brought the
    * latest data to land were SENT (the smallest, like coverage; null when one
    * was sent before any position was known). A stream that takes on a scope
    * the tab's streams did not carry opens from here: the tab's position says
@@ -301,7 +301,7 @@ class LiveLedger {
    * Recorded once per tab: two streams whose scopes both carry an event (the
    * project controller page: the layout's and the page's own) both deliver it,
    * with the same id and body (ids are unique across server processes, ruling
-   * 457, RV-5).
+   * 11, RV-5).
    */
   recordLive(name: string, event: MessageEvent<string>): void {
     if (event.lastEventId) {
@@ -329,7 +329,7 @@ class LiveLedger {
 
   /**
    * React Router declined to revalidate after this action (it failed, or its
-   * caller opted out): it changed nothing a loader reads. Ruling 457 (RV-4):
+   * caller opted out): it changed nothing a loader reads. Ruling 11 (RV-4):
    * found by its submission, so the two times React Router asks each route
    * about one answer withdraw that action once, and never another send on the
    * same path still running (the newest on the path used to go, per call).
@@ -442,7 +442,7 @@ class LiveLedger {
     const prev = this.last;
     this.last = state;
 
-    // 0. Ruling 457 (RV-4): an action whose submission has answered (or was
+    // 0. Ruling 11 (RV-4): an action whose submission has answered (or was
     //    abandoned) is recorded again, now: its write has committed, and a
     //    load that started while it ran cannot hold it. Its own revalidation
     //    starts in this same update and covers it; if a navigation aborts that
@@ -567,7 +567,7 @@ export function useLiveLedger(seedPosition: number | null = null): LiveLedger | 
 
 /**
  * True when the URL is the one on screen: its path, its search and its hash.
- * Ruling 523: a press that ends a link's mark takes the hash away
+ * Ruling 302(c): a press that ends a link's mark takes the hash away
  * (`useHashTarget`), the one hash change React Router hands the loaders
  * (a browser would request a page without it); it adds nothing to load.
  */
@@ -624,7 +624,7 @@ function decide(
   return urlConcerns(rule, args);
 }
 
-/** The `shouldRevalidate` of the route `routeId` (ruling 457). */
+/** The `shouldRevalidate` of the route `routeId` (ruling 11). */
 export function revalidateWhen(routeId: RevalidationRouteId): ShouldRevalidateFunction {
   return (args) => decide(routeId, args);
 }

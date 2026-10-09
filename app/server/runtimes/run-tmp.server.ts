@@ -17,10 +17,10 @@ import { RUN_REAP_GRACE_MS } from "./run-processes.server";
 import { assertPathSafeRunId } from "./user-homes.server";
 
 /**
- * Ruling 636: every run has a temporary directory of its own, and it goes when
+ * Ruling 141(c): every run has a temporary directory of its own, and it goes when
  * the run settles.
  *
- * Ruling 460 runs each agent as its person's own uid, and every run of one
+ * Ruling 139 runs each agent as its person's own uid, and every run of one
  * person is that one uid, so all of them shared `/tmp`: what a run wrote there
  * stayed until the container went, and every later run of the person could
  * list it and read it. Live on AWSC-86 (2026-10-02) the Cloud Solutions
@@ -36,8 +36,8 @@ import { assertPathSafeRunId } from "./user-homes.server";
  * the path it is given and cannot list the others. The run's directory is the
  * server's, 2770 in the agent group like a workspace, so whatever the agent
  * writes in it stays removable. It is made when the run launches (a queued run
- * has none), removed as the run's person (ruling 485) once the settle is done
- * and the sweep has had its grace (ruling 174), and boot removes whatever a
+ * has none), removed as the run's person (ruling 140) once the settle is done
+ * and the sweep has had its grace (ruling 142), and boot removes whatever a
  * stopped server or a failed removal left. The shell inventory every prompt
  * carries says to keep temporary files there.
  *
@@ -60,6 +60,15 @@ export function runTmpEnv(dir: string) {
 }
 
 /**
+ * `<root>/<runId>`: the temporary directory a run is given when it launches.
+ * The one derivation `prepareRunTmp` makes and the run's disclosure names
+ * before launch (ruling 217(d)'s file-tool roots).
+ */
+export function runTmpDirFor(runId: string): string {
+  return path.join(runTmpRoot(), assertPathSafeRunId(runId));
+}
+
+/**
  * Make the run's temporary directory and return its path. What a crashed
  * predecessor of the same id left is removed first, as the person: a run starts
  * clean and never inherits. Throws when the root is not the server's own
@@ -67,10 +76,8 @@ export function runTmpEnv(dir: string) {
  * one and says so.
  */
 export function prepareRunTmp(runId: string, person: AgentLaunch | null): string {
-  const root = runTmpRoot();
-  passThroughDirForAgents(root);
-  // `<root>/<runId>`: one run's temporary directory.
-  const dir = path.join(root, assertPathSafeRunId(runId));
+  passThroughDirForAgents(runTmpRoot());
+  const dir = runTmpDirFor(runId);
   removeAgentTreeSync(dir, person);
   mkdirSync(dir);
   shareDirWithAgents(dir);

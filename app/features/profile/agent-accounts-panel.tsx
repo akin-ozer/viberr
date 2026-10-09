@@ -20,7 +20,7 @@ import {
 } from "./agent-accounts-regions";
 
 /**
- * Profile → Agent accounts (ruling 127).
+ * Profile → Agent accounts (ruling 137).
  *
  * Every agent run bills ONE person's provider account: a run on a task belongs
  * to the task owner, a controller turn to the asker. So "is Claude configured"
@@ -43,9 +43,9 @@ import {
  * URL appeared or that the sign-in finished. Every toast settles on a fetcher
  * RESULT, never at submit time.
  *
- * Ruling 507: a person may keep several accounts per backend. The card leads
+ * Ruling 138: a person may keep several accounts per backend. The card leads
  * with the one their runs use (its health, usage and refusals, which are about
- * that account). Ruling 616: that account is a select (`AccountPicker`), whose
+ * that account). Ruling 323: that account is a select (`AccountPicker`), whose
  * menu lists every account kept here and switches to the one chosen — a
  * switch, not a sign-in: each account's sign-in stays in its own home on this
  * server. The same menu adds another account, which connects through the same
@@ -53,7 +53,7 @@ import {
  * management. Rename and Disconnect are per account; disconnecting the one in
  * use hands runs to the account used before it.
  *
- * Ruling 700(e): the card is composition. Its sign-in poll is a hook in
+ * Ruling 13(b): the card is composition. Its sign-in poll is a hook in
  * `agent-accounts-actions.ts`, what it reads off its props and the fetcher is
  * pure functions in `agent-accounts-derive.ts`, and its regions are hook-free
  * components in `agent-accounts-regions.tsx` and `agent-account-in-use.tsx`;
@@ -101,21 +101,21 @@ function AgentAccountCard({
 }) {
   const { backend, methods, limits } = data;
   const label = BACKEND_LABEL[backend];
-  // Ruling 507: every account the person holds here, the active one first.
+  // Ruling 138: every account the person holds here, the active one first.
   const accounts = data.accounts;
   const active = accounts.find((account) => account.active) ?? null;
   const others = accounts.filter((account) => !account.active);
   const push = useToast();
   const revalidator = useRevalidator();
   const [paste, setPaste] = useState<"api_key" | "access_token" | null>(null);
-  // Ruling 507: the account a Disconnect is asking about, the account whose
+  // Ruling 138: the account a Disconnect is asking about, the account whose
   // name is being edited (each by its id), and whether "Add another account"
-  // is open. Ruling 616: and whether the other accounts' management is.
+  // is open. Ruling 323: and whether the other accounts' management is.
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState(false);
-  // Ruling 616: what the picker's menu opens takes the focus once it is on
+  // Ruling 323: what the picker's menu opens takes the focus once it is on
   // screen (the menu row that opened it is gone by then), and closing it
   // hands the focus back to the picker. A fresh object per request, so a
   // section asked for again while it is already open is focused again.
@@ -166,7 +166,7 @@ function AgentAccountCard({
   // Within the account in use's region, the confirm is held by id and found in
   // each load (AccountInUse), so an account disconnected in another tab takes
   // the dialog with it, and its id, never listed again, opens nothing later; a
-  // confirmed Disconnect closes it itself (ruling 459). The management closes
+  // confirmed Disconnect closes it itself (ruling 287). The management closes
   // with the last account it listed, so an account added later does not open
   // it again on its own, and during render, so no frame paints it open and
   // empty.
@@ -180,7 +180,7 @@ function AgentAccountCard({
   // A completed rename or saved key closes what the person had open for it.
   // Settled on the RESULT, so a refusal leaves the field as it was. Not the
   // disconnect dialog: ConfirmDialog closes it once the Disconnect is
-  // confirmed (ruling 459), whatever the answer; the account's own Disconnect
+  // confirmed (ruling 287), whatever the answer; the account's own Disconnect
   // button carries the request, and the toast or the inline error says what
   // happened.
   useFetcherResult(fetcher, (result) => {
@@ -222,7 +222,7 @@ function AgentAccountCard({
   return (
     <div className="cred-card">
       <div className="cred-top">
-        {/* Ruling 625: the backend's own mark (Claude's sparkle, Codex's
+        {/* Ruling 282: the backend's own mark (Claude's sparkle, Codex's
             chip), as every other surface draws it; the name beside it is the
             text, so the tile is decorative. */}
         <AgentGlyph backend={backend} decorative />
@@ -257,7 +257,7 @@ export function AgentAccountsPanel({
   backends: ProfileBackend[];
   fetcher: AccountsFetcher;
   submit: (fields: Record<string, string>) => void;
-  /** Ruling 532: the URL names this panel, so it wears the landing ring. */
+  /** Ruling 322: the URL names this panel, so it wears the landing ring. */
   targeted?: boolean;
 }) {
   useAccountsToast(fetcher);

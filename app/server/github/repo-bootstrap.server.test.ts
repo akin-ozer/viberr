@@ -45,11 +45,11 @@ function contextFor(store: ReturnType<typeof setup>, gh: FakeGithub) {
   return result;
 }
 
-/** GitHub's answers on an EMPTY repository (ruling 128; recorded in the module
+/** GitHub's answers on an EMPTY repository (ruling 227; recorded in the module
  *  comment — the live step V2 re-verifies them). */
 const EMPTY_REF = { status: 409, body: { message: "Git Repository is empty." } };
 
-describe("ensureDefaultBranch (ruling 128)", () => {
+describe("ensureDefaultBranch (ruling 227)", () => {
   it("an empty repository gets an initial commit and its default branch, recorded on the timeline and audited", async () => {
     // Canary: return `bootstrap_failed` from the empty-array arm instead of
     // issuing the PUT — the status, the PUT call and the timeline line all fail.
@@ -92,7 +92,7 @@ describe("ensureDefaultBranch (ruling 128)", () => {
     expect(timeline[0]!.text).toContain("`d2e0fb0`");
     const audit = listAuditEvents(store.db).find((e) => e.action === "github.repo.bootstrapped");
     expect(audit?.details).toMatchObject({ how: "initial_commit", sha: ROOT, defaultBranch: "main" });
-    // Ruling 480 (F40-43): the commit this token just made proves `repo` on this
+    // Ruling 220 (F40-43): the commit this token just made proves `repo` on this
     // repository. Canary: drop the bootstrap's `markWriteScopeProven`.
     const proof = getPatMetadata(store.db, contextFor(store, gh).patId)!.repoScopes;
     expect(proof).toEqual([
@@ -106,11 +106,11 @@ describe("ensureDefaultBranch (ruling 128)", () => {
   });
 
   /**
-   * Ruling 468: two paths now bootstrap (the branch preparation and the
+   * Ruling 227: two paths now bootstrap (the branch preparation and the
    * operator's first checkout). A PUT that loses the race is refused by
    * GitHub; the branch the winner made is the outcome both wanted.
    */
-  it("ruling 468: a create refused because another call already made the branch answers `exists` and writes nothing", async () => {
+  it("ruling 227: a create refused because another call already made the branch answers `exists` and writes nothing", async () => {
     const store = setup();
     let reads = 0;
     const gh = fakeGithubFetch({
@@ -197,7 +197,7 @@ describe("ensureDefaultBranch (ruling 128)", () => {
 
   it("a repository whose only branch is a pushed task branch gets `main` at that branch's first commit and the default restored", async () => {
     // Canary: post the ref with the NEWEST sha (the first page entry) and the
-    // sha assertions fail. Ruling 670: stop reading a task's key as its
+    // sha assertions fail. Ruling 227: stop reading a task's key as its
     // branch and `jc-1` is taken as the project's default instead.
     const store = setup();
     const gh = fakeGithubFetch({
@@ -298,14 +298,14 @@ describe("ensureDefaultBranch (ruling 128)", () => {
 });
 
 /**
- * Ruling 670: ruling 128's repair is for a repository whose default on GitHub
- * is a task branch. A default branch that is not one is the repository's own.
+ * Ruling 227: the repair is for a repository whose default on GitHub is a
+ * task branch. A default branch that is not one is the repository's own.
  * The repair used to run there too: a project written with `main` while
  * GitHub was unreachable, or left on `master` after a rename on GitHub, had
  * that name created at the first commit of the real default branch and made
  * the repository's default.
  */
-describe("ensureDefaultBranch and a repository with a default branch of its own (ruling 670)", () => {
+describe("ensureDefaultBranch and a repository with a default branch of its own (ruling 227)", () => {
   /** GitHub's answers for a repository whose default is `branch`, with the
    *  writes the repair would make answering as they do when it runs. */
   const routes = (branch: string) => ({
@@ -397,7 +397,7 @@ describe("ensureDefaultBranch and a repository with a default branch of its own 
   });
 
   it("a task's key with a suffix is a task's branch, an archived task's too: the repair runs and the project keeps its own", async () => {
-    // Ruling 122 allocates `<key>-<4 hex>` when the key is taken. CANARY: ask
+    // Ruling 228 allocates `<key>-<4 hex>` when the key is taken. CANARY: ask
     // only whether the name IS a task's key, or leave archived tasks out, and
     // `jc-1-0c88` becomes the project's default branch.
     const store = setup();
@@ -421,7 +421,7 @@ describe("ensureDefaultBranch and a repository with a default branch of its own 
 });
 
 /**
- * Pass 34 review (ruling 128's own split): the gate divides by EVIDENCE, not by
+ * Pass 34 review (ruling 227's own split): the gate divides by EVIDENCE, not by
  * failure. A read that did not answer proves nothing about the repository, so
  * it must never tell a person their `main` is missing; a create that failed is
  * positive evidence the base could not be made.

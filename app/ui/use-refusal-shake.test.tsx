@@ -22,7 +22,7 @@ function Box({ refusal, shown }: { refusal: RefusalMark; shown: boolean }) {
 }
 
 /**
- * Ruling 451(g): a refusal box shakes once per refusal. Two reviewers found
+ * Ruling 284: a refusal box shakes once per refusal. Two reviewers found
  * that a class tied to the mount shook on keystrokes: a field that turned valid
  * and then invalid again mounted the same refusal's box a second time.
  */

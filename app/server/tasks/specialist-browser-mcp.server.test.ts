@@ -57,7 +57,7 @@ describe("R19-19 resolveBrowserMcp", () => {
     expect(r.refused).toBeNull();
     const server = r.server!;
     expect(server.command).toBe(process.execPath);
-    // Ruling 554: the server runs under the supervisor, which node runs as
+    // Ruling 193: the server runs under the supervisor, which node runs as
     // TypeScript. CANARY: mount the CLI bare and a page that stops answering
     // holds the agent's browser for the rest of the run.
     expect(server.args[0]).toMatch(/[\\/]browser-supervisor\.server\.ts$/);
@@ -190,19 +190,19 @@ describe("browserPersonaSection — the load-bearing screenshot contract", () =>
   });
 
   /**
-   * Ruling 159 (pass 35, F35-10): the path the agent is handed is ABSOLUTE and
+   * Ruling 198 (pass 35, F35-10): the path the agent is handed is ABSOLUTE and
    * said to be outside the checkout. The store-relative form
    * (`projects/<slug>/tasks/<key>/attachments`, "reachable from your working
    * directory") was created inside the clone by KNC-9's agent and pushed.
    */
-  it("ruling 159: the browser section says the dir is outside the checkout and never committed", () => {
+  it("ruling 198: the browser section says the dir is outside the checkout and never committed", () => {
     const p = browserPersonaSection("/data/projects/vqp/tasks/VQP-1/attachments", "claude");
     expect(p).toContain("outside the repository checkout");
     expect(p).toContain("never commit it");
   });
 });
 
-describe("attachmentsDropSection — ruling 159, an absolute path outside the checkout", () => {
+describe("attachmentsDropSection — ruling 198, an absolute path outside the checkout", () => {
   const dir = "/data/projects/knc/tasks/KNC-9/attachments";
   it("prints the absolute dir, says it is outside the checkout and never to commit it", () => {
     const p = attachmentsDropSection(dir);
@@ -215,19 +215,19 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
   });
 
   /**
-   * Ruling 306 (pass 37, F37-141): the attachments directory is READ as well as
+   * Ruling 217(b) (pass 37, F37-141): the attachments directory is READ as well as
    * written, and nothing said so.
    *
    * It shipped as a drop box, which is half of what it is. On a task that has
    * run before it already holds what every earlier run attached — 27 files on
    * SHOP-11 of this instance's board, 90 on SHOP-15 — so an agent reworking
    * that task was standing next to the evidence its directive was summarising,
-   * and was told only where to put things. That is rulings 285/292/293 one
+   * and was told only where to put things. That is rulings 117/262/79 one
    * actor over: the coordinator was given the evidence so it would stop
    * relaying claims about files it had not read, and the agent doing the work
    * was left relaying them.
    */
-  it("ruling 306: names the directory as two-way, and says to read by citation rather than wholesale", () => {
+  it("ruling 217(b): names the directory as two-way, and says to read by citation rather than wholesale", () => {
     const text = attachmentsDropSection("/data/projects/p/tasks/P-1/attachments");
     // CANARY: restore the write-only framing.
     expect(text).toContain("TWO-WAY");
@@ -244,13 +244,13 @@ describe("attachmentsDropSection — ruling 159, an absolute path outside the ch
   });
 
   /**
-   * Ruling 530: on a board that delivers results, a task's input is usually a
+   * Ruling 198: on a board that delivers results, a task's input is usually a
    * person's attachment and its deliverable is the result's files. The section
    * named only earlier runs' files, and sent every large artifact to the
    * repository and the pull request, which is where an estimate the board was
    * asked to make would have gone.
    */
-  it("ruling 530: names a person's attachment as input to read, and keeps a result that is the deliverable out of every commit", () => {
+  it("ruling 198: names a person's attachment as input to read, and keeps a result that is the deliverable out of every commit", () => {
     const text = attachmentsDropSection("/data/projects/p/tasks/P-1/attachments");
     // CANARY: drop the result sentence, and an agent on a results board reads
     // only that large artifacts belong in the pull request.

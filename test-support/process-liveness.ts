@@ -1,6 +1,6 @@
 /**
  * Real-process liveness for tests that spawn processes and assert the kernel's
- * answer (ruling 174: the Claude CLI spawn and the settle sweep).
+ * answer (ruling 142: the Claude CLI spawn and the settle sweep).
  *
  * Signal 0 probes existence without delivering anything, and any throw reads
  * as not alive: these tests probe processes they spawned themselves. The

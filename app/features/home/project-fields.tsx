@@ -4,19 +4,19 @@ import type { BoardDelivers } from "~/shared/board-delivers";
 import { Icon } from "~/ui/icon";
 
 /**
- * Ruling 653: the fields that say what a new project is called and where its
+ * Ruling 32: the fields that say what a new project is called and where its
  * repository lives, shared by the New project dialog and Instance settings'
  * board import dialog, so the two read, derive and refuse alike. Split out of
  * `new-project-modal.tsx` with no change to either.
  */
 
 /** The footer's blocker line; the field a refused submit flags points at it.
- *  The board import dialog (ruling 653) prints its own under the same id. */
+ *  The board import dialog (ruling 32) prints its own under the same id. */
 export const BLOCK_REASON_ID = "np-block-reason";
 /** Which field the FIRST unmet requirement belongs to (`conn` has no input). */
 export type BlockedField = "name" | "key" | "conn" | "repo";
 
-/** Project name and task key, shared with the board import dialog (ruling 653). */
+/** Project name and task key, shared with the board import dialog (ruling 32). */
 export function NewProjectNameFields({
   nameRef,
   keyRef,
@@ -126,9 +126,9 @@ export function NewProjectNameFields({
 }
 
 /**
- * Ruling 667: what the board delivers. A results board needs no repository;
+ * Ruling 224: what the board delivers. A results board needs no repository;
  * its second control attaches one anyway, for agents that read a repository
- * and never write it. Ruling 672: a software board may start without one too,
+ * and never write it. Ruling 224: a software board may start without one too,
  * and its second control says so.
  */
 export function NewProjectDeliversField({
@@ -187,12 +187,12 @@ export function NewProjectDeliversField({
   );
 }
 
-/** Ruling 672: what a software board that starts with no repository does
+/** Ruling 224: what a software board that starts with no repository does
  *  until it has one. Shared with the board import dialog. */
 export const SOFTWARE_REPO_LATER_HINT =
   "The board starts with no repository. Tasks come back as files until one is connected, and the operator asks for it the first time a task needs a pull request.";
 
-/** Ruling 672: a software board's way to start with no repository, shared
+/** Ruling 224: a software board's way to start with no repository, shared
  *  with the board import dialog. */
 export function RepoLaterLine({
   repoLater,
@@ -213,7 +213,7 @@ export function RepoLaterLine({
   );
 }
 
-/** Ruling 667: a results board's one repository control, shared with the
+/** Ruling 224: a results board's one repository control, shared with the
  *  board import dialog, where the file decides what the board delivers. */
 export function AttachRepoLine({
   attachRepo,
@@ -377,13 +377,13 @@ export function NewProjectRepoField({
   derived: boolean;
   effOwner: string;
   effRepo: string;
-  /** Ruling 462: create the repository on GitHub when it does not exist. */
+  /** Ruling 225: create the repository on GitHub when it does not exist. */
   createRepo: boolean;
   setCreateRepo: (v: boolean) => void;
-  /** Ruling 462: the created repository's visibility, private by default. */
+  /** Ruling 225: the created repository's visibility, private by default. */
   repoPrivate: boolean;
   setRepoPrivate: (v: boolean) => void;
-  /** Ruling 667: a results board's repository, which its agents read and
+  /** Ruling 224: a results board's repository, which its agents read and
    *  never write. */
   readOnly?: boolean;
 }) {
@@ -425,11 +425,11 @@ export function NewProjectRepoField({
         <span className="fhint">
           Owner is fixed by the <b>{effOwner}</b> connection. Enter just the
           repository name.
-          {/* Ruling 667: a results board's repository is reference material. */}
+          {/* Ruling 224: a results board's repository is reference material. */}
           {readOnly && " The agents read it and commit nothing to it."}
         </span>
       )}
-      {/* Ruling 462: the server creates the repository with the connection's
+      {/* Ruling 225: the server creates the repository with the connection's
           token before it writes the project, and a refusal names what the
           token lacks and creates nothing. Off by default: an existing
           repository is the usual case, and a typo must not become one. */}

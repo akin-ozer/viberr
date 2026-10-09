@@ -3,7 +3,7 @@ import path from "node:path";
 import { splitFrontmatter } from "~/server/files/frontmatter.server";
 
 /**
- * Rulings 502 and 689: every operator run, every controller turn and every
+ * Ruling 187: every operator run, every controller turn and every
  * specialist run writes under the Humanizer skill, and nothing a person uses
  * names it.
  *
@@ -20,7 +20,7 @@ import { splitFrontmatter } from "~/server/files/frontmatter.server";
  * themselves, as the last part of their static block, whatever the profile
  * grants: {@link HUMANIZER_PROMPT_SECTION} for the two coordinators, and
  * {@link HUMANIZER_SPECIALIST_SECTION} for the agents that write a task's
- * result and the agents that review it (ruling 689).
+ * result and the agents that review it (ruling 187).
  */
 export const HUMANIZER_SOURCE = {
   repository: "https://github.com/blader/humanizer",
@@ -54,7 +54,7 @@ export function humanizerSkillFile(): string {
   }
   throw new Error(
     `The vendored Humanizer skill was not found. Looked in: ${HUMANIZER_DIR_CANDIDATES.join(", ")}. ` +
-      "It ships with the app under app/server/runtimes/humanizer/ (ruling 502).",
+      "It ships with the app under app/server/runtimes/humanizer/ (ruling 187).",
   );
 }
 
@@ -76,7 +76,7 @@ const HUMANIZER_FRAMING =
   "among your skills and resources.";
 
 /**
- * Ruling 689: how an agent that writes a task's result, or reviews one, is
+ * Ruling 187: how an agent that writes a task's result, or reviews one, is
  * told to use the same guide. Three things differ from the coordinators'
  * framing. What it writes includes the result itself. A person's own writing
  * outranks the guide, since a result written in their name has to sound like
@@ -114,10 +114,10 @@ function humanizerSection(framing: string): string {
 /**
  * The section the operator's and the controller's prompt builders close their
  * static block with: the framing, then the skill's body. Static text, so
- * ruling 370's prefix stays byte-identical across tasks and turns.
+ * ruling 169's prefix stays byte-identical across tasks and turns.
  */
 export const HUMANIZER_PROMPT_SECTION = humanizerSection(HUMANIZER_FRAMING);
 
-/** Ruling 689: the section `buildSpecialistPromptPrefix` closes its static
+/** Ruling 187: the section `buildSpecialistPromptPrefix` closes its static
  *  block with, on both backends, whatever the profile grants. */
 export const HUMANIZER_SPECIALIST_SECTION = humanizerSection(HUMANIZER_SPECIALIST_FRAMING);

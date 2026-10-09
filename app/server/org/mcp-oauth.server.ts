@@ -45,7 +45,7 @@ import { toError } from "~/shared/errors";
 import { publishResourceUpdated } from "./resource-events.server";
 
 /**
- * Ruling 469: an org admin signs an HTTP MCP connection in with OAuth, and the
+ * Ruling 192: an org admin signs an HTTP MCP connection in with OAuth, and the
  * tokens live only in this server.
  *
  * Two columns on `org_mcp_servers` carry it. `oauth_ref` is a secret-box
@@ -54,7 +54,7 @@ import { publishResourceUpdated } from "./resource-events.server";
  * (its secret, when one was issued) and the tokens. `oauth_json` is the public
  * half every surface reads without opening a box: the status, when the access
  * token expires, whether it renews, the issuer's host, the challenge's
- * metadata URL, the scope the server granted (ruling 486: not a secret, and
+ * metadata URL, the scope the server granted (ruling 192: not a secret, and
  * the one thing that says whether a run may write through the connection)
  * and, once a sign-in expires, why. Nothing here logs, audits or
  * publishes a token, a code, a verifier or a client secret, and a reason quoted
@@ -68,7 +68,7 @@ import { publishResourceUpdated } from "./resource-events.server";
  * the callback's half, which spends that state once, checks it belongs to the
  * same session, exchanges the code and seals the tokens (dropping a static
  * credential: a connection holds one). `mcpOAuthTokenSource` is what the
- * ruling-461 gateway and the health probe attach upstream: it renews the
+ * ruling-191 gateway and the health probe attach upstream: it renews the
  * access token when it has run out, and once after a 401, and re-seals what
  * comes back; a refusal it cannot renew ends the sign-in ("sign-in expired").
  * `signOutMcpOAuth` revokes upstream when the server offers it and drops the
@@ -89,7 +89,7 @@ const MCP_OAUTH_CALLBACK_PATH = "/resources/mcp-oauth/callback";
  * (required behind a reverse proxy, where the request's own origin is the
  * proxy's upstream), else the origin the request arrived on. `publicOrigin`
  * is the one definition; the Sign-in & SSO card's callback uses it too
- * (R19-16, ruling 687).
+ * (R19-16, ruling 28).
  */
 export function mcpOAuthRedirectUri(request: Request): string {
   return `${publicOrigin(request)}${MCP_OAUTH_CALLBACK_PATH}`;
@@ -131,7 +131,7 @@ const publicOAuthSchema = z.object({
   issuer: z.string().nullable().catch(null),
   resourceMetadataUrl: z.string().nullable().catch(null),
   reason: z.string().nullable().catch(null),
-  /** Ruling 486: the granted scope; absent on a row written before it. */
+  /** Ruling 192: the granted scope; absent on a row written before it. */
   scope: z.string().nullable().catch(null),
 });
 type PublicOAuth = z.infer<typeof publicOAuthSchema>;
@@ -169,7 +169,7 @@ interface OAuthRow {
   cred_ref: string | null;
   oauth_ref: string | null;
   oauth_json: string | null;
-  /** Ruling 486(c): the scope the admin asked the next sign-in for. */
+  /** Ruling 192: the scope the admin asked the next sign-in for. */
   oauth_requested_scope: string | null;
 }
 
@@ -258,7 +258,7 @@ function storedTokens(tokens: OAuthTokens, now: number = Date.now()): StoredToke
 
 /**
  * The public half of a sign-in that holds tokens. `scope` is what the token
- * reply granted (ruling 486); a reply that names none granted `granted`
+ * reply granted (ruling 192); a reply that names none granted `granted`
  * (RFC 6749: the scope asked for on a code exchange, and the scope already
  * held on a refresh, §5.1 and §6).
  */
@@ -332,7 +332,7 @@ export function mcpOAuthCredential(db: DatabaseSync, id: string): McpOAuthCreden
 }
 
 /**
- * Ruling 486 (live verification 2026-09-25): a sign-in completed before the
+ * Ruling 192 (live verification 2026-09-25): a sign-in completed before the
  * public half carried its grant keeps the granted scope only in the sealed
  * half (`tokens.scope`), so every surface would name no grant until a refresh
  * happened to repeat it. At boot, copy that scope into the public half of each
@@ -362,7 +362,7 @@ export function backfillMcpGrantScopes(db: DatabaseSync): string[] {
     filled.push(row.name);
   }
   if (filled.length > 0) {
-    logger.info("recorded the granted scope of MCP sign-ins made before ruling 486", { mcp: filled });
+    logger.info("recorded the granted scope of MCP sign-ins whose public half lacked it", { mcp: filled });
   }
   return filled;
 }
@@ -477,7 +477,7 @@ export async function startMcpOAuthSignIn(
   } catch (error) {
     return refuse("discovery", oauthFailureReason(error));
   }
-  // Ruling 486(c): the scope the admin asked for, when there is one, is what
+  // Ruling 192: the scope the admin asked for, when there is one, is what
   // the authorization request (and a registration) sends; else the scopes
   // the resource advertises, as before. The server decides what it grants.
   if (row.oauth_requested_scope) discovery = { ...discovery, scope: row.oauth_requested_scope };
@@ -663,7 +663,7 @@ export async function completeMcpOAuthSignIn(
   const pub = signedInPublic(sealed, stored, readPublic(row.oauth_json), entry.discovery.scope);
   const replacedStaticCredential = row.cred_ref !== null;
   // A connection holds one credential: the sign-in the admin just chose takes
-  // the place of a pasted token, which would otherwise win (ruling 469(e)).
+  // the place of a pasted token, which would otherwise win (ruling 192).
   db.prepare(
     `UPDATE org_mcp_servers SET oauth_ref = ?, oauth_json = ?, cred_ref = NULL, updated_at = ? WHERE id = ?`,
   ).run(sealSecret(JSON.stringify(sealed)), JSON.stringify(pub), new Date().toISOString(), row.id);
@@ -731,7 +731,7 @@ export async function signOutMcpOAuth(
     issuer: pub?.issuer ?? (sealed ? hostOf(sealed.authorizationServer) : null),
     resourceMetadataUrl: pub?.resourceMetadataUrl ?? null,
     reason: null,
-    // Ruling 486: the grant went with the tokens.
+    // Ruling 192: the grant went with the tokens.
     scope: null,
   });
   recordAudit(db, {
@@ -882,7 +882,7 @@ export function mcpOAuthTokenSource(
     }
     const stored = storedTokens(fresh);
     const next: SealedOAuth = { ...sealed, tokens: stored };
-    // Ruling 486: a refresh reply that names a scope updates the grant; one
+    // Ruling 192: a refresh reply that names a scope updates the grant; one
     // that names none keeps the grant the sign-in held.
     const previous = readPublic(again.oauth_json);
     writeOAuth(db, row.id, next, signedInPublic(next, stored, previous, tokens.scope ?? previous?.scope ?? sealed.scope));

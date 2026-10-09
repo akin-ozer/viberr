@@ -28,7 +28,7 @@ import { listScopeViolations } from "./policy-violations.server";
  * Audit logs: the REAL `scope_violations` + `audit_events` tables merged
  * into the mock's four display kinds (violation / blockedact / change /
  * audit). Violations carry their own per-row open/resolved state
- * (ruling 5) plus resolve context (who/when — Phase 10). audit_events rows
+ * (ruling 221) plus resolve context (who/when — Phase 10). audit_events rows
  * are mapped through an explicit whitelist covering every project-scoped
  * governance action family, each with a readable text template (the
  * fallback template guarantees no raw JSON ever reaches the UI) —
@@ -36,7 +36,7 @@ import { listScopeViolations } from "./policy-violations.server";
  * the Stream panel, auth/org-scoped rows have no project home. Both panels
  * are capped with loader-driven "show older" pagination (Phase 10).
  *
- * Ruling 681: one family of instance rows does have a project home. A write
+ * Ruling 34: one family of instance rows does have a project home. A write
  * to a knowledge base, a skill or an MCP server names the boards whose runs
  * are given it (`details.resource`), and the audit panel of each of those
  * boards shows it (`RESOURCE_ACTIONS` below).
@@ -190,7 +190,7 @@ export function listActivityStream(
       // reversed the two relative to the task page whenever timestamps
       // collided (e.g. the up-to-4 events one reconcile pass stamps in a
       // single tick). The tie-break used to be `id ASC`, which only agreed
-      // while every write re-inserted a task's rows newest first; ruling 457
+      // while every write re-inserted a task's rows newest first; ruling 21
       // keeps the ids of unchanged rows (CS-1), so a newer event appended
       // later carries the LARGER id and only `position` still says which is
       // newer. `id` stays last so ties across tasks remain deterministic.
@@ -238,7 +238,7 @@ export interface AuditLogEntry {
   resolvedAt: string | null;
   /** Resolver display name (user id resolved; label fallback). */
   resolvedBy: string | null;
-  /** Ruling 681: the knowledge-base document a resource row wrote, for the
+  /** Ruling 34: the knowledge-base document a resource row wrote, for the
    *  route to link for a viewer who may open it. Absent on every other row. */
   doc?: { kb: string; doc: string };
 }
@@ -254,10 +254,10 @@ const AUDIT_LOG_LIMIT = 60;
 const AUDIT_ACTION_KINDS = {
   "project.policy.boundary_changed": "change",
   "project.policy.guardrail_changed": "change",
-  // Ruling 178: the required-reviewer rule (Settings → Required reviewers,
+  // Ruling 89: the required-reviewer rule (Settings → Required reviewers,
   // or the controller's set_required_reviewers) — acceptance policy.
   "project.required_reviewers.updated": "change",
-  // Ruling 482: the project's gates (Settings → Gates, or the controller's
+  // Ruling 104: the project's gates (Settings → Gates, or the controller's
   // set_project_gates) — what acceptance waits on, like the rule above.
   "project.gates.updated": "change",
   "project.member.role_changed": "change",
@@ -276,13 +276,13 @@ const AUDIT_ACTION_KINDS = {
   // library profile into the project is the same class of config change as
   // creating one here, and was the only sibling missing.
   "project.agent_profile.deployed": "change",
-  // Ruling 681: which knowledge base the board's rulings are, and a template's
+  // Ruling 34: which knowledge base the board's rulings are, and a template's
   // grants pushed into the board's copy of an agent. Both change what the
   // board's runs are given, and both were recorded and shown nowhere.
   "project.rulings_kb.updated": "change",
   "project.agent_profile.resources_synced": "change",
   "project.created": "change",
-  // Ruling 462: the GitHub repository a project was created with.
+  // Ruling 225: the GitHub repository a project was created with.
   "project.repository.created": "change",
   "project.archived": "change",
   "project.unarchived": "change",
@@ -300,32 +300,32 @@ const AUDIT_ACTION_KINDS = {
   // nowhere — reconstructing "who bypassed the required reviewer" used to need
   // raw SQLite access, the exact thing this panel exists to make unnecessary.
   "task.acceptance.forced": "audit",
-  // Ruling 235: a human pressed Accept and the gate refused because the
+  // Ruling 96: a human pressed Accept and the gate refused because the
   // reviewed revision is not on the pull request. It belongs on the feed for
   // the same reason the forced acceptance does - it is a governance-relevant
   // thing a person did that the record must be able to answer for.
   "task.acceptance.head_unpushed": "blockedact",
-  // Ruling 177 (pass 36): acceptance ended the task's live runs.
+  // Ruling 154 (pass 36): acceptance ended the task's live runs.
   "task.acceptance.interrupted_runs": "audit",
-  // Ruling 237 (F37-57): a reviewer objected twice running and Viberr put the
+  // Ruling 94 (F37-57): a reviewer objected twice running and Viberr put the
   // decision in front of a person. On the feed because the alternative is that
   // "why did this task sit for a day" is only answerable by opening the task.
   "task.review.deadlock": "audit",
-  // Ruling 482: Viberr's own run of the project's gates on a revision, and a
+  // Ruling 104: Viberr's own run of the project's gates on a revision, and a
   // person asking for one. The run is the evidence an acceptance stands on.
   "task.gates.run": "audit",
   "task.gates.requested": "audit",
   "project.org_admin.override": "audit",
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
-  // Ruling 477(b) (F40-28): a goal chain was the automation that started,
-  // stranded and closed a project's work. Ruling 503 turned the chains into
-  // epics and nothing writes these any more; a project's history keeps the
-  // rows it has, and they still read as sentences.
+  // Ruling 273 (F40-28): a goal chain was the automation that started,
+  // stranded and closed a project's work. Epics replace the chains and nothing
+  // writes these any more; a project's history keeps the rows it has, and they
+  // still read as sentences.
   "goal.created": "change",
   "goal.updated": "change",
   "goal.completed": "audit",
-  // Ruling 503: an epic is a person's plan. Creating one, changing what it
+  // Ruling 272: an epic is a person's plan. Creating one, changing what it
   // is, and putting a task in one or taking it out are their decisions; the
   // one-time conversion of a goal chain into an epic is Viberr's own record.
   "epic.created": "change",
@@ -381,7 +381,7 @@ const auditDetailsSchema = z.object({
   email: detailText,
   role: detailText,
   name: detailText,
-  // Ruling 364: the preset NAME a stage was recoloured to.
+  // Ruling 279: the preset NAME a stage was recoloured to.
   color: detailText,
   // F20-13: the composite boundary change a stage removal caused (display
   // NAMES), written only when re-joining the neighbours TIGHTENED a hop.
@@ -400,42 +400,42 @@ const auditDetailsSchema = z.object({
   label: detailText,
   op: detailText,
   value: z.number().optional().catch(undefined),
-  // Ruling 178: the required-reviewer list as written, resolved to names.
+  // Ruling 89: the required-reviewer list as written, resolved to names.
   rules: z
     .array(z.object({ stageName: z.string().catch("?"), agentName: z.string().catch("?") }))
     .catch([]),
-  // Ruling 235: the two SHAs and the pull request a refused acceptance named.
+  // Ruling 96: the two SHAs and the pull request a refused acceptance named.
   // Without these the row falls back to the humanised action id, which is the
   // one line on the audit panel that reads like a machine label instead of a
   // sentence a person can act on.
   prNumber: z.number().optional().catch(undefined),
   revisionHeadSha: detailText,
   liveHeadSha: detailText,
-  // Ruling 237: the reviewer whose objections deadlocked, and how many rounds.
+  // Ruling 94: the reviewer whose objections deadlocked, and how many rounds.
   rounds: z.number().optional().catch(undefined),
   profileId: detailText,
-  // Ruling 462: the repository created with the project, and its visibility.
+  // Ruling 225: the repository created with the project, and its visibility.
   repo: detailText,
   private: z.boolean().optional().catch(undefined),
-  // Ruling 477(b): a goal row's chain title, its link count at creation, the
+  // Ruling 273: a goal row's chain title, its link count at creation, the
   // op a redirect ran, the link it touched, the reason given, and whether it
   // changed nothing (`from`/`to` above carry a rename's two titles). Ruling
-  // 503's epic rows reuse `title`, `from`, `to`, `status` and `total`.
+  // 272's epic rows reuse `title`, `from`, `to`, `status` and `total`.
   title: detailText,
   links: z.number().optional().catch(undefined),
   index: z.number().optional().catch(undefined),
   reason: detailText,
   unchanged: z.boolean().optional().catch(undefined),
-  // Ruling 503: what an epic edit changed, as the epic's own history words it.
+  // Ruling 272: what an epic edit changed, as the epic's own history words it.
   summary: detailText,
 
-  // Ruling 653: a project made from a board file says which file.
+  // Ruling 32: a project made from a board file says which file.
   template: detailText,
   file: detailText,
-  // Ruling 681: the knowledge base a board named as its rulings.
+  // Ruling 34: the knowledge base a board named as its rulings.
   dir: detailText,
 
-  // Ruling 482: the gate list as written, and one gate run's outcome.
+  // Ruling 104: the gate list as written, and one gate run's outcome.
   gates: z.array(z.object({ name: z.string().catch("?") })).catch([]),
   headSha: detailText,
   status: detailText,
@@ -477,7 +477,7 @@ function auditText(
       return `${actor} turned **${label}** ${d.op === "on" ? "on" : "off"}.`;
     }
     case "project.required_reviewers.updated": {
-      // Ruling 178: the whole list as it now stands; a clear says so.
+      // Ruling 89: the whole list as it now stands; a clear says so.
       if (d.rules.length === 0) return `${actor} cleared the required reviewers.`;
       const named = d.rules.map((r) => `**${r.agentName} at ${r.stageName}**`).join(", ");
       return `${actor} set the required reviewers to ${named}.`;
@@ -505,7 +505,7 @@ function auditText(
         : `${actor} renamed a workflow stage.`;
     }
     case "project.stage.recolored": {
-      // Ruling 364: the writer records `{ name, color }` — the preset NAME,
+      // Ruling 279: the writer records `{ name, color }` — the preset NAME,
       // which is the whole value, so the feed can print it as a word.
       const name = d.name;
       const color = d.color;
@@ -557,7 +557,7 @@ function auditText(
         ? `${actor} named **${d.dir}** the project's rulings.`
         : `${actor} cleared the project's rulings.`;
     case "project.created":
-      // Ruling 653: an imported board names the file it came from.
+      // Ruling 32: an imported board names the file it came from.
       return d.template === "imported" && d.file
         ? `${actor} created the project from the board file **${d.file}**.`
         : `${actor} created the project.`;
@@ -616,7 +616,7 @@ function auditText(
     // reason/remediation halves are split by a sentence boundary; rows recorded
     // before the copy was de-dashed used an em dash, so both are handled.
     case "task.acceptance.head_unpushed": {
-      // Ruling 235. Deliberately not "<actor> did X": the actor on this row is
+      // Ruling 96. Deliberately not "<actor> did X": the actor on this row is
       // the policy engine, and what a reader needs is WHICH revision was
       // reviewed against WHICH head, in the same shape the refusal itself used.
       const pr = d.prNumber ? `**PR #${d.prNumber}**` : "the review PR";
@@ -625,12 +625,12 @@ function auditText(
       return `Acceptance refused: ${reviewed} is not on ${pr}${live}, so the merge would not have carried the reviewed work, on`;
     }
     case "project.gates.updated": {
-      // Ruling 482: the whole list as it now stands; a clear says so.
+      // Ruling 104: the whole list as it now stands; a clear says so.
       if (d.gates.length === 0) return `${actor} cleared the project's gates.`;
       return `${actor} set the project's gates to ${d.gates.map((g) => `**${g.name}**`).join(", ")}.`;
     }
     case "task.gates.run": {
-      // Ruling 482. The actor is the server; the row says what its run found.
+      // Ruling 104. The actor is the server; the row says what its run found.
       const sha = d.headSha ? `\`${d.headSha.slice(0, 7)}\`` : "the revision under review";
       if (d.status === "error") return `Viberr could not run the project's gates on ${sha} on`;
       return `Viberr ran the project's gates on ${sha}: ${d.passed ?? 0}/${d.total ?? 0} exit 0, on`;
@@ -638,7 +638,7 @@ function auditText(
     case "task.gates.requested":
       return `${actor} asked Viberr to run the project's gates again on`;
     case "task.review.deadlock": {
-      // Ruling 237. The actor is the policy engine, so this says what happened,
+      // Ruling 94. The actor is the policy engine, so this says what happened,
       // not who did it. The reviewer is named by profile id, which is what the
       // row stores; the task link beside it carries the rest.
       const who = d.profileId ? `\`${d.profileId}\`` : "a reviewer";
@@ -650,9 +650,9 @@ function auditText(
       if (!bypassed || bypassed.startsWith("no gate")) {
         return `${actor} force-accepted the completion on`;
       }
-      // Rows recorded before ruling 571 carry gate sentences that set their
-      // remedy off with a dash; newer ones end the claim with a period, which
-      // the sentence split below takes care of.
+      // Older rows carry gate sentences that set their remedy off with a dash;
+      // newer ones (ruling 292(c)) end the claim with a period, which the
+      // sentence split below takes care of.
       const reason = bypassed
         .split(/ — /)[0]!
         .split(/(?<=\.)\s/)[0]!
@@ -666,7 +666,7 @@ function auditText(
       const memberRole = d.memberRole;
       return `${actor} used the org-admin override to ${what} (project role: ${memberRole ?? "not a member"}).`;
     }
-    // Ruling 477(b) (F40-28): the goal-chain rows.
+    // Ruling 273 (F40-28): the goal-chain rows.
     case "goal.created": {
       const goal = `goal ${goalLabel(row, d)}`;
       return d.links === undefined
@@ -678,7 +678,7 @@ function auditText(
     case "goal.completed":
       // The runner's own record names no actor, like the policy engine's rows.
       return `Goal ${goalLabel(row, d)} completed: every link is settled.`;
-    // Ruling 503: the epic rows. A task's move reads on its task chip.
+    // Ruling 272: the epic rows. A task's move reads on its task chip.
     case "epic.created":
       return d.total
         ? `${actor} created epic ${goalLabel(row, d)} with ${countLabel(d.total, "task")}.`
@@ -713,15 +713,15 @@ function auditText(
   }
 }
 
-/** Ruling 477(b): a goal row names its chain by id, with the title the row
+/** Ruling 273: a goal row names its chain by id, with the title the row
  *  recorded (a row written before the writer recorded one has none). Ruling
- *  503's epic rows name their epic the same way. */
+ *  272's epic rows name their epic the same way. */
 function goalLabel(row: AuditRow, d: AuditDetailsRead): string {
   return `**${row.subject_id ?? "?"}**${d.title ? ` (${d.title})` : ""}`;
 }
 
 /**
- * Ruling 477(b) (F40-28): a `goal.updated` row reads as what the person did to
+ * Ruling 273 (F40-28): a `goal.updated` row reads as what the person did to
  * the chain, op by op, from the facts the writer records beside `op`.
  */
 function goalUpdatedText(row: AuditRow, actor: string, d: AuditDetailsRead): string {
@@ -757,10 +757,10 @@ function goalUpdatedText(row: AuditRow, actor: string, d: AuditDetailsRead): str
   }
 }
 
-/* -------------------------------------------- resource writes (ruling 681) */
+/* -------------------------------------------- resource writes (ruling 34) */
 
 /**
- * Ruling 681: the instance rows a board's panel shows when their `resource`
+ * Ruling 34: the instance rows a board's panel shows when their `resource`
  * names the board. Each changes what the board's runs are given: a document
  * of a knowledge base, a skill's text, an MCP server's reach, or the resource
  * itself going or changing name. A new folder, a re-index and a create are
@@ -792,7 +792,7 @@ const DETAILS_JSON = "CASE WHEN json_valid(a.details_json) THEN a.details_json E
  * The instance rows about one board (`audit_events AS a`): one of those actions
  * whose `resource` names the board. A write that is an agent's correction, or
  * its undo, on one of the board's own tasks is left out, because that task's
- * timeline entry is on the Stream beside this panel (ruling 498); another
+ * timeline entry is on the Stream beside this panel (ruling 210); another
  * board given the same knowledge base has no such entry, and sees the row.
  *
  * Only a member of `boards` that is an object is asked for its project: a
@@ -815,10 +815,10 @@ function resourceRowsWhere(slug: string) {
  *
  * `edited` is read as whether there was an edit and nothing more: the empty
  * object drops its keys here. The row keeps the passage an edit replaced and
- * what replaced it (ruling 637), and a knowledge base can be private (ruling
- * 578): this panel is read by every member of the board, so no sentence of it
+ * what replaced it (ruling 212(b)), and a knowledge base can be private (ruling
+ * 209): this panel is read by every member of the board, so no sentence of it
  * quotes a document. It names the document, as a correction's entry does when
- * it may not quote (ruling 568).
+ * it may not quote (ruling 211).
  */
 const resourceDetailsSchema = z.object({
   resource: z
@@ -1029,7 +1029,7 @@ export interface AuditActorOption {
 /**
  * C5 (pass 34, U34-4): what the Activity column calls the actor of one audit
  * row. The joined user name used to win outright, so a row written as
- * `<email> · via controller` (ruling 99(b)'s disclosure) rendered exactly like
+ * `<email> · via controller` (ruling 247's disclosure) rendered exactly like
  * one the same person wrote by hand — the ONE column that dropped it, since
  * the org Audit log and `inspect_audit_log` render the raw stored label.
  *
@@ -1065,7 +1065,7 @@ function displayAuditActorLabel(raw: string): string {
 }
 
 export function auditFilterActors(db: DatabaseSync, slug: string): AuditActorOption[] {
-  // Ruling 681: and whoever wrote an instance row this board's panel shows.
+  // Ruling 34: and whoever wrote an instance row this board's panel shows.
   const given = resourceRowsWhere(slug);
   // SAFETY: `actor_label` is NOT NULL; `name` is NOT NULL on users, null only
   // when the LEFT JOIN finds no row.
@@ -1217,7 +1217,7 @@ function collectAuditEntries(
       });
     }
   }
-  // Ruling 681: the instance rows about this board. Each is a change, and none
+  // Ruling 34: the instance rows about this board. Each is a change, and none
   // is on a task, so a kind or a task filter that excludes those excludes them.
   if ((!filters.kind || filters.kind === "change") && !task) {
     for (const row of auditRows(resourceRowsWhere(slug))) {
@@ -1285,7 +1285,7 @@ export function countAuditLog(
       )
       .get(slug, ...actions) as { c: number }
   ).c;
-  // Ruling 681: and the instance rows about this board.
+  // Ruling 34: and the instance rows about this board.
   const given = resourceRowsWhere(slug);
   // SAFETY: the same aggregate guarantee — one row, numeric `c`.
   const resourceRows = (

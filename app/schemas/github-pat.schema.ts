@@ -16,7 +16,7 @@ import { z } from "zod";
  * scope introspection, so each id maps to a live probe where one exists —
  * reads directly, writes via the empty-payload dry-run (422 = authorized,
  * 403 = refused) — and is otherwise "assumed" granted until a real 403
- * opens a scope violation (ruling 5).
+ * opens a scope violation (ruling 221).
  */
 
 const PAT_VALIDATION_STATUS_VALUES = [
@@ -64,7 +64,7 @@ const patValidationSchema = z
     scopes: z.array(scopeCheckSchema).default([]),
     /** Scope ids with ok=false — convenience for insufficient_scope. */
     missingScopes: z.array(z.string()).default([]),
-    /** Ruling 144 (pass 34, G34-2): a CLASSIC token's full granted list, read
+    /** Ruling 221(a) (pass 34, G34-2): a CLASSIC token's full granted list, read
      *  from the `x-oauth-scopes` header verbatim (an empty header records
      *  `[]`). Null for fine-grained tokens, which expose nothing to read, and
      *  for a run that never reached the header. Advisory only: the required
@@ -91,7 +91,7 @@ export function parsePatValidation(raw: string | null): PatValidation | null {
 }
 
 /**
- * Ruling 480 (F40-43): what one REPOSITORY proved about a token, kept per
+ * Ruling 220 (F40-43): what one REPOSITORY proved about a token, kept per
  * repository in `github_pats.repo_scopes_json`.
  *
  * A fine-grained token is granted per repository, so its `repo` and

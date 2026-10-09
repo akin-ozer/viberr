@@ -6,7 +6,7 @@ import {
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
-// Ruling 296: every tool on this server refuses arguments it does not
+// Ruling 136: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { imageResult, strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
 import {
@@ -123,7 +123,7 @@ import { pageEnd } from "~/server/runtimes/read-page-budget.server";
  *                    recorded ATOMICALLY with the reply at completion); its
  *                    optional `evidence` field is separately gated on
  *                    attach-evidence-references (P13-D-26)
- *   keep_source    → attach-evidence-references (ruling 690: the grant that
+ *   keep_source    → attach-evidence-references (ruling 82: the grant that
  *                    lets a run save files on its task lets it keep the
  *                    sources its result rests on)
  *
@@ -136,7 +136,7 @@ export interface AgentToolkit {
   /** `{ viberr_agent: <sdk mcp server> }` — merge into the run's mcpServers. */
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
   /**
-   * Ruling 339: the names of the tools this toolkit ACTUALLY mounted, taken
+   * Ruling 167: the names of the tools this toolkit ACTUALLY mounted, taken
    * from the definitions it just built. The run record discloses this; it used
    * to restate three of the gates by hand, which is why it under-reported.
    */
@@ -153,11 +153,11 @@ interface AgentToolkitDeps {
   /** Staging key for report_outcome (threaded to the completion input). */
   outcomeKey: string;
   collab: AgentCollab;
-  /** Ruling 283: the knowledge bases attached to THIS run, by store directory.
+  /** Ruling 205: the knowledge bases attached to THIS run, by store directory.
    *  Their documents are indexed into the prompt, not injected, so the run
    *  needs a way to pull one — and may pull only from these. */
   kb: readonly string[];
-  /** Ruling 690: the run's `use-web-search-fetch` grant, for what
+  /** Ruling 82: the run's `use-web-search-fetch` grant, for what
    *  `keep_source` says a run can keep: a page it fetched, or only what a run
    *  without the web can reach. */
   webEgress: boolean;
@@ -180,13 +180,13 @@ interface ReportedOutcome {
   verdict?: "approve" | "request_changes";
   summary?: string;
   evidence?: { label: string; result?: string; status: EvidenceStatus }[];
-  /** Ruling 488: declared on every variant of the tool. */
+  /** Ruling 202: declared on every variant of the tool. */
   relay?: RelayEntry[];
 }
 
 /** F4: the JSON a single `github_read` hands back is capped, so a large
  *  tree/blob or a 1000-item list cannot flood the run transcript; the agent
- *  narrows or paginates. Ruling 624: the cap is `READ_PAGE_BYTES` of UTF-8,
+ *  narrows or paginates. Ruling 215: the cap is `READ_PAGE_BYTES` of UTF-8,
  *  the most a Codex run's code-mode tool output carries whole (it was 48,000
  *  characters). */
 
@@ -218,7 +218,7 @@ export async function postAgentComment(
   // fan-out drops those, and without the slug this call could only ever
   // disclose the AMBIGUOUS half, so a non-member tag went silently nowhere.
   const ambiguity = withAmbiguityDisclosure(db, input.text, input.projectSlug);
-  // Ruling 252 (F37-81): the same disclosure ruling 214 gave the operator, for
+  // Ruling 70 (F37-81): the same disclosure ruling 133 gave the operator, for
   // the two writers that share this seam. A comment writes a timeline line and
   // starts nothing, so an @tagged AGENT read it only in the writer's head.
   //
@@ -228,14 +228,14 @@ export async function postAgentComment(
   // the agent (`commentToAgent` starts a run). Typed by the controller on their
   // behalf they reach nobody, and nothing said so.
   //
-  // `@operator` is excluded, exactly as in ruling 214: several writes in a
+  // `@operator` is excluded, exactly as in ruling 133: several writes in a
   // controller turn wake the operator on their own, so claiming nothing was
   // sent to it could be the false half of an honest sentence.
   //
-  // Ruling 262 (F37-92): EVERY unreached handle, not the one a run would have
+  // Ruling 70 (F37-92): EVERY unreached handle, not the one a run would have
   // gone to. `resolveMentionedAgent` answers the dispatch question, so it
   // returned the operator for the very comment above and the stamp was skipped
-  // — ruling 252 did not cover its own motivating example until this resolver
+  // — ruling 70 did not cover its own motivating example until this resolver
   // replaced it.
   const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
   const note = unreachedAgentNote(
@@ -244,7 +244,7 @@ export async function postAgentComment(
   );
   const text = note ? `${ambiguity}\n\n${note}` : ambiguity;
   const occurredAt = new Date().toISOString();
-  // Ruling 644: built once, so the recipients are stamped on this event.
+  // Ruling 72: built once, so the recipients are stamped on this event.
   const comment: TaskFileEvent = {
     occurredAt,
     type: "comment",
@@ -272,7 +272,7 @@ export async function postAgentComment(
   // NEW-4: a mid-run agent comment that tags a person notifies them, same as
   // any other comment — the tag is a real ping, not decoration. NEW-5: the
   // `from` chip is the agent's own name, not its runtime label.
-  // Ruling 382: and the event records who it reached, so compaction keeps it.
+  // Ruling 20: and the event records who it reached, so compaction keeps it.
   await stampNotifiedRecipients(
     db,
     taskRef(ctx, input.projectSlug, input.taskKey),
@@ -328,7 +328,7 @@ export async function openAgentQuestionPacket(
   const packet = buildAgentQuestionPacket(input.actorRef, question);
 
   let opened = false;
-  // Ruling 137: an agent's question pauses coordination like any packet, so
+  // Ruling 99: an agent's question pauses coordination like any packet, so
   // the standing acceptance offers are withdrawn on the record in the same write.
   const questionCause: OfferWithdrawalCause = { kind: "packet", title: packet.title };
   const terminalStageId = terminalStageIdFor(ctx, input.projectSlug);
@@ -377,7 +377,7 @@ export async function openAgentQuestionPacket(
     taskKey: input.taskKey,
     details: { actorRef: encodeActorRef(input.actorRef), title: packet.title },
   });
-  // Ruling 222 (F37-42): the notification says WHO is asking. `notifyTaskWatchers`
+  // Ruling 74 (F37-42): the notification says WHO is asking. `notifyTaskWatchers`
   // stamps `OPERATOR_NOTIFY_FROM` on any notice that names nobody, so an agent's
   // own question reached the owner's inbox under the Operator's name and avatar
   // — on the one surface whose chip IS the "who wants something from you"
@@ -389,15 +389,15 @@ export async function openAgentQuestionPacket(
   const notice: TaskWatcherNotice = {
     projectSlug: input.projectSlug,
     taskKey: input.taskKey,
-    // Ruling 481(a) (F40-48): a question, not an approval. As `approval` it
+    // Ruling 74 (F40-48): a question, not an approval. As `approval` it
     // wore the stage-transition arrow and pill, and "Approval requests" off
     // silenced it with nothing on the toggle saying so.
     kind: "question",
     title: `${role} asks: ${packet.title}`,
     text: packet.body || "An engaged agent needs a human decision.",
-    // Ruling 497: the row opens the question's card, where it is answered.
+    // Ruling 75: the row opens the question's card, where it is answered.
     about: { decision: packet.id },
-    // Ruling 361: the agent that asked, by name; the Operator only when it did.
+    // Ruling 74: the agent that asked, by name; the Operator only when it did.
     from:
       input.actorRef.kind === "agent"
         ? { kind: "agent", backend: input.actorRef.backend, name: role, role }
@@ -408,7 +408,7 @@ export async function openAgentQuestionPacket(
 }
 
 /**
- * Ruling 298: how many answer choices a live agent question may carry. The
+ * Ruling 202: how many answer choices a live agent question may carry. The
  * number was always four; what changed is that it is DECLARED here and
  * refused at the boundary, instead of being applied by a silent `.slice(0, 4)`
  * in the packet builder. A decision card is the one surface where a dropped
@@ -421,8 +421,7 @@ const ASK_HUMAN_MAX_OPTIONS = 4;
 export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab, kb } = deps;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
 
   if (collab.comment) {
     tools.push(
@@ -538,12 +537,12 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         .string()
         .optional()
         .describe("One-paragraph justification (markdown allowed)."),
-      // Ruling 488 (F40-67): the specialist's reach onto another task of the
+      // Ruling 202 (F40-67): the specialist's reach onto another task of the
       // project, through the reporting path it already has rather than a
       // post tool of its own. Live on WEB-9 the Platform Engineer wrote its
       // results for WEB-8 into two attachments and a person pasted them over.
       // More than the cap is refused here, by name, so the agent re-reports
-      // inside the same run (ruling 298's rule for a live channel).
+      // inside the same run (ruling 202's rule for a live channel).
       relay: z
         .array(
           z.strictObject({
@@ -552,7 +551,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             files: z
               .array(z.string())
               .optional()
-              .describe("Ruling 538: names of this task's attachments to put on that task with the text, exactly as saved here."),
+              .describe("Names of this task's attachments to put on that task with the text, exactly as saved here."),
           }),
         )
         .max(RELAY_MAX_ENTRIES)
@@ -568,7 +567,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     // so the `evidence:` block had 42 `null` writers and zero real ones. Gated
     // exactly like its siblings: the field is only DECLARED when the profile
     // holds the grant, so an agent without it cannot see or use it.
-    // Ruling 526: a row is what was checked, how it came out and whether that
+    // Ruling 16: a row is what was checked, how it came out and whether that
     // passed. It carried two diff-count cells, which a reviewer filled with
     // "102 passed" and "0 failed" and the timeline painted green and red.
     const evidenceField = z
@@ -736,7 +735,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
-  // Ruling 690: a run that may save files on its task keeps the sources its
+  // Ruling 82: a run that may save files on its task keeps the sources its
   // result rests on. Gated on `attach-evidence-references` and on nothing
   // wider: that grant is what makes the attachments folder the run's to write,
   // and the keep takes a file from there. The Codex twin is the gateway's
@@ -752,7 +751,6 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           from: z.string().describe(keepFields.from),
           title: z.string().describe(keepFields.title),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             return textResult(
@@ -777,7 +775,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
-  // Ruling 281 (pass 37, F37-114): an agent can read its repository and not the
+  // Ruling 213(a) (pass 37, F37-114): an agent can read its repository and not the
   // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
   // report_outcome and (with a grant) github_read — so a task key it is TOLD
   // about, in a document or a directive, could not be checked.
@@ -797,7 +795,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   // its OWN task already — the gap was only ever the other tasks beside it.
   // Mounted only when this profile already has a Viberr server — a profile
   // holding no collaboration grant at all still gets nothing, which is the
-  // gate U11 pinned and this must not widen. Ruling 589: the same predicate
+  // gate U11 pinned and this must not widen. Ruling 216: the same predicate
   // mounts the gateway's board server for a Codex run.
   if (holdsCollaborationGrant(collab)) {
     tools.push(
@@ -805,7 +803,6 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         "read_board",
         READ_BOARD_DESCRIPTION,
         { taskKey: z.string().optional().describe(READ_BOARD_TASK_KEY_DESCRIPTION) },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             const deps = { db, ctx, projectSlug };
@@ -822,12 +819,12 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           }
         },
       ),
-      // Ruling 563: the prompt's recent timeline clips every entry at 220
-      // characters, and nothing here returned one whole, the gap ruling 285
+      // Ruling 213(b): the prompt's recent timeline clips every entry at 220
+      // characters, and nothing here returned one whole, the gap ruling 117
       // closed for the operator. Live on AWSC-4 a retried run got a person's
       // four-item answer as "1=Shared … 2=RDS for SQL Server 2…" and raised a
       // packet asking for it again. Same gate as `read_board`: read-only,
-      // nothing a member could not read on the task page. Ruling 596: another
+      // nothing a member could not read on the task page. Ruling 213: another
       // task's entry too, by the stamp `read_board` lists in its `timeline`.
       tool(
         "read_timeline_entry",
@@ -841,7 +838,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const entryTask = args.taskKey?.trim() || taskKey;
-            // Ruling 648: a correction to a knowledge base this run is given reads whole.
+            // Ruling 211: a correction to a knowledge base this run is given reads whole.
             return textResult(
               await readTimelineEntry(
                 { db, ctx, projectSlug, readerKbs: kb },
@@ -857,7 +854,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           }
         },
       ),
-      // Ruling 594: one file of any task in this project. Same gate, read-only;
+      // Ruling 214: one file of any task in this project. Same gate, read-only;
       // the Codex twin is the gateway's board server.
       tool(
         "read_task_attachment",
@@ -868,7 +865,6 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           offset: z.number().int().min(0).optional().describe(READ_TASK_ATTACHMENT_FIELDS.offset),
           delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             const read = readAgentTaskAttachment(
@@ -885,7 +881,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           }
         },
       ),
-      // Ruling 690: the sources a task of this project keeps, listed or
+      // Ruling 82: the sources a task of this project keeps, listed or
       // opened by id. Same gate, read-only: a reviewer that holds no file
       // grant still checks a claim against the source it cites.
       tool(
@@ -897,7 +893,6 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
           find: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.find),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             const read = readAgentTaskSource(
@@ -915,7 +910,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         },
       ),
     );
-    // Ruling 691: one page of this task as a reader sees it, or (given a
+    // Ruling 194: one page of this task as a reader sees it, or (given a
     // size) as one picture of exactly that size. Same gate, and only on a
     // server that can render one: a tool that cannot answer is never listed.
     // It saves nothing on the task; the Codex twin is the gateway's board
@@ -945,7 +940,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
                 height: args.height,
                 scale: args.scale,
                 // Told how a picture is kept: a run that can post files and
-                // holds no verdict (ruling 698). One that holds the verdict
+                // holds no verdict (ruling 194). One that holds the verdict
                 // judges pictures and makes none, and one that cannot post
                 // was told never to write into that folder.
                 keeps: collab.evidence && !collab.verdict,
@@ -963,14 +958,14 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     }
   }
 
-  // Ruling 283: a knowledge base is INDEXED into the prompt now, not injected,
+  // Ruling 205: a knowledge base is INDEXED into the prompt now, not injected,
   // so the grant is only half-delivered without a way to pull a document. Its
   // gate is the KB grant itself, not the collaboration grants above — an agent
   // granted a knowledge base and nothing else still has to be able to read it,
   // and U11's gate was about collaboration, which this is not. (A Codex run
   // mounts no in-process Viberr tools at all; its channel is the folder path
   // the index prints, which `KB_INDEX_NOTE` names, and for a private knowledge
-  // base the same tool, answered by the gateway, ruling 585.)
+  // base the same tool, answered by the gateway, ruling 216.)
   if (kb.length > 0) {
     tools.push(
       tool(
@@ -981,7 +976,6 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
           path: z.string().describe(KB_DOC_PATH_DESCRIPTION),
           offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args) => {
           try {
             return textResult(readKbDocForRun(kb, args.kb, args.path, ctx.dataRoot, args.offset ?? 0));
@@ -998,13 +992,13 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
-  // Ruling 483 (F40-53): an agent that PROVES a line of one of its knowledge
+  // Ruling 210 (F40-53): an agent that PROVES a line of one of its knowledge
   // bases wrong could only say so in a comment. Live on WEB-3 the Platform
   // Engineer wrote "the knowledge-base runbook is read-only to me, so I carried
   // it into the repo", an hour after the Site Engineer found the same stale
   // dossier fact, and the next directives still sent agents to the old lines.
   // Gated like `read_knowledge_doc`, on the grant itself: an agent corrects
-  // exactly the knowledge bases it was given. Ruling 498 writes the correction
+  // exactly the knowledge bases it was given. Ruling 210 writes the correction
   // as it is made, and a person undoes what they disagree with. Mounted after
   // `read_board`, so a knowledge base alone never widens U11's collaboration
   // gate.
@@ -1067,7 +1061,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   });
   return {
     mcpServers: { viberr_agent: server },
-    // Ruling 339: read off the definitions, never restated. Every gate above
+    // Ruling 167: read off the definitions, never restated. Every gate above
     // adds its own tool, so the only list that cannot drift from them is this
     // one.
     toolNames: tools.map((t) => t.name),

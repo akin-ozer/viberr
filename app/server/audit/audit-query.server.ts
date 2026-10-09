@@ -24,7 +24,7 @@ import type { DatabaseSync } from "node:sqlite";
  *  - **bounded** — `AUDIT_RETENTION_DAYS` (90) caps it at roughly 26k rows per
  *    task-year (288 ticks/day). `idx_audit_events__task_action` (project_slug,
  *    task_key, action, occurred_at) serves the per-task read from one task's
- *    rows (ruling 457); the action-only index made it walk every task's.
+ *    rows (ruling 11); the action-only index made it walk every task's.
  *
  * DG-3 stays exactly as it is. Nothing here writes.
  */
@@ -106,7 +106,7 @@ export interface TaskAuditDetailsRow {
 }
 
 /**
- * Ruling 475: the newest rows of ONE action on ONE task, details parsed. The
+ * Ruling 129: the newest rows of ONE action on ONE task, details parsed. The
  * operator's branch-update door reads its own earlier routing decisions here
  * (was this conflict already handed to the delivering agent once?), the way
  * the operator snapshot reads a person's dismissals. Served by

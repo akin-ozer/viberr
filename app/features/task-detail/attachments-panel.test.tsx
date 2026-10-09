@@ -95,14 +95,14 @@ describe("AttachmentsPanel", () => {
   });
 });
 
-/* -------------------------------------------- ruling 510: the long list */
+/* -------------------------------------------- ruling 314: the long list */
 
 /**
- * Ruling 510 (owner, 2026-09-26): the panel listed every file flat, so a task
+ * Ruling 314 (owner, 2026-09-26): the panel listed every file flat, so a task
  * whose gates ran twice listed fifteen files and pushed its timeline a screen
  * down. A long list now folds the way a long comment does.
  */
-describe("AttachmentsPanel folds a long list like a long comment (ruling 510)", () => {
+describe("AttachmentsPanel folds a long list like a long comment (ruling 314)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const files = [
@@ -209,15 +209,15 @@ describe("AttachmentsPanel attach control (F39-6)", () => {
     expect(container.textContent).toContain("read by the agents");
     const input = container.querySelector<HTMLInputElement>('input[type="file"]');
     expect(input).not.toBeNull();
-    // Ruling 574: the picker offers any kind of file; what may render inline
+    // Ruling 76: the picker offers any kind of file; what may render inline
     // is the serving route's business, not the picker's.
     expect(input!.accept).toBe("");
   });
 
-  // Ruling 368: the upload in flight is `aria-busy` on the control that
+  // Ruling 286: the upload in flight is `aria-busy` on the control that
   // started it, the loader spinning and the label naming the work.
   // Canary: drop `aria-busy` from the label in attachments-panel.tsx.
-  it("ruling 368: an upload in flight reads Attaching…, busy, the loader spinning", async () => {
+  it("ruling 286: an upload in flight reads Attaching…, busy, the loader spinning", async () => {
     const Stub = createRoutesStub([
       {
         path: "/t",
@@ -288,7 +288,7 @@ describe("TimelineItem evidence linkify", () => {
     expect(link.getAttribute("href")).toBe(`${BASE}/board-after.png`);
     expect(link.textContent).toBe("board-after.png");
     // The surrounding words stay plain text, and the name's backticks are its
-    // code face (ruling 526), never printed. CANARY: drop the code-span split
+    // code face (ruling 313), never printed. CANARY: drop the code-span split
     // in `EvidenceLabel` and the row reads "`board-after.png`".
     const row = container.querySelector(".ev-item")!;
     expect(row.textContent).toContain("shows the fix");
@@ -338,7 +338,7 @@ describe("AttachmentsPanel producer attribution (P21)", () => {
     expect(fileBy.textContent).toContain("by Reviewer");
   });
 
-  it("ruling 478(b) (F40-32): every name carries its whole self on hover, and comes before the by-line", () => {
+  it("ruling 313 (F40-32): every name carries its whole self on hover, and comes before the by-line", () => {
     // WEB-3's rows both read "WEB-3…" at phone width, with no title to read
     // the rest from. CANARY: drop `title={a.name}` from the file row.
     const { container } = render(
@@ -481,7 +481,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
   });
 
   it("a page capture opens at the page's width in a scroller the keyboard reaches", () => {
-    // Ruling 691: Viberr's picture of a delivered page is the whole page, up
+    // Ruling 86: Viberr's picture of a delivered page is the whole page, up
     // to six screens tall; fitted to the popup's height it cannot be read.
     // CANARY: render a capture through the plain image branch and there is no
     // region to focus, so a keyboard cannot scroll the page.
@@ -549,7 +549,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(baseElement.querySelector(DIALOG)).toBeNull();
   });
 
-  it("the Close control is on the shared close design (ruling 148)", () => {
+  it("the Close control is on the shared close design (ruling 287)", () => {
     const { container, baseElement } = render(
       <AttachmentLightboxProvider>
         <TimelineItem ev={ev()} attachmentsBase={BASE} />
@@ -580,7 +580,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(baseElement.querySelector(DIALOG)).toBeTruthy();
   });
 
-  // Ruling 105: a text-typed chip opens the read-only viewer in the same
+  // Ruling 317: a text-typed chip opens the read-only viewer in the same
   // popup — with the content fetched from the serving route and a Download
   // button that forces the save dialog (`?download=1`).
   it("a yml chip opens the read-only text viewer with a Download button", async () => {
@@ -686,7 +686,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     }
   });
 
-  // Ruling 105 addendum: a kind the popup cannot render still opens the card,
+  // Ruling 317 addendum: a kind the popup cannot render still opens the card,
   // showing a no-preview note in place of content — the point is the uniform
   // Download button, not the preview.
   it("a chip the popup cannot render (zip) opens the no-preview card with Download", async () => {
@@ -744,7 +744,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
   });
 
   // The no-preview card is the one body that never renders the file, so it
-  // probes the URL — a proven-unservable response (404 after the ruling-105
+  // probes the URL — a proven-unservable response (404 after the ruling-78
   // prune, 413 over the cap, auth redirect) swaps the note for the failure
   // message and drops Download (some browsers save a failed download's error
   // body as a file bearing the attachment's real name).
@@ -774,7 +774,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     }
   });
 
-  // Ruling 105 addendum: the Download button is on EVERY kind's card — before
+  // Ruling 317 addendum: the Download button is on EVERY kind's card — before
   // it, an image opened with only "Open original" and saving took a
   // right-click on the raw tab.
   it("the image lightbox carries the same Download button", () => {
@@ -902,13 +902,13 @@ describe("attachment images degrade gracefully when the picture cannot load", ()
 });
 
 /*
- * Ruling 363: the reader is a code reader. A file whose name is not an image
+ * Ruling 317: the reader is a code reader. A file whose name is not an image
  * or a known binary kind opens in it — highlighted by the name's grammar,
  * numbered — and only the bytes (a NUL in the head) can send it to the
  * no-preview card instead. The serving route is untouched: these fetches are
  * downloads on the wire, text in the popup, never rendered.
  */
-describe("attachment code reader (ruling 363)", () => {
+describe("attachment code reader (ruling 317)", () => {
   const DIALOG = 'dialog[data-screen-label="Attachment lightbox"]';
   const NUL = String.fromCharCode(0);
   const ev = (attachments: string[]): TimelineEventRender => ({
@@ -993,7 +993,7 @@ describe("attachment code reader (ruling 363)", () => {
     });
   });
 
-  it("ruling 614: a .md chip opens rendered, and Raw is the code reader", async () => {
+  it("ruling 317: a .md chip opens rendered, and Raw is the code reader", async () => {
     await withBody("# Findings\n\nAll **green**.\n", async () => {
       const { dialog, findByRole, getByRole } = openChip("report.md");
       // CANARY: send markdown straight to CodeView and nothing here renders.
@@ -1015,7 +1015,7 @@ describe("attachment code reader (ruling 363)", () => {
     });
   });
 
-  it("ruling 614: a rendered picture of the task's own file loads from its serving route", async () => {
+  it("ruling 317: a rendered picture of the task's own file loads from its serving route", async () => {
     await withBody("![the page](shot.png)\n", async () => {
       const { container, findByRole } = render(
         <AttachmentLightboxProvider attachmentNames={["report.md", "shot.png"]} attachmentsBase={BASE}>

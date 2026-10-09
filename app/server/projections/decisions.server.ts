@@ -68,7 +68,7 @@ export interface DecisionsForUser {
   mine: DecisionRef[];
   /** Open decisions the user could act on ONLY via the org-admin override. */
   overrideEligible: DecisionRef[];
-  /** Ruling 672: open repository questions on boards this user is a member
+  /** Ruling 65: open repository questions on boards this user is a member
    *  of and cannot answer. Both answers decide the board, so they wait on a
    *  project admin. Never this user's inbox; listed so that whoever asks what
    *  is waiting is not told "nothing" about a packet they can see. */
@@ -84,7 +84,7 @@ type OpenDecisionRow = {
   stage: string;
   owner_user_id: string | null;
   has_packet: number;
-  /** The open packet's `cause` (ruling 315), or null. */
+  /** The open packet's `cause` (ruling 65), or null. */
   packet_cause: string | null;
   recommendation_count: number;
 };
@@ -222,7 +222,7 @@ export function decisionsRequiring(
   const classify = (
     ref: DecisionRef,
     ownerUserId: string | null,
-    /** Ruling 672: the packet is the repository question, whose two answers
+    /** Ruling 65: the packet is the repository question, whose two answers
      *  both decide the board. It is a project admin's and nobody else's, so
      *  it is not "waiting on" a maintainer or the task's owner. */
     boardDecision = false,

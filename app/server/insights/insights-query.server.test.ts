@@ -36,19 +36,19 @@ function insertRun(
     interruptedReason?: "restart" | null;
     /** F35-1: 0 while the row holds a live estimate (default 1: a total). */
     usageFinal?: 0 | 1;
-    /** Ruling 308: the two columns the task and profile breakdowns group on. */
+    /** Ruling 35: the two columns the task and profile breakdowns group on. */
     taskKey?: string;
     agentProfileId?: string;
-    /** Ruling 642: the agent's name as its run was stamped, and when. */
+    /** Ruling 35: the agent's name as its run was stamped, and when. */
     agentName?: string | null;
     createdAt?: string;
-    /** Ruling 395: what the provider said it wrote into the cache. */
+    /** Ruling 36: what the provider said it wrote into the cache. */
     cacheWrite?: number;
-    /** Ruling 505: the provider session the run used (a resume reuses one). */
+    /** Ruling 172: the provider session the run used (a resume reuses one). */
     sessionId?: string | null;
-    /** Ruling 505: the first call's write and read; warm by `startTemperature`. */
+    /** Ruling 172: the first call's write and read; warm by `startTemperature`. */
     firstCall?: { write: number; read: number } | null;
-    /** Ruling 505: the run's largest prompt (0: no per-call figure landed). */
+    /** Ruling 172: the run's largest prompt (0: no per-call figure landed). */
     peak?: number;
     credentialKind?: "login" | "api_key" | "access_token" | null;
     credentialUserId?: string | null;
@@ -101,7 +101,7 @@ function insertRun(
 
 const NOW = "2026-08-23T12:00:00.000Z";
 
-/** Ruling 635: one backend's runs, read alone — Claude's unless another is
+/** Ruling 35: one backend's runs, read alone — Claude's unless another is
  *  asked for. */
 function runsOf(
   db: DatabaseSync,
@@ -126,7 +126,7 @@ describe("U39-22: the task breakdown", () => {
 });
 
 /**
- * Ruling 635 (owner, 2026-10-03: "since claude and codex parity on numbers
+ * Ruling 35 (owner, 2026-10-03: "since claude and codex parity on numbers
  * can't be achieved, let's just have a selector on backends on the token data
  * etc. viberr data itself is global"). Only Claude's result envelope carries a
  * cost, a Codex token and a Claude token are different models' tokens, and
@@ -134,7 +134,7 @@ describe("U39-22: the task breakdown", () => {
  * neither. Live: "estimate-judge 187 runs · $135.89" was 31 Claude runs' cost
  * over 187 runs, and "5361.5M in" added Claude's tokens to Codex's.
  */
-describe("ruling 635: run figures are one backend's", () => {
+describe("ruling 35: run figures are one backend's", () => {
   it("names every backend with its run count, one that never ran included, and reads each that ran", () => {
     const db = ctx.makeDb();
     insertRun(db, { backend: "claude", project: "p1" });
@@ -376,12 +376,12 @@ describe("run analytics", () => {
   });
 
   /**
-   * Ruling 642: a group carries the name the page prints, and keeps its key.
+   * Ruling 35: a group carries the name the page prints, and keeps its key.
    * The page printed the keys: "primary" and "reviewer" (the rows' machinery,
    * which UXV19-3 took off the run consoles), `estimate-judge`, `opus[1m]`,
    * `aws-cost-calculator`.
    */
-  it("ruling 642: names each group as the page prints it, keeping the key", () => {
+  it("ruling 35: names each group as the page prints it, keeping the key", () => {
     const db = ctx.makeDb();
     db.prepare(
       `INSERT INTO projects (slug, name, task_prefix, source_path, content_hash, parsed_at)
@@ -454,14 +454,14 @@ describe("run analytics", () => {
   });
 
   /**
-   * Ruling 308 (pass 37, F37-143): the window says what it left out.
+   * Ruling 35 (pass 37, F37-143): the window says what it left out.
    *
    * The cap keeps eight groups and reserves half the slots for the busiest, so
    * a cost view still shows where the work happens. It dropped everything else
    * in silence, on the one surface a person opens to decide where their money
    * goes: eight of thirty groups, presented as the instance.
    */
-  it("ruling 308: a capped breakdown reports the groups it dropped, their runs and their cost", () => {
+  it("ruling 35: a capped breakdown reports the groups it dropped, their runs and their cost", () => {
     const db = ctx.makeDb();
     // 12 models — four more than the cap — so four are dropped.
     for (let m = 0; m < 12; m++) {
@@ -481,12 +481,12 @@ describe("run analytics", () => {
   });
 
   /**
-   * Ruling 308's other half, from the controller: "'What did SHOP-27 cost
+   * Ruling 35's other half, from the controller: "'What did SHOP-27 cost
    * across eleven rework rounds' has no answer. 'Which reviewer earns its runs'
    * has no answer. You are running this instance and cannot see what it costs
    * you." `byKind` cannot answer the second, because every reviewer is one kind.
    */
-  it("ruling 308: breaks down by task and by agent profile, and labels a task with its project when unscoped", () => {
+  it("ruling 35: breaks down by task and by agent profile, and labels a task with its project when unscoped", () => {
     const db = ctx.makeDb();
     insertRun(db, {
       project: "alpha",
@@ -587,13 +587,12 @@ describe("run analytics", () => {
  * AND the controller: both decide what the working agents do, both carry real
  * cost, and the runtime treats them as one class.
  *
- * Ruling 635 takes the share one backend at a time, in the backend's measure.
- * Rulings 190 and 201 guarded the cross-backend sum, where a whole side was
- * silent by construction (every Codex run); ruling 190's test still decides
- * when there is no share, and ruling 201's stricter one gives way to counting
- * the incidental silence inside one backend.
+ * Ruling 35 takes the share one backend at a time, in the backend's measure.
+ * Ruling 36 decides when there is no share: a side that ran and reported
+ * nothing at all. A run inside one backend that reported nothing is
+ * incidental silence, counted rather than a reason to drop the share.
  */
-describe("coordination share (F31-D6, rulings 190 and 635)", () => {
+describe("coordination share (F31-D6, rulings 36 and 35)", () => {
   it("F31-D6: is the operator AND controller share of the backend's cost", () => {
     const db = ctx.makeDb();
     // $0.50 operator + $0.10 controller = $0.60 coordination, over $1.00 → 60%.
@@ -610,7 +609,7 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     expect(s.coordination.total).toBeCloseTo(s.totals.cost, 5);
   });
 
-  it("ruling 635: a run that reported no cost is counted inside one backend, not a reason to drop the share", () => {
+  it("ruling 35: a run that reported no cost is counted inside one backend, not a reason to drop the share", () => {
     const db = ctx.makeDb();
     insertRun(db, { kind: "operator", cost: 1.0, turns: 2 });
     insertRun(db, { kind: "primary", cost: 3.0, turns: 9 });
@@ -618,15 +617,15 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     // token gap is.
     insertRun(db, { kind: "primary", state: "interrupted", cost: null, turns: 4 });
     const s = runsOf(db);
-    // CANARY: restore ruling 201's test (null unless EVERY run reported) and
-    // one stopped run blanks the card for good on an ordinary instance.
+    // CANARY: make the share null unless EVERY run reported, and one stopped
+    // run blanks the card for good on an ordinary instance.
     expect(s.coordination.share).toBeCloseTo(0.25, 5);
     expect(s.coordination.silent).toEqual({ delivery: 1, coordination: 0 });
     expect(s.coordination.reached).toEqual({ delivery: 2, coordination: 1 });
   });
 
   /**
-   * Ruling 190 (F37-12, live): a delivery fleet that reported no cost left the
+   * Ruling 36 (F37-12, live): a delivery fleet that reported no cost left the
    * controller's turns as the whole denominator, and the card read "100%" —
    * arithmetic that cannot be wrong and an answer that cannot be right. The
    * mirror reads "0%" and claims coordination is free. A side whose runs
@@ -643,7 +642,7 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     // day one and held Codex's share at "n/a" for good. CANARY: test the
     // side's runs instead of the ones that reached the provider.
     { name: "an operator run that never reached the provider is no evidence, so 0% stands", runs: [["operator", null, 0], ["primary", 2.0, 4]], share: 0 },
-  ] as const)("ruling 190: $name", ({ runs, share }) => {
+  ] as const)("ruling 36: $name", ({ runs, share }) => {
     // CANARY: drop the `unobserved` test from the share and the first row
     // reads 1, the second 0.
     const db = ctx.makeDb();
@@ -670,7 +669,7 @@ describe("coordination share (F31-D6, rulings 190 and 635)", () => {
     expect(c).toMatchObject({ measure: "tokens", coordination: 1200, total: 9400 });
     expect(c.share).toBeCloseTo(1200 / 9400, 5);
     expect(c.silent).toEqual({ delivery: 1, coordination: 1 });
-    // Ruling 190 at the token level: a side that landed NO provider figure.
+    // Ruling 36 at the token level: a side that landed NO provider figure.
     const blind = ctx.makeDb();
     insertRun(blind, { backend: "codex", kind: "operator", inTok: 1000, outTok: 200, turns: 1 });
     insertRun(blind, { backend: "codex", kind: "primary", inTok: 5000, outTok: 1000, usageFinal: 0, turns: 2 });
@@ -798,7 +797,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.clarity.pct).toBeCloseTo(2 / 3, 5);
   });
 
-  it("ruling 143: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
+  it("ruling 37: traceability counts delivered revisions and recorded PRs; an allocated branch alone is not a delivery", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // Traced: a delivered revision with branch + PR both recorded.
@@ -809,7 +808,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     insertTask(db, { key: "VIB-2", branch: "vib-2", revisionSha: "b".repeat(40) });
     // No footprint at all → out of the denominator.
     insertTask(db, { key: "VIB-3" });
-    // Branch only. Ruling 122 allocates the name at first dispatch, before an
+    // Branch only. Ruling 228 allocates the name at first dispatch, before an
     // agent has written anything, so this task has delivered nothing (JC-7 in
     // pass 34: "7 of 8 delivered tasks" with this one among the eight).
     // CANARY: put `|| t.branch != null` back in the denominator and it counts
@@ -820,14 +819,14 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.traceability.deliveredTasks).toBe(2);
     expect(g.traceability.tracedTasks).toBe(1);
     expect(g.traceability.pct).toBeCloseTo(0.5, 5);
-    // Ruling 290: and it NAMES the one that cannot be traced. A traceability
+    // Ruling 37: and it NAMES the one that cannot be traced. A traceability
     // metric that reports "1 of 2" and will not say which is withholding the
     // only fact a person reads it for. CANARY: return the count alone.
     expect(g.traceability.untraced).toEqual(["gp/VIB-2"]);
   });
 
   /**
-   * Ruling 407 (F39-34), live on ax-clone AX-12.
+   * Ruling 37 (F39-34), live on ax-clone AX-12.
    *
    * AX-12's deliverable was an upstream-fidelity REPORT, delivered as 20
    * attachments: `noChanges: true`, zero commits, force-accepted, Done. It
@@ -836,11 +835,11 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
    * named as the one that does not -- a shortfall that can never be closed,
    * because nothing about a finished task moves again.
    *
-   * Ruling 391 settled that a report is delivered work; ruling 401 dropped the
+   * Ruling 235 settled that a report is delivered work; ruling 237 dropped the
    * same task's "behind main" pill for the same reason, on the same predicate.
    * This is that predicate, in the surface that still demanded a PR.
    */
-  it("ruling 407: a delivery that was never commit-shaped is not an untraced one", () => {
+  it("ruling 37: a delivery that was never commit-shaped is not an untraced one", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     insertTask(db, { key: "VIB-1", branch: "vib-1", prJson: '{"number":9}', revisionSha: "a".repeat(40) });
@@ -862,7 +861,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.traceability.untraced).toEqual([]);
   });
 
-  it("ruling 407: a task that DID commit and never opened a PR is still untraced", () => {
+  it("ruling 37: a task that DID commit and never opened a PR is still untraced", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // Same terminal stage, same missing PR -- but it committed, so the demand
@@ -881,14 +880,14 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
   });
 
   /**
-   * Ruling 290 (pass 37, F37-125). Three cards on /insights counted EXCEPTIONS
+   * Ruling 37 (pass 37, F37-125). Three cards on /insights counted EXCEPTIONS
    * — untraceable work, work with no next actor, records past the readability
    * guardrail — and named none of them. Live this pass the page read "41 of 42
-   * delivered tasks carry branch + PR" with no way to reach the 1. Ruling 253
+   * delivered tasks carry branch + PR" with no way to reach the 1. Ruling 205
    * settled the same shape for a knowledge base ("an agent cannot ask for a
    * rule it cannot name"); this is that rule with a person reading it.
    */
-  it("ruling 290: the clarity card names the task with no next actor, and a card that names them all leaves no remainder", () => {
+  it("ruling 37: the clarity card names the task with no next actor, and a card that names them all leaves no remainder", () => {
     const db = ctx.makeDb();
     insertProject(db, "gp");
     // No owner and nothing waited on → no definite next actor.
@@ -903,7 +902,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
     expect(g.clarity.activeTasks - g.clarity.clearTasks - g.clarity.unclear.length).toBe(0);
   });
 
-  it("ruling 290: past the cap the names stop and the count does not", () => {
+  it("ruling 37: past the cap the names stop and the count does not", () => {
     // The cap is what stops one card becoming a wall on a drifted instance:
     // eight names. The count goes on past it, so the card can say how many
     // more there are. CANARY: drop the `.slice` in `namedKeys` and the first
@@ -986,7 +985,7 @@ describe("oversight outcomes (pass 29 — the PRD's own success criteria, measur
 
     const all = getInsightsSummary(db, NOW).oversight;
     expect(all.longTimelines).toBe(2);
-    // Ruling 635: named longest first. CANARY: drop the sort and the card
+    // Ruling 35: named longest first. CANARY: drop the sort and the card
     // names table order (here gp/VIB-2 first; live, AWSC-1 to AWSC-8 of 70).
     expect(all.longTimelineKeys).toEqual(["other/OT-1", "gp/VIB-2"]);
     const scoped = oversightSummary(db, { projectSlug: "gp" });
@@ -1068,7 +1067,7 @@ describe("backend quota readings (pass 29)", () => {
     const claude = runsOf(db).quota;
     expect(claude.reading?.utilization).toBeCloseTo(0.92, 5);
     expect(claude.reading?.observedAt).toBe("2026-08-23T11:30:00.000Z");
-    // Ruling 635: each backend's view holds its own reading alone.
+    // Ruling 35: each backend's view holds its own reading alone.
     expect(runsOf(db, { backend: "codex" }).quota.reading).toBeNull();
     // The window resets 2026-08-27T12:00Z, after NOW: still current.
     expect(claude.readingWindowReset).toBe(false);
@@ -1079,14 +1078,14 @@ describe("backend quota readings (pass 29)", () => {
   });
 
   /**
-   * Ruling 481(d) (F40-50): a reading whose own window reset before the
+   * Ruling 161(c) (F40-50): a reading whose own window reset before the
    * summary was generated is marked, so the panel stops drawing its bar and
    * stops saying "resets <time>" in the present tense. Only an exhaustion used
    * to age against its reset.
    *
    * Canary: return `false` from `readingWindowReset`.
    */
-  it("marks a reading whose window reset before the summary's `nowIso` (ruling 481)", async () => {
+  it("marks a reading whose window reset before the summary's `nowIso` (ruling 161)", async () => {
     const db = ctx.makeDb();
     const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
     recordBackendRateLimit(db, "claude", {
@@ -1109,8 +1108,8 @@ describe("backend quota readings (pass 29)", () => {
   });
 
   /**
-   * Ruling 612: a reading that lists its windows (rulings 608, 611) ages each
-   * one on its own reset. A lapsed window keeps its name and reset but loses
+   * Ruling 161(c): a reading that lists its windows ages each one on its own
+   * reset. A lapsed window keeps its name and reset but loses
    * its figure, and when it was the binding window, the current window closest
    * to its limit binds in its place, so the week stays on the card after the
    * five-hour window resets.
@@ -1118,7 +1117,7 @@ describe("backend quota readings (pass 29)", () => {
    * Canary: age only the binding window (return the stored reading), and the
    * week is hidden behind "five hour window reset".
    */
-  it("ages a listed reading window by window (ruling 612)", async () => {
+  it("ages a listed reading window by window (ruling 161(c))", async () => {
     const db = ctx.makeDb();
     const { recordBackendRateLimit } = await import("~/server/runtimes/backend-quota.server");
     const fiveHourReset = Date.parse("2026-08-23T03:30:00.000Z") / 1000; // before NOW
@@ -1179,11 +1178,11 @@ describe("backend quota readings (pass 29)", () => {
       ],
     });
     // Once the week has reset too, nothing current is left: the reading is
-    // aged whole (ruling 481(d)) and kept as history.
+    // aged whole (ruling 161(c)) and kept as history.
     const later = read("2026-08-28T00:00:00.000Z", "claude");
     expect(later.readingWindowReset).toBe(true);
     expect(later.reading).toMatchObject({ rateLimitType: "seven_day", utilization: 0.71 });
-    // Ruling 635: the page draws every window, each marked once its own reset
+    // Ruling 35: the page draws every window, each marked once its own reset
     // has passed. CANARY: draw the binding reading alone and the five-hour
     // window drops off the card the moment the week binds.
     expect(runsOf(db, { backend: "codex" }).quotaWindows).toEqual([
@@ -1198,15 +1197,15 @@ describe("backend quota readings (pass 29)", () => {
 });
 
 /**
- * Ruling 395 (F39-22) — a figure the provider never reports, printed as a
+ * Ruling 36 (F39-22) — a figure the provider never reports, printed as a
  * measured zero, on the page built to judge the prompt-cache work.
  *
  * Live on the ax-clone instance the Prompt cache table read, for 21 Codex
  * specialist runs: `WRITTEN 0 · READ 45.0M · WRITE/READ 0.000`. Codex declares
  * `cache_write_input_tokens` in the SDK's own types and returned exactly 0 for
  * it in 101 of 101 usage envelopes, against 67.2M tokens reported read. A
- * reader checking whether rulings 369-376 do anything on Codex would take
- * `0.000` for an answer.
+ * reader checking whether the prompt-cache rulings (169 to 173) do anything on
+ * Codex would take `0.000` for an answer.
  *
  * Every neighbouring column on that page already refuses to do this: the cost
  * breakdowns print "not reported" rather than $0.00, the quota panel prints
@@ -1214,7 +1213,7 @@ describe("backend quota readings (pass 29)", () => {
  * own docstring says "a rate with no first call behind it prints n/a, never
  * 0%".
  */
-describe("ruling 395: a backend that reports no cache write reports no cache write", () => {
+describe("ruling 36: a backend that reports no cache write reports no cache write", () => {
   it("prints nothing rather than zero for Codex, and says the backend reports none", () => {
     const db = ctx.makeDb();
     // Codex runs, millions read, and the provider's flat zero written.
@@ -1236,7 +1235,7 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
     expect(primary.writeTokens).toBeNull();
     expect(primary.writeReadRatio).toBeNull();
     expect(primary.writeReportingRuns).toBe(0);
-    // Ruling 635: so the page leaves the write columns out whole.
+    // Ruling 35: so the page leaves the write columns out whole.
     expect(cache.reportsWrites).toBe(false);
   });
 
@@ -1258,7 +1257,7 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
 });
 
 /**
- * Ruling 505 — what the prompt-cache plan asked this
+ * Ruling 172 — what the prompt-cache plan asked this
  * page for and it lacked. PR 1's acceptance was "the insights page reproduces
  * the baseline table above from the stored rows", and the table had columns the
  * page never drew: the mean first-call write, reads per run and the peak
@@ -1267,14 +1266,14 @@ describe("ruling 395: a backend that reports no cache write reports no cache wri
  * and PR 5 asked for the operator bursts to be counted before a gate is built.
  * Every clock below is pinned; nothing reads the wall clock.
  */
-describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () => {
+describe("ruling 172: the prompt-cache table reproduces PLAN.md's baseline", () => {
   it("carries the mean first-call write, reads per run and the peak prompt's spread", () => {
     const db = ctx.makeDb();
     // A cold start, a warm one, and one refused before the provider answered.
     insertRun(db, { kind: "primary", firstCall: { write: 14_000, read: 0 }, cachedTok: 5_000_000, peak: 10_000 });
     insertRun(db, { kind: "primary", firstCall: { write: 2_000, read: 40_000 }, cachedTok: 3_000_000, peak: 20_000 });
     insertRun(db, { kind: "primary", state: "error" });
-    // A row from before ruling 369: reads, no first call. CANARY: take the
+    // An older row: reads, no first call. CANARY: take the
     // reads over every run and read/run is (5M + 3M + 9M) / 2.
     insertRun(db, { kind: "primary", cachedTok: 9_000_000 });
     for (const peak of [30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000]) {
@@ -1304,7 +1303,7 @@ describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () 
     const codex = runsOf(db, { backend: "codex" }).cache.byKind.find((r) => r.label === "primary")!;
     expect(codex).toMatchObject({ runs: 2, firstCalls: 2, warmStarts: 1, writeTokens: null, readPerRun: 2_100_000 });
     // Averaging the first writes over every backend would read Codex as 0,
-    // the zero ruling 395 retired one column over.
+    // the zero ruling 36 retired one column over.
     expect(codex.avgFirstCallWrite).toBeNull();
     expect(codex.peakPrompt).toEqual({ median: 26_000, p90: 175_000, max: 175_000 });
     const claude = runsOf(db).cache.byKind.find((r) => r.label === "primary")!;
@@ -1312,7 +1311,7 @@ describe("ruling 505: the prompt-cache table reproduces PLAN.md's baseline", () 
   });
 });
 
-describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", () => {
+describe("ruling 172: resumes by idle time (PLAN.md's Codex retention probe)", () => {
   const T0 = Date.parse("2026-09-21T10:00:00.000Z");
   const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
 
@@ -1373,7 +1372,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     expect(resumes.edgesMs).toEqual([5 * 60_000, 10 * 60_000, 60 * 60_000, 24 * 60 * 60_000]);
     // The size past which a stale session is set aside, so the card can name it.
     expect(resumes.freshContextTokens).toBe(150_000);
-    // Ruling 635: each backend's resumes are its own, a row per credential kind.
+    // Ruling 35: each backend's resumes are its own, a row per credential kind.
     expect(resumes.rows.map((r) => r.label)).toEqual(["login"]);
     const claude = resumes.rows[0];
     const codex = runsOf(db, { backend: "codex" }).cache.resumes.rows[0];
@@ -1390,7 +1389,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     expect(codex!.cells[0]!.warmRate).toBe(1);
   });
 
-  it("ruling 701: idle time runs from the end of the earlier run's compaction, which follows its finish", () => {
+  it("ruling 36: idle time runs from the end of the earlier run's compaction, which follows its finish", () => {
     // A specialist's run is finished before its session is compacted, and the
     // compaction is the last call that touched the cache. CANARY: time the
     // idle from the row's finish alone and this resume, four minutes after
@@ -1419,7 +1418,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
       sessionId: "s-key",
       runs: [
         // The earlier run billed an API key: the resume reads its writes, and
-        // ruling 372 takes the TTL from it. CANARY: key by the resume's own
+        // ruling 173 takes the TTL from it. CANARY: key by the resume's own
         // kind and this lands on "login".
         { idle: 0, warm: false, kind: "api_key" },
         { idle: 4, warm: true, kind: "login" },
@@ -1443,7 +1442,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
     expect(rows[0]!.cells.map((c) => c.firstCalls)).toEqual([1, 0, 0, 0, 0]);
   });
 
-  it("counts the fresh starts ruling 372 made instead of a replay, from their start audit", () => {
+  it("counts the fresh starts ruling 173 made instead of a replay, from their start audit", () => {
     const db = ctx.makeDb();
     const fresh = insertRun(db, { backend: "codex", credentialKind: "login", sessionId: "s-new" });
     const lost = insertRun(db, { backend: "codex", credentialKind: "login", sessionId: "s-new-2" });
@@ -1469,7 +1468,7 @@ describe("ruling 505: resumes by idle time (PLAN.md's Codex retention probe)", (
   });
 });
 
-describe("ruling 505: operator bursts (PLAN.md's count before the gate)", () => {
+describe("ruling 172: operator bursts (PLAN.md's count before the gate)", () => {
   const T0 = Date.parse("2026-09-21T10:00:00.000Z");
   const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
   const operator = (
@@ -1519,7 +1518,7 @@ describe("ruling 505: operator bursts (PLAN.md's count before the gate)", () => 
     const b = runsOf(db).cache.operatorBursts;
     // CANARY: partition by project alone and three of these read as a burst.
     expect(b).toMatchObject({ starts: 4, inBursts: 0, coldInBursts: 0, coldStarts: 4 });
-    // Codex's cache does not cross threads (ruling 375(c)): no order of starts
+    // Codex's cache does not cross threads (ruling 146): no order of starts
     // could make a second one warm, so its view has no burst count at all.
     expect(runsOf(db, { backend: "codex" }).cache.operatorBursts).toBeNull();
   });

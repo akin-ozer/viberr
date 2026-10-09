@@ -42,10 +42,10 @@ export function hasDeliveringAgent(
 }
 
 /**
- * Ruling 702: the EARLIER stages a task with no delivering agent may go back
+ * Ruling 112: the EARLIER stages a task with no delivering agent may go back
  * to so that one can be engaged, or nothing when no such move is needed.
  *
- * Ruling 133 lets a task's engaged deliverer run at every stage and judges
+ * Ruling 181 lets a task's engaged deliverer run at every stage and judges
  * every other profile by its declared stages. A task that reached a later
  * stage with no deliverer (its files were taken from another task, a person
  * moved it, only supporting agents ran on it) has nobody the first half
@@ -56,7 +56,7 @@ export function hasDeliveringAgent(
  *
  * Nothing is offered:
  *  - once the task has delivered anything (a revision or a files delivery):
- *    from then on a review's verdict decides the way back (R7-4, ruling 163),
+ *    from then on a review's verdict decides the way back (R7-4, ruling 90),
  *    and a task waiting to be accepted is not walked away from its offer;
  *  - while an acceptance offer stands on it for any other reason: a task can
  *    be acceptable with nothing delivered, and the move would withdraw it;
@@ -68,8 +68,8 @@ export function hasDeliveringAgent(
  *
  * Otherwise: every earlier stage at which some deployed agent is eligible
  * that can be given a delivery (a repo-write grant or the grant to save
- * files, ruling 535, and not one of the project's required reviewers, ruling
- * 556) and that cannot be engaged where the task stands, with those agents.
+ * files, ruling 128, and not one of the project's required reviewers, ruling
+ * 89) and that cannot be engaged where the task stands, with those agents.
  *
  * Four callers share this one answer, the way three share `verdictStageFor`:
  * what the operator's snapshot offers (`reworkStages`), what its move claims

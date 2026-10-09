@@ -271,7 +271,7 @@ describe("NotificationsPage", () => {
     expect(rows[0]!.querySelector(".pill.blocked")!.textContent).toBe(
       "blocked decision",
     );
-    // Ruling 625: a decision that waits on you is blue (info), as on the
+    // Ruling 277: a decision that waits on you is blue (info), as on the
     // board; amber (input) is kept for an agent's question.
     // CANARY: put the packet pill back on `input`.
     expect(rows[1]!.querySelector(".pill.info")!.textContent).toBe(
@@ -291,7 +291,7 @@ describe("NotificationsPage", () => {
 
     // Global page: every row names where it points (open Q C), in the one
     // "Project · KEY" idiom the bell's meta line and the stream use (ruling
-    // 625) — no project pill beside the type pill.
+    // 280) — no project pill beside the type pill.
     expect(rows[0]!.querySelector(".sub .ntf-where")!.textContent).toBe(
       "Viberr Core · VIB-160",
     );
@@ -320,7 +320,7 @@ describe("NotificationsPage", () => {
     );
   });
 
-  it("ruling 148: a row with no sender names none, rather than a '−'", () => {
+  it("ruling 291: a row with no sender names none, rather than a '−'", () => {
     const senderless = ITEMS.map((n) =>
       n.id === "n-148-mention" ? { ...n, from: null } : n,
     );
@@ -504,7 +504,7 @@ describe("NotificationsPage", () => {
 });
 
 /**
- * Rulings 131 / 140 (pass 34): the two new kinds get their own glyph and
+ * Rulings 57 / 50 (pass 34): the two new kinds get their own glyph and
  * palette. Asserted EXPLICITLY because `ntfMeta` has a catch-all (`alert` +
  * `act-policy`) and would degrade silently — an ownership hand-off rendered as
  * a policy violation is the exact wrong reading.
@@ -523,7 +523,7 @@ describe("ntfMeta — the pass-34 kinds", () => {
 });
 
 /**
- * Ruling 481(a) (F40-48): an agent's question is a decision that waits on a
+ * Ruling 74 (F40-48): an agent's question is a decision that waits on a
  * person, and it looks like one. Filed as an `approval` it wore the stage
  * arrow (`act-transition`) and the "approval" pill beside operator packets
  * pilled as decisions; the task page calls the same packet "Agent question".
@@ -532,7 +532,7 @@ describe("ntfMeta — the pass-34 kinds", () => {
  * kind name, "question", on the info tone) or of `ntfMeta` (the alert
  * catch-all) and this fails.
  */
-describe("the agent question row (ruling 481)", () => {
+describe("the agent question row (ruling 74)", () => {
   it("waits on you with the hand glyph and an 'agent question' input pill", () => {
     const question: NotificationPageItem = {
       ...ITEMS[2]!,

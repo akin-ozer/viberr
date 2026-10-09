@@ -6,10 +6,10 @@ import {
 } from "../../test-support/test-app";
 
 /**
- * Ruling 145 — the standalone-page layout's loader.
+ * Ruling 294 — the standalone-page layout's loader.
  *
  * It answers one question: does THIS route take the app header, and with what.
- * The scoping is the point. `/org/settings`, `/controller` (ruling 623) and
+ * The scoping is the point. `/org/settings`, `/controller` (ruling 321) and
  * `/insights` get the viewer and the bell's counts the header renders;
  * `/profile` and `/notifications` get nothing at all — not even an auth call —
  * so the routes that render no header cost exactly what they cost before the
@@ -34,7 +34,7 @@ async function loadShell(path: string, userId?: string) {
   return loader(routeArgs(request, {}, "/"));
 }
 
-describe("palette-shell loader (ruling 145)", () => {
+describe("palette-shell loader (ruling 294)", () => {
   it("hands the header the viewer and their bell's counts on a page route", async () => {
     const result = await loadShell("/org/settings", ardaId);
     expect(result.header).not.toBeNull();
@@ -42,12 +42,12 @@ describe("palette-shell loader (ruling 145)", () => {
     expect(result.header!.user.name).toBeTruthy();
     expect(result.header!.unread).toBeGreaterThanOrEqual(0);
     expect(result.header!.orphanUnread).toBe(0);
-    // Ruling 457 (owner, 2026-09-24): the bell loads its own list.
+    // Ruling 300 (owner, 2026-09-24): the bell loads its own list.
     expect(result.header).not.toHaveProperty("notifications");
   });
 
   it("answers the same on the other page routes", async () => {
-    // Ruling 623: the controller page carries the header too; it was the one
+    // Ruling 321: the controller page carries the header too; it was the one
     // instance page with no search, bell or account menu. CANARY: take
     // `/controller` off `STANDALONE_PAGES` and its header is null again.
     for (const path of ["/insights", "/controller"]) {

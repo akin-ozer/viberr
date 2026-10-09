@@ -8,7 +8,7 @@ import { routeArgs, setupAppTest, type AppTestContext } from "../../../test-supp
 import { listAuditEvents } from "../../../test-support/audit-log";
 
 /**
- * Ruling 25 (R15-4) + D2, driven through the REAL route actions.
+ * Ruling 27 (R15-4) + D2, driven through the REAL route actions.
  *
  * Two invariants live here, and both were found by USING the app rather than
  * reading it:
@@ -118,14 +118,14 @@ const ACTION_ROUTES: GatedRoute[] = [
     path: `/projects/${SLUG}/settings`,
     params: { slug: SLUG },
   },
-  // Ruling 99: the project controller surface.
+  // Ruling 247: the project controller surface.
   {
     name: "controller",
     mod: "project.controller",
     path: `/projects/${SLUG}/controller`,
     params: { slug: SLUG },
   },
-  // Ruling 503: the project's epics, and one epic.
+  // Ruling 325: the project's epics, and one epic.
   {
     name: "epics",
     mod: "project.epics",
@@ -375,15 +375,15 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.task.tsx",
     "project.tsx",
   ];
-  /** Every project route: since ruling 457 (BOARD-6) the board serves its own
-   *  columns instead of the layout serving them. */
+  /** Every project route: the board serves its own columns instead of the
+   *  layout serving them (ruling 11, BOARD-6). */
   const EXPECTED_LOADER_ROUTES = EXPECTED_PROJECT_ROUTES;
 
-  /** Ruling 457 (BOARD-6): the layout and the board read the project through
+  /** Ruling 11 (BOARD-6): the layout and the board read the project through
    *  ONE gated read, `readWorkspace` (routes/project-workspace.server.ts). */
   const WORKSPACE_READ = "readWorkspace(request, db, params.slug, user)";
   /** The loaders gated by that read: the layout, the board, and since ruling
-   *  503 the two epic pages, which draw from the same members and stages. */
+   *  325 the two epic pages, which draw from the same members and stages. */
   const WORKSPACE_LOADERS = ["project.tsx", "project.board.tsx", "project.epics.tsx", "project.epic.tsx"];
 
   /**
@@ -424,7 +424,7 @@ describe("every project-scoped route carries a membership gate", () => {
     const taskLoader = body("project.task.tsx", "loader")!;
     expect(taskLoader.split("\n").length).toBeGreaterThan(5);
     expect(taskLoader).toContain("requireVisibleProject(");
-    // Ruling 457 (BOARD-6): the board has its own loader, gated by the
+    // Ruling 11 (BOARD-6): the board has its own loader, gated by the
     // layout's own read.
     expect(body("project.board.tsx", "loader")).toContain(WORKSPACE_READ);
     // …and it has to extract the NON-async form too — the exact shape BS-1 hid.

@@ -1,5 +1,5 @@
 /**
- * What every task action shares (ruling 654): the action context and its test
+ * What every task action shares (ruling 13(a)): the action context and its test
  * seams, the authority guards (`requireAction`, `requireAcceptCompletion`,
  * `requireDecisionAuthority` and the owner exception behind them), the stage
  * and actor helpers, the operator's react and transition caps, and
@@ -63,11 +63,11 @@ import { errorMessage, toError } from "~/shared/errors";
 export const OPERATOR_REACT_DEPTH_CAP = 4;
 
 /**
- * Ruling 489(d): the ceiling on react hops since a person last acted, which
- * nothing but a person (or an approve, ruling 362) restarts.
+ * Ruling 119: the ceiling on react hops since a person last acted, which
+ * nothing but a person (or an approve) restarts.
  *
  * The depth cap above counts hops that got nowhere, so a reply that moved the
- * task's head resets it (ruling 489(a)). That leaves a chain whose every hop
+ * task's head resets it. That leaves a chain whose every hop
  * commits a new head with no bound at all: the operator re-dispatching a
  * developer that commits each time, with no reviewer to object, would run and
  * bill forever. This one counts EVERY hop, progress or not, and stops the
@@ -126,21 +126,21 @@ export interface TaskActionDeps {
   openTaskPr?: typeof openTaskPr;
   mergeTaskPr?: typeof mergeTaskPr;
   runOperator?: typeof runOperator;
-  /** Ruling 162 / G35-5(d): the acceptance-time base refresh (the workspace
+  /** Ruling 95 / G35-5(d): the acceptance-time base refresh (the workspace
    *  merge the operator's `update_branch_from_base` performs), injectable so a
    *  test can assert the ceremony's call sequence: one refresh, one merge. */
   updateBranchFromBase?: typeof updateWorkspaceBranchFromBase;
-  /** Ruling 241: the dispatch the dependency release drains a queued reviewer
+  /** Ruling 66: the dispatch the dependency release drains a queued reviewer
    *  question through. Injected for the same reason `runOperator` is — the
    *  drain's contract is WHAT it sends and in what order, and both are
    *  unobservable through a real run. */
   startAgentRun?: typeof startAgentRun;
-  /** Ruling 475: the dispatch the operator's conflict handoff starts the
+  /** Ruling 129: the dispatch the operator's conflict handoff starts the
    *  delivering agent through. Injected for the same reason: the handoff's
    *  contract is WHOM it sends and with WHAT directive, and a real run would
    *  prepare a workspace from GitHub. */
   dispatchAgent?: typeof operatorDispatchAgent;
-  /** Ruling 672: the controller turn a connected repository starts on the
+  /** Ruling 259: the controller turn a connected repository starts on the
    *  board. Injected for the same reason `runOperator` is: its contract is
    *  WHO is asked WHAT, and a real turn starts a model on a person's account. */
   runControllerTurn?: typeof runControllerTurn;
@@ -170,7 +170,7 @@ export function reviewStageIdOf(project: ProjectContext): string | null {
 }
 
 /**
- * Ruling 163: the stage a task whose revision changed after a verdict returns
+ * Ruling 90: the stage a task whose revision changed after a verdict returns
  * to (`verdictStageFor`, read against the deployed profiles' declared
  * eligibility), or null when a verdict can be given where it stands.
  */
@@ -187,7 +187,7 @@ export async function verdictStageOf(
 }
 
 /**
- * Ruling 702: the earlier stages a task with no delivering agent may go back
+ * Ruling 112: the earlier stages a task with no delivering agent may go back
  * to so that one can be engaged (`engageStagesFor`, read against the deployed
  * profiles and the project's required reviewers), and whether the task has a
  * delivering agent that can run at all.
@@ -330,7 +330,7 @@ export function humanActorRef(db: DatabaseSync, actor: TaskActor) {
 
 /**
  * The `assign` timeline event every ownership change writes — `setOwner`'s
- * take/hand-off, and (ruling 127) creation seating the creator.
+ * take/hand-off, and (ruling 137) creation seating the creator.
  *
  * ONE builder because the owner seat is now load-bearing beyond bookkeeping:
  * every agent run on the task bills the owner's accounts, so "who owns this and
@@ -343,7 +343,7 @@ export function ownerAssignEvent(
   actor: TaskActor,
   text: string,
   /**
-   * Ruling 255 (pass 37, F37-84): the instant to stamp, when the caller is
+   * Ruling 72 (pass 37, F37-84): the instant to stamp, when the caller is
    * writing SEVERAL events for one act and the clock would otherwise put them
    * in an order the arrangement contradicts. Creation passes its own `now`;
    * every other caller keeps reading the clock here.
@@ -367,7 +367,7 @@ export function attachmentKb(bytes: number): string {
 }
 
 /**
- * Ruling 140(a): the ONE rule for who may hold the owner seat, shared by a
+ * Ruling 50: the ONE rule for who may hold the owner seat, shared by a
  * hand-off through `setOwner` and a named owner at creation, so the pinned
  * sentence never forks. The ACTOR-side guard of `setOwner` (who may hand off)
  * does not apply at creation: the creator is the implicit first owner.
@@ -382,7 +382,7 @@ export function requireOwnable(project: ProjectContext, targetUserId: string): v
 }
 
 /** What a trigger carries into the run beside its name: ONE trailing options
- *  object (ruling 131 folded the growing positional tail). */
+ *  object (ruling 55 folded the growing positional tail). */
 export interface AutoInvokeOptions {
   /** Transition-chain depth to thread into the run (transition + delivered triggers —
    *  see OPERATOR_TRANSITION_CHAIN_CAP). Omitted → the run starts a fresh chain. */
@@ -395,15 +395,15 @@ export interface AutoInvokeOptions {
   /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
    *  title, optional note), so the turn instruction states the decision. */
   resolvedOption?: ResolvedPacketOption;
-  /** Ruling 131(e): dependencies-released trigger — what was waited on. */
+  /** Ruling 57: dependencies-released trigger — what was waited on. */
   dependencyRelease?: DependencyReleasePayload;
-  /** Ruling 488: relayed trigger — the task it came from, who sent it and
+  /** Ruling 135: relayed trigger — the task it came from, who sent it and
    *  the text, so the turn instruction carries what arrived. */
   relay?: RelayPayload;
 }
 
 /**
- * Ruling 330: the record that a task had stopped.
+ * Ruling 122: the record that a task had stopped.
  *
  * Written BEFORE the operator is invoked and unconditionally, because it has to
  * survive an operator that refuses, is not deployed, or throws — the whole
@@ -424,7 +424,7 @@ export async function noteStranded(
 }
 
 /**
- * Ruling 333 — "No changes were delivered" was a literal, over runs that had
+ * Ruling 156(a) — "No changes were delivered" was a literal, over runs that had
  * been working for up to two and a half hours.
  *
  * Every classified provider refusal appended it, and so did every unclassified
@@ -474,7 +474,7 @@ export function runOutcomeClause(input: {
 }
 
 /**
- * Ruling 334: a transport reason flattened to fit inside a prose sentence.
+ * Ruling 231(b): a transport reason flattened to fit inside a prose sentence.
  *
  * The same shape as `push-workspace.server.ts`'s `oneLine`, kept local rather
  * than exported across the module boundary: a `fetch` failure's message is one
@@ -508,23 +508,23 @@ export async function autoInvokeOperator(
     | "delivered"
     | "packet-resolved"
     | "dependencies-released"
-    // Ruling 235: a refused acceptance whose cause is an unpushed reviewed
+    // Ruling 96: a refused acceptance whose cause is an unpushed reviewed
     // revision. Only the operator may push it, so the refusal is handed here.
     | "head-unpushed"
-    // Ruling 330: the periodic sweep found a task nothing was going to move —
+    // Ruling 122: the periodic sweep found a task nothing was going to move —
     // no packet, no recommendation, no queued question, no schedule, no run and
     // no hold. The operator is invoked to decide what happens next, which is
     // what a person ends up doing by hand.
     | "stranded"
-    // Ruling 332: a person pressed Accept and the acceptance-time refresh found
+    // Ruling 244: a person pressed Accept and the acceptance-time refresh found
     // the branch in conflict. Only the operator can run the workspace merge
     // that resolves it, so the refusal is handed here rather than left as a
     // sentence telling a person to do git they have no checkout for.
     | "pr-conflicting"
-    // Ruling 482: the project's gates failed on the revision under review.
+    // Ruling 130: the project's gates failed on the revision under review.
     // Only the operator dispatches the rework, so the result is handed here.
     | "gates-failed"
-    // Ruling 488: work on another task of this project relayed text here.
+    // Ruling 135: work on another task of this project relayed text here.
     // The operator reads it the way it reads a person's @operator comment.
     | "relayed",
   options: AutoInvokeOptions = {},
@@ -574,7 +574,7 @@ export async function autoInvokeOperator(
           type: "note",
           actor: { kind: "system", systemId: "operator" },
           title: null,
-          // Ruling 331: the reason, and no claim about what happens next.
+          // Ruling 122: the reason, and no claim about what happens next.
           //
           // This said "(an internal error)" over an `error` the line above was
           // already logging, and then asserted "Coordination is paused for this
@@ -582,7 +582,7 @@ export async function autoInvokeOperator(
           // eleven seconds later, so the one durable sentence on the timeline
           // was the only thing still saying the task was stopped. What this
           // knows is that ONE invocation failed; it does not know that nothing
-          // else will run, and ruling 330's sweep now guarantees something will
+          // else will run, and ruling 122's sweep now guarantees something will
           // look again.
           text:
             `The operator could not be started automatically: ` +
@@ -617,12 +617,13 @@ export function projectRepoFor(
 }
 
 /**
- * Ruling 177 (pass 36, F36-5): a task that closes ends its live runs. Called
- * after the closing write (acceptance, force-accept) so the runs are stopped
- * on a task that IS closed; the interrupt itself is the run-service's, audited
- * under the system actor with the cause and the person. Writes ONE policy note
- * naming every run it stopped and one audit row for the task; nothing when no
- * run was live. Best-effort: a failure here never masks the acceptance.
+ * Ruling 154 (pass 36, F36-5): a task that closes ends its live runs. Called
+ * after the closing write (acceptance, force-accept, archive) so the runs are
+ * stopped on a task that IS closed; the interrupt itself is the run-service's,
+ * audited under the system actor with the cause and the person. Writes ONE
+ * policy note, titled for the cause, naming every run it stopped and one audit
+ * row for the task; nothing when no run was live. Best-effort: a failure here
+ * never masks the closure.
  */
 export async function interruptLiveRunsOnClosure(
   db: DatabaseSync,
@@ -650,18 +651,18 @@ export async function interruptLiveRunsOnClosure(
       }
     }
     if (stopped.length === 0) return [];
-    const verb =
-      closure.cause === "archive"
-        ? "archived"
-        : closure.cause === "force-accept"
-          ? "force-accepted"
-          : "accepted";
+    // Ruling 166: the title and the body both name the closure that happened.
+    const { title, verb } = {
+      accept: { title: "Interrupted by acceptance", verb: "accepted" },
+      "force-accept": { title: "Interrupted by force-accept", verb: "force-accepted" },
+      archive: { title: "Interrupted by archiving", verb: "archived" },
+    }[closure.cause];
     const list = stopped.map((r) => `\`${r.id}\` (${r.label})`).join(", ");
     await appendTimelineEvent(taskRef(ctx, projectSlug, taskKey), {
       occurredAt: new Date().toISOString(),
       type: "note",
       actor: { kind: "system", systemId: "policy-engine" },
-      title: "Interrupted by acceptance",
+      title,
       text:
         `**Closed task:** ${stopped.length === 1 ? "the run" : `${stopped.length} runs`} ${list} ` +
         `${stopped.length === 1 ? "was" : "were"} still live when ${taskKey} was ${verb}; ` +

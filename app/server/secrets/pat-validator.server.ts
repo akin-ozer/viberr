@@ -44,7 +44,7 @@ import {
  *   one exists (`/repos/{r}` for repo access + its `permissions` block,
  *   `/user/orgs` for org read, `/repos/{r}/pulls` for pull-request READ) and
  *   mark anything still unprovable `source: "assumed"` — treated as granted
- *   until a real 403 opens a scope violation (ruling 5).
+ *   until a real 403 opens a scope violation (ruling 221).
  * - REPOSITORY WRITE is proven READ-ONLY (A8/pass-16): `GET /repos/{r}`
  *   returns a `permissions` object computed for the AUTHENTICATED token, so
  *   `permissions.push` answers "can this credential write to this repo?"
@@ -92,7 +92,7 @@ export interface ValidatePatTokenOptions {
  *  delivery succeeds or an operator opts in; turning "we don't know" into
  *  "granted" is the failure B-GH8 exists to prevent. The env schema parses
  *  `VIBERR_GITHUB_WRITE_PROBE` and refuses a spelling it does not know at boot
- *  (ruling 458(c)). */
+ *  (ruling 39). */
 function writeProbeEnabled(): boolean {
   return getEnv().VIBERR_GITHUB_WRITE_PROBE;
 }
@@ -135,7 +135,7 @@ const repoResponseSchema = z.object({
  *
  *  F20-15: a project exists to push branches and open PRs, so a repo the
  *  credential can only READ is not deliverable — on `false` the Change probe
- *  refuses where the board writes its repository (ruling 669) and the create
+ *  refuses where the board writes its repository (ruling 226) and the create
  *  probe warns. The third state is on purpose: absent or
  *  unreadable is "unknown", never a refusal; only a PROVEN read-only repo is.
  *  `admin` and `maintain` need no third state: either GitHub asserted one or it
@@ -186,7 +186,7 @@ interface PatValidationBase {
   repo: string | null;
   scopes: ScopeCheck[];
   missingScopes: string[];
-  /** Ruling 144: the classic token's granted list (null until the header is
+  /** Ruling 221(a): the classic token's granted list (null until the header is
    *  read, and for fine-grained tokens). */
   headerScopes: string[] | null;
 }
@@ -271,7 +271,7 @@ export async function validatePatToken(
   const scopesHeader = user.scopesHeader;
   const tokenKind = tokenKindOf(token, scopesHeader);
   const expiresAt = user.tokenExpiration ?? options.knownExpiresAt ?? null;
-  // Ruling 144 (pass 34): a CLASSIC token's full granted list, verbatim from
+  // Ruling 221(a) (pass 34): a CLASSIC token's full granted list, verbatim from
   // the header (an empty header is the positive fact "no scopes"). Null for a
   // fine-grained token, which sends no header. Advisory: `scopes` below stays
   // the verdict on the REQUIRED set; this is what the credential card reads to
@@ -566,7 +566,7 @@ const REVALIDATE_COOLDOWN_MS = 60_000;
  * violation whose scope the fresh validation now reports granted
  * (header/probe ok, or `assumed` for unverifiable fine-grained write
  * permissions — the next real 403 reopens it). Each resolution writes the
- * typed `policy` timeline event into the violation's OWN task (ruling 5),
+ * typed `policy` timeline event into the violation's OWN task (ruling 221),
  * reprojects it, and audits via the violations API. SSE fan-out rides the
  * emitted projection/violation events.
  */
@@ -700,7 +700,7 @@ export async function revalidateProjectCredential(
       s.ok && (s.source === "header" || s.source === "probe") ? [s.id] : [],
     ),
   );
-  // Ruling 144(c): a classic token's published list is header evidence for
+  // Ruling 221(a): a classic token's published list is header evidence for
   // EVERY scope it names, not only the required ones, so an open `workflow`
   // violation resolves on a re-check whose header now lists it.
   for (const scope of validation.headerScopes ?? []) {

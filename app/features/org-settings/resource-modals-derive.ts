@@ -3,7 +3,7 @@ import { mcpSignInPhrase, type McpOAuthView } from "~/shared/mcp-oauth";
 
 /**
  * What the MCP-server editor and its OAuth sign-in read off the row and the
- * draft (ruling 700(e), the split of `resource-modals.tsx`): what the editor
+ * draft (ruling 13(b), the split of `resource-modals.tsx`): what the editor
  * opens with, which refusal names the credential, when a live sign-in stands
  * in for it, when a save drops the sign-in, and the copy the editor's chrome
  * and the sign-in's status line say. Pure functions, no React.
@@ -14,7 +14,7 @@ export interface McpOpening {
   name: string;
   transport: McpView["transport"];
   target: string;
-  /** Ruling 486(c): the requested scopes, as stored. */
+  /** Ruling 192: the requested scopes, as stored. */
   scopes: string;
 }
 
@@ -28,15 +28,15 @@ export function mcpDraftOf(initial: McpView | null): McpOpening {
   };
 }
 
-/** Ruling 514: a refusal about the credential (too short, or pasted over a
+/** Ruling 288: a refusal about the credential (too short, or pasted over a
  *  live sign-in this editor had not seen yet) is said at that field. */
 export function credentialError(err: string | null, errField: string | null): string | null {
   return err !== null && errField === "cred" ? err : null;
 }
 
-/** Ruling 469(e): a signed-in HTTP server still pointed where it signed in
+/** Ruling 192: a signed-in HTTP server still pointed where it signed in
  *  holds its credential through the sign-in, so the credential field gives
- *  way. `initial` is the row as the panel keeps it current (ruling 469). */
+ *  way. `initial` is the row as the panel keeps it current (ruling 192). */
 export function credentialReplaced(
   initial: McpView | null,
   transport: "HTTP" | "stdio",
@@ -59,7 +59,7 @@ export function repointDropsSignIn(
   );
 }
 
-/** The saved server whose OAuth sign-in (ruling 469) the editor offers: an
+/** The saved server whose OAuth sign-in (ruling 192) the editor offers: an
  *  HTTP server still edited as one. */
 export function signInServer(
   initial: McpView | null,
@@ -83,7 +83,7 @@ function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** Ruling 469: the sign-in's status line. */
+/** Ruling 192: the sign-in's status line. */
 export function signInStatus(oauth: McpOAuthView | null): string {
   const signedIn = oauth?.status === "signed_in";
   const phrase = mcpSignInPhrase(oauth);

@@ -10,10 +10,10 @@ import { toError } from "~/shared/errors";
 import { getConversation } from "./controller-conversations.server";
 
 /**
- * Ruling 525: what a deleted controller conversation's turns leave behind,
+ * Ruling 250: what a deleted controller conversation's turns leave behind,
  * taken away.
  *
- * A turn is a run (ruling 99), and a run keeps what was said and done in three
+ * A turn is a run (ruling 251), and a run keeps what was said and done in three
  * places: its console lines (`run_log_lines`: every tool call and reply, and
  * the inputs disclosure), its raw NDJSON (`runtimes/<backend>/<runId>.jsonl`),
  * and the provider's own session transcript in its person's runtime home. All
@@ -101,7 +101,7 @@ export function purgeDeletedConversationLogs(
 
 /**
  * The provider's transcript of one session, removed as its person (ruling
- * 485): it sits in their runtime home, which their agents write. A Claude
+ * 140): it sits in their runtime home, which their agents write. A Claude
  * session keeps its subagents' and tool results' files in a folder named for
  * it beside the transcript, which goes too. Best-effort: a transcript that
  * cannot be removed is logged and never stops the deletion.
@@ -130,8 +130,8 @@ function removeTranscript(
 /**
  * Boot: finish the purge for every conversation a deletion left logs behind
  * for, which is a turn that was still running when its conversation was
- * deleted and that a restart cut off before it settled. Before ruling 525 no
- * conversation was ever deleted, so a controller run with no conversation is
+ * deleted and that a restart cut off before it settled. A conversation goes
+ * only by deletion (ruling 250), so a controller run with no conversation is
  * always one of these.
  */
 export function purgeOrphanedConversationLogs(db: DatabaseSync, dataRoot?: string): number {

@@ -11,7 +11,7 @@ import {
 } from "./host-disk.server";
 
 /**
- * Ruling 603: `npm run deploy` measures the host before it builds. Live on
+ * Ruling 41: `npm run deploy` measures the host before it builds. Live on
  * 2026-09-30 a cold build filled the Mac and Docker's disk went read-only under
  * the running instance; the deploy script now refuses a build the host has no
  * room for.
@@ -61,12 +61,12 @@ describe("buildRoomRefusal", () => {
   });
 
   it("lets a build start when the host has the room", () => {
-    // Ruling 603(b): the refusal is below 8 GB, and none at it.
+    // Ruling 41: the refusal is below 8 GB, and none at it.
     expect(buildRoomRefusal({ path: "/x", freeBytes: 8 * GB, totalBytes: 239 * GB })).toBeNull();
   });
 });
 
-describe("supersededImagesToRemove (ruling 605)", () => {
+describe("supersededImagesToRemove (ruling 41)", () => {
   // The three untagged builds deploys 37 to 39 left on 2026-09-30.
   const left = [
     { id: "c0b73aaaece8", created: "2026-09-30T14:03:54.097576918Z" },
@@ -86,11 +86,11 @@ describe("supersededImagesToRemove (ruling 605)", () => {
   });
 });
 
-describe("BUILD_CACHE_KEEP_BYTES (ruling 628)", () => {
+describe("BUILD_CACHE_KEEP_BYTES (ruling 41)", () => {
   it("keeps a whole build's layers, and every deploy trims the cache to it", () => {
     // Deploy 48's build used 2.17 GB of BuildKit's cache (`docker buildx du`,
     // 2026-10-01). A cap below that makes every deploy a cold build, the 5-6 GB
-    // write ruling 603 measures the host for. CANARY: cap at 2 GiB, or drop the
+    // write ruling 41 measures the host for. CANARY: cap at 2 GiB, or drop the
     // prune from scripts/deploy.ts, and this fails.
     expect(BUILD_CACHE_KEEP_BYTES).toBeGreaterThan(2.17e9);
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");

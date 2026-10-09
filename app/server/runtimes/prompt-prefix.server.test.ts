@@ -10,7 +10,7 @@ import {
   staticPromptText,
 } from "./prompt-prefix.server";
 
-describe("ruling 370: prompt prefix ordering", () => {
+describe("ruling 169: prompt prefix ordering", () => {
   it("Claude gets static, the SDK's boundary, then dynamic", () => {
     // The marker is the SDK's own, never a look-alike.
     expect(claudeSystemPromptBlocks({ static: ["a", "b"], dynamic: ["c"] })).toEqual([

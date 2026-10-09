@@ -8,7 +8,7 @@ import { reviewRowSub } from "./review-helpers";
 
 /**
  * Route-level tests for /projects/:slug/review against the seeded demo
- * store: auth gating, the panel split (project-wide per ruling 10), and
+ * store: auth gating, the panel split (project-wide per ruling 46), and
  * the sublines the seeded rows get (the precedence itself is
  * review-helpers.test.ts's).
  */
@@ -89,7 +89,7 @@ describe("/projects/:slug/review", () => {
 
   it("ships the board's own waiting-on-you answer (interface review 2026-09-24, writ-3)", async () => {
     // The queue tagged VIB-142/145/160 "waiting on a human" while the board
-    // told the same viewer "waiting on you". Ruling 457 took the board's columns
+    // told the same viewer "waiting on you". Ruling 11 took the board's columns
     // out of the layout, so both loaders now call `waitingOnViewer`; this pins
     // them to one answer on the seeded store.
     const { cookie } = await app.cookieFor(ardaId);

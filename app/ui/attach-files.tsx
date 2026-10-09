@@ -5,18 +5,18 @@ import { prettySize } from "~/shared/text/byte-size";
 import { Icon } from "./icon";
 
 /**
- * Ruling 573: the files a person hands over with a message, picked, dropped or
+ * Ruling 319: the files a person hands over with a message, picked, dropped or
  * pasted, before the message is sent: the tray, the paperclip and the drop,
  * for the controller page and dock and a task's comments.
  *
  * The anatomy follows ReUI's composer tray with removable attachments
  * (`c-attachment-2`), shadcn's `Attachment` and ReUI's `use-file-upload` hook,
- * read as design references and never installed (ruling 166): a paperclip
+ * read as design references and never installed (ruling 14): a paperclip
  * that opens the picker, a tray of chips over the text (a picture's own
  * thumbnail or the file glyph, the name, the size, a remove button), a drop on
  * the composer's frame, and a pasted screenshot.
  *
- * The picker offers any kind of file (ruling 574); the rules for what a
+ * The picker offers any kind of file (ruling 76); the rules for what a
  * composer keeps, sizes and counts, are `picked-files.ts`.
  */
 
@@ -35,7 +35,7 @@ export interface FileDrop {
 }
 
 /**
- * Ruling 573: a composer's frame takes the files dropped on it. `dropping` is
+ * Ruling 319: a composer's frame takes the files dropped on it. `dropping` is
  * true while files are held over the frame, for its highlight; a drag of text
  * or of anything but files is left to the page.
  */
@@ -70,8 +70,8 @@ export function useFileDrop(onFiles: (files: File[]) => void, disabled = false):
 
 /**
  * The paperclip that opens the file picker. A button beside a hidden input,
- * not a label around it, so the press is the button's own (ruling 459, F31)
- * and the keyboard meets one control. Memoised with the tray (ruling 457): a
+ * not a label around it, so the press is the button's own (ruling 283, F31)
+ * and the keyboard meets one control. Memoised with the tray (ruling 11): a
  * composer re-renders on every revalidation of its page, and these draw
  * nothing new until the person picks.
  */

@@ -7,7 +7,7 @@ import type { ControllerToolUser } from "./controller-tool-guards.server";
 import type { HomeProjectCard } from "~/features/home/home-query.server";
 
 /**
- * Ruling 121 — the per-turn context READ.
+ * Ruling 253 — the per-turn context READ.
  *
  * The task file goes in verbatim inside its budget; over budget the head
  * (frontmatter, goal, packet) stays whole and the NEWEST timeline entries are
@@ -29,7 +29,7 @@ beforeAll(async () => {
   const { findUserByEmail } = await import("~/server/auth/user-store.server");
   const found = findUserByEmail(app.db, "arda@viberr.dev")!;
   arda = { id: found.id, email: found.email, name: found.name };
-  // A plain member, contributor on this board: the case ruling 309 is about.
+  // A plain member, contributor on this board: the case ruling 254 is about.
   const s = findUserByEmail(app.db, "selin@viberr.dev")!;
   selin = { id: s.id, email: s.email, name: s.name };
 });
@@ -185,13 +185,13 @@ describe("gatherControllerContext", () => {
     expect(read.text).toMatch(/members: .*\(admin\)/);
     expect(read.text).toMatch(/open tasks: \d+ \(\d+ waiting on a human/);
     expect(read.text).toContain("- VIB-142 · Attach execution workspace to task runtime · stage Review");
-    // Ruling 503: the open epics stand where the goal chains stood.
+    // Ruling 273: the open epics stand where the goal chains stood.
     expect(read.text).toMatch(/open epics: /);
     expect(read.text).not.toMatch(/goal chains: /);
     expect(read.text).not.toContain("### task.md");
   });
 
-  it("ruling 131: a held task shows 'waits on N' in the board table and a 'waits on:' header line on the task read", async () => {
+  it("ruling 55: a held task shows 'waits on N' in the board table and a 'waits on:' header line on the task read", async () => {
     // Canary: remove the `waits on` header line (the task read loses it).
     const { setTaskDependencies } = await import("~/server/tasks/dependencies.server");
     await setTaskDependencies(app.db, { projectSlug: SLUG, taskKey: "VIB-153", blockedBy: ["VIB-142", "VIB-148"] }, { userId: arda.id, label: arda.email }, { dataRoot: app.dataRoot });
@@ -221,7 +221,7 @@ describe("gatherControllerContext", () => {
   });
 
   /**
-   * Ruling 307 (pass 37, F37-142). The controller found this by describing what
+   * Ruling 253 (pass 37, F37-142). The controller found this by describing what
    * talking to it is actually like: "the turn's context block gives me your
    * visible PROJECTS, not the board. So every board question starts from zero.
    * On the turn where you said 'drive it', you waited through `list_runs`,
@@ -232,7 +232,7 @@ describe("gatherControllerContext", () => {
    * The numbers were never missing. `listHomeProjectsForUser` computes them for
    * the home page's own cards, and this read called it and discarded them.
    */
-  it("ruling 307: each project carries its state, not only its name", async () => {
+  it("ruling 253: each project carries its state, not only its name", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const read = gatherControllerContext(app.db, {
       projectSlug: null,
@@ -245,7 +245,7 @@ describe("gatherControllerContext", () => {
     expect(read.text).toMatch(/waiting on YOU/);
   });
 
-  it("ruling 307: a project with nothing waiting says so in words, never a blank", async () => {
+  it("ruling 253: a project with nothing waiting says so in words, never a blank", async () => {
     const { projectStateLines } = await import("./controller-context.server");
     const base: HomeProjectCard = {
       slug: "p",
@@ -433,15 +433,16 @@ describe("gatherControllerContext", () => {
   });
 
   /**
-   * Ruling 309 (pass 37). The instance scope has named the person's role per
-   * project since ruling 307; the two BOUND scopes — the ones a person is
-   * standing in when they ask for something — named nothing about them at all.
+   * Ruling 253: the instance scope names the person's role per project, and
+   * a bound scope names the asker's. The two BOUND scopes — the ones a person
+   * is standing in when they ask for something — named nothing about them at
+   * all.
    * The controller, asked on a live task what the person in front of it could
    * do, answered right and then said how: "your project role was not in
    * anything I had... I bridged that gap with a rule from my playbook", having
    * spent a `whoami` round trip before it could help with anything.
    */
-  it("ruling 309: the role is the ASKER's, not the board's strongest member", async () => {
+  it("ruling 254: the role is the ASKER's, not the board's strongest member", async () => {
     // The board roster was already in the board block ("members: … (admin)"),
     // which is why this looked covered and was not: the roster says who is on
     // the project, never which of them is asking. Two people, one board, one
@@ -474,7 +475,7 @@ describe("gatherControllerContext", () => {
     expect(board.text).toContain("your authority: project role contributor");
   });
 
-  it("ruling 309: a live demotion reaches the next turn", async () => {
+  it("ruling 254: a live demotion reaches the next turn", async () => {
     // The whole premise of putting this in the context read rather than the
     // system preamble: it is taken again every turn, so it cannot go stale
     // inside a long conversation.
@@ -532,11 +533,11 @@ describe("gatherControllerContext", () => {
   });
 
   /**
-   * Ruling 390 (F39-17): the ask the controller raised and nobody has answered
+   * Ruling 271 (F39-17): the ask the controller raised and nobody has answered
    * comes back in EVERY scope, because the failure it closes is a standing fact
    * that lived only in a conversation that ended.
    */
-  it("ruling 390: an open grant request rides in every scope, and leaves when answered", async () => {
+  it("ruling 271: an open grant request rides in every scope, and leaves when answered", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const { raiseResourceRequest, closeRequestsAnsweredByGrants } = await import(
       "./controller-requests.server"
@@ -587,11 +588,11 @@ describe("gatherControllerContext", () => {
   });
 
   /**
-   * Ruling 483 (F40-59): a knowledge-base proposal an agent filed comes back
+   * Ruling 267 (F40-59): a knowledge-base proposal an agent filed comes back
    * to the controller's next turn, because the controller runs only when a
    * person talks to it and live on WEB-1 nothing else brought two back.
    */
-  it("ruling 483: the project's open knowledge-base proposals ride in its scopes, and leave when resolved", async () => {
+  it("ruling 267: the project's open knowledge-base proposals ride in its scopes, and leave when resolved", async () => {
     const { gatherControllerContext } = await import("./controller-context.server");
     const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
     const { writeStoreDoc } = await import("~/server/org/store-files.server");
@@ -605,7 +606,7 @@ describe("gatherControllerContext", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 498, and still standing in its document.
+    // A legacy proposal, still standing in its document (ruling 210(c)).
     const body = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",

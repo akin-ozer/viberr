@@ -9,7 +9,7 @@ import { strictTool } from "./strict-tool.server";
 import { connectedClient } from "../../../test-support/mcp-tool-meta";
 
 /**
- * Ruling 296. These drive a REAL MCP client against a REAL server, because
+ * Ruling 136. These drive a REAL MCP client against a REAL server, because
  * the thing under test is what the SDK's validation layer does with the
  * schema, not what our cast claims. A test that called the handler directly
  * (the way the toolkit tests do) would pass no matter what, since the
@@ -27,7 +27,7 @@ function textOf(result: Awaited<ReturnType<Client["callTool"]>>): string {
   return parsed.content.map((c) => c.text).join("\n");
 }
 
-describe("strictTool (ruling 296)", () => {
+describe("strictTool (ruling 136)", () => {
   it("refuses an argument it does not declare, by name, before the handler exists", async () => {
     // Every call the handler actually saw. A counter the test can read beats a
     // sentinel it has to type as unknown.
@@ -40,7 +40,7 @@ describe("strictTool (ruling 296)", () => {
     ]);
 
     // The controller's live case: it asked for failed runs, `status` is not a
-    // thing this tool has, and before ruling 296 it got the live listing back
+    // thing this tool has, and without the strict check it got the live listing back
     // as though that were the answer. CANARY: hand the raw shape to the SDK's
     // own `tool()` and this returns "answered".
     const wrong = await client.callTool({
@@ -50,7 +50,7 @@ describe("strictTool (ruling 296)", () => {
     const text = textOf(wrong);
     expect(text).toContain("status");
     expect(text).not.toContain("answered");
-    // Ruling 296, amended after the controller called the first version "the
+    // Ruling 136, amended after the controller called the first version "the
     // least helpful of the five... it names the rejected key but not the
     // accepted ones". CANARY: drop the `error` callback and this is a bare
     // Zod issue array.
@@ -70,14 +70,14 @@ describe("strictTool (ruling 296)", () => {
   });
 
   /**
-   * Ruling 303 (pass 37, F37-138). Measured live: four operator tool calls came
+   * Ruling 136 (pass 37, F37-138). Measured live: four operator tool calls came
    * back to a run as the literal string `database is not open`, from `get_task`
    * and `read_board`, in the six seconds before the old process finished
    * shutting down. The leak is the finding, not the shutdown: every one of the
    * operator's 17 tools handed the SDK a bare handler, while the controller's
    * guards and the agent toolkit's per-tool catches both converted.
    */
-  it("ruling 296: a tool that takes NO arguments says that, rather than listing nothing", async () => {
+  it("ruling 136: a tool that takes NO arguments says that, rather than listing nothing", async () => {
     const client = await connect([
       strictTool("whoami", "probe", {}, async () => ({
         content: [{ type: "text" as const, text: "me" }],
@@ -90,7 +90,7 @@ describe("strictTool (ruling 296)", () => {
     expect(text).toContain("It takes no arguments at all.");
   });
 
-  it("ruling 303: an unexpected throw answers in words, and names the tool", async () => {
+  it("ruling 136: an unexpected throw answers in words, and names the tool", async () => {
     const client = await connect([
       strictTool("get_task", "probe", {}, async () => {
         // Exactly what the live one threw.
@@ -106,7 +106,7 @@ describe("strictTool (ruling 296)", () => {
     expect(answer).toContain("did not get a result");
   });
 
-  it("ruling 303: an AppError keeps its own words, because those were written for the caller", async () => {
+  it("ruling 136: an AppError keeps its own words, because those were written for the caller", async () => {
     const { AppError } = await import("~/server/errors/app-error.server");
     const client = await connect([
       strictTool("move_task", "probe", {}, async () => {
@@ -120,13 +120,13 @@ describe("strictTool (ruling 296)", () => {
   });
 
   /**
-   * Ruling 340 (pass 37, F37-176). Ruling 303 stopped the SQLite sentence
+   * Ruling 163(a) (pass 37, F37-176). Ruling 136 stopped the SQLite sentence
    * reaching the model and put "failed unexpectedly" in its place, which reads
    * the same way: like a hiccup. All eight shopify-clone runs that met a closed
    * store retried, and what they left on the task was "The store dropped a
    * connection mid-turn. Retrying." Viberr holds the fact.
    */
-  it("ruling 340: a closed store says it is a shutdown, and says not to retry", async () => {
+  it("ruling 163(a): a closed store says it is a shutdown, and says not to retry", async () => {
     const { shutdownDatabase, closeDb } = await import("~/server/db/sqlite.server");
     const { AppError } = await import("~/server/errors/app-error.server");
     const client = await connect([
@@ -149,7 +149,7 @@ describe("strictTool (ruling 296)", () => {
       expect(answer).toContain("NOT transient");
       expect(answer).toContain("retrying cannot succeed");
       expect(answer).not.toContain("failed unexpectedly");
-      // Ruling 338's discipline: name the record, promise nothing about what
+      // Ruling 166's discipline: name the record, promise nothing about what
       // recovery will do.
       expect(answer).toContain("recorded on the task");
       expect(answer).not.toMatch(/re-?invoke/i);
@@ -162,7 +162,7 @@ describe("strictTool (ruling 296)", () => {
     } finally {
       closeDb();
     }
-    // And with the latch down, ruling 303's arms are untouched.
+    // And with the latch down, ruling 136's arms are untouched.
     expect(
       textOf(await client.callTool({ name: "get_task", arguments: {} })),
     ).toContain("failed unexpectedly");
@@ -190,14 +190,14 @@ describe("strictTool (ruling 296)", () => {
 });
 
 /**
- * Ruling 296's second half, and the half that is easy to lose: the rule holds
+ * Ruling 136's second half, and the half that is easy to lose: the rule holds
  * for EVERY tool surface, not for whichever one was edited the day it was
  * written. Viberr has four MCP servers today (agent, operator, controller,
  * controller-ops) and adding a fifth is a normal afternoon's work. A toolkit
  * that reaches past this wrapper for the SDK's own `tool()` would go back to
  * silently dropping arguments, with nothing failing to say so.
  */
-describe("ruling 296: every tool surface is strict", () => {
+describe("ruling 136: every tool surface is strict", () => {
   const appDir = fileURLToPath(new URL("../../", import.meta.url));
 
   function sources(dir: string, out: string[] = []): string[] {
@@ -237,7 +237,7 @@ describe("ruling 296: every tool surface is strict", () => {
     // CANARY: import { tool } from the SDK in any toolkit.
     expect(
       offenders,
-      `these build MCP tools without ruling 296's strict schema: ${offenders.join(", ")}`,
+      `these build MCP tools without ruling 136's strict schema: ${offenders.join(", ")}`,
     ).toEqual([]);
   });
 

@@ -4,7 +4,7 @@ import type { SeedUserIds } from "../../test-support/demo-data";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 548: the Blocked by picker's read, as real requests against the
+ * Ruling 59: the Blocked by picker's read, as real requests against the
  * route: a 401 rather than a login redirect because a fetcher loads it, the
  * task page's membership gate, and the list for a member. Which tasks are
  * barred and why is `server/projections/dependencies.server.test.ts`.
@@ -42,7 +42,7 @@ async function refusedStatus(read: Promise<unknown>): Promise<number | null> {
   }
 }
 
-describe("ruling 548: the Blocked by picker's read", () => {
+describe("ruling 59: the Blocked by picker's read", () => {
   it("answers a signed-out fetch 401, and a non-member or an unknown task the page's 404", async () => {
     // CANARY: gate on `requireUser` and the signed-out fetch is redirected to
     // /login, which a fetcher follows as a navigation away from the task.

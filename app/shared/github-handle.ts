@@ -1,5 +1,5 @@
 /**
- * The one home of GitHub-handle normalization (ruling 154). Shared because the
+ * The one home of GitHub-handle normalization (ruling 29). Shared because the
  * field lives on both sides: the GitHub OAuth provisioning reads the provider's
  * `login` through it, the org admin's Edit-user save reads a typed value
  * through it, and the client field validates what it will send with the same

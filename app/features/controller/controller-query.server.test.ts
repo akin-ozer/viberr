@@ -8,7 +8,7 @@ import { setBackendApiKey } from "~/server/runtimes/backend-credentials.server";
 import { getControllerSurface } from "./controller-query.server";
 
 /**
- * Ruling 127 — `available` on the controller surface is a fact about the PERSON
+ * Ruling 137 — `available` on the controller surface is a fact about the PERSON
  * looking at it.
  *
  * A controller turn runs on the ASKER's own Claude account (the run row records
@@ -53,7 +53,7 @@ function surfaceFor(user: { id: string; email: string }) {
   });
 }
 
-describe("getControllerSurface — availability is the viewer's own Claude (ruling 127)", () => {
+describe("getControllerSurface — availability is the viewer's own Claude (ruling 137)", () => {
   it("is false for a viewer who has connected nothing", () => {
     const view = surfaceFor(store.users.murat);
     expect(view.available).toBe(false);
@@ -79,7 +79,7 @@ describe("getControllerSurface — availability is the viewer's own Claude (ruli
 /**
  * The open conversation's runtime rides the surface: the Live-run strip and
  * the Agent-logs console on the controller page are the task page's panels fed
- * from the same projection, asked for the ruling-99 scope a controller run is
+ * from the same projection, asked for the ruling-251 scope a controller run is
  * stored under (`project_slug = ''`, `task_key = <conversation id>`).
  */
 describe("getControllerSurface — the open conversation's runtime", () => {
@@ -160,12 +160,12 @@ describe("getControllerSurface — the open conversation's runtime", () => {
 });
 
 /**
- * Ruling 419(f): a person is named on the controller page the way the rest of
+ * Ruling 320: a person is named on the controller page the way the rest of
  * the app names them. A conversation stores its owner's email when it is
  * created, and the transcript and the rail printed "arda@viberr.dev" beside
  * every message the task timeline attributes to "Arda".
  */
-describe("getControllerSurface — people are named by display name (ruling 419(f))", () => {
+describe("getControllerSurface — people are named by display name (ruling 320)", () => {
   it("names the open thread's owner and every listed thread's owner, not their address", async () => {
     // CANARY: return `c.userLabel` / the stored conversation unchanged.
     const { createConversation } = await import("~/server/controller/controller-conversations.server");
@@ -273,7 +273,7 @@ describe("getControllerSurface — the tasks a transcript names (U39-29)", () =>
 });
 
 /**
- * Ruling 483 (F40-59): the project surface carries the open knowledge-base
+ * Ruling 267 (F40-59): the project surface carries the open knowledge-base
  * proposals its tasks filed, so the owner sees what waits on them; the link to
  * the document is an org admin's, the only person who can open that page.
  */
@@ -295,7 +295,7 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
       dataRoot: store.dataRoot,
     });
     const target = resolveStoreTarget(store.db, "kb", kb.id, { dataRoot: store.dataRoot })!;
-    // Filed before ruling 498, and still standing in its document.
+    // A proposal no tool files any more (ruling 210(c)), still standing in its document.
     const body = withLegacyProposals("# Facts\n\n- A fact.\n", [
       { taskKey: "VIB-1", filedBy: "Operator", line: "A fact.", correction: "A truer fact.", evidence: "measured" },
     ]);
@@ -321,11 +321,11 @@ describe("getControllerSurface — the project's open knowledge-base proposals",
 });
 
 /**
- * Ruling 498: the project surface lists what agents on its tasks wrote into a
+ * Ruling 321: the project surface lists what agents on its tasks wrote into a
  * knowledge base, newest first, each with whether a person undid it: the
  * record the owner reads instead of approving each correction first.
  */
-describe("getControllerSurface — the project's knowledge-base corrections (ruling 498)", () => {
+describe("getControllerSurface — the project's knowledge-base corrections (ruling 321)", () => {
   it("lists them newest first on the project surface only, clipped for the page, with the document link for an org admin", async () => {
     const [{ saveKnowledgeBase, resolveStoreTarget }, { writeStoreDoc }, { mergeKbCorrection }] = await Promise.all([
       import("~/server/org/resources.server"),
@@ -384,13 +384,13 @@ describe("getControllerSurface — the project's knowledge-base corrections (rul
 });
 
 /**
- * Ruling 525: a project admin may delete other people's conversations about
+ * Ruling 26: a project admin may delete other people's conversations about
  * the project, so the project page lists them for them ("Show everyone's"),
  * each with its Delete. They are listed, not opened: a conversation's words
- * stay its starter's and the org admins' (ruling 99(d)), so each is titled by
+ * stay its starter's and the org admins' (ruling 249), so each is titled by
  * whose it is and none is readable.
  */
-describe("getControllerSurface — other people's threads for a project admin (ruling 525)", () => {
+describe("getControllerSurface — other people's threads for a project admin (ruling 26)", () => {
   it("lists them sealed, with a Delete, only on their project's page and only when asked", async () => {
     // CANARY: title an unreadable row by `c.title` and the starter's first
     // words reach a page that may not show them.

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { newId } from "~/shared/ids/new-id.server";
 
 /**
- * Ruling 685: what a controller conversation left itself to do when a task is
+ * Ruling 259: what a controller conversation left itself to do when a task is
  * accepted.
  *
  * A controller turn cannot wait for a task: it ends, and an agent's work on a
@@ -169,7 +169,7 @@ export function turnOpenedByFollowUp(db: DatabaseSync, conversationId: string, m
 
 /**
  * Drop the steps left on a project that is being deleted, as its other
- * app-owned rows are (ruling 274): a project of the same name gives the slug
+ * app-owned rows are (ruling 249): a project of the same name gives the slug
  * and its task keys back, and an acceptance there must not start a step left
  * for the project that is gone. A step already started stays, with its
  * conversation: it is the record of which message Viberr sent there, which a

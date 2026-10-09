@@ -5,7 +5,7 @@ import type { DocView } from "~/ui/markdown-doc";
 
 /**
  * What the store browser's document card reads off the open draft (ruling
- * 700(e), the split of `store-browser.tsx`): whether the read has answered,
+ * 13(b), the split of `store-browser.tsx`): whether the read has answered,
  * whether the text changed, the name it saves under, whether it renders as
  * markdown and in which view, and the line that sums the saved text up. Pure
  * functions of the draft, no React; `DocumentCard` calls `documentCardState`
@@ -20,18 +20,18 @@ export interface DocDraft {
   name: string;
   body: string;
   existing: boolean;
-  /** Ruling 614: the body as the read returned it, so the card knows whether
+  /** Ruling 317: the body as the read returned it, so the card knows whether
    *  anything changed. Null until the read answers (and after a read that
    *  failed); always null for a new document. */
   saved: string | null;
   /** The on-disk file exceeded the read cap, so this body is a partial copy. */
   truncated: boolean;
-  /** Ruling 663: the version the read returned. The save sends it back, and
+  /** Ruling 18(c): the version the read returned. The save sends it back, and
    *  the server refuses the save once the file is no longer that version, so
    *  a correction an agent merged meanwhile is not wiped. Null for a new
    *  document and until the read answers. */
   version: string | null;
-  /** Ruling 614: rendered or raw. An existing markdown file opens rendered; a
+  /** Ruling 317: rendered or raw. An existing markdown file opens rendered; a
    *  new document opens raw, since there is nothing to render yet. */
   view: DocView;
   err: string | null;
@@ -44,7 +44,7 @@ export function draftFileName(name: string): string {
   return trimmed.includes(".") ? trimmed : `${trimmed}.md`;
 }
 
-/** Lines as the attachment reader's gutter counts them (ruling 363): a
+/** Lines as the attachment reader's gutter counts them (ruling 317): a
  *  trailing newline ends the last line rather than opening an empty one. */
 export function lineCount(text: string): number {
   if (text === "") return 0;
@@ -56,7 +56,7 @@ export function lineCount(text: string): number {
 export interface DocumentCardState {
   /** An existing document whose read has not answered, or failed. */
   unread: boolean;
-  /** Ruling 147(d): an opened document saves only once its text changed. */
+  /** Ruling 288: an opened document saves only once its text changed. */
   changed: boolean;
   /** The name the document has, or saves under. */
   fileName: string;

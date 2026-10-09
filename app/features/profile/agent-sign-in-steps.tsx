@@ -8,7 +8,7 @@ import { hostOf, statusLine, VENDOR } from "./agent-accounts-derive";
 import type { ProfileBackend } from "./profile-query.server";
 
 /**
- * Profile → Agent accounts: a running sign-in (ruling 700(e), the split of
+ * Profile → Agent accounts: a running sign-in (ruling 13(b), the split of
  * `agent-accounts-panel.tsx` along the task page's recipe). `SignInSteps`
  * keeps every hook it always owned; its two steps and its footer are
  * hook-free pieces it hands what they show.
@@ -16,7 +16,7 @@ import type { ProfileBackend } from "./profile-query.server";
 
 type StepState = "pending" | "current" | "done";
 
-/** WHICH button just copied (ruling 294). */
+/** WHICH button just copied (ruling 137). */
 type Copied = "link" | "code" | null;
 
 function StepMark({ n, state }: { n: number; state: StepState }) {
@@ -50,7 +50,7 @@ function StepMark({ n, state }: { n: number; state: StepState }) {
  * the person pressed (the card mounts it per session id, so a restarted
  * sign-in moves focus again and the 2 s poll's re-renders never do).
  *
- * Ruling 147 for the code field: Submit stays enabled, an empty submit is
+ * Ruling 288 for the code field: Submit stays enabled, an empty submit is
  * refused with the server's own sentence as a fresh alert, the field marked
  * and focused, and never becomes a request. The field itself is disabled only
  * while Anthropic has not asked for a code yet, which is availability, not
@@ -68,16 +68,16 @@ export function SignInSteps({
   label: string;
   login: NonNullable<ProfileBackend["login"]>;
   busy: boolean;
-  /** Ruling 368: the intent THIS card sent, while it is in flight. */
+  /** Ruling 286: the intent THIS card sent, while it is in flight. */
   inFlight: string | null;
   submit: (fields: Record<string, string>) => void;
 }) {
   const codeId = `agentacc-${backend}-code`;
   const [code, setCode] = useState("");
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
-  // Ruling 294: WHICH button just copied, not merely that one did. Step 1 now
+  // Ruling 137: WHICH button just copied, not merely that one did. Step 1 now
   // has a copy-link button and step 2 (on codex) still has the copy-code one,
   // inside the same component — one boolean made both read "Copied" at once,
   // and the later reset would have blanked the other's confirmation early.
@@ -197,7 +197,7 @@ function OpenLinkStep({
                 Open sign-in page
                 <Icon name="ext" className="ico-end" />
               </a>
-              {/* Ruling 294 (owner's ask): the LINK, copyable. Opening it
+              {/* Ruling 137 (owner's ask): the LINK, copyable. Opening it
                   here only works when the browser reading this page is the
                   one holding the vendor session, and often it is not: the
                   instance runs on a server, a person is on a second

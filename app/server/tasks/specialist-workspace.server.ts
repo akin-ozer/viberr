@@ -1,5 +1,5 @@
 /**
- * A specialist run's working copy (ruling 656): the task workspace and the
+ * A specialist run's working copy (ruling 13(a)): the task workspace and the
  * clone of the project's repository in it (with the support checkout), the
  * run's environment, and the agent's git identity.
  */
@@ -83,12 +83,29 @@ export function taskCloneDir(
 }
 
 /**
+ * Ruling 199: the working directory of a run on a task with no checkout (the
+ * workspace root, or a supporting engagement's own root under it), which its
+ * workspace contract calls the task's scratch; null when the project has a
+ * repository. The same directory `startAgentRun` and `resumeWorkdir` run in.
+ */
+export function taskScratchDir(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  support?: { profileId: string },
+): string | null {
+  if (projectRepo(ctx, projectSlug)) return null;
+  const root = taskWorkspaceRoot(projectSlug, taskKey, ctx.dataRoot);
+  return support ? path.join(root, "support", support.profileId) : root;
+}
+
+/**
  * P8 (pass 25): per-engagement workspace isolation. The DELIVERING engagement
  * owns the canonical checkout `<workspaceRoot>/<repo>` — the tree delivery's
  * `git add -A` ships (push-workspace), the operator reads, and evidence paths
  * resolve against. Every SUPPORTING (non-delivering) engagement gets its OWN
  * checkout at `<workspaceRoot>/support/<profileId>/<repo>`, so a supporting run's
- * writes — allowed there when its grants allow them (ruling 101(b)), bound by
+ * writes — allowed there when its grants allow them (ruling 183), bound by
  * Claude's denylist when they do not, and by this isolation on either backend —
  * can NEVER
  * reach the delivering tree or be swept into the delivered PR (the F-P8
@@ -162,7 +179,7 @@ export function agentGitIdentityEnv(profileId: string) {
 
 /** Why a workspace checkout is missing — carried to the prompt and the human. */
 export interface CloneFailure extends CloneFailureLogDetails {
-  /** Ruling 249: what part a credential played — supplied, absent, or not
+  /** Ruling 197: what part a credential played — supplied, absent, or not
    *  involved at all (the local arm never reaches GitHub). */
   credential: CloneCredential;
   /** One plain sentence, safe to show a human and to put in a prompt. */
@@ -182,7 +199,7 @@ interface CloneOutcome {
   /** The checkout directory, or null when the run has no working tree. */
   dir: string | null;
   failure?: CloneFailure;
-  /** Ruling 129 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
+  /** Ruling 195 (pass 34, Q34-5): what the pre-run refresh did to a REUSED
    *  checkout, in the words `describeWorkspaceRefresh` gives it. Absent on a
    *  fresh clone (nothing to refresh: it was just built from the mirror). */
   refreshed?: string;
@@ -191,11 +208,11 @@ interface CloneOutcome {
 // `stripUngovernedRepoCatalog` (R18-3 / F18-8) lives in
 // ~/server/runtimes/skill-mount.server: stripping the repo's `.claude` and
 // mounting Viberr's granted skills (as a plugin beside the checkout, ruling
-// 180) are two halves of one rule — a governed run sees what its profile
+// 185) are two halves of one rule — a governed run sees what its profile
 // grants and nothing else — and keeping them together is what lets the mount
 // guarantee it on its own.
 
-/** Ruling 129: the branch a reused checkout is refreshed against — the
+/** Ruling 195: the branch a reused checkout is refreshed against — the
  *  project's own default, read from project.md like every other caller. */
 function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string }): string {
   const ref = input.dataRoot
@@ -205,7 +222,7 @@ function defaultBranchForRefresh(input: { projectSlug: string; dataRoot?: string
 }
 
 /**
- * Ruling 179 (pass 36): detach a SUPPORTING checkout at the task's revision
+ * Ruling 240 (pass 36): detach a SUPPORTING checkout at the task's revision
  * under review when the commit is present (the fetch-only refresh brings
  * `origin/<branch>` — and with it an external revision — into the clone).
  * Returns the disclosure sentence, or null when there was nothing to pin.
@@ -224,13 +241,13 @@ export async function pinSupportCheckout(
   const sha = subject?.sha ?? null;
   if (!sha) return null;
   const short = sha.slice(0, 7);
-  // Ruling 238: when the subject moved past the reviewed revision, every
+  // Ruling 239: when the subject moved past the reviewed revision, every
   // sentence below has to say so. A reviewer told only "checked out at the
   // revision under review" while standing on a different commit would report
   // against a sha it never read, and the record would be a lie with a git
   // object id in it.
   const what = subject?.rePinned
-    ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${countLabel(subject.rePinned.baseRefresh.merges, "merge commit")}, ${countLabel(subject.rePinned.baseRefresh.commits, "base commit")}, and no authored work since the review; ruling 238)`
+    ? `the reviewed revision \`${subject.rePinned.reviewedSha.slice(0, 7)}\` on its refreshed base, at \`${short}\` (${countLabel(subject.rePinned.baseRefresh.merges, "merge commit")}, ${countLabel(subject.rePinned.baseRefresh.commits, "base commit")}, and no authored work since the review; ruling 239)`
     : `the revision under review \`${short}\``;
   if (!git) return `${what} could not be checked out; HEAD was left as it is`;
   try {
@@ -276,23 +293,23 @@ export async function cloneRepo(
     /** F27-U1: 0..1 progress for a cold network clone, so the caller can drive a
      *  live percentage onto the run strip. */
     onCloneProgress?: (fraction: number) => void;
-    /** Ruling 179 (pass 36): the task's active work revision. A SUPPORTING
+    /** Ruling 240 (pass 36): the task's active work revision. A SUPPORTING
      *  checkout is detached at it when it is present after the refresh — a
      *  reviewer judges the revision under review, not the delivering tree's
-     *  head, and a sandboxed Codex run could not move `.git` itself (the CLI
-     *  kept it read-only until ruling 185). Live (HLC-18, 19:46Z): the
-     *  external revision the reconciler minted was never in the reviewer's
-     *  clone of the delivering tree, and the reviewer could not check it out. */
+     *  head, and a sandboxed Codex run could not move `.git` itself (the
+     *  sandbox kept it read-only; there is none now, ruling 144). Live
+     *  (HLC-18, 19:46Z): the external revision the reconciler minted was never
+     *  in the reviewer's clone of the delivering tree, and the reviewer could not check it out. */
     pinSubject?: ReviewSubject | null;
-    /** Ruling 179: the task branch, for the delivering refresh's fast-forward
+    /** Ruling 240: the task branch, for the delivering refresh's fast-forward
      *  to origin's copy (`refreshWorkspaceFromMirror`). */
     taskBranch?: string | null;
   },
 ): Promise<CloneOutcome> {
-  // Ruling 249: `absent` until an arm proves otherwise — the local arm sets
-  // `not_involved` because it never reaches GitHub (ruling 485: before its
-  // first step), the network arm sets `supplied` when a token was actually
-  // handed to git, and a workspace fault in either arm is `not_involved`.
+  // Ruling 197: `absent` until an arm proves otherwise — the local arm sets
+  // `not_involved` because it never reaches GitHub (before its first step),
+  // the network arm sets `supplied` when a token was actually handed to git,
+  // and a workspace fault in either arm is `not_involved`.
   let credential: CloneCredential = "absent";
   // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
   // never reaches argv or the remote URL (askpass env only), so this literal
@@ -321,7 +338,7 @@ export async function cloneRepo(
       // agent's own commits; this only benefits the server-side auto-commit.
     }
   };
-  // Ruling 485: every LOCAL step — removing or replacing a tree, making a
+  // Ruling 197: every LOCAL step — removing or replacing a tree, making a
   // directory, cloning the delivering checkout, rewriting its origin,
   // stripping `.claude` — fails as a workspace fault that names what failed,
   // the path and the OS error (`workspaceStep`). The catch below then says
@@ -329,7 +346,7 @@ export async function cloneRepo(
   // directory was logged `credential: absent`, and the operator asked the
   // owner for a credential.
   const local = workspaceStep;
-  // Ruling 485: a clone that did not finish leaves no tree behind. Removing
+  // Ruling 197: a clone that did not finish leaves no tree behind. Removing
   // one is best effort here — its failure is logged, never thrown over the
   // clone's own — and the next run's check below removes what is left.
   const clearUnfinished = async (dir: string, person: AgentLaunch | null) => {
@@ -351,7 +368,7 @@ export async function cloneRepo(
       input.dataRoot,
     );
     const dir = supportCheckoutDir(workspaceRoot, name, input.support);
-    // Ruling 485: whom a tree in this workspace is removed as — the task's
+    // Ruling 140: whom a tree in this workspace is removed as — the task's
     // person, as its git runs; null is the server's own user (isolation off).
     // With isolation on and nobody to name, that is the first local fault.
     const person = await local(`\`${workspaceRoot}\` has no person to work in it as`, () => personGit().launch);
@@ -368,19 +385,19 @@ export async function cloneRepo(
     if (input.support) {
       const deliveringDir = supportCheckoutDir(workspaceRoot, name);
       const fromDelivering = existsSync(path.join(deliveringDir, ".git"));
-      // Ruling 249, fixed BEFORE any local step (ruling 485): a checkout cloned
+      // Ruling 197, fixed BEFORE any local step: a checkout cloned
       // from the delivering one never reaches GitHub, so no credential is
       // involved from the start. It used to be set after the removal below,
       // so the removal's own failure went out as `credential: absent`.
       if (fromDelivering) credential = "not_involved";
-      // Ruling 485: the previous review's tree is the agents' — a tool they ran
+      // Ruling 140: the previous review's tree is the agents' — a tool they ran
       // can leave directories only its uid can enter (wrangler's 0700 temp
       // dirs, F40-62) — so it is replaced as its person, never by the
       // server's own recursive remove, which died half-way and left a tree
       // with no `.git` that every later review tripped over.
       await local(`\`${dir}\` could not be replaced`, () => removeAgentTree(dir, person));
       if (fromDelivering) {
-        // Ruling 460: the checkout is edited by agents running as their own
+        // Ruling 15: the checkout is edited by agents running as their own
         // users; what is created below the shared root stays in the agent
         // group.
         await local(`\`${path.dirname(dir)}\` could not be created`, () => {
@@ -389,7 +406,7 @@ export async function cloneRepo(
         });
         try {
           // Pass 40 review (R-seams-2): through git's own transport, never
-          // `--local`. Under ruling 460 the delivering checkout's objects are
+          // `--local`. Under ruling 196 the delivering checkout's objects are
           // written by an agent uid, and `--local` HARDLINKS them — the
           // kernel's `fs.protected_hardlinks` refuses a link to a file the
           // server neither owns nor can write, so every supporting run after
@@ -408,7 +425,7 @@ export async function cloneRepo(
               timeoutMs: 10_000,
             }),
           );
-          // Ruling 129: the supporting checkout keeps its fetch-only refresh,
+          // Ruling 195: the supporting checkout keeps its fetch-only refresh,
           // now through the SAME function the delivering one uses.
           const supportRefresh: WorkspaceRefreshInput = {
             projectSlug: input.projectSlug,
@@ -433,7 +450,7 @@ export async function cloneRepo(
       // No delivering checkout yet — nothing has been delivered to review. Fall
       // through to a normal mirror clone (default branch) in the isolated dir.
     }
-    // Ruling 485 (3): a checkout with no `.git/HEAD` is no checkout — a clone
+    // Ruling 195 (3): a checkout with no `.git/HEAD` is no checkout — a clone
     // killed mid-way, or a tree an older build's server-side remove left
     // half-removed. Left in place it is read as "already cloned" or blocks the
     // clone into its path on every run after, so it is removed as its person
@@ -457,12 +474,12 @@ export async function cloneRepo(
       await setIdentity(dir);
       // This is the reuse path, so a run may ALREADY be executing in this
       // workspace. Its skills live in its own plugin beside the checkout
-      // (ruling 180), so stripping the repo's `.claude` here takes nothing
+      // (ruling 185), so stripping the repo's `.claude` here takes nothing
       // from it.
       await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
         stripUngovernedRepoCatalog(dir, personGit()),
       );
-      // Ruling 129 (pass 34, Q34-5): THIS is the stale-checkout window. A
+      // Ruling 195 (pass 34, Q34-5): THIS is the stale-checkout window. A
       // workspace cloned once, from a repository that was still empty, was
       // reused as it stood by every later run — agents hold no credential, so
       // they could not fetch — and the spec writers committed unrelated root
@@ -511,7 +528,7 @@ export async function cloneRepo(
         repo: input.repo,
         destination: dir,
         token,
-        // Ruling 485: a destination in the clone's way is removed as the
+        // Ruling 140: a destination in the clone's way is removed as the
         // task's person.
         person,
       };
@@ -522,7 +539,7 @@ export async function cloneRepo(
       await local(`\`${path.join(dir, ".claude")}\` could not be removed`, () =>
         stripUngovernedRepoCatalog(dir, personGit()),
       );
-      // Ruling 179: a supporting run that reached here (no delivering checkout
+      // Ruling 240: a supporting run that reached here (no delivering checkout
       // to clone from) still judges the revision under review when the fresh
       // clone carries it.
       const freshPin = input.support
@@ -537,7 +554,7 @@ export async function cloneRepo(
       await clearUnfinished(dir, person);
     }
   } catch (error) {
-    // Ruling 485: a local step's fault never involved a credential, whichever
+    // Ruling 197: a local step's fault never involved a credential, whichever
     // arm it happened in — and a network clone's failure keeps the credential
     // state its arm set.
     if (error instanceof WorkspaceFault) credential = "not_involved";

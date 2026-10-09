@@ -60,7 +60,7 @@ interface ComposerOptions {
   /** Replace the stub action's reply (default `{ ok: true }`). */
   action?: () => ComposerActionReply | Promise<ComposerActionReply>;
   onPosted?: (text: string) => void;
-  /** Ruling 127: the task's run principal, which the `@claude` / `@codex` rows
+  /** Ruling 137: the task's run principal, which the `@claude` / `@codex` rows
    *  answer from. Undefined (the default) claims nothing either way. */
   runPrincipal?: TaskRunPrincipalView | null;
 }
@@ -107,7 +107,7 @@ async function renderComposer(opts: ComposerOptions = {}) {
     },
   ]);
   const utils = render(<Stub initialEntries={["/t"]} />);
-  // Ruling 457: the editor is lazy and every mount starts as its stand-in.
+  // Ruling 300: the editor is lazy and every mount starts as its stand-in.
   // Pressing the stand-in fetches it at once instead of on the idle callback.
   const standIn = utils.container.querySelector(".composer-ce");
   if (!standIn) throw new Error("renderComposer: no composer rendered");
@@ -169,7 +169,7 @@ function readText(editor: LexicalEditor): string {
 const listbox = () => document.querySelector('[role="listbox"]');
 
 /**
- * Ruling 127 — `@claude` / `@codex` name a RUNTIME, and a mention that engages
+ * Ruling 137 — `@claude` / `@codex` name a RUNTIME, and a mention that engages
  * one starts a run on the TASK OWNER's account. The menu therefore cannot go
  * on offering the handle as if the instance held a credential: the row says
  * whose account it would bill and whether that account can pay, in the same
@@ -178,7 +178,7 @@ const listbox = () => document.querySelector('[role="listbox"]');
  * nothing) — B-AG2 already established that a suggestion must not promise a
  * target the resolver refuses, and this is the honest half of that promise.
  */
-describe("ruling 127: the backend handles name whose account they would bill", () => {
+describe("ruling 137: the backend handles name whose account they would bill", () => {
   const rowFor = (handle: string) =>
     Array.from(document.querySelectorAll('[role="option"]')).find((o) =>
       o.querySelector(".ri-sub")?.textContent?.startsWith(`@${handle} `),
@@ -195,7 +195,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     });
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // mount a render before its "@c" options do (the lazy editor, ruling 300,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain(
@@ -210,7 +210,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     const { editor } = await renderComposer({ runPrincipal: null });
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // mount a render before its "@c" options do (the lazy editor, ruling 300,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).toContain("no task owner");
@@ -221,7 +221,7 @@ describe("ruling 127: the backend handles name whose account they would bill", (
     const { editor } = await renderComposer();
     await setText(editor, "@c");
     // Wait for the rows this test reads, not just the listbox: the list can
-    // mount a render before its "@c" options do (the lazy editor, ruling 457,
+    // mount a render before its "@c" options do (the lazy editor, ruling 300,
     // moves that render later under a loaded suite).
     await waitFor(() => expect(rowFor("codex") && rowFor("claude")).toBeTruthy());
     expect(rowFor("codex")!.textContent).not.toContain("not connected");
@@ -512,7 +512,7 @@ describe("Timeline empty state (UI-40)", () => {
    * `events.length`) cannot help: seconds after creation the Live-run strip on
    * this same page reads "Preparing workspace · Cloning akin-ozer/viberr · 13%"
    * while the timeline underneath declared the loop had never started. Ruling
-   * 87(b) exists so a healthy pre-run phase is distinguishable from a wedged
+   * 152 exists so a healthy pre-run phase is distinguishable from a wedged
    * one; the copy undid half of it on the same screen.
    */
   it("U33-1: a LIVE run means the loop HAS started, not that it never did", () => {

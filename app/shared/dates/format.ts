@@ -1,5 +1,5 @@
 /**
- * THE shared timestamp formatter (orchestrator ruling 4).
+ * THE shared timestamp formatter (ruling 293).
  *
  * Boundaries carry UTC ISO strings; display reproduces the mock's exact
  * forms in the viewer's local timezone (the seed back-dates events to local

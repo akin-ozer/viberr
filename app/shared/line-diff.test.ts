@@ -21,7 +21,7 @@ function replay(a: readonly string[], b: readonly string[], steps: readonly Diff
 
 const cost = (steps: readonly DiffStep[]) => steps.filter((s) => s !== "same").length;
 
-describe("ruling 499: diffSteps is the shortest edit script between two lists", () => {
+describe("ruling 168: diffSteps is the shortest edit script between two lists", () => {
   it("keeps what both share and names only the change", () => {
     const a = ["## Step 1", "", "4. Build", "5. builds: on", "tail"];
     const b = ["## Step 1", "", "4. Build", "5. builds: off", "tail"];
@@ -65,7 +65,7 @@ describe("ruling 499: diffSteps is the shortest edit script between two lists", 
   });
 });
 
-describe("ruling 499: changedSpans marks the words that changed in a paired line", () => {
+describe("ruling 168: changedSpans marks the words that changed in a paired line", () => {
   it("marks the changed words, joining a phrase across its spaces", () => {
     const before = "5. Non-production branch builds: on";
     const after = "5. Non-production branch builds: off (previews_enabled: false)";

@@ -15,7 +15,7 @@ import type { Mentionables } from "~/server/tasks/mention-suggestions.server";
 import type { TaskRunPrincipalView } from "./run-principal-view";
 
 /**
- * The task-comment composer as the timeline mounts it. Ruling 457 (owner,
+ * The task-comment composer as the timeline mounts it. Ruling 300 (owner,
  * 2026-09-24): the editor behind it (Lexical, `comment-composer.tsx`) was
  * most of the task route's chunk, fetched and compiled before the first task
  * page of a session could render, so it is loaded lazily. Until it arrives
@@ -44,7 +44,7 @@ export interface CommentComposerHandle {
 
 export interface CommentComposerProps {
   mentionables: Mentionables;
-  /** Ruling 127: the task's run principal (the owner whose accounts an
+  /** Ruling 137: the task's run principal (the owner whose accounts an
    *  `@claude` / `@codex` mention would bill), so the menu rows can name a
    *  backend that would refuse. Absent on renders with no task behind them. */
   runPrincipal?: TaskRunPrincipalView | null;
@@ -206,7 +206,7 @@ function StandIn({
 }
 
 /**
- * Ruling 457 (CS-7): memoised. The timeline hands it stable callbacks and
+ * Ruling 11 (CS-7): memoised. The timeline hands it stable callbacks and
  * directories, so a revalidation or a send's fetcher states re-render the
  * timeline without re-rendering the editor under it.
  */
@@ -224,7 +224,7 @@ export const CommentComposer = memo(function CommentComposer({
   // A transition keeps the stand-in on screen (and typeable) until the
   // editor can render in its place in one commit.
   const swap = useCallback(() => startTransition(() => setWanted(true)), []);
-  // Review finding COMPOSER-IME-SWAP (ruling 457): while an IME or a dead
+  // Review finding COMPOSER-IME-SWAP (ruling 300): while an IME or a dead
   // key composes, the stand-in's node holds the uncommitted text, and
   // removing it ends the composition: the conversion in progress is lost
   // and the marked text is carried as if typed. A swap that comes due then

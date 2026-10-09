@@ -10,7 +10,7 @@ import {
 } from "../../../test-support/test-app";
 
 /**
- * Ruling 99 — conversation ownership and turn admission.
+ * Ruling 249 — conversation ownership and turn admission.
  *
  * A conversation belongs to its user: that user and org admins read it,
  * NOBODY else (a member of the same project included), and only the owner may
@@ -31,7 +31,7 @@ beforeAll(async () => {
   ownerId = userIds.selin;
   otherMemberId = userIds.murat;
   orgAdminId = userIds.arda;
-  // Ruling 127: a controller turn runs on the ASKER's own Claude account, so
+  // Ruling 137: a controller turn runs on the ASKER's own Claude account, so
   // the conversation owner has to have connected Claude for any turn in this
   // file to start. The refusal case disconnects him deliberately.
   const { connectFakeBackend } = await import(
@@ -123,7 +123,7 @@ describe("conversation access", () => {
   });
 
   it("a turn refuses honestly IN the transcript when the ASKER has no Claude connected", async () => {
-    // Ruling 127: the controller runs on the asker's OWN Claude account, so the
+    // Ruling 137: the controller runs on the asker's OWN Claude account, so the
     // refusal is about them — not about the deployment — and another member who
     // HAS connected Claude can still converse (asserted below).
     const { createConversation, listMessages } = await import(
@@ -156,7 +156,7 @@ describe("conversation access", () => {
       expect(messages).toHaveLength(2);
       expect(messages[0]!.author).toBe("user");
       expect(messages[1]!.author).toBe("controller");
-      // Ruling 465: the refusal names the message it refused.
+      // Ruling 252: the refusal names the message it refused.
       expect(messages[1]!.replyTo).toBe(messages[0]!.id);
       // Addressed to the person, naming where THEY fix it.
       expect(messages[1]!.text).toContain("your own Claude account");
@@ -177,7 +177,7 @@ describe("conversation access", () => {
   });
 
   it("a sign-in whose credential FILE is gone gets the store's own sentence", async () => {
-    // Ruling 127, the wiped-runtime-volume case. This person HAS a connection
+    // Ruling 137, the wiped-runtime-volume case. This person HAS a connection
     // row — they signed in through the vendor's own binary — so "Claude isn't
     // connected for you yet" is both false and unactionable: what went missing
     // is the sign-in file that lived on the volume. The refusal note carries
@@ -235,7 +235,7 @@ describe("conversation access", () => {
     }
   });
 
-  it("another member WITH Claude connected still gets a turn (ruling 127)", async () => {
+  it("another member WITH Claude connected still gets a turn (ruling 137)", async () => {
     // The half that makes the refusal above person-shaped rather than a
     // deployment outage: one member's missing connection never silences
     // anybody else's controller. Canary: read availability from an instance
@@ -320,7 +320,7 @@ describe("conversation access", () => {
     };
     const map = host[leaseKey] ?? new Map();
     host[leaseKey] = map;
-    // Ruling 527: steering counts against the same bound.
+    // Ruling 251: steering counts against the same bound.
     map.set(conversation.id, {
       runId: "run_busy",
       queue: Array.from({ length: 6 }, (_, i) => ({
@@ -352,7 +352,7 @@ describe("conversation access", () => {
       expect(messages[0]!.text).toBe("One more thing.");
       expect(messages[1]!.author).toBe("controller");
       expect(messages[1]!.text).toContain("queue for this conversation is full");
-      // Ruling 465: under the message it refused, not under the busy turn's.
+      // Ruling 252: under the message it refused, not under the busy turn's.
       expect(messages[1]!.replyTo).toBe(messages[0]!.id);
     } finally {
       map.delete(conversation.id);
@@ -409,7 +409,7 @@ describe("O39-d: a reply its owner has not seen", () => {
 /**
  * Stopping a turn from the controller page.
  *
- * `interruptControllerTurn` hands the engine the ruling-99 scope of a
+ * `interruptControllerTurn` hands the engine the ruling-251 scope of a
  * controller run so neither page has to know it, and the engine's interrupt
  * asks `canInterruptControllerRun` instead of a project membership the run
  * has none of. A stopped turn settles like a finished one: the transcript
@@ -472,21 +472,21 @@ describe("stopping a turn", () => {
       author: "controller",
       runId,
       text: "This turn was stopped before I could answer.",
-      // Ruling 465: the settle's note names the message the turn answered.
+      // Ruling 252: the settle's note names the message the turn answered.
       replyTo: messages[0]!.id,
     });
     expect(conversationTurnState(app.db, conversationId).working).toBe(false);
   });
 
   /**
-   * Ruling 250 (pass 37, F37-79): the live turn says what it is doing.
+   * Ruling 257 (pass 37, F37-79): the live turn says what it is doing.
    *
    * Both facts are on the run row and both already render in the live-run panel
    * on the controller page; the conversation row, where the person actually
    * waits, showed a static sentence for turns measured in minutes, and the dock
    * has no run panel to fall back to at all.
    */
-  it("ruling 250: the turn state carries the run's phase and step, minus the generic phase", async () => {
+  it("ruling 257: the turn state carries the run's phase and step, minus the generic phase", async () => {
     const { conversationTurnState } = await import("./controller-run.server");
     const { patchRun } = await import("~/server/runtimes/run-store.server");
     const { conversationId, runId } = await startWorkingTurn();
@@ -698,7 +698,7 @@ describe("a failed queued start accounts for the messages behind it", () => {
           .filter((m) => m.author === "controller")
           .map((m) => [m.text, m.replyTo]);
       await pollUntil(() => notes().length >= 4, 2_000);
-      // B was attempted; C and D are the ones abandoned. Ruling 465: every
+      // B was attempted; C and D are the ones abandoned. Ruling 252: every
       // dropped message has its own note under it, so none reads back as a
       // question nobody answered (and boot recovery, which notes every
       // unanswered message, does not call them a restart).
@@ -717,7 +717,7 @@ describe("a failed queued start accounts for the messages behind it", () => {
 });
 
 /**
- * Ruling 99(d): a turn a restart orphans gets an honest "interrupted" note.
+ * Ruling 252: a turn a restart orphans gets an honest "interrupted" note.
  *
  * Message ORDER cannot see the common case. A turn taken off the FIFO always
  * has the PREVIOUS turn's reply sitting after its own user message, because
@@ -781,7 +781,7 @@ describe("boot recovery", () => {
     });
     // The queued turn's run, as boot's orphan finalizer leaves it.
     upsertRun(app.db, controllerRun("run_ctrl_b", conversation.id, "error"));
-    // Ruling 465: a third message was still in the lost in-memory queue. The
+    // Ruling 252: a third message was still in the lost in-memory queue. The
     // old order-based arms never reached it (the dead turn's note made the
     // newest message a controller one).
     const third = appendMessage(app.db, {
@@ -809,7 +809,7 @@ describe("boot recovery", () => {
     expect(listMessages(app.db, conversation.id)).toHaveLength(before);
   });
 
-  it("ruling 527: a message that steered a turn is part of it, so only the turn's own message is noted", async () => {
+  it("ruling 251: a message that steered a turn is part of it, so only the turn's own message is noted", async () => {
     const { createConversation, appendMessage, listMessages, markSteered } = await import(
       "./controller-conversations.server"
     );
@@ -844,9 +844,9 @@ describe("boot recovery", () => {
   });
 });
 
-// ------------------------------------------------------------ ruling 121
+// ------------------------------------------------------------ ruling 249
 
-describe("conversation scope (ruling 121)", () => {
+describe("conversation scope (ruling 249)", () => {
   it("refuses a task binding without a project, in the store and in the CHECK", async () => {
     const { createConversation } = await import("./controller-conversations.server");
     expect(() =>
@@ -998,12 +998,12 @@ describe("conversation scope (ruling 121)", () => {
 });
 
 /**
- * Ruling 130(b): a refused turn's note names the classified cause and the
+ * Ruling 156(a): a refused turn's note names the classified cause and the
  * person's own remedy, never "Say it again to retry" for a quota or auth
  * refusal (which would only reproduce it). Canaries: restore the fixed
  * suffix on every kind; route `auth` through the generic arm.
  */
-describe("ruling 130(b): the controller's note for a refused turn", () => {
+describe("ruling 156(a): the controller's note for a refused turn", () => {
   /** A turn whose run ends in error on `line`, as an adapter reports a
    *  refused run; returns the transcript the settle leaves. */
   async function erroredTurn(line: LogLine): Promise<string[]> {
@@ -1028,8 +1028,8 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     } finally {
       // The sink records a quota or an auth refusal against the backend off
       // these lines (D5, F32-4); every case starts without one.
-      clearBackendQuotaExhaustion(app.db, "claude");
-      clearBackendCredentialRefusal(app.db, "claude");
+      clearBackendQuotaExhaustion(app.db, "claude", ownerId);
+      clearBackendCredentialRefusal(app.db, "claude", ownerId);
     }
   }
 
@@ -1076,7 +1076,7 @@ describe("ruling 130(b): the controller's note for a refused turn", () => {
     expect(note).not.toContain("Profile → Agent accounts");
   });
 
-  it("ruling 175: a turn the spending cap stopped names the cap and the spend, and who can raise it", async () => {
+  it("ruling 159: a turn the spending cap stopped names the cap and the spend, and who can raise it", async () => {
     // Canary: route `max_budget` through the generic arm and the note reads
     // "the run did not complete" with no figure and nobody to ask.
     const texts = await erroredTurn({
@@ -1135,9 +1135,9 @@ describe("U39-19: a conversation is titled by its first sentence", () => {
 
 /**
  * U39-30: a long turn's answer reaches the transcript the moment it is
- * written, not after the completion compaction (ruling 376) behind it. Live on
+ * written, not after the completion compaction (ruling 175) behind it. Live on
  * ax-clone the page showed "Compacting context" for 27 seconds while the reply
- * already existed, and ruling 371 measured one compaction at 131.
+ * already existed, and ruling 170 measured one compaction at 131.
  */
 describe("U39-30: the answer does not wait for the compaction", () => {
   it("is in the transcript while the compaction runs, and only once after it", async () => {
@@ -1203,7 +1203,7 @@ describe("U39-30: the answer does not wait for the compaction", () => {
     expect(duringCompaction).toEqual([answer]);
     const replies = listMessages(app.db, conversation.id).filter((m) => m.author === "controller");
     expect(replies.map((m) => [m.text, m.runId])).toEqual([[answer, result.runId]]);
-    // Ruling 465: the answer posted before the compaction names its message.
+    // Ruling 252: the answer posted before the compaction names its message.
     // CANARY: drop `replyTo` from `postReply`.
     expect(replies[0]!.replyTo).toBe(result.messageId);
 
@@ -1257,11 +1257,11 @@ describe("U39-30: the answer does not wait for the compaction", () => {
 });
 
 /**
- * Ruling 465 (F40-8, F40-10): a queued message is visible as queued, each
+ * Ruling 252 (F40-8, F40-10): a queued message is visible as queued, each
  * reply names the message it answers, and a turn's prompt stops at its own
  * message with a line for the ones behind it.
  */
-describe("ruling 465: the queue is visible and every reply names its message", () => {
+describe("ruling 252: the queue is visible and every reply names its message", () => {
   it("exposes the answered and queued ids with their positions, then links each reply as the FIFO drains", async () => {
     const { createConversation, listMessages } = await import("./controller-conversations.server");
     const { runControllerTurn, conversationTurnState, interruptControllerTurn } = await import(
@@ -1382,7 +1382,7 @@ describe("ruling 465: the queue is visible and every reply names its message", (
       const send = (text: string, mode?: "queue") =>
         runControllerTurn(app.db, { conversationId: conversation.id, text, user, mode, dataRoot: app.dataRoot });
       // All three sends begin before the first start reaches the adapter.
-      // Ruling 527: part 3 is sent to steer the turn that is starting.
+      // Ruling 251: part 3 is sent to steer the turn that is starting.
       const [first, second, third] = await Promise.allSettled([
         send("Part 1."),
         send("Part 2.", "queue"),
@@ -1412,13 +1412,13 @@ describe("ruling 465: the queue is visible and every reply names its message", (
 });
 
 /**
- * Ruling 527: a message sent while a turn works steers that turn unless its
+ * Ruling 251: a message sent while a turn works steers that turn unless its
  * sender queued it. The run asks for what is waiting at each step boundary
  * (`RunSpec.steering`, which the Claude adapter's hooks call; the adapter's
  * own suite owns those); a message that misses the turn starts the next one,
  * ahead of the messages queued on purpose.
  */
-describe("ruling 527: a message sent while a turn works steers it", () => {
+describe("ruling 251: a message sent while a turn works steers it", () => {
   const user = { id: "", email: "selin@viberr.dev", name: "Selin", orgRole: "member" as const };
   const answer = (text: string, gate?: Promise<void>): FakeRun => {
     const run: FakeRun = {
@@ -1487,7 +1487,7 @@ describe("ruling 527: a message sent while a turn works steers it", () => {
     // next boot notes it as a restart).
     const channel = lastRunSpec()!.steering!;
     const delivery = channel.take();
-    // Ruling 573: its file is named after its words. CANARY: drop
+    // Ruling 258: its file is named after its words. CANARY: drop
     // `withFilesNote` from `steeringText` and a file sent while a turn worked
     // reaches it as words alone.
     expect(delivery).toEqual({

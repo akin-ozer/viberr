@@ -11,10 +11,10 @@ import { toError } from "~/shared/errors";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
- * Ruling 639, once at boot: a result the old 40-character cap cut gets back
+ * Ruling 16, once at boot: a result the old 40-character cap cut gets back
  * the words its run reported.
  *
- * Until ruling 639 the writer kept 39 characters of an evidence row's result
+ * Before this rule the writer kept 39 characters of an evidence row's result
  * and an ellipsis, and the task file is the row's only copy, so a verdict read
  * "The proposed pay-as-you-go default list…" on every surface. The run's own
  * report still holds the sentence in its log: a Codex run's final envelope (an

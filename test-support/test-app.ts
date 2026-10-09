@@ -71,7 +71,7 @@ export async function setupAppTest(): Promise<AppTestContext> {
   // `npm test` the moment a credential leaks in. The fakes complete
   // deterministically instead.
   //
-  // Ruling 127: this decides only WHICH adapter a run reaches, never whether
+  // Ruling 137: this decides only WHICH adapter a run reaches, never whether
   // it may run. That is a fact about the run's credential principal, so a test
   // whose dispatch must reach an adapter connects the backend for the person
   // it bills (`connectFakeBackend` in test-support/backend-credentials.ts),

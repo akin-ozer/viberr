@@ -256,19 +256,19 @@ describe("githubWebHost (B11: browse-link host derivation)", () => {
 });
 
 /**
- * Ruling 223 (F37-43): the fact this predicate exists to encode, pinned as a
+ * Ruling 243 (F37-43): the fact this predicate exists to encode, pinned as a
  * test rather than as a fixture's guess.
  *
  * `GET /repos/{repo}/commits/{sha}` does NOT 404 a well-formed 40-character SHA
  * it cannot find — it answers 422 with "No commit found for SHA: <sha>",
- * verified against the live API. Ruling 135's never-pushed probe asked
+ * verified against the live API. Ruling 243's never-pushed probe asked
  * `isMissingRefAnswer`, which knows only 404 and the empty-repository 409, so
  * the refusal it guards was unreachable and a never-pushed revision read as an
  * "unverifiable" head that acceptance merges anyway. On SHOP-17 that merged the
  * revision the required reviewer had rejected and discarded the one both
  * required reviewers had approved.
  */
-describe("isMissingCommitAnswer (ruling 223)", () => {
+describe("isMissingCommitAnswer (ruling 243)", () => {
   const http = (status: number, message: string): GithubResponse<unknown> => ({
     ok: false,
     kind: "http",

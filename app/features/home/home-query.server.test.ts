@@ -161,13 +161,13 @@ describe("UI-02: a task-less project has no recency signal", () => {
 });
 
 /**
- * Ruling 532: Home's setup checklist. An org admin gets the instance's steps
+ * Ruling 322: Home's setup checklist. An org admin gets the instance's steps
  * (GitHub, an account other than the bootstrap admin); every person gets the
  * two that are their own (a Claude or Codex account, which their runs bill,
  * and a first project); the checklist is null once every step is done. Each
  * gap is closed here through the writer that closes it in the product.
  */
-describe("getHomeSetup — the setup checklist (ruling 532)", () => {
+describe("getHomeSetup — the setup checklist (ruling 322)", () => {
   /** GitHub accepting a classic token with the scopes a connection needs. */
   const github = () =>
     fakeGithubFetch({
@@ -187,7 +187,7 @@ describe("getHomeSetup — the setup checklist (ruling 532)", () => {
     const { db, admin, actor } = await freshInstance();
     const viewer = { id: admin.id, role: "admin" as const };
     // CANARY: count the bootstrap admin as an account of someone's own and
-    // "account" starts done. Ruling 667: the first project waits on nothing;
+    // "account" starts done. Ruling 322: the first project waits on nothing;
     // hold it behind a connection again and a board that delivers results
     // cannot be started on an instance with none.
     expect(getHomeSetup(db, viewer, 0)).toEqual([
@@ -196,7 +196,7 @@ describe("getHomeSetup — the setup checklist (ruling 532)", () => {
       { id: "agents", state: "todo" },
       { id: "project", state: "todo" },
     ]);
-    // Ruling 667: with a project and still no connection, the instance runs
+    // Ruling 322: with a project and still no connection, the instance runs
     // boards that need no GitHub, so that step is not owed. CANARY: list it
     // whatever the projects are and the checklist never leaves this Home.
     expect(getHomeSetup(db, viewer, 1)?.map((step) => step.id)).toEqual(["account", "agents", "project"]);

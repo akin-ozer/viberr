@@ -22,7 +22,7 @@ import { useDismiss } from "~/ui/use-dismiss";
 import { useCopied } from "~/ui/use-copied";
 import { useFreshLine } from "~/ui/use-fresh-line";
 import { useLiveStreamFailed } from "~/features/live-updates/use-live-updates";
-// Ruling 457: backend labels and count plurals are spelled inline here, not
+// Ruling 11: backend labels and count plurals are spelled inline here, not
 // through `BACKEND_LABEL` / `countLabel` (why: shared/text/backend-label.ts,
 // shared/text/plural.ts).
 import { Pill } from "~/ui/pill";
@@ -70,7 +70,7 @@ import {
 } from "./runs-panels-derive";
 
 /**
- * Ruling 366(e): the counts that climb while a run waits roll their digits
+ * Ruling 284(e): the counts that climb while a run waits roll their digits
  * (`@number-flow/react`: Intl-formatted, accessible as one labelled number,
  * static under reduced motion, plain markup on the server). Every wrapper
  * carries the figure in plain text on a `data-` attribute, so the DOM can be
@@ -80,7 +80,7 @@ const TWO_DIGITS = { minimumIntegerDigits: 2 } as const;
 /** The tens digit of a base-60 field never passes 5. */
 const BASE_60 = { 1: { max: 5 } } as const;
 /**
- * Ruling 524(b): a clock's field rolls in 300 ms, eased out (the sheet's
+ * Ruling 311: a clock's field rolls in 300 ms, eased out (the sheet's
  * `--ease-out`). number-flow's own roll is a 900 ms spring, and a clock ticks
  * once a second, so its seconds were mid-roll nine tenths of the time: two
  * digits half in view in the cell, read as "03:1" over a clipped glyph (owner's
@@ -94,8 +94,8 @@ const CLOCK_FIELD = { trend: 1, willChange: true, spinTiming: CLOCK_ROLL, transf
 /**
  * One rolling field of a clock, memoised on its props (all primitives or
  * module constants): a tick re-renders the seconds and leaves the minutes and
- * hours alone until they move (ruling 457, LIVE-11; the digits still roll,
- * ruling 366(e) and 451(e)).
+ * hours alone until they move (ruling 11, LIVE-11; the digits still roll,
+ * ruling 284(e) and 284).
  */
 const Roll = memo(NumberFlow);
 
@@ -148,9 +148,9 @@ function WaitClock({ seconds, title }: { seconds: number; title: string }) {
   );
 }
 
-/** Ruling 451(e): the strip's Turns cell rolls as Elapsed and Tokens beside
+/** Ruling 284: the strip's Turns cell rolls as Elapsed and Tokens beside
  *  it do; it used to be the one figure in the row that jumped. Memoised on
- *  its figure (ruling 457, LIVE-11): the number-flow element resets its
+ *  its figure (ruling 11, LIVE-11): the number-flow element resets its
  *  markup on every render. */
 const TurnCount = memo(function TurnCount({ n }: { n: number }) {
   return (
@@ -161,7 +161,7 @@ const TurnCount = memo(function TurnCount({ n }: { n: number }) {
 });
 
 /** `TokenCount`'s two digit formats, made once: a new format object per render
- *  reset the number-flow element's markup (ruling 457, LIVE-11). */
+ *  reset the number-flow element's markup (ruling 11, LIVE-11). */
 const ONE_FRACTION_DIGIT = { minimumFractionDigits: 1, maximumFractionDigits: 1 } as const;
 const NO_FRACTION_DIGITS = { minimumFractionDigits: 0, maximumFractionDigits: 0 } as const;
 
@@ -189,7 +189,7 @@ const TokenCount = memo(function TokenCount({ n, estimated }: { n: number; estim
   );
 });
 
-/** Ruling 457 (LIVE-11): the strip's Elapsed cell owns its one-second clock,
+/** Ruling 11 (LIVE-11): the strip's Elapsed cell owns its one-second clock,
  *  so a tick re-renders the clock and nothing else of the Live run card. */
 function LiveElapsed({ startedAt }: { startedAt: string | null }) {
   return <RunClock seconds={useElapsed(startedAt, true)} />;
@@ -216,7 +216,7 @@ function RunGlyph({ run, decorative }: { run: RunView; decorative?: boolean }) {
  * Shared listbox dropdown. Adds Escape-close + arrow-key navigation over the
  * mock (which only had outside-mousedown close).
  *
- * Ruling 478(d) (F40-34): the trigger is named by its label AND the stream it
+ * Ruling 311 (F40-34): the trigger is named by its label AND the stream it
  * shows ("Agent log stream: Platform Engineer · delivering"), so a screen
  * reader hears which agent's console is open and a voice-control user can
  * say the name on screen (WCAG 2.5.3); a fixed `aria-label` used to replace
@@ -352,7 +352,7 @@ function AgentPicker({
                   collapses both `interrupted` and `queued` to "idle". So the
                   list a user reads FIRST to choose a stream called a run
                   "idle" while the pill and footer four lines below — which do
-                  apply ruling 11's lifecycle mapping — read "interrupted · by
+                  apply ruling 165's lifecycle mapping — read "interrupted · by
                   Arda" / "queued". One panel, one vocabulary: the label comes
                   from `runStatePill`, the module written for that ruling. The
                   DOT keeps the render-state class: it is a CSS state name, and
@@ -396,7 +396,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   canInterrupt: boolean;
   /** A request that Interrupt waits on is in flight. */
   interrupting: boolean;
-  /** Ruling 368: the server run id whose interrupt is in flight, so THAT run's
+  /** Ruling 286: the server run id whose interrupt is in flight, so THAT run's
    *  Interrupt shows the work (busy, the loader, "Interrupting…"). */
   interruptingRunId?: string | null;
   /** F39 (owner decision): the streaming console for THIS run, rendered inside
@@ -408,7 +408,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
   console?: ReactNode;
   /** Whether {@link console} is showing, so the trigger can name what it does. */
   consoleOpen?: boolean;
-  /** Ruling 457 (LIVE-1): the console's store, whose tail reads carry the
+  /** Ruling 11 (LIVE-1): the console's store, whose tail reads carry the
    *  run's phase, step, turns and tokens as each line lands. Without one the
    *  strip shows what the page loaded. */
   store?: RunLogStore | null;
@@ -468,7 +468,7 @@ export const LiveRunPanel = memo(function LiveRunPanel({
 });
 
 /**
- * The strip's actions: the console's trigger and Interrupt. Ruling 700(e):
+ * The strip's actions: the console's trigger and Interrupt. Ruling 13(b):
  * LiveRunPanel's `.run-actions` slot as a component of its own, with no hook,
  * so the strip around it keeps its markup.
  */
@@ -488,7 +488,7 @@ function RunActions({
   consoleOpen: boolean;
   canInterrupt: boolean;
   interrupting: boolean;
-  /** Ruling 368: THIS run's interrupt is the request in flight. */
+  /** Ruling 286: THIS run's interrupt is the request in flight. */
   stoppingThis: boolean;
   onViewLogs: (id: string) => void;
   onInterrupt: (runId: string) => void;
@@ -511,11 +511,11 @@ function RunActions({
             : "Show console"}
       </button>
       {canInterrupt && (
-        /* Ruling 150: a stop discards the work in flight, so the trigger
-           wears ruling 149's danger label like the confirm it opens
+        /* Ruling 278(a): a stop discards the work in flight, so the trigger
+           wears the danger label like the confirm it opens
            (`btn danger`) — the neutral/red pair inside `.run-actions` is
            what separates it from the sibling `View logs`. `disabled` here
-           is the request in flight (ruling 147(a)), not a validity gate. */
+           is the request in flight (ruling 288), not a validity gate. */
         <button
           type="button"
           className="btn ghost sm danger"
@@ -532,7 +532,7 @@ function RunActions({
 }
 
 /**
- * The strip's phase, step and figures. Ruling 457 (LIVE-1): read from the
+ * The strip's phase, step and figures. Ruling 11 (LIVE-1): read from the
  * console's store, whose every tail read carries the run's current facts, over
  * what the page loaded; the page used to revalidate root, layout and task
  * every 2 s during a run only to move these. The clock is its own leaf
@@ -555,9 +555,9 @@ const RunStripFacts = memo(function RunStripFacts({
   // that IS known from the row's state rather than rendering an empty bold
   // line, and the step row is omitted entirely when there is no step.
   const phase = f.phase ?? "Working";
-  // Ruling 451(a): phase and step are keyed on their text, so a new one is a
+  // Ruling 284: phase and step are keyed on their text, so a new one is a
   // new line that rises in (the sheet's `swap-in`) rather than words changing
-  // under the reader. Ruling 459: only a line that REPLACES the first one
+  // under the reader. Ruling 284: only a line that REPLACES the first one
   // rises (`data-fresh`); the words on screen when the strip opens stand still.
   const phaseFresh = useFreshLine(phase);
   const stepFresh = useFreshLine(f.step ?? "");
@@ -565,7 +565,7 @@ const RunStripFacts = memo(function RunStripFacts({
     <>
       <div className="run-phase">
         <span className="run-spin" aria-hidden="true" />
-        {/* Ruling 478(c) (F40-33): the text column is what may shrink, so a
+        {/* Ruling 311 (F40-33): the text column is what may shrink, so a
             long step cuts at the strip's edge with its ellipsis showing
             instead of widening the page on a phone (app.css). */}
         <div className="run-phase-text">
@@ -635,7 +635,7 @@ const RunStripFacts = memo(function RunStripFacts({
 });
 
 /**
- * Ruling 369: the strip's Tokens cell says on hover how much of the prompt
+ * Ruling 311: the strip's Tokens cell says on hover how much of the prompt
  * the cache wrote and read, beside the estimate sentence when there is one.
  * Nothing is claimed for a run that has reported no cache figure yet.
  */
@@ -654,8 +654,8 @@ function missLabel(reason: string): string {
 }
 
 /**
- * Ruling 369: the facts row's first chip, the run's first model call: warm or
- * cold and its figure, or why there is none to show. Ruling 700(e): the row's
+ * Ruling 311: the facts row's first chip, the run's first model call: warm or
+ * cold and its figure, or why there is none to show. Ruling 13(b): the row's
  * first slot as a component of its own, with no hook.
  */
 function FirstCallChip({ first, reported }: { first: RunCacheView["firstCall"]; reported: boolean }) {
@@ -684,12 +684,12 @@ function FirstCallChip({ first, reported }: { first: RunCacheView["firstCall"]; 
 }
 
 /**
- * Ruling 369: the console's record of what the prompt cache did for the run —
+ * Ruling 311: the console's record of what the prompt cache did for the run —
  * the first call's temperature and figures (with the provider's miss reason
  * when it sent one), the TTL bucket, the run's writes and reads, the peak
  * prompt and the compactions. Every chip carries its figure on a `data-`
  * attribute, so the DOM reads without the words. A run that has reported
- * nothing says so instead of printing zeros as facts. Ruling 457 (LIVE-1): the
+ * nothing says so instead of printing zeros as facts. Ruling 11 (LIVE-1): the
  * figures follow the console's tail reads, over what the page loaded.
  */
 const RunFactsRow = memo(function RunFactsRow({
@@ -770,7 +770,7 @@ const CLAUDE_META = "@anthropic-ai/claude-agent-sdk · stream-json · session ";
  * click-to-expand shows it in full and click again (or the copy affordance)
  * copies the whole id — so it can actually be pasted into `--resume`.
  *
- * Ruling 148: when there is no id the slot says so in words. A "−" sat exactly
+ * Ruling 291: when there is no id the slot says so in words. A "−" sat exactly
  * where every other run shows a click-to-expand control, so it read as a
  * collapsed or emptied one rather than as the fact.
  */
@@ -798,9 +798,9 @@ function SessionIdChip({
     }
   };
   // The id identifies the provider session (claude session_id / codex thread),
-  // stored inside the app's runtime — since ruling 127 in the runtime home of
-  // the person the run billed (`runtimes/users/<id>/{claude,codex}-home` on the
-  // data volume). It IS resumable on your own machine with
+  // stored inside the app's runtime — in the runtime home of the person the
+  // run billed (`runtimes/users/<id>/{claude,codex}-home` on the data volume,
+  // ruling 137). It IS resumable on your own machine with
   // your own subscription — use Export to download an installer that places the
   // transcript where the local CLI expects it and prints `claude --resume` /
   // `codex resume`. (Or continue in-app by @mentioning the agent.)
@@ -858,7 +858,7 @@ function SessionIdChip({
  * still be able to tell an added file from a deleted one. The `title` carries
  * the word itself for anyone who needs it spelled out.
  *
- * Ruling 148: that promise went unkept for a pass — the chip set no `title` and
+ * Ruling 291: that promise went unkept for a pass — the chip set no `title` and
  * no text, so the mark was the whole signal: a leading "−" read as a remove
  * control and a reader heard "minus app/b.ts". The glyph is now aria-hidden and
  * the word beside it is what gets announced.
@@ -876,7 +876,7 @@ const FILE_KIND_WORD = {
 } satisfies Record<"add" | "update" | "delete", string>;
 
 /**
- * Ruling 366: a tool chip's name, marked by whose tool it is. Viberr's own
+ * Ruling 168: a tool chip's name, marked by whose tool it is. Viberr's own
  * tools carry the agent tint and the V mark; the word is read to assistive
  * tech (`.vh`) so the mark is never the only carrier, and the title spells the
  * provider's full name for anyone who greps a transcript by it.
@@ -920,7 +920,7 @@ interface FoldRowProps {
 }
 
 /**
- * Ruling 366: one call's heartbeats, folded into one wait row. LIVE while the
+ * Ruling 168: one call's heartbeats, folded into one wait row. LIVE while the
  * run is going and nothing has landed after the last heartbeat — the orb
  * turns and the count runs on from the provider's last figure (366(e)); once
  * anything follows, the call was still running AT that figure, and the row
@@ -945,7 +945,7 @@ function WaitRow({
   const ticking = live && from !== null;
   const clock = (t: string) => (hydrated ? localLogClock(t, startedAt) : t);
   const n = lines.length;
-  // Ruling 459: a row seen live keeps its orb once the wait ends, paused and
+  // Ruling 284: a row seen live keeps its orb once the wait ends, paused and
   // hidden, so the sheet can trade it for the clock in place instead of
   // swapping a 20px orb for a 14px glyph in one frame. A row first drawn
   // ended never mounts one. Same set-state-in-render latch as `useFreshLine`.
@@ -960,7 +960,7 @@ function WaitRow({
           <span className="log-wait">
             <span className="lw-glyph" data-live={live ? "true" : undefined} aria-hidden="true">
               {seenLive && (
-                // Ruling 499: AICSS's lattice orb, in CSS. Decorative — the
+                // Ruling 168: AICSS's lattice orb, in CSS. Decorative — the
                 // words beside it carry the state, so it is hidden from
                 // assistive tech; the sheet stops its dots once the wait ends.
                 <ConsoleOrb motion={who.kind === "viberr" ? "ring" : "wave"} />
@@ -1014,7 +1014,7 @@ function WaitRow({
 }
 
 /**
- * Ruling 366(d): the arguments a tool row's summary cut, in full, under the
+ * Ruling 168: the arguments a tool row's summary cut, in full, under the
  * row — only those, in the order the link named them — in the same shape the
  * run-inputs disclosure uses, so a reader never has to leave the row for
  * `{ } raw`.
@@ -1054,9 +1054,9 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
     }
   };
   const lines = block.code.split("\n");
-  // Ruling 499: AICSS's code block. A head naming what the block holds, its
+  // Ruling 168: AICSS's code block. A head naming what the block holds, its
   // size and a Copy control (the copy mark trading for the check, as every
-  // other copy control does since ruling 451(c)); the lines numbered in a
+  // other copy control does, ruling 284(b)); the lines numbered in a
   // gutter the selection skips.
   return (
     <span className="log-code">
@@ -1078,7 +1078,7 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
           aria-label={copied ? "Copied this output" : "Copy this output"}
         >
           <CopyGlyph copied={copied} />
-          {/* Ruling 451(c): the confirmation rises in; "Copy" returns at once. */}
+          {/* Ruling 284: the confirmation rises in; "Copy" returns at once. */}
           {copied ? <span className="copy-done">Copied</span> : "Copy"}
         </button>
       </span>
@@ -1100,7 +1100,7 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
 }
 
 /**
- * A folded row's lines as a thought fold draws them (P19-RC1). Ruling 499:
+ * A folded row's lines as a thought fold draws them (P19-RC1). Ruling 168:
  * AICSS's thinking block. While the run is going and nothing has landed after
  * the fold (`live`), its label shimmers "Thinking"; once anything follows it
  * reads "Thought for Ns", the verb above the figure, with the chevron that
@@ -1152,11 +1152,11 @@ function ThoughtRow({ rowKey, lines, live, startedAt, hydrated, open, onToggle }
 }
 
 /** What the raw view prints for a line whose stored envelope has not arrived
- *  yet (ruling 457: the envelopes load when the raw view opens). */
+ *  yet (ruling 300: the envelopes load when the raw view opens). */
 const RAW_PENDING = "loading the stored envelope…";
 
 /** One console line as the console draws it: the raw envelope, or the shapes
- *  the projection distinguishes (P19-RC1, P19-G11, ruling 366(d)). */
+ *  the projection distinguishes (P19-RC1, P19-G11, ruling 168). */
 function LineRow({
   line,
   raw,
@@ -1170,7 +1170,7 @@ function LineRow({
 }: {
   line: StreamedLine;
   raw: boolean;
-  /** Ruling 499: the run is going and this is the to-do list it last wrote. */
+  /** Ruling 168: the run is going and this is the to-do list it last wrote. */
   live: boolean;
   startedAt: string | null;
   hydrated: boolean;
@@ -1235,7 +1235,7 @@ function LineRow({
 
 /**
  * P19-G11: the run-inputs line, summarised on one row and opened on demand
- * into the rows of what the run was given. Ruling 700(e): LineRow's branch
+ * into the rows of what the run was given. Ruling 13(b): LineRow's branch
  * for it, which LineRow CALLS rather than renders. As a component it was a
  * different element type from the fragment the other branch returns, so a raw
  * toggle tore the row down and mounted it again (a reader's selection in its
@@ -1296,8 +1296,8 @@ function runInputsRow({
 }
 
 /**
- * P19-RC1: a tool call as a chip, marked by whose tool it is (ruling 366),
- * with what it was pointed at. Ruling 700(e): LineRow's chip, as a component
+ * P19-RC1: a tool call as a chip, marked by whose tool it is (ruling 168),
+ * with what it was pointed at. Ruling 13(b): LineRow's chip, as a component
  * of its own with no hook.
  */
 function ToolCallChip({
@@ -1357,9 +1357,9 @@ function ToolCallChip({
 }
 
 /**
- * What a console line draws below its words (P19-RC1, ruling 499): an edit's
+ * What a console line draws below its words (P19-RC1, ruling 168): an edit's
  * diff, a to-do list, the files a change touched, multi-line output. Ruling
- * 700(e): LineRow's blocks, as a component of its own with no hook, drawn only
+ * 13(b): LineRow's blocks, as a component of its own with no hook, drawn only
  * for a line that has one.
  */
 function LineBlocks({
@@ -1427,7 +1427,7 @@ function disclosureOf(row: ConsoleRow<StreamedLine>, raw: boolean): Disclosure |
 }
 
 /**
- * Ruling 457 (LIVE-4): one drawn row of the console, memoised. The fold keeps a
+ * Ruling 11 (LIVE-4): one drawn row of the console, memoised. The fold keeps a
  * row's object for as long as its content is unchanged and every other prop is
  * a primitive or stable, so an appended line renders the row it adds (or the
  * one fold it grows) and no other.
@@ -1447,7 +1447,7 @@ const ConsoleEntry = memo(function ConsoleEntry({
   raw: boolean;
   /** The run is going and this row is still the latest of its kind: a wait
    *  or a thought fold with nothing after it, or the to-do list the agent
-   *  last wrote (ruling 499). */
+   *  last wrote (ruling 168). */
   live: boolean;
   startedAt: string | null;
   hydrated: boolean;
@@ -1484,7 +1484,7 @@ const ConsoleEntry = memo(function ConsoleEntry({
       />
     );
   }
-  // Ruling 366: one call's heartbeats, folded into one wait row. LIVE while
+  // Ruling 168: one call's heartbeats, folded into one wait row. LIVE while
   // the run is going and nothing has landed after the last heartbeat — the orb
   // turns; once anything follows, the call was still running AT the figure,
   // and the row claims exactly that.
@@ -1520,7 +1520,7 @@ const NO_LINES: readonly StreamedLine[] = [];
 const NONE_OPEN: ReadonlySet<string> = new Set();
 
 /**
- * UI-03 for the tab's one live stream (ruling 457): it FAILED and is
+ * UI-03 for the tab's one live stream (ruling 11): it FAILED and is
  * reconnecting on its backoff, so the console is not following. The reconnect
  * revalidates the page, and the console fetches whatever it missed.
  */
@@ -1528,7 +1528,7 @@ const LIVE_TAIL_DOWN =
   "Live tail disconnected: reconnecting, and the console catches up once it is back.";
 
 /**
- * Ruling 457 (LIVE-2 / LIVE-4): the console box and its footer, for one thread
+ * Ruling 11 (LIVE-2 / LIVE-4): the console box and its footer, for one thread
  * of the store. It reads the thread itself (`useSyncExternalStore`), so a line
  * re-renders this and the row it adds, and nothing of the page around it; its
  * other props are primitives, so a revalidation that changed nothing it draws
@@ -1578,11 +1578,11 @@ const ConsoleView = memo(function ConsoleView({
   const rows = folder.fold(lines, raw, thread?.epoch ?? 0);
   /**
    * The disclosures the reader opened (P19-G11 run inputs, P19-RC1 thoughts,
-   * ruling 366(d) heartbeat folds and argument lists), keyed
+   * ruling 168 heartbeat folds and argument lists), keyed
    * `thread|kind|row key`. A row's key is its first line's `consoleLineKey`,
    * which survives streaming, folding and backward paging; it used to be the
    * stored envelope, which a console now holds only while its raw view is
-   * open. Ruling 457 (CON-6): every thread's first line is `0:0`, and this
+   * open. Ruling 11 (CON-6): every thread's first line is `0:0`, and this
    * view outlives an agent switch, so the thread is part of the key; a
    * disclosure the reader opened stays with its own agent.
    */
@@ -1628,7 +1628,7 @@ const ConsoleView = memo(function ConsoleView({
       topRef.current = el.scrollTop;
     };
     pin();
-    // Ruling 457 (CON-4): the rows skip layout until they are near the view
+    // Ruling 11 (CON-4): the rows skip layout until they are near the view
     // (`content-visibility: auto`, CSS-6), so the rows this jump brings into
     // view still count at their 21px placeholder here and reach their real
     // height in the frames after it; a row's first relevance check runs after
@@ -1655,10 +1655,10 @@ const ConsoleView = memo(function ConsoleView({
   // the rows on screen: the window withholds older lines, and UI-53's
   // `── resumed ──` rows are not stored lines. `lineCount` is the loader's
   // snapshot and `total` the store's own count, which the live tail moves
-  // (ruling 457: the page no longer revalidates per line to move it). Take the
+  // (ruling 11: the page no longer revalidates per line to move it). Take the
   // larger, so the count never goes backwards.
   const eventCount = Math.max(lineCount, thread?.total ?? 0);
-  // Ruling 499: the to-do list the agent wrote last, whose step under way is
+  // Ruling 168: the to-do list the agent wrote last, whose step under way is
   // the one in progress now while the run is going.
   const latestTodos = running && !raw ? latestTodoRow(rows) : null;
   return (
@@ -1669,14 +1669,14 @@ const ConsoleView = memo(function ConsoleView({
         role="log"
         aria-live="off"
         aria-label={label}
-        // Ruling 626: a scroller the keyboard reaches. Its lines hold nothing
+        // Ruling 320: a scroller the keyboard reaches. Its lines hold nothing
         // focusable, so without a tab stop of its own the log scrolled for a
         // mouse only (WCAG 2.1.1, axe scrollable-region-focusable).
         tabIndex={0}
         onScroll={(e) => {
           const el = e.currentTarget;
           const top = el.scrollTop;
-          // Ruling 457 (CON-4): only a scroll UP stops following. Rows growing
+          // Ruling 11 (CON-4): only a scroll UP stops following. Rows growing
           // as they come into view (and scroll anchoring making room for
           // rows that grew above it) send scroll events too, with the view
           // short of the end until the next pin; those used to turn `follow`
@@ -1686,7 +1686,7 @@ const ConsoleView = memo(function ConsoleView({
           topRef.current = top;
         }}
       >
-        {/* Ruling 457 (owner decision 2): a thread the page did not carry
+        {/* Ruling 300 (owner decision 2): a thread the page did not carry
             lines for fills itself with one request when it is shown. */}
         {notice ? (
           <div className={"log-line " + notice.ev}>
@@ -1761,7 +1761,7 @@ const ConsoleView = memo(function ConsoleView({
         {/* UI-03/UI-30: a stopped tail is stated, never left to look like
             silence from the agent. */}
         <span>{stopped ?? footer}</span>
-        {/* Ruling 366(f): the total counts up to its figure; the figure itself
+        {/* Ruling 284(e): the total counts up to its figure; the figure itself
             is on `data-count` for anyone reading the DOM, and the noun follows
             the figure drawn, so the count never passes through "1 events". */}
         <span className="logs-count">
@@ -1779,7 +1779,7 @@ const ConsoleView = memo(function ConsoleView({
  * (`useRunLogStream`): the live tail, the backward pages and the window a
  * thread loads when the page did not carry it — NOT loader revalidation. The
  * raw toggle renders the stored wire envelope verbatim (runs.md §5.4), loaded
- * when the toggle opens (ruling 457).
+ * when the toggle opens (ruling 300).
  */
 export const AgentLogsPanel = memo(function AgentLogsPanel({
   runtime,
@@ -1794,14 +1794,14 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   runtime: RunView[];
   sel: string | null;
   onSel: (id: string | null) => void;
-  /** Ruling 457: the lines, their backward pages and the live tail's state
+  /** Ruling 11: the lines, their backward pages and the live tail's state
    *  (`useRunLogStream`; a test feeds one by hand). */
   store: RunLogStore;
   /** Retry the failed run's agent on the other backend (D4). Receives the
    *  failed run so the caller can dispatch it (run-agent + the run's own
    *  profileId + the backend override). */
   onRetryBackend?: (backend: "claude" | "codex", run: RunView) => void;
-  /** Ruling 127: which backends a retry on this task could actually RUN on —
+  /** Ruling 137: which backends a retry on this task could actually RUN on —
    *  the task owner's connected accounts, because every run bills them. A
    *  backend absent from this list gets no button and no "a maintainer can
    *  retry it" advice: dispatching it would produce a second, identically
@@ -1812,13 +1812,13 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
   retryBackends?: readonly ("claude" | "codex")[] | undefined;
   /** A request the retry waits on is in flight. */
   retrying?: boolean;
-  /** Ruling 368: the profile whose retry is in flight, so the shown run's
+  /** Ruling 286: the profile whose retry is in flight, so the shown run's
    *  Retry says so when it is that agent's. */
   retryingProfileId?: string | null;
 }) {
   const [follow, setFollow] = useState(true);
   const { streamError, rawView: raw } = useConsoleStatus(store);
-  // UI-03: the tab's live stream (the layout's, ruling 457) is down.
+  // UI-03: the tab's live stream (the layout's, ruling 11) is down.
   const liveDown = useLiveStreamFailed();
   const hydrated = useHydrated();
   const boxRef = useRef<HTMLDivElement>(null);
@@ -1829,7 +1829,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
     runtime[0];
   const curId = cur?.id ?? null;
 
-  // Ruling 457 (owner decision 2): the thread on screen is the one whose lines
+  // Ruling 300 (owner decision 2): the thread on screen is the one whose lines
   // the console asks for, when the page did not carry them.
   useEffect(() => {
     if (curId !== null) store.show(curId);
@@ -1873,7 +1873,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
           {cur.backend === "codex" ? CODEX_META : CLAUDE_META}
           <SessionIdChip sid={cur.sid} runId={cur.serverRunId} exportable={cur.exportable} />
         </span>
-        {/* Ruling 524(d): the toggles wrap as one group, pushed right on
+        {/* Ruling 321: the toggles wrap as one group, pushed right on
             whichever line they land, while the SDK line beside them takes the
             row's free space and wraps inside its own box first. */}
         <span className="logs-tools">
@@ -1887,7 +1887,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
               disabled={retrying}
               aria-busy={retryingThis || undefined}
               onClick={() => onRetryBackend!(altBackend!, cur)}
-              // Ruling 662: the agent by name. The kind said "reviewer" for
+              // Ruling 292(b): the agent by name. The kind said "reviewer" for
               // every supporting agent and "specialist", a retired word, for
               // the deliverer.
               title={`Re-run ${cur.who.name} on ${altLabel}. The current backend was unavailable`}
@@ -1897,7 +1897,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
             </button>
           )}
           {/* UI-57: both toggles carry their state for assistive tech, not just
-              via the `on` class. Ruling 457: opening the raw view loads the
+              via the `on` class. Ruling 300: opening the raw view loads the
               shown thread's stored envelopes, which no page payload carries. */}
           <button
             type="button"
@@ -1924,7 +1924,7 @@ export const AgentLogsPanel = memo(function AgentLogsPanel({
         </span>
       </div>
 
-      {/* Ruling 369: what the prompt cache did for this run, above the stream. */}
+      {/* Ruling 311: what the prompt cache did for this run, above the stream. */}
       <RunFactsRow run={cur} store={store} />
 
       <ConsoleView

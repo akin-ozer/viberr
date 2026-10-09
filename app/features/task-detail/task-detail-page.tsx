@@ -62,7 +62,7 @@ import { TaskMainColumn } from "./task-main-column";
  * the action (verbatim spec §5 strings).
  *
  * Pass 16 split this file (1811 lines) along that same contract, and ruling
- * 700(d) piloted the split of the large components on it; both are pure
+ * 13(b) piloted the split of the large components on it; both are pure
  * structural refactors, no behaviour or copy change. What stays here is the
  * composition: the page's props and defaults, its hooks in the order its 10
  * fetchers register, and the regions of `.detail` in source order. The posts,
@@ -79,7 +79,7 @@ function runThreadKey(run: RunView): string {
   return run.id;
 }
 
-/** Ruling 690: a task that keeps no sources, as one list every render. */
+/** Ruling 317: a task that keeps no sources, as one list every render. */
 const NO_SOURCES: TaskSourceRow[] = [];
 
 interface TaskDetailPageProps {
@@ -88,7 +88,7 @@ interface TaskDetailPageProps {
   /** The project's existing label vocabulary, for the Details panel's label
    *  autocomplete. */
   labelSuggestions?: string[];
-  /** Ruling 503: the project's epics, for the hero's Epic field and the
+  /** Ruling 325: the project's epics, for the hero's Epic field and the
    *  Details panel's Epic menu. Empty in a project with none. */
   epics?: EpicOption[];
   /** R19-19: browser-produced files (loader). */
@@ -103,7 +103,7 @@ interface TaskDetailPageProps {
    *  built by the route component (the one place that knows the params).
    *  Null hides the panel and the evidence links (e.g. bare test renders). */
   attachmentsBase?: string | null;
-  /** Ruling 690: the sources the task keeps (loader; absent for a task that
+  /** Ruling 317: the sources the task keeps (loader; absent for a task that
    *  keeps none), newest first. */
   sources?: TaskSourceRow[];
   /** How many it keeps in all: the list stops at the newest hundred. */
@@ -111,18 +111,18 @@ interface TaskDetailPageProps {
   /** `/projects/<slug>/tasks/<KEY>/sources`, the route that serves one by
    *  its id, built by the route component. Null draws no source as a link. */
   sourcesBase?: string | null;
-  /** Ruling 484: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
+  /** Ruling 246: `/projects/<slug>/tasks/<KEY>/changes`, the Changes panel's
    *  read, built by the route component. Null hides the panel. */
   changesUrl?: string | null;
-  /** Ruling 548: `/projects/<slug>/tasks/<KEY>/dependency-candidates`, the
+  /** Ruling 59: `/projects/<slug>/tasks/<KEY>/dependency-candidates`, the
    *  Blocked by picker's read, built by the route component. Null offers no
    *  list; a key typed in full still goes in. */
   dependencyCandidatesUrl?: string | null;
-  /** Ruling 521: the completion packet as the loader read it (Operator's
+  /** Ruling 103: the completion packet as the loader read it (Operator's
    *  summary and screenshots, each reviewer's verdict, the change's size);
    *  null while nothing is delivered. */
   completion?: CompletionView | null;
-  /** Ruling 693: what the task took, as the completion card prints it; null
+  /** Ruling 83: what the task took, as the completion card prints it; null
    *  when the loader shipped none (nothing delivered, or a viewer who may not
    *  see the runs). */
   whatItTook?: TookCard | null;
@@ -137,7 +137,7 @@ interface TaskDetailPageProps {
   /** F37-65: whether the operator's `completion-for-acceptance` grant actually
    *  resolves to `direct` at this autonomy. Autonomy alone does not say. */
   operatorAcceptsDirectly?: boolean;
-  /** Ruling 127: whose accounts this task's agent runs bill (the OWNER's) and
+  /** Ruling 137: whose accounts this task's agent runs bill (the OWNER's) and
    *  what those accounts can run. `null` = unowned, so nothing runs here.
    *  P11-41's "would fail fast" gate, answered per person. */
   runPrincipal: TaskRunPrincipalView | null;
@@ -160,13 +160,13 @@ interface TaskDetailPageProps {
   /** Pending scheduled runs (O-3 generalized, loader — from the task file).
    *  Rendered inside the execution profile's run controls. */
   schedules: TaskSchedule[];
-  /** Ruling 241: reviewer questions a dependency hold refused. Optional with
+  /** Ruling 66: reviewer questions a dependency hold refused. Optional with
    *  an empty default, like `labelSuggestions`: all but a handful of tasks have
    *  none, and a render built by hand should not have to say so. */
   queuedQuestions?: { id: string; profileId: string; decidedByLabel: string }[];
-  /** Ruling 319: what else the open packet's confirm answers, or null. */
+  /** Ruling 65: what else the open packet's confirm answers, or null. */
   packetAlsoAnswers?: string | null;
-  /** Ruling 324: per create_task option index, the tasks that already look
+  /** Ruling 67: per create_task option index, the tasks that already look
    *  like the one it would create. */
   packetCreateTaskEchoes?: Record<number, { key: string; title: string; stage: string }[]>;
   /** R14-3: the task's archive disposition (loader — from the task file, which
@@ -183,7 +183,7 @@ interface TaskDetailPageProps {
   /** U39-32: base commits the branch lacked at the reconciler's last
    *  compare; null when never compared. */
   baseBehindBy?: number | null;
-  /** Ruling 475: the other open PRs this task's merge would likely put in
+  /** Ruling 244: the other open PRs this task's merge would likely put in
    *  conflict, for the accept dialog. */
   mergeCollisions?: readonly PrOverlap[];
   /** F19-22: newest COMPLETED reconcile pass for this task (`github.reconcile.task`
@@ -194,7 +194,7 @@ interface TaskDetailPageProps {
   workRevisionSha?: string | null;
   /** R17-2: a verified no-change completion (empty branch, no PR). */
   noChanges?: boolean;
-  /** Ruling 550: when the task was delivered as files on it, the delivery's time. */
+  /** Ruling 316: when the task was delivered as files on it, the delivery's time. */
   filesDeliveredAt?: string | null;
   /** The merge target named in the accept confirm — the project's default branch. */
   defaultBranch?: string;
@@ -207,7 +207,7 @@ interface TaskDetailPageProps {
  * markdown embeds, the Attachments panel, cited evidence filenames — opens in
  * the in-app lightbox the provider renders (owner request 2026-08-21) instead
  * of a raw-file tab. A markdown attachment renders there, its pictures
- * resolved against the task's files (ruling 614).
+ * resolved against the task's files (ruling 317).
  *
  * U35-2 (pass 35): source order IS the reading order at every width,
  * so a screen reader, the Tab key and the one-column phone stack all
@@ -228,11 +228,11 @@ interface TaskDetailPageProps {
  *      the packet). Rendered only while a packet is open, so without
  *      one the two columns meet at the same row as before.
  *   3. `.detail-side`: the GitHub trace first (owner, 2026-09-09,
- *      ruling 170: on desktop it sits at the top right, beside the
+ *      ruling 308: on desktop it sits at the top right, beside the
  *      goal, where the cell used to be empty), then Current state (the
  *      next action and the acceptance button), then Details. The
  *      Permissions panel that closed the column is gone (owner,
- *      2026-09-08, ruling 167). One order everywhere: the right column
+ *      2026-09-08, ruling 308). One order everywhere: the right column
  *      reads GitHub, Current state, Details on desktop, and so does the
  *      phone stack — placement may not reorder what the DOM says.
  *   4. `.detail-main`: the live run, diagnostics, continuity,
@@ -243,7 +243,7 @@ interface TaskDetailPageProps {
  * which U7 found re-splits what the eye and the focus ring see (WCAG
  * 2.2 SC 1.3.2 / 2.4.3).
  *
- * Ruling 700(d): each region that is a component of its own (the decision
+ * Ruling 13(b): each region that is a component of its own (the decision
  * region, the main column, the acceptance ceremony) takes the one slot its
  * markup held here and calls no hook, so `.detail` keeps its ten children and
  * the ids React derives from the tree do not move; the other confirms are
@@ -298,7 +298,7 @@ export function TaskDetailPage({
   defaultBranch = "main",
   canDeliver = false,
 }: TaskDetailPageProps) {
-  // Ruling 457 (TASK-4): the run projection keeps its objects while their
+  // Ruling 11 (TASK-4): the run projection keeps its objects while their
   // content is unchanged, so a revalidation that moved nothing in it leaves
   // the memoised run card and console alone.
   const runtime = useStableRows(loadedRuntime, runThreadKey);
@@ -321,7 +321,7 @@ export function TaskDetailPage({
   const accept = useAcceptCompletion(csrf);
   // R15-2 safety net (b): manual delivery from the GitHub panel.
   const [deliverBusy, onDeliver] = useIntentPost("deliver-review", csrf);
-  // Ruling 482: run the project's gates on the revision under review again,
+  // Ruling 104: run the project's gates on the revision under review again,
   // from the PR card. Same tier as the manual delivery above.
   const [gatesBusy, onRunGates] = useIntentPost("run-gates", csrf);
   const taskClosed = isClosedForWork(task, archived);

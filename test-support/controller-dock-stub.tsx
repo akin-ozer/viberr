@@ -13,10 +13,10 @@ import type { LiveTurnView, UnseenReplyView } from "~/routes/resources.controlle
 import { clientActionOver, clientLoaderOver, unreachable } from "./client-data";
 
 /**
- * Ruling 121: the controller dock under a routed stub shaped like the app —
+ * Ruling 256: the controller dock under a routed stub shaped like the app —
  * root (which mounts the dock), the workspace layout, a board, a task and the
  * project controller page, and the dock's two resource routes. Shared by the
- * dock's behaviour tests and its ruling-457 perf test, so both drive the same
+ * dock's behaviour tests and its ruling-11 perf test, so both drive the same
  * routes and count the same requests.
  *
  * The resource routes run as framework mode runs a fetcher's request, through
@@ -39,12 +39,12 @@ export interface DockStubOptions {
   view: (request: Request) => ControllerDockView;
   /** O39-d: the viewer's unseen replies (none by default). */
   unseen?: () => UnseenReplyView[];
-  /** Ruling 457: the viewer's turns working right now (none by default). */
+  /** Ruling 11: the viewer's turns working right now (none by default). */
   working?: () => LiveTurnView[];
   action?: (
     form: FormData,
   ) => { ok: true; conversationId: string } | { ok: false; error: string } | WaitingActionResult;
-  /** Ruling 457: asked on every request the dock makes; false while the
+  /** Ruling 11: asked on every request the dock makes; false while the
    *  server can't be reached (a restart, a dead network), when the request
    *  gets no answer. Reachable when absent. */
   reachable?: () => boolean;

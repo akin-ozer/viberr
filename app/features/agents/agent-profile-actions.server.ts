@@ -90,16 +90,16 @@ export interface ProfileSaveResult {
    *  hid that the operator can now close tasks without a human) and recorded as
    *  its own audit event, not folded into the generic profile-updated row. */
   governanceNotice?: { message: string };
-  /** Ruling 139: what the write actually stored for the run's backend, model
+  /** Ruling 261: what the write actually stored for the run's backend, model
    *  and effort, so a reply has a source instead of restating the request. */
   applied?: { backend: RealBackend; model: string; modelLabel: string; effort: string };
   /**
-   * Ruling 264 (pass 37, F37-94): whether the DEPLOYED grants let this profile
+   * Ruling 183 (pass 37, F37-94): whether the DEPLOYED grants let this profile
    * write the repo, read back through the same predicate the runtime gates on
    * (`isWithheld` over the delivery headline). Set by the library deploy,
    * whose every reply used to promise "delivery starts withheld" — true only
-   * of a template with no grants of its own, since ruling 156 made the deploy
-   * COPY the template's grants.
+   * of a template with no grants of its own, because the deploy COPIES the
+   * template's grants (ruling 177).
    */
   delivery?: "granted" | "withheld";
 }
@@ -152,19 +152,19 @@ type ProfileDeployedAuditDetails = CouplingAuditKeys & {
   name: string;
   source: "library";
   projectName: string;
-  /** Ruling 139: the model and effort the deployment was written with. */
+  /** Ruling 261: the model and effort the deployment was written with. */
   model?: string;
   effort?: string;
 };
 
 /** `project.agent_profile.deleted`; `reason` when the caller gave one
- *  (ruling 464: the controller's removal always does). */
+ *  (ruling 266: the controller's removal always does). */
 type ProfileDeletedAuditDetails = {
   name: string;
   reason?: string;
 };
 
-/** Ruling 467: the persona an update wrote, when it changed the stored one;
+/** Ruling 177: the persona an update wrote, when it changed the stored one;
  *  filled inside the file writer's callback. */
 interface PersonaEditHolder {
   after: string | null;
@@ -172,17 +172,17 @@ interface PersonaEditHolder {
 
 type ProfileUpdatedAuditDetails = CouplingAuditKeys & {
   name: string;
-  /** Absent on the operator, which has no role (ruling 518). */
+  /** Absent on the operator, which has no role (ruling 176). */
   role?: string;
   backend: "codex" | "claude";
-  /** Ruling 139 parity with `deployed` (U36-3): the model and effort the
+  /** Ruling 261 parity with `deployed` (U36-3): the model and effort the
    *  update wrote — the row used to carry neither. */
   model?: string;
   effort?: string;
   operatorAutonomy?: "supervised" | "full";
   acceptCompletionIntoDone?: "direct" | "off";
   acceptCompletionActsDirectly?: boolean;
-  /** Ruling 467: the save rewrote the deployment's persona (the run's system
+  /** Ruling 177: the save rewrote the deployment's persona (the run's system
    *  prompt), with its new length. Every door that edits a persona writes
    *  these two keys: the Agents page, `update_agent_deployment` and a
    *  template propagation (which adds `source: "org-template"`). */
@@ -238,7 +238,7 @@ export function deploymentFingerprint(deployment: AgentDeployment): string {
 const profileFormSchema = z.object({
   // U35-1 (pass 35): the name as the person meant it, entities decoded once
   // and markup refused; the id is derived from the normalized text. Ruling
-  // 518: the operator's form carries no name or role, so both may be absent
+  // 176: the operator's form carries no name or role, so both may be absent
   // here and an agent profile's save requires them (`requireIdentity`).
   name: z
     .string()
@@ -306,7 +306,7 @@ function requireProjectAction(
 }
 
 /** An agent profile is saved with a name and a role. The operator has
- *  neither: it is one agent, called Operator (ruling 518). */
+ *  neither: it is one agent, called Operator (ruling 176). */
 function requireIdentity(form: ProfileFormInput): void {
   if (!form.name) throw AppError.validation("Name is required.");
   if (!form.role) throw AppError.validation("Role is required.");
@@ -477,7 +477,7 @@ export async function createAgentProfile(
 
   let profileId = "";
   const delivery: DeliveryNoticeHolder = { notices: [] };
-  // Ruling 139: a new profile has no stored tier, so an explicit effort is
+  // Ruling 261: a new profile has no stored tier, so an explicit effort is
   // always a change and is judged by name.
   if (form.effort.trim()) assertEffortForBackend(form.backend, form.effort);
   await updateProjectFile(ref, (parsed) => {
@@ -558,7 +558,7 @@ export async function createAgentProfile(
 /**
  * Copy an org-level TEMPLATE into this project's `agents:` deployment list —
  * the project side of "Global agent profiles are a real template library"
- * (owner ruling 1, P13-AP-05).
+ * (P13 owner decision 1, P13-AP-05).
  *
  * Before this, no code path anywhere added a template to a project, so a
  * profile created in org settings was permanently unreachable: never deployed,
@@ -591,7 +591,7 @@ export interface LibraryTemplate {
  * not a store segment, a template that does not exist, and one that is not a
  * specialist (the operator and the controller are never deployable this way).
  * Reads only: the library deploy and a controller-built project's roster
- * (ruling 464) both call it before anything is written.
+ * (ruling 266) both call it before anything is written.
  */
 export function readLibraryTemplate(
   rawProfileId: string,
@@ -624,7 +624,7 @@ export function readLibraryTemplate(
   return { profileId, parsed };
 }
 
-/** Ruling 139: a deploy's explicit model and effort, each optional. */
+/** Ruling 261: a deploy's explicit model and effort, each optional. */
 export interface DeployOverrides {
   model?: string;
   effort?: string;
@@ -634,16 +634,16 @@ export interface DeployOverrides {
 export interface LibraryDeploymentBuild {
   deployment: AgentDeployment;
   applied: NonNullable<ProfileSaveResult["applied"]>;
-  /** Ruling 264: read off the grants the deployment carries. */
+  /** Ruling 183: read off the grants the deployment carries. */
   delivery: "granted" | "withheld";
   notices: GrantCouplingNotice[];
 }
 
 /**
  * The deployment a library deploy writes for `template` into the project
- * called `projectName`, with ruling 139's explicit `model` / `effort`
+ * called `projectName`, with ruling 261's explicit `model` / `effort`
  * overrides judged by name against the backend it will run on — a pure
- * build that throws before anything is written. Ruling 464: the Agents page's
+ * build that throws before anything is written. Ruling 266: the Agents page's
  * deploy and a controller-built project's `agents` roster share it, so a
  * roster entry is exactly what deploying that template afterwards would have
  * written.
@@ -683,7 +683,7 @@ export function buildLibraryDeployment(
   // records it, so the agents page and the run agree.
   const templateModel = fm.model.trim();
   const templateEffort = fm.effort?.trim() ?? "";
-  // Ruling 139: an EXPLICIT override is judged by name against the backend
+  // Ruling 261: an EXPLICIT override is judged by name against the backend
   // the deployment will run on; the template's own values are taken as
   // they are (the F21-13 rule above stays true).
   const modelOverride = overrides.model?.trim() ?? "";
@@ -701,7 +701,7 @@ export function buildLibraryDeployment(
       (templateModel && !foreignModelBackend(backend, templateModel)
         ? templateModel
         : defaultModelFor(backend)),
-    // Ruling 153 (pass 35, G35-2): the template's own default effort is
+    // Ruling 261 (pass 35, G35-2): the template's own default effort is
     // taken when it is a tier this backend offers; an override still wins,
     // and an absent or foreign tier falls back to the backend default.
     effort:
@@ -737,7 +737,7 @@ export function buildLibraryDeployment(
       modelLabel: modelDisplayName(backend, model),
       effort: definition.effort ?? "",
     },
-    // Ruling 264: read the answer off the grants that are actually written,
+    // Ruling 183: read the answer off the grants that are actually written,
     // through the predicate the RUN gates on, so the reply cannot drift from it.
     delivery: deliveryWithheld(deployDelivery.grants) ? "withheld" : "granted",
     notices: deployDelivery.notices,
@@ -749,7 +749,7 @@ export async function deployAgentProfileFromLibrary(
   input: {
     projectSlug: string;
     profileId: string;
-    /** Ruling 139: EXPLICIT overrides of the template's model and effort,
+    /** Ruling 261: EXPLICIT overrides of the template's model and effort,
      *  judged by name against the deployment's primary backend before the
      *  write. A library template's OWN model is still not refused (F21-13). */
     model?: string;
@@ -834,9 +834,9 @@ export async function updateAgentProfile(
 
   let appliedUpdate: ProfileSaveResult["applied"] | undefined;
   // The name the saved profile goes by: the form's, or the operator's own,
-  // which no save changes (ruling 518). Filled inside the writer callback.
+  // which no save changes (ruling 176). Filled inside the writer callback.
   let savedName = form.name;
-  // Ruling 467: the persona this save wrote when it differs from the one it
+  // Ruling 177: the persona this save wrote when it differs from the one it
   // replaced, for the audit row (a holder: the writer callback fills it).
   const personaEdit: PersonaEditHolder = { after: null };
   await updateProjectFile(ref, (parsed) => {
@@ -860,7 +860,7 @@ export async function updateAgentProfile(
     const isOperator = current.kind === "operator";
     if (isOperator) savedName = current.name;
     else requireIdentity(form);
-    // Ruling 139: a CHANGED effort is judged by name against the backend it
+    // Ruling 261: a CHANGED effort is judged by name against the backend it
     // will run on. An unchanged value is never re-judged, so a deployment
     // that legitimately stores a preserved tier (Codex `minimal`, accepted
     // but not offered) stays editable on every other field.
@@ -905,7 +905,7 @@ export async function updateAgentProfile(
     // + effort (the operator no longer keeps the "orchestration runtime"
     // placeholder — it runs on a real backend/model). The operator additionally
     // stores its default autonomy, and never a name, a role or a scope: those
-    // are its template's (ruling 518, `OPERATOR_FIXED_FIELDS`). Written field
+    // are its template's (ruling 176, `OPERATOR_FIXED_FIELDS`). Written field
     // by field in the file's order.
     const definition: AgentDeploymentDefinition = { kind: current.kind };
     if (!isOperator) {
@@ -1028,7 +1028,7 @@ export async function updateAgentProfile(
 // ------------------------------------------------------------------ delete
 
 /**
- * Ruling 464: the refusal the controller's `remove_agent_deployment` adds to
+ * Ruling 266: the refusal the controller's `remove_agent_deployment` adds to
  * the Agents page's Delete — a profile that is the delivering or an engaged
  * agent on an open task stays, and the sentence names those tasks. "Open" is
  * the population the Agents page lists under the profile's active
@@ -1070,10 +1070,10 @@ export async function deleteAgentProfile(
   input: {
     projectSlug: string;
     profileId: string;
-    /** Ruling 464: why, recorded in the audit details (the controller's
+    /** Ruling 266: why, recorded in the audit details (the controller's
      *  `remove_agent_deployment` always gives one). */
     reason?: string;
-    /** Ruling 464: refuse a profile engaged on an open task, naming the
+    /** Ruling 266: refuse a profile engaged on an open task, naming the
      *  tasks. The controller's door sets it; the Agents page's Delete keeps
      *  its own confirm and does not. */
     refuseOpenEngagements?: boolean;

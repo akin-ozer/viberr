@@ -1,5 +1,5 @@
 /**
- * Accepting a task's delivery (ruling 654): the acceptance gate every surface
+ * Accepting a task's delivery (ruling 13(a)): the acceptance gate every surface
  * reads (`acceptanceStanding`, `acceptanceRefusalFor`, the PR-head check and
  * the force-accept disclosure), the accept, force-accept and complete-merge
  * ceremonies that write it, and the acceptance-time branch refresh and merge
@@ -26,7 +26,7 @@ import {
   unpushedRevisionBlockedReason,
   type Validation,
 } from "~/schemas/task-file.schema";
-// Ruling 482: the gates' view and refusal, one pure home for every surface.
+// Ruling 315: the gates' view and refusal, one pure home for every surface.
 import { type GatesView, projectGatesRefusal, projectGatesView } from "~/shared/project-gates";
 // R19-B: a LEAF module (zod + task-file types only), so the acceptance gate can
 // consult the human GitHub approval synchronously without the dynamic-import
@@ -58,13 +58,13 @@ import { ERROR_CODES } from "~/server/errors/error-codes";
 // OBS-11: R15-6's post-merge branch-cleanup switch. A leaf module (one
 // projection read + the guardrail schema), so no dynamic import is needed.
 import { branchCleanupOnMerge } from "~/server/github/branch-cleanup.server";
-// Ruling 88 (F21-2): the acceptance disclosure contract — one definition the
+// Ruling 97 (F21-2): the acceptance disclosure contract — one definition the
 // ceremony writes and the server reads (see the module's docblock).
 import {
   type AcceptanceDisclosure,
   acceptanceDisclosureDrift,
 } from "~/shared/acceptance-disclosure";
-// Ruling 471: which open-decision option a direct acceptance answers — the one
+// Ruling 100: which open-decision option a direct acceptance answers — the one
 // predicate the write below and the accept dialog's loader both read.
 import { acceptanceAnswerOf } from "~/shared/packet-acceptance-answer";
 import {
@@ -129,7 +129,7 @@ const UNREACHABLE_MERGE_CAUSE =
   "no reachable GitHub merge; merge it manually or reconcile once credentials are set";
 
 /**
- * Ruling 162 / G35-5(d) (pass 35): the ONE base refresh of an acceptance.
+ * Ruling 95 / G35-5(d) (pass 35): the ONE base refresh of an acceptance.
  *
  * Runs the same workspace merge the operator's `update_branch_from_base`
  * performs, from the acceptance ceremony itself, immediately before the gate
@@ -167,7 +167,7 @@ const ACCEPTANCE_REFRESH: PersonRefreshPurpose = {
 
 /**
  * A person's refresh of the task branch from its base: the acceptance
- * ceremony's, and ruling 449's "bring it up to date and re-review first".
+ * ceremony's, and ruling 97's "bring it up to date and re-review first".
  * Returns the refresh's own status (null when there was nothing to refresh)
  * and, on a conflict, the acceptance outcome that names it.
  */
@@ -198,7 +198,7 @@ async function refreshBranchAsPerson(
     details.commits = result.commits;
     details.mergeSha = result.mergeSha;
   }
-  // Ruling 159(b): a refusal that names paths puts them on the record, whether
+  // Ruling 229: a refusal that names paths puts them on the record, whether
   // it was a merge conflict or the store layout the refresh will not publish.
   if (result.status === "conflict" || result.status === "store_layout") {
     details.files = result.files;
@@ -245,7 +245,7 @@ async function refreshBranchAsPerson(
   });
   reprojectTask(db, ctx, projectSlug, taskKey);
   /**
-   * Ruling 332: hand it to the operator. This refusal used to wake nobody.
+   * Ruling 244: hand it to the operator. This refusal used to wake nobody.
    *
    * It stamps `pr.mergeable = "conflicting"`, writes a note, and returns a 409
    * — and that is all. No packet, no run, no notification. Meanwhile the
@@ -259,7 +259,7 @@ async function refreshBranchAsPerson(
    * — so this path creates the one state in which the in-product resolver is
    * permitted and then schedules nothing. And because the flag is already set,
    * the reconciler's `flippedToConflict` can never fire afterwards, so ruling
-   * 162(d)'s withdrawal of the standing `accept_completion` offer never runs:
+   * 95's withdrawal of the standing `accept_completion` offer never runs:
    * the card invites a click its own gate refuses, for as long as the task
    * sits.
    *
@@ -271,8 +271,8 @@ async function refreshBranchAsPerson(
    * later, and the operator's own reply: "It was never a click you were
    * withholding." SHOP-3: the same shape, 7h45m, same exit.
    *
-   * Ruling 226's words sit sixty lines below this arm: "A refusal with no exit
-   * is its own defect." Ruling 235 gave exactly this hand-off to the sibling
+   * Ruling 243's words sit sixty lines below this arm: "A refusal with no exit
+   * is its own defect." Ruling 96 gives exactly this hand-off to the sibling
    * refusal (an unpushed reviewed revision) because only the operator may push;
    * the same is true of the merge, and this arm was left out.
    *
@@ -286,21 +286,21 @@ async function refreshBranchAsPerson(
     kind: "unmergeable",
     reason:
       reason ??
-      // Ruling 291: the same sentence as `conflictingPrBlockedReason`, and for
+      // Ruling 230: the same sentence as `conflictingPrBlockedReason`, and for
       // the same reason — the remedy viberr actually implements is a merge.
       `${taskKey}'s review PR #${before.pr.number} conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.`,
-    // Ruling 291: the short cause, in the same voice as the long reason above.
+    // Ruling 230: the short cause, in the same voice as the long reason above.
     cause: "the PR conflicts with the base branch; merge the base into it, then merge",
   } };
 }
 
-/** Ruling 449: the refresh a person asks for before a re-review. */
+/** Ruling 97: the refresh a person asks for before a re-review. */
 const RE_REVIEW_REFRESH: PersonRefreshPurpose = {
   lead: "Asked for a re-review before accepting, brought",
   refused: "no re-review was started",
 };
 
-/** Ruling 449: the directive each re-run reviewer receives. */
+/** Ruling 97: the directive each re-run reviewer receives. */
 function reReviewDirective(branch: string, base: string, mergeSha: string | null): string {
   return (
     `A person asked for a re-review before accepting. \`${branch}\` was brought up to date ` +
@@ -320,7 +320,7 @@ export interface RefreshAndReviewResult {
 }
 
 /**
- * Ruling 449 (O39-c; default, owner may revisit): "bring it up to date and
+ * Ruling 97 (O39-c; default, owner may revisit): "bring it up to date and
  * re-review first", the safe answer to U39-32's "N commits behind … No review
  * has run on that combination".
  *
@@ -331,7 +331,7 @@ export interface RefreshAndReviewResult {
  * merged combination in a container before accepting. This is that method as
  * one click: the branch is brought up to date as the person (the ceremony's
  * own refresh, `refreshBranchAsPerson`), and every reviewer whose verdict
- * stands on the revision re-reviews the refreshed head (ruling 439 keeps the
+ * stands on the revision re-reviews the refreshed head (ruling 239 keeps the
  * revision and moves the review subject to the chain's end). Acceptance then
  * merges the head the re-review ran on.
  */
@@ -451,7 +451,7 @@ export async function attemptAcceptanceMerge(
     const mergeTaskPr =
       ctx.deps?.mergeTaskPr ??
       (await import("~/server/github/github-reconciler.server")).mergeTaskPr;
-    // Ruling 162 / G35-5(d) (pass 35): the base refresh happens ONCE, here, as
+    // Ruling 95 / G35-5(d) (pass 35): the base refresh happens ONCE, here, as
     // part of the acceptance ceremony. Live (19:35Z to 20:08Z) the operators
     // refreshed every open branch on every turn while fifteen PRs shared one
     // small repository, and each merge commit they pushed conflicted again
@@ -488,12 +488,12 @@ export async function attemptAcceptanceMerge(
       case "task_not_found":
         return { kind: "no_pr" };
       case "not_mergeable": {
-        // Ruling 162 (pass 35, F35-12 (a0)): the post-gate refusal reads the
+        // Ruling 95 (pass 35, F35-12 (a0)): the post-gate refusal reads the
         // SAME function the gate does. `mergeTaskPr` records what GitHub said
         // (`mergeable: conflicting`, on the 405 as well as on the detail read)
         // before answering, so the re-read file carries the fact and
         // `mergeReadinessRefusal` prints the gate's sentence with its way out.
-        // Ruling 135 still ranks first inside it: when the delivered revision
+        // Ruling 243 still ranks first inside it: when the delivered revision
         // never reached the PR, the push is the remedy, never "rebase".
         // A merge answer that names the conflict lands on the file HERE when the
         // merge path did not record it (the test seam, or a write that failed),
@@ -524,7 +524,7 @@ export async function attemptAcceptanceMerge(
             reason: gateReason,
             cause: unpushed
               ? "the delivered revision is not on the PR; deliver the branch to push it, then merge"
-              // Ruling 291: never "rebase it" — see `conflictingPrBlockedReason`.
+              // Ruling 230: never "rebase it" — see `conflictingPrBlockedReason`.
               : "the PR conflicts with the base branch; merge the base into it, then merge",
           };
         }
@@ -636,7 +636,7 @@ export function acceptanceRefusalReason(
 interface AcceptanceRefusalOptions {
   blockedPacket: boolean;
   noChange?: AcceptanceNoChangeCheck;
-  /** Ruling 556: who made the review subject, read from the timeline. */
+  /** Ruling 89: who made the review subject, read from the timeline. */
   subjectAuthor: string | null;
 }
 
@@ -671,7 +671,7 @@ function acceptanceRefusalReasons(
     acceptanceStageBlockedReason(project, fm.stage, taskKey),
     // F10-15: every required reviewer must have approved the CURRENT revision.
     acceptanceBlockedReason(fm, opts.subjectAuthor),
-    // Ruling 178 (pass 36, G36-3): the reviewers the PROJECT declares must have
+    // Ruling 89 (pass 36, G36-3): the reviewers the PROJECT declares must have
     // approved it too, engaged or not. F10-15's set is emergent (whoever the
     // operator engaged), so a task whose operator never ran the project's
     // reviewer was acceptable on another agent's verdict. Same order in the
@@ -699,7 +699,7 @@ function acceptanceRefusalReasons(
         opts.noChange.refusal == null &&
         opts.noChange.verification?.basis !== "no_repo",
     ),
-    // Ruling 482 (F40-52): the project's gates, run by Viberr on the revision
+    // Ruling 104 (F40-52): the project's gates, run by Viberr on the revision
     // under review, must all have exited 0 there. Evidence that is missing,
     // stale or still running refuses too; force accept bypasses it on the
     // record like every gate here. Same position in the projection's
@@ -710,7 +710,7 @@ function acceptanceRefusalReasons(
     opts.blockedPacket
       ? "This task has an open blocked decision. Resolve the operator's packet before accepting it."
       : null,
-    // Ruling 162 (pass 35, F35-12): the GitHub-fact half of the gate, ONE
+    // Ruling 95 (pass 35, F35-12): the GitHub-fact half of the gate, ONE
     // function shared with the operator's Merge-entry check and the accept-time
     // merge failure, so the three cannot drift.
     mergeReadinessRefusal(fm, taskKey),
@@ -719,7 +719,7 @@ function acceptanceRefusalReasons(
 }
 
 /**
- * Ruling 162 (pass 35, F35-12): why the review pull request cannot be merged
+ * Ruling 95 (pass 35, F35-12): why the review pull request cannot be merged
  * as it stands, or null. The GitHub-fact half of the acceptance gate, kept as
  * ONE function because three surfaces read it: the acceptance refusal stack,
  * the operator's move INTO the acceptance stage (Merge means mergeable: a task
@@ -728,7 +728,7 @@ function acceptanceRefusalReasons(
  * cached `clean` had let through, and the second sentence for the same fact
  * had no way out).
  *
- * Ruling 135 (pass 34, F34-11): an unpushed delivered revision OUTRANKS the
+ * Ruling 243 (pass 34, F34-11): an unpushed delivered revision OUTRANKS the
  * conflict, whose `mergeable` describes the head GitHub has, not the one that
  * was reviewed; while it stands, the conflict sentence ("rebase") is not a
  * gate a person should be told about, on the force record or anywhere else.
@@ -755,7 +755,7 @@ export interface ForceAcceptDisclosure {
   skippedStageIds: string[];
   validation: Validation;
   /** The open decision packet the acceptance withdraws unanswered, by title.
-   *  Null when there is none, and (ruling 471) when the forced acceptance
+   *  Null when there is none, and (ruling 100) when the forced acceptance
    *  ANSWERS it instead, because it offers `force_accept` or
    *  `accept_completion`. */
   withdrawnPacket: string | null;
@@ -765,7 +765,7 @@ export interface ForceAcceptDisclosure {
  * U35-3 (pass 35): ONE builder for the force record. `forceAcceptCompletion`
  * calls it once, with the live no-change probe the acceptance then closes on,
  * and the audit row and the forced `completion` event both read that value, so
- * the two name the same bypasses (ruling 393). The confirm dialog lists the
+ * the two name the same bypasses (ruling 98). The confirm dialog lists the
  * gates the loader reads without the probe (it makes no GitHub call): on a
  * PR-less task the probe can still add the counted "carries N commit(s)" gate,
  * or clear "no review pull request" for a branch it found empty or absent, and
@@ -792,7 +792,7 @@ function forceAcceptDisclosure(
     // pass is refused by `noChange.refusal`, outside the gate list, and a force
     // closes it over that refusal: the record names it with the rest, or the
     // row read "no gate (already acceptable)" beside an event saying the task
-    // closed WITHOUT a passing re-check (ruling 393).
+    // closed WITHOUT a passing re-check (ruling 98).
     ...(noChange.refusal ? [noChange.refusal] : []),
   ];
   const terminalId = terminalStageIdOf(project);
@@ -809,7 +809,7 @@ function forceAcceptDisclosure(
     gates,
     skippedStageIds,
     validation: deriveValidation(fm),
-    // Ruling 471: a decision this force answers is not withdrawn, so neither
+    // Ruling 100: a decision this force answers is not withdrawn, so neither
     // the forced completion event nor the `task.acceptance.forced` row may say
     // it died unanswered.
     withdrawnPacket:
@@ -855,7 +855,7 @@ function forceBypassClause(
   if (disclosure.withdrawnPacket) {
     parts.push(`the open decision "${disclosure.withdrawnPacket}" withdrawn unanswered`);
   }
-  // Ruling 471: the list ends its sentence, because the answered-decision
+  // Ruling 100: the list ends its sentence, because the answered-decision
   // clause `applyAcceptanceWrite` may append starts a new one.
   return parts.length > 0 ? ` Bypassed: ${parts.join("; ")}.` : "";
 }
@@ -883,9 +883,9 @@ export function acceptanceTerminallyBlocked(fm: TaskFrontmatter): boolean {
  * longer be recorded, a stale blocked packet, a conflicting PR a maintainer
  * accepts as merge-pending. It was implemented as "skip `acceptanceRefusalReason`
  * entirely", which handed it one power nobody ruled on: **a terminal GitHub
- * fact** (R16-3, ruling 37). A PR closed unmerged has nothing to merge, so
+ * fact** (R16-3, ruling 95). A PR closed unmerged has nothing to merge, so
  * forcing it stamped `pr.state: accepted` on a PR GitHub had already closed and
- * moved the task to Done over a rejection — verbatim the harm ruling 37 names.
+ * moved the task to Done over a rejection — verbatim the harm ruling 95 names.
  * The withdrawal shipped CLIENT-side only (the task page hides the button), so
  * every non-UI caller — and any UI state the client had not refreshed — still
  * wrote it. That is what this function refuses.
@@ -913,7 +913,7 @@ export function forceIrreducibleRefusal(
       `not for a pull request GitHub has already closed.`
     );
   }
-  // Ruling 123: the archive is the second thing force may not jump. Everywhere
+  // Ruling 98: the archive is the second thing force may not jump. Everywhere
   // else archive is terminal — `transitionStage` refuses an archived task with a
   // 409 and the lifecycle doc says "an archived task cannot be moved" — but
   // `force` skips the shared refusal helper that holds the archived gate, so an
@@ -952,7 +952,7 @@ export interface AcceptancePrHeadCheck {
    * unreachable, the PR read or compare failed). `not-applicable` = nothing to
    * verify (no PR, no revision, or the PR is already merged).
    *
-   * Ruling 226 amends what `unverifiable` permits. A9 allowed it through on the
+   * Ruling 243 amends what `unverifiable` permits. A9 allowed it through on the
    * reasoning that "the merge's own honesty covers unreachability" — true when
    * GitHub is unreachable, because then the merge fails too. It is false in the
    * one case where GitHub answered the pull request and refused only the
@@ -964,7 +964,7 @@ export interface AcceptancePrHeadCheck {
   prNumber: number | null;
   revisionHeadSha: string | null;
   /**
-   * Ruling 226: the head GitHub reported for the PR, when it reported one.
+   * Ruling 243: the head GitHub reported for the PR, when it reported one.
    * Present only on the refusing `unverifiable` case — the packet that offers
    * the way out names both SHAs, and the waiver that takes it is pinned to this
    * exact head so it cannot be spent on a different one.
@@ -972,11 +972,11 @@ export interface AcceptancePrHeadCheck {
   liveHeadSha: string | null;
 }
 
-/** The timeline title ruling 235's record carries, and the idempotence key. */
+/** The timeline title ruling 96's record carries, and the idempotence key. */
 const UNPUSHED_HEAD_TITLE = "Acceptance refused: the reviewed revision is not on the pull request";
 
 /**
- * Ruling 235 (F37-55) — record a refused acceptance whose cause is a KNOWN head
+ * Ruling 96 (F37-55) — record a refused acceptance whose cause is a KNOWN head
  * mismatch, and hand the delivery to the operator.
  *
  * Measured live: SHOP-2's two required reviewers approved `ea5f2ffd7493`, PR #13's
@@ -1056,7 +1056,7 @@ async function recordUnpushedHeadRefusal(
 }
 
 /**
- * Ruling 226 (F37-43): refuse the acceptance AND leave the human a way forward.
+ * Ruling 243 (F37-43): refuse the acceptance AND leave the human a way forward.
  *
  * A refusal with no exit is its own defect, and this one could otherwise strand
  * a task permanently — the cause is GitHub declining a comparison, which no
@@ -1077,11 +1077,11 @@ export async function refuseUnverifiedHead(
   check: AcceptancePrHeadCheck,
 ): Promise<never> {
   const refusal = check.refusal ?? "";
-  // Ruling 235 (F37-55): a KNOWN mismatch is not a decision. The reviewed
+  // Ruling 96 (F37-55): a KNOWN mismatch is not a decision. The reviewed
   // revision simply is not on the pull request, the only remedy is to push it,
-  // and ruling 134 reserves pushing for the operator — so there is nothing to
+  // and ruling 126 reserves pushing for the operator — so there is nothing to
   // ask a person. It gets a record and a hand-off instead of a packet; only the
-  // UNVERIFIABLE case (ruling 226), where a maintainer really must choose
+  // UNVERIFIABLE case (ruling 243), where a maintainer really must choose
   // between re-delivering and merging unchecked, opens one.
   if (
     check.verification !== "unverifiable" &&
@@ -1119,7 +1119,7 @@ export async function refuseUnverifiedHead(
           // task back to the agent side and re-queues the operator — which
           // would re-run this very gate, refuse again, and open this very
           // packet again. Answering the decision would re-create it, which is
-          // ruling 224's fourth half repeating. Re-checking needs no option at
+          // ruling 157's fourth half repeating. Re-checking needs no option at
           // all: this packet does not block acceptance, so pressing Accept is
           // the re-check, and a successful acceptance withdraws the packet on
           // its own.
@@ -1241,7 +1241,7 @@ const pullHeadShaSchema = z
 /** `GET /compare/…` — only `status` is read; a body that doesn't carry a
  *  string one degrades to "no status", exactly as the raw read did. */
 const compareStatusSchema = z.object({ status: z.string().optional() }).catch({});
-/** Ruling 135: the one field the never-pushed probe reads. */
+/** Ruling 243: the one field the never-pushed probe reads. */
 const commitShaSchema = z.object({ sha: z.string() }).loose();
 
 /**
@@ -1259,7 +1259,7 @@ async function evaluateAcceptancePrHead(
 ): Promise<{
   refusal: string | null;
   verification: "verified" | "unverifiable" | "not-applicable";
-  /** Ruling 226: the live PR head, when GitHub reported one. */
+  /** Ruling 243: the live PR head, when GitHub reported one. */
   liveHeadSha?: string | null;
 }> {
   try {
@@ -1300,7 +1300,7 @@ async function evaluateAcceptancePrHead(
       compareStatusSchema,
     );
     if (!cmp.ok) {
-      // Ruling 135: the compare's base is the LOCAL delivered sha, so a 404
+      // Ruling 243: the compare's base is the LOCAL delivered sha, so a 404
       // is what a never-pushed revision looks like. One direct commit read
       // confirms it, and that is a KNOWN mismatch, not an unverifiable head.
       if (isMissingRefAnswer(cmp)) {
@@ -1309,7 +1309,7 @@ async function evaluateAcceptancePrHead(
           `/repos/${gh.repo}/commits/${rev.headSha}`,
           commitShaSchema,
         );
-        // Ruling 223: the COMMIT read's own vocabulary — GitHub answers a
+        // Ruling 243: the COMMIT read's own vocabulary — GitHub answers a
         // well-formed but unknown 40-char SHA with 422 "No commit found for
         // SHA", never 404, so `isMissingRefAnswer` here confirmed nothing and
         // this refusal was unreachable on the real API.
@@ -1320,7 +1320,7 @@ async function evaluateAcceptancePrHead(
               `PR #${pr.number}'s head is \`${headSha.slice(0, 7)}\`. Deliver the branch to push it; ` +
               `it cannot be accepted until the PR carries the reviewed revision.`,
             verification: "verified",
-            // Ruling 235 (F37-55): the live head travels with the refusal so the
+            // Ruling 96 (F37-55): the live head travels with the refusal so the
             // recorder below can write what was refused and why. Without it
             // `refuseUnverifiedHead`'s guard saw a null and recorded NOTHING —
             // the refusal reached one browser's toast and never the task file,
@@ -1330,7 +1330,7 @@ async function evaluateAcceptancePrHead(
           };
         }
       }
-      // Ruling 226 (F37-43's surviving half): GitHub ANSWERED the pull request
+      // Ruling 243 (F37-43's surviving half): GitHub ANSWERED the pull request
       // and then would not answer the comparison. Both SHAs are in hand, the
       // repository is reachable, and the merge that follows this check would
       // therefore succeed — so "unknown" here is not the offline case A9's
@@ -1345,7 +1345,7 @@ async function evaluateAcceptancePrHead(
       // check. The way out is the packet the refused acceptance opens
       // (`unverified_head`), where a maintainer can re-check, send the branch
       // back, or take the merge deliberately with their name on it.
-      // The waiver a maintainer granted for exactly this triple (ruling 226).
+      // The waiver a maintainer granted for exactly this triple (ruling 243).
       // Re-read live, never trusted from the moment it was written: the head
       // below is what GitHub reports NOW, so a branch that moved after the
       // waiver no longer matches and the refusal returns.
@@ -1437,7 +1437,7 @@ export interface AcceptanceAffordance {
   /** null when acceptance would succeed right now; else the exact refusal. */
   blockedReason: string | null;
   /**
-   * Ruling 393 (F39-20): EVERY standing refusal, in gate order — what a
+   * Ruling 98 (F39-20): EVERY standing refusal, in gate order — what a
    * force-accept would bypass, whole.
    *
    * `blockedReason` is the first one, which is right for the one-line "Not
@@ -1479,11 +1479,11 @@ export interface AcceptanceAffordance {
    * The acceptance surface must RENDER this: a gate that a person satisfied
    * cannot just go green, or the human who accepts has no idea whose judgement
    * they are standing on — the same "a chip is evidence, never a pseudo-check"
-   * rule (ruling 19) that this pass has been applying everywhere else.
+   * rule (ruling 220) that this pass has been applying everywhere else.
    */
   verdictSatisfiedBy: string | null;
   /**
-   * Ruling 482 (F40-52): the project's gates on the revision under review, as
+   * Ruling 315 (F40-52): the project's gates on the revision under review, as
    * Viberr ran them — the line the PR card and the accept dialog print
    * ("Gates on a95c337: 4/4 exit 0 (run by Viberr)") and each result. Absent
    * when the project declares no gates or nothing is delivered (the resolver
@@ -1495,7 +1495,7 @@ export interface AcceptanceAffordance {
 /** The affordance, and the project's required-reviewer rules it was read with. */
 export interface AcceptanceStanding {
   affordance: AcceptanceAffordance;
-  /** Ruling 178's rules, resolved; empty when the project cannot be read. */
+  /** Ruling 89's rules, resolved; empty when the project cannot be read. */
   requiredReviewers: RequiredReviewerView[];
 }
 
@@ -1512,10 +1512,10 @@ export interface AcceptanceStanding {
  * A pure READ: it classifies by project role + ownership exactly like
  * `decisionsRequiring`, and never calls the audited authority path.
  *
- * Ruling 521: it answers with the required-reviewer rules it read. The task
+ * Ruling 103: it answers with the required-reviewer rules it read. The task
  * page's completion packet marks a rule's reviewer required whether or not
  * anyone engaged it, and taking the rules from this read of project.md keeps
- * the page's revalidation at its store-read budget (ruling 457).
+ * the page's revalidation at its store-read budget (ruling 11).
  *
  * Deliberately DB-free: membership and ownership both live in the canonical
  * files, so this resolves on a loader path without a projection read (and
@@ -1559,10 +1559,10 @@ function affordanceIn(
   const existing = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
   if (!existing) return denied;
   const fm = existing.parsed.frontmatter;
-  // Ruling 482: shown whatever the viewer may do and wherever the task sits,
+  // Ruling 315: shown whatever the viewer may do and wherever the task sits,
   // so the evidence reads the same on a Done task as it did at the boundary.
   // Absent (not null) when there is nothing to show: the task page's payload
-  // is budgeted (ruling 457), and a project with no gates ships no key.
+  // is budgeted (ruling 11), and a project with no gates ships no key.
   const gates = projectGatesView(project.gates, fm);
   if (gates) denied.gates = gates;
   const role = project.memberRoles.get(input.viewerUserId) ?? null;
@@ -1581,15 +1581,15 @@ function affordanceIn(
   if (terminalId !== null && fm.stage === terminalId) {
     return { ...denied, hasAuthority };
   }
-  // Ruling 123: an archived task is terminally blocked for acceptance, so the
-  // force-accept affordance is WITHDRAWN rather than disabled (ruling 37's
+  // Ruling 98: an archived task is terminally blocked for acceptance, so the
+  // force-accept affordance is WITHDRAWN rather than disabled (ruling 95's
   // precedent). The server refuses it too — `forceIrreducibleRefusal`.
   if (fm.archived) {
     return { ...denied, hasAuthority, terminallyBlocked: true };
   }
   const atBoundary =
     !fm.archived && acceptanceStageBlockedReason(project, fm.stage, input.taskKey) === null;
-  // Ruling 393: the WHOLE list once, and the first of it is `blockedReason`.
+  // Ruling 98: the WHOLE list once, and the first of it is `blockedReason`.
   // Computing them separately is how the dialog and the audit row came to
   // disagree about what an override was bypassing.
   const blockedGates = acceptanceRefusalReasons(project, fm, input.taskKey, {
@@ -1643,7 +1643,7 @@ export function mergePendingCause(merge: AcceptanceMergeOutcome): string {
  * is honest about what merged. Every acceptance path appends this.
  */
 export function revisionDriftNote(fm: TaskFrontmatter): string {
-  // Ruling 132 (pass 34, F34-14): the permanent record uses the SAME words as
+  // Ruling 239 (pass 34, F34-14): the permanent record uses the SAME words as
   // every live surface — authored commits were added outside the reviewed
   // revision; a base refresh is recorded as a base refresh and never as
   // unreviewed work (JC-8's timeline said "5 commits were added" for 4 base
@@ -1665,7 +1665,7 @@ export function revisionDriftNote(fm: TaskFrontmatter): string {
  * back to the DERIVED branch name when the task never recorded one, so it can
  * read — and the completion copy can then claim — a same-name branch from a
  * previous life that this task never created. Deleting someone else's branch on
- * a name match is exactly the branch-COLLISION harm rulings 34/35 refuse
+ * a name match is exactly the branch-COLLISION harm ruling 231(a) refuse
  * elsewhere. So deletion is restricted to the branch the task itself recorded
  * (`fm.branch`), which is also all `deleteTaskRemoteBranch` will act on, and a
  * name-only match is disclosed as the collision it is instead.
@@ -1729,7 +1729,7 @@ export function emptyBranchNote(
 }
 
 /**
- * Ruling 88 (F21-2) — the disclosure the ceremony WOULD state for this task
+ * Ruling 97 (F21-2) — the disclosure the ceremony WOULD state for this task
  * right now: what merges, what was delivered, what the review said.
  *
  * Derived from the canonical file, never from the projection, and `verdict`
@@ -1747,7 +1747,7 @@ function acceptanceDisclosureOf(
 }
 
 /**
- * Ruling 88 (F21-2) — the server-side half of the acceptance ceremony.
+ * Ruling 97 (F21-2) — the server-side half of the acceptance ceremony.
  *
  * `ack` is deliberately three-state, and the distinction is the whole design:
  *
@@ -1811,12 +1811,12 @@ interface WithdrawnPacket {
 interface WithdrawnPacketRef {
   current: WithdrawnPacket | null;
 }
-/** Ruling 471: the open decision a direct human acceptance ANSWERED, and the
+/** Ruling 100: the open decision a direct human acceptance ANSWERED, and the
  *  option it answered with, captured inside the file lock like its sibling. */
 interface AnsweredPacketRef {
   current: { packetKind: string; option: PacketOption } | null;
 }
-/** Ruling 547: the decision an acceptance closed, answered or withdrawn, and
+/** Ruling 75: the decision an acceptance closed, answered or withdrawn, and
  *  the entry that records it. */
 interface ClosedDecisionRef {
   current: ClosedDecision | null;
@@ -1833,7 +1833,7 @@ interface ClosedDecisionRef {
  * merge actually landed: an "accepted, merge pending" outcome already
  * discloses the unreachability itself. Empty otherwise.
  *
- * Ruling 226: two different things reach this, and they are not the same
+ * Ruling 243: two different things reach this, and they are not the same
  * admission. A9's original case is GitHub being unreachable, and its sentence
  * is right for that. The other is a maintainer who was shown the refusal and
  * took the merge anyway: there the record names what was risked, not the
@@ -1841,7 +1841,7 @@ interface ClosedDecisionRef {
  * reads as a formality; "code no reviewer approved may be on the base branch"
  * is what it means.
  *
- * Ruling 686: both writers of the last stage append it. The decision packet's
+ * Ruling 100: both writers of the last stage append it. The decision packet's
  * "accept completion" option made the same check and said nothing of it on
  * the record.
  */
@@ -1864,26 +1864,26 @@ export function unverifiedHeadNote(fm: TaskFrontmatter, headCheck: AcceptancePrH
 }
 
 /**
- * Ruling 686: what follows every acceptance, once the task stands at the
+ * Ruling 100: what follows every acceptance, once the task stands at the
  * board's last stage. Two writes set that stage: `applyAcceptanceWrite` below
  * (a person's Accept or board move, a recommendation card, a force-accept,
  * the operator's own acceptance) and the decision packet's "accept
  * completion" option, which writes the stage itself. Both end here, so a
- * step added for one is not forgotten for the other: the packet's option ran
- * none of these until ruling 685 gave it the third, and an epic whose last
- * task was accepted from a decision was never told it was done.
+ * step added for one is not forgotten for the other: the packet's option once
+ * ran none of these, and an epic whose last task was accepted from a decision
+ * was never told it was done.
  *
  * Each is fire-and-forget and reads the store as it stands, so a call that
  * finds nothing to do writes nothing (the release reads every held task of
  * the project to find that out).
  */
 export function afterAcceptance(db: DatabaseSync, ctx: TaskActionContext, projectSlug: string, taskKey: string): void {
-  // Ruling 503: an acceptance is the usual way an epic's last task is done.
+  // Ruling 55: an acceptance is the usual way an epic's last task is done.
   maybeNoteEpicComplete(db, ctx, projectSlug, taskKey);
-  // Ruling 131(e): and the usual way a waited-on task is done. The runner's
+  // Ruling 57: and the usual way a waited-on task is done. The runner's
   // minute tick would release its dependents too; this does it now.
   maybeReleaseDependents(db, ctx, projectSlug);
-  // Ruling 685: and the moment a controller conversation that waited for
+  // Ruling 259: and the moment a controller conversation that waited for
   // this task takes its next step.
   maybeContinueController(db, ctx, projectSlug, taskKey);
 }
@@ -1928,10 +1928,10 @@ export async function applyAcceptanceWrite(
      *  Done task. The `task.acceptance.forced` audit row stays; this is the
      *  additional durable field. */
     forced?: boolean;
-    /** Ruling 88 (F21-2): the disclosure the human acknowledged, re-compared
+    /** Ruling 97 (F21-2): the disclosure the human acknowledged, re-compared
      *  under the lock. See `assertAcceptanceDisclosure` for the three states. */
     ack?: AcceptanceDisclosure | null;
-    /** Ruling 471: the PERSON whose direct acceptance this is. Set by every
+    /** Ruling 100: the PERSON whose direct acceptance this is. Set by every
      *  human door (`acceptCompletion`, plain or forced), and then an open
      *  decision that offers the option this acceptance performs
      *  (`acceptanceAnswerOf`) is ANSWERED with it: the `task.packet.resolved`
@@ -1963,7 +1963,7 @@ export async function applyAcceptanceWrite(
   // captured inside the lock so the note and the audit row name the packet
   // that was actually there, not the one the caller read before waiting.
   const withdrawn: WithdrawnPacketRef = { current: null };
-  // Ruling 471: or the open decision this acceptance ANSWERS, captured in the
+  // Ruling 100: or the open decision this acceptance ANSWERS, captured in the
   // same place for the same reason.
   const answered: AnsweredPacketRef = { current: null };
   const closedPacket: ClosedDecisionRef = { current: null };
@@ -1978,7 +1978,7 @@ export async function applyAcceptanceWrite(
     if (parsed.frontmatter.stage === input.doneStageId) return;
     assertVerifiedHeadStillApplies(parsed.frontmatter, headCheck, input.taskKey);
     assertVerifiedNoChangeStillApplies(parsed.frontmatter, noChange, input.taskKey);
-    // Ruling 88: the disclosure is re-compared against the state actually being
+    // Ruling 97: the disclosure is re-compared against the state actually being
     // closed. `skipInLockRecheck` (force) does NOT relax it — force bypasses
     // process GATES, and this is not a gate: it is the record of what the human
     // was shown. Scope `in-lock` skips the PR fact, which this very acceptance
@@ -2028,7 +2028,7 @@ export async function applyAcceptanceWrite(
     if (input.forced) {
       parsed.frontmatter.acceptance = "forced";
     }
-    // Ruling 98: EVERY stage write records where the task came from — the
+    // Ruling 124: EVERY stage write records where the task came from — the
     // acceptance writer is a stage writer too (hunt 2026-08-29: it skipped the
     // field, so a Done task's previousStageId still named the stage before
     // review, and a reopen fed the operator a false "arrived from").
@@ -2058,7 +2058,7 @@ export async function applyAcceptanceWrite(
     // Done task); acceptance consumes every open offer, matching the packet
     // resolution path's long-standing behavior.
     parsed.frontmatter.recommendations = [];
-    // Ruling 471: a person's direct acceptance ANSWERS the open decision when
+    // Ruling 100: a person's direct acceptance ANSWERS the open decision when
     // it offers the option this acceptance performs. Live on WEB-1 the
     // operator recommended "Accept WEB-1 and merge PR #1", the owner pressed
     // Accept, and the note below said the decision "was never answered". The
@@ -2127,7 +2127,7 @@ export async function applyAcceptanceWrite(
     });
   }
   if (accepted && answered.current && input.answerer) {
-    // Ruling 471: the row the packet door writes when a person resolves this
+    // Ruling 100: the row the packet door writes when a person resolves this
     // option (same action, actor and fields), plus `via`, the direct
     // acceptance it came through, in the vocabulary of the withdrawal row's
     // `by`. The operator hand-off the packet door skips for both kinds
@@ -2148,7 +2148,7 @@ export async function applyAcceptanceWrite(
     });
   }
   if (accepted) {
-    // Ruling 600: an acceptance closes the packet (answered or withdrawn) and
+    // Ruling 100: an acceptance closes the packet (answered or withdrawn) and
     // consumes every recommendation card, so no decision is left on the task,
     // and its decision rows are read for everyone, as the packet door and
     // archiving read theirs. Live on AWSC-12 a direct Accept consumed the
@@ -2180,9 +2180,9 @@ export async function acceptCompletion(
      *  before the write: the live no-change probe and the disclosure built with
      *  it (U35-3). The acceptance closes on that probe run and its completion
      *  event names that disclosure's gates, the ones the audit row records, so
-     *  neither is read a second time here (ruling 393). */
+     *  neither is read a second time here (ruling 98). */
     force?: { noChange: AcceptanceNoChangeCheck; disclosure: ForceAcceptDisclosure };
-    /** Ruling 88 (F21-2) — the acceptance disclosure the human acknowledged.
+    /** Ruling 97 (F21-2) — the acceptance disclosure the human acknowledged.
      *  Three states, documented on `assertAcceptanceDisclosure`: an echo to
      *  verify, an explicit `null` from a door whose request carried none (a
      *  bare POST — refused), or omitted by an in-process caller carrying its
@@ -2211,7 +2211,7 @@ export async function acceptCompletion(
 
   if (existing.parsed.frontmatter.stage === doneStageId) return false; // already Done.
 
-  // Ruling 88 (F21-2): the disclosure is checked HERE — after the authority
+  // Ruling 97 (F21-2): the disclosure is checked HERE — after the authority
   // gate (a caller who may not accept hears about their role, not their
   // dialog) and BEFORE the merge, so a stale or missing acknowledgment can
   // never be discovered on the far side of an irreversible GitHub write. It is
@@ -2233,7 +2233,7 @@ export async function acceptCompletion(
   // auto-detect built to accept exactly this) never ran. R19-8 still holds: a
   // stale `noChanges` claim on a branch that has since gained commits fails
   // closed via `noChange.refusal` below. A forced acceptance carries the probe
-  // its record was built with (ruling 393).
+  // its record was built with (ruling 98).
   const noChange =
     input.force?.noChange ??
     (await acceptanceNoChangeCheck(db, ctx, input.projectSlug, input.taskKey));
@@ -2350,7 +2350,7 @@ export async function acceptCompletion(
 
   // R17-1: name any reviewed-revision drift on the completion record.
   /**
-   * Ruling 318: computed AFTER the merge, because the merge is what moves the
+   * Ruling 96: computed AFTER the merge, because the merge is what moves the
    * branch. `existing` was read before `attemptAcceptanceMerge`, which runs
    * `refreshBranchForAcceptance` → `recordBranchRefresh`: it brings the branch
    * up to date with the base, pushes that merge commit, re-measures the drift
@@ -2419,7 +2419,7 @@ export async function acceptCompletion(
     event.text += emptyBranchNote(branchDisposition, input.taskKey);
   }
   // U35-3 (pass 35): a forced acceptance says on the record what it jumped:
-  // the disclosure its audit row carries too (ruling 393).
+  // the disclosure its audit row carries too (ruling 98).
   if (input.force) {
     event.text += forceBypassClause(project, input.force.disclosure, noChange.refusal);
   }
@@ -2431,19 +2431,19 @@ export async function acceptCompletion(
     event,
     headCheck,
     noChangeCheck: noChange,
-    // Ruling 471: every door into this function is a person's acceptance
+    // Ruling 100: every door into this function is a person's acceptance
     // (Accept, Force accept, a stage move into the terminal stage, an applied
     // acceptance card), so it answers the open decision it performs.
     answerer: actor,
   };
-  // Ruling 88: the same acknowledgment is re-compared under the write lock.
+  // Ruling 97: the same acknowledgment is re-compared under the write lock.
   if ("ack" in input) acceptance.ack = input.ack ?? null;
   if (input.force) {
     acceptance.skipInLockRecheck = true;
     acceptance.forced = true;
   }
   const { accepted } = await applyAcceptanceWrite(db, ctx, acceptance);
-  // Ruling 177 (pass 36, F36-5): the task just closed — end its live runs so a
+  // Ruling 154 (pass 36, F36-5): the task just closed — end its live runs so a
   // Shipped task spends nothing more and no completion re-invokes the operator
   // on it. One note names every run; each run's own audit row carries the cause.
   if (accepted) {
@@ -2569,7 +2569,7 @@ export async function forceAcceptCompletion(
   input: {
     projectSlug: string;
     taskKey: string;
-    /** Ruling 88 (F21-2): force is an override of the GATES, never of the
+    /** Ruling 97 (F21-2): force is an override of the GATES, never of the
      *  disclosure — the `force` ceremony states everything the ordinary one
      *  does plus the stages and the refusal it bypasses, so its echo is
      *  demanded on exactly the same terms. See `acceptCompletion`. */
@@ -2599,7 +2599,7 @@ export async function forceAcceptCompletion(
   }
   // F19-25 (R16-3): refuse the one gate force may not bypass BEFORE the audit
   // row — a `task.acceptance.forced` row for an override that was refused would
-  // read as a completed bypass in the log. Ruling 37 has the task page WITHDRAW
+  // read as a completed bypass in the log. Ruling 95 has the task page WITHDRAW
   // (hide) the button while the PR is closed, but that withdrawal is client-only
   // and depends on state the client may not have refreshed; this is the server
   // saying no. R19-5: an off-boundary task is NOT refused here — force-accept
@@ -2610,7 +2610,7 @@ export async function forceAcceptCompletion(
     input.taskKey,
   );
   if (irreducible) throw AppError.conflict(irreducible);
-  // Ruling 88: and refuse a missing/stale disclosure before the audit row for
+  // Ruling 97: and refuse a missing/stale disclosure before the audit row for
   // the same reason — `acceptCompletion` checks it again, but by then a
   // "forced" row would already claim a bypass that never happened.
   assertAcceptanceDisclosure(
@@ -2627,7 +2627,7 @@ export async function forceAcceptCompletion(
   // one the single-reason helper happened to pick (KNC-10: the record said a
   // stage boundary was skipped and never that a failing verdict was
   // overridden). `bypassed` stays a string for its existing readers.
-  // Ruling 393: the live no-change probe decides two of those gates (a branch
+  // Ruling 98: the live no-change probe decides two of those gates (a branch
   // carrying commits adds the counted sentence, a branch it found empty or
   // absent clears "no review pull request"). It runs ONCE, here:
   // `acceptCompletion` closes on this run and writes the completion event from
@@ -2714,7 +2714,7 @@ export async function completeTaskMerge(
   // Deliberately WRITES NOTHING: the acceptance that stamped this PR "accepted"
   // already recorded its completion on the timeline, and minting a second
   // completion for a click that changed no state would be exactly the invented
-  // record ruling 88 exists to prevent. `merged` answers "is the PR merged when
+  // record ruling 97 exists to prevent. `merged` answers "is the PR merged when
   // this returns", not "did this call merge it" — which is why the honest message
   // rides alongside it and the caller renders that, not a verb of its own.
   if (pr.state === "merged") {

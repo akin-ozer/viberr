@@ -14,7 +14,7 @@ import { writeFileAtomic } from "./atomic-file.server";
  * content THIS process wrote per path; when a locked read disagrees with it,
  * trust our own write only while the read is provably a stale view of it.
  *
- * Ruling 513: "provably" is the file's IDENTITY, never a clock.
+ * Ruling 18: "provably" is the file's IDENTITY, never a clock.
  * `writeFileAtomic` renames a fresh temp file over the path, so every write
  * puts a new inode there. `writeAndRemember` stats the path just before the
  * write (the file it replaces) and right after the rename (the file it put
@@ -41,7 +41,7 @@ import { writeFileAtomic } from "./atomic-file.server";
  * C01-A2 (pass 32): the task and project writers each carried a private copy
  * of this and the goal writer had none — pass-31 gotcha 10 predicted that two
  * back-to-back link-status writes on VirtioFS could lose one. One module now,
- * three callers (the epic writer took the goal writer's place, ruling 503).
+ * three callers (the epic writer took the goal writer's place, ruling 17).
  */
 
 /** What a file IS rather than what it holds, as one stat reports it. */

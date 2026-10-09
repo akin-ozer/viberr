@@ -14,7 +14,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 /**
- * Real MCP servers for the gateway's tests (ruling 461): the in-test stand-ins
+ * Real MCP servers for the gateway's tests (ruling 191): the in-test stand-ins
  * for a remote org server that REQUIRES its bearer — the shape of the
  * Cloudflare API MCP server the gateway exists for — over Streamable HTTP and
  * over the legacy SSE transport, and a stdio command that reports the
@@ -39,7 +39,7 @@ const TOOLS = [
   { name: "fail", description: "Answers with an error", inputSchema: { type: "object" as const } },
 ];
 
-/** The fixture MCP server every stand-in serves (ruling 469's OAuth server too). */
+/** The fixture MCP server every stand-in serves (ruling 192's OAuth server too). */
 export function fixtureServer(calls: string[]): Server {
   const server = new Server(
     { name: "fixture-upstream", version: "1.0.0" },

@@ -49,7 +49,7 @@ import type { RecommendationView } from "./operator-recommendations";
  * answers it by hydrating synchronously, ahead of the transition), and then a
  * `run.log-appended` update of the shape `useRunLogStream` produces, delivered
  * through the workspace layout's live stream (the tab's one EventSource,
- * ruling 457) and the console's `/resources/run-log` tail fetch.
+ * ruling 11) and the console's `/resources/run-log` tail fetch.
  */
 
 type PageProps = ComponentProps<typeof TaskDetailPage>;
@@ -348,7 +348,7 @@ async function pageIn(zone: string, entry = "/"): Promise<(props: PageProps) => 
   const toast: ToastModule = await import("~/ui/toast");
   const live: LiveModule = await import("~/features/live-updates/use-live-updates");
   // The workspace layout's stream (`routes/project.tsx`): it carries the
-  // console's frames to the page (ruling 457).
+  // console's frames to the page (ruling 11).
   const LayoutStream = ({ slug, taskKey }: { slug: string; taskKey: string }) => {
     live.useLiveUpdates([`project:${slug}`, `task:${slug}/${taskKey}`]);
     return null;
@@ -400,7 +400,7 @@ async function hydrate(
   html: string,
   sighting: () => PageProps,
   interrupt?: (container: HTMLElement) => void,
-  /** The URL the viewer opened (ruling 497: its hash never reaches the server). */
+  /** The URL the viewer opened (ruling 302: its hash never reaches the server). */
   entry = "/",
 ): Promise<{ container: HTMLElement; report: HydrationReport }> {
   vi.setSystemTime(new Date(VIEWER_NOW));
@@ -479,7 +479,7 @@ describe.each([
   });
 
   /**
-   * Ruling 497: a notification's link names an event by the URL's hash, which a
+   * Ruling 302: a notification's link names an event by the URL's hash, which a
    * browser never sends. A document load of that link (a refresh, a pasted
    * URL, the router's reload after a deploy) is rendered by the server with no
    * mark, so the mark is drawn after hydration, never during it. CANARY: read

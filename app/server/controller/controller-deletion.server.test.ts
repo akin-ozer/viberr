@@ -9,7 +9,7 @@ import { untilRunSettled } from "../../../test-support/fake-runtime";
 import { setupAppTest, type AppTestContext } from "../../../test-support/test-app";
 
 /**
- * Ruling 525 — deleting a controller conversation.
+ * Ruling 250 — deleting a controller conversation.
  *
  * WHO: its starter, always; an org admin, any; and, on a conversation about a
  * project, whoever holds `delete-controller-conversations` there (a project
@@ -42,7 +42,7 @@ beforeAll(async () => {
   murat = { id: userIds.murat, email: "murat@viberr.dev" };
   deniz = { id: userIds.deniz, email: "deniz@viberr.dev" };
   arda = { id: userIds.arda, email: "arda@viberr.dev" };
-  // Ruling 127: a turn runs on its asker's own Claude account.
+  // Ruling 137: a turn runs on its asker's own Claude account.
   const { connectFakeBackend } = await import("../../../test-support/backend-credentials");
   await connectFakeBackend(app.db, selin.id, "claude");
 });
@@ -136,7 +136,7 @@ const answered = (sessionId: string, text: string) => ({
   ] satisfies LogLine[],
 });
 
-describe("who may delete a controller conversation (ruling 525)", () => {
+describe("who may delete a controller conversation (ruling 26)", () => {
   it("its starter, whatever it is about", async () => {
     for (const scope of [INSTANCE, BOARD, TASK]) {
       const conversation = await conversationOf(selin, scope);
@@ -168,7 +168,7 @@ describe("who may delete a controller conversation (ruling 525)", () => {
   it("one about no project stays its starter's and the org admins'", async () => {
     const conversation = await conversationOf(selin, INSTANCE);
     // Elif administers a project, not this conversation: she is answered as
-    // if it did not exist, as she is when she asks to read it (ruling 99(d)).
+    // if it did not exist, as she is when she asks to read it (ruling 249).
     await expect(deleteAs(elif, conversation.id, null)).rejects.toMatchObject({ status: 404 });
     expect(await stillThere(conversation.id)).toBe(true);
     await deleteAs(arda, conversation.id, null);
@@ -179,7 +179,7 @@ describe("who may delete a controller conversation (ruling 525)", () => {
   });
 
   it("each page deletes only the conversations it lists", async () => {
-    // Ruling 121: a page opens only its own scope's threads, so it deletes
+    // Ruling 249: a page opens only its own scope's threads, so it deletes
     // only those. The starter herself gets the not-found shape elsewhere.
     const board = await conversationOf(selin, BOARD);
     const instance = await conversationOf(selin, INSTANCE);
@@ -228,7 +228,7 @@ describe("who may delete a controller conversation (ruling 525)", () => {
   });
 });
 
-describe("what a deletion takes away (ruling 525)", () => {
+describe("what a deletion takes away (ruling 250)", () => {
   it("its messages and what its turns said, keeping each turn's run row as the spend", async () => {
     // CANARY: drop the `run_log_lines` delete from
     // `purgeDeletedConversationLogs` and the console lines survive.
@@ -298,7 +298,7 @@ describe("what a deletion takes away (ruling 525)", () => {
   });
 });
 
-describe("a turn still working when its conversation is deleted (ruling 525)", () => {
+describe("a turn still working when its conversation is deleted (ruling 250)", () => {
   it("is stopped as the deleter, answers nobody, and starts nothing queued behind it", async () => {
     // CANARY: drop the interrupt loop from `deleteControllerConversation` and
     // the turn is still running when the deletion has returned.
@@ -316,7 +316,7 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
     if (working.state !== "started") throw new Error(`turn ${working.state}`);
     const queued = await turn(conversation.id, "And then the stale ones.", "queue");
     expect(queued.state).toBe("queued");
-    // Ruling 527: and one sent to steer it, which the stopping turn must not
+    // Ruling 251: and one sent to steer it, which the stopping turn must not
     // read. CANARY: empty only the queue in `dropConversationLease` and the
     // turn's channel still hands it over.
     const steering = await turn(conversation.id, "Skip the archived ones.");
@@ -414,7 +414,7 @@ describe("a turn still working when its conversation is deleted (ruling 525)", (
   });
 });
 
-describe("boot finishes a purge a restart cut short (ruling 525)", () => {
+describe("boot finishes a purge a restart cut short (ruling 250)", () => {
   it("clears what a deleted conversation's turn wrote after the deletion, and nothing of a live one", async () => {
     // A turn stopped by a deletion writes its last lines as it exits; a
     // restart before its settle leaves them. CANARY: return early from

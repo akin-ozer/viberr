@@ -40,7 +40,7 @@ import { resolvePacket } from "./packet-resolution.server";
 import type { TaskActionContext } from "./task-action-core.server";
 
 /**
- * Ruling 503(g): the operator and epics.
+ * Ruling 116: the operator and epics.
  *
  * Its snapshot carries `epic` (the epic its task is in, the description
  * clipped, and the epic's OTHER tasks with their stage and `blockedBy`) where
@@ -172,7 +172,7 @@ afterEach(() => {
 
 // ------------------------------------------------------------ the snapshot
 
-describe("ruling 503(g): the operator's snapshot carries its task's epic", () => {
+describe("ruling 116: the operator's snapshot carries its task's epic", () => {
   it("names the epic, its status and description, and lists its OTHER live tasks with their stage and blockedBy", async () => {
     deployOperator(EPIC_POLICY);
     writeSeedTask("VIB-1", { stage: "impl", title: "Build the checkout form" });
@@ -258,7 +258,7 @@ describe("ruling 503(g): the operator's snapshot carries its task's epic", () =>
 
 // ------------------------------------------------------------ set_epic
 
-describe("ruling 503(g): set_epic moves the operator's own task", () => {
+describe("ruling 116: set_epic moves the operator's own task", () => {
   it("puts the task in, moves it and takes it out, each move signed by the operator on the task, the epics and the audit", async () => {
     deployOperator(EPIC_POLICY);
     writeSeedTask("VIB-1", { stage: "impl" });
@@ -408,7 +408,7 @@ function persistPlan(runId: string, plan: string): void {
   });
 }
 
-describe("ruling 503(g): a Codex operator reaches set_epic through its plan", () => {
+describe("ruling 116: a Codex operator reaches set_epic through its plan", () => {
   it("the plan schema offers set_epic and its epicId, and withholds it without append-typed-events", () => {
     deployOperator(FULL_POLICY, "codex");
     const tools = operatorPlanToolsFor(authority());
@@ -461,7 +461,7 @@ describe("ruling 503(g): a Codex operator reaches set_epic through its plan", ()
 
 // ------------------------------------------------------------ create_task option
 
-describe("ruling 503(b): a task a person creates from the operator's create_task option joins the deciding task's epic", () => {
+describe("ruling 272: a task a person creates from the operator's create_task option joins the deciding task's epic", () => {
   const FOLLOW_ON = "Publish the receipt webhook";
 
   /** The operator offers the follow-on, and Arda confirms it. */

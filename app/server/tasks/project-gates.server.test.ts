@@ -45,7 +45,7 @@ import { performDelivery, runProjectGatesByHand } from "./task-delivery.server";
 import { transitionStage } from "./task-transitions.server";
 
 /**
- * Ruling 482 (pass 40, F40-52): Viberr runs the project's gates itself.
+ * Ruling 104 (pass 40, F40-52): Viberr runs the project's gates itself.
  *
  * Live on akinozer-com the gate list was prose in a knowledge base, every
  * directive re-typed it, and the owner accepted two production deploys on
@@ -176,7 +176,7 @@ afterEach(async () => {
   ctx.cleanup();
 });
 
-describe("the gate run (ruling 482)", () => {
+describe("the gate run (ruling 104)", () => {
   it("runs every gate in a fresh checkout of the revision's sha, records each exit code and saves each log as an attachment", async () => {
     setGates([
       { name: "head", command: "git rev-parse HEAD" },
@@ -227,11 +227,11 @@ describe("the gate run (ruling 482)", () => {
     });
     expect(note.text).toContain(`Gates on ${revisionSha.slice(0, 7)}: 1/2 exit 0 (run by Viberr)`);
     expect(note.attachments).toEqual(record.results.map((r) => r.log));
-    // Ruling 526: each row carries its gate's ending into task.md, where an
+    // Ruling 16: each row carries its gate's ending into task.md, where an
     // agent reads it, and into the review PR's evidence lines. CANARY: mark
     // every row `info` in `gateRunEvent`.
     expect(note.evidence?.map((row) => row.status)).toEqual(["pass", "fail"]);
-    // Ruling 493: the timeline reads the projected note back into this run,
+    // Ruling 313: the timeline reads the projected note back into this run,
     // each row with its own log. CANARY: print the evidence label another way
     // in `gateRunEvent` and the note renders as prose again.
     const [shown] = listTaskEvents(store.db, store.slug, "VIB-1", { limit: 1 });
@@ -396,7 +396,7 @@ describe("the gate run (ruling 482)", () => {
   });
 });
 
-describe("what the gate record does to acceptance (ruling 482)", () => {
+describe("what the gate record does to acceptance (ruling 104)", () => {
   it("blocks a plain acceptance until every gate exited 0, and force accept records the bypass", async () => {
     setGates([{ name: "build", command: "exit 1" }]);
     writeDeliveredTask();
@@ -511,7 +511,7 @@ describe("what the gate record does to acceptance (ruling 482)", () => {
   });
 });
 
-describe("a promoted gate list is evidence on the tasks already in review (ruling 482)", () => {
+describe("a promoted gate list is evidence on the tasks already in review (ruling 104)", () => {
   it("setProjectGates queues the new list on every open task with a delivered revision", async () => {
     writeDeliveredTask();
     const { setProjectGates } = await import(
@@ -532,7 +532,7 @@ describe("a promoted gate list is evidence on the tasks already in review (rulin
   });
 });
 
-describe("a new head on an open PR asks for the gates (ruling 482)", () => {
+describe("a new head on an open PR asks for the gates (ruling 104)", () => {
   it("the workspace reconcile that mints a new revision while the PR stands queues the gates on it", async () => {
     // CANARY: drop the gate request in reconcileWorkspaceDelivery.
     setGates([{ name: "head", command: "git rev-parse HEAD" }]);
@@ -559,7 +559,7 @@ describe("a new head on an open PR asks for the gates (ruling 482)", () => {
   });
 });
 
-describe("the delivery asks for the gates (ruling 482)", () => {
+describe("the delivery asks for the gates (ruling 104)", () => {
   it("a delivered outcome queues the gates on the revision it delivered", async () => {
     setGates([{ name: "ok", command: "true" }]);
     writeDeliveredTask({ pr: null, verdicts: [], validation: "changed" });
@@ -605,7 +605,7 @@ describe("the delivery asks for the gates (ruling 482)", () => {
   });
 });
 
-describe("as the task owner's agent uid (ruling 460)", () => {
+describe("as the task owner's agent uid (ruling 139)", () => {
   /** A stand-in `viberr-launch`: logs the uid and the binary, scrubs the
    *  `VIBERR_LAUNCH_*` names as the real one does, and execs. */
   function standInLauncher(): string {

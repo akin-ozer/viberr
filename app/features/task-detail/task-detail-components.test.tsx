@@ -86,10 +86,10 @@ describe("DecisionPacket", () => {
       <DecisionPacket packet={packet142} busy={false} canResolve={true} canResolveCompletion={true} canEditGoal={true} canArchive={true} onResolveCustom={() => {}} onResolve={() => {}} onAsk={() => {}} />,
     );
     const card = container.querySelector(".packet")!;
-    // Ruling 625 (B11): the operator's decision wears the info tone a decision
+    // Ruling 312 (B11): the operator's decision wears the info tone a decision
     // waiting on a person wears everywhere; amber (`input`) is an agent's question.
     expect(card.classList.contains("decision")).toBe(true);
-    // Ruling 500: the kind is the head's title beside its tile.
+    // Ruling 312: the kind is the head's title beside its tile.
     expect(container.querySelector(".packet-top .packet-kind")!.textContent).toBe(
       "Completion report",
     );
@@ -115,11 +115,11 @@ describe("DecisionPacket", () => {
     );
   });
 
-  it("ruling 319: states what else the confirm answers, above the options", () => {
+  it("ruling 65: states what else the confirm answers, above the options", () => {
     /**
      * The reach has to be visible while the person is CHOOSING, not reported
      * after the click — a confirm that quietly answers four other tasks is the
-     * undisclosed one-way write ruling 20 exists to stop, and this card is the
+     * undisclosed one-way write ruling 97 exists to stop, and this card is the
      * only place it can be said first.
      *
      * CANARY: drop the `alsoAnswers` prop from the card, or move the paragraph
@@ -163,7 +163,7 @@ describe("DecisionPacket", () => {
     expect(plain.container.querySelector("[data-also-answers]")).toBeNull();
   });
 
-  it("ruling 324: a create_task option names what already looks like it", () => {
+  it("ruling 67: a create_task option names what already looks like it", () => {
     /**
      * The controller, unprompted, on what a reader of the final board would not
      * learn: "SHOP-27's decision packet was one confirmation away from creating
@@ -267,7 +267,7 @@ describe("DecisionPacket", () => {
     );
   });
 
-  it("blocked packets tint blocked; no rec → nothing preselected (ruling 478(e)); Ask fires", () => {
+  it("blocked packets tint blocked; no rec → nothing preselected (ruling 68); Ask fires", () => {
     const onAsk = vi.fn();
     const blocked: PacketRender = {
       ...packet142,
@@ -419,7 +419,7 @@ describe("TimelineItem", () => {
     // is comment-only now (the colored node + category pill already say it's an
     // agent action, so the badge was redundant on events).
     expect(pills).toEqual(["Completion report"]);
-    // Ruling 526: a failure is read before what passed, and says so in words
+    // Ruling 313: a failure is read before what passed, and says so in words
     // as well as its mark; the file keeps the order the agent wrote.
     // CANARY: drop the sort in `EvidenceList` and the failure reads second.
     const rows = [...container.querySelectorAll(".ev-list .ev-item")];
@@ -436,14 +436,14 @@ describe("TimelineItem", () => {
   });
 
   /**
-   * Ruling 483 (F40-59): a proposal asks a person to decide, and the event
+   * Ruling 267 (F40-59): a proposal asks a person to decide, and the event
    * used to carry no way to where that happens. Inside a project it links to
    * the project's Controller page, where the proposal is listed with its
-   * document and its Promote and Dismiss. Ruling 498: a correction an agent
+   * document and its Promote and Dismiss. Ruling 210: a correction an agent
    * wrote links there too, where it is reviewed and undone; a person's undo
    * owes nothing and links nowhere.
    */
-  it("rulings 483 and 498: a proposal and an agent's correction link to the Controller page's panel, and no other event does", () => {
+  it("rulings 267 and 210: a proposal and an agent's correction link to the Controller page's panel, and no other event does", () => {
     const href = "/projects/akinozer-com/controller";
     const proposal = ev({
       type: "proposal",
@@ -502,11 +502,11 @@ describe("TimelineItem", () => {
       // G8: continuity reset — amber warning tone, its own label; borrows the
       // quality node styling (both are the amber/attention family).
       ["continuity", "quality", "Continuity reset"],
-      // Ruling 483 (F40-59): a proposed knowledge-base correction is its own
+      // Ruling 267 (F40-59): a proposed knowledge-base correction is its own
       // kind, never a "Review verdict". CANARY: drop `proposal` from EVENT_META
       // and the fallback names the raw type on an unstyled node.
       ["proposal", "proposal", "Proposal"],
-      // Ruling 498: a correction an agent wrote, in the proposal's tint, named
+      // Ruling 210: a correction an agent wrote, in the proposal's tint, named
       // for what it touched.
       ["kb_correction", "proposal", "Knowledge base"],
       ["transition", "transition", "Transition request"],
@@ -537,7 +537,7 @@ describe("TimelineItem", () => {
   });
 });
 
-describe("TimelineItem: an entry's pictures show their first row, and fold with its text (ruling 522)", () => {
+describe("TimelineItem: an entry's pictures show their first row, and fold with its text (ruling 314)", () => {
   afterEach(() => vi.restoreAllMocks());
 
   /** jsdom lays nothing out: the strip is given 1008px and each tile 240, so
@@ -581,7 +581,7 @@ describe("TimelineItem: an entry's pictures show their first row, and fold with 
     expect(tiles(container)).toEqual(shots(4));
   });
 
-  it("ruling 586: a long typed entry folds its text behind its own Show more", () => {
+  it("ruling 68: a long typed entry folds its text behind its own Show more", () => {
     // CANARY: render a typed entry's text in a plain box again and a question
     // entry carrying its card runs the whole height of the timeline.
     layout(900);
@@ -998,7 +998,7 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     // active, so tabbing THROUGH the control silently selected the
     // first-deployed agent — typically the repo-write deliverer — and the next
     // Enter in the prompt input dispatched a billable run nobody chose.
-    // Ruling 147 moved the proof off `disabled`: the start stays clickable with
+    // Ruling 288 moved the proof off `disabled`: the start stays clickable with
     // nothing picked, so what must hold is that no pick was made and a click
     // dispatches nothing.
     const { container, onRunAgent } = renderExec(execTask());
@@ -1054,7 +1054,7 @@ describe("ExecutionProfile — the AgentSelect combobox", () => {
     expect(agentInput(container)!.value).toBe("Developer");
     fireEvent.change(agentInput(container)!, { target: { value: "Rev" } });
     // The selection is cleared until a row is picked again, so the start has
-    // nothing to submit: ruling 147 keeps it enabled, and it dispatches nothing.
+    // nothing to submit: ruling 288 keeps it enabled, and it dispatches nothing.
     fireEvent.click(agentRunBtn(container));
     expect(onRunAgent).not.toHaveBeenCalled();
   });
@@ -1081,7 +1081,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
   });
 
   /**
-   * Ruling 147: an empty picker is validation, not availability, so the start
+   * Ruling 288: an empty picker is validation, not availability, so the start
    * stays ENABLED and refuses the click — a dead button explained only by a
    * `title` no browser opens on a disabled control was the defect.
    */
@@ -1195,7 +1195,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     );
     cleanup();
 
-    // Ruling 556: the project's required reviewer, delivery-capable, on a task
+    // Ruling 89: the project's required reviewer, delivery-capable, on a task
     // with no deliverer → the dispatch engages it to review, and says so.
     // CANARY: drop the `requiredReviewer` term and this promises it the branch.
     const judge: DeployedSpecialistView = {
@@ -1213,7 +1213,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     );
     cleanup();
 
-    // Ruling 665: the task's deliverer on a board that delivers results holds
+    // Ruling 228: the task's deliverer on a board that delivers results holds
     // no repo-write, so it owns no branch. CANARY: drop the `delivery ===
     // false` arm and a files deliverer is promised a branch and a PR.
     const builder: DeployedSpecialistView = {
@@ -1302,7 +1302,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(closed.container.querySelector(".agent-run")!.textContent).toContain(
       "Reviewer run · recheck",
     );
-    // Ruling 177 (U36-13, live 2026-09-12): visible is not enough — a pending
+    // Ruling 52 (U36-13, live 2026-09-12): visible is not enough — a pending
     // entry on a CLOSED task will be SKIPPED when it comes due, never run, and
     // the page said nothing while the control beside it said "Task closed".
     // The controller read two such entries on shipped HLC-19 and could not
@@ -1321,7 +1321,7 @@ describe("ExecutionProfile — run an agent (prompt + Run/Schedule)", () => {
     expect(bare.container.querySelector("[data-sched-moot]")).toBeNull();
   });
 
-  it("ruling 177 (U36-13): the OPERATOR control's pending entries say the same thing on a closed task", () => {
+  it("ruling 52 (U36-13): the OPERATOR control's pending entries say the same thing on a closed task", () => {
     const pending = [schedule({ id: "sch-op", action: "run-operator", prompt: "check in" })];
     const { container } = renderExec(execTask({ displayReadiness: "merged" }), {
       schedules: pending,
@@ -1480,11 +1480,11 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(runBtn.disabled).toBe(true);
   });
 
-  it("a closed task withdraws the operator run and no longer advertises an @operator side door (N20-17 → ruling 177, 625)", () => {
+  it("a closed task withdraws the operator run and no longer advertises an @operator side door (N20-17 → ruling 52, 310)", () => {
     const { container } = renderExec(
       execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
     );
-    // Ruling 625 on ruling 37: withdrawn, as the run-an-agent control is, not
+    // Ruling 310 on ruling 95: withdrawn, as the run-an-agent control is, not
     // a dead steer field, when-picker and button. CANARY: drop the closed
     // early return in OperatorRunControl and all three draw again, disabled.
     expect(container.querySelector(".op-run:not(.agent-run) > button.btn")).toBeNull();
@@ -1492,7 +1492,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain(
       "Task closed. Reopen it to run the operator.",
     );
-    // Ruling 177 (pass 36): every door refuses a closed task, so the N20-17
+    // Ruling 52 (pass 36): every door refuses a closed task, so the N20-17
     // disclosure that an @operator comment "still runs it" would now lie.
     expect(container.textContent).not.toContain("still runs it");
   });
@@ -1502,7 +1502,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
       execTask({ operator: attachedOperator }),
       {
         operatorBackend: "codex",
-        // Ruling 127: the question is the task OWNER's Codex account, not a
+        // Ruling 137: the question is the task OWNER's Codex account, not a
         // deployment credential probe — and the viewer here IS the owner, so
         // the store's own second-person sentence is what they read (here, a
         // wiped runtime volume's, which the generic fallback cannot say).
@@ -1532,7 +1532,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain(
       "Runs on this task use your own account",
     );
-    // No instance credential is named: since ruling 127 there is none to name.
+    // No instance credential is named: there is none to name (ruling 137).
     expect(container.textContent).not.toContain("on this instance");
   });
 
@@ -1784,7 +1784,7 @@ describe("ExecutionProfile — a closed task offers no run controls (P14-WL-07)"
  * run-an-agent cell has replaced itself with "Task closed. Reopen it to run an
  * agent.", the operator Run is disabled with its reason rendered — and one row
  * down the ledger sat an ENABLED ✕ titled "Release this agent from the task",
- * which the server refuses at the terminal stage. Ruling 37 settles the shape
+ * which the server refuses at the terminal stage. Ruling 95 settles the shape
  * of the fix: a WITHDRAWN affordance is honest, a disabled one just invites the
  * support question. The ledger ROW keeps rendering either way — it is the
  * record of who was engaged, and a closed task has the most reason to keep it.
@@ -1867,7 +1867,7 @@ describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     expect(agentMenu(container)).toBeNull();
     expect(input.value).toBe("");
-    // Nothing is picked, so the start (enabled since ruling 147) submits nothing.
+    // Nothing is picked, so the start (enabled, ruling 288(a)) submits nothing.
     fireEvent.click(agentRunBtn(container));
     expect(onRunAgent).not.toHaveBeenCalled();
   });
@@ -1930,7 +1930,7 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
         />
       </MemoryRouter>,
     );
-    // Ruling 511: the collision is the first of the card's status rows.
+    // Ruling 315: the collision is the first of the card's status rows.
     const row = container.querySelector('[data-signal="collision"]')!;
     expect(row).not.toBeNull();
     expect(row.querySelector(".pr-sig-title")!.textContent).toBe("Branch collision");
@@ -1953,11 +1953,11 @@ describe("GithubTrace — branch collision framing (F31-1)", () => {
 });
 
 /**
- * Ruling 482 (F40-52): the PR card says what Viberr's own run of the project's
+ * Ruling 315 (F40-52): the PR card says what Viberr's own run of the project's
  * gates found on the revision under review, with each gate's log, and offers
  * the run again to the people who may deliver.
  */
-describe("GithubTrace — project gates (ruling 482)", () => {
+describe("GithubTrace — project gates (ruling 315)", () => {
   const GATES: NonNullable<AcceptanceAffordance["gates"]> = {
     sha: "a95c337".padEnd(40, "0"),
     state: "failed",
@@ -1989,7 +1989,7 @@ describe("GithubTrace — project gates (ruling 482)", () => {
       </MemoryRouter>,
     );
     expect(getByText("Gates on a95c337: 3/4 exit 0 (run by Viberr)")).toBeTruthy();
-    // Ruling 511: the gates are the card's first status row, titled in the
+    // Ruling 315: the gates are the card's first status row, titled in the
     // pill vocabulary's words, and a failure keeps its table open.
     const gatesRow = container.querySelector('[data-signal="gates"]')!;
     expect(gatesRow.querySelector(".pr-sig-title")!.textContent).toBe("gates failed");
@@ -2029,7 +2029,7 @@ describe("GithubTrace — project gates (ruling 482)", () => {
 });
 
 /**
- * Ruling 511 (owner, 2026-09-26, on the PR card: "this is dated design …
+ * Ruling 315 (owner, 2026-09-26, on the PR card: "this is dated design …
  * this has no taste"): the card reads like GitHub's merge box. No inverted
  * bar: the repository and the pull request's state, its title as the link to
  * it, the branch as the link to its tree, and the diff; then one status row
@@ -2037,7 +2037,7 @@ describe("GithubTrace — project gates (ruling 482)", () => {
  * folds its table; a commit leads with its subject; the actions stand
  * together; the freshness facts close the card in small print.
  */
-describe("GithubTrace — the merge-box card (ruling 511)", () => {
+describe("GithubTrace — the merge-box card (ruling 315)", () => {
   const PASSED: NonNullable<AcceptanceAffordance["gates"]> = {
     sha: "a91f7c2".padEnd(40, "0"),
     state: "passed",
@@ -2339,7 +2339,7 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(onForceAccept).toHaveBeenCalled();
   });
 
-  it("ruling 665: a task delivered as files says it has no branch, and its delivered files are work to accept", () => {
+  it("ruling 228: a task delivered as files says it has no branch, and its delivered files are work to accept", () => {
     // CANARY: drop `filesDelivery === "delivered"` from `wedgedOrDelivering`
     // (`forceAcceptReason` in task-side-panels-derive.ts) and a
     // files-delivered task that review has stalled on loses the admin's way
@@ -2367,11 +2367,11 @@ describe("GithubTrace — admin force-accept (DG-2)", () => {
     expect(delivered.getByText(/Force accept/)).toBeTruthy();
   });
 
-  it("ruling 124: NO force-accept on a task with nothing to accept and no wedge", () => {
+  it("ruling 98: NO force-accept on a task with nothing to accept and no wedge", () => {
     // The standing offer this removes: a task created seconds ago — no branch,
     // no PR, no revision, no blocked packet — showed an admin "skips the
     // remaining stages and the review gate" directly above "No branch yet"
-    // (pass 33, Q33-2). Ruling 59's escape hatch is kept by the case above.
+    // (pass 33, Q33-2). Ruling 98's escape hatch is kept by the case above.
     const { container, getByText } = render(
       <MemoryRouter>
         <GithubTrace
@@ -2593,7 +2593,7 @@ describe("F19-22: the GitHub panel names the last CHANGE, not the last check", (
   it("says 'no completed pass on record' — never 'never synced' — with no audit row", () => {
     // Null here means the app cannot prove when it last looked (audit rows are
     // kept 90 days). Claiming GitHub was never contacted is the same class of
-    // lie F19-22 is about, and ruling 46/R17-5 keeps this neutral either way.
+    // lie F19-22 is about, and ruling 237/R17-5 keeps this neutral either way.
     const { checked } = freshnessRows(
       traceTask({ pr: { number: 147, state: "review", title: "x" } }),
       "2026-08-06T12:01:55.000Z",
@@ -2640,7 +2640,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     const reviewPill = review.container.querySelector(".gh-bar .pill")!;
     expect(reviewPill.textContent).toBe("in review");
     expect(reviewPill.className).toContain("info");
-    // Ruling 511: the number stands with the title, not in the pill.
+    // Ruling 315: the number stands with the title, not in the pill.
     expect(review.container.querySelector(".pr-title")!.textContent).toContain("#14");
   });
 
@@ -2648,7 +2648,7 @@ describe("UI-36: a rejected PR must not look like an open one", () => {
     const merged = render(<GithubTrace githubHost={GH_HOST} task={withPr("merged")} acceptance={traceAcceptance()} />);
     const mergedPill = merged.container.querySelector(".gh-bar .pill")!;
     expect(mergedPill.textContent).toBe("merged");
-    // Ruling 511: filled on the bar, as it always was there. The quiet
+    // Ruling 315: filled on the bar, as it always was there. The quiet
     // outline's muted ink is made for --surface and fades on the inverted bar.
     expect(mergedPill.className).not.toContain("quiet");
     cleanup();
@@ -2708,7 +2708,7 @@ describe("UI-42/UI-44: the decision packet", () => {
     ],
   };
 
-  it("ruling 138 / F35-6: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, the requested goal itself, and one 'Edit the goal' control that opens that same draft", () => {
+  it("ruling 63 / F35-6: a DECIDED edit_goal packet renders the chosen option locked, no Confirm, the requested goal itself, and one 'Edit the goal' control that opens that same draft", () => {
     // Canary: ignore `p.awaiting`/`p.decided` in the card and the radiogroup +
     // Confirm come back. F35-6 canary: drop the `.goal-draft` figure and the
     // draft assert is red; hand the button `goalDraftForOption(chosen)` again
@@ -2762,7 +2762,7 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(onResolve).not.toHaveBeenCalled();
   });
 
-  it("ruling 138: an awaiting packet WITHOUT a recorded decision renders nothing special", () => {
+  it("ruling 63: an awaiting packet WITHOUT a recorded decision renders nothing special", () => {
     const { queryByRole } = render(
       <DecisionPacket
         packet={{ ...goalPacket, awaiting: "goal_edit" }}
@@ -2779,12 +2779,12 @@ describe("UI-42/UI-44: the decision packet", () => {
     expect(queryByRole("radiogroup")).not.toBeNull();
   });
 
-  // Ruling 459: the blocked option and the refused Confirm each carried an
+  // Ruling 283: the blocked option and the refused Confirm each carried an
   // inline .55 of their own, off the house .45 step, and the sheet's
   // `:not(:disabled)` hover and press still matched both. The attribute is now
   // the whole contract: `.opt[aria-disabled="true"]` and
   // `.btn[aria-disabled="true"]` dim them in app.css, which pins those rules.
-  it("blocks edit_goal for a resolver who cannot edit the goal; the dim is the sheet's (ruling 459)", () => {
+  it("blocks edit_goal for a resolver who cannot edit the goal; the dim is the sheet's (ruling 283)", () => {
     const onResolve = vi.fn();
     const { container } = render(
       <DecisionPacket
@@ -2919,8 +2919,8 @@ describe("UI-42/UI-44: the decision packet", () => {
    * passes an inert option by, as a disabled radio is in the APG radio group,
    * and does nothing when every option is inert. With nothing chosen, the
    * group's one tab stop is the first choice the viewer can make, and a
-   * refused Confirm focuses it (ruling 478(e)); an arrow that finds no other
-   * choice keeps a standing refusal (ruling 147). `accept_completion` carries
+   * refused Confirm focuses it (ruling 68); an arrow that finds no other
+   * choice keeps a standing refusal (ruling 288). `accept_completion` carries
    * no option-level gate, so a click and a key both still choose it and only
    * Confirm refuses.
    *
@@ -3032,7 +3032,7 @@ describe("UI-42/UI-44: the decision packet", () => {
       expect(radios.findIndex((r) => r.getAttribute("aria-checked") === "true"), `checked ${when}`).toBe(checked);
       expect(radios.findIndex((r) => r.tabIndex === 0), `tab stop ${when}`).toBe(stop);
       expect(container.querySelector('[role="alert"]') !== null, `refusal ${when}`).toBe(refused);
-      // Ruling 478(e): refused with nothing chosen, focus is on the tab stop.
+      // Ruling 68: refused with nothing chosen, focus is on the tab stop.
       if (refused && checked < 0) expect(document.activeElement, `focus ${when}`).toBe(radios[stop]);
     };
     expectState("on open", opened);
@@ -3130,7 +3130,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     const note = noteOf(packetView.container)!;
     expect(note).toBeTruthy();
     expect(note.textContent).toContain(DELIVER_LABEL);
-    // Ruling 160: the door is REFUSED while the closure is unanswered, and this
+    // Ruling 232: the door is REFUSED while the closure is unanswered, and this
     // packet is what answers it — so the note must name the refusal and make
     // resolving the precondition, never a click the reader can skip to.
     expect(note.textContent).toContain("refused while this decision stands");
@@ -3142,7 +3142,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     // The promise the packet body makes about GitHub travels here honestly now.
     expect(note.textContent).toContain("Reopening the pull request on GitHub");
     // The old copy told the reader delivering did NOT resolve the packet, which
-    // under ruling 160 reads as "click it and skip this decision" — the one
+    // under ruling 232 reads as "click it and skip this decision" — the one
     // path that always fails.
     expect(note.textContent).not.toContain("does not resolve this packet");
 
@@ -3166,7 +3166,7 @@ describe("UX19-4: the recovery packet names the in-app re-delivery path", () => 
     ].find((b) => b.textContent?.includes(DELIVER_LABEL));
     expect(deliver).toBeTruthy();
     expect(deliver!.textContent?.trim()).toBe(DELIVER_LABEL);
-    // Ruling 160: and that control refuses, so it says so on itself rather than
+    // Ruling 232: and that control refuses, so it says so on itself rather than
     // 409-ing after the click. The refusal names the PR and is readable, not
     // parked in `title` alone.
     expect(deliver!.disabled).toBe(true);
@@ -3555,12 +3555,12 @@ describe("DecisionPacket — pass-20 governance", () => {
   });
 
   /**
-   * Ruling 164 (pass 35, F35-14): the two new kinds carry the tier of the
+   * Ruling 131 (pass 35, F35-14): the two new kinds carry the tier of the
    * control they perform, in the same table every other gated kind reads. A
    * maintainer holds `approve-transition` (the stage picker) but not
    * `force-accept-completion` (admin), so one option is live and one is not.
    */
-  it("ruling 164: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
+  it("ruling 131: force_accept takes the admin tier and move_stage the stage picker's, each with its own sentence", () => {
     // Canary: drop either row from PACKET_TIER_GATES (decision-packet-derive.ts)
     // and a maintainer is offered a click the server answers with a 403.
     const { container } = render(
@@ -3607,7 +3607,7 @@ describe("DecisionPacket — pass-20 governance", () => {
   });
 
   /**
-   * Ruling 161 (pass 35, U35-8): the delete-branch ceremony says what origin
+   * Ruling 234 (pass 35, U35-8): the delete-branch ceremony says what origin
    * holds when the reconciler recorded a foreign head. Live (KNC-21) the
    * dialog promised to delete "this task's" branch while the ref held a
    * foreign fixture commit the packet itself called "not ours".
@@ -3666,7 +3666,7 @@ describe("DecisionPacket — pass-20 governance", () => {
   /**
    * V16 — the three ask-first ceremonies are ONE shell with three sets of rows
    * (`PacketDestructiveConfirm`, decision-packet-ceremonies.tsx). They were
-   * three shell-for-shell copies of the standard rulings 20 (R15-1) and 53
+   * three shell-for-shell copies of the standard rulings 97 (R15-1) and 53
    * (R18-7) hold every one-way write to, so a change to the shared half landed
    * on whichever copy was open. This pins the shell on all three at once: the
    * same alertdialog contract, the same close affordance, the same obs body,
@@ -3818,7 +3818,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     expect(send).toBeDefined();
     fireEvent.click(send);
     expect(onRequestMaintainer).toHaveBeenCalled();
-    // Ruling 673 trimmed the card to one note on the repository question
+    // Ruling 312(d) trimmed the card to one note on the repository question
     // only. Here the options sit on different grants, so the selected one
     // still says which it needs, and Confirm is described by that line alone.
     // CANARY: let the one-note treatment reach every stranded packet and two
@@ -3832,12 +3832,12 @@ describe("DecisionPacket — pass-20 governance", () => {
     ).toBe("pkt-block-reason");
   });
 
-  // Ruling 368: the escalation in flight shows itself on its button. It was
+  // Ruling 286: the escalation in flight shows itself on its button. It was
   // never even disabled for its own request (only the resolve fetcher's), so a
   // second click re-posted it and nothing said it was on its way.
   // Canary: stop passing `escalating: escalateBusy` in task-detail-regions.tsx
   // (this renders the card directly, so drop `aria-busy` on the button instead).
-  it("ruling 368: an escalation in flight reads Sending…, busy, the loader spinning", () => {
+  it("ruling 286: an escalation in flight reads Sending…, busy, the loader spinning", () => {
     const { container } = render(
       <DecisionPacket
         packet={withOptions([
@@ -3927,7 +3927,7 @@ describe("DecisionPacket — pass-20 governance", () => {
       "PR #143 was closed on GitHub without merging.",
     );
   });
-  it("ruling 472: the asking agent's markdown body renders as steps, not literal ** and ##", () => {
+  it("ruling 62: the asking agent's markdown body renders as steps, not literal ** and ##", () => {
     // Live on WEB-3 (pass 40) a 3,500-character Cloudflare Connect guide read as
     // one paragraph: `**Worker name:**`, `## (a) Connect…` and `1. …` as typed.
     const guide = withOptions(packet142.options, {
@@ -3944,7 +3944,7 @@ describe("DecisionPacket — pass-20 governance", () => {
     expect(body.textContent).not.toContain("**");
     expect(body.textContent).not.toContain("##");
     expect(body.querySelector("strong")!.textContent).toBe("Why this is yours:");
-    // Ruling 478(f): under the packet's own h2 title, one level down.
+    // Ruling 313: under the packet's own h2 title, one level down.
     expect(body.querySelector("h3")!.textContent).toBe("(a) Connect Workers Builds");
     expect([...body.querySelectorAll("ol > li")].map((li) => li.textContent)).toEqual([
       "Open Workers & Pages.",
@@ -3989,7 +3989,7 @@ describe("DecisionPacket observation labels", () => {
     expect(long!.length).toBeLessThanOrEqual(40);
   });
 
-  it("ruling 470: a path-shaped key is the agent's label and is shown, never replaced", () => {
+  it("ruling 62: a path-shaped key is the agent's label and is shown, never replaced", () => {
     // Live on WEB-1 (pass 40) the operator keyed a row `origin/main`, the git
     // ref it had read; the card said "DETAIL" and lost what the row was about.
     const [ref, cicd, path, long] = labelsFor([
@@ -4109,7 +4109,7 @@ describe("pending schedules render inside the execution profile", () => {
 });
 
 describe("the run controls' button tiers, and the hero's links and goal editor", () => {
-  it("routine starters are secondary, and a schedule's Cancel is a ghost danger trigger (pass 30, ruling 149)", () => {
+  it("routine starters are secondary, and a schedule's Cancel is a ghost danger trigger (pass 30, ruling 278)", () => {
     const { container } = renderExec(execTask(), {
       schedules: [schedule({ id: "sch-op", prompt: "recheck" })],
     });
@@ -4120,12 +4120,12 @@ describe("the run controls' button tiers, and the hero's links and goal editor",
     expect(run.classList.contains("primary")).toBe(false);
     const cancel = container.querySelector<HTMLButtonElement>(".sched-cancel")!;
     expect(cancel.classList.contains("ghost")).toBe(true);
-    // Ruling 149: the trigger takes the danger label its own confirm commits
+    // Ruling 278: the trigger takes the danger label its own confirm commits
     // with, so the row does not read neutral up to the last click.
     expect(cancel.classList.contains("danger")).toBe(true);
   });
 
-  it("ruling 131: the hero links each wait entry to its task page, with its state when not open", () => {
+  it("ruling 55: the hero links each wait entry to its task page, with its state when not open", () => {
     // Canary: drop the `Link` wrapper (no anchors) or the state suffix.
     const { container } = renderWithRouter(
       <TaskHero
@@ -4149,7 +4149,7 @@ describe("the run controls' button tiers, and the hero's links and goal editor",
     for (const a of chips) expect(a.className).toContain("neutral");
   });
 
-  it("ruling 503(e): the hero names the task's epic as a field, a chip linking to the epic's page", () => {
+  it("ruling 325: the hero names the task's epic as a field, a chip linking to the epic's page", () => {
     // CANARY: drop the hero's Epic field, or render the chip without `to`.
     const { container } = renderWithRouter(
       <TaskHero
@@ -4185,10 +4185,10 @@ describe("the run controls' button tiers, and the hero's links and goal editor",
     expect(save.className).not.toBe(cancel.className);
   });
 
-  // Ruling 147: the 3-character floor stops disabling Save goal. The primary
+  // Ruling 288: the 3-character floor stops disabling Save goal. The primary
   // stays enabled, a short draft is refused in place with the sentence the
   // surface already carried, and the refusal never becomes a request.
-  it("ruling 147: Save goal stays enabled and refuses a draft under the floor", async () => {
+  it("ruling 288: Save goal stays enabled and refuses a draft under the floor", async () => {
     let saves = 0;
     const { container, getByText, queryByRole } = renderWithRouter(
       <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
@@ -4237,7 +4237,7 @@ describe("the run controls' button tiers, and the hero's links and goal editor",
     expect(saves).toBe(1);
   });
 
-  it("ruling 451(g): the goal refusal shakes per refused click, never on a keystroke", async () => {
+  it("ruling 284: the goal refusal shakes per refused click, never on a keystroke", async () => {
     // Found in review: after a refused "ab", typing "abc" and then a backspace
     // mounted the same refusal's box again, and it shook with no click.
     // CANARY: put `.refused` back on the box whenever `refused` is set.
@@ -4264,7 +4264,7 @@ describe("the run controls' button tiers, and the hero's links and goal editor",
     expect(queryByRole("alert")!.classList.contains("refused")).toBe(true);
   });
 
-  it("ruling 147: a re-opened editor is pristine, never still marked", async () => {
+  it("ruling 288: a re-opened editor is pristine, never still marked", async () => {
     const { container, getByText, queryByRole } = renderWithRouter(
       <TaskHero task={heroTask()} stage={undefined} canEditGoal />,
     );
@@ -4454,13 +4454,13 @@ describe("C2/C3/C12: the hero's readiness + validation vocabulary", () => {
 });
 
 /**
- * Ruling 169 (owner, 2026-09-09): "a task can't be blocked, ready, and awaiting
+ * Ruling 308 (owner, 2026-09-09): "a task can't be blocked, ready, and awaiting
  * verdict at the same time. What does ready mean?" — the hero read the Ready
  * STAGE as a status word beside a readiness pill and a validation pill drawn as
  * peers. The stage and the status are labelled fields now, and the status is
  * one word; validation appears on its own only as a problem.
  */
-describe("ruling 169: the hero's stage and status are labelled fields, and the status is one word", () => {
+describe("ruling 308: the hero's stage and status are labelled fields, and the status is one word", () => {
   const ready = { id: "ready", name: "Ready", color: "emerald" };
   const meta = (el: HTMLElement) => el.querySelector(".hero-meta")!;
   const fields = (el: HTMLElement) =>
@@ -4585,14 +4585,14 @@ describe("U39-21: a packet option renders its inline code", () => {
   });
 });
 
-/* ---------------------------------------- ruling 478: task page fixes */
+/* ---------------------------------------- ruling 313: task page fixes */
 
 /**
- * Ruling 493: a gate run's note is drawn as what it records, its ending, its
+ * Ruling 313: a gate run's note is drawn as what it records, its ending, its
  * revision and the gate table, instead of a sentence, a monospaced block and
  * the same logs again as files.
  */
-describe("TimelineItem — a gate run's note (ruling 493)", () => {
+describe("TimelineItem — a gate run's note (ruling 313)", () => {
   const BASE = "/projects/viberr-core/tasks/VIB-151/attachments";
   const LOG = "gate-a95c337-02-build-20260925T101512Z.log";
   const gateNote = (gates: NonNullable<TimelineEventRender["gates"]>) =>
@@ -4650,12 +4650,12 @@ describe("TimelineItem — a gate run's note (ruling 493)", () => {
 });
 
 /**
- * Ruling 526: a reviewer's verdict is a card: its title in the verdict's
+ * Ruling 313: a reviewer's verdict is a card: its title in the verdict's
  * colour, the tally of its checks, the revision it judged, and the checklist
  * with what blocks first. The note's "Validation:" lead and its plain opening
  * are not said again, and a file a row opens is not drawn again as a tile.
  */
-describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
+describe("TimelineItem — a reviewer's verdict (ruling 313)", () => {
   const BASE = "/projects/viberr-core/tasks/VIB-142/attachments";
   const LOG = "vib-142-review-validate-cases.log";
   const verdictNote = (partial: Partial<TimelineEventRender>) =>
@@ -4723,13 +4723,13 @@ describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
   });
 
   /**
-   * Ruling 639: a result the line cuts opens in place. The owner read "The
+   * Ruling 313: a result the line cuts opens in place. The owner read "The
    * proposed pay-as-you-go default list…" on AWSC-90's verdict with no way to
    * read the rest. jsdom lays nothing out, so the long result reports a cut
    * (its words 900px wide in a 300px box) and the short one fits.
    * CANARY: render every result as plain text and the cut one has no control.
    */
-  it("ruling 639: a cut result is the control that opens it, a result that fits stays text", () => {
+  it("ruling 313: a cut result is the control that opens it, a result that fits stays text", () => {
     const why =
       "The proposed pay-as-you-go default lists the old tier price and leaves the flat-rate plan out of the totals.";
     const cutText = (el: HTMLElement) => el.classList.contains("ev-result-text") && el.textContent === why;
@@ -4765,7 +4765,7 @@ describe("TimelineItem — a reviewer's verdict (ruling 526)", () => {
   });
 });
 
-describe("ruling 478: the task page's timeline, packet and GitHub panel", () => {
+describe("ruling 313: the task page's timeline, packet and GitHub panel", () => {
   /** WEB-3's agent question, as the loader renders it. */
   const agentQuestion: PacketRender = {
     type: "input",
@@ -4859,7 +4859,7 @@ describe("ruling 478: the task page's timeline, packet and GitHub panel", () => 
     ]);
   });
 
-  it("ruling 625 (B11): an agent's question keeps the amber tone; the operator's decision takes the info blue", () => {
+  it("ruling 312 (B11): an agent's question keeps the amber tone; the operator's decision takes the info blue", () => {
     // CANARY: tone the card on `p.type` alone again, and every input packet is
     // `input` (amber) — the operator's "Decision required" too, while Home and
     // Notifications pill that same packet blue.
@@ -4982,7 +4982,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     // The composed choice renders after the authored options.
     const custom = getByText("Write your own directive").closest("button")!;
     expect(custom.getAttribute("role")).toBe("radio");
-    // Ruling 271: `list_decisions` numbers this choice `options.length + 1` so
+    // Ruling 263: `list_decisions` numbers this choice `options.length + 1` so
     // a person reading the controller's briefing finds the same one here. Pin
     // the position the briefing promises. CANARY: render the composed choice
     // before the authored options and the two stop agreeing.
@@ -5003,7 +5003,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     const input = document.querySelector<HTMLTextAreaElement>("#pkt-custom")!;
     expect(input).not.toBeNull();
 
-    // Ruling 147: Confirm stays ENABLED with the directive still empty, and the
+    // Ruling 288: Confirm stays ENABLED with the directive still empty, and the
     // click is refused in place instead of going dead.
     // SAFETY: the aria-label belongs to the packet's Confirm <button>
     // (`PacketActions`, decision-packet-regions.tsx); the bound query cannot
@@ -5037,7 +5037,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     );
   });
 
-  // Ruling 147: a pristine form is never accused — leaving the directive and
+  // Ruling 288: a pristine form is never accused — leaving the directive and
   // coming back drops the standing refusal. Choosing the directive again while
   // it is the checked choice changes nothing, by a click or by its digit as by
   // an arrow (UI-42's table): the box is as empty as when Confirm refused it,
@@ -5045,7 +5045,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   //
   // CANARY: drop `selectOption`'s return on the checked choice and a click or
   // the digit on the checked directive clears its refusal.
-  it("ruling 147: only a choice change clears a standing directive refusal", () => {
+  it("ruling 288: only a choice change clears a standing directive refusal", () => {
     const { getByText, getByLabelText } = render(
       <DecisionPacket
         packet={packet142}
@@ -5087,7 +5087,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
     ).toBeNull();
   });
 
-  // Ruling 147 dropped `choiceCount === 0` from Confirm's `disabled`, which
+  // Ruling 288 dropped `choiceCount === 0` from Confirm's `disabled`, which
   // raises the question of what an options-less packet does now. Nothing bad:
   // the composed directive IS a choice, and it is offered to exactly the
   // viewers who get the Confirm button (`customOffered = canResolve`, in
@@ -5166,7 +5166,7 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
       />,
     );
     const group = container.querySelector('[role="radiogroup"]')!;
-    // Ruling 500: each option leads with its key, which the button also
+    // Ruling 312: each option leads with its key, which the button also
     // declares as its shortcut; the chosen option's key fills (the sheet).
     const chips = [...container.querySelectorAll(".opt-key")].map(
       (k) => k.textContent,
@@ -5202,16 +5202,16 @@ describe("DecisionPacket questionnaire custom answer (P21)", () => {
   });
 });
 
-/* ------------------------------------------ ruling 459: primary-action exits */
+/* ------------------------------------------ ruling 287: primary-action exits */
 
 /**
- * Ruling 459: a dialog's primary action leaves the way Cancel does, through
+ * Ruling 287: a dialog's primary action leaves the way Cancel does, through
  * `useDialog`'s `commit`: the action runs, the dialog plays its exit, and only
  * then its onCancel unmounts it. jsdom reads no stylesheet, so each test gives
  * the dialog the sheet's closing clock itself; the exit then waits for the
  * dialog's own transitionend, as it does in a browser.
  */
-describe("ruling 459: a confirm's primary action plays the same exit as Cancel", () => {
+describe("ruling 287: a confirm's primary action plays the same exit as Cancel", () => {
   const slow = (dialog: HTMLElement) => {
     dialog.style.transitionDuration = "0.15s";
   };
@@ -5340,16 +5340,16 @@ describe("ruling 459: a confirm's primary action plays the same exit as Cancel",
 });
 
 /**
- * Ruling 368 on the GitHub trace: Complete merge and Force accept share the
+ * Ruling 286 on the GitHub trace: Complete merge and Force accept share the
  * task page's run fetcher with interrupt and retry, so both went `disabled`
  * (the .45 refused step) for ANY of them, their own included, with their
  * resting labels. Deliver named its work but kept the branch glyph at .45.
- * Ruling 459: each glyph trades for the loader in its GlyphSwap cell, where the
+ * Ruling 284: each glyph trades for the loader in its GlyphSwap cell, where the
  * loader is always drawn (spinning, paused while it rests hidden), so "the
  * loader shows" is the cell's `data-copied`, not the presence of a `.spin`.
  * Canary: drop `aria-busy={forcing || undefined}` in task-side-panels.tsx.
  */
-describe("ruling 368: the GitHub trace's requests in flight", () => {
+describe("ruling 286: the GitHub trace's requests in flight", () => {
   const blocked = traceAcceptance({ blockedReason: "Waiting on a verdict." });
   const trace = (props: Partial<ComponentProps<typeof GithubTrace>>) =>
     render(
@@ -5398,12 +5398,12 @@ describe("ruling 368: the GitHub trace's requests in flight", () => {
 });
 
 /**
- * Ruling 368's other half: a control that merely waits claims nothing. Both
+ * Ruling 286's other half: a control that merely waits claims nothing. Both
  * callers close the move-back dialog on the click, so its busy step is always
  * another move in flight; the button used to read "Moving…" for it.
  * Canary: put `{busy ? "Moving…" : "Move back"}` back in move-back-confirm.tsx.
  */
-describe("ruling 368: the move-back dialog waits without claiming the move", () => {
+describe("ruling 286: the move-back dialog waits without claiming the move", () => {
   it("busy: disabled, still reads Move back, no busy mark", () => {
     const { getByText } = render(
       <MoveBackConfirm
@@ -5423,7 +5423,7 @@ describe("ruling 368: the move-back dialog waits without claiming the move", () 
 });
 
 /**
- * Ruling 459 over ruling 368: a run start's glyph changes twice (Run → Schedule
+ * Ruling 284 over ruling 286: a run start's glyph changes twice (Run → Schedule
  * with the when-picker, resting → loader while its own request is in flight),
  * and both go through one cell. The resting mark and the clock trade in the
  * inner GlyphSwap; that whole resting cell trades for the one spinning loader
@@ -5437,7 +5437,7 @@ describe("ruling 368: the move-back dialog waits without claiming the move", () 
  * dispatch's `.op-run.agent-run` row matches too, so the selectors below are
  * that rule's. Canary: drop `run-go` from either button.
  */
-describe("ruling 459 over 368: a run start trades its glyphs in one cell", () => {
+describe("ruling 284 over 368: a run start trades its glyphs in one cell", () => {
   const starts = (c: HTMLElement) => [
     ["When the operator run starts", c.querySelector<HTMLButtonElement>(".op-run:not(.agent-run) > .run-go")!],
     ["When the agent run starts", c.querySelector<HTMLButtonElement>(".op-run.agent-run > .run-go")!],

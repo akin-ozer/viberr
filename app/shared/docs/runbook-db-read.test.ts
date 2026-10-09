@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ruling 158 (pass 35 F35-9) — the operations docs never tell anyone to open
+ * Ruling 23 (pass 35 F35-9) — the operations docs never tell anyone to open
  * a LIVE projection database, from either side of the container boundary.
  *
  * Pass 34 (D34-1) saw the server die with SIGBUS (exit 135) one second after a
@@ -109,7 +109,7 @@ function sqlite3Invocations(text: string): { command: string; at: number }[] {
   }));
 }
 
-describe("ruling 158: the operations docs never open a live projection database, on either side", () => {
+describe("ruling 23: the operations docs never open a live projection database, on either side", () => {
   it.each(PAGES)("$rel: no sqlite3 invocation targets state/projection.sqlite", ({ rel, text }) => {
     expect(
       sqlite3Invocations(text).map((i) => i.command),
@@ -205,7 +205,7 @@ describe("ruling 158: the operations docs never open a live projection database,
   );
 });
 
-describe("ruling 158: the scripts page describes the reader that shipped", () => {
+describe("ruling 23: the scripts page describes the reader that shipped", () => {
   const SCRIPTS = page("docs/development/scripts.md");
 
   /** The `### npm run backup` section, up to the next heading of any level. */
@@ -219,7 +219,7 @@ describe("ruling 158: the scripts page describes the reader that shipped", () =>
     expect(
       section,
       `${SCRIPTS.rel} still describes the VACUUM INTO as running "from a read-only connection", ` +
-        `which is the pre-158 shape: readOnly: true on a live root is what produced exit 135 twice. ` +
+        `which is the old shape: readOnly: true on a live root is what produced exit 135 twice. ` +
         `The live-lock path opens a COPY, read-write, so SQLite recovers the copied WAL into it.`,
     ).not.toMatch(/read-only\s+connection/i);
     expect(

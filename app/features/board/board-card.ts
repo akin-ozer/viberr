@@ -1,20 +1,20 @@
 import type { TaskSummary } from "~/shared/mapping/task.server";
 
 /**
- * Ruling 457 (BOARD-3): what the board ships for one card. The board route
+ * Ruling 11 (BOARD-3): what the board ships for one card. The board route
  * used to hand every card the whole 49-field `TaskSummary` (the full decision
  * packet, the goal, commits, file path, timestamps and counts), of which the
- * card face (ruling 365), `card-status.ts`, `board-filters.ts`, the list view
- * and the acceptance ceremony (`AcceptOnBoardConfirm`, rulings 53 and 88) read
+ * card face (ruling 306), `card-status.ts`, `board-filters.ts`, the list view
+ * and the acceptance ceremony (`AcceptOnBoardConfirm`, ruling 97) read
  * under thirty; half the board's payload was fields nothing drew. This is that
  * read set, built by `toBoardCard` in the board loader; the board's types
  * accept nothing wider, so a field a new board feature reads has to be added
  * here, where the typecheck sends it.
  *
  * Kept on purpose: the acceptance ceremony re-reads the summary from the live
- * payload (F19-27, ruling 42), so `pr`, `prChecks`, `workRevisionSha`, the
+ * payload (F19-27, ruling 96), so `pr`, `prChecks`, `workRevisionSha`, the
  * packet's type and title (and the option the acceptance answers it with,
- * ruling 471), `blockReason`,
+ * ruling 316), `blockReason`,
  * `atAcceptanceBoundary` and `archived` stay; `waitingOnMe` (R8-3) and `quiet`
  * (Gap-10) are the loader's viewer and activity annotations.
  */
@@ -50,14 +50,14 @@ export interface BoardCard
   /** Only the operator's presence is drawn ("awaiting owner"). */
   operator: Pick<NonNullable<TaskSummary["operator"]>, "name"> | null;
   /** The open decision's kind and title: the readiness word and the
-   *  acceptance ceremony's open-packet row. Ruling 471: plus the option the
+   *  acceptance ceremony's open-packet row. Ruling 316: plus the option the
    *  board's acceptance (a move into the terminal stage) answers it with, when
    *  it answers one; the row then reads "Answers" instead of "Withdraws". */
   packet: Pick<NonNullable<TaskSummary["packet"]>, "type" | "title" | "acceptAnswersWith"> | null;
   /** Gap-10: gone quiet (resolved server-side, see `TaskActivitySummary`). */
   quiet: boolean;
-  /** Ruling 503: the epic the task belongs to, which the board's epic filter
-   *  reads. The card draws no chip for it: ruling 172 keeps the card to its
+  /** Ruling 325: the epic the task belongs to, which the board's epic filter
+   *  reads. The card draws no chip for it: ruling 306(e) keeps the card to its
    *  title, status and owner, and the task page names the epic. */
   epicId: string | null;
 }

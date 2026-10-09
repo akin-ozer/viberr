@@ -40,7 +40,7 @@ import { writeStoreFiles } from "./store-files.server";
 import { recordNoRepositoryRuling } from "./repository-ruling.server";
 
 /**
- * Ruling 653: a board file carries a board's workflow from one instance to
+ * Ruling 32: a board file carries a board's workflow from one instance to
  * another, and an import writes it as a new project without touching what the
  * instance already has. Every test here drives the real writers on both ends:
  * the source board is built through the org settings writers, exported with
@@ -137,7 +137,8 @@ async function sourceBoard(): Promise<TestStore> {
   ).deployment;
   const qaLead: AgentDeployment = {
     profileId: "qa-lead",
-    capabilities: [],
+    // The board's required reviewer, so it holds the grant one must (ruling 17).
+    capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
     extras: [],
     definition: {
       kind: "specialist",
@@ -196,7 +197,7 @@ async function importInto(target: TestStore, file: { name: string; bytes: Uint8A
   });
 }
 
-describe("ruling 653: a board file carries the workflow and none of the work", () => {
+describe("ruling 32: a board file carries the workflow and none of the work", () => {
   it("imports into a new project whose workflow keys equal the exported board's, and brings its resources", async () => {
     // CANARY: drop `agents`, `requiredReviewers`, `gates` or `rulingsKb` from
     // the board file, or skip a resource writer, and the board comes back
@@ -299,7 +300,7 @@ describe("ruling 653: a board file carries the workflow and none of the work", (
     expect(preview.suggestedName).toBe("Viberr Core 2");
     seedConnection(source.db, source.users.arda.id);
     const result = await importInto(source, file);
-    expect(existsSync(kbDirPath("release-rulings-2", source.dataRoot))).toBe(false);
+    expect(existsSync(kbDirPath("release-rulings-26(a)", source.dataRoot))).toBe(false);
     expect(existsSync(skillDirPath("release-notes-2", source.dataRoot))).toBe(false);
     expect(listMcpServers(source.db).map((m) => m.name)).toEqual(["linear"]);
     const created = listAuditEvents(source.db, { action: "project.created" }).find((e) => e.projectSlug === result.slug)!;
@@ -314,7 +315,7 @@ describe("ruling 653: a board file carries the workflow and none of the work", (
   });
 });
 
-describe("ruling 653: a name this instance already uses for something else", () => {
+describe("ruling 32: a name this instance already uses for something else", () => {
   /** A target whose `release-notes` skill says something else. */
   async function targetWithOtherSkill(): Promise<TestStore> {
     const target = targetStore();
@@ -405,11 +406,11 @@ describe("ruling 653: a name this instance already uses for something else", () 
 });
 
 /**
- * Ruling 667: an imported board needs a repository only when one of its
+ * Ruling 224: an imported board needs a repository only when one of its
  * agents may write one. The file carries each deployment's grants, so the
  * import reads what the board delivers off its own roster.
  */
-describe("ruling 667: a board none of whose agents writes a repository imports without one", () => {
+describe("ruling 224: a board none of whose agents writes a repository imports without one", () => {
   const REPO_WRITE = ["execute-code-or-write-repo", "create-task-branch", "commit-push-branch", "open-review-pr"];
   const noRepository = { ...importInput(), owner: "", repoName: "" };
 
@@ -425,7 +426,7 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
     const into = { dataRoot: bare.dataRoot };
     const software = exported(source);
     expect(previewBoardImport(bare.db, software, into).delivers).toBe("software");
-    // Ruling 672: a board whose agents write a repository imports without
+    // Ruling 224: a board whose agents write a repository imports without
     // one too, and says what that means; half a repository is still refused.
     await expect(
       importBoard(bare.db, software, { ...noRepository, owner: "acme" }, actorOf(bare.users.arda), into),
@@ -470,7 +471,7 @@ describe("ruling 667: a board none of whose agents writes a repository imports w
   });
 });
 
-describe("ruling 672: a board file does not carry a decision made on this instance", () => {
+describe("ruling 199: a board file does not carry a decision made on this instance", () => {
   it("leaves the document that a board connects no repository out of the knowledge base it exports", async () => {
     // CANARY: export the rulings knowledge base whole and a board brought up
     // under the same name elsewhere is born refused: its operator is never
@@ -522,7 +523,7 @@ describe("ruling 672: a board file does not carry a decision made on this instan
   });
 });
 
-describe("ruling 671: an import names a repository GitHub confirms", () => {
+describe("ruling 225: an import names a repository GitHub confirms", () => {
   it("is refused before a single resource is written when GitHub does not show the repository", async () => {
     // The form fills the repository's name in from the board's and leaves the
     // create box unticked, so this is an import's ordinary first answer.
@@ -548,7 +549,7 @@ describe("ruling 671: an import names a repository GitHub confirms", () => {
   });
 });
 
-describe("ruling 653: what an import refuses", () => {
+describe("ruling 32: what an import refuses", () => {
   it("lists every problem in board.md at once, and an import of it writes nothing", async () => {
     // CANARY: stop at the first problem, or write before checking, and a
     // person fixes one line per upload while debris collects.
@@ -577,6 +578,36 @@ describe("ruling 653: what an import refuses", () => {
     expect(existsSync(skillDirPath("release-notes", target.dataRoot))).toBe(false);
   });
 
+  it("ruling 17: refuses a required reviewer the board deploys without the verdict grant, as Settings does", async () => {
+    // A required reviewer that cannot report a verdict never approves, so
+    // `requiredReviewerRefusals` holds every delivered task until an admin
+    // force-accepts. CANARY: drop the `grantsValidationVerdict` check from
+    // `checkBoard` and this board imports, its rule unanswerable.
+    const source = await sourceBoard();
+    const project = readProjectFile({ projectSlug: source.slug, dataRoot: source.dataRoot })!.parsed;
+    writeProject(
+      source.dataRoot,
+      {
+        ...project.frontmatter,
+        agents: project.frontmatter.agents.map((a) =>
+          a.profileId === "qa-lead"
+            ? { ...a, capabilities: [{ capabilityId: "report-validation-verdict", mode: "off" as const }] }
+            : a,
+        ),
+      },
+      project.description,
+    );
+    reprojectProject(source.db, { dataRoot: source.dataRoot }, source.slug);
+    const target = targetStore();
+    const file = exported(source);
+    expect(previewBoardImport(target.db, file, { dataRoot: target.dataRoot }).problems).toEqual([
+      "board.md: a required reviewer names the agent `qa-lead`, which the board deploys without " +
+        "`report-validation-verdict`, so it could never give the approval acceptance waits on.",
+    ]);
+    await expect(importInto(target, file)).rejects.toThrow(/cannot be imported: board\.md: a required reviewer/);
+    expect(readProjectFile({ projectSlug: "release-train", dataRoot: target.dataRoot })).toBeNull();
+  });
+
   it("refuses a board file from a newer format, and a zip with no board.md", () => {
     // CANARY: read an unknown format as this one and keys it never had are
     // dropped without a word.
@@ -599,7 +630,7 @@ describe("ruling 653: what an import refuses", () => {
   });
 });
 
-describe("ruling 653: a board folder a person zipped again", () => {
+describe("ruling 32: a board folder a person zipped again", () => {
   it("reads Finder's zip of a hand-written board: its folder, its data descriptors, and nothing of __MACOSX or .DS_Store", async () => {
     // CANARY: trust a local header's sizes (Finder writes them as zero) or
     // keep __MACOSX's `._` files and this zip does not import.

@@ -38,7 +38,6 @@ function AttachmentImage({
   useEffect(() => {
     setFailed(false);
     onFailedChange?.(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src]);
   if (failed) {
     return (

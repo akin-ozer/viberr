@@ -9,7 +9,7 @@ import {
 } from "./codex-app-server.server";
 
 /**
- * Ruling 376: the Codex completion compaction speaks the app-server's JSON-RPC
+ * Ruling 174: the Codex completion compaction speaks the app-server's JSON-RPC
  * over stdio. These cases script the server side over pipes and pin the
  * exchange the client makes, the notification that settles it, and the three
  * ways it ends without a compaction.
@@ -31,7 +31,7 @@ interface ServerLine {
     threadId?: string;
     turnId?: string;
     item?: { type: string; id: string };
-    // Ruling 599: `error` and `turn/completed` carry the turn's failure.
+    // Ruling 174: `error` and `turn/completed` carry the turn's failure.
     willRetry?: boolean;
     error?: { message: string };
     turn?: { id: string; status: string; error: { message: string } | null };
@@ -111,7 +111,7 @@ function scriptedServer(
 
 const ok = (request: Request, result: ServerResult = {}): ServerLine => ({ id: request.id, result });
 
-describe("compactCodexThread (ruling 376)", () => {
+describe("compactCodexThread (ruling 174)", () => {
   it("initializes, resumes the thread with the run's cwd, model and config, starts the compaction and settles on thread/compacted", async () => {
     const server = scriptedServer((request, write) => {
       if (request.method === "initialize") write(ok(request, { codexHome: "/x" }));
@@ -210,13 +210,13 @@ describe("compactCodexThread (ruling 376)", () => {
     expect(server.killed).toEqual(["SIGTERM"]);
   });
 
-  // Ruling 599: live, eight compactions the Codex usage limit refused each
+  // Ruling 174: live, eight compactions the Codex usage limit refused each
   // waited out the whole deadline, holding their failed runs `running`.
   // CANARY: drop the `error` / `turn/completed` arm and both cases end on the
   // two-second deadline's reason instead.
   const refusal = "You've hit your usage limit. Try again at 10:31 AM.";
 
-  it("ruling 599: an error the CLI will not retry ends the compaction with its reason; a retried one or another thread's does not", async () => {
+  it("ruling 174: an error the CLI will not retry ends the compaction with its reason; a retried one or another thread's does not", async () => {
     const server = scriptedServer((request, write) => {
       if (request.method === "initialize") write(ok(request));
       if (request.method === "thread/resume") write(ok(request));
@@ -232,7 +232,7 @@ describe("compactCodexThread (ruling 376)", () => {
     expect(server.killed).toEqual(["SIGTERM"]);
   });
 
-  it("ruling 599: a compaction turn that completes failed ends it with the turn's error", async () => {
+  it("ruling 174: a compaction turn that completes failed ends it with the turn's error", async () => {
     const server = scriptedServer((request, write) => {
       if (request.method === "initialize") write(ok(request));
       if (request.method === "thread/resume") write(ok(request));

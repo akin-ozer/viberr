@@ -17,10 +17,10 @@ import { reapRunProcesses } from "./run-processes.server";
 /**
  * A command Viberr itself runs for a task, as the task's person.
  *
- * Two things do this: the project's gates (ruling 482) and the page capture
- * (ruling 691). Both run something an agent wrote (a repository's build, a
+ * Two things do this: the project's gates (ruling 139) and the page capture
+ * (ruling 194). Both run something an agent wrote (a repository's build, a
  * delivered page's scripts), so neither may run as the server where isolation
- * is on (ruling 460): the command goes through the launcher as the task
+ * is on (ruling 139): the command goes through the launcher as the task
  * owner's agent uid, in a process group of its own, and is killed with its
  * group at its timeout. This module is the one home of that: who it runs as
  * ({@link taskOwnerLaunch}), how it runs and is stopped
@@ -40,7 +40,7 @@ const REAP_GRACE_MS = 2_000;
  * Who a task's own command runs as: the task owner's agent uid through the
  * launcher, or (isolation off) the server's own user. Throws when isolation is
  * on and nobody can be named, with `refusal` as the sentence the caller keeps:
- * ruling 460(h), never the server instead.
+ * ruling 139, never the server instead.
  */
 export function taskOwnerLaunch(
   db: DatabaseSync,

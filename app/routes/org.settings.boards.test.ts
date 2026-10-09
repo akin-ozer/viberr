@@ -4,7 +4,7 @@ import { createPat } from "~/server/secrets/pat-store.server";
 import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support/test-app";
 
 /**
- * Ruling 653: what the routes add to a board's export and import — the
+ * Ruling 32: what the routes add to a board's export and import — the
  * org-admin gate, the file response, the multipart upload, the settings
  * reply's shape and the refusals a form can cause. What the file carries and
  * what an import writes is `board-import.server.test.ts`'s.
@@ -71,7 +71,7 @@ async function post(fields: Record<string, string>, file?: { name: string; bytes
   return "data" in result ? result.data : result;
 }
 
-describe("ruling 653: the board export route", () => {
+describe("ruling 32: the board export route", () => {
   it("hands an org admin the board file, refuses anyone else, and answers an unknown board with its reason", async () => {
     // CANARY: drop `requireRole` from the loader and a member downloads every
     // board's knowledge bases and personas.
@@ -93,7 +93,7 @@ describe("ruling 653: the board export route", () => {
   });
 });
 
-describe("ruling 653: the board import intents", () => {
+describe("ruling 32: the board import intents", () => {
   it("previews an uploaded file, then imports it, answering in the settings reply's fields", async () => {
     // CANARY: read the upload from another field, or drop `slug` from the
     // reply, and the dialog never opens or never lands on the new board.

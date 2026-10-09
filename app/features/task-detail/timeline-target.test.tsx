@@ -10,10 +10,10 @@ import { Timeline, type TimelineFilterId } from "./timeline";
 import { timelineSlice } from "./timeline-slice";
 
 /**
- * Ruling 497: a notification about an event opens it on the task page. The
+ * Ruling 302: a notification about an event opens it on the task page. The
  * link names the event by its time (`#event-<occurredAt>`); the timeline
  * marks it, brings it into view and focuses it, opens the filter tab that hid
- * it, and loads older events until it is among them. Ruling 523: the person's
+ * it, and loads older events until it is among them. Ruling 302(c): the person's
  * next press or key ends the mark and takes the hash out of the URL.
  */
 
@@ -75,7 +75,7 @@ function renderAt(entry: string, tlDefault: TimelineFilterId = "all", initial = 
 const targeted = (container: HTMLElement) =>
   [...container.querySelectorAll(".tl-item[data-targeted]")].map((el) => el.id);
 
-describe("a link to a timeline event (ruling 497)", () => {
+describe("a link to a timeline event (ruling 302)", () => {
   it("marks the event, focuses it, and anchors only the first of a shared time", async () => {
     const { container } = renderAt(`/t#${anchorOf(1)}`);
     await waitFor(() => expect(targeted(container)).toEqual([anchorOf(1)]));
@@ -139,7 +139,7 @@ describe("a link to a timeline event (ruling 497)", () => {
   });
 });
 
-describe("the next press ends the mark (ruling 523)", () => {
+describe("the next press ends the mark (ruling 302(c))", () => {
   it("a press anywhere drops the hash and the mark, keeps the loaded events and the focus, and a new link marks again", async () => {
     const { container, getByTestId, getByText } = renderAt(`/t#${anchorOf(9)}`);
     await waitFor(() => expect(targeted(container)).toEqual([anchorOf(9)]));

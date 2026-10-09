@@ -8,7 +8,7 @@ import { useEpicActionToast, type EpicActionResult } from "./epic-parts";
 import type { EpicPageView, EpicStageView, EpicTaskView } from "./epics-query.server";
 
 /**
- * The epic page's posts (ruling 700(e), the large-component split of
+ * The epic page's posts (ruling 13(b), the large-component split of
  * `epic-page.tsx`), each with its fetcher, toast, local state and confirm: the
  * status the head's select sets, and a task row's Remove, Archive and
  * Restore. The page calls them in the order its fetchers always registered
@@ -43,7 +43,7 @@ export function useEpicStatus(epic: EpicPageView["epic"]) {
 }
 
 /**
- * Ruling 651: a row's Remove, Archive and Restore are the page's requests,
+ * Ruling 325: a row's Remove, Archive and Restore are the page's requests,
  * not the row's. Each one moves its row (out of the list, into the fold or
  * back), and a fetcher unmounted with the row never delivered its toast.
  * `pending` names the request in flight and its task, `locked` holds every

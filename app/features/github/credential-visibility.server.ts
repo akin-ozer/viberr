@@ -15,7 +15,7 @@ import { roleCan, type ProjectRole } from "~/shared/rbac";
  * HTML carried `github_pat_••••42af`, its label and its per-scope verdicts,
  * exactly the leak the ruling closed one page over. Two routes, one rule: the
  * decision lives here so a third surface reaching for credential health has to
- * pass through it (rulings 12/14 — never fork a mapping per surface).
+ * pass through it (rulings 237/297 — never fork a mapping per surface).
  */
 
 /**
@@ -78,7 +78,7 @@ export function withoutCredentialDetail(
     masked: null,
     lastValidatedAt: null,
     validation: null,
-    // Ruling 480: which connection holds the token is its identity too; an
+    // Ruling 222: which connection holds the token is its identity too; an
     // undefined key never reaches the serialized payload.
     connectionId: undefined,
     scopes: [],

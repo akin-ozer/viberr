@@ -511,7 +511,7 @@ describe("danger zone", () => {
   });
 
   /**
-   * Ruling 697: a project slug is one folder under `projects/`. The slug
+   * Ruling 15(b): a project slug is one folder under `projects/`. The slug
    * arrives from the URL decoded (a `%2F` is a `/`), so it can hold a path,
    * and `delete-project` builds the folder it `rmSync`s from `projectDir(slug)`.
    * A person holding `attach-file` (contributor and up) can put a `project.md`
@@ -520,7 +520,7 @@ describe("danger zone", () => {
    * file lists — here one naming arda admin, so the ONLY thing between the
    * request and the `rmSync` is the slug's containment.
    */
-  it("ruling 697: a project.md planted in a task's attachments is not a project the delete door will erase", async () => {
+  it("ruling 15(b): a project.md planted in a task's attachments is not a project the delete door will erase", async () => {
     const attachments = path.join(
       app.dataRoot,
       "projects/viberr-core/tasks/VIB-142/attachments",
@@ -719,11 +719,11 @@ describe("E9: change-repo + set-branch-cleanup authority gates", () => {
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the Settings table posts its rules as one JSON
+ * Ruling 89 (pass 36, G36-3): the Settings table posts its rules as one JSON
  * field; the route decodes it, the shared writer validates and audits, and
  * the loader hands the resolved rules (and the agents a rule may name) back.
  */
-describe("set-required-reviewers (ruling 178)", () => {
+describe("set-required-reviewers (ruling 89)", () => {
   it("round-trips the table through the action into project.md and the loader; a maintainer is refused", async () => {
     const saved = actionOutcome(
       await postAction(ids.arda, {
@@ -767,13 +767,13 @@ describe("set-required-reviewers (ruling 178)", () => {
 });
 
 /**
- * Ruling 396 (F39-23): leases reach a human surface.
+ * Ruling 61 (F39-23): leases reach a human surface.
  *
  * Before this, `set_file_leases` was a controller tool and nothing else: no
  * route, no form, no panel. A delivery refused by a lease told the person to
  * "clear the lease once VIB-142 has landed" and there was nowhere to do it.
  */
-describe("set-file-leases (ruling 396)", () => {
+describe("set-file-leases (ruling 61)", () => {
   it("round-trips a lease through the action into project.md and back out of the loader", async () => {
     const saved = actionOutcome(
       await postAction(ids.arda, {
@@ -839,11 +839,11 @@ describe("set-file-leases (ruling 396)", () => {
 });
 
 /**
- * Ruling 482 (F40-52): the project's gates are declared on Settings, through
+ * Ruling 17 (F40-52): the project's gates are declared on Settings, through
  * the writer the controller's `set_project_gates` calls. Before this the list
  * was prose in a knowledge base that every directive re-typed.
  */
-describe("set-project-gates (ruling 482)", () => {
+describe("set-project-gates (ruling 17)", () => {
   it("round-trips the gate list into project.md and the loader, audited, with the writer's refusals", async () => {
     const saved = actionOutcome(
       await postAction(ids.arda, {

@@ -38,11 +38,11 @@ import {
  * the acceptance would carry past (force-accept). Same useDialog contract as
  * ArchiveConfirm / ReleaseConfirm.
  *
- * Pass 19: ruling 20 says EVERY accept confirms, and the acceptance-writer
+ * Pass 19: ruling 97 says EVERY accept confirms, and the acceptance-writer
  * matrix found three writers that never did — then a fourth (`stage-move`) that
  * the matrix itself had missed. They are modes of this dialog rather than four
  * new ones — one ceremony, one disclosure, one place to keep honest (rulings
- * 12/14: never fork a mapping per surface):
+ * 237/297: never fork a mapping per surface):
  *
  * - `complete-merge` (F19-24) — the mandatory human half of every full-autonomy
  *   operator acceptance (R16-6); it performs the real, irreversible merge.
@@ -56,7 +56,7 @@ import {
  *   sixth writer, and the last surface where a card reaching Done merged
  *   silently — the board's identical menu has confirmed since R18-7.
  *
- * Pass 21 (F21-2 / ruling 88): all of that was CLIENT architecture. A POST that
+ * Pass 21 (F21-2 / ruling 97): all of that was CLIENT architecture. A POST that
  * skipped this dialog accepted and merged with no disclosure at all, so the
  * whole ceremony held only for callers who chose to run it. The confirmed click
  * now hands its caller an `AcceptanceDisclosure` — the three facts THIS RENDER
@@ -86,12 +86,12 @@ export interface AcceptCeremony {
 }
 
 /**
- * D3 (rulings 14/53) — the exact task facts this one ceremony reads, declared
+ * D3 (rulings 297/97) — the exact task facts this one ceremony reads, declared
  * STRUCTURALLY so BOTH acceptance surfaces render this single component instead
  * of forking it. The task page passes its full `TaskDetail` (a superset); the
  * board passes a projection `TaskSummary` plus the board's own stage list — the
  * board summary carries every field below except `stages`, which it supplies
- * from its columns. Ruling 14 forbids a per-surface fork; keeping the param a
+ * from its columns. Ruling 297 forbids a per-surface fork; keeping the param a
  * subset is what lets one implementation serve both without a cast.
  */
 export interface AcceptConfirmTask {
@@ -105,7 +105,7 @@ export interface AcceptConfirmTask {
   branch: string | null;
   pr: PrRef | null;
   /**
-   * Ruling 304: the CI state of the pull request this click MERGES.
+   * Ruling 97: the CI state of the pull request this click MERGES.
    *
    * Checks are deliberately not an acceptance gate -- the reviewers' verdicts
    * are -- which is exactly why the person deciding has to be told. Null when
@@ -114,7 +114,7 @@ export interface AcceptConfirmTask {
   prChecks: PrChecksRender | null;
 }
 
-/** Ruling 700(e): the two list defaults, each the same array on every render.
+/** Ruling 13(b): the two list defaults, each the same array on every render.
  *  The rows that read them live in accept-confirm-regions.tsx now; none of
  *  them is memoised, but from here a `[]` built per render would read as one
  *  that defeats a memo (react-doctor's rerender-memo-with-default-value). */
@@ -122,12 +122,12 @@ const NO_BLOCKED_GATES: readonly string[] = [];
 const NO_MERGE_COLLISIONS: readonly PrOverlap[] = [];
 
 /**
- * Ruling 700(e): the ceremony's props, declared apart from the destructuring
+ * Ruling 13(b): the ceremony's props, declared apart from the destructuring
  * that gives them their defaults, so the component body is the ceremony.
  */
 interface AcceptConfirmProps {
   task: AcceptConfirmTask;
-  /** Ruling 475 (F40-55 (c)): the other open pull requests that change a
+  /** Ruling 244 (F40-55 (c)): the other open pull requests that change a
    *  path this one changes, so merging it will likely put them in conflict.
    *  Both doors pass it: the task page from its loader, the board from the
    *  cards it holds (`mergeCollisions` in `~/shared/pr-overlaps`). */
@@ -135,11 +135,11 @@ interface AcceptConfirmProps {
   /** U39-32: how many base commits the branch lacked at the reconciler's last
    *  compare, or null when that was never measured (the board door). */
   baseBehindBy?: number | null;
-  /** Ruling 482 (F40-52): the project's gates as Viberr ran them on the
+  /** Ruling 315 (F40-52): the project's gates as Viberr ran them on the
    *  revision this click accepts, or null (no gates declared, or the board
    *  door, whose refusal row already carries the gate's sentence). */
   gates?: GatesView | null;
-  /** Ruling 449 (O39-c): bring the branch up to date and re-review it before
+  /** Ruling 97 (O39-c): bring the branch up to date and re-review it before
    *  accepting. Offered only where the caller passes it (the task page's
    *  direct Accept) and only while the branch is behind its base. */
   onRefreshFirst?: () => void;
@@ -160,7 +160,7 @@ interface AcceptConfirmProps {
    *  an ordinary PR-less accept still reads "closes without a merge" — the loader
    *  decides which shape this is. */
   noPullRequest?: boolean;
-  /** Ruling 550: the task's delivery is the files saved on it, delivered at
+  /** Ruling 316: the task's delivery is the files saved on it, delivered at
    *  this instant. Nothing merges and nothing is re-checked on GitHub. */
   filesDeliveredAt?: string | null;
   /** The merge target — the project's default branch. */
@@ -174,9 +174,9 @@ interface AcceptConfirmProps {
   /** R19-B: the human GitHub approval carrying the verdict gate, or null. */
   verdictSatisfiedBy?: string | null;
   blockedReason: string | null;
-  /** Ruling 393: every gate a force-accept bypasses, in gate order. */
+  /** Ruling 98: every gate a force-accept bypasses, in gate order. */
   blockedGates?: readonly string[];
-  /** Ruling 162's interlock applies to the refusal the SERVER will re-decide
+  /** Ruling 95's interlock applies to the refusal the SERVER will re-decide
    *  from the same facts (the task page reads the live task file through
    *  `acceptanceStanding`), so a dialog quoting it may disable its own
    *  confirm. The board composes its refusal from a projection summary instead
@@ -189,7 +189,7 @@ interface AcceptConfirmProps {
   blockedReasonAuthoritative?: boolean;
   busy: boolean;
   onCancel: () => void;
-  /** Ruling 88: receives the disclosure this dialog just made, for the submit
+  /** Ruling 97: receives the disclosure this dialog just made, for the submit
    *  to echo back to the server. Callers that reach a path with no server-side
    *  disclosure contract (the packet resolution, an applied recommendation)
    *  simply ignore the argument. */
@@ -207,7 +207,7 @@ export function AcceptConfirm({
   ceremony,
   /** R19-B: when a HUMAN's GitHub approval cleared the verdict gate, the
    *  sentence naming them and the commit they approved — rendered on the verdict
-   *  row so the human accepting knows whose judgement they stand on (ruling 19:
+   *  row so the human accepting knows whose judgement they stand on (ruling 220:
    *  a chip is evidence, never a pseudo-check). Null when an agent verdict
    *  cleared the gate, or nothing has. */
   verdictSatisfiedBy = null,
@@ -216,7 +216,7 @@ export function AcceptConfirm({
    *  packet resolution would hit, never the open packet it clears (F19-7). */
   blockedReason,
   /**
-   * Ruling 393 (F39-20): EVERY gate a force-accept would bypass, in gate order.
+   * Ruling 98 (F39-20): EVERY gate a force-accept would bypass, in gate order.
    *
    * U35-3 made the audit row and the forced completion event name all of them
    * so the record could not under-report an override; its docstring says "the
@@ -233,7 +233,7 @@ export function AcceptConfirm({
    *  it silently — no row here, no timeline note, no audit — so the human
    *  never learned a question died with the acceptance. */
   openPacketTitle = null,
-  /** Ruling 471: the title of the option this acceptance ANSWERS that
+  /** Ruling 316: the title of the option this acceptance ANSWERS that
    *  decision with, or null when it withdraws it. The loader decides
    *  (`acceptAnswersWith` / `forceAnswersWith` on the packet render, from the
    *  predicate the server's write uses); this component only says which. */
@@ -246,12 +246,12 @@ export function AcceptConfirm({
   onCancel,
   onConfirm,
 }: AcceptConfirmProps) {
-  // Ruling 459: both commits leave the way Cancel does (`commit`), and the
+  // Ruling 287: both commits leave the way Cancel does (`commit`), and the
   // callers leave the unmount to onCancel.
   const { ref: panelRef, close, commit } = useDialog(onCancel);
   // What the dialog reads off these props (accept-confirm-derive.ts): the
   // writer asking, the stages a force jumps, the PR's state, the branch the
-  // click refreshes, and the disclosure the confirmed click echoes (ruling 88).
+  // click refreshes, and the disclosure the confirmed click echoes (ruling 97).
   const facts = ceremonyFacts({
     task,
     ceremony,
@@ -308,12 +308,12 @@ export function AcceptConfirm({
             noPullRequest={noPullRequest}
             force={force}
           />
-          {/* Ruling 162 / G35-5(d): the acceptance ceremony now runs the base
+          {/* Ruling 95 / G35-5(d): the acceptance ceremony now runs the base
               refresh itself (`refreshBranchForAcceptance`) immediately before
               the gate re-check and the merge — the same workspace merge
               `update_branch_from_base` performs, pushed to origin. That is a
               WRITE to the person's branch on GitHub, made by this click, and
-              the dialog is the ruling-88 disclosure: it may not stay silent
+              the dialog is the ruling-97 disclosure: it may not stay silent
               about it, and the "Merge head" row below is the sha the refresh
               supersedes when the base has moved. `complete-merge` is excluded
               because its path (`completeTaskMerge`) merges the PR without the
@@ -326,7 +326,7 @@ export function AcceptConfirm({
               refreshFirstOffered={facts.refreshFirst !== null}
             />
           )}
-          {/* Ruling 475 (F40-55 (c)): the pull requests this merge will
+          {/* Ruling 244 (F40-55 (c)): the pull requests this merge will
               likely put in conflict, named before the click rather than found
               by the next person's refused Accept. Only where a merge happens. */}
           {pr && !facts.alreadyMerged && mergeCollisions.length > 0 && (
@@ -343,7 +343,7 @@ export function AcceptConfirm({
             <MergeHeadRow headSha={pr.revisionDrift.headSha} drift={drift} />
           )}
           <CeremonyVerdictRow validation={task.validation} verdictSatisfiedBy={verdictSatisfiedBy} />
-          {/* Ruling 482 (F40-52): the owner accepted two production deploys on
+          {/* Ruling 315 (F40-52): the owner accepted two production deploys on
               agents' reports of the gate exit codes. This row is the server's
               own run, bound to the sha on the Revision row above. A failure
               also stands in the Blocked row below, because it refuses a plain

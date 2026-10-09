@@ -27,7 +27,7 @@ import { attachmentDownloadHref } from "./attachment-download-href";
  * (`useDialog`: showModal, Escape, backdrop click, animated close), and keeps
  * an "Open original" link so the raw-file tab is one click away, not gone.
  *
- * Ruling 105 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
+ * Ruling 317 (owner ask 2026-08-31) widens it to TEXT evidence: a yaml/log/
  * txt/md/json/csv attachment opens as a read-only viewer in the same popup,
  * with a Download button (`?download=1` on the serving route). The owner's
  * same-day addendum makes the card UNIVERSAL: every attachment kind opens it
@@ -42,17 +42,17 @@ import { attachmentDownloadHref } from "./attachment-download-href";
  * components) the handler does nothing and the anchor behaves exactly as
  * before — the popup is an enhancement, never a dependency.
  *
- * Ruling 363 (owner, 2026-09-20): the reader is a CODE reader. Whether a file
+ * Ruling 317 (owner, 2026-09-20): the reader is a CODE reader. Whether a file
  * is text is no longer a six-extension whitelist — `attachment-kind.ts` rules
  * out images and the known binary kinds by name and the bytes' NUL test rules
  * out the rest — and what it shows is `CodeView`: Shiki tokens by the name's
  * grammar, numbered lines, plain when no grammar is mapped.
  *
- * Ruling 614: except a markdown file, which opens rendered, with Preview / Raw
+ * Ruling 317: except a markdown file, which opens rendered, with Preview / Raw
  * at the top of the card; Raw is that same code reader.
  */
 
-/** Ruling 614: what a markdown attachment's rendered links resolve against —
+/** Ruling 317: what a markdown attachment's rendered links resolve against —
  *  the task's own files, through their serving route. */
 export interface AttachmentDocLinks {
   names: ReadonlySet<string>;
@@ -72,7 +72,7 @@ const LightboxContext = createContext<((img: LightboxImage) => void) | null>(
 
 /**
  * Click-handler factory for an attachment link — every kind opens the card
- * (ruling 105 addendum); modified clicks keep the plain anchor. Usage:
+ * (ruling 317 addendum); modified clicks keep the plain anchor. Usage:
  *   const lightbox = useAttachmentLightbox();
  *   <a href={url} target="_blank" onClick={lightbox({ name, url })}>…
  */
@@ -107,7 +107,7 @@ const UNSERVABLE_COPY =
 /**
  * Read at most `cap` characters of the body, then STOP the transfer — the
  * route serves up to 50 MB, and `res.text()` would buffer all of it before
- * the display cap could apply (ruling-105 review). Falls back to the buffered
+ * the display cap could apply (ruling-317 review). Falls back to the buffered
  * read where the body stream is unavailable (older jsdom shims).
  */
 async function readTextCapped(
@@ -133,7 +133,7 @@ async function readTextCapped(
 }
 
 /** The read-only body of a text attachment, fetched from the member-only
- *  serving route (inert text/plain for the ruling-105 types, a download for
+ *  serving route (inert text/plain for the ruling-317 types, a download for
  *  every other name — fetch reads either; nothing is ever rendered).
  *  `onUnservable` fires when the fetch PROVED the file unservable (404, 413,
  *  auth redirect, network failure) so the footer can drop its Download button
@@ -146,13 +146,13 @@ function LightboxTextBody({
   links,
 }: {
   url: string;
-  /** The filename — it picks the grammar (ruling 363), and whether the file
-   *  renders as markdown (ruling 614). */
+  /** The filename — it picks the grammar and whether the file renders as
+   *  markdown (ruling 317). */
   name: string;
   onUnservable: () => void;
   links: AttachmentDocLinks | null;
 }) {
-  /** Ruling 614: a markdown file opens rendered; Raw is the code reader. */
+  /** Ruling 317: a markdown file opens rendered; Raw is the code reader. */
   const markdown = isMarkdownName(name);
   const [view, setView] = useState<DocView>("preview");
   const [state, setState] = useState<
@@ -175,7 +175,7 @@ function LightboxTextBody({
       )
       .then((read) => {
         if (cancelled) return;
-        // Ruling 363: the name said "try the reader"; the bytes get the last
+        // Ruling 317: the name said "try the reader"; the bytes get the last
         // word — a NUL in the head means this was never text.
         setState(
           looksBinary(read.text) ? { kind: "binary" } : { kind: "ready", ...read },
@@ -256,7 +256,7 @@ function LightboxTextBody({
 }
 
 /**
- * Every body but the text reader's (ruling 700(e)): the no-preview card, the
+ * Every body but the text reader's (ruling 13(b)): the no-preview card, the
  * picture that would not load, a page capture, or the image. Lightbox owns
  * the state and hands it in, so the markup is what it was.
  */
@@ -275,7 +275,7 @@ function LightboxMediaBody({
   fetchFailed: boolean;
   /** The picture did not load. */
   failed: boolean;
-  /** Ruling 691: the width a page capture was taken at, or null. */
+  /** Ruling 86: the width a page capture was taken at, or null. */
   captureView: ReturnType<typeof viewOfCaptureName>;
   onFailed: () => void;
 }) {
@@ -308,7 +308,7 @@ function LightboxMediaBody({
     );
   }
   const image = <img className="lightbox-img" src={img.url} alt={img.name} onError={onFailed} />;
-  // Ruling 691: a page capture is the whole page. It opens at the page's own
+  // Ruling 86: a page capture is the whole page. It opens at the page's own
   // width and scrolls, so it takes focus and a name, as the markdown preview
   // does: a keyboard reaches all of a long page.
   return captureView ? (
@@ -329,7 +329,7 @@ function Lightbox({
   img: LightboxImage;
   links: AttachmentDocLinks | null;
   onClose: () => void;
-  /** Ruling 582: the viewer may take this file off its task's record. */
+  /** Ruling 80: the viewer may take this file off its task's record. */
   onRemove?: () => void;
 }) {
   const { ref, close } = useDialog(onClose);
@@ -337,14 +337,14 @@ function Lightbox({
   // route's 50 MB inline cap (413), or an unsupported type. Show a message
   // instead of a broken image; "Open original" below still reaches the route.
   const [failed, setFailed] = useState(false);
-  // Ruling 105: a text attachment renders as a read-only viewer in the same
+  // Ruling 317: a text attachment renders as a read-only viewer in the same
   // popup; per the addendum every other kind opens the card too, with a
   // no-preview note standing in for content the popup cannot render.
-  // Ruling 363: the name rules out images and the known binary kinds; every
+  // Ruling 317: the name rules out images and the known binary kinds; every
   // other name tries the reader, whose NUL test has the last word.
   const kind = attachmentKind(img.name);
   const isText = kind === "text";
-  /** Ruling 691: the width Viberr pictured a delivered page at, when this
+  /** Ruling 86: the width Viberr pictured a delivered page at, when this
    *  file is one of its pictures. */
   const captureView = viewOfCaptureName(img.name);
   const isOther = kind === "binary"; // the remaining kind, image, is the <img> branch
@@ -383,7 +383,7 @@ function Lightbox({
     >
       {isText ? (
         <LightboxTextBody
-          // Each file opens on its own view (ruling 614): a markdown file
+          // Each file opens on its own view (ruling 317): a markdown file
           // opens rendered whatever the last one was switched to.
           key={img.url}
           url={img.url}
@@ -403,7 +403,7 @@ function Lightbox({
       )}
       <div className="lightbox-foot">
         <span className="nm">{img.name}</span>
-        {/* Every kind gets the button (ruling 105 addendum) — unless a fetch
+        {/* Every kind gets the button (ruling 317 addendum) — unless a fetch
             proved the file unservable, see `fetchFailed`. The serving route
             forces a save dialog on `download=1` — the raw URL renders inline
             where the type allows (that is what the viewer itself fetches).
@@ -435,11 +435,11 @@ function Lightbox({
             first focusable) — that link navigates AWAY, so a reflex Enter on a
             freshly-opened lightbox would open the raw file in a new tab. A
             dialog opened with showModal() honors `autofocus`.
-            Ruling 148: it takes the shared close design (borderless circle),
+            Ruling 287: it takes the shared close design (borderless circle),
             the same control as every modal head and the page overlay. It stays
             the foot's trailing item — the foot sits on the card's own surface,
             where the shared transparent rest and soft hover read correctly,
-            and an absolute corner control would sit over the ruling-105 text
+            and an absolute corner control would sit over the ruling-317 text
             viewer's scrolling first line. */}
         <button
           type="button"
@@ -464,17 +464,17 @@ export function AttachmentLightboxProvider({
   attachmentsBase,
 }: {
   children: ReactNode;
-  /** Ruling 582: the viewer holds `remove-from-record`, so the card offers
+  /** Ruling 80: the viewer holds `remove-from-record`, so the card offers
    *  Remove on a task attachment. */
   removable?: boolean;
-  /** Ruling 614: the task's files and their serving route, which a rendered
+  /** Ruling 317: the task's files and their serving route, which a rendered
    *  markdown attachment's links and pictures resolve against. */
   attachmentNames?: readonly string[];
   attachmentsBase?: string | null;
 }) {
   const [img, setImg] = useState<LightboxImage | null>(null);
   // Keyed on the names' content: the page hands over a new list on every
-  // render, and the removable card is memoised (ruling 457). The names are
+  // render, and the removable card is memoised (ruling 11). The names are
   // directory entries, which cannot contain "/", so the join is exact.
   const nameKey = attachmentNames?.join("/") ?? "";
   const links = useMemo(
@@ -496,10 +496,10 @@ export function AttachmentLightboxProvider({
   );
 }
 
-/** Ruling 582: the card with Remove on a task attachment, and the confirm it
+/** Ruling 80: the card with Remove on a task attachment, and the confirm it
  *  asks. Its own component, so only a page that offers removal needs the data
  *  router the confirm's fetcher posts through; memoised, so a revalidation
- *  that leaves no card open renders nothing more (ruling 457). */
+ *  that leaves no card open renders nothing more (ruling 11). */
 const RemovableLightbox = memo(function RemovableLightbox({
   img,
   setImg,

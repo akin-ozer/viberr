@@ -3,7 +3,7 @@ import type { ProjectCustomStages } from "~/server/org/org-view.server";
 import type { StageDef } from "~/schemas/project-file.schema";
 
 /**
- * What the global agent-template editor reads off its props (ruling 700(e), the
+ * What the global agent-template editor reads off its props (ruling 13(b), the
  * split of `agent-template-modal.tsx`): a grant list matched against the org's
  * resources, the stage a new profile starts on, the stored stages no board
  * offers, the Custom stages list's order and the page of it on screen. Pure
@@ -25,7 +25,7 @@ export const toggle = (list: string[], set: (v: string[]) => void, id: string) =
 export const drop = (list: string[], set: (v: string[]) => void, id: string) =>
   set(list.filter((x) => x !== id));
 
-/** Ruling 618: the Custom stages list pages through projects this many at a
+/** Ruling 326: the Custom stages list pages through projects this many at a
  *  time. */
 export const PROJECTS_PER_PAGE = 3;
 
@@ -44,9 +44,9 @@ export function defaultStageOf(workStages: StageDef[]): string | undefined {
 }
 
 /**
- * Ruling 479(h): a stored stage the chips do not offer (a project's own
+ * Ruling 326: a stored stage the chips do not offer (a project's own
  * `build`, carried into the template) had no chip, so it could be neither
- * seen nor removed and every save kept it. Ruling 618: a stage a live
+ * seen nor removed and every save kept it. Ruling 326: a stage a live
  * project's board has is offered in that project's row, so this is only what
  * no board has any more (a project archived, a stage renamed).
  */
@@ -64,7 +64,7 @@ export function storedOnlyStagesOf(
     : [];
 }
 
-/** Ruling 618: the projects whose stages the profile already names lead, so
+/** Ruling 326: the projects whose stages the profile already names lead, so
  *  what it stores is on the first page. */
 export function projectsNamedFirst(
   initial: GagentView | null,
@@ -75,7 +75,7 @@ export function projectsNamedFirst(
   return [...projectStages.filter(namesOne), ...projectStages.filter((p) => !namesOne(p))];
 }
 
-/** Ruling 618: the page of the Custom stages list on screen. */
+/** Ruling 326: the page of the Custom stages list on screen. */
 export function stagePage(projects: ProjectCustomStages[], page: number) {
   const pages = Math.max(1, Math.ceil(projects.length / PROJECTS_PER_PAGE));
   const pageStart = (page - 1) * PROJECTS_PER_PAGE;

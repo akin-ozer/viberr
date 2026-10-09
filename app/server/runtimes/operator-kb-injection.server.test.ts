@@ -19,7 +19,7 @@ function authorityWith(kb: string[]): OperatorAuthority {
 }
 
 describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
-  it("indexes declared knowledge bases into the system prompt (ruling 283)", () => {
+  it("indexes declared knowledge bases into the system prompt (ruling 205)", () => {
     const dataRoot = temp.make("viberr-kb-");
     const kbDir = path.join(dataRoot, "kb", "architecture-notes");
     mkdirSync(kbDir, { recursive: true });
@@ -32,16 +32,16 @@ describe("buildOperatorSystemPrompt — KB injection (F6, FR9)", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith(["architecture-notes"]), dataRoot).prompt;
     // The KB leg was decorative before F6 — no run ever received KB content.
     expect(prompt).toContain("architecture-notes (knowledge base)");
-    // Ruling 283: the INDEX, not the text. The doc and its sections are named
+    // Ruling 205: the INDEX, not the text. The doc and its sections are named
     // so the operator can ask for it; the body is a `read_knowledge_doc` away.
     expect(prompt).toContain("`overview.md`");
     expect(prompt).toContain("# Architecture");
     expect(prompt).not.toContain("KB-MARKER-ARCH-42");
     // …and the prompt says how to turn a name into the text.
     expect(prompt).toContain("read_knowledge_doc");
-    // Ruling 312: the operator reads both ruling namespaces at once, so it is
+    // Ruling 208(c): the operator reads both ruling namespaces at once, so it is
     // told which is which. CANARY: drop the shared note from the operator
-    // prompt and "ruling 4" in a directive reads as a viberr ruling.
+    // prompt and "ruling 293" in a directive reads as a viberr ruling.
     expect(prompt).toContain("is Viberr's own product decision");
     expect(prompt).toContain("name the document and the section rather than a bare number");
   });
@@ -184,10 +184,10 @@ describe("buildOperatorSystemPrompt — shared skill budget (C2)", () => {
     // C1 rides along: what was dropped is named, not merely truncated away.
     expect(prompt).toContain("**second-skill**");
     // The whole prompt stays near ONE budget, not two: the base operator
-    // prompt (~6.7k, and it grows — ruling 191 added the shell inventory to it)
+    // prompt (~6.7k, and it grows — ruling 148 added the shell inventory to it)
     // plus the single 24k skill budget. Two budgets would land past 54k, so the
     // bound separates the two cases with room for the base prompt to move.
-    // Ruling 502's writing guide rides every drive at a fixed size and spends
+    // Ruling 187's writing guide rides every drive at a fixed size and spends
     // no skill budget, so it is measured out of the bound rather than into it.
     expect(prompt.length - HUMANIZER_PROMPT_SECTION.length).toBeLessThan(40_000);
   });
@@ -213,13 +213,13 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
   });
 
   /**
-   * Ruling 487 (F40-65): the rule is appended whatever the persona says, and it
+   * Ruling 125 (F40-65): the rule is appended whatever the persona says, and it
    * used to be the sentence that sent every hold to a packet: "NEVER leave a
    * pre-work or `auto` stage with nothing done and no packet". Live on WEB-9
    * the operator opened one only so the stage was "not left idle with nothing
    * recorded". Canaries: restore the old sentence; drop the packet rule.
    */
-  it("ruling 487: a wait on a clock is scheduled, and a hold a pending schedule explains needs no packet", () => {
+  it("ruling 125: a wait on a clock is scheduled, and a hold a pending schedule explains needs no packet", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
     expect(prompt).toContain("with nothing done, no packet and no pending schedule");
     expect(prompt).toContain("A decision packet is for a decision a PERSON must make.");
@@ -233,11 +233,11 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
   });
 
   /**
-   * Ruling 488 (F40-67): appended whatever the persona says. Live on WEB-9 an
+   * Ruling 135 (F40-67): appended whatever the persona says. Live on WEB-9 an
    * acceptance packet asked the owner to confirm two attachments had been
    * pasted onto WEB-8 by hand. Canary: drop the rule.
    */
-  it("ruling 488: text for another task is relayed, never handed to a person", () => {
+  it("ruling 135: text for another task is relayed, never handed to a person", () => {
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
     expect(prompt).toContain(
       "- Text meant for ANOTHER task of this project (a result a goal says to post there, numbers another task depends on) is posted there with `relay_to_task`",
@@ -245,9 +245,9 @@ describe("buildOperatorSystemPrompt — persona + invariants (P11-21 / R-A / R-C
     expect(prompt).toContain(
       "Never hand text or a file to a person to copy or post between tasks, and never ask a person to confirm a relay landed.",
     );
-    // Ruling 538: and a file that task needs goes with the text. Canary: drop
+    // Ruling 135: and a file that task needs goes with the text. Canary: drop
     // the sentence.
-    expect(prompt).toContain("A file that task needs (an input it works from, a file it is to judge) goes with the text in `files` (ruling 538)");
+    expect(prompt).toContain("A file that task needs (an input it works from, a file it is to judge) goes with the text in `files` (ruling 135)");
   });
 });
 
@@ -280,7 +280,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
     expect(prompt).toContain("change project policy");
   });
 
-  it("ruling 461: a server reached through Viberr's gateway is named as such, and only that one", () => {
+  it("ruling 191: a server reached through Viberr's gateway is named as such, and only that one", () => {
     // Canary: drop the gateway section from buildOperatorSystemPrompt.
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
       servers: {
@@ -301,7 +301,7 @@ describe("buildOperatorSystemPrompt — safety scaffolding (A6)", () => {
     expect(prompt).not.toContain("ops-readonly is mounted through");
   });
 
-  it("ruling 176: a server whose write tools are marked leaves the paragraph, and the removed tools are named", () => {
+  it("ruling 188: a server whose write tools are marked leaves the paragraph, and the removed tools are named", () => {
     // Canary: drop the `gatedServers` filter in buildOperatorSystemPrompt and
     // the paragraph names the gated server again.
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot, {
@@ -373,11 +373,13 @@ describe("authoredPacketOptions — recommended index (P11-27)", () => {
     ]);
   });
 
-  it("caps at 4 and defaults the first when none is marked", () => {
+  it("keeps every titled option and defaults the first when none is marked", () => {
+    // Ruling 202: a list past the cap is refused whole by the shared writer,
+    // never cut here (operator-run.server.test.ts owns the refusal).
     const out = authoredPacketOptions(
       ["a", "b", "c", "d", "e"].map((t) => ({ kind: "custom" as const, title: t, recommended: false })),
     );
-    expect(out).toHaveLength(4);
+    expect(out).toHaveLength(5);
     expect(out!.filter((o) => o.recommended)).toHaveLength(1);
     expect(out![0].recommended).toBe(true);
   });
@@ -453,7 +455,7 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
     expect(prompt).toContain("never narrate that you cannot accept while you hold that grant");
   });
 
-  it("ruling 67: a clamped run is told what it asked for and the ceiling it runs at", () => {
+  it("ruling 108: a clamped run is told what it asked for and the ceiling it runs at", () => {
     // CANARY: drop the clause and a run held to its ceiling reads "Autonomy:
     // **supervised**." with nothing saying it asked for full, which only the
     // audit row a person reads records.
@@ -462,7 +464,7 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
       dataRoot(),
     ).prompt;
     expect(clamped).toContain(
-      "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling for every run, ruling 67).\n\n",
+      "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling for every run, ruling 108).\n\n",
     );
     // A run that asked for LESS than its ceiling was not clamped, and reads
     // the line every unclamped run always read.
@@ -475,13 +477,13 @@ describe("buildOperatorSystemPrompt — whose policy is this? (F21-16, F21-14)",
 });
 
 /**
- * Ruling 191 (F37-13, live): the operator does not run these commands — it
+ * Ruling 148 (F37-13, live): the operator does not run these commands — it
  * plans work that does and reads verdicts that ran them. Pass 37 a REQUIRED
  * reviewer chartered to `make up` a Docker stack on a host with neither could
  * only ever return request_changes, and the coordinator answered each verdict
  * by sending the DELIVERER back to edit a document that was never the problem.
  */
-describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
+describe("buildOperatorSystemPrompt — shell inventory (ruling 148)", () => {
   it("carries what the agents it dispatches can actually run", () => {
     const dataRoot = temp.make("viberr-op-shell-");
     const prompt = buildOperatorSystemPrompt(authorityWith([]), dataRoot).prompt;
@@ -495,12 +497,12 @@ describe("buildOperatorSystemPrompt — shell inventory (ruling 191)", () => {
 });
 
 /**
- * Ruling 286 at the PROMPT layer. `kb-injection.server.test.ts` proves the
+ * Ruling 208(b) at the PROMPT layer. `kb-injection.server.test.ts` proves the
  * reader marks the rulings index and builds the note; nothing proved the
- * runtime then carries it — which is the gap that produced ruling 270 and
- * ruling 224 both, a payload with no door.
+ * runtime then carries it — which is the gap that produced ruling 132 and
+ * ruling 157 both, a payload with no door.
  */
-describe("buildOperatorSystemPrompt — the rulings obligation (ruling 286)", () => {
+describe("buildOperatorSystemPrompt — the rulings obligation (ruling 208(b))", () => {
   const withRulings = (rulingsKb: string | null) => {
     const dataRoot = temp.make("viberr-op-r286-");
     mkdirSync(path.join(dataRoot, "kb", "team-rules"), { recursive: true });

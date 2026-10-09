@@ -15,7 +15,7 @@ import { useModalAction } from "./resource-helpers";
  * The global agent-TEMPLATE editor for the Agent-resources tab. Split out of
  * `resources-panel.tsx` (pass 16, pure structural refactor — no behaviour or
  * copy change); it is the largest and least-shared of the four editors, so it
- * gets its own file. Ruling 700(e) split it again along the task-page recipe:
+ * gets its own file. Ruling 13(b) split it again along the task-page recipe:
  * its draft lives in `agent-template-draft.ts` (hooks), what it reads off its
  * props in `agent-template-derive.ts`, and the fields that carry logic (the
  * backend pick, the eligible stages, the loadable context with its missing
@@ -33,7 +33,7 @@ export function AgentModal({
 }: {
   initial: GagentView | null;
   stages: StageDef[];
-  /** Ruling 618: each live project's stages outside the default workflow. */
+  /** Ruling 326: each live project's stages outside the default workflow. */
   projectStages: ProjectCustomStages[];
   kbs: KbView[];
   mcps: McpView[];
@@ -57,13 +57,13 @@ export function AgentModal({
   const grants = useContextGrants(initial, kbs, mcps, skills);
   const { selStages } = eligibility;
   const { selSkills, selMcps, selKbs, legacySkills, legacyMcps, legacyKbs } = grants;
-  // Ruling 156 (pass 35, F35-7): a project's deployment is its own COPY of the
+  // Ruling 177 (pass 35, F35-7): a project's deployment is its own COPY of the
   // grants, taken at deploy time, so an edit here never reached an adopted
   // project and the old foot hint pointed at "re-adopt", a door the deploy
   // refuses ("already deployed in this project"). Unchecked by default: a
   // copy is its own record, and the org admin decides per save.
   const [propagate, setPropagate] = useState(false);
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction(() => setDone(true));
 
@@ -101,7 +101,7 @@ export function AgentModal({
           skills: JSON.stringify([...selSkills, ...legacySkills]),
           mcps: JSON.stringify([...selMcps, ...legacyMcps]),
           kbs: JSON.stringify([...selKbs, ...legacyKbs]),
-          // Ruling 156: "1" copies these grants onto every adopted project's
+          // Ruling 177: "1" copies these grants onto every adopted project's
           // copy that differs; the default leaves each copy its own record.
           propagate: propagate ? "1" : "0",
         };

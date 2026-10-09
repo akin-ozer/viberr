@@ -29,7 +29,7 @@ import {
 } from "./controller-requests.server";
 
 /**
- * The controller's own configuration (ruling 99): ONE instance-level profile,
+ * The controller's own configuration (ruling 247): ONE instance-level profile,
  * `agents/profiles/controller.md` (kind: controller), plus its dedicated
  * definition file `agents/definitions/controller.md` — the operator's shape
  * (system profile with its own doctrine file), not the specialist's
@@ -44,7 +44,7 @@ import {
 
 export const CONTROLLER_PROFILE_ID = "controller";
 
-// Ruling 108 — the lock vocabulary (sections, unlock variables, the unlock
+// Ruling 270 — the lock vocabulary (sections, unlock variables, the unlock
 // value) lives in `~/shared/controller-locks` (P07-G, pass 32) so the panel and
 // this enforcer read ONE definition.
 import {
@@ -132,7 +132,7 @@ function readControllerProfile(dataRoot?: string): ParsedProfile | null {
   // hand-edited junk value (`effort: 3`, a blank) into "backend default", and
   // the next save writes that back — erasing the junk without a word. Say so
   // at the read, once, so the erasure is announced rather than silent.
-  // Ruling 457: that check parses the frontmatter a second time, so it runs
+  // Ruling 11: that check parses the frontmatter a second time, so it runs
   // only when the typed read found no effort and the file names one at all.
   if (parsed.frontmatter.effort === undefined && raw.includes("effort")) {
     const rawEffort = z
@@ -170,7 +170,7 @@ function controllerNameOf(fm: AgentProfileFrontmatter | undefined): string {
 /**
  * Just {@link resolveControllerConfig}'s `name`, for the surfaces that show
  * only the name (the dock, on every load): it reads the profile and never the
- * definition doc (ruling 457).
+ * definition doc (ruling 11).
  */
 export function resolveControllerName(dataRoot?: string): string {
   return controllerNameOf(readControllerProfile(dataRoot)?.frontmatter);
@@ -207,7 +207,7 @@ export interface SaveControllerConfigInput {
 }
 
 /** What a save leaves behind: the resolved configuration, plus the grant
- *  requests it answered (ruling 390), so the caller can say so. */
+ *  requests it answered (ruling 271), so the caller can say so. */
 export interface SavedControllerConfig extends ControllerConfig {
   answeredRequests: ResourceRequest[];
 }
@@ -230,7 +230,7 @@ export function saveControllerConfig(
       "The controller profile is missing from the store. Restart the app to restore the shipped one, then edit it.",
     );
   }
-  // Ruling 108: a locked section is NEVER rewritten from the input. An empty
+  // Ruling 270: a locked section is NEVER rewritten from the input. An empty
   // list (the panel posts blank for a locked section, since it renders it
   // read-only) keeps the stored value — so a CLEAR cannot be expressed through
   // a locked section at all: blank means keep, never "empty it" (P07-E, pass
@@ -333,7 +333,7 @@ export function saveControllerConfig(
     },
   });
   const saved = resolveControllerConfig(ctx.dataRoot);
-  // Ruling 390 (amended 2026-09-23): this save is the in-app grant, so it
+  // Ruling 271 (amended 2026-09-23): this save is the in-app grant, so it
   // answers the controller's open requests for whatever it leaves granted.
   // Done here, beside the lock check, so every save path closes them.
   const answeredRequests = closeRequestsAnsweredByGrants(

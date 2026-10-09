@@ -2,7 +2,7 @@ import type { StageDef } from "~/schemas/project-file.schema";
 import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
 
 /**
- * Ruling 177 (pass 36, F36-4 / F36-5): ONE spelling of "this task is closed".
+ * Ruling 52 (pass 36, F36-4 / F36-5): ONE spelling of "this task is closed".
  *
  * A task is closed when it is archived or when it sits at the terminal stage
  * (Shipped / Done — the last stage of the board, the one human acceptance moves

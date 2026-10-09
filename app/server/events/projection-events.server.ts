@@ -42,7 +42,7 @@ export type ProjectionEvent =
       taskKey: string | null;
       occurredAt: string;
     }
-  /** Ruling 503: an epic's projection changed (created, edited, a status
+  /** Ruling 272: an epic's projection changed (created, edited, a status
    * set). Project-routed; the Epics pages revalidate. A task joining or
    * leaving an epic is a `task.updated` on that task, since the membership is
    * the task's own field. */

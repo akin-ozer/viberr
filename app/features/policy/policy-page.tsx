@@ -50,7 +50,7 @@ import { useRefusalShake } from "~/ui/use-refusal-shake";
  * CapabilityMatrixModal. A role without the grant a control's action needs
  * reads the page rather than driving it: U33-4 (owner, 2026-09-03) turned the
  * member-role picker and the guardrail controls into plain values for that
- * reader, ruling 65's withdrawn-not-disabled precedent. The server enforces
+ * reader, ruling 27's withdrawn-not-disabled precedent. The server enforces
  * regardless.
  */
 
@@ -60,7 +60,7 @@ type ActionResult = { ok: true; toast: string } | { ok: false; error: string };
    `PANEL_COUNT_STYLE = { fontSize: ".76rem", color: "var(--faint)" }` const —
    a byte copy of the sheet's `.fine` utility that github-view.tsx and
    settings-page.tsx each kept a copy of too. Hoisting the object out of the
-   JSX also slipped it past app.css.test.ts's `style={{…}}` scan. Ruling 14:
+   JSX also slipped it past app.css.test.ts's `style={{…}}` scan. Ruling 297:
    shared single implementations, never fork per surface — the count is
    `right sub fine`, the same three classes seven other panel heads use. */
 
@@ -102,7 +102,7 @@ export function HumanAccess({
     // Client mirror of the server guard (`isLastLiveAdmin`; UX sugar — the
     // action re-checks): `counts.admin` is the admins who can sign in, and only
     // the last of them is kept. A removed or disabled admin is not one of them,
-    // so its demotion goes, as on the server (ruling 705).
+    // so its demotion goes, as on the server (ruling 26).
     if (
       m.role === "admin" &&
       r !== "admin" &&
@@ -145,7 +145,7 @@ export function HumanAccess({
           only feedback was silence.
           U33-4 (owner, 2026-09-03): the dimmed radios are gone entirely. A
           reader without `manage-members` gets the member's role as a value
-          instead (below) — ruling 65's precedent, that a withdrawn affordance
+          instead (below) — ruling 27's precedent, that a withdrawn affordance
           is honest where a disabled one invites a support question. This note
           stays, and now explains the control's ABSENCE while naming the grant
           the reader would have to ask for. */}
@@ -194,7 +194,7 @@ export function HumanAccess({
             </span>
             {canManage ? (
               /* UXA-7: a radiogroup promises arrow-key traversal; this one
-                 declared the role and never wired the keys. Ruling 166 moved
+                 declared the role and never wired the keys. Ruling 14 moved
                  that wiring to Radix behind `RadioSeg` — same roles, same
                  classes, and Home/End and RTL for free. It is a toggle group
                  rather than a radio group ON PURPOSE: selection here commits a
@@ -249,7 +249,7 @@ export function HumanAccess({
               <th>Action</th>
               {PROJECT_ROLES.map((r) => (
                 <th key={r}>
-                  {/* Ruling 625: the count under the role, so the header can
+                  {/* Ruling 280: the count under the role, so the header can
                       wrap at its cap instead of taking the action column's
                       width. The space keeps the two words apart for AT. */}
                   {ROLE_LABEL[r]} <span className="rbac-n">{counts[r]}</span>
@@ -270,7 +270,7 @@ export function HumanAccess({
               <tr key={row.action}>
                 <td className="act">
                   {row.action}
-                  {/* Ruling 309(a): two grants gate more than their name says,
+                  {/* Ruling 26(b): two grants gate more than their name says,
                       and the name stays short because sentences elsewhere on
                       this page read it inline. This table is where someone
                       comes to learn what a role can do, so the scope is here. */}
@@ -278,7 +278,7 @@ export function HumanAccess({
                 </td>
                 {PROJECT_ROLES.map((r) => (
                   <td key={r}>
-                    {/* Ruling 148: same words as the profile page's "Your
+                    {/* Ruling 291: same words as the profile page's "Your
                         access" list — the check is aria-hidden, so a glyph-only
                         cell announced nothing at all. */}
                     {row.grant[r] ? (
@@ -419,7 +419,7 @@ export function AgentCapability({
                   "Org Docs Writer · Org Docs Writer" here — the library deploy
                   copies the NAME into the role when the template declares none.
                   One shared label rule for every roster surface, which gives
-                  the operator none (ruling 518). */}
+                  the operator none (ruling 176). */}
               {role && <span className="sub">{role}</span>}
             </span>
             <span className="pcap-counts">
@@ -688,7 +688,7 @@ export function WorkflowRules({
               throughout.{" "}
             </>
           )}
-          {/* Ruling 151 (pass 35, F35-2): the boundary below is the contract
+          {/* Ruling 111 (pass 35, F35-2): the boundary below is the contract
               every actor answers to, the operator included. This sentence used
               to say the opposite (a Direct grant "crosses them itself"), which
               the engine now refuses outright. */}
@@ -739,19 +739,19 @@ export function Guardrails({
   guardrails: GuardrailView[];
   canManage: boolean;
   busy: boolean;
-  /** Ruling 368: the guardrail and op whose request is in flight, so the
+  /** Ruling 286: the guardrail and op whose request is in flight, so the
    *  button that sent it shows the work and every other control only waits. */
   inFlight?: { id: string; op: string } | null;
   onSet: (id: string, op: GuardrailOp, value?: number) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
-  // Ruling 147: Apply is kept disabled ONLY by the nothing-changed gate. The
+  // Ruling 288: Apply is kept disabled ONLY by the nothing-changed gate. The
   // old `valueChanged` folded validity into it, so a typed "0", "-3", "2.5" or
   // an emptied box was a changed draft that left Apply dead with no reason.
   // Counted per row, so a repeated press re-announces; cleared as soon as the
   // draft is edited, so a pristine row is never accused.
   const [refusedFor, setRefusedFor] = useState<Record<string, number>>({});
-  // Ruling 451(g): the row refused last, as `id:count`. Its box shakes once
+  // Ruling 284: the row refused last, as `id:count`. Its box shakes once
   // per refusal, and no other row's box shakes with it.
   const [lastRefused, setLastRefused] = useState<string | null>(null);
   const refusalShake = useRefusalShake(lastRefused);
@@ -829,7 +829,7 @@ export function Guardrails({
                 </span>
               </div>
               {/* U33-4 (owner, 2026-09-03): without `edit-policy` this row is a
-                  READING of the guardrail, never a dead control — ruling 65's
+                  READING of the guardrail, never a dead control — ruling 27's
                   withdrawn-not-disabled precedent, the same shape the GitHub-
                   owned row below has always had. Nothing is hidden: the state
                   (and the threshold with its unit) still renders, as text. */}
@@ -928,7 +928,7 @@ export function Guardrails({
                       aria-busy={(inFlight?.id === g.id && inFlight.op === "remove") || undefined}
                       onClick={() => onSet(g.id, "remove")}
                     >
-                      {/* Ruling 459 over ruling 368: the ✕ trades for the
+                      {/* Ruling 284 over ruling 286: the ✕ trades for the
                           spinning loader in place (GlyphSwap), not in one frame. */}
                       <GlyphSwap
                         rest="x"
@@ -952,7 +952,7 @@ export function Guardrails({
 // ------------------------------------------------------- required reviewers
 
 /**
- * Ruling 178 (pass 36, G36-3): the reviewers the project REQUIRES per review
+ * Ruling 89 (pass 36, G36-3): the reviewers the project REQUIRES per review
  * stage, read here beside the other acceptance rules. Before the rule, a
  * reviewer was required on a task only once the operator engaged it there, so
  * a task whose operator never ran the project's reviewer was acceptable on
@@ -1005,7 +1005,7 @@ export function RequiredReviewers({
           {canManage ? (
             <>
               Add or remove a rule in{" "}
-              {/* Ruling 625: a place named in a sentence, linked the way the
+              {/* Ruling 280: a place named in a sentence, linked the way the
                   controller's "Profile → Agent accounts" is, not a key chip. */}
               <button type="button" className="linkish" onClick={onOpenSettings}>
                 Settings → Required reviewers
@@ -1114,7 +1114,7 @@ export function PolicyPage({
             onSetRole={onSetRole}
           />
           {/* Design pass 2026-09-08: the right cell used to hold Agent capability
-              alone. `.policy-cols` is a stretching grid (ruling 148(a)), and
+              alone. `.policy-cols` is a stretching grid (ruling 323), and
               Human access is far the taller of the two, so the right panel was
               drawn as a bordered, shadowed box around roughly 430px of nothing
               — the heaviest chrome on the page wrapped around its emptiest
@@ -1147,7 +1147,7 @@ export function PolicyPage({
               }
               onSet={onSetGuardrail}
             />
-            {/* Ruling 178: the acceptance rule beside the other rules; the
+            {/* Ruling 89: the acceptance rule beside the other rules; the
                 pickers that edit it live on Settings, next to the stages. */}
             <RequiredReviewers
               rules={data.requiredReviewers}

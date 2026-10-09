@@ -14,7 +14,7 @@ const userNameRowSchema = z.object({ name: z.string() });
  * `specialist-run.server.ts` need it, and specialist-run takes values only
  * from the task-mutation substrate, never statically from a task-action module
  * (those load specialist-run when they run), so the two stay out of a module
- * cycle (ruling 207(e)).
+ * cycle (ruling 13).
  *
  * Returns the id when no such user exists, so a caller can tell "resolved" from
  * "unknown" by comparing against the id it passed. `users.name` is NOT NULL, so
@@ -32,7 +32,7 @@ export function userDisplayName(db: DatabaseSync, userId: string): string {
  * U39-18 (pass 39): a person, as a sentence people read names them.
  *
  * `actor.label` is the address, with the controller's instrument appended
- * (`arda@viberr.dev · via controller`, ruling 99(b)), which is what an audit
+ * (`arda@viberr.dev · via controller`, ruling 247), which is what an audit
  * row wants. Written into prose it read "Released: arda@viberr.dev · via
  * controller cleared the wait on AX-22" and "Link 2 edited by arda@viberr.dev
  * · via controller" on the task and chain a teammate reads. Here it is the

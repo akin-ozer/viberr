@@ -70,13 +70,13 @@ function renderAsContributor(patch: Partial<TaskDetail> = {}, myRole = "contribu
 }
 
 /**
- * Ruling 127 — the owner seat is also the RUN PRINCIPAL: every agent run on a
+ * Ruling 137 — the owner seat is also the RUN PRINCIPAL: every agent run on a
  * task bills the owner's own Claude and Codex accounts. The Current-state row
  * is where a person sees and releases that seat, so it is where the widened
  * meaning has to be stated; the run controls in the execution profile then
  * name the owner when a backend of theirs is not connected.
  */
-describe("the owner row states what the seat now means (ruling 127)", () => {
+describe("the owner row states what the seat now means (ruling 137)", () => {
   it("names the acceptance authority AND whose accounts the agents run on", () => {
     const { container } = renderPanel({
       owner: {
@@ -110,7 +110,7 @@ describe("owner seat on closed and archived tasks (D32-16 / E32-9)", () => {
     expect(archived.queryByText("Assign me")).toBeNull();
   });
 
-  it("ruling 118: an ADMIN may still take a closed seat for the record, never an archived one", () => {
+  it("ruling 50: an ADMIN may still take a closed seat for the record, never an archived one", () => {
     const closedAsAdmin = renderAsContributor({ owner: null, displayReadiness: "accepted" }, "admin");
     expect(closedAsAdmin.queryByText("Assign me")).not.toBeNull();
     closedAsAdmin.unmount();
@@ -179,7 +179,7 @@ function renderDetails(
   return render(<Stub initialEntries={["/"]} />);
 }
 
-describe("ruling 131: the Current-state Waiting-on row names the other work", () => {
+describe("ruling 55: the Current-state Waiting-on row names the other work", () => {
   it("reads 'Other work: …' while waiting is none and the list is non-empty; 'Nothing' otherwise", () => {
     // Canary: drop the `blockedBy` arm and the row reads "Nothing".
     const { container } = renderPanel({
@@ -189,7 +189,7 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
         { ref: "JC-3", label: "JC-3", state: "done", taskKey: "JC-3" },
       ],
     });
-    // Ruling 356: JC-3 is done in the fixture, and reads as done (CANARY:
+    // Ruling 58: JC-3 is done in the fixture, and reads as done (CANARY:
     // print the bare labels again).
     expect(kv(container, "Waiting on")).toBe("Other work: JC-2 and JC-3 (done)");
     const row = [...container.querySelectorAll(".kv-row")].find((r) => r.querySelector(".k")?.textContent === "Waiting on")!;
@@ -203,7 +203,7 @@ describe("ruling 131: the Current-state Waiting-on row names the other work", ()
 });
 
 /** The Details panel, capturing every form it posts. `candidates` is what the
- *  Blocked by picker's read answers (ruling 548). */
+ *  Blocked by picker's read answers (ruling 59). */
 function renderCapturing(
   patch: Partial<TaskDetail>,
   canEdit: boolean,
@@ -239,7 +239,7 @@ function renderCapturing(
 const trigger = (view: { getByRole: ReturnType<typeof render>["getByRole"] }, label: string) =>
   view.getByRole("button", { name: new RegExp(`^${label} `) });
 
-describe("ruling 131: the Details panel's Blocked by row and its own form", () => {
+describe("ruling 55: the Details panel's Blocked by row and its own form", () => {
   const entries = [
     { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3" },
     { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6" },
@@ -249,10 +249,10 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
   it("reads the wait as a kv row with each entry's state, and its status ring", () => {
     const { container } = renderCapturing({ blockedBy: entries }, false);
     expect(kv(container, "Blocked by")).toBe("JC-3 · doneJC-6 · archivedJC-7");
-    // Ruling 548: a viewer's chips carry no cross. CANARY: hand the row its
+    // Ruling 309: a viewer's chips carry no cross. CANARY: hand the row its
     // crosses without the edit grant.
     expect(container.querySelectorAll("button")).toHaveLength(0);
-    // Ruling 501: each entry is a chip carrying its state for the sheet's ring.
+    // Ruling 309: each entry is a chip carrying its state for the sheet's ring.
     // CANARY: drop `data-wait-state` and the done and dead rings lose their tone.
     const chips = [...container.querySelectorAll(".wait-chip")];
     expect(chips.map((c) => c.getAttribute("data-wait-state"))).toEqual(["done", "failed", "open"]);
@@ -269,13 +269,13 @@ describe("ruling 131: the Details panel's Blocked by row and its own form", () =
 });
 
 /**
- * Ruling 548: the wait's editor works the way the Owner row releases its
+ * Ruling 59: the wait's editor works the way the Owner row releases its
  * owner. Each entry is the row's chip with a remove cross, the field finds the
  * project's tasks from the picker's own read, and Save still posts the FULL
- * list through the wait's own form and intent (ruling 131). Which tasks the
+ * list through the wait's own form and intent (ruling 55). Which tasks the
  * read bars, and why, is the read model's suite.
  */
-describe("ruling 548: the Blocked by editor finds tasks and takes entries out by their cross", () => {
+describe("ruling 59: the Blocked by editor finds tasks and takes entries out by their cross", () => {
   const entries = [
     { ref: "JC-3", label: "JC-3", state: "done" as const, taskKey: "JC-3" },
     { ref: "JC-6", label: "JC-6", state: "failed" as const, taskKey: "JC-6" },
@@ -317,7 +317,7 @@ describe("ruling 548: the Blocked by editor finds tasks and takes entries out by
     // The picker takes the focus in an effect as it mounts, which a loaded
     // suite runs after `findByRole` has returned.
     await waitFor(() => expect(document.activeElement).toBe(field));
-    // Archived JC-6 is refused on every Save while it is listed (ruling 355).
+    // Archived JC-6 is refused on every Save while it is listed (ruling 59).
     expect(within(dialog).getByText("JC-6 can never complete: take it out to save.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove JC-6" }));
     expect(within(dialog).queryByText(/can never complete/)).toBeNull();
@@ -393,7 +393,7 @@ describe("ruling 548: the Blocked by editor finds tasks and takes entries out by
     expect(chips(dialog)).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(view.posted).toHaveLength(1));
-    // Ruling 131: an empty list clears the wait, which for a person IS the release.
+    // Ruling 57: an empty list clears the wait, which for a person IS the release.
     expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "" });
   });
 
@@ -430,7 +430,7 @@ describe("TaskDetailsPanel", () => {
   });
 
   /**
-   * Ruling 241 (F37-68): a question the hold refused is put when the hold
+   * Ruling 66 (F37-68): a question the hold refused is put when the hold
    * lifts, and the wait has to say so. Without this the only trace is one
    * timeline note, and a promise a person made and cannot see is the defect
    * this pass kept finding.
@@ -453,7 +453,7 @@ describe("TaskDetailsPanel", () => {
       false,
       [{ id: "qq_1", profileId: "rev", decidedByLabel: "Arda" }],
     );
-    // Ruling 232: a handle is a NAME. CANARY: fall back to `q.profileId` first
+    // Ruling 70: a handle is a NAME. CANARY: fall back to `q.profileId` first
     // and this reads "rev", which names nobody a person can search for.
     expect(kv(container, "When it clears")).toContain("Integration Verifier");
     expect(kv(container, "When it clears")).toContain("Arda");
@@ -473,20 +473,20 @@ describe("TaskDetailsPanel", () => {
     expect(kv(container, "Labels")).toContain("None");
     expect(kv(container, "Epic")).toBe("None");
     expect(kv(container, "Due date")).toContain("None");
-    // Ruling 501: an empty value is the quiet line, never the bold fact the
+    // Ruling 309: an empty value is the quiet line, never the bold fact the
     // owner's screenshot showed four times. CANARY: print them bare in `.v`.
-    // Ruling 503's Epic row is the fifth.
+    // Ruling 325's Epic row is the fifth.
     expect(container.querySelectorAll(".kv-row .prop-empty")).toHaveLength(5);
   });
 });
 
 /**
- * Ruling 503(e): the Details panel's Epic row. A viewer reads the epic as a
+ * Ruling 325: the Details panel's Epic row. A viewer reads the epic as a
  * chip that opens its page; an editor gets a menu of "No epic" and the open
  * epics (the current one kept even when closed), and a pick posts the one
  * field.
  */
-describe("ruling 503(e): the Details panel's Epic row", () => {
+describe("ruling 325: the Details panel's Epic row", () => {
   const EPICS: EpicOption[] = [
     { id: "epic-1", title: "Checkout revamp", color: "teal", status: "in_progress" },
     { id: "epic-2", title: "Search", color: "violet", status: "done" },
@@ -574,14 +574,14 @@ describe("ruling 503(e): the Details panel's Epic row", () => {
 });
 
 /**
- * Ruling 548 (the owner's follow-up, "add the × on the row chips too"): for an
+ * Ruling 309 (the owner's follow-up, "add the × on the row chips too"): for an
  * editor the Blocked by row's own chips carry the Owner row's cross. A press
  * saves the wait without that entry at once, through the wait's own intent,
  * and the trigger is the plus after the chips. A cross that leaves nothing
- * still open releases the task (ruling 131(e)), so that one asks first, as the
+ * still open releases the task (ruling 59), so that one asks first, as the
  * Owner row's cross does.
  */
-describe("ruling 548: the Blocked by row's chips carry the remove cross", () => {
+describe("ruling 309: the Blocked by row's chips carry the remove cross", () => {
   const entry = (ref: string, state: "open" | "done" | "failed") => ({ ref, label: ref, state, taskKey: ref });
   /** The row itself, outside any popover. */
   const row = (container: HTMLElement) => container.querySelector<HTMLElement>('.kv-row[data-prop="deps"]')!;
@@ -663,12 +663,12 @@ describe("ruling 548: the Blocked by row's chips carry the remove cross", () => 
 });
 
 /**
- * Ruling 501: the Details panel draws its properties the way Linear's and
+ * Ruling 309: the Details panel draws its properties the way Linear's and
  * GitHub's issue sidebars do. Each value is its own control, which edits that
  * one property in a popover and posts only its own field; the "Edit details"
  * and "Edit what it waits on" buttons, and the three-field form, are gone.
  */
-describe("ruling 501: each Details property is its own control", () => {
+describe("ruling 309: each Details property is its own control", () => {
   it("gives a viewer text, and an editor one trigger per property, with the empty ones as invitations", () => {
     // CANARY: render the triggers for a viewer, or bring back the footer buttons.
     const viewer = renderCapturing({}, false);
@@ -770,8 +770,8 @@ describe("ruling 501: each Details property is its own control", () => {
   });
 });
 
-/** Ruling 138: the rail says a goal edit is owed on a decided edit_goal packet. */
-describe("ruling 138: Waiting on · a decided edit_goal packet", () => {
+/** Ruling 63: the rail says a goal edit is owed on a decided edit_goal packet. */
+describe("ruling 63: Waiting on · a decided edit_goal packet", () => {
   it("reads 'a goal edit' instead of 'a human'", () => {
     // Canary: remove the `awaiting === "goal_edit"` branch.
     const { container } = renderPanel({
@@ -793,12 +793,33 @@ describe("ruling 138: Waiting on · a decided edit_goal packet", () => {
 });
 
 /**
- * Ruling 520 — Current state draws the rows the Details panel draws (ruling
- * 501): the labels in one column, every value on one left edge, each led by
+ * Ruling 166: the rail's "Agent queued" says why the run waits from its row. A
+ * run that resumes a session still being compacted is parked with the step
+ * ruling 175 writes, whatever the cap says: it waits for a summary, not a slot.
+ * Which sentence the rows give is the loader's (task-detail-route suite); this
+ * is the rail printing it.
+ */
+describe("ruling 166: Waiting on · a queued run says what it waits for", () => {
+  it("titles the queued fact with the loader's reason, never a cap it assumed", () => {
+    // CANARY: put the one cap sentence back on the row and a run held for its
+    // session's summary reads "Behind the instance's concurrent-run cap".
+    const held = "Queued, waiting for the summary of its last run; then it starts when a slot frees.";
+    const { container } = renderPanel({ waiting: "agent", liveRun: "queued", liveRunWait: held });
+    const fact = container.querySelector(".kv.props .v > .prop-fact")!;
+    expect({ words: fact.textContent, title: fact.getAttribute("title") }).toEqual({
+      words: "Agent queued",
+      title: held,
+    });
+  });
+});
+
+/**
+ * Ruling 309(a) — Current state draws the rows the Details panel draws (ruling
+ * 309): the labels in one column, every value on one left edge, each led by
  * its mark, and an empty one said quietly. The owner's screenshot had five
  * values set five ways and right-aligned.
  */
-describe("ruling 520: Current state is a property grid", () => {
+describe("ruling 309(a): Current state is a property grid", () => {
   /** What `Icon` draws for a glyph: one mark is told from another by its paths. */
   function glyph(name: IconName): string {
     const { container, unmount } = render(<Icon name={name} />);
@@ -831,7 +852,7 @@ describe("ruling 520: Current state is a property grid", () => {
 
   it.each(WAITS)("when %s, Waiting on leads with the board card's mark", (_, patch, words, mark) => {
     // CANARY: draw a queued run with the pulse, or drop a mark, and the card
-    // stops speaking the board card's vocabulary (ruling 365).
+    // stops speaking the board card's vocabulary (ruling 306).
     const { container } = renderPanel(patch);
     const fact = prop(container, "Waiting on").querySelector(".v > .prop-fact")!;
     expect(fact.textContent).toBe(words);

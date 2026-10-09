@@ -7,7 +7,7 @@ import { writeFakeBrowser, type FakeBrowser } from "../../../test-support/fake-b
 import { createTempDirs } from "../../../test-support/temp-dirs";
 
 /**
- * Ruling 691, through the real renderer child as a real process: the page
+ * Ruling 194, through the real renderer child as a real process: the page
  * server it starts, the article it sets a markdown file as, the flags it
  * starts a browser with and the picture it asks for. The browser is the
  * stand-in executable (`test-support/fake-browser.ts`), which fetches what it
@@ -142,7 +142,7 @@ function pngSize(file: string) {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
-describe("the page capture's renderer child (ruling 691)", () => {
+describe("the page capture's renderer child (ruling 194)", () => {
   it("sets a markdown file as an article page: a table, a code block and a sibling picture render, and raw HTML stays text", async () => {
     const b = bench({
       "notes.md":
@@ -378,7 +378,7 @@ describe("the page capture's renderer child (ruling 691)", () => {
       "cover.html": "<p>a cover that fits its box</p>",
       "long.html": "<p>a layout that does not fit: fake-height:900 fake-width:1400</p>",
     });
-    // Ruling 698.
+    // Ruling 194.
     const twice = await b.run({ pages: ["cover.html"], views: [box(1200, 630, 2)] });
     expect(twice.pages[0]).toMatchObject({
       error: null,
@@ -490,7 +490,7 @@ describe("the page capture's renderer child (ruling 691)", () => {
   });
 
   it("finds a page and the file beside it in whichever Unicode form they are stored", async () => {
-    // Ruling 675's rule in the renderer's own process: a file uploaded from a
+    // Ruling 76's rule in the renderer's own process: a file uploaded from a
     // Mac may be stored decomposed, and a page names its picture the way its
     // author typed it. CANARY: open every name with `openRegular` alone and,
     // on a file system that holds names byte for byte (the image's), the

@@ -55,7 +55,7 @@ import { CREDENTIAL_ENV_RE } from "./runtime-registry.server";
 import { backendAccountHome, userBackendHome } from "./user-homes.server";
 
 /**
- * The hosted sign-in driver (ruling 127, spec §3.4), driven against REAL child
+ * The hosted sign-in driver (ruling 137, spec §3.4), driven against REAL child
  * processes.
  *
  * Every test here spawns an actual executable (`test-support/fake-vendor-binary`
@@ -109,7 +109,7 @@ function start(
   });
 }
 
-/** The home a sign-in runs in: the account it will record (ruling 507), a new
+/** The home a sign-in runs in: the account it will record (ruling 138), a new
  *  one of its own unless the sign-in is into an existing account. */
 function homeOf(view: LoginSessionView): string {
   return backendAccountHome(
@@ -178,7 +178,7 @@ function refusalFrom(run: () => string): AppError {
   throw new Error("expected an AppError, but the call returned");
 }
 
-/** Wait for a path to be removed (ruling 507: an abandoned sign-in's home goes
+/** Wait for a path to be removed (ruling 138: an abandoned sign-in's home goes
  *  once its process has exited, which happens on the process's schedule). */
 async function waitForGone(target: string, what: string): Promise<void> {
   const deadline = Date.now() + 10_000;
@@ -244,12 +244,12 @@ describe("resolveBackendBinary", () => {
 });
 
 /**
- * Ruling 460: the sign-in writes the person's credential into their home, so it
+ * Ruling 139: the sign-in writes the person's credential into their home, so it
  * runs as the person's own OS user — through the launcher, like their runs —
  * and so does the status check that confirms it. The stand-in launcher logs
  * what the real one reads and then execs the vendor binary it was handed.
  */
-describe("the sign-in runs as the person's own OS user (ruling 460)", () => {
+describe("the sign-in runs as the person's own OS user (ruling 139)", () => {
   afterEach(() => resetAgentIsolationForTests());
 
   it("spawns the launcher for the sign-in and its confirmation, with the vendor binary and the person's uid", async () => {
@@ -277,7 +277,7 @@ describe("the sign-in runs as the person's own OS user (ruling 460)", () => {
 
     const entries = readFileSync(log, "utf8").trim().split("\n");
     // The launcher hands back the whole BACKEND home after each process, which
-    // holds every account's home (ruling 507); the vendor itself works in the
+    // holds every account's home (ruling 138); the vendor itself works in the
     // new account's own home.
     const prefix = `uid=20001 exec=${fake.binaries.claude} home=${userBackendHome(ACTOR.userId, "claude", dataRoot)}`;
     expect(entries).toEqual([
@@ -553,7 +553,7 @@ describe("session lifetime", () => {
     // runtime home and stdin until the container restarted.
     await waitForTermination(evidence, "the replaced child to die");
     expect(fakeVendorTerminations(evidence)).toEqual([firstHome]);
-    // Ruling 507: the replacement signs in to a NEW home of its own, and the
+    // Ruling 138: the replacement signs in to a NEW home of its own, and the
     // replaced attempt's half-made home goes once its process has exited.
     expect(homeOf(second)).not.toBe(firstHome);
     await waitForGone(firstHome, "the replaced attempt's home to be removed");
@@ -591,12 +591,12 @@ describe("session lifetime", () => {
 });
 
 /**
- * Ruling 507: a sign-in is for ONE account. A new one runs in an empty home of
+ * Ruling 138: a sign-in is for ONE account. A new one runs in an empty home of
  * its own and leaves every account the person already has exactly as it was;
  * signing an existing sign-in in again runs in that account's home; and an
  * attempt that does not end connected leaves no half-made account behind.
  */
-describe("sign-ins and the person's several accounts (ruling 507)", () => {
+describe("sign-ins and the person's several accounts (ruling 138)", () => {
   it("signs a NEW account in beside the one connected, in a home of its own", async () => {
     const keyId = await pasteKey("claude");
     const started = start("claude", "claudeai");

@@ -5,7 +5,7 @@ import {
   type McpSdkServerConfigWithInstance,
   type SdkMcpToolDefinition,
 } from "@anthropic-ai/claude-agent-sdk";
-// Ruling 296: every tool on this server refuses arguments it does not
+// Ruling 136: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { strictTool as tool } from "~/server/runtimes/strict-tool.server";
 import { mountedToolName } from "~/server/runtimes/tool-manifest.server";
@@ -56,7 +56,7 @@ import {
 import { countLabel } from "~/shared/text/plural";
 
 /**
- * `viberr_ops` — the controller's built-in diagnostics server (ruling 107).
+ * `viberr_ops` — the controller's built-in diagnostics server (ruling 269).
  *
  * The `viberr_controller` toolkit reads and changes the PRODUCT: projects,
  * tasks, agents, epics, org resources. It has no reach at all into the ops
@@ -95,8 +95,7 @@ export interface ControllerOpsDeps {
 export interface ControllerOpsMcp {
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
   allowedTools: string[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools: SdkMcpToolDefinition<any>[];
+  tools: SdkMcpToolDefinition[];
 }
 
 /** The mount key, exported so the run assembly can never disagree about
@@ -128,7 +127,7 @@ const DEFAULT_LOG_LINES = 200;
 const MAX_LOG_LINES = 250;
 
 /**
- * Ruling 677: the most a page's lines come to, in UTF-8 bytes as the reply
+ * Ruling 269: the most a page's lines come to, in UTF-8 bytes as the reply
  * prints them. A count alone bounds nothing: a line's `display` runs from a
  * few bytes to kilobytes, and 500 of the smallest already printed as 82 KB,
  * more than a turn carries. Under the reply's own cap of 50,000 characters,
@@ -158,7 +157,7 @@ function linesThatFit<T>(page: readonly T[], keep: "newest" | "oldest"): T[] {
   return keep === "newest" ? kept.reverse() : kept;
 }
 
-/** Ruling 265: page bounds for `list_runs`. A live listing on a busy instance
+/** Ruling 269: page bounds for `list_runs`. A live listing on a busy instance
  *  is tens of rows, not thousands, and a task's whole run history is the other
  *  arm — both are summaries, so the default is generous and the max is a stop. */
 const DEFAULT_RUN_ROWS = 50;
@@ -178,7 +177,7 @@ interface StoreDocPage {
   nextOffset?: number;
 }
 
-/** Ruling 302: present on a `list_runs` reply ONLY when rows were left out,
+/** Ruling 117: present on a `list_runs` reply ONLY when rows were left out,
  *  naming how many and the argument that returns them. */
 interface RunWindowNote {
   truncated?: string;
@@ -192,7 +191,7 @@ function notVisibleRun(runId: string): string {
 }
 
 /**
- * What `instance_health` says about one backend (ruling 127).
+ * What `instance_health` says about one backend (ruling 137).
  *
  * The org-admin-only DETAIL arm is gone, and with it the whole reason it
  * existed: `backendCredentialHealth` used to explain an unusable credential by
@@ -200,7 +199,7 @@ function notVisibleRun(runId: string): string {
  * CLI-auth opt-in) and which environment variable to set — deployment
  * configuration, which is why only an org admin got it. Nothing here names a
  * config path any more, because there is no instance credential to configure:
- * each person connects their own on Profile → Agent accounts (ruling 107's
+ * each person connects their own on Profile → Agent accounts (ruling 269's
  * "everyone learns whether, only admins learn why" split therefore no longer
  * applies to this tool — see the dated correction on that ruling).
  *
@@ -256,13 +255,11 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
   const allowed: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const add = (t: SdkMcpToolDefinition<any>, name: string) => {
+  const add = (t: SdkMcpToolDefinition, name: string) => {
     tools.push(t);
-    // Ruling 347: the manifest's spelling of the mounted name.
+    // Ruling 204: the manifest's spelling of the mounted name.
     allowed.push(mountedToolName(CONTROLLER_OPS_MCP_NAME, name));
   };
 
@@ -289,14 +286,14 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     if (!runVisible(row)) throw new NotVisibleError(notVisibleRun(row.id));
   }
 
-  /** One `list_runs` row. Named, because ruling 268 adds a key that is present
+  /** One `list_runs` row. Named, because ruling 269 adds a key that is present
    *  on exactly one kind of run and the shape has to say so. */
   interface RunRowView {
     runId: string;
     /** Null on a CONTROLLER turn: it belongs to a conversation, not a board. */
     projectSlug: string | null;
     taskKey: string | null;
-    /** Present only on a controller turn (ruling 268). */
+    /** Present only on a controller turn (ruling 269). */
     conversationId?: string;
     kind: RunKind;
     agent: string;
@@ -313,12 +310,12 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     logLines: number;
   }
 
-  /** Ruling 265: one run, as `list_runs` reports it. Enough to decide which log
+  /** Ruling 269: one run, as `list_runs` reports it. Enough to decide which log
    *  to read and what a run is doing, and nothing a `get_task` read would not
    *  already tell the same asker. */
   function runRow(row: AgentRunRow): RunRowView {
-    // Ruling 268 (F37-100): a CONTROLLER turn has no project and no task —
-    // ruling 99 stores the conversation id in `task_key` because the runs
+    // Ruling 269 (F37-100): a CONTROLLER turn has no project and no task —
+    // ruling 251 stores the conversation id in `task_key` because the runs
     // table has one identity column. Reporting that raw put a `cnv_…` in a
     // field named `taskKey` with `projectSlug: ""`, so "anything filtering by
     // task has to know to discard that row". A storage shape is not a reply
@@ -335,7 +332,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
       backend: row.backend,
       model: row.model,
       state: row.state,
-      // Ruling 250's pair: the phase is the strip's header and the step is what
+      // Ruling 257's pair: the phase is the strip's header and the step is what
       // the run is doing this second.
       phase: row.phase,
       step: row.step,
@@ -368,7 +365,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         // integers about run load that carry no name, project or run in them
         // (`backendCredential` says why the per-backend reading is open too).
         const admin = orgAdmin();
-        // Ruling 130(d): a signed-in read carries whose account a refusal was.
+        // Ruling 160(a): a signed-in read carries whose account a refusal was.
         const snapshot = healthSnapshot(db, { principal: true });
         auditRead("instance_health", "instance");
         const body: HealthSnapshot & {
@@ -407,13 +404,12 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   );
 
   /**
-   * Ruling 302, third sibling. `list_runs` clipped at `limit` and said nothing:
+   * Ruling 117, third sibling. `list_runs` clipped at `limit` and said nothing:
    * a caller asking "which runs are live right now" got a list that looked
    * complete, and could not reconcile it with the count `instance_health`
-   * reports for the same instant. `read_run_log` beside it has carried
-   * `olderExist`/`newerExist` and recovery cursors since pass 32, and
-   * `inspect_audit_log` has carried `total`/`shown` since ruling 279. This is
-   * the one that did not.
+   * reports for the same instant. `read_run_log` beside it carries
+   * `olderExist`/`newerExist` and recovery cursors, and `inspect_audit_log`
+   * carries `total`/`shown` (ruling 33). This is the one that did not.
    */
   const windowNote = (total: number, shown: number): RunWindowNote => {
     if (total <= shown) return {};
@@ -486,7 +482,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_run_log",
-      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), and fewer when they are long (ruling 677: a page's lines come to at most 44,000 bytes, kept from the end the cursor reads from), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
+      `One PAGE of an agent run's log lines, newest page by default (which is where a failure is). Readable by a member of the run's project; a controller conversation's own turns are readable by the person whose conversation it is (and by org admins). Two ways to move: \`before\` pages BACKWARD (the lines older than that sequence number) and \`since\` pages FORWARD (the lines after it). Name only one of them. Every call returns at most \`limit\` lines (${DEFAULT_LOG_LINES} by default, ${MAX_LOG_LINES} at most), and fewer when they are long (ruling 269: a page's lines come to at most 44,000 bytes, kept from the end the cursor reads from), so read \`page\` to see where you are: it reports whether older or newer lines exist and hands you the exact argument for the next call. \`run.logLines\` is the run's total.`,
       {
         runId: z
           .string()
@@ -557,7 +553,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
             page = runLogPage(db, row, { since: args.since, forwardLimit: limit }).lines;
           }
 
-          // Ruling 677: and to what a reply carries. The lines are shaped as
+          // Ruling 269: and to what a reply carries. The lines are shaped as
           // the reply prints them first, so the measure is of the reply.
           const lines = linesThatFit(
             page.map((line) => ({ seq: line.seq, at: line.occurredAt, display: line.display })),
@@ -633,7 +629,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_store_doc",
-      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"]. Ruling 677: a read returns one page of at most 32,000 bytes; `truncated` is true while more follows, `nextOffset` is the `offset` that reads on, and `characters` is the document's length.",
+      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"]. Ruling 269: a read returns one page of at most 32,000 bytes, and the pages run to the end of the file however long it is; `truncated` is true while more follows, `nextOffset` is the `offset` that reads on, and `characters` is the document's length.",
       {
         kind: z.enum(["kb", "skill"]).describe("Which store the document lives in."),
         id: z.string().describe("The knowledge base or skill id."),
@@ -646,7 +642,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         requireOrgAdmin("read store documents");
         const target = resolveStoreTarget(db, args.kind, args.id, { dataRoot });
         if (!target) {
-          // Ruling 246's rule for the resource as for the file below: "no
+          // Ruling 260's rule for the resource as for the file below: "no
           // longer exists" claims the id once named something, and a mistyped
           // or invented id never did. Name the id and the read that lists the
           // real ones, as every other toolkit miss does.
@@ -656,14 +652,18 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               : `No skill has the id ${args.id}; list_skills names them.`,
           );
         }
-        const doc = readStoreDoc(target, args.path);
+        // Ruling 269: read the whole file, past `readStoreDoc`'s 256 KB cap. A
+        // replace names a version hashed from the whole file (ruling 212(a)),
+        // so pages that stopped at the cap with no page after them let a
+        // caller that read every page delete the tail it never saw.
+        const doc = readStoreDoc(target, args.path, Number.POSITIVE_INFINITY);
         if (!doc) {
-          // Ruling 246 (F37-75): say what this reader IS, not that the file
+          // Ruling 260 (F37-75): say what this reader IS, not that the file
           // "no longer exists" — which claims it once did, and sent the
           // controller looking for a deletion that never happened. The store
           // and the git repository are different places, and the caller most
           // likely to hit this is one that confused them, so it names the
-          // reads that do open the repository (ruling 299 gave the controller
+          // reads that do open the repository (ruling 265 gave the controller
           // the default branch).
           throw AppError.notFound(
             `${target.kind === "kb" ? "Knowledge base" : "Skill"} "${target.name}" has no ` +
@@ -673,7 +673,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               "read_pull_request a pull request's changed files.",
           );
         }
-        // Ruling 677: one page at a time, like every other document read. It
+        // Ruling 269: one page at a time, like every other document read. It
         // returned up to 256 KB in one reply, which no turn receives: a skill
         // or a document past about 60 KB could not be read at all.
         const start = args.offset ?? 0;
@@ -687,16 +687,15 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const more = end < doc.text.length;
         auditRead("read_store_doc", `${target.kind}/${target.id}`, {
           path: args.path.join("/"),
-          truncated: doc.truncated || more,
+          truncated: more,
         });
         const page: StoreDocPage = {
           resource: { kind: target.kind, id: target.id, name: target.name },
           path: args.path,
           // Reported, never hidden: a clipped document that reads as complete
           // is how a model states a half-read file as fact. True while a page
-          // follows this one, and on the last page of a document longer than
-          // this reader takes.
-          truncated: doc.truncated || more,
+          // follows this one.
+          truncated: more,
           characters: doc.text.length,
           text: doc.text.slice(start, end),
         };
@@ -711,7 +710,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   const server = createSdkMcpServer({
     name: CONTROLLER_OPS_MCP_NAME,
     version: "1.0.0",
-    // Ruling 297, corrected: the manifest rides in the system prompt, which
+    // Ruling 255, corrected: the manifest rides in the system prompt, which
     // is rebuilt per turn, not here, which is captured once per session.
     instructions: CONTROLLER_OPS_INSTRUCTIONS,
     tools,

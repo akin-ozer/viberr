@@ -31,7 +31,7 @@ import {
 } from "./dependencies.server";
 
 /**
- * Ruling 131(b)/(e) (pass 34, Q34-11): the ONE writer for `blockedBy`, its
+ * Ruling 55/(e) (pass 34, Q34-11): the ONE writer for `blockedBy`, its
  * validation against the store, and the two halves of a release.
  */
 const ctx = createTestDbContext();
@@ -79,7 +79,7 @@ describe("validateDependencyRefs", () => {
       validateDependencyRefs(store.db, { projectSlug: store.slug, self, entries });
     const self = { kind: "task" as const, task: "VIB-1" };
     expect(() => validate(self, ["nonsense words"])).toThrow(/"nonsense words" is not a task key/);
-    // Ruling 503: the goal-link spelling went with the chains.
+    // Ruling 55: the goal-link spelling went with the chains.
     expect(() => validate(self, ["goal-1 link 2"])).toThrow(/"goal-1 link 2" is not a task key/);
     expect(() => validate(self, ["VIB-1"])).toThrow(/VIB-1: a task cannot wait on itself/);
     expect(() => validate(self, ["VIB-999"])).toThrow(/VIB-999 is not a task in this project/);
@@ -159,7 +159,7 @@ describe("setTaskDependencies", () => {
     expect(kept.blockedBy).toEqual(["VIB-5", "VIB-1"]);
   });
 
-  it("ruling 620: a person's edit that leaves only done entries releases the task in the same write; the operator's waits for the sweep", async () => {
+  it("ruling 57: a person's edit that leaves only done entries releases the task in the same write; the operator's waits for the sweep", async () => {
     // Live on aws-cost-calculator the controller took AWSC-75 off two hold-outs
     // that also waited on the done AWSC-73 and AWSC-74; they read blocked
     // until the minute sweep. CANARY: drop the `satisfied` release arm (the
@@ -298,7 +298,7 @@ const runOperatorStub = () =>
   );
 
 /**
- * Ruling 331 (pass 37, F37-167) shipped without a canary, which is how this
+ * Ruling 122 (pass 37, F37-167) shipped without a canary, which is how this
  * note said two false things for a day: it reduced an `error` that was in scope
  * and being logged on the line above to "(an internal error)", and then claimed
  * "Coordination is paused for this task" — live on SHOP-38 the operator was
@@ -308,7 +308,7 @@ const runOperatorStub = () =>
  * `autoInvokeOperator`'s failure arm is reachable from every trigger; a release
  * is the cheapest one to drive.
  */
-describe("ruling 331: a failed auto-invocation names its cause and claims nothing", () => {
+describe("ruling 122: a failed auto-invocation names its cause and claims nothing", () => {
   it("writes the thrown reason, the trigger, and no claim that coordination stopped", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
@@ -349,7 +349,7 @@ describe("ruling 331: a failed auto-invocation names its cause and claims nothin
     expect(text).toContain("dependencies-released");
     // CANARY: restore "Coordination is paused for this task" and these fail.
     // This code knows ONE attempt failed; it cannot know nothing else will run,
-    // and ruling 330's sweep guarantees something looks again.
+    // and ruling 122's sweep guarantees something looks again.
     expect(text).not.toMatch(/coordination is paused/i);
     expect(text).toContain("not a decision to stop");
     expect(text).toContain("sweeps for tasks");
@@ -359,12 +359,12 @@ describe("ruling 331: a failed auto-invocation names its cause and claims nothin
   });
 });
 
-/** Ruling 131(e): the release engine. */
+/** Ruling 57: the release engine. */
 describe("the release engine", () => {
   /**
    * L02-1 (test audit, 2026-09-27): the goal runner was the one caller that
-   * released a task at birth (ruling 358, F39-65), for the links it minted, and
-   * ruling 503 deleted it. A task created waiting only on finished work (the
+   * released a task at birth (ruling 272, F39-65), for the links it minted, and
+   * ruling 273 deleted it. A task created waiting only on finished work (the
    * controller's `create_task`, a packet's `create_task` option) stayed held
    * until the runner's minute tick, which released it as an ordinary hold: the
    * note said the base "has changed since the hold", its people were told it
@@ -494,13 +494,13 @@ describe("the release engine", () => {
       .prepare(`SELECT user_id, kind, actor_json FROM notifications WHERE task_key = 'VIB-10' AND kind = 'dependency'`)
       .all() as { user_id: string; kind: string; actor_json: string | null }[];
     expect(notifs.map((n) => n.user_id)).toContain(store.users.arda.id);
-    // Ruling 361: the inbox names the engine as the timeline does, never the
+    // Ruling 74: the inbox names the engine as the timeline does, never the
     // Operator (CANARY: drop `from` at the release site — the type refuses;
     // pass OPERATOR_NOTIFY_FROM there and this reads "Operator").
     for (const n of notifs) {
       expect(JSON.parse(n.actor_json ?? "null")).toEqual({ kind: "system", name: "Dependency release" });
     }
-    // Ruling 497: the row opens the release note, which says what it waited on.
+    // Ruling 75: the row opens the release note, which says what it waited on.
     // CANARY: drop `about` from the release notice and the row opens the top.
     expect(
       new Set(
@@ -556,7 +556,7 @@ describe("the release engine", () => {
     expect(runOperator.mock.calls.some((c) => c[1].taskKey === "VIB-12")).toBe(false);
   });
 
-  it("ruling 651: a dependency archived when it was done still counts done: never noted dead, and its dependent still releases", async () => {
+  it("ruling 55: a dependency archived when it was done still counts done: never noted dead, and its dependent still releases", async () => {
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
@@ -590,7 +590,7 @@ describe("the release engine", () => {
     // Canaries: remove the `blockedBy = []` write in `clearDependencies` (a
     // second `releaseTask` releases again); drop `releaseDueDependents` from
     // the dependency runner's tick (the hand-edited task stays held). Ruling
-    // 503 moved the tick from the goal runner, which it outlived.
+    // 273 moved the tick from the goal runner, which it outlived.
     const store = setupTestStore(ctx);
     await seed(store);
     writeTask(store.dataRoot, store.slug, {
@@ -703,7 +703,7 @@ describe("the release engine speaks only for a task that is actually waiting", (
  * Pass 34 review: a wait that can NEVER complete used to be noticed only when
  * a dependency TASK was archived — the one door that called the notice. A
  * cancelled goal, a removed link or a lost task left the dependent held and
- * silent forever. Ruling 503 retired the goal links; a task that is gone is
+ * silent forever. Ruling 55 retired the goal links; a task that is gone is
  * the case left.
  */
 describe("the sweep notices a dead wait whatever killed it", () => {
@@ -803,11 +803,11 @@ describe("the archive hook and the convergent sweep state the same fact once", (
 });
 
 /**
- * Ruling 241 (pass 37, F37-68): the question a hold refused is put when the
+ * Ruling 66 (pass 37, F37-68): the question a hold refused is put when the
  * hold lifts, and before the operator gets the task back.
  *
- * Live on SHOP-5 ruling 237's escalation recommended asking the reviewer what
- * else it would block on. The task was held (`blockedBy: [SHOP-23]`), ruling 186
+ * Live on SHOP-5 ruling 94's escalation recommended asking the reviewer what
+ * else it would block on. The task was held (`blockedBy: [SHOP-23]`), ruling 56
  * refuses every agent dispatch while it is, and the resolution discovered that
  * only AFTER writing the decision onto the task contract and clearing the
  * packet. Nothing was asked, the packet was gone, and the contract said "no
@@ -834,7 +834,7 @@ const recordDispatch =
     return Promise.resolve(QUESTION_RUN);
   };
 
-describe("F37-68 / ruling 241: a reviewer question the hold refused survives the wait", () => {
+describe("F37-68 / ruling 66: a reviewer question the hold refused survives the wait", () => {
   function seedQueued(store: TestStore, held: string[], waiting: "human" | "agent" = "human"): void {
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-11", {
@@ -890,12 +890,12 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
   });
 
   it("the OPERATOR clearing the wait puts the question too, though no release is announced", async () => {
-    // Self-review of ruling 241, an hour after shipping it. `setTaskDependencies`
+    // Self-review of ruling 66, an hour after shipping it. `setTaskDependencies`
     // computes `releasing` as `next.length === 0 && previous.length > 0 &&
     // !ctx.operatorAuthorized` — the operator is excluded deliberately, because
     // `announceRelease` re-invokes the operator and a write from inside its own
     // turn would loop. But the drain lived ONLY in `announceRelease`, so the
-    // operator correcting a wait with `set_dependencies` (the door ruling 240
+    // operator correcting a wait with `set_dependencies` (the door ruling 56
     // names by name) left the question stranded on the task forever, under a
     // wait panel still promising it would be put when the wait clears — on a
     // task with nothing left to clear. F37-68's own shape, in my own fix.
@@ -923,7 +923,7 @@ describe("F37-68 / ruling 241: a reviewer question the hold refused survives the
     expect(started[0]!.directive).toBe("Name everything you would still block on.");
     expect(started[0]!.directiveFrom).toBe("Arda");
     // CANARY: drain without clearing and the next release asks the same
-    // reviewer the same question again, which is the loop ruling 237 breaks.
+    // reviewer the same question again, which is the loop ruling 94 breaks.
     expect(file(store, "VIB-11").frontmatter.queuedQuestions).toEqual([]);
   });
 

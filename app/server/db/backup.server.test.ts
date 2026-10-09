@@ -70,7 +70,7 @@ function fixture(): Fixture {
   writeFileSync(path.join(dataRoot, "kb", "handbook", "style.md"), "# Style\n");
   // A half-written atomic write in flight — never content.
   writeFileSync(path.join(taskDir, "task.md.abcd.tmp"), "half written");
-  // Ruling 102's durable record of purged audit rows (C01-A3).
+  // Ruling 33's durable record of purged audit rows (C01-A3).
   mkdirSync(path.join(dataRoot, "audit-exports"), { recursive: true });
   writeFileSync(
     path.join(dataRoot, "audit-exports", "audit-events-2026-08-01.jsonl"),
@@ -128,12 +128,12 @@ describe("createBackup", () => {
   });
 
   /**
-   * Ruling 158 (pass 35 F35-9). With the app holding the writer lock, the
+   * Ruling 23 (pass 35 F35-9). With the app holding the writer lock, the
    * backup must not be the second connection to the live file: it reads a copy
    * taken beside the store, the copy carries the WAL (so the artefact still
    * holds every committed row), the copy is gone when the backup returns, and
    * the manifest says which way the projection was read. Canary: put the
-   * pre-158 open back (`new DatabaseSync(source, { readOnly: true })` instead of
+   * older read-only open back (`new DatabaseSync(source, { readOnly: true })` instead of
    * the reader handle) and the provenance assertions fail; the snapshot
    * semantics themselves are pinned in `sqlite.server.test.ts`.
    */
@@ -227,7 +227,7 @@ describe("createBackup", () => {
 
   it("carries runtimes/ only when asked", () => {
     const f = fixture();
-    // Ruling 127: the credential that makes `runtimes/` opt-in is a PERSON's
+    // Ruling 137: the credential that makes `runtimes/` opt-in is a PERSON's
     // own vendor sign-in, under their runtime home.
     const home = path.join(f.dataRoot, "runtimes", "users", "u_arda", "codex-home");
     mkdirSync(home, { recursive: true });
@@ -371,7 +371,7 @@ describe("restoreBackup", () => {
   });
 });
 
-describe("the secrets an instance generated for itself (ruling 504)", () => {
+describe("the secrets an instance generated for itself (ruling 38)", () => {
   it("travel in the artefact, and come back on a fresh root without --force", () => {
     const f = fixture();
     const generated = createInstanceSecrets(f.dataRoot);
@@ -503,7 +503,7 @@ describe("createBackup — re-derivable git trees stay out of the artefact", () 
     const mirror = path.join(proj, ".repo-mirror", "acme__app.git", "objects");
     mkdirSync(mirror, { recursive: true });
     writeFileSync(path.join(mirror, "pack.idx"), "binary");
-    // Ruling 691: what a page render works in is beside the workspace. Its
+    // Ruling 194: what a page render works in is beside the workspace. Its
     // browser profile is a folder only the renderer's uid can enter, which
     // stopped the copy of everything. Canary: drop the RENDER_WORK_DIRS
     // clause and both folders are in the artefact.

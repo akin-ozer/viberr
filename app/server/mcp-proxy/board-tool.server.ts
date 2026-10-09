@@ -10,28 +10,28 @@ import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
 import { READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 
 /**
- * Ruling 589: the board server Viberr's MCP gateway answers itself for a Codex
+ * Ruling 216: the board server Viberr's MCP gateway answers itself for a Codex
  * specialist, with the two readers a Claude specialist's toolkit holds beside
  * its collaboration tools.
  *
  * A Claude run that holds any collaboration grant reads the project's board
- * (`read_board`, ruling 281, with each task's outcome and verdict reports,
- * ruling 569) and any entry of its own task's timeline in full
- * (`read_timeline_entry`, ruling 563). A Codex run mounted neither (ruling
- * 422). Live on AWSC-24 the Workflow Researcher, on GPT-6 Luna, was asked to
+ * (`read_board`, ruling 213(a), with each task's outcome and verdict reports)
+ * and any entry of its own task's timeline in full (`read_timeline_entry`,
+ * ruling 213(b)). A Codex run mounted neither. Live on AWSC-24 the Workflow
+ * Researcher, on GPT-6 Luna, was asked to
  * compare the Estimate Judge's round-3 verdicts on AWSC-20 to AWSC-23. It
  * looked for them in those tasks' attachment folders, found no verdict file
  * for two of them, and wrote that it used the operator's summaries in its
  * directive instead: the verdicts are on the tasks' timelines, which
  * `read_board` returns and nothing on Codex could read. The gateway already
- * answers a Codex run's knowledge server (ruling 585), so it answers these two
+ * answers a Codex run's knowledge server (ruling 216), so it answers these two
  * as well, from this process, with the same readers.
  */
 export const BOARD_MCP_NAME = "viberr_board";
 
 /** What a run's board mount carries to the gateway: the store the task files
  *  are in. The project and task are the run's own, which the gateway holds.
- *  Ruling 690: `sources` is set for a run that may save files on its task,
+ *  Ruling 82: `sources` is set for a run that may save files on its task,
  *  with the agent a source is kept as and whether the run may fetch from the
  *  web (`use-web-search-fetch`); the board server then offers `keep_source`
  *  too, described for what the run can reach. */
@@ -46,39 +46,38 @@ export const boardMountSchema = z.object({
 });
 export type BoardMount = z.infer<typeof boardMountSchema>;
 
-/** Ruling 281: what `read_board` says it does, on either backend. */
+/** Ruling 213(a): what `read_board` says it does, on either backend. */
 export const READ_BOARD_DESCRIPTION =
   "Read this project's board. With `taskKey`, that one task: its title, stage, readiness, what it waits on, whether it is archived, its goal (a long one clipped to its opening, with every decision recorded on it kept whole), and, once it has one, its `outcome` (the completion summary and each verdict's report on what it delivered), the names of its files (`files`), which `read_task_attachment` opens, the deliveries it kept (`deliveries`: each stamp, newest first, with the files as that delivery held them), and its timeline as an index (`timeline`: each entry's stamp, type, author and title, newest first), whose entries `read_timeline_entry` opens. Without, every task in the project as a list. THIS project only, and read-only: it changes nothing. Use it before you act on a task key you were told about rather than read yourself: a task named in a document, a directive or another agent's report is a claim about the board, and this is how you check it. It is also how you find out whether work you are about to ask for already has an owner.";
 
 export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Omit to list the whole board.";
 
 /**
- * Ruling 707: what every `read_timeline_entry` says of a long entry, at all
+ * Ruling 213(e): what every `read_timeline_entry` says of a long entry, at all
  * four doors (a specialist's on either backend, the operator's and the
- * controller's). The reader used to stop at 40,000 characters and say
- * `truncated` with nothing to pass back.
+ * controller's).
  */
 export const TIMELINE_ENTRY_PAGES_SENTENCE =
-  `A long entry comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. ` +
+  `A long entry comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole: read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. ` +
   "A read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, which you pass back as `offset` to read on, until a read is not `truncated`. " +
   "Entries that share a stamp share the first page and are numbered (`entry`); `entry` reads one of them alone, a whole page of it.";
 
-/** Ruling 707: the two arguments a page takes, on every door. */
+/** Ruling 213(e): the two arguments a page takes, on every door. */
 export const READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION =
   "Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start. When several entries share the stamp, `offset` alone reads on in the one long enough to reach it; say which with `entry` when more than one is.";
 export const READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION =
   "Which of the entries that share the stamp, counted from 1 in the order they were written, as a first read numbers them. Omit when the stamp names one entry, or to read them all from the start.";
 
-/** Ruling 563: what `read_timeline_entry` says it does, on either backend. */
+/** Ruling 213(b): what `read_timeline_entry` says it does, on either backend. */
 export const READ_TIMELINE_ENTRY_DESCRIPTION =
-  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. " +
+  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline`. Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. " +
   `${TIMELINE_ENTRY_PAGES_SENTENCE} ` +
   "Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`, when you are given its knowledge base: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.";
 
 export const READ_TIMELINE_ENTRY_AT_DESCRIPTION =
   "The entry's stamp, exactly as your prompt or `read_board`'s `timeline` prints it (ISO, to the millisecond).";
 
-/** Ruling 596: the other task whose entry to read. */
+/** Ruling 213: the other task whose entry to read. */
 export const READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION =
   "The task the entry is on, e.g. AWSC-24. Omit for this task.";
 
@@ -114,9 +113,9 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
   annotations: { title: "Read one timeline entry in full", ...READ_ONLY },
 };
 
-/** Ruling 594: what `read_task_attachment` says it does, on either backend. */
+/** Ruling 214: what `read_task_attachment` says it does, on either backend. */
 export const READ_TASK_ATTACHMENT_DESCRIPTION =
-  `Read ONE attachment of a task in this project: this task's by default, or another task's with \`taskKey\`, such as a report or a register a directive tells you to read where it is. \`read_board\` with a task's key lists its \`files\`. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (\`pdftotext -layout\`, a form feed between pages), an image as the picture itself, and any other file whose bytes are text as text; a binary file (a .docx, a zip) is named and refused. A read returns one page of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. When it says \`truncated\`, call again with \`offset\` set to its \`nextOffset\`. With \`delivery\`, one of the stamps \`read_board\` lists under a task's \`deliveries\`, it reads the file as that delivery held it: a rework saves the same names again, and a verdict scored the delivery it was given. Read-only: nothing is copied onto your task.`;
+  `Read ONE attachment of a task in this project: this task's by default, or another task's with \`taskKey\`, such as a report or a register a directive tells you to read where it is. \`read_board\` with a task's key lists its \`files\`. A spreadsheet (.xlsx) comes back as its sheets in CSV, a PDF as its text (\`pdftotext -layout\`, a form feed between pages), an image as the picture itself, and any other file whose bytes are text as text; a binary file (a .docx, a zip) is named and refused. A read returns one page of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole: read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. When it says \`truncated\`, call again with \`offset\` set to its \`nextOffset\`. With \`delivery\`, one of the stamps \`read_board\` lists under a task's \`deliveries\`, it reads the file as that delivery held it: a rework saves the same names again, and a verdict scored the delivery it was given. Read-only: nothing is copied onto your task.`;
 
 export const READ_TASK_ATTACHMENT_FIELDS = {
   name: "The attachment's file name, exactly as `read_board` or the timeline lists it.",
@@ -145,7 +144,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
 };
 
 /**
- * Ruling 698: what `capture_page` takes for a picture of an exact size, on
+ * Ruling 194: what `capture_page` takes for a picture of an exact size, on
  * either backend:
  * each side of the box in CSS px, and the scale it is drawn at. The largest
  * side at the largest scale is 8,000 px, the most a reader of images takes
@@ -163,7 +162,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
 const CAPTURE_PAGE_BOX = { minSide: 100, maxSide: 4000, scales: [0.25, 0.5, 1, 1.5, 2] } as const;
 const SCALES_TEXT = "0.25, 0.5, 1, 1.5 and 2";
 
-/** Ruling 691: what `capture_page` says it does, on either backend. */
+/** Ruling 194: what `capture_page` says it does, on either backend. */
 export const CAPTURE_PAGE_DESCRIPTION =
   "Look at ONE page on this task as a reader sees it. `name` is a .html, .htm, .md or .markdown file among this task's files, exactly as `read_board` lists it. Viberr renders it in a real browser at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, scrolls it once from top to bottom, and hands you the picture: one stretch of the page, up to 2000 px tall, sized so you can read it. When the page runs on, the reply gives `nextFrom`; call again with `from` set to it. A markdown file is set as a plain article first. The page loads only its own bytes and the files saved beside it on the task, nothing from the network, and the reply names what it asked for and did not get. Look before you deliver a page, and when you review one: the source tells you the words, the picture tells you what a reader gets. Where a task's result is files on the task, Viberr pictures each delivered page the same way and keeps those pictures on the task as `<file>.capture-desktop.png` and `<file>.capture-phone.png`. To make a picture of an exact size instead (a diagram, a cover image), give `width` and `height`: the page, or a .svg drawing, is laid out in a viewport of that size, in CSS px, and pictured once, cut to that box from its top left corner, as a PNG of exactly `width` times `scale` by `height` times `scale` px. The reply says when the page is laid out taller or wider than the box (what a page that hides its overflow, or a drawing's own canvas, cuts off it cannot see: look for that in the picture), and where the PNG was saved for this run. A picture over 2000 px on a side is saved and not shown: look at the same box at a lower scale, which is the same layout. Text is drawn in a font this server has (`fc-list : family` in your shell lists them by the names to use) or in one saved beside the page and loaded with `@font-face`. This call saves nothing on the task.";
 
@@ -221,7 +220,7 @@ export const pageCaptureArgsSchema = z.object({
 export type PageCaptureArgs = z.infer<typeof pageCaptureArgsSchema>;
 
 /**
- * Ruling 690: what `read_task_source` says it does, wherever it is mounted: a
+ * Ruling 82: what `read_task_source` says it does, wherever it is mounted: a
  * Claude specialist's toolkit, this board server for a Codex one, the
  * operator and the controller.
  */
@@ -257,7 +256,7 @@ export const TASK_SOURCE_TOOL: Tool = {
 export const KEEP_SOURCE_NAME = "keep_source";
 
 /**
- * Ruling 690: what `keep_source` says it does, on either backend. A run that
+ * Ruling 82: what `keep_source` says it does, on either backend. A run that
  * may save files on its task holds it: on Claude in its toolkit, on Codex
  * from this board server. The run saves the bytes; Viberr keeps them.
  *
@@ -328,20 +327,20 @@ export function keepSourceTool(web: boolean): Tool {
   };
 }
 
-/** The readers, in the order the gateway lists them. Ruling 690 adds
+/** The readers, in the order the gateway lists them. Ruling 82 adds
  *  `read_task_source`; `keep_source` follows them for a run that holds it. */
 export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL, TASK_ATTACHMENT_TOOL, TASK_SOURCE_TOOL];
 
 /**
  * `read_board`'s arguments, parsed where the gateway receives the call.
  *
- * Ruling 707: every reader of this server parses strictly, as its Claude twin
- * does (ruling 296). An argument this door dropped was a silent one: asked
- * for an attachment with `nextOffset` under its own name, or `page: 2`, it
- * answered the first page again as a good read. Measured on the stored run
- * logs before the change, as ruling 296 was: of 12,892 calls Codex runs had
- * made to these tools, the only two that carried an argument the tools do
- * not declare (`stamp`) were refused already, for want of `occurredAt`.
+ * Ruling 216: every reader of this server parses strictly, as its Claude twin
+ * does (ruling 136). An argument the door dropped would be a silent one:
+ * asked for an attachment with `nextOffset` under its own name, or `page: 2`,
+ * it would answer the first page again as a good read. Measured on the
+ * stored run logs: of 12,892 calls Codex runs had made to these tools, the
+ * only two that carried an argument the tools do not declare (`stamp`) were
+ * refused already, for want of `occurredAt`.
  */
 export const boardReadArgsSchema = z.strictObject({ taskKey: z.string().optional() });
 export type BoardReadArgs = z.infer<typeof boardReadArgsSchema>;
@@ -356,10 +355,10 @@ export const taskAttachmentArgsSchema = z.strictObject({
 export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
 /** `read_timeline_entry`'s arguments, parsed where the gateway receives the call.
- *  Ruling 707: strict, as the tool's Claude twins are (ruling 296). Two of its
- *  arguments now choose which text comes back, and an argument this door
- *  dropped (`nextOffset` for `offset`, `page` for anything) answered the first
- *  page again as a good read, which a run in a loop took for the next one. */
+ *  Ruling 216: strict, as the tool's Claude twins are (ruling 136). Two of its
+ *  arguments choose which text comes back, and an argument the door dropped
+ *  (`nextOffset` for `offset`, `page` for anything) would answer the first
+ *  page again as a good read, which a run in a loop takes for the next one. */
 export const timelineEntryArgsSchema = z.strictObject({
   occurredAt: z.string(),
   taskKey: z.string().optional(),
@@ -369,7 +368,7 @@ export const timelineEntryArgsSchema = z.strictObject({
 export type TimelineEntryArgs = z.infer<typeof timelineEntryArgsSchema>;
 
 /** `read_task_source`'s arguments, parsed where the gateway receives the call.
- *  Strict, as the tool's Claude twin is (ruling 296): an argument it does not
+ *  Strict, as the tool's Claude twin is (ruling 136): an argument it does not
  *  declare is refused, not dropped. */
 export const taskSourceArgsSchema = z.strictObject({
   id: z.string().optional(),
@@ -391,7 +390,7 @@ interface BoardCallContext {
   projectSlug: string;
   taskKey: string;
   mount: BoardMount;
-  /** Ruling 648: the knowledge bases the run's knowledge mounts give it. */
+  /** Ruling 211: the knowledge bases the run's knowledge mounts give it. */
   readerKbs: readonly string[];
 }
 
@@ -427,7 +426,7 @@ export async function boardReadResult(input: BoardCallContext, args: BoardReadAr
 }
 
 /** `read_timeline_entry`: one entry, in pages, of the run's own task or, with
- *  `taskKey`, of another task in the project (ruling 596). */
+ *  `taskKey`, of another task in the project (ruling 213). */
 export async function timelineEntryResult(
   input: BoardCallContext,
   args: TimelineEntryArgs,
@@ -600,8 +599,7 @@ function listed(items: readonly string[]): string {
 
 /**
  * The answer to arguments that are not the tool's, read off the schema the
- * tool publishes: each argument by what it takes. Ruling 707: it used to say
- * every argument is text, which was true until a reader took `offset`; a run
+ * tool publishes: each argument by what it takes (ruling 216), since a run
  * told a number is text sends `"32000"` and is refused again (the trap
  * {@link pageCaptureArgsRefusal} names). A tool that refuses an argument it
  * does not declare says so, and one that requires an argument names it.

@@ -1,18 +1,18 @@
 /**
- * Ruling 245(b) (pass 37, F37-76): a lease whose HOLDER is finished holds
+ * Ruling 60 (pass 37, F37-76): a lease whose HOLDER is finished holds
  * nothing.
  *
- * Ruling 245 shipped with `FileLease.taskKey` documented as "released when it
- * reaches a terminal stage" and nothing implementing it. The controller read
+ * `FileLease.taskKey` was once documented as "released when it reaches a
+ * terminal stage" with nothing implementing it. The controller read
  * that contract, believed it, and wrote it into the first real lease's own
  * reason — "Lease releases when SHOP-11 merges". SHOP-11 then merged, and the
  * lease stood: `pnpm-lock.yaml` owned by a completed task, refusing SHOP-5's
  * delivery in the name of work that had already landed, with two records
  * promising the opposite. A comment claiming a mechanism nobody built is the
- * defect this pass has found more often than any other, and ruling 245's own
- * finding note called a stale lease "its own stale-record problem".
+ * defect this pass has found more often than any other, and the finding note
+ * behind ruling 60 called a stale lease "its own stale-record problem".
  *
- * Resolved at READ time rather than swept on completion, for ruling 131(e)'s
+ * Resolved at READ time rather than swept on completion, for ruling 55's
  * reason: a sweep is a hook that some path completing a task will eventually
  * miss, while a resolution converges no matter how the holder finished —
  * accepted, force-accepted, archived, or edited on disk. The row stays in
@@ -92,14 +92,14 @@ export interface LeaseSide {
 }
 
 /**
- * Ruling 417: the first two leases, held by DIFFERENT tasks that are both
+ * Ruling 61: the first two leases, held by DIFFERENT tasks that are both
  * still active, whose globs can match one file. Null when none do.
  *
  * Such a pair refuses each holder's delivery by the other's lease, so neither
  * could ever land. The check it replaces refused only an identical glob twice,
  * which no real collision looks like: `internal/sandbox/**` against
  * `internal/sandbox/local.go` passed it. A lease whose holder has finished
- * binds nobody (ruling 245(b)), so it never conflicts.
+ * binds nobody (ruling 60), so it never conflicts.
  */
 export function overlappingLeases(
   projectSlug: string,
@@ -139,12 +139,13 @@ export function overlappingLeases(
 }
 
 /**
- * Ruling 417: the first ACTIVE lease another task holds that one of `globs`
+ * Ruling 61: the first ACTIVE lease another task holds that one of `globs`
  * overlaps, or null. First come, first served: the operator leasing files to
  * its own task is refused by name here, and the holder keeps what it declared.
  *
  * Only clashes with the NEW globs count: an overlap two other leases already
- * had (declared before ruling 417 refused one) is not this task's to answer.
+ * had (declared before overlaps were refused, ruling 61) is not this task's
+ * to answer.
  */
 export function leaseHeldAgainst(
   projectSlug: string,

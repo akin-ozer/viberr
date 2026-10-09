@@ -7,7 +7,7 @@ const WORKSPACE =
 /** The same, with thirty clones of the demo's task files (40 tasks). */
 const BOARD_40 = `${WORKSPACE}; viberr-core enlarged to 40 tasks by cloning the demo's task files`;
 
-/** Ruling 457 ratchet ceilings: loader payloads (bell, board columns, board task shape). */
+/** Ruling 11 ratchet ceilings: loader payloads (bell, board columns, board task shape). */
 export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // FL-4: 8,505 before the bell's list left the pages (owner, 2026-09-24):
   // 62 % of Home's payload was a popover closed at first paint. 3,251 was
@@ -15,7 +15,7 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // shorter than the afternoon's greeting) and counted the data root, a temp
   // path as long as the host makes it (71 bytes on macOS, 26 on Linux); on the
   // pinned clock with the path measured as empty the same payload is 3,182.
-  // Raised by 136 for ruling 532: the setup checklist's four steps. The demo
+  // Raised by 136 for ruling 322: the setup checklist's four steps. The demo
   // seed gives arda no GitHub connection and no Claude or Codex account, so
   // the checklist is open (two steps done), and it rides the loader it shows
   // on; an instance with every step done sends `null`.
@@ -68,7 +68,7 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
   // the wall clock in the small hours, before the demo's "today" agent
   // activity was an hour old; on the pinned clock twelve cards read `quiet:
   // true`, a byte shorter each (the same for card-bytes below). Raised 38705
-  // to 38865 by ruling 471: the four cards cloned from VIB-142 carry the
+  // to 38865 by ruling 316: the four cards cloned from VIB-142 carry the
   // option the board's acceptance answers their open decision with
   // (`"acceptAnswersWith":"Accept completion"`, 40 bytes each), so the
   // dialog can say "Answers" from the loader instead of "Withdraws".
@@ -79,7 +79,7 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
     fixture: `${BOARD_40}; /board`,
   },
   // BOARD-3: 74,188 before (the whole TaskSummary per card). Raised 37048 to
-  // 37208 by ruling 471: the same four cards' `acceptAnswersWith` (40 bytes
+  // 37208 by ruling 316: the same four cards' `acceptAnswersWith` (40 bytes
   // each, as above).
   "payload:board-40.card-bytes": {
     ceiling: 37208,
@@ -88,9 +88,9 @@ export const PAYLOAD_BUDGETS: PerfBudgetTable = {
     fixture: `${BOARD_40}; /board; the 40 cards' JSON`,
   },
   // BOARD-3: 49 before; `toBoardCard` ships the board's read set. 28 since
-  // ruling 491 dropped `prChecksUnread`, which fed only the removed pill.
-  // Raised 28 to 29 by ruling 503: `epicId`, which the board's epic filter
-  // reads (the card draws no chip for it, ruling 172).
+  // ruling 237 dropped `prChecksUnread`, which fed only the removed pill.
+  // Raised 28 to 29 by ruling 325: `epicId`, which the board's epic filter
+  // reads (the card draws no chip for it, ruling 306(e)).
   "payload:board-40.card-fields": {
     ceiling: 29,
     unit: "count",

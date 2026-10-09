@@ -19,7 +19,7 @@ import type { TaskActionContext } from "./task-action-core.server";
 import { appendPolicyNote, taskRef, terminalStageIdFor } from "./task-mutation.server";
 
 /**
- * Ruling 685: the words a follow-up turn opens with. The message stands in the
+ * Ruling 259: the words a follow-up turn opens with. The message stands in the
  * person's conversation as theirs, because the turn runs as them, so it says
  * who sent it; and it names the project, because a conversation on Home or on
  * another board has nothing else that does.
@@ -47,7 +47,7 @@ function stillInProject(db: DatabaseSync, ctx: TaskActionContext, projectSlug: s
 
 /**
  * Start the conversation's next turn, as the person who asked: a controller
- * turn runs on the asker's own Claude account (ruling 127) and under their
+ * turn runs on the asker's own Claude account (ruling 137) and under their
  * permissions, and the acceptance may be somebody else's. So the person is
  * checked as they stand now, before a message is put in their conversation:
  * an account that is gone, a project they no longer belong to and a Claude
@@ -146,7 +146,7 @@ async function continueWith(db: DatabaseSync, ctx: TaskActionContext, followUp: 
 }
 
 /**
- * Ruling 685, the hook: a task may have been accepted. When it stands at the
+ * Ruling 259, the hook: a task may have been accepted. When it stands at the
  * board's last stage and a controller conversation left a follow-up on it,
  * that conversation's next turn is started with it. It reads the stage itself,
  * so both writers of the last stage call it and nothing else has to decide

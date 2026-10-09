@@ -6,11 +6,11 @@ import { Icon } from "./icon";
 afterEach(cleanup);
 
 /**
- * Ruling 458(f): the glyphs the mock drew as local SVGs (the folder, folder
+ * Ruling 297: the glyphs the mock drew as local SVGs (the folder, folder
  * upload, upload, pencil and pin star) are `Icon` names, and a state is its own
  * name. These pin the frame every glyph shares and the two state pairs.
  */
-describe("Icon's state pairs (ruling 458(f))", () => {
+describe("Icon's state pairs (ruling 297)", () => {
   function draw(name: Parameters<typeof Icon>[0]["name"]) {
     const { container } = render(<Icon name={name} />);
     return container.querySelector("svg.ico")!;

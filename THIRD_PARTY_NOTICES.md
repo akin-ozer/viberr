@@ -6,7 +6,7 @@ licences in `node_modules` and are not listed here.
 
 ## AICSS
 
-Ruling 499: the run console's to-do list, code block, thinking block and orb
+Ruling 168: the run console's to-do list, code block, thinking block and orb
 (`app/features/runtime/console-blocks.tsx`, `app/features/runtime/runs-panels.tsx`,
 their rules in `app/app.css`) are adapted from AICSS's free components
 (<https://www.aicss.dev>, <https://github.com/kvnkld/aicss>, `@aicss/react` 0.1.3).
@@ -37,7 +37,7 @@ SOFTWARE.
 
 ## Humanizer
 
-Rulings 502 and 689: the writing guide every operator run, controller turn and
+Ruling 187: the writing guide every operator run, controller turn and
 specialist run carries (`app/server/runtimes/humanizer/SKILL.md`, read by
 `app/server/runtimes/humanizer.server.ts`) is the Humanizer skill by Siqi Chen
 (<https://github.com/blader/humanizer>), version 3.1.0, copied unchanged from
@@ -70,7 +70,7 @@ SOFTWARE.
 
 ## OpenClaw test-audit skill
 
-Ruling 512: the test value bar in `docs/development/testing.md` §0 and the
+Ruling 8: the test value bar in `docs/development/testing.md` §0 and the
 workflow in `.claude/skills/test-audit/SKILL.md` are adapted from OpenClaw's
 `test-audit` skill (<https://github.com/openclaw/openclaw>,
 `.agents/skills/test-audit/SKILL.md` and `CAMPAIGN.md` at commit
@@ -104,7 +104,7 @@ SOFTWARE.
 ## anti-slop oxlint plugin
 
 `tools/oxlint/anti-slop/` (the lint rules `npm run lint` loads through
-`.oxlintrc.json`, ruling 86) is a vendored copy of the `src/` tree of Dillon
+`.oxlintrc.json`, ruling 7) is a vendored copy of the `src/` tree of Dillon
 Mulroy's anti-slop plugin (<https://github.com/dmmulroy/anti-slop>), taken from
 an earlier revision of `main` and pinned file by file in
 `tools/oxlint/anti-slop.manifest.json`.

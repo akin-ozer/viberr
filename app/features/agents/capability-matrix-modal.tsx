@@ -27,7 +27,7 @@ import {
  * capabilities. Matching is by display label — labels are rendered from the
  * id-based store server-side, so this stays exact.
  *
- * Ruling 479(a): the grid holds only capabilities something enforces
+ * Ruling 184: the grid holds only capabilities something enforces
  * (`GOVERNED_CAP_LABELS`, the set the Policy page's counts and the profile
  * panel's columns read). Advisory persona lines (`group: null` in the catalog,
  * the review-verdict outcomes among them, and bespoke extras) used to land in
@@ -38,7 +38,7 @@ import {
  * shows them (R15-12): each line with the profiles that hold it and the mode
  * it is stored at, and no cell colour.
  *
- * Ruling 16 additions over the mock: rendered as a native <dialog> via
+ * Ruling 287 additions over the mock: rendered as a native <dialog> via
  * useDialog, which provides Escape close, backdrop-click close, and focus
  * management (markup otherwise unchanged).
  */
@@ -63,7 +63,7 @@ const MODE_TITLE = {
 } satisfies Record<Mode, string>;
 
 /**
- * What the matrix draws from the roster (ruling 700(e), the split of
+ * What the matrix draws from the roster (ruling 13(b), the split of
  * `CapabilityMatrixModal`): the grid's groups, the curated catalog plus
  * "Operator actions", and the advisory lines that never reach a cell. A pure
  * function of the profiles; the modal calls it once per render.
@@ -75,7 +75,7 @@ function matrixGroups(profiles: MatrixProfile[]) {
   const groups: { group: string; labels: string[] }[] = CAP_MODAL_CATALOG.map(
     (g) => ({ group: g.group, labels: g.caps.map((c) => c.label) }),
   );
-  // Ruling 479(a): a label outside the agent catalog is either one of the
+  // Ruling 184: a label outside the agent catalog is either one of the
   // operator's own capabilities (enforced, so a grid row) or an advisory line
   // (no runtime consumer, so never a coloured cell).
   const operatorOnly = new Set<string>();
@@ -123,7 +123,7 @@ export function CapabilityMatrixModal({
 
   return (
     <dialog
-      // Ruling 625: as wide as its grid (`.mx-modal`), so each row's label
+      // Ruling 184: as wide as its grid (`.mx-modal`), so each row's label
       // sits beside its dots instead of 450-680px from them.
       className="modal-card mx-modal"
       aria-label="Capability matrix"
@@ -174,7 +174,7 @@ export function CapabilityMatrixModal({
           <span className="d off" />
           {MODE_LABEL.off}
         </span>
-        {/* Ruling 625: the legend names the row mark once; the rows carry the
+        {/* Ruling 184: the legend names the row mark once; the rows carry the
             mark, not the word repeated on every one. */}
         <span className="lg mx-scope-legend">
           <span className="mx-scope" aria-hidden="true">
@@ -221,7 +221,7 @@ export function CapabilityMatrixModal({
                     const capId = capabilityByLabel(label)?.id;
                     const claudeOnly =
                       capId && capabilityEnforcement(capId) === "claude-only";
-                    // Ruling 185: with the Codex OS sandbox gone, a withheld
+                    // Ruling 183: with the Codex OS sandbox gone, a withheld
                     // write family has no OS channel on Codex — the prompt and
                     // the delivery gate carry it. Name the Codex-first
                     // profiles on the row so the matrix never reads "both" for
@@ -268,7 +268,7 @@ export function CapabilityMatrixModal({
                               {/* Interface review 2026-09-24 (acce-20): the
                                   title is only a description, so table
                                   navigation read every cell as blank. Same
-                                  fix as ruling 148's RBAC cells. */}
+                                  fix as ruling 291's RBAC cells. */}
                               <span className="vh">{MODE_TITLE[m]}</span>
                             </span>
                           </td>
@@ -282,7 +282,7 @@ export function CapabilityMatrixModal({
             </tbody>
           </table>
           {advisory.size > 0 && (
-            /* Ruling 479(a): the panel's R15-12 treatment, across profiles.
+            /* Ruling 184: the panel's R15-12 treatment, across profiles.
                Collapsed and outside the grid, so no cell colour and no count
                reads an advisory line as authority; the number stays visible. */
             <details className="cap-advisory">
@@ -330,7 +330,7 @@ export function CapabilityMatrixModal({
 }
 
 /**
- * The runtime notes under the grid, hook-free (ruling 700(e) moved them
+ * The runtime notes under the grid, hook-free (ruling 13(b) moved them
  * out of the modal's body unchanged).
  *
  * P13-RT-14 / LV-15 / KM-04: the Claude↔Codex differences below are
@@ -347,7 +347,7 @@ function RuntimeDifferences() {
           server-side on the delivering profile's grant, enforced on both
           backends. Withholding <b>Write to the repository</b> binds on
           Claude, which drops the write tools. Codex runs are not OS-confined
-          (ruling 185), so there it is advisory: the prompt omits every delivery
+          (ruling 183), so there it is advisory: the prompt omits every delivery
           step, and the row is tagged "advisory on Codex" above. The scoped
           delivery commands bind only on Claude too, and the <b>server-side
           delivery gate</b> is what constrains what ships on either backend. Web
@@ -364,7 +364,7 @@ function RuntimeDifferences() {
           gets the persona alone.
         </li>
         <li>
-          {/* F19-16 / ruling 51 (R18-5): the asymmetry is meant to be
+          {/* F19-16 / ruling 185 (R18-5): the asymmetry is meant to be
               DISCLOSED, not silent — "Codex keeps prompt-text injection —
               the asymmetry is disclosed, not silent". It was disclosed
               nowhere in the UI, so a reader granting a long skill could
@@ -419,7 +419,7 @@ function RuntimeDifferences() {
               as if the matrix still bounded its powers. It does not, and
               the consequence belongs in the disclosure: a granted server
               is its own grant. Pinned by specialist-tool-policy.test.ts.
-              Ruling 176 amends it: the tools an admin MARKS are the one
+              Ruling 188 amends it: the tools an admin MARKS are the one
               exception, and the copy says which tools that covers. */}
           <b>MCP tools sit outside this matrix, with one exception.</b> Viberr
           can't know what a third-party tool does, so a granted server's tools are

@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ruling 342 (pass 37, F37-178) — a tool description is a prompt, and it is
+ * Ruling 10 (pass 37, F37-178) — a tool description is a prompt, and it is
  * edited the way prose is edited.
  *
- * `list_decisions`' description shipped ruling 336's new `releases` paragraph
+ * `list_decisions`' description shipped ruling 263's new `releases` paragraph
  * with its closing sentence pasted twice: *"`kind` and `notAcceptableReason`
  * carry that other half. `kind` and `notAcceptableReason` carry that other
  * half."* It is 1,900 characters long, it is assembled from adjacent string
@@ -71,7 +71,7 @@ function repeatedSentences(text: string): string[] {
   return [...counts.entries()].filter(([, n]) => n > 1).map(([s]) => s);
 }
 
-describe("tool descriptions say each thing once (ruling 342)", () => {
+describe("tool descriptions say each thing once (ruling 10)", () => {
   it("the sweep reads real descriptions, not an empty set", () => {
     // CANARY: break `agentStrings` and every assertion below passes vacuously.
     const found = SURFACES.flatMap((rel) =>
@@ -94,7 +94,7 @@ describe("tool descriptions say each thing once (ruling 342)", () => {
     const offenders = agentStrings(readFileSync(path.join(ROOT, rel), "utf8"))
       .flatMap(repeatedSentences)
       .map((s) => s.slice(0, 120));
-    // CANARY: paste ruling 336's "`kind` and `notAcceptableReason` carry that
+    // CANARY: paste ruling 263's "`kind` and `notAcceptableReason` carry that
     // other half." back a second time and this names it.
     expect(
       offenders,

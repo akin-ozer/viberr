@@ -22,7 +22,7 @@ import type { BoardColumnData, BoardStage, BoardTask } from "./board-page";
 import { findTask, readBoardView, stageNameIn } from "./board-page-derive";
 
 /**
- * The board page's state and posts (ruling 700(e), the task-page recipe rolled
+ * The board page's state and posts (ruling 13(b), the task-page recipe rolled
  * out to `board-page.tsx`), each hook owning its fetcher, toast and local
  * state: the view the URL carries, the re-scan, the moves and what they draw
  * while the server answers, the keyboard's way around the cards, the confirms a
@@ -57,7 +57,7 @@ export function useBoardQuery() {
         next.delete("filter");
         next.delete("q");
         next.delete("label"); // F26-12: Clear resets the label filter too.
-        next.delete("epic"); // Ruling 503: and the epic filter.
+        next.delete("epic"); // Ruling 325: and the epic filter.
         return next;
       },
       { replace: true, preventScrollReset: true },
@@ -155,7 +155,7 @@ export function useBoardMoves(columns: BoardColumnData[], allTasks: BoardTask[],
   /**
    * D9 (WCAG 2.2 / UX spec §Accessibility Strategy) — the board's polite
    * announcement region. Board drag is pointer-only and keyboard users move via
-   * the StageMenu (ruling 64 built the traversal half), but nothing ever spoke
+   * the StageMenu (ruling 307 built the traversal half), but nothing ever spoke
    * a requested move, a completed one, or a server refusal — including the 409
    * the server answers an off-boundary move with, since the board is
    * authoritative and never commits a move client-side. `announceMove` speaks
@@ -171,12 +171,12 @@ export function useBoardMoves(columns: BoardColumnData[], allTasks: BoardTask[],
     taskKey: string,
     to: string,
     beforeKey: string,
-    // Ruling 88 (F21-2): set ONLY for a move onto the FINAL column, which the
+    // Ruling 97 (F21-2): set ONLY for a move onto the FINAL column, which the
     // server reads as an acceptance (`reorderTask` → `transitionStage` →
     // `acceptCompletion` — the real merge). It is the echo of what the ceremony
     // just displayed; without it the server refuses the acceptance.
     disclosure?: AcceptanceDisclosure,
-    // Ruling 381: why the card went back. Required by the server for a
+    // Ruling 47: why the card went back. Required by the server for a
     // backward move; collected by `MoveBackConfirm` before this is called.
     reason?: string,
   ) => {
@@ -272,7 +272,7 @@ export function useBoardKeyboard(
     refocusKey.current = taskKey;
     submitReorder(taskKey, stageId, beforeKey);
   };
-  // Ruling 457: the memoised cards take this as a prop, so it keeps one
+  // Ruling 11: the memoised cards take this as a prop, so it keeps one
   // identity and runs the latest render's nudge, as `moveTask` does
   // (`useMoveConfirms`).
   const latestNudgeTask = useRef(nudgeTaskNow);
@@ -418,7 +418,7 @@ export function useBoardKeyboard(
   return { rovingKey, onCardKeyDown, onNudgeTask };
 }
 
-/** Ruling 381: a backward move waiting on its reason. */
+/** Ruling 47: a backward move waiting on its reason. */
 interface PendingMoveBack {
   taskKey: string;
   from: string;
@@ -436,7 +436,7 @@ interface PendingAccept {
 /**
  * The two confirms a move can need before it posts: a move into the final
  * stage is an acceptance, confirmed through the one shared ceremony (B1, D3),
- * and a move back asks why (ruling 381). With them the Move menu's move
+ * and a move back asks why (ruling 47). With them the Move menu's move
  * (F10-25), which routes to either the way the drop does, and both confirms as
  * elements the page places where they always stood.
  */
@@ -448,7 +448,7 @@ export function useMoveConfirms({
   moves,
 }: {
   columns: BoardColumnData[];
-  /** The page's stable stage list (ruling 457), which the ceremony names. */
+  /** The page's stable stage list (ruling 11), which the ceremony names. */
   stages: BoardStage[];
   allTasks: BoardTask[];
   defaultBranch: string;
@@ -472,7 +472,7 @@ export function useMoveConfirms({
       setPendingAccept({ taskKey, to: toStageId, beforeKey: "" });
       return;
     }
-    // Ruling 381: and the same reason dialog. A keyboard user who skipped this
+    // Ruling 47: and the same reason dialog. A keyboard user who skipped this
     // would meet a bare 400 with no field to answer it in — the drag's own
     // dead end, one door over.
     const fromIdx = columns.findIndex((c) => c.stage.id === fromStage);
@@ -483,7 +483,7 @@ export function useMoveConfirms({
     }
     submitReorder(taskKey, toStageId, "");
   };
-  // Ruling 457: every card and list row takes the move callback, so it keeps
+  // Ruling 11: every card and list row takes the move callback, so it keeps
   // one identity and runs the latest render's `onMoveTask` (which reads the
   // current columns); a fresh closure per render re-rendered every card.
   const latestMoveTask = useRef(onMoveTask);
@@ -497,7 +497,7 @@ export function useMoveConfirms({
 
   // F19-27: the summary the acceptance confirm discloses from. Resolved here
   // rather than captured into `pendingAccept` so it re-reads on every
-  // revalidation — a stale snapshot is exactly the failure ruling 42 is about.
+  // revalidation — a stale snapshot is exactly the failure ruling 96 is about.
   const pendingAcceptTask = findTask(allTasks, pendingAccept?.taskKey);
   // …and the price of resolving it late: a revalidation between the gesture and
   // the render can drop the task from the payload (someone archived it, the
@@ -550,19 +550,19 @@ export function useMoveConfirms({
       fromStageName={
         // `stageName`'s fallback, spelled here: importing stage-roles.ts
         // would put its whole chunk on the board for this one line
-        // (ruling 457).
+        // (ruling 11).
         stages.find((s) => s.id === pendingAcceptTask.stage)?.name ??
         pendingAcceptTask.stage
       }
       defaultBranch={defaultBranch}
-      // Ruling 475 (F40-55 (c)): the same disclosure the task page's
+      // Ruling 244 (F40-55 (c)): the same disclosure the task page's
       // dialog makes, from the board's own cards (`pr.paths` rides them).
       mergeCollisions={mergeCollisions(pendingAcceptTask, allTasks)}
       busy={busy}
       onCancel={() => setPendingAccept(null)}
       onConfirm={(disclosure) => {
         const p = pendingAccept;
-        // Ruling 88: the drop commits with the ceremony's own echo of what
+        // Ruling 97: the drop commits with the ceremony's own echo of what
         // it disclosed — the same acknowledgment the task page's stage move
         // sends, on the same server contract.
         submitReorder(p.taskKey, p.to, p.beforeKey, disclosure);
@@ -719,7 +719,7 @@ export function useBoardDrag({
       });
       return;
     }
-    // Ruling 381: dragging a card BACK is the same act as picking an earlier
+    // Ruling 47: dragging a card BACK is the same act as picking an earlier
     // stage from the task page's menu, and the server requires a reason for
     // either. Without this the drag would simply be refused, with nowhere to
     // type the answer.

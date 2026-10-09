@@ -9,6 +9,7 @@ import { createTestDbContext, type TestDbContext } from "../../../test-support/t
 import { setupTestStore, type TestStore } from "../../../test-support/test-store";
 import type { EmittedLine, RunSpec } from "./adapter.server";
 import {
+  backendDispatchHold,
   latestBackendRateLimits,
   parseQuotaResetAt,
 } from "./backend-quota.server";
@@ -25,7 +26,7 @@ import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server"
  * environment landed the live key verbatim in a member-visible console, in the
  * `{ } raw` toggle, and in the persisted `.jsonl`.
  *
- * Ruling 127 moved that one credential out of this process's environment: it is
+ * Ruling 137 moved that one credential out of this process's environment: it is
  * the run PRINCIPAL's own, sealed in `user_backend_credentials` and opened per
  * run, so the env sweep alone can no longer see it. `createRunSink(db, spec,
  * { secrets })` is how the value reaches the redactor, and it is now the
@@ -46,7 +47,7 @@ const SAVED = {
 const CLAUDE_KEY = "sk-ant-api03-VERYSECRETVALUE0123456789abcdef";
 const CODEX_TOKEN = "codex-access-token-0123456789abcdef";
 /**
- * The ruling-127 shape: a credential that exists ONLY in a sealed row and in
+ * The ruling-137 shape: a credential that exists ONLY in a sealed row and in
  * the one run's spawn env, never in this process's environment. Deliberately a
  * ChatGPT-workspace ACCESS TOKEN rather than an `sk-…` key: the token patterns
  * would have caught an `sk-` prefix on sight, and then this file would be
@@ -95,8 +96,9 @@ function emitted(
   return { raw, display, facts: {}, occurredAt };
 }
 
-/** A run row + a sink over it. `threadId` is only ever passed when a test needs
- *  a SECOND run on the same task (one thread holds one run row). */
+/** A run row + a sink over it, billed to Arda (every run that reaches a
+ *  provider bills someone, ruling 137). `threadId` is only ever passed when a
+ *  test needs a SECOND run on the same task (one thread holds one run row). */
 function sinkFor(runId: string, threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
@@ -110,12 +112,13 @@ function sinkFor(runId: string, threadId = "primary") {
     sdk: "Claude Agent SDK",
     agentProfileId: "dev",
     state: "queued",
+    credentialUserId: store.users.arda.id,
   });
   return createRunSink(store.db, spec(runId));
 }
 
 /** The same row + sink, but carrying the per-run secrets `runCredentialFor`
- *  resolved for the run's principal (ruling 127). */
+ *  resolved for the run's principal (ruling 137). */
 function sinkWithSecrets(runId: string, secrets: string[], threadId = "primary") {
   upsertRun(store.db, {
     id: runId,
@@ -264,7 +267,7 @@ describe("createLineRedactor", () => {
   });
 
   /**
-   * Ruling 127: the run's own secret. A personal API key is sealed in
+   * Ruling 137: the run's own secret. A personal API key is sealed in
    * `user_backend_credentials` and decrypted for exactly one run, so it is
    * never in `process.env` — the env sweep above cannot know it, and without
    * this seam the first `env` a model ran would print one person's key into a
@@ -329,7 +332,7 @@ describe("the sink redacts before it persists", () => {
   });
 
   it("scrubs the PRINCIPAL's own credential, which lives only in the sealed row", () => {
-    // Ruling 127's leak path: the run bills one person, its child env carries
+    // Ruling 137's leak path: the run bills one person, its child env carries
     // that person's credential, and the console is visible to every project
     // member.
     const sink = sinkWithSecrets("run_personal", [PERSONAL_TOKEN]);
@@ -894,13 +897,13 @@ describe("quota exhaustion from a refused run (D5)", () => {
 });
 
 /**
- * Ruling 130(d) (pass 34): the quota store records the STRUCTURED refusal
+ * Ruling 160(a) (pass 34): the quota store records the STRUCTURED refusal
  * (a rejected window on the terminal line's `failure` record) and whose
  * account it was. Canaries: delete the `failure` clause from the exhaustion
  * gate; gate on `window` instead of `windowRejected`; remove the clock arm;
  * stop reading the run's `credential_user_id`.
  */
-describe("ruling 604: a Codex line's usage reading", () => {
+describe("ruling 161(b): a Codex line's usage reading", () => {
   it("is stored as the codex backend's reading, naming the account that ran it", () => {
     const runId = `run_codex_rl_${randomBytes(6).toString("hex")}`;
     upsertRun(store.db, {
@@ -925,7 +928,7 @@ describe("ruling 604: a Codex line's usage reading", () => {
       sink.line({ ...emitted({ t: "13:00:00", ev: "tool", tag: "codex·tool", text: "npm test" }, "{}", "2026-09-30T13:00:00.000Z"), facts: { rateLimit: reading } });
       // CANARY: record the reading for Claude runs only and Profile's Codex
       // card has nothing to show before a refusal.
-      // CANARY (ruling 608): drop `windows` from the stored schema and the
+      // CANARY (ruling 161(b)): drop `windows` from the stored schema and the
       // five-hour figure never reaches instance_health.
       const row = latestBackendRateLimits(store.db, "2026-09-30T13:01:00.000Z").find((q) => q.backend === "codex")!;
       expect(row.reading).toMatchObject({ ...reading, observedAt: "2026-09-30T13:00:00.000Z", credentialUserId: store.users.arda.id });
@@ -935,15 +938,18 @@ describe("ruling 604: a Codex line's usage reading", () => {
   });
 });
 
-describe("ruling 130(d): structured refusals and the principal", () => {
+describe("ruling 160(a): structured refusals and the principal", () => {
   const facts = (over: Partial<RunFailureFacts>): RunFailureFacts => ({
     kind: "quota", resetsAt: null, window: null, windowRejected: false, apiError: null, apiErrorStatus: null, terminalReason: null, origin: null, ...over,
   });
-  function principalSink(runId: string) {
+  /** A run billed to `userId` (Arda unless named; null bills nobody).
+   *  `threadId` only when a test needs a second run on the task (one thread
+   *  holds one run row). */
+  function principalSink(runId: string, userId: string | null = store.users.arda.id, threadId = "primary") {
     upsertRun(store.db, {
-      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId: "primary", role: "developer", kind: "primary",
+      id: runId, projectSlug: store.slug, taskKey: "VIB-1", threadId, role: "developer", kind: "primary",
       backend: "claude", model: "sonnet", sdk: "Claude Agent SDK", agentProfileId: "dev", state: "queued",
-      credentialUserId: store.users.arda.id,
+      credentialUserId: userId,
     });
     return createRunSink(store.db, spec(runId));
   }
@@ -1008,7 +1014,7 @@ describe("ruling 130(d): structured refusals and the principal", () => {
     }
   });
 
-  it("a credential refusal names the account it billed, and a run with no principal names none", () => {
+  it("a credential refusal names the account it billed, and a run with no principal records none", () => {
     const runId = `run_auth_p_${randomBytes(6).toString("hex")}`;
     const sink = principalSink(runId);
     sink.markRunning();
@@ -1023,27 +1029,86 @@ describe("ruling 130(d): structured refusals and the principal", () => {
       rmSync(rawLogPath("claude", runId), { force: true });
     }
 
-    // The record is the latest refusal's: a run that billed nobody names
-    // nobody, not the account the earlier refusal named.
+    // A run that billed nobody reached no provider (ruling 137(b)), so there is
+    // no account its refusal is about: it records nothing, and Arda's stands.
+    // CANARY: drop the principal guard from `recordBackendCredentialRefusal`
+    // and the bare run files a record under no account that names nobody.
     const bare = `run_auth_np_${randomBytes(6).toString("hex")}`;
-    const sink2 = sinkFor(bare, "primary-r1");
+    const sink2 = principalSink(bare, null, "primary-r1");
     sink2.markRunning();
     try {
-      sink2.line(emitted({ t: "10:00:00", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
-      expect(quotaFor().credentialRefused!.credentialUserId).toBeNull();
+      sink2.line(emitted({ t: "10:00:01", ev: "err", tag: "run·error·auth", text: "refused" }, "{}"));
+      expect(quotaFor().credentialRefused).toMatchObject({ credentialUserId: store.users.arda.id, runId });
     } finally {
       rmSync(rawLogPath("claude", bare), { force: true });
+    }
+  });
+
+  /**
+   * Rulings 151 and 160: a refusal is a record about the account its run
+   * billed, so another person's run on the same backend can neither replace it
+   * nor retire it. Both records used to be one `instance_settings` slot per
+   * backend: Murat's refusal overwrote Arda's, which lifted her dispatch hold
+   * (the record now named somebody else), and Murat's next completed run
+   * deleted whatever the slot held, Arda's credential refusal included.
+   * CANARY: key the records by backend alone again and Arda's hold lifts the
+   * moment Murat is refused; clear them by backend alone in `finalize` and it
+   * lifts when Murat's next run finishes.
+   */
+  it("one person's refusal is neither replaced nor retired by another person's run on the same backend", () => {
+    const arda = store.users.arda.id;
+    const murat = store.users.murat.id;
+    const nowMs = Date.parse("2026-09-07T09:10:00.000Z");
+    const nowIso = new Date(nowMs).toISOString();
+    const refuse = (sink: ReturnType<typeof principalSink>, observedAt: string, resetsAt: string) => {
+      sink.markRunning();
+      sink.line(emitted({
+        t: "09:00:00", ev: "err", tag: "run·error·quota",
+        text: "The Claude account is over its usage quota: its five hour window is spent.",
+        failure: facts({ windowRejected: true, window: "five_hour", resetsAt }),
+      }, "{}", observedAt));
+      sink.line(emitted({
+        t: "09:00:01", ev: "err", tag: "run·error·auth", text: "refused\n\nThe provider reported: token revoked",
+      }, "{}", observedAt));
+      sink.finalize({ outcome: "error", effectiveBackend: "claude" });
+    };
+    const holdFor = (userId: string) => backendDispatchHold(store.db, "claude", { nowMs, credentialUserId: userId });
+    const ardaRun = `run_arda_${randomBytes(6).toString("hex")}`;
+    const muratRun = `run_murat_${randomBytes(6).toString("hex")}`;
+    const muratOk = `run_murat_ok_${randomBytes(6).toString("hex")}`;
+    try {
+      refuse(principalSink(ardaRun, arda), "2026-09-07T09:00:00.000Z", "2026-09-07T11:50:00.000Z");
+      refuse(principalSink(muratRun, murat, "murat-1"), "2026-09-07T09:05:00.000Z", "2026-09-07T12:30:00.000Z");
+
+      // Murat's refusal is his own record; Arda's still holds her dispatches.
+      expect(holdFor(arda)?.until).toBe(Date.parse("2026-09-07T11:50:00.000Z"));
+      expect(holdFor(murat)?.until).toBe(Date.parse("2026-09-07T12:30:00.000Z"));
+
+      // Murat's next run completes: it proves HIS account answers again.
+      const ok = principalSink(muratOk, murat, "murat-2");
+      ok.markRunning();
+      ok.finalize({ outcome: "finished", effectiveBackend: "claude" });
+
+      expect(holdFor(murat)).toBeNull();
+      expect(holdFor(arda)?.until).toBe(Date.parse("2026-09-07T11:50:00.000Z"));
+      // The instance-wide read (Insights, health) still shows Arda's standing
+      // refusals, naming her and the run they were read off.
+      const row = quotaFor(nowIso);
+      expect(row.credentialRefused).toMatchObject({ credentialUserId: arda, runId: ardaRun });
+      expect(row.exhausted).toMatchObject({ credentialUserId: arda, runId: ardaRun });
+    } finally {
+      for (const id of [ardaRun, muratRun, muratOk]) rmSync(rawLogPath("claude", id), { force: true });
     }
   });
 });
 
 /**
- * Ruling 369: the sink folds every cache fact onto the row — the run's writes,
+ * Ruling 172: the sink folds every cache fact onto the row — the run's writes,
  * the FIRST call (with its temperature and the provider's miss reason), the
  * peak and last prompt (per-call figures only), the TTL bucket and the
  * compactions — and a compaction is a governed fact with an audit row.
  */
-describe("ruling 369: the sink folds the prompt-cache record", () => {
+describe("ruling 172: the sink folds the prompt-cache record", () => {
   const cacheLine = (
     cache: NonNullable<EmittedLine["facts"]["cache"]>,
     tag = "assistant",
@@ -1199,7 +1264,7 @@ describe("ruling 369: the sink folds the prompt-cache record", () => {
     ).toHaveLength(1);
   });
 
-  it("ruling 376: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
+  it("ruling 174: a completion compaction's fact sets the replay size, and its request adds cost and tokens", () => {
     const sink = sinkFor("run_completion_compact", "completion-compact");
     sink.line(cacheLine(call(2_000, 118_000, { promptTokens: 120_000 })));
     sink.line({

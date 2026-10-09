@@ -4,7 +4,7 @@ import interLatin500 from "@fontsource/inter/files/inter-latin-500-normal.woff2?
 import interLatin700 from "@fontsource/inter/files/inter-latin-700-normal.woff2?url";
 
 /**
- * Ruling 457: the Inter faces a first paint needs are preloaded, so the
+ * Ruling 11: the Inter faces a first paint needs are preloaded, so the
  * browser fetches them while it parses the HTML instead of discovering them
  * only after the root stylesheet has been downloaded, parsed and matched.
  *
@@ -18,7 +18,7 @@ import interLatin700 from "@fontsource/inter/files/inter-latin-700-normal.woff2?
  *    uses, and 700, the weight of `.btn`, `.pill` and the field labels, which
  *    the login page, Home and the workspace all draw on first paint.
  *  - The project workspace (`routes/project`) adds 500: the rail, the crumbs,
- *    the board's card titles, column heads and filter chips (ruling 365(g)).
+ *    the board's card titles, column heads and filter chips (ruling 280).
  *
  * 600 and 800 (a page title, a name, the brand mark) and JetBrains Mono (the
  * ⌘K chip, keys and counts) are short runs of text; they load from the

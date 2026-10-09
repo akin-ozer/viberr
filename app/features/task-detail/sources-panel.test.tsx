@@ -7,7 +7,7 @@ import { SourcesPanel } from "./sources-panel";
 
 afterEach(cleanup);
 
-/* Ruling 690: the task page's Sources panel. What the loader ships is the
+/* Ruling 317: the task page's Sources panel. What the loader ships is the
    route suite's and what a source is served as is the route's own; this suite
    owns what a row says and where it leads. */
 
@@ -32,7 +32,7 @@ const SHOT: TaskSourceRow = {
   bytes: 2048,
 };
 
-describe("SourcesPanel (ruling 690)", () => {
+describe("SourcesPanel (ruling 317)", () => {
   it("lists each source by id with its title, where it came from, who kept it and its size, and its link is the source's own route", () => {
     // CANARY: build the href from the file name instead of the id and the
     // link points at a route that answers 404.

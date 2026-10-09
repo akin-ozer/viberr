@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { dfReading, formatBytes, type RawDiskReading } from "./disk-space.server";
 
 /**
- * Ruling 603: `npm run deploy` measures the host before it builds.
+ * Ruling 41: `npm run deploy` measures the host before it builds.
  *
  * An image build writes into Docker's disk, and on Docker Desktop that disk is
  * a sparse image file that grows on the host. Live on 2026-09-30 a cold build
@@ -60,7 +60,7 @@ export interface SupersededImage {
 }
 
 /**
- * Ruling 605: the images a verified deploy removes. Every build moves the tag
+ * Ruling 41: the images a verified deploy removes. Every build moves the tag
  * to the new image and leaves the one it replaced untagged, about 0.9 GB of
  * its own layers each: three deploys on 2026-09-30 left 2.6 GB on a host with
  * 20 GB free. The newest of them is the build this deploy replaced, kept so a
@@ -74,12 +74,12 @@ export function supersededImagesToRemove(images: readonly SupersededImage[]): st
 }
 
 /**
- * Ruling 628: how much of BuildKit's build cache a deploy keeps.
+ * Ruling 41: how much of BuildKit's build cache a deploy keeps.
  *
  * Every build adds the layers it made to the cache, and nothing trimmed it:
  * after deploy 48 on 2026-10-01 it held 6.7 GB, 2.2 GB of it the layers that
  * build used and about 4.5 GB left by builds a day and more old, on the host
- * whose disk a cold build had filled (ruling 603). The deploy keeps the most
+ * whose disk a cold build had filled (ruling 41). The deploy keeps the most
  * recently used 3 GiB, a whole build's layers with room to spare, so the next
  * build stays incremental, and Docker evicts the rest, least recently used
  * first (`docker builder prune --max-used-space`).

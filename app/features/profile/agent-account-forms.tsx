@@ -5,7 +5,7 @@ import type { ProfileBackendAccount } from "./profile-query.server";
 
 /**
  * Profile → Agent accounts: the two forms a card opens, the pasted key and an
- * account's name (ruling 700(e), the split of `agent-accounts-panel.tsx` along
+ * account's name (ruling 13(b), the split of `agent-accounts-panel.tsx` along
  * the task page's recipe), moved whole with the hooks they always owned.
  */
 
@@ -26,7 +26,7 @@ export function PasteForm({
 }) {
   const [secret, setSecret] = useState("");
   const [refused, setRefused] = useState(0);
-  // Ruling 451(g): the box shakes once per refusal, not on each mount.
+  // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
   const field = useRef<HTMLInputElement | null>(null);
   const noun = kind === "access_token" ? "workspace access token" : "API key";
@@ -38,7 +38,7 @@ export function PasteForm({
   const empty = secret.trim() === "";
   const invalid = refused > 0 && empty;
 
-  // Ruling 147: Save stays enabled until the request starts; an empty field is
+  // Ruling 288: Save stays enabled until the request starts; an empty field is
   // refused here, with the sentence the server would have thrown, and never
   // becomes a request. A pristine form is never marked.
   const save = () => {
@@ -111,10 +111,10 @@ export function PasteForm({
 }
 
 /**
- * Ruling 507: give an account the person's own name, or clear it. The same
+ * Ruling 138: give an account the person's own name, or clear it. The same
  * field idiom as the key paste form (a `.field` with its label and the card's
  * button row), prefilled with the name it has; an empty save clears the name
- * and the account is named by its vendor facts again. Ruling 147: Save is
+ * and the account is named by its vendor facts again. Ruling 288: Save is
  * enabled until the request starts, and an over-long name is refused here
  * with the store's own sentence.
  */

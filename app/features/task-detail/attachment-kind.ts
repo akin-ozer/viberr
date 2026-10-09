@@ -1,5 +1,5 @@
 /**
- * Ruling 363: what the attachment card can show for a file, decided from the
+ * Ruling 317: what the attachment card can show for a file, decided from the
  * name — and, for the text reader, confirmed by the bytes.
  *
  * The card used to decide "text" by a six-extension whitelist mirrored from

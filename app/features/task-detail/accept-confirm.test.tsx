@@ -28,7 +28,7 @@ function detail(patch: Partial<AcceptConfirmTask> = {}): AcceptConfirmTask {
     validation: "healthy",
     branch: "vib-151",
     pr: null,
-    // Ruling 304: nothing reported, which reads as "not reported", never green.
+    // Ruling 97: nothing reported, which reads as "not reported", never green.
     prChecks: null,
     stages: STAGES,
     ...patch,
@@ -103,7 +103,7 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
   });
 
   /**
-   * Ruling 393 (F39-20), live on ax-clone AX-12. U35-3 made the audit row and
+   * Ruling 98 (F39-20), live on ax-clone AX-12. U35-3 made the audit row and
    * the forced completion event name EVERY bypassed gate so an override could
    * not be under-reported, and said in its own docstring that "the timeline,
    * the audit log and the confirm dialog list the same bypasses". The dialog
@@ -111,7 +111,7 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
    * Waiting on 1 required reviewer approval of the current revision." and the
    * audit row recorded that gate AND the project's required-reviewer rule.
    */
-  it("ruling 393: force lists EVERY gate it bypasses, not just the first", () => {
+  it("ruling 98: force lists EVERY gate it bypasses, not just the first", () => {
     const gates = [
       "Waiting on 1 required reviewer approval of the current revision.",
       "Required reviewer Reviewer (project rule at Review) has not approved revision 76dabee.",
@@ -126,12 +126,12 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
     // records it.
     expect(text).toContain("Bypassing");
     for (const gate of gates) expect(text).toContain(gate);
-    // Ruling 638. CANARY: the footer's one sentence for every count read "The
+    // Ruling 316. CANARY: the footer's one sentence for every count read "The
     // bypassed gate is recorded" under a list of two.
     expect(text).toContain("The bypassed gates are recorded to the audit log.");
   });
 
-  it("ruling 393: a single gate still reads as one sentence, not a list", () => {
+  it("ruling 98: a single gate still reads as one sentence, not a list", () => {
     const only = "Waiting on 1 required reviewer approval of the current revision.";
     const { dialog } = renderConfirm({
       ceremony: { mode: "force" },
@@ -148,12 +148,12 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
   });
 
   /**
-   * Ruling 471, live on WEB-1: the operator's decision recommended the very
+   * Ruling 316, live on WEB-1: the operator's decision recommended the very
    * acceptance the owner then pressed, and this row told them it "closes
    * unanswered". When the loader says the acceptance answers the decision
    * (`answersWith`, the option it answers with), the row says that instead.
    */
-  it("ruling 471: an acceptance the loader says answers the decision reads Answers, naming the option", () => {
+  it("ruling 316: an acceptance the loader says answers the decision reads Answers, naming the option", () => {
     // Canary: drop the `answersWith` arm of the open-decision row and both
     // doors read "Withdraws … closes unanswered" again.
     const title = "WEB-1 ready to accept: both reviewers approved PR #1";
@@ -176,7 +176,7 @@ describe("F32-11 (pass 32): the ceremony names the open decision it withdraws", 
 describe("the no-change row states what is true of THIS task", () => {
   it("names the empty branch when there is one (the R17-2/F17-L9 shape)", () => {
     const text = open({ noChanges: true, task: { branch: "vib-151" } });
-    // Ruling 576: the row says what merges and names no outcome, since "no
+    // Ruling 316: the row says what merges and names no outcome, since "no
     // changes" is false of a task that corrected a knowledge base.
     expect(text).not.toContain("with no changes");
     expect(text).toContain("vib-151 carries no commits");
@@ -234,12 +234,12 @@ describe("F20-6: the no-PR auto-detect arm", () => {
 });
 
 /**
- * Ruling 550 — a task delivered as the files saved on it. Live on AWSC-2 the
+ * Ruling 316 — a task delivered as the files saved on it. Live on AWSC-2 the
  * confirm said "No delivered revision recorded." about a research task whose
  * two files a reviewer had approved, and promised a GitHub re-check that would
  * close it "with no changes".
  */
-describe("ruling 550: a task delivered as files", () => {
+describe("ruling 316: a task delivered as files", () => {
   it("names the files as the delivery and promises no merge and no re-check", () => {
     // CANARY: drop the `filesDeliveredAt` arms and the rows read "No linked
     // pull request" and "No delivered revision recorded."
@@ -282,7 +282,7 @@ describe("the revision-drift row agrees with its own number", () => {
     expect(withDrift(3)).toContain("3 authored commits since review merge unreviewed");
   });
 
-  it("ruling 132: a base refresh prints the canonical sentence verbatim and is not a warning", () => {
+  it("ruling 239: a base refresh prints the canonical sentence verbatim and is not a warning", () => {
     // Canary: restore the count-based sentence (`authored + baseRefresh.commits`
     // "commit(s) added since review; they merge unreviewed"), which renders 5
     // for this fixture.
@@ -296,7 +296,7 @@ describe("the revision-drift row agrees with its own number", () => {
 });
 
 /**
- * F21-2 / ruling 88 — the confirmed click hands back the disclosure this render
+ * F21-2 / ruling 97 — the confirmed click hands back the disclosure this render
  * made, so the submit can echo it and the server can verify it. Read off the
  * SAME props the three rows above display: a value the human never saw would
  * acknowledge nothing.
@@ -445,12 +445,12 @@ describe("F21-23: an already-merged PR is not promised a merge", () => {
 });
 
 /**
- * Ruling 162 / G35-5(d) (pass 35): the acceptance ceremony brings the branch up
+ * Ruling 95 / G35-5(d) (pass 35): the acceptance ceremony brings the branch up
  * to date with the base and PUSHES that merge before it merges the PR. That is
  * a write to the person's branch on GitHub performed by this click, and the
- * dialog is the ruling-88 disclosure of what the click does.
+ * dialog is the ruling-97 disclosure of what the click does.
  */
-describe("ruling 162: the ceremony discloses the base refresh it performs", () => {
+describe("ruling 95: the ceremony discloses the base refresh it performs", () => {
   const OPEN_PR = { number: 16, state: "review" as const, title: "[VIB-151] t" };
   function dialogText(props: {
     pr: AcceptConfirmTask["pr"];
@@ -502,12 +502,12 @@ describe("ruling 162: the ceremony discloses the base refresh it performs", () =
 });
 
 /**
- * Ruling 449 (O39-c): when the reviewed head is behind its base, the merge
+ * Ruling 97 (O39-c): when the reviewed head is behind its base, the merge
  * head would be one no review ran on. Live on ax-clone two green pull
  * requests merged a minute apart and left main red. The dialog offers the
  * owner's own method as one click: bring it up to date and re-review first.
  */
-describe("ruling 449: update the branch and re-review first", () => {
+describe("ruling 97: update the branch and re-review first", () => {
   const OPEN_PR = { number: 16, state: "review" as const, title: "[VIB-151] t" };
   function dialog(props: { baseBehindBy: number | null; onRefreshFirst?: () => void; onConfirm?: () => void; mode?: "accept" | "force" }) {
     return renderConfirm({
@@ -552,12 +552,12 @@ describe("ruling 449: update the branch and re-review first", () => {
 });
 
 /**
- * Ruling 162 (pass 35, F35-12 (c)): the accept dialog prints the gate's
+ * Ruling 95 (pass 35, F35-12 (c)): the accept dialog prints the gate's
  * refusal above a DISABLED confirm; only force-accept, which bypasses the
  * gate, keeps its button. Live (KNC-6) the dialog's controls were all enabled
  * while the server answered 409 on every click.
  */
-describe("ruling 162: a standing refusal disables the confirm", () => {
+describe("ruling 95: a standing refusal disables the confirm", () => {
   const REFUSAL =
     "VIB-151's review PR #16 conflicts with the base branch. GitHub can't merge it, so it can't be accepted. Resolve the conflict on the branch by merging the base INTO it (never by rebasing, which rewrites commits the pull request already published), then re-review, or archive the task.";
   function confirmButton(mode: "accept" | "force", blockedReason: string | null) {
@@ -593,7 +593,7 @@ describe("ruling 162: a standing refusal disables the confirm", () => {
 });
 
 /**
- * Ruling 304 (pass 37, F37-139): the dialog that authorizes an irreversible
+ * Ruling 97 (pass 37, F37-139): the dialog that authorizes an irreversible
  * merge says what CI thinks of the head it is about to merge.
  *
  * Checks are deliberately NOT an acceptance gate -- the reviewers' verdicts
@@ -604,7 +604,7 @@ describe("ruling 162: a standing refusal disables the confirm", () => {
  * named the PR, the branch, the base, the verdict and the skipped stages
  * without ever mentioning them.
  */
-describe("ruling 304: the accept ceremony states the checks it merges past", () => {
+describe("ruling 97: the accept ceremony states the checks it merges past", () => {
   const PR = { number: 41, state: "review" as const, title: "[VIB-151] work" };
 
   function ceremonyText(prChecks: AcceptConfirmTask["prChecks"]): string {
@@ -651,12 +651,12 @@ describe("ruling 304: the accept ceremony states the checks it merges past", () 
 });
 
 /**
- * Ruling 475 (F40-55 (c)): live on akinozer-com the owner accepted WEB-4 while
+ * Ruling 244 (F40-55 (c)): live on akinozer-com the owner accepted WEB-4 while
  * WEB-2's open PR #3 changed the same `package.json`. Viberr knew (both PRs'
  * `pr.paths`), and the dialog that authorizes the merge said nothing, so
  * WEB-2's acceptance was refused a minute later.
  */
-describe("ruling 475: the ceremony names the open pull requests this merge will likely conflict", () => {
+describe("ruling 244: the ceremony names the open pull requests this merge will likely conflict", () => {
   const OPEN_PR = { number: 2, state: "review" as const, title: "[WEB-4] work" };
 
   function collidesRow(props: {
@@ -712,12 +712,12 @@ describe("ruling 475: the ceremony names the open pull requests this merge will 
 });
 
 /**
- * Ruling 482 (F40-52): the owner accepted two production deploys on agents'
+ * Ruling 315 (F40-52): the owner accepted two production deploys on agents'
  * reports of the gate exit codes. The dialog that authorizes the merge prints
  * Viberr's own run instead, bound to the sha on the Revision row, and a
  * failing gate refuses the plain acceptance while force states the bypass.
  */
-describe("ruling 482: the Gates row", () => {
+describe("ruling 315: the Gates row", () => {
   const failed = {
     sha: "a95c337".padEnd(40, "0"),
     state: "failed" as const,

@@ -8,7 +8,7 @@ import { listAuditEvents } from "../../test-support/audit-log";
 import { listMcpServers } from "~/server/org/resources.server";
 
 /**
- * Ruling 176: the MCP editor's "Write tools" section rides the `mcp-save`
+ * Ruling 188: the MCP editor's "Write tools" section rides the `mcp-save`
  * intent as a JSON array of tool names. The list round-trips through the
  * registry column, a change is audited before → after, a save without the field
  * keeps the stored marks, and a malformed list or a name outside the MCP
@@ -54,7 +54,7 @@ async function saveMcp(
 
 const server = () => listMcpServers(app.db).find((m) => m.name === "gh-tools");
 
-describe("org-settings mcp-save carries the write-tool marks (ruling 176)", () => {
+describe("org-settings mcp-save carries the write-tool marks (ruling 188)", () => {
   it("an admin's list is stored, shown back and audited before → after", async () => {
     const { body } = await saveMcp(ardaId, {
       writeTools: JSON.stringify(["create_pull_request", "merge_pull_request"]),

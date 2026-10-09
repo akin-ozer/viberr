@@ -10,7 +10,7 @@ import { formatDayBucket, formatDayBucketUTC, localDayKey, utcDayKey } from "./f
  *
  * Its own module, not `format.ts`: only the notifications stream and the epic
  * history group by day, and `format.ts` rides every page's shared chunk
- * (ruling 457).
+ * (ruling 11).
  */
 export function daySections<T>(
   rows: readonly T[],

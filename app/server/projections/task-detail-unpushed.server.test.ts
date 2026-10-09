@@ -13,7 +13,7 @@ import { rebuildAll } from "./rebuilder.server";
 import { getTaskDetail } from "./task-query.server";
 
 /**
- * Ruling 134(c) / 135 (pass 34, F34-11): the task page's push control renders
+ * Ruling 229 / 243 (pass 34, F34-11): the task page's push control renders
  * from `unpushedRevisionOf(task.pr, task.workRevisionSha)` on the REAL detail
  * projection. This drives the record end to end (task file → workspace
  * reconcile → rebuild → detail projection → the panel's own expression), so

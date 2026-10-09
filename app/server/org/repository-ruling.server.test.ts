@@ -24,7 +24,7 @@ import { deleteKnowledgeBase, saveKnowledgeBase } from "./resources.server";
 import { setProjectRulingsKb } from "~/features/project-settings/settings-actions.server";
 
 /**
- * Ruling 672: a person's decision that a board connects no repository is one
+ * Ruling 199: a person's decision that a board connects no repository is one
  * document in the project's rulings knowledge base. "If they refuse that's
  * stored as a ruling on project kb never asked again" (owner, 2026-10-06).
  */
@@ -53,7 +53,7 @@ const record = (store: TestStore) =>
     { dataRoot: store.dataRoot },
   );
 
-describe("the ruling that a board connects no repository (ruling 672)", () => {
+describe("the ruling that a board connects no repository (ruling 199)", () => {
   it("is written into the rulings knowledge base the project names, under a heading every run's index shows", async () => {
     // CANARY: write it anywhere but the project's rulings knowledge base and
     // no run reads it; drop the heading and the index names a file and says

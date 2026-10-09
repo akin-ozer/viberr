@@ -2,7 +2,7 @@ import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 
 /**
- * Ruling 370: ONE home for how a run's system prompt is ORDERED so its prefix
+ * Ruling 169: ONE home for how a run's system prompt is ORDERED so its prefix
  * caches across tasks.
  *
  * A prompt is built as two blocks. `static` holds nothing that varies per task,

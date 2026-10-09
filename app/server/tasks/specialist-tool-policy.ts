@@ -22,8 +22,8 @@ import {
  * Scope (deliberate + honest): only the high-consequence, cleanly command-
  * mappable capabilities are enforced at the tool layer (branch, push, open PR,
  * merge PR). Finer-grained delivery capabilities remain advisory in the run
- * persona. Codex has no denylist channel of its own, and since ruling 185 no
- * OS sandbox: one derived flag still binds there,
+ * persona. Codex has no denylist channel of its own, and no OS sandbox
+ * (ruling 144): one derived flag still binds there,
  * `webSearchWithheldFromDenylist` → `webSearchMode: "disabled"` (P14-RT-06).
  * The write family and the scoped commands are advisory on Codex, where the
  * server-owned delivery gate plus credential-less agents are the boundary —
@@ -139,7 +139,7 @@ export function specialistGrantModes(
  * resolves it ({@link specialistGrantModes}), and the headline or a scoped
  * branch or commit grant is direct. One reading for whoever picks an agent
  * (the roster's `capabilities.delivery`), for an imported board, and for the
- * door that removes a project's repository (ruling 667).
+ * door that removes a project's repository (ruling 226).
  *
  * Re-deriving it as "any scoped delivery grant is direct" was the mistake XS-4
  * fixed on the prompt side: the headline gates ALL delivery, so a profile with
@@ -155,6 +155,23 @@ export function grantsWriteRepository(grants: readonly CapabilityGrant[]): boole
     grants.some((g) => g.capabilityId === id && coerceSpecialistCapabilityMode(g.mode) === "direct");
   return (
     direct("execute-code-or-write-repo") || direct("commit-push-branch") || direct("create-task-branch")
+  );
+}
+
+/**
+ * Ruling 17: whether these grants let an agent give a validation verdict,
+ * which is what a required reviewer (ruling 89) must hold: an EXPLICIT direct
+ * `report-validation-verdict`. One reading for whoever picks a reviewer (the
+ * roster's `capabilities.verdict`, which the Settings writer of required
+ * reviewers checks) and for an imported board's rules. The completion-time
+ * default that records a supporting engagement's verdict with no grant is a
+ * recording rule, not this.
+ */
+export function grantsValidationVerdict(grants: readonly CapabilityGrant[]): boolean {
+  return grants.some(
+    (g) =>
+      g.capabilityId === "report-validation-verdict" &&
+      coerceSpecialistCapabilityMode(g.mode) === "direct",
   );
 }
 
@@ -204,7 +221,7 @@ export function resolveUndeployedDisallowedTools(): string[] {
 }
 
 /**
- * Ruling 101(e), amended (Option D PR 5): the sentence the Claude PreToolUse
+ * Ruling 219(a), amended (Option D PR 5): the sentence the Claude PreToolUse
  * hook hands the model when a Bash command reaches a denied prefix.
  *
  * Named from the run's final denylist alone, the way
@@ -248,8 +265,8 @@ export function bashDenyReason(
 }
 
 /**
- * Ruling 461: the sentence Viberr's MCP gateway answers a call to a withheld
- * write tool with (ruling 176). The same shape as {@link bashDenyReason}: the
+ * Ruling 191: the sentence Viberr's MCP gateway answers a call to a withheld
+ * write tool with (ruling 188). The same shape as {@link bashDenyReason}: the
  * capability by label and id, the thing refused, what to do instead. On a
  * direct mount the CLI never lists such a tool at all; through the gateway it
  * is filtered from `tools/list` too, so this is what a run reads only if it
@@ -266,7 +283,7 @@ export function mcpWriteToolDenyReason(server: string, tool: string): string {
 }
 
 /**
- * Ruling 185 (owner, 2026-09-12, pass 36): Viberr no longer confines a Codex
+ * Ruling 183 (owner, 2026-09-12, pass 36): Viberr no longer confines a Codex
  * run with the CLI's OS sandbox, so on Codex a withheld repo-write family has
  * no OS channel to bind it. It is ADVISORY there: the prompt omits every
  * delivery step (`resolveDeliveryPermissions`), the run's own contract
@@ -277,7 +294,7 @@ export function mcpWriteToolDenyReason(server: string, tool: string): string {
  * This predicate is what every surface that RENDERS the repo-write
  * enforcement asks, so a Codex row is never drawn as a hard block it is not.
  * True for any Codex profile whose headline write family is withheld. (Before
- * ruling 185 it was true only for the narrower E32-3 carve-out — write
+ * ruling 183 it was true only for the narrower E32-3 carve-out — write
  * withheld AND evidence granted — because the sandbox bound the rest.)
  */
 export function codexRepoWriteAdvisory(
@@ -290,12 +307,12 @@ export function codexRepoWriteAdvisory(
 }
 
 /**
- * Ruling 264 (pass 37, F37-94): can this set of grants write the repo at all?
+ * Ruling 183 (pass 37, F37-94): can this set of grants write the repo at all?
  *
  * The one derivation, so a SENTENCE about a deployment cannot drift from the
  * gate the run is held to. `deploy_agent` promised "Delivery starts withheld"
- * on every deploy, which stopped being true when ruling 156 made a library
- * deploy COPY the template's grants — so a repo-write template deployed with
+ * on every deploy, which is false because a library deploy COPIES the
+ * template's grants (ruling 177) — so a repo-write template deployed with
  * repo write and the reply said the opposite.
  */
 export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
@@ -305,14 +322,14 @@ export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
 /** The one sentence every surface uses for the Codex posture (see
  *  {@link codexRepoWriteAdvisory}). */
 export const CODEX_REPO_WRITE_ADVISORY_NOTE =
-  "repo-write is withheld, and since ruling 185 Viberr does not OS-confine a Codex run, so on Codex the withholding is advisory: the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
+  "repo-write is withheld, and Viberr does not OS-confine a Codex run, so on Codex the withholding is advisory (ruling 183): the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
 
 export interface DeliveryPermissions {
   canBranch: boolean;
   canCommitPush: boolean;
   canOpenPr: boolean;
   /** The headline repo-write grant is not withheld. Without it a deliverer's
-   *  delivery can only be the files it saves on the task (ruling 535); with it
+   *  delivery can only be the files it saves on the task (ruling 128); with it
    *  and commit withheld, its workspace changes are published by a person. */
   repoWrite: boolean;
 }

@@ -73,7 +73,7 @@ describe("task queries overlay the live backend over the engage-time snapshot", 
     expect(summary.specialist).toMatchObject({ backend: "codex", name: "Codex" });
   });
 
-  it("the board list gives the same answer as the task page (one mapping, rulings 12/14)", async () => {
+  it("the board list gives the same answer as the task page (one mapping, rulings 237/297)", async () => {
     const { listProjectTasks } = await import("./board-query.server");
     const vib151 = listProjectTasks(app.db, "viberr-core").find(
       (t) => t.key === "VIB-151",

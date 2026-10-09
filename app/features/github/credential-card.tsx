@@ -99,7 +99,7 @@ export function CredentialCard({
           </span>
         )}
       </div>
-      {/* Ruling 144(a): advisories are facts about what this token cannot do,
+      {/* Ruling 221(a): advisories are facts about what this token cannot do,
           never a missing chip and never a validation failure. */}
       {credential.advisories.map((a) => (
         <div className="sub" key={a.id} data-advisory={a.id}>
@@ -121,14 +121,14 @@ export function CredentialCard({
   );
 }
 
-/** What a PAT card's scope chips prove (ruling 700(e), the split of
+/** What a PAT card's scope chips prove (ruling 13(b), the split of
  *  `CredentialCard`): the first refused scope, the chips that are evidence,
  *  the ones that are not, and whether nothing at all is proven. */
 function readScopes(scopes: ScopeChip[]) {
   const missing = scopes.find((s) => !s.ok);
   // Owner ruling 2026-07-25: a chip is a PROVEN verdict — a scope header, a
   // live probe (writes via the empty-payload dry-run), or an open violation.
-  // Ruling 480: a repository-scoped chip's probe is this project's repository's
+  // Ruling 220: a repository-scoped chip's probe is this project's repository's
   // proof, a write Viberr made there included.
   // `assumed`/`unchecked` entries are not evidence, so they render as the
   // honest "unproven" line instead of a pseudo-check next to real ones.
@@ -149,7 +149,7 @@ function readScopes(scopes: ScopeChip[]) {
 }
 
 /**
- * A PAT card's footer (ruling 700(e), the split of `CredentialCard`): the one
+ * A PAT card's footer (ruling 13(b), the split of `CredentialCard`): the one
  * warning that outranks the others (a dead token, then a refused scope, then
  * no proof at all), or the all-clear. Hook-free, in the slot the card's
  * ternary held.
@@ -241,7 +241,7 @@ function CredentialFooter({
   );
 }
 
-/** The remove confirm, on the shared `ConfirmDialog` (ruling 458(f)). */
+/** The remove confirm, on the shared `ConfirmDialog` (ruling 297). */
 function RemoveCredentialDialog({
   onCancel,
   onConfirm,
@@ -273,7 +273,7 @@ function RemoveCredentialDialog({
  * Re-attach + Remove; otherwise a single Attach. admin|maintainer only — the
  * parent renders it only for them. Remove goes through a confirm.
  *
- * Ruling 480 (F40-45): the configured button said "Rotate credential" and
+ * Ruling 222 (F40-45): the configured button said "Rotate credential" and
  * rotated nothing. It binds the connection that matches the repository's owner
  * (or the default) again and re-checks it, so on a one-connection instance the
  * token that runs afterwards is byte for byte the one before, and someone
@@ -290,7 +290,7 @@ export function CredentialManageActions({
   replaceHref = null,
 }: {
   configured: boolean;
-  /** Ruling 368: the intent the credential fetcher is carrying
+  /** Ruling 286: the intent the credential fetcher is carrying
    *  (`inFlightIntent`), null while it is idle. The button that started it
    *  shows the work; the other one only waits at the disabled step. */
   inFlight: string | null;
@@ -321,7 +321,7 @@ export function CredentialManageActions({
             : "Bind the GitHub connection for this repository's owner to this project"
         }
       >
-        {/* Ruling 459 over ruling 368: the lock trades for the refresh mark
+        {/* Ruling 284 over ruling 286: the lock trades for the refresh mark
             once a credential is bound, and that resting cell trades for the
             spinning loader while this button's own request is in flight. */}
         <GlyphSwap rest="lock" alt="refresh" on={configured} busy={setting} />
@@ -342,7 +342,7 @@ export function CredentialManageActions({
       {configured && (
         <button
           type="button"
-          // Ruling 149: unbinding the credential is destructive, and the
+          // Ruling 278: unbinding the credential is destructive, and the
           // dialog it opens already commits in red.
           className="btn ghost sm danger"
           onClick={() => setConfirming(true)}

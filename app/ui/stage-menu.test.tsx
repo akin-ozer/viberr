@@ -166,7 +166,7 @@ describe("StageMenu keyboard contract (F10-25)", () => {
     expect(view.getByLabelText("Change stage (currently Done)")).toBeTruthy();
   });
 
-  it("ruling 148: a stage the project no longer lists is named, in one wording", () => {
+  it("ruling 291: a stage the project no longer lists is named, in one wording", () => {
     const view = renderMenu({ currentStageId: "ghost" });
     // The visible label was a "−" (a cleared control) while the accessible name
     // said "unknown", so the name did not contain the label. Both now say the
@@ -280,7 +280,7 @@ describe("StageMenu placement (layo-8)", () => {
     expect(activeName()).toBe("Triage");
   });
 
-  it("ruling 520: a property row's menu hangs from the trigger's left edge, a card's from its right", () => {
+  it("ruling 309(a): a property row's menu hangs from the trigger's left edge, a card's from its right", () => {
     // CANARY: drop the `align` arm and the task page's menu opens 166px left
     // of its trigger, over the row's label.
     placeAt(100);

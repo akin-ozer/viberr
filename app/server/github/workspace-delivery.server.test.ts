@@ -49,7 +49,7 @@ function fakeExec(config: {
   shallow?: boolean;
   /** Whether `git fetch --deepen …` succeeds (default: true). */
   deepenOk?: boolean;
-  /** Ruling 135: what the workspace knows about the PR head `gh` reported.
+  /** Ruling 243: what the workspace knows about the PR head `gh` reported.
    *  Default: nothing (`merge-base` fails, `cat-file` fails → `unknown`). */
   ancestry?: { prHeadIsAncestor?: boolean; revisionIsAncestor?: boolean; prHeadKnown?: boolean };
 }): CommandExec {
@@ -180,7 +180,7 @@ describe("reconcileWorkspaceDelivery", () => {
     );
   });
 
-  it("ruling 137: a new delivered revision withdraws the accept card, records why, keeps the Reconciled branch event, and leaves a surviving run_agent card's bell UNREAD", async () => {
+  it("ruling 99: a new delivered revision withdraws the accept card, records why, keeps the Reconciled branch event, and leaves a surviving run_agent card's bell UNREAD", async () => {
     // Canary: restore the blind branch patch (drop the withdrawal from the
     // locked write) and the accept card survives the revision it no longer
     // describes.
@@ -250,7 +250,7 @@ describe("reconcileWorkspaceDelivery", () => {
     expect(unread.c).toBe(1);
   });
 
-  it("ruling 439: a delivery after Viberr's own base refresh keeps the revision and the approval on it", async () => {
+  it("ruling 239: a delivery after Viberr's own base refresh keeps the revision and the approval on it", async () => {
     // Live on ax-clone AX-29: revision 4e6c47d, `main` merged onto it by
     // update_branch_from_base as 278c1ed, the reviewer approved, and the
     // deliver_for_review reconcile 65 seconds later minted 278c1ed as a NEW
@@ -690,14 +690,14 @@ describe("reconcileWorkspaceDelivery", () => {
 });
 
 /**
- * Ruling 135 (pass 34, F34-11): the moment a delivering run mints a revision on
+ * Ruling 243 (pass 34, F34-11): the moment a delivering run mints a revision on
  * a branch whose PR is open, the workspace reconcile relates origin's copy (the
  * PR head `gh` reported) to that revision from the workspace's own history and
  * records `pr.unpushedRevision`, so the acceptance gate does not wait for the
  * five-minute poll. Canary: make `classifyUnpushedRevision` return null and
  * the three relations below are never written.
  */
-describe("ruling 135: the workspace reconcile records the unpushed revision", () => {
+describe("ruling 243: the workspace reconcile records the unpushed revision", () => {
   const PR_HEAD = "0".repeat(40);
   async function reconcile(store: ReturnType<typeof setupTask>, exec: CommandExec) {
     return deliver(store, { workdir: makeWorkspaceRepo(), exec });
@@ -735,7 +735,7 @@ describe("ruling 135: the workspace reconcile records the unpushed revision", ()
     }));
     expect(readFm(diverged).frontmatter.pr?.unpushedRevision).toEqual({ revisionSha: HEAD_SHA, prHeadSha: PR_HEAD, relation: "diverged" });
     expect(readFm(diverged).timeline[0]!.text).toContain("holds commits this workspace does not");
-    // Ruling 321: the diverged line carries the shared remedy (merge, never a
+    // Ruling 230: the diverged line carries the shared remedy (merge, never a
     // rebase), not a sentence of its own.
     expect(readFm(diverged).timeline[0]!.text).toContain(DIVERGED_BRANCH_REMEDY);
 
@@ -775,12 +775,12 @@ describe("ruling 135: the workspace reconcile records the unpushed revision", ()
   });
 
   /**
-   * Ruling 445, live on ax-clone AX-5: eleven seconds after the delivery
+   * Ruling 243, live on ax-clone AX-5: eleven seconds after the delivery
    * reconcile minted `b82bb93`, the review queue still said "PR #24 does not
    * carry the delivered revision 509c0d1", because the workspace could not
    * read the PR and the line is only re-measured beside that read.
    */
-  it("ruling 445: a mint the PR cannot be read for re-points the line at the revision that now stands", async () => {
+  it("ruling 243: a mint the PR cannot be read for re-points the line at the revision that now stands", async () => {
     const SUPERSEDED = "5".repeat(40);
     const stale = () =>
       setupTask("ATL-3", {

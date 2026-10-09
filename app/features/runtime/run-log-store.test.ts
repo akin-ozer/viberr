@@ -10,7 +10,7 @@ import {
 import { NO_RUN_CACHE } from "../../../test-support/run-view";
 
 /**
- * The run-log store on its own (ruling 457): what it asks `/resources/run-log`
+ * The run-log store on its own (ruling 11): what it asks `/resources/run-log`
  * for and what it holds afterwards, for the paths a page drives without a
  * console on screen (a strip's run, a revalidation, a resume, the raw toggle).
  * The console-level behaviour is in `use-run-log-stream.test.tsx` and
@@ -153,7 +153,7 @@ async function flush(times = 12) {
   for (let i = 0; i < times; i++) await Promise.resolve();
 }
 
-describe("CON-1: every running group's strip moves, shown or not (ruling 457, LIVE-1)", () => {
+describe("CON-1: every running group's strip moves, shown or not (ruling 11, LIVE-1)", () => {
   it("a frame for a thread the console never showed reads that run's facts", async () => {
     const store = createLiveRunLogStore([
       loaded(2, { id: "op", serverRunId: "run_op" }),

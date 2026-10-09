@@ -8,7 +8,7 @@ import { WRITES_BUDGETS } from "./perf-budgets/writes";
 import type { PerfBudgetTable } from "./perf-verdict";
 
 /**
- * Ruling 457: the performance ratchet. Each entry is a DETERMINISTIC figure
+ * Ruling 11: the performance ratchet. Each entry is a DETERMINISTIC figure
  * (bytes shipped, SQL statements run, React renders or commits, loaders re-run)
  * measured on a named fixture by a co-located `*.perf.test.ts(x)` file, with a
  * ceiling it may never exceed. The ceiling only moves down: the verdict

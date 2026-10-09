@@ -40,7 +40,7 @@ import { refreshWorkspaceFromMirror } from "./workspace-refresh.server";
  * Pass 40 review, R-seams-1: the server never executes git with an
  * agent-writable repository as its working repository under its own uid.
  *
- * Ruling 460 shares every task workspace with the agent group, so an agent
+ * Ruling 196 shares every task workspace with the agent group, so an agent
  * can plant hooks, `core.fsmonitor`, a credential helper or `url.insteadOf` in
  * a checkout's `.git`. These tests plant all of them and drive the server's
  * real paths — the pre-run refresh, the delivery push, the branch update, the
@@ -113,7 +113,7 @@ async function checkout(): Promise<string> {
   return dir;
 }
 
-/** What an agent can write into any checkout under ruling 460. */
+/** What an agent can write into any checkout under ruling 196. */
 function plant(dir: string): void {
   const script = path.join(scratch, "planted.sh");
   writeFileSync(

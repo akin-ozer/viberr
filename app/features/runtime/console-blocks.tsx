@@ -5,12 +5,12 @@ import type { TodoSnapshot } from "./console-todos";
 import { diffPreview, type DiffLine, type EditDiff } from "./edit-diff";
 
 /**
- * Ruling 499: what an agent did, drawn the way agent tools draw it, inside
+ * Ruling 168: what an agent did, drawn the way agent tools draw it, inside
  * the run console's dark box: an edit as a diff, a to-do list as a list, a
  * wait as an orb. The to-do list, the orb and the console's thinking and code
  * blocks take their design from AICSS's free components (MIT, © 2026 AICSS;
  * THIRD_PARTY_NOTICES.md), redrawn in this sheet's console palette; the diff
- * is the app's own, the Changes panel's rows (ruling 484) in the console's
+ * is the app's own, the Changes panel's rows (ruling 246) in the console's
  * colours.
  */
 
@@ -229,7 +229,7 @@ export function TodoCard({ todos, live }: { todos: TodoSnapshot; live: boolean }
 /**
  * AICSS's lattice orb: nine dots on a 3×3 grid. A pulse radiates from the
  * centre while a tool runs (`wave`); a Viberr tool's comet runs the ring
- * instead (`ring`), the two motions ruling 366's orb told apart. Pure CSS: the
+ * instead (`ring`), the two motions ruling 168's orb told apart. Pure CSS: the
  * sheet stages each dot and holds the centre still under reduced motion.
  */
 export function ConsoleOrb({ motion }: { motion: "wave" | "ring" }) {

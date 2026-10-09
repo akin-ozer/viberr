@@ -18,7 +18,7 @@ import { useToast } from "~/ui/toast";
 import { useFetcherResult } from "~/ui/use-fetcher-result";
 
 /**
- * Ruling 484 (pass 40, F40-54): the Changes panel's body, loaded when a person
+ * Ruling 315 (pass 40, F40-54): the Changes panel's body, loaded when a person
  * opens the panel (`changes-slot.tsx` is what the task page ships).
  *
  * It reads the delivered revision's files and patches (`task-changes.ts`),
@@ -28,17 +28,17 @@ import { useFetcherResult } from "~/ui/use-fetcher-result";
  * which is the comment door, so the agent resumes on it as it would on the same
  * words typed in the composer. Code is drawn in the mono face, unhighlighted: a
  * hunk is a window onto a file, not a file, so the attachment reader's Shiki
- * pass (ruling 363, whole-file grammars) would colour it wrongly as often as
+ * pass (ruling 317, whole-file grammars) would colour it wrongly as often as
  * not.
  *
- * Ruling 509: a note may cover several lines of one hunk, as a GitHub review
+ * Ruling 296: a note may cover several lines of one hunk, as a GitHub review
  * comment can. A person drags the mouse across the numbers, or opens a note and
  * shift-clicks another number (Shift+Enter from the keyboard), and the note
  * reaches the agent as `path:start-end`. A line still carries one note, so a
  * range stops before a line that has one, and pressing any line of a note
  * opens it.
  *
- * Ruling 700(e) split the body and a file along the task page's recipe, a pure
+ * Ruling 13(b) split the body and a file along the task page's recipe, a pure
  * structural refactor: the body's stale notice and foot, and a file's left-out
  * patch, are hook-free components below the one that draws them, and a file's
  * own read is its hook `useFilePatch`. The read's failure stays in the body.
@@ -119,7 +119,7 @@ function capitalized(text: string): string {
 }
 
 /** A note as the `review-notes` intent reads it: a note on several lines also
- *  names its first line and that line's side (ruling 509). */
+ *  names its first line and that line's side (ruling 246). */
 function postedNote({ path, start, end, body }: PanelNote) {
   const note = { path, line: end.line, side: end.side, body };
   return start.row === end.row ? note : { ...note, startLine: start.line, startSide: start.side };
@@ -185,7 +185,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
   if (!view.ok) {
     // Drawn here, not in a component of its own: this `div` sits in the slot
     // the body's `div` fills, so a read that fails and then succeeds (or the
-    // reverse) keeps the same node, as before ruling 700(e).
+    // reverse) keeps the same node, as it did before the ruling 13(b) split.
     return (
       <div className="chg-fail" role="alert">
         <p>{view.reason}</p>

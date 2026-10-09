@@ -185,10 +185,10 @@ describe("ProjectPanel", () => {
   // U33-9: an identity write already in flight holds the control — the panel
   // still shows the OLD loader values until revalidation remounts it, so a
   // second press would resubmit the same governed rename.
-  // Ruling 368: and Save shows it is saving (busy, the loader, "Saving…")
+  // Ruling 286: and Save shows it is saving (busy, the loader, "Saving…")
   // instead of the .45 refused step; Discard only waits.
   // Canary: drop `aria-busy` from Save in settings-page.tsx.
-  it("U33-9 / ruling 368: an in-flight save holds both controls and Save says it is saving", () => {
+  it("U33-9 / ruling 286: an in-flight save holds both controls and Save says it is saving", () => {
     const onSave = vi.fn();
     const { getByDisplayValue, getByText } = render(
       <ProjectPanel project={PROJECT} canManage busy onSave={onSave} />,
@@ -355,9 +355,9 @@ describe("StagesPanel", () => {
     expect(onRemove).toHaveBeenCalledWith("ready");
   });
 
-  // Ruling 147: the inline commit stays enabled and refuses an empty name in
+  // Ruling 288: the inline commit stays enabled and refuses an empty name in
   // rendered copy, instead of going dead and dropping out of the tab order.
-  it("ruling 147: the inline Add stage refuses an empty name instead of disabling", () => {
+  it("ruling 288: the inline Add stage refuses an empty name instead of disabling", () => {
     const onAdd = vi.fn();
     const { container, getByText } = render(
       <StagesPanel
@@ -404,7 +404,7 @@ describe("StagesPanel", () => {
     expect(getByText("Add stage").closest(".stg-add")).not.toBeNull();
   });
 
-  it("ruling 147: Escape after a refusal leaves no alert behind", () => {
+  it("ruling 288: Escape after a refusal leaves no alert behind", () => {
     const { container, getByText } = render(
       <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} />,
     );
@@ -438,10 +438,10 @@ describe("StagesPanel", () => {
     expect(setEditingId).toHaveBeenCalledWith(null);
   });
 
-  // Ruling 364: the row's dot is the colour picker — a button carrying the
+  // Ruling 279: the row's dot is the colour picker — a button carrying the
   // stage's preset NAME (the sheet paints it; nothing inline), opening the
   // twenty swatches; a pick reports the preset and closes the menu.
-  it("ruling 364: the dot opens the twenty-swatch menu and a pick reports the preset", () => {
+  it("ruling 279: the dot opens the twenty-swatch menu and a pick reports the preset", () => {
     const onRecolor = vi.fn();
     const { container } = render(
       <StagesPanel {...base} onRename={() => {}} onRemove={() => {}} onRecolor={onRecolor} />,
@@ -461,7 +461,7 @@ describe("StagesPanel", () => {
     expect(container.querySelector(".swatch-menu")).toBeNull();
   });
 
-  it("ruling 364: a non-admin sees the colour but cannot open the menu", () => {
+  it("ruling 279: a non-admin sees the colour but cannot open the menu", () => {
     const { container } = render(
       <StagesPanel {...base} canManage={false} onRename={() => {}} onRemove={() => {}} />,
     );
@@ -698,7 +698,7 @@ describe("MembersPanel", () => {
   };
 
   it("renders the member count, the you-tag and the policy link", () => {
-    // Ruling 705: a disabled account cannot sign in, so it is not "active",
+    // Ruling 26: a disabled account cannot sign in, so it is not "active",
     // but it is a member, and the head counts it as Policy's does.
     // CANARY: call the head "N active" again and Elif reads as active.
     const elifDisabled = MEMBERS.map((m) => (m.userId === "u_elif" ? { ...m, disabled: true } : m));
@@ -712,7 +712,7 @@ describe("MembersPanel", () => {
 
   // D5 and UI-29: the browser refuses, in the server's words, the removals the
   // server refuses, yourself and the last admin who can sign in, and confirms
-  // every other one before it dispatches (D6). Ruling 705: a disabled admin is
+  // every other one before it dispatches (D6). Ruling 26: a disabled admin is
   // never the last admin, so its removal confirms (`isLastLiveAdmin`).
   // CANARY: exempt only a removed account from the last-admin check again and
   // Elif's disabled seat is refused "Elif Demir is the only admin…".
@@ -752,7 +752,7 @@ describe("MembersPanel", () => {
     }).toEqual({ said, removed: said === null ? [name] : [] });
   });
 
-  it("only the row whose removal is in flight reads busy; the others wait (ruling 368 over 459)", () => {
+  it("only the row whose removal is in flight reads busy; the others wait (ruling 286 over 459)", () => {
     // Canary: put `aria-busy={busy || undefined}` back on the row's ✕ and
     // every row claims the removal.
     const { container, rerender } = render(
@@ -773,8 +773,8 @@ describe("MembersPanel", () => {
   });
 
   /**
-   * Ruling 148(b): the invite form is no longer served under the member list —
-   * "Add member" in the panel head opens the shared `MiniModal`. Ruling 147
+   * Ruling 323: the invite form is no longer served under the member list —
+   * "Add member" in the panel head opens the shared `MiniModal`. Ruling 288
    * lives in that modal: the primary stays ENABLED on an incomplete form and a
    * click refuses in a fresh alert with the first unmet field marked and
    * focused, where the row could only raise a toast.
@@ -794,9 +794,9 @@ describe("MembersPanel", () => {
     // SAFETY: the modal's own primary — `MiniModal` renders exactly one
     // `.btn.primary` in its foot, so this is the Add member commit.
     const save = modal.querySelector("button.btn.primary") as HTMLButtonElement;
-    // Ruling 147(a): only a request in flight disables it.
+    // Ruling 288: only a request in flight disables it.
     expect(save.disabled).toBe(false);
-    // Ruling 147(c): a pristine form is never accused.
+    // Ruling 288: a pristine form is never accused.
     expect(modal.querySelector("[aria-invalid]")).toBeNull();
 
     fireEvent.click(save);
@@ -855,7 +855,7 @@ describe("MembersPanel", () => {
     expect(emailInput.getAttribute("aria-describedby")).toBe(alert.id);
     expect(document.activeElement).toBe(emailInput);
     // Editing the address clears the refusal, so the next one is announced as a
-    // fresh insertion rather than a role flip on unchanged text (ruling 147(b)).
+    // fresh insertion rather than a role flip on unchanged text (ruling 288).
     fireEvent.change(emailInput, { target: { value: "arda@viberr.de" } });
     expect(dialog.querySelector('.form-err[role="alert"]')).toBeNull();
   });
@@ -869,7 +869,7 @@ describe("MembersPanel", () => {
    * action (`org-settings/users-panel.tsx`) labels "Full name" and "Email" over
    * inputs carrying those identical placeholders, and this page's own identity
    * fields use the same `.field` + `.flabel` idiom. The form moved into a modal
-   * with ruling 148(b); the labels are what makes it readable there too.
+   * with ruling 323; the labels are what makes it readable there too.
    */
   it("#22: both invite fields keep a real label, not just a vanishing placeholder", () => {
     const { container, getByLabelText, getByText } = render(
@@ -910,7 +910,7 @@ describe("MembersPanel", () => {
     const { container, queryByText } = render(
       <MembersPanel {...base} canManage={false} onInvite={() => {}} onRemove={() => {}} />,
     );
-    // Ruling 148(b): the form is behind a head button now, so the assertion has
+    // Ruling 323: the form is behind a head button now, so the assertion has
     // to be that the BUTTON is gone — a placeholder query would pass for free.
     expect(queryByText("Add member")).toBeNull();
     expect(container.querySelector(".stg-x")).toBeNull();
@@ -935,7 +935,7 @@ describe("MembersPanel", () => {
    .9rem in github-view, .85rem in the sheet.
    app.css.test.ts holds the structural gate (no style object, hoisted or inline,
    may restate a utility rule); these assert what this surface renders.
-   Ruling 14: shared single implementations, never fork per surface. */
+   Ruling 297: shared single implementations, never fork per surface. */
 describe("settings panels take count + note styling from the sheet (F19-33)", () => {
   const expectSheetStyled = (container: HTMLElement) => {
     const count = container.querySelector(".panel-head .right")!;
@@ -1093,12 +1093,12 @@ describe("RepoPanel", () => {
   });
 
   /**
-   * Ruling 667 (owner, 2026-10-06): a board that delivers results needs no
+   * Ruling 226 (owner, 2026-10-06): a board that delivers results needs no
    * repository. A project that has one can give it up through a confirmed
    * Remove, and a project with none shows no GitHub-only control, only the way
    * to attach one.
    */
-  it("ruling 667: Remove takes the repository away through a confirm, and a project with none offers Attach and nothing about GitHub", () => {
+  it("ruling 226: Remove takes the repository away through a confirm, and a project with none offers Attach and nothing about GitHub", () => {
     // CANARY: submit on the first click and a repository goes with one stray
     // press; keep the credential card or the after-merge row for a project
     // with no repository and it is warned about a sync it has no use for.
@@ -1131,7 +1131,7 @@ describe("RepoPanel", () => {
     );
   });
 
-  it("ruling 669: the Change dialog names the token that checks the repository, the attached credential or a connection it then binds", () => {
+  it("ruling 292: the Change dialog names the token that checks the repository, the attached credential or a connection it then binds", () => {
     // Every change is checked before it is written. CANARY: restore "can't be
     // verified until one is" for a project with no credential and the dialog
     // promises an unchecked write the server refuses to make.
@@ -1267,7 +1267,7 @@ describe("DangerZone", () => {
       />,
     );
     fireEvent.click(container.querySelector(".dz-row .btn.danger:not(.ghost)")!);
-    // Ruling 458(l): the one dialog in the family that had no screen label.
+    // Ruling 287(d): the one dialog in the family that had no screen label.
     expect(
       container.querySelector('[role="alertdialog"]')!.getAttribute("data-screen-label"),
     ).toBe("Delete project dialog");
@@ -1285,7 +1285,7 @@ describe("DangerZone", () => {
     expect(onDelete).toHaveBeenCalledWith("Viberr Core");
   });
 
-  it("ruling 149: Archive wears the danger label beside Delete; Restore does not", () => {
+  it("ruling 278: Archive wears the danger label beside Delete; Restore does not", () => {
     // Both lifecycle triggers in this panel are destructive, so both read as
     // one kind of control. jsdom computes no colour, so the class is the
     // assertion — canary: drop the ternary in `settings-page.tsx`.
@@ -1391,19 +1391,19 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
     expect(container.textContent).not.toContain("Archive Viberr Core");
     // …and the rest of the page really did render, so the absence above is the
     // gate doing its job rather than a blank component tree.
-    // Ruling 625: in reading order, the left stack (project, people,
+    // Ruling 281: in reading order, the left stack (project, people,
     // repository) then the right one (the workflow and its rules).
     expect(pageRendered(container)).toEqual([
       "Project",
       "Members",
       "Repository & credentials",
       "Workflow stages",
-      // Ruling 178: rendered read-only for a viewer (the rules as text).
+      // Ruling 89: rendered read-only for a viewer (the rules as text).
       "Required reviewers",
-      // Ruling 396: likewise. A viewer still needs to know who owns a file
+      // Ruling 61: likewise. A viewer still needs to know who owns a file
       // before it touches one, and the write controls are the part withheld.
       "File leases",
-      // Ruling 482: likewise. What acceptance waits on is readable to all.
+      // Ruling 104: likewise. What acceptance waits on is readable to all.
       "Gates",
     ]);
     // F21-5: the Repository panel above is present — and this is the assertion
@@ -1444,8 +1444,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 
   // The render gate asks the question archive and delete ask the server. If
   // `edit-policy`'s role set ever changes, the render gate has to follow it —
-  // a role shown the panel and then refused by the server is the pre-ruling
-  // state.
+  // a role shown the panel and then refused by the server is the state this
+  // guards against.
   it("rendering tracks roleCan(edit-policy) for every project role", () => {
     const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
     for (const role of roles) {
@@ -1460,13 +1460,13 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 });
 
 /**
- * Ruling 625 (e-settings #1 and #4). The page said the reviewer rules sit
- * "under the stage editor in the same grid cell" (ruling 178), with leases and
- * gates under them (rulings 396, 482), but the cell was a third grid item and
+ * Ruling 281 (e-settings #1 and #4). The page said the reviewer rules sit
+ * "under the stage editor in the same grid cell" (ruling 89), with leases and
+ * gates under them (rulings 61, 104), but the cell was a third grid item and
  * wrapped under Project, leaving a 786px hole beside it. And each empty list
  * was a 240px card holding a centred sentence and a disabled primary.
  */
-describe("ruling 625: Settings' layout and its empty rule lists", () => {
+describe("ruling 281: Settings' layout and its empty rule lists", () => {
   const headingsIn = (col: Element) =>
     Array.from(col.querySelectorAll("h2")).map((h) => h.textContent?.trim());
 
@@ -1545,7 +1545,7 @@ describe("SettingsPage — each panel follows the grant its own server guard che
           (b) => b.textContent?.trim() === "Add stage",
         ),
       ),
-      // Ruling 148(b): the invite form lives behind "Add member" in the panel
+      // Ruling 323: the invite form lives behind "Add member" in the panel
       // head now, so the head button is the affordance to read.
       members: Boolean(
         Array.from(container.querySelectorAll("button")).find(
@@ -1567,7 +1567,7 @@ describe("SettingsPage — each panel follows the grant its own server guard che
           (b) => b.textContent?.trim() === "Re-check scopes",
         ),
       ),
-      // Ruling 178: the required-reviewer table rides `edit-policy`
+      // Ruling 89: the required-reviewer table rides `edit-policy`
       // (setRequiredReviewers checks it) — its Add rule button is the affordance.
       requiredReviewers: Boolean(
         Array.from(container.querySelectorAll("button")).find(
@@ -1604,7 +1604,7 @@ describe("SettingsPage — each panel follows the grant its own server guard che
 });
 
 /**
- * Ruling 147: the Change repository dialog's primary stays enabled; a refused
+ * Ruling 288: the Change repository dialog's primary stays enabled; a refused
  * submit names what is missing, marks it and moves focus there.
  */
 describe("ChangeRepoDialog refuses instead of disabling", () => {
@@ -1668,12 +1668,12 @@ describe("ChangeRepoDialog refuses instead of disabling", () => {
 });
 
 /**
- * Ruling 178 (pass 36, G36-3): the project's required reviewers are edited on
+ * Ruling 89 (pass 36, G36-3): the project's required reviewers are edited on
  * Settings as a small table — a non-terminal stage and a deployed
  * verdict-capable agent per row — and saved WHOLE through one intent, the
  * same writer and validation the controller's `set_required_reviewers` uses.
  */
-describe("RequiredReviewersPanel (ruling 178)", () => {
+describe("RequiredReviewersPanel (ruling 89)", () => {
   const RULES: RequiredReviewerView[] = [
     { stageId: "review", stageName: "Review", profileId: "reviewer", agentName: "Code Reviewer" },
   ];
@@ -1764,9 +1764,9 @@ describe("RequiredReviewersPanel (ruling 178)", () => {
 });
 
 /**
- * Ruling 396 (F39-23): file leases, on a page a person can open.
+ * Ruling 61 (F39-23): file leases, on a page a person can open.
  *
- * Ruling 245 built leases and gave them no human surface. They were written by
+ * Ruling 60 built leases and gave them no human surface. They were written by
  * one controller tool, read by another, injected into every specialist's
  * prompt, and enforced at delivery — `push-workspace` refuses the push and says
  * "clear the lease once AX-9 has landed", with nowhere to do it. Live on the
@@ -1774,7 +1774,7 @@ describe("RequiredReviewersPanel (ruling 178)", () => {
  * agent reads: "Current leases are on the project's settings page." There was
  * no such panel.
  */
-describe("FileLeasesPanel (ruling 396)", () => {
+describe("FileLeasesPanel (ruling 61)", () => {
   const LEASES = [
     {
       paths: ["go.mod", "go.sum"],
@@ -1807,12 +1807,12 @@ describe("FileLeasesPanel (ruling 396)", () => {
       />,
     );
     const panel = container.querySelector('[data-panel="file-leases"]')!;
-    // CANARY: this whole panel is the finding. Before ruling 396 nothing in
-    // app/features or app/routes read a lease at all.
+    // CANARY: this whole panel is the finding (ruling 61): without it nothing
+    // in app/features or app/routes reads a lease at all.
     expect(panel.textContent).toContain("go.mod go.sum");
     expect(panel.textContent).toContain("AX-9");
     expect(panel.textContent).toContain("AX-9 pins the module graph until it merges");
-    // Ruling 245(b): a spent lease is still a declared row, and says so.
+    // Ruling 60: a spent lease is still a declared row, and says so.
     expect(panel.textContent).toContain("holder finished; binds nobody");
     // A reader without the grant still learns who owns the file.
     expect(panel.textContent).toContain("Read-only");
@@ -1886,7 +1886,7 @@ describe("FileLeasesPanel (ruling 396)", () => {
 });
 
 /**
- * Ruling 368 on project Settings: the repository fetcher carries the change,
+ * Ruling 286 on project Settings: the repository fetcher carries the change,
  * the branch-cleanup switch and the scope re-check, and the credential fetcher
  * carries attach/rotate and remove, so every one of those buttons went to the
  * .45 refused step for any of them with its resting label. The one that sent
@@ -1895,7 +1895,7 @@ describe("FileLeasesPanel (ruling 396)", () => {
  * never says Checking… (this renders the panel, so drop `aria-busy` on
  * Re-check scopes instead).
  */
-describe("ruling 368: Settings' requests in flight", () => {
+describe("ruling 286: Settings' requests in flight", () => {
   const renderInFlight = (inFlight: string | null, credInFlight: string | null) =>
     render(repoPanel({ repoBusy: inFlight !== null, inFlight, credInFlight }));
 
@@ -1944,11 +1944,11 @@ describe("ruling 368: Settings' requests in flight", () => {
 });
 
 /**
- * Ruling 482 (F40-52): the gates Viberr runs on every delivered revision, on
+ * Ruling 104 (F40-52): the gates Viberr runs on every delivered revision, on
  * a page a person can open. On akinozer-com the list was prose in a knowledge
  * base and a measured set sat "Proposed (not binding)" with nowhere to go.
  */
-describe("ProjectGatesPanel (ruling 482)", () => {
+describe("ProjectGatesPanel (ruling 104)", () => {
   it("reads the list to a role without the policy grant", () => {
     const { container } = render(
       <ProjectGatesPanel
@@ -1997,13 +1997,13 @@ describe("ProjectGatesPanel (ruling 482)", () => {
 });
 
 /**
- * Ruling 652(b): the File leases panel's save answers like every other panel's.
+ * Ruling 303: the File leases panel's save answers like every other panel's.
  * Its fetcher was the one of nine on the page without `useActionToast`, so a
  * saved table said nothing and a refusal vanished. Canary: drop
  * `useActionToast(fetcher)` from `useListSave` (settings-page-actions.ts), the
  * hook the lease save goes through, and the refusal is never read.
  */
-describe("ruling 652(b): a file-lease save answers on the page", () => {
+describe("ruling 303: a file-lease save answers on the page", () => {
   it("toasts what the action answers, a refusal included", async () => {
     const spent = { paths: ["Makefile"], taskKey: "AX-1", taskTitle: "Repo skeleton", reason: "", spent: true };
     const Stub = createRoutesStub([

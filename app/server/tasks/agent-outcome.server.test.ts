@@ -75,7 +75,7 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
   });
 
   /**
-   * Ruling 298 (pass 37, F37-133): this path keeps EVERY option. It used to
+   * Ruling 202 (pass 37, F37-133): this path keeps EVERY option. It used to
    * cut at four, silently, and this is the one path that cannot refuse: the
    * envelope is the agent's last word, parsed after the run has ended, so
    * there is nobody to hand a refusal to and nothing to retry. A cut here
@@ -109,7 +109,7 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     ]);
   });
 
-  it("ruling 298: and the packet built from it offers all five, not the first four", async () => {
+  it("ruling 202: and the packet built from it offers all five, not the first four", async () => {
     const { buildAgentQuestionPacket } = await import("./agent-outcome.server");
     const packet = buildAgentQuestionPacket(
       { kind: "agent", backend: "claude", profileId: "ap_1", roleHint: "Dev" },
@@ -127,12 +127,12 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     // CANARY: `(question.options ?? []).slice(0, 4)` in the builder.
     expect(packet.options.map((o) => o.t)).toContain("the fifth, which used to vanish");
     expect(packet.options).toHaveLength(5);
-    // Nothing was marked, so nothing is recommended (ruling 478(e)); the cut
+    // Nothing was marked, so nothing is recommended (ruling 68); the cut
     // never decided that either.
     expect(packet.options.filter((o) => o.rec)).toHaveLength(0);
   });
 
-  it("ruling 478(e) (F40-57): an unmarked list carries no recommendation, and a marked one carries exactly its mark", async () => {
+  it("ruling 68 (F40-57): an unmarked list carries no recommendation, and a marked one carries exactly its mark", async () => {
     /**
      * WEB-5: the Content Writer asked two things only Akin could answer (may a
      * customer story be published, is an unattributed video his talk). Option
@@ -158,7 +158,7 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     ]);
   });
 
-  it("ruling 478(e) (F40-31): a choice that needs a typed answer says so on the packet, and the no-choice fallback always does", async () => {
+  it("ruling 68 (F40-31): a choice that needs a typed answer says so on the packet, and the no-choice fallback always does", async () => {
     /**
      * WEB-3: "Connected; the first build succeeded" asked, in its own detail,
      * for the Worker name and the workers.dev URL, and nothing on the packet
@@ -189,7 +189,7 @@ describe("parseAgentOutcomeJson — Codex envelope transport", () => {
     expect(fallback.options[0]!.d).not.toMatch(/operator/i);
   });
 
-  it("ruling 478(e): the Codex envelope carries `reply`", () => {
+  it("ruling 68: the Codex envelope carries `reply`", () => {
     // CANARY: drop `if (opt.reply === true) choice.reply = true;` in the parser.
     const o = parseAgentOutcomeJson(
       JSON.stringify({
@@ -254,12 +254,12 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
   // this app is supposed to not have.
 
   /**
-   * Ruling 526: the timeline draws the rows as a checklist, so the strict
+   * Ruling 16: the timeline draws the rows as a checklist, so the strict
    * schema Codex answers under asks every row for its result and its mark.
    * CANARY: drop `status` from the item's `required` and a Codex run can
    * report rows the checklist cannot mark.
    */
-  it("ruling 526: asks every row for how it came out and a pass, fail or info mark", () => {
+  it("ruling 16: asks every row for how it came out and a pass, fail or info mark", () => {
     const item = AGENT_OUTCOME_JSON_SCHEMA.properties.evidence.items;
     expect(item.required).toEqual(["label", "result", "status"]);
     expect(item.properties.status.enum).toEqual(["pass", "fail", "info"]);
@@ -311,12 +311,12 @@ describe("evidence is a BOTH-backend channel (P13-D-26)", () => {
 });
 
 /**
- * Ruling 488 (F40-67): `relay` is the Codex envelope's channel onto another
+ * Ruling 202 (F40-67): `relay` is the Codex envelope's channel onto another
  * task, as `report_outcome`'s field is Claude's. The envelope is the agent's
  * last word, so every entry is kept here and the cap is applied, with the rest
  * named, where the entries are posted.
  */
-describe("relay is a BOTH-backend channel (ruling 488)", () => {
+describe("relay is a BOTH-backend channel (ruling 202)", () => {
   const ctx = createTestDbContext();
   afterEach(ctx.cleanup);
 
@@ -343,7 +343,7 @@ describe("relay is a BOTH-backend channel (ruling 488)", () => {
     ]);
   });
 
-  it("ruling 538: an entry's files ride with it, and a garbled list costs the files, never the relay", () => {
+  it("ruling 71: an entry's files ride with it, and a garbled list costs the files, never the relay", () => {
     // CANARY: leave `files` out of the envelope's relay items (the strict
     // schema then refuses it) or out of the parser's copy.
     expect(AGENT_OUTCOME_JSON_SCHEMA.properties.relay.items.required).toContain("files");

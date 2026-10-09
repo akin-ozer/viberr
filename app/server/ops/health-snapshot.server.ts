@@ -25,7 +25,7 @@ import {
 } from "~/server/projections/store-health.server";
 
 /**
- * The instance's ops reading, assembled once (ruling 107).
+ * The instance's ops reading, assembled once (ruling 269).
  *
  * `/resources/health` built this body inline, so it was reachable only over
  * HTTP. The controller's `viberr_ops` diagnostics MCP answers the same question
@@ -39,7 +39,7 @@ import {
  */
 
 /**
- * Ruling 127: how many PEOPLE have connected this backend.
+ * Ruling 137: how many PEOPLE have connected this backend.
  *
  * There is no instance-level "the backend is configured" verdict any more — a
  * run bills the person it is for, so the only true instance-level number is a
@@ -68,7 +68,7 @@ export interface HealthSnapshot {
   degraded: string[];
   projections: { projects: number; tasks: number };
   /**
-   * Ruling 217 (F37-37): the standing projection-rebuild fault, or null when
+   * Ruling 22 (F37-37): the standing projection-rebuild fault, or null when
    * the mirror tracks the files. `projections` above counts ROWS, which a
    * broken store keeps answering happily — the counts read fine for the twelve
    * minutes every write was failing, which is exactly why a count is not a
@@ -98,16 +98,16 @@ export interface HealthSnapshot {
    */
   quota: BackendQuotaRow[];
   /**
-   * Ruling 182 (pass 36, G36-4), narrowed by ruling 185: what this host can
-   * run — the versions of the tools an agent's shell finds (null when absent)
-   * and the pinned CLI packages. Probed once per process. The sandbox verdict
-   * and the `startRun` refusal it fed went with the sandbox. Informational
+   * Ruling 40 (pass 36, G36-4): what this host can run — the versions of the
+   * tools an agent's shell finds (null when absent) and the pinned CLI
+   * packages. Probed once per process. No sandbox verdict and no `startRun`
+   * refusal (ruling 144). Informational
    * here, like `browser`: a missing tool is something a run should know about,
    * not a broken host, so it never degrades health.
    */
   toolchain: Toolchain;
   /**
-   * Ruling 461: the loopback MCP gateway a run reaches a credentialed org MCP
+   * Ruling 191: the loopback MCP gateway a run reaches a credentialed org MCP
    * server through — whether it is listening, on which 127.0.0.1 port, and how
    * many runs hold a live token. Informational: a gateway that failed to bind
    * leaves credentialed servers unmountable (each run's prompt says why), which
@@ -116,7 +116,7 @@ export interface HealthSnapshot {
    */
   mcpProxy: McpGatewayStatus;
   /**
-   * Ruling 460: whether agent processes run as their person's own OS user.
+   * Ruling 40: whether agent processes run as their person's own OS user.
    * `on`: the launcher is installed and the boot probe could not read the
    * store as another uid. `off`: no launcher (the host dev server, the test
    * harness) — runs spawn as the server's user, and that is not a fault here.
@@ -139,7 +139,7 @@ export interface HealthSnapshot {
  */
 export function healthSnapshot(
   db: DatabaseSync,
-  /** Ruling 130(d): the unauthenticated route never names a person; the
+  /** Ruling 160(a): the unauthenticated route never names a person; the
    *  signed-in `instance_health` read and Insights do. */
   opts: { principal?: boolean } = {},
 ): HealthSnapshot {
@@ -166,7 +166,7 @@ export function healthSnapshot(
   if (!kbWatcher) degraded.push("kbWatcher");
   if (!lock) degraded.push("lock");
   if (disk && disk.status !== "ok") degraded.push("disk");
-  // Ruling 217: a projection that cannot be rebuilt from the canonical files is
+  // Ruling 22: a projection that cannot be rebuilt from the canonical files is
   // the one fault this product cannot afford to report as healthy — "files are
   // truth" is only useful while the mirror follows them. Live: `SQLITE_CORRUPT`
   // under the process, every task page 500ing, and this array empty.
@@ -176,10 +176,10 @@ export function healthSnapshot(
     : null;
   if (projectionStore) degraded.push("projections");
 
-  // Ruling 146 (owner, 2026-09-06) — SUPERSEDES the F32-4/F32-9 entries that
+  // Ruling 40 (owner, 2026-09-06) — SUPERSEDES the F32-4/F32-9 entries that
   // used to be pushed here (`credential:<backend>` / `quota:<backend>`).
   //
-  // Those predate ruling 127, when a backend credential was a deployment-wide
+  // Those predate ruling 137, when a backend credential was a deployment-wide
   // fact and "Claude is refused" really was an instance outage. Since 127 the
   // credential is PER PERSON, so the refusal this reads is one person's — and
   // pushing it into `degraded` made `?probe=readiness` answer 503 for the whole
@@ -199,7 +199,7 @@ export function healthSnapshot(
 
   const browser = browserRuntimeStatus();
 
-  // Ruling 460: an image whose store does not refuse an agent uid is running
+  // Ruling 40: an image whose store does not refuse an agent uid is running
   // agents that can read the database — a real fault, unlike `off` on a dev
   // host, where no launcher exists to promise anything.
   const isolation = agentIsolation();
@@ -233,9 +233,9 @@ export function healthSnapshot(
     // Memoized: the first call (boot's integrity line, normally) pays the
     // probe once.
     toolchain: cachedToolchain(),
-    // Appended by ruling 461, then followed by ruling 460's key (key-order contract above).
+    // Ruling 191's key, after the toolchain (key-order contract above).
     mcpProxy: mcpGatewayStatus(),
-    // LAST, by the key-order contract above (ruling 460 appended it after ruling 461's mcpProxy).
+    // LAST, by the key-order contract above (ruling 40's agent isolation, after mcpProxy).
     agentIsolation: isolation,
   };
 }

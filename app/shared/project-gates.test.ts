@@ -16,7 +16,7 @@ import {
 } from "./project-gates";
 
 /**
- * Ruling 482: the one reading of a task's gate record. The acceptance gate,
+ * Ruling 315: the one reading of a task's gate record. The acceptance gate,
  * the projection, the PR card, the accept dialog, the operator and every
  * agent's anchor print what this answers, so a sha, a count and a refusal can
  * never disagree between two surfaces.
@@ -61,7 +61,7 @@ function finished(exitCodes: (number | null)[], over: Partial<GateRun> = {}): Ga
   };
 }
 
-describe("projectGatesView (ruling 482)", () => {
+describe("projectGatesView (ruling 315)", () => {
   it("says the PR card's line for a clean run", () => {
     const view = projectGatesView(GATES, { workRevision: REV, gateRun: finished([0, 0, 0, 0]) });
     expect(view).toMatchObject({ state: "passed", passed: 4, total: 4 });
@@ -123,7 +123,7 @@ describe("projectGatesView (ruling 482)", () => {
   });
 });
 
-describe("projectGatesRefusal (ruling 482)", () => {
+describe("projectGatesRefusal (ruling 104)", () => {
   it("refuses a failing, missing, running or stale record and passes a clean one", () => {
     expect(projectGatesRefusal(GATES, { workRevision: REV, gateRun: finished([0, 0, 0, 0]) }, "WEB-4")).toBeNull();
     // CANARY: return null for `failed` in projectGatesRefusal.
@@ -157,11 +157,11 @@ describe("gate log names", () => {
 });
 
 /**
- * Ruling 493: the timeline draws a gate run's note as the gate table, from the
+ * Ruling 313: the timeline draws a gate run's note as the gate table, from the
  * rows its writer printed. The rows go through the same normalizer the writer
  * uses, so what is read here is what task.md holds.
  */
-describe("gateNoteView (ruling 493)", () => {
+describe("gateNoteView (ruling 313)", () => {
   const noteOf = (run: GateRun, title: string | null, text: string) => ({
     title,
     text,

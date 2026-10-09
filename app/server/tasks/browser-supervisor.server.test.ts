@@ -12,7 +12,7 @@ import { BROWSER_CALL_DEADLINE_MS as DEADLINE } from "./browser-deadline.server"
 import { superviseBrowserServer } from "./browser-supervisor.server";
 
 /**
- * Ruling 554, through the real supervisor over a real child process: a stand-in
+ * Ruling 193, through the real supervisor over a real child process: a stand-in
  * for Playwright MCP. It answers `initialize` after 200 ms (a handshake takes
  * time) and every call at once, saying whether the handshake's second half
  * (`notifications/initialized`) had come, except `hang`, which it never
@@ -150,7 +150,7 @@ function session() {
   return { open, call, send, answer, answers, answered, said, text, close, done };
 }
 
-describe("ruling 554: the browser runs under a supervisor", () => {
+describe("ruling 193: the browser runs under a supervisor", () => {
   it("passes a call answered in time through to the client, on the one server", async () => {
     const s = session();
     const pid = await s.open();

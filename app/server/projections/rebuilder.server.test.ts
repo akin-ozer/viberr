@@ -85,7 +85,7 @@ describe("rebuilder", () => {
     expect(board?.project.name).toBe("Viberr Core");
     expect(board?.members).toHaveLength(4);
     expect(board?.columns.map((c) => c.tasks.length)).toEqual([1, 1, 0, 0, 0]);
-    // Store-relative display path (ruling 3).
+    // Store-relative display path (ruling 15(a)).
     const task = board?.columns[1]?.tasks[0];
     expect(task?.filePath).toBe("projects/viberr-core/tasks/VIB-1/task.md");
   });
@@ -113,7 +113,7 @@ describe("rebuilder", () => {
     expect(acceptanceOf("VIB-2")).toBeNull();
   });
 
-  it("ruling 53/88: projects the delivered revision head sha the board ceremony discloses", () => {
+  it("ruling 97: projects the delivered revision head sha the board ceremony discloses", () => {
     // A board card is rendered from this table alone, so a fact the board's
     // acceptance ceremony must DISCLOSE has to be projected. Without the column
     // the ceremony said "No delivered revision recorded." about every task and
@@ -892,7 +892,7 @@ describe("UX19-3: the projected validation column and the acceptance gate agree"
     );
   });
 
-  it("ruling 135: an UNPUSHED delivered revision projects its own block reason ABOVE the conflict", () => {
+  it("ruling 243: an UNPUSHED delivered revision projects its own block reason ABOVE the conflict", () => {
     // Canary: drop `unpushedRevisionBlockedReason` from `acceptanceBlockReason`
     // and the column names a rebase for a branch that only needs a push.
     const store = setupTestStore(ctx);
@@ -1174,7 +1174,7 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
   });
 
   /**
-   * Ruling 217 (F37-37). `rebuildPath`'s catch is deliberately quiet so one bad
+   * Ruling 22 (F37-37). `rebuildPath`'s catch is deliberately quiet so one bad
    * file cannot take the process down. Live on pass 37 the store went to
    * `SQLITE_CORRUPT` and quiet is exactly what it stayed: every rebuild threw,
    * every task page 500ed, and `/resources/health` answered `degraded: []` for
@@ -1235,13 +1235,13 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
       "error",
     );
     // CANARY: drop the `succeeded()` clear and the instance alarms forever
-    // after one bad write, which is what ruling 146 refused to let it do.
+    // after one bad write, which is what ruling 22 refused to let it do.
     expect(projectionFault()).toBeNull();
     resetProjectionFaultsForTests();
   });
 
   /**
-   * Ruling 219 (F37-39). `rebuildPath`'s catch exists so one bad file cannot
+   * Ruling 22 (F37-39). `rebuildPath`'s catch exists so one bad file cannot
    * take the process down — and it wrote its "this failed" provenance row to
    * the SAME store that had just failed, so when the store itself was the
    * fault, the catch threw and `rebuildPath` raised after all.
@@ -1252,7 +1252,7 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
    * "agent working" with nothing running for eleven minutes — after the
    * canonical write had already succeeded. Only the mirror had failed.
    */
-  it("never throws into its caller, even when the store cannot take the failure note (ruling 219)", () => {
+  it("never throws into its caller, even when the store cannot take the failure note (ruling 22)", () => {
     const store = setupTestStore(ctx);
     resetProjectionFaultsForTests();
     const uid = store.users.arda.id;
@@ -1299,13 +1299,13 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
   });
 
   /**
-   * Ruling 218 (F37-38): 217's latch held ONE slot, so any later rebuild that
+   * Ruling 22 (F37-38): 217's latch held ONE slot, so any later rebuild that
    * wrote cleared it. Live, ninety seconds after the corrupt store was
    * replaced, a transient `disk I/O error` on SHOP-4 left its card reading
    * "waiting on you" while its file said `waiting: agent` — and health was back
    * to `ok`, because SHOP-16's file had rebuilt fine in between.
    */
-  it("keeps one file's fault when a DIFFERENT file projects (ruling 218)", () => {
+  it("keeps one file's fault when a DIFFERENT file projects (ruling 22)", () => {
     const store = setupTestStore(ctx);
     resetProjectionFaultsForTests();
     const uid = store.users.arda.id;
@@ -1352,14 +1352,14 @@ describe("rebuildTaskFile crash-consistency (F28-D3)", () => {
 });
 
 /**
- * Ruling 131 (pass 34): the projection carries `blockedBy` verbatim and the
+ * Ruling 55 (pass 34): the projection carries `blockedBy` verbatim and the
  * DERIVED readiness floors at `blocked` while the list is non-empty; the
  * stored value is untouched (the floor never improves anything).
  *
  * Canary: pass `dependenciesListed: false` into `deriveReadiness` and the
  * derived `blocked` assertion fails while the column still fills.
  */
-describe("task dependencies projection (ruling 131)", () => {
+describe("task dependencies projection (ruling 55)", () => {
   it("stores blocked_by_json verbatim and floors the derived readiness at blocked, leaving the stored value alone", () => {
     const ctx = createTestDbContext();
     try {
@@ -1443,7 +1443,7 @@ describe("LV-20: waiting is normalized at the terminal stage", () => {
 });
 
 /**
- * Ruling 225 (F37-45). The live failure: ruling 224 taught viberr to answer a
+ * Ruling 45 (F37-45). The live failure: ruling 157 taught viberr to answer a
  * shut quota window by scheduling its own resumption, and four pass-37 tasks
  * did exactly that — packet resolved, `run-operator` pending for 02:28 UTC,
  * nothing asked of anybody. Every card still read "waiting on a human" and the
@@ -1455,7 +1455,7 @@ describe("LV-20: waiting is normalized at the terminal stage", () => {
  * can act on always outranks the clock, because `decisionsRequiring` reads this
  * same column and a wrong answer here would hide work rather than describe it.
  */
-describe("ruling 225: a task resting on a clock", () => {
+describe("ruling 45: a task resting on a clock", () => {
   /**
    * The live shape these four tasks were in: delivered work at the review
    * boundary with no approving verdict, so no human can accept it either. That
@@ -1650,7 +1650,7 @@ describe("ruling 225: a task resting on a clock", () => {
   it("never promises a resume the schedule runner will refuse", () => {
     // Caught by re-reading my own predicate, not by any of the 41 tests that
     // were already green. A task that waits on other work is HELD (ruling
-    // 131(d)), and the schedule runner refuses its occurrence on exactly those
+    // 115), and the schedule runner refuses its occurrence on exactly those
     // grounds: "waits on other work (…) — no operator run was started; Viberr
     // releases the task when every entry is done." A card reading "resumes Sep
     // 14 · 02:28" over an occurrence that will be refused is the same lie this
@@ -1745,7 +1745,7 @@ describe("ruling 225: a task resting on a clock", () => {
   });
 });
 
-describe("ruling 457: projection write cost, behaviour kept", () => {
+describe("ruling 21: projection write cost, behaviour kept", () => {
   const comment = (userId: string, at: string, text: string) => ({
     occurredAt: at,
     type: "comment" as const,

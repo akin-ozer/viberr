@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 /**
- * Ruling 345 (pass 37, F37-181) — a build stamp the image declares and nothing
+ * Ruling 41 (pass 37, F37-181) — a build stamp the image declares and nothing
  * supplies.
  *
  * `build-info.server.ts` has resolved identity from env since gap 18, and its
@@ -43,7 +43,7 @@ function namesTheModuleReads(): string[] {
   return [...new Set([...src.matchAll(/env\.(VIBERR_BUILD_\w+)/g)].map((m) => m[1]!))].sort();
 }
 
-describe("the build stamp is wired end to end (ruling 345)", () => {
+describe("the build stamp is wired end to end (ruling 41)", () => {
   const names = namesTheModuleReads();
 
   it("the module reads the three stamps this test is about", () => {
@@ -64,7 +64,7 @@ describe("the build stamp is wired end to end (ruling 345)", () => {
     expect(dockerfile).toContain(`ENV ${name}=$${name}`);
   });
 
-  it.each(namesTheModuleReads())("the Dockerfile stamps %s after the final stage's last COPY (ruling 607)", (name) => {
+  it.each(namesTheModuleReads())("the Dockerfile stamps %s after the final stage's last COPY (ruling 41)", (name) => {
     // An ENV whose value changes rebuilds every layer after it, and a deploy
     // stamps a new sha and time each time: declared before the node_modules
     // COPY, every deploy re-copied 829 MB of unchanged dependencies (seven such

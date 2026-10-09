@@ -71,7 +71,7 @@ export interface SetupNotice {
   tempPassword: string;
 }
 
-/** Allow access's sign-in method picker (ruling 700(e), split out of
+/** Allow access's sign-in method picker (ruling 13(b), split out of
  *  `InviteModal`, which keeps the state): a method this deployment has not
  *  configured is drawn, disabled and marked off (F18-3). */
 function InviteMethodPicker({
@@ -150,7 +150,7 @@ function InviteMethodPicker({
   );
 }
 
-/** The instance-role toggle both user modals end on (ruling 700(e), split out
+/** The instance-role toggle both user modals end on (ruling 13(b), split out
  *  of `InviteModal` and `EditUserModal`, which keep the role's state). */
 function InstanceRoleField({
   label,
@@ -194,7 +194,7 @@ function InviteModal({
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [role, setRole] = useState<"admin" | "member">(initialRole);
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const { action, err, setErr } = useModalAction((d) => {
     if (d.tempPassword !== undefined) {
@@ -341,7 +341,7 @@ function InviteModal({
   );
 }
 
-/** A local account's Password field in Edit user (ruling 700(e), split out of
+/** A local account's Password field in Edit user (ruling 13(b), split out of
  *  `EditUserModal`, which keeps the reset's fetcher and the one-time temp
  *  password it returned). */
 function PasswordResetField({
@@ -391,7 +391,7 @@ function PasswordResetField({
           className="btn ghost sm"
           onClick={onReset}
           disabled={busy}
-          // Ruling 368: the reset in flight shows itself here.
+          // Ruling 286: the reset in flight shows itself here.
           aria-busy={busy || undefined}
         >
           <GlyphSwap rest="lock" alt="loader" on={busy} spinAlt />
@@ -432,12 +432,12 @@ function EditUserModal({
   const [role, setRole] = useState<"admin" | "member">(
     user.role === "admin" ? "admin" : "member",
   );
-  // Ruling 154: an org admin links the GitHub handle of a local or Google
+  // Ruling 29: an org admin links the GitHub handle of a local or Google
   // account here; a GitHub account's handle syncs from the provider instead.
   const linksHandle = user.idp !== "github";
   const [githubHandle, setGithubHandle] = useState(user.githubHandle ?? "");
   const [tempPassword, setTempPassword] = useState<string | null>(null);
-  // Ruling 459: a save plays the modal's exit, then onClose unmounts it.
+  // Ruling 287: a save plays the modal's exit, then onClose unmounts it.
   const [done, setDone] = useState(false);
   const push = useToast();
 
@@ -589,8 +589,8 @@ function EditUserModal({
 }
 
 /** Disable confirm — killing sessions + blocking sign-in is disruptive, so a
- * confirm gate mirrors the remove flow (native <dialog>, ruling 16; the shared
- * `ConfirmDialog` since ruling 458(f)). */
+ * confirm gate mirrors the remove flow (the shared `ConfirmDialog`, a native
+ * <dialog>, ruling 287). */
 function DisableUserDialog({
   name,
   onCancel,
@@ -636,7 +636,7 @@ export function UsersPanel({
     | null
   >(null);
   const [disabling, setDisabling] = useState<OrgUserView | null>(null);
-  // Ruling 532: Home's setup checklist lands here with `?add=admin`, the
+  // Ruling 322: Home's setup checklist lands here with `?add=admin`, the
   // person making an account of their own: the dialog opens with Admin chosen.
   const [searchParams] = useSearchParams();
   const [inviting, setInviting] = useState<"admin" | "member" | null>(
@@ -801,12 +801,12 @@ export function UsersPanel({
               ) : (
                 <button
                   type="button"
-                  // Ruling 149: disabling signs the person out at once and
+                  // Ruling 278: disabling signs the person out at once and
                   // locks them out until someone re-enables them, and the
                   // confirm it opens commits on a `btn danger`. The row's ✕
                   // takes the destructive hover by position (`:last-child`);
                   // this control sits before it, so it opts in by name
-                  // (ruling 150(c)).
+                  // (ruling 278).
                   className={"stg-x destructive" + (you ? " off" : "")}
                   title="Disable user"
                   aria-label={"Disable " + u.name}

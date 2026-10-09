@@ -1,5 +1,5 @@
 /**
- * Ruling 457: the ratchet's one verdict, shared by the vitest helper
+ * Ruling 11: the ratchet's one verdict, shared by the vitest helper
  * (`perf-ratchet.ts`) and `node scripts/measure-routes.mjs --check`. It has no
  * imports on purpose: Node strips the types and loads it straight from the
  * script.

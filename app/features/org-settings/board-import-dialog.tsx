@@ -33,7 +33,7 @@ import { useRefusalShake, type RefusalShake } from "~/ui/use-refusal-shake";
 import type { OrgActionData } from "./use-org-action";
 
 /**
- * Ruling 653: the board import dialog. It opens on the server's preview of
+ * Ruling 32: the board import dialog. It opens on the server's preview of
  * the file (nothing has been written) and shows, top to bottom, what the
  * person decides and then what they get: the new project's name, key and
  * repository (the New project dialog's own fields, so the two read and
@@ -245,7 +245,7 @@ function importFileKey(taskPrefix: string): string {
   return /^[A-Z]{2,4}$/.test(taskPrefix) ? taskPrefix : "";
 }
 
-/** What the import form reads off its fields (ruling 700(e), split out of
+/** What the import form reads off its fields (ruling 13(b), split out of
  *  `BoardImportDialog`, which keeps the fields' state): the key and the
  *  repository in effect, the new project's slug, whether the key is taken,
  *  and the first field that stops the import (a taken slug stops the name)
@@ -314,7 +314,7 @@ function blockedImportReason(blocked: BlockedField | null, slugTaken: boolean, s
   }
 }
 
-/** A file with problems, all of them, in place of the form (ruling 700(e):
+/** A file with problems, all of them, in place of the form (ruling 13(b):
  *  one slot of `BoardImportDialog`'s body, drawn from its props alone). */
 function BoardImportProblems({ problems }: { problems: string[] }) {
   return (
@@ -337,8 +337,8 @@ function BoardImportProblems({ problems }: { problems: string[] }) {
 }
 
 /** Whether the board takes a repository: a results board attaches one only
- *  on request (ruling 667), a software board may connect it later (ruling
- *  672). Ruling 700(e): one slot of `BoardImportDialog`'s form, which keeps
+ *  on request (ruling 224), a software board may connect it later (ruling
+ *  224). Ruling 13(b): one slot of `BoardImportDialog`'s form, which keeps
  *  both choices' state. */
 function BoardImportRepository({
   delivers,
@@ -374,7 +374,7 @@ function BoardImportRepository({
   );
 }
 
-/** The dialog's foot (ruling 700(e), split out of `BoardImportDialog`, which
+/** The dialog's foot (ruling 13(b), split out of `BoardImportDialog`, which
  *  keeps the refusal count and its shake): where the board will live, why it
  *  cannot be imported yet, and the way on. */
 function BoardImportFoot({
@@ -465,10 +465,10 @@ export function BoardImportDialog({
   const [createRepo, setCreateRepo] = useState(false);
   const [repoPrivate, setRepoPrivate] = useState(true);
   const [connOwner, setConnOwner] = useState(() => connections[0] ?? "");
-  // Ruling 667: a board none of whose agents writes a repository needs none,
+  // Ruling 224: a board none of whose agents writes a repository needs none,
   // and takes one only when the person attaches it.
   const [attachRepo, setAttachRepo] = useState(false);
-  // Ruling 672: a board whose agents write a repository may start without one.
+  // Ruling 224: a board whose agents write a repository may start without one.
   const [repoLater, setRepoLater] = useState(false);
   const needsRepo = preview.delivers === "software" ? !repoLater : attachRepo;
   const [choices, setChoices] = useState<ReadonlyMap<string, BoardResourceChoice>>(() => new Map());
@@ -497,7 +497,7 @@ export function BoardImportDialog({
     if (d.toast) push(d.toast);
     if (d.repoNote) push(d.repoNote);
     if (d.repoWarning) push(d.repoWarning, "error");
-    // Instant on purpose (ruling 459), as New project: the page goes to the
+    // Instant on purpose (ruling 287), as New project: the page goes to the
     // new board, so there is nothing for an exit to leave toward.
     onClose();
     if (d.slug) navigate(`/projects/${d.slug}/board`);

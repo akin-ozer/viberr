@@ -23,7 +23,7 @@ import { Timeline } from "./timeline";
 import "./comment-composer";
 
 /**
- * Ruling 457 (CS-7): what typing costs. The draft lives in a ref, so a plain
+ * Ruling 11 (CS-7): what typing costs. The draft lives in a ref, so a plain
  * keystroke renders nothing above the editor, and that is the property pinned
  * here: a draft lifted into page state would re-render the whole timeline on
  * every key. Inside an @token the menu re-renders (its filter changed), but the
@@ -93,7 +93,7 @@ async function mountComposer() {
       <Stub initialEntries={["/t"]} />
     </Profiler>,
   );
-  // Ruling 457: the editor is lazy and every mount starts as its stand-in.
+  // Ruling 300: the editor is lazy and every mount starts as its stand-in.
   // Pressing it imports the editor's chunk; act() awaits that same import and
   // commits the swap once it resolves, so no deadline races the host. Polled
   // against waitFor's one-second deadline while Lexical compiled, the file's
@@ -136,7 +136,7 @@ async function type(editor: LexicalEditor, text: string) {
   });
 }
 
-describe("composer renders per keystroke (ruling 457)", () => {
+describe("composer renders per keystroke (ruling 11)", () => {
   it("a plain keystroke renders nothing", async () => {
     const view = await mountComposer();
     await type(view.editor, "Looks good");

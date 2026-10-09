@@ -4,7 +4,7 @@ import { expectWithinBudget } from "../../test-support/perf-ratchet";
 import { sameMarkdownProps } from "./markdown";
 
 /**
- * Ruling 457, CTL-7: a transcript hands every message ONE conversation-wide
+ * Ruling 11, CTL-7: a transcript hands every message ONE conversation-wide
  * `taskLinks` map (the dock, the controller page, the task timeline). When a
  * reply names a task key nothing named before, that map gains a key, and the
  * `Markdown` memo used to compare the whole map, so every unchanged message
@@ -35,7 +35,7 @@ function linksFor(texts: readonly string[]): TaskLinks {
   return links;
 }
 
-describe("Markdown re-parses when a reply names a new task key (ruling 457, CTL-7)", () => {
+describe("Markdown re-parses when a reply names a new task key (ruling 11, CTL-7)", () => {
   it("re-renders only the reply, not the thirty messages before it", () => {
     const before = transcript(30);
     const reply = "Created VIB-7 for the follow-up.";

@@ -6,7 +6,7 @@ import { LocalDayDotTime } from "~/ui/local-time";
 import { useAttachmentLightbox } from "./attachment-lightbox";
 
 /**
- * Ruling 690: the sources a task keeps, apart from its files.
+ * Ruling 317: the sources a task keeps, apart from its files.
  *
  * A source is what an agent read to state a fact in the result: a page as it
  * fetched it, a repository file at a commit, an API answer, a command's
@@ -20,7 +20,7 @@ import { useAttachmentLightbox } from "./attachment-lightbox";
  * copy is the thing to open), and who kept it, when, and its size. A row
  * opens the kept copy in the reader card every task file opens in, so a kept
  * HTML page shows as its source text and never renders on the app's origin
- * (ruling 363). The card offers no Remove: a kept source is not removed.
+ * (ruling 317). The card offers no Remove: a kept source is not removed.
  *
  * Silent on a task that keeps none, as the attachments panel is on a task
  * that never had a file. Member-gated upstream: the task page is
@@ -49,7 +49,7 @@ export function SourcesPanel({
         <h2>Sources</h2>
         <span className="right sub">{count === 1 ? "1 source" : `${count} sources`}</span>
       </div>
-      {/* Ruling 510: a long list folds, as the attachments list does. */}
+      {/* Ruling 314: a long list folds, as the attachments list does. */}
       <Collapsible className="attach-list" contentKey={sources.length}>
         {count > sources.length && (
           <p className="ntf-truncated sub">
@@ -78,7 +78,7 @@ export function SourcesPanel({
                     <span className="cmp-file-what">{source.from}</span>
                     {/* The card family's byline, which wraps: `.attach-by`
                         in a file row is one line cut with an ellipsis on a
-                        phone (ruling 478(b)), and cut the size off here. */}
+                        phone (ruling 313), and cut the size off here. */}
                     <span className="cmp-by">
                       kept by {source.by} · <LocalDayDotTime iso={source.keptAt} /> ·{" "}
                       {prettySize(source.bytes)}

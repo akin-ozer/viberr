@@ -16,7 +16,7 @@ import { toError } from "~/shared/errors";
  * ONE honesty rule.
  *
  * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases were budgeted from F9
- * until ruling 283 replaced their injected text with an index; skills first got
+ * until they reached a run as an index (ruling 205); skills first got
  * a cap in P14-KM-03 — but a PER-SKILL one, applied fresh on every per-skill
  * read inside the caller's loop. N skills × 24 k is unbounded, which is
  * precisely the failure the KB budget existed to prevent, so
@@ -41,11 +41,11 @@ import { toError } from "~/shared/errors";
 export const SKILL_INJECTION_BUDGET = 24_000;
 
 /**
- * Ruling 679: how many characters of its skills a controller turn is given.
+ * Ruling 186: how many characters of its skills a controller turn is given.
  *
  * An agent's skills share 24,000 characters when they arrive as prompt text.
  * The controller's own skill is the guide this repository ships, which gains
- * a section with most rulings that teach it something: ruling 672's took its
+ * a section with most rulings that teach it something: ruling 224's took its
  * body to 25,766 characters, and from that deploy every turn read the guide
  * with its end cut off ("Answer style", and that a run is never claimed
  * started unless the tool said so), told only by a line at the foot of the
@@ -61,7 +61,7 @@ export const CONTROLLER_SKILL_BUDGET = 40_000;
 export const CONTROLLER_GUIDE_SKILL = "controller-guide";
 
 /**
- * Ruling 679: the order a controller turn draws its skills in, from the list
+ * Ruling 186: the order a controller turn draws its skills in, from the list
  * as its turn sorts it: the guide first, whatever its name sorts behind, so a
  * skill an org admin attached is never what cuts the doctrine short. One
  * home, so the turn and the size a save reports cannot disagree.
@@ -74,7 +74,7 @@ export function controllerSkillDrawOrder(names: readonly string[]): string[] {
 }
 
 /**
- * Ruling 679: how many characters of a controller turn's budget are left for
+ * Ruling 267: how many characters of a controller turn's budget are left for
  * `name` when its turn to draw comes: the budget, less the bodies of the
  * skills drawn before it. Null when `names`, the controller's own list, does
  * not hold it.
@@ -264,7 +264,7 @@ export interface SkillBodySize {
 }
 
 /**
- * Ruling 679: how much of a skill a run handed its skills as prompt text
+ * Ruling 186: how much of a skill a run handed its skills as prompt text
  * cannot be given: the characters of its SKILL.md body past
  * {@link SKILL_INJECTION_BUDGET}, 0 when it fits, null when it has no readable
  * body. An agent that holds other skills ahead of this one is given less.
@@ -337,7 +337,7 @@ export const skillFrontmatterSchema = z.object({
 });
 
 /**
- * Ruling 183 (pass 36, F36-2): a SKILL.md body is validated at EVERY writer —
+ * Ruling 186 (pass 36, F36-2): a SKILL.md body is validated at EVERY writer —
  * the org-settings editor, the controller's `save_skill`, uploads and the
  * store browser's document editor — and refused by name, never rewritten.
  *

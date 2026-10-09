@@ -4,7 +4,7 @@ import { normalizeWorkspacePaths } from "~/shared/workspace-paths";
 import type { LogLine } from "./runtime-types";
 
 /**
- * Ruling 499: an agent's file edit, read as a diff on its own console row.
+ * Ruling 168: an agent's file edit, read as a diff on its own console row.
  *
  * Claude's `Edit` carries the text it replaces and the text that replaces it,
  * `MultiEdit` a list of such pairs, and `Write` the whole file it writes. The
@@ -62,7 +62,7 @@ export interface EditDiff {
   everywhere: boolean;
   rows: DiffRow[];
   /** The arguments the diff shows in full, which the row's link then leaves
-   *  out (ruling 366(d) names only what a reader cannot see). */
+   *  out (ruling 168 names only what a reader cannot see). */
   drawn: readonly string[];
 }
 
@@ -231,7 +231,7 @@ export function editDiff(line: LogLine): EditDiff | null {
 
 /** Rows drawn before the rest waits behind "Show N more lines". Exported with
  *  no importer on purpose: module-local, it grows both Controller pages'
- *  closures by a byte (ruling 457's ratchet). */
+ *  closures by a byte (ruling 11's ratchet). */
 export const PREVIEW_ROWS = 10;
 
 /**
