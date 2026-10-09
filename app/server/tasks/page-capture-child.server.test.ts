@@ -601,6 +601,21 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(new Set(b.browser.launches().map((launch) => launch.argv.find((arg) => arg.startsWith("--user-data-dir=")))).size).toBe(3);
   });
 
+  it("asks a page for reduced motion before it loads at a view that carries `reduce`, and for no preference at one that does not, so one view's setting never reaches the next", async () => {
+    const b = bench({ "page.html": "<p>a page that moves</p>" });
+    const report = await b.run({ pages: ["page.html"], views: [{ ...DESKTOP, reduce: true }, PHONE] });
+    expect(report.pages[0]).toMatchObject({ error: null });
+    expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png", "1-phone.png"]);
+    // What each load had been told when it started. CANARY: tell the browser
+    // after `Page.navigate` and the desktop's load is under "" (a page reads
+    // the preference as it loads). Leave a view without `reduce` alone and
+    // the phone is loaded under the desktop's "reduce".
+    expect(b.browser.pages().map((page) => [page.metrics.width, page.reducedMotion])).toEqual([
+      [1280, "reduce"],
+      [390, "no-preference"],
+    ]);
+  });
+
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
     // A view is one kind of picture: a box, a whole page, an act or a moving
     // screen.

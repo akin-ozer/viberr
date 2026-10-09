@@ -571,7 +571,7 @@ type CdpMessage = z.infer<typeof cdpMessageSchema>;
 type CdpFields = NonNullable<CdpMessage["result"]>;
 
 /** What a command sends: plain JSON values. */
-type CdpParams = { [key: string]: string | number | boolean | CdpParams };
+type CdpParams = { [key: string]: string | number | boolean | CdpParams | CdpParams[] };
 
 interface Waiting {
   resolve(result: CdpFields): void;
@@ -892,6 +892,14 @@ async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: numb
   await browser.send(
     "Emulation.setDeviceMetricsOverride",
     { width: view.width, height: view.height, deviceScaleFactor, mobile: view.mobile },
+    sessionId,
+  );
+  // A page reads what motion its reader asks for as it loads, so the browser
+  // is told first, and told at every view: one that asks for none must not be
+  // loaded under the last one's `reduce`.
+  await browser.send(
+    "Emulation.setEmulatedMedia",
+    { features: [{ name: "prefers-reduced-motion", value: view.reduce === true ? "reduce" : "no-preference" }] },
     sessionId,
   );
   const loaded = nextLoad(browser, sessionId);
