@@ -184,13 +184,15 @@ export function canonicalTaskAnchor(input: {
    * Ruling 201 (F39-19): the verdicts that STAND, with their reasons whole.
    *
    * Live on ax-clone AX-12 the operator wrote "@Developer … read the Reviewer's
-   * request-changes findings in the timeline" — and no agent can. `read_board`
-   * answers a task's stage, readiness, waits, archived flag and goal, and no
-   * timeline at all; this anchor is every other word an agent gets, and it
-   * clamps each entry to 220 characters, which is shorter than any verdict
-   * worth reworking against. The deliverer did the right thing and raised a
-   * decision packet asking a human to paste them, which cost a run and a human
-   * decision to answer.
+   * request-changes findings in the timeline", and the deliverer could not:
+   * it raised a decision packet asking a human to paste them, which cost a run
+   * and a human decision to answer. An agent holding a collaboration grant now
+   * reads the timeline (ruling 213: `read_board`'s `timeline` index, and
+   * `read_timeline_entry` to open one entry whole), but one without that grant
+   * has neither, and the timeline block of this anchor clamps each entry to
+   * 220 characters, shorter than any verdict worth reworking against. So the
+   * verdicts are not left to a read the agent may not have, or may not think
+   * to make.
    *
    * The operator's playbook already says to carry the findings in its prompt.
    * This is the half that does not depend on it remembering: the reasons are

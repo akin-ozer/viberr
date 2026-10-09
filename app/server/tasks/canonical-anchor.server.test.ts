@@ -163,13 +163,14 @@ describe("canonicalTaskAnchor", () => {
   /**
    * Ruling 201 (F39-19), live on ax-clone AX-12: the operator wrote
    * "@Developer … read the Reviewer's request-changes findings in the timeline",
-   * and no agent can. `read_board` answers stage, readiness, waits, archived and
-   * goal, with no timeline at all; this anchor is every other word an agent
-   * gets, and it clamps each entry to 220 characters — shorter than any verdict
-   * worth reworking against. The deliverer raised a decision packet asking a
-   * human to paste them, which cost a run and a human decision.
+   * and the deliverer could not; it raised a decision packet asking a human to
+   * paste them, which cost a run and a human decision. Ruling 213 now gives an
+   * agent holding a collaboration grant the timeline's index and its entries,
+   * but one without that grant has neither, and this anchor's timeline block
+   * clamps each entry to 220 characters — shorter than any verdict worth
+   * reworking against.
    */
-  it("ruling 201: the standing verdicts ride WHOLE, because rework has nowhere else to read them", () => {
+  it("ruling 201: the standing verdicts ride WHOLE, because a rework may have nowhere else to read them", () => {
     const reason =
       "Blocking findings:\n\n- internal/store/store.go:825 snapshot errors occur " +
       "after the WAL is synced, so Create returns an error while Get sees the object. " +
