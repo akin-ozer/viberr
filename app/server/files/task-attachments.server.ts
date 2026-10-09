@@ -1050,12 +1050,15 @@ export function attachmentWholeText(name: string, bytes: Buffer): string | null 
 }
 
 /**
- * Ruling 706: the kinds of file whose indentation is nesting, by their names:
- * data and markup. A search of one takes no indented line to continue the
- * line above it, so no place in a printed JSON list is headed by the list's
- * first line. A workbook is searched as the CSV a read renders it to.
+ * Ruling 706: the kinds of file whose indentation does not say which line
+ * continues which, by their names. In data and markup an indent is nesting,
+ * and a search that took an indented line to continue the line above it
+ * would head every place in a printed JSON list with the list's first line.
+ * A workbook is searched as the CSV a read renders it to. A PDF's text keeps
+ * the page's layout, where an indent is a paragraph's first line or a margin.
  */
 const INDENT_IS_NESTING = new Set([
+  ".pdf",
   ".json",
   ".jsonl",
   ".ndjson",

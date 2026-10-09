@@ -218,9 +218,10 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     // line, then every line indented. Walking up from index 1 for the line
     // above, `lastIndexOf` was asked for a break "at or before -1", looked at
     // index 0, found the one the text opens with and answered index 1 again.
-    // Canary: take the line above as `lastIndexOf("\n", at - 2) + 1` at
-    // every index, and this call never comes back: a search of such a source
-    // held the one server process for good.
+    // A search of such a source held the one server process for good. The
+    // walk is now unable to stand still twice over: index 1 is answered
+    // without asking, and a step that does not move up ends it. Canary: drop
+    // both and this call never comes back (either alone still returns).
     const run = "\n RUN  v5.0.3 /repo\n\n Test Files  548 passed (548)\n      Tests  9750 passed | 2 skipped (9752)\n";
     const found = find(run, "passed");
     expect(found.found).toBe(2);
@@ -238,9 +239,10 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
       "    run's totals. How much of it is cached is not said, and the next sentences go on for a while\n" +
       "    under the same hanging indent, to the entry's last line.\n\n" +
       "507. **The entry after (2026-09-26).** It begins here.\n";
-    // Canary: take the middle of the line the phrase ends on for the end of
-    // a line, and the excerpt stops at the phrase's last word.
-    const [wrapped] = find(entries, "added to the run's totals").hits;
+    // Canary: look for the block under the line the phrase ends on and from
+    // the middle of it, as the first rework did, and this excerpt opens with
+    // entry 505 and closes with entry 507.
+    const [wrapped] = find(entries, "added to the run").hits;
     expect(wrapped!.line).toBe(3);
     expect(wrapped!.text).toBe(
       "506. **A cached prefix no longer moves between sessions (2026-09-26).** Its tokens are added to the\n" +
@@ -265,8 +267,14 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     const over = "21. **An entry (2026-01-01).** It runs on\n    under an indent, to its end\n22. **The next entry (2026-01-02).** begins here and goes on a little.\n";
     const [spill] = find(over, "to its end 22. **The next entry").hits;
     expect(spill!.text).toBe("21. **An entry (2026-01-01).** It runs on\nunder an indent, to its end\n22. **The next entry (2026-01-02).** begins here and goes on a little.");
+    // The same when the block's last line is shorter than the phrase's own
+    // end. Canary: end the excerpt where the block ends, and the phrase
+    // loses its last word.
+    const short = "21. **An entry (2026-01-01).** It runs\n    under\n22. **The next entry (2026-01-02).** begins here.\n";
+    const [cut] = find(short, "runs under 22.").hits;
+    expect(cut!.text).toBe("21. **An entry (2026-01-01).** It runs\nunder\n22. **The next entry (2026-01-02).** begins here.");
     // Words on an entry's first line whose line is longer than the excerpt
-    // reaches: the line under it is still looked at, so the block is seen.
+    // reaches: the lines under it are still looked at, so the block is seen.
     // Canary: look below only as far as the excerpt reaches, and the excerpt
     // opens with the last words of the entry above.
     const head = `2. **The second entry turns the needle (2026-02-01).** ${"Its first line runs long. ".repeat(11)}`.trim();
@@ -276,6 +284,13 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     const [onHead] = find(two, "second entry turns").hits;
     expect(onHead!.text.startsWith("2. **The second entry turns the needle")).toBe(true);
     expect(onHead!.text).not.toContain("nothing else changed");
+    // And with a blank line between that first line and the indented ones.
+    // Canary: look only at the one line under the words' line.
+    const spaced = two.replace(`${head}\n    and it runs`, `${head}\n\n    and it runs`);
+    expect(spaced).not.toBe(two);
+    const [onSpaced] = find(spaced, "second entry turns").hits;
+    expect(onSpaced!.text.startsWith("2. **The second entry turns the needle")).toBe(true);
+    expect(onSpaced!.text).not.toContain("nothing else changed");
   });
 
   it("reads a place from its own line when its entry starts more than a page above it", () => {
@@ -293,7 +308,7 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     expect(hit!.text).toContain(" … ");
   });
 
-  it("holds its three measures: 400 characters for a line of its own, 200 for an entry shown from its start", () => {
+  it("holds its two measures: 400 characters for a line of its own, 200 for an entry shown from its start", () => {
     // A line of exactly 400 characters is a wrapped one, and its excerpt
     // takes the line under it; one more character and it is an entry of its
     // own. Canary: move the measure to 300 or to 450.
@@ -303,7 +318,7 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     const [own] = find(`${line(401)}\nthe line under it\n`, "needle").hits;
     expect(own!.text).not.toContain("the line");
     // An entry that starts within 200 characters of the excerpt is shown from
-    // its start, once; one character further and its head is lent instead.
+    // its start, once; a word further and its head is lent instead.
     // Canary: move the measure to 100, or to 300.
     const entry = (words: number) => `E. ${"ab ".repeat(words)}needle ${"cd ".repeat(200)}`;
     const [near] = find(entry(118), "needle").hits;
@@ -451,6 +466,7 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     // No words is an empty pattern, which matches at every index and never
     // moves. Canary: drop the early return and this call does not come back.
     expect(findInText("abc", [])).toEqual({ words: [], found: 0, hits: [] });
+    expect(findInText("abc", [""])).toEqual({ words: [""], found: 0, hits: [] });
     expect(findInText("", ["abc"])).toEqual({ words: ["abc"], found: 0, hits: [] });
   });
 });

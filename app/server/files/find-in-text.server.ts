@@ -27,8 +27,11 @@ import { escapeRegExp } from "~/shared/text/regexp";
  * of one letter and one to fifty spaces repeated, one scan by a phrase that
  * fails on its last word took at most 19 ms for 2 words, 234 ms for 12 and
  * 2.4 s for 100 (which 200 characters allow). One scan of 10 MB of prose by
- * a 20-word phrase took 6 ms. The server is one process and a search holds
- * it, so the limit is twelve.
+ * a 20-word phrase took 6 ms. A search that finds its phrase scans twice,
+ * once to count and once to list: the slowest whole search measured at
+ * twelve words took 0.6 s on 10 MB and 0.9 s on the 16,000,000 characters a
+ * rendered file may run to, both on texts built for it. The server is one
+ * process and a search holds it, so the limit is twelve.
  */
 export const FIND_MAX_WORDS = 12;
 export const FIND_MAX_CHARS = 200;
@@ -139,8 +142,13 @@ function entryStartOf(text: string, lineStart: number): number {
   while (at > 0 && lineStart - at <= ENTRY_HEAD_REACH) {
     // The start of the line above. From index 1 that is index 0: asked for a
     // line break "at or before -1", `lastIndexOf` looks at index 0, finds the
-    // one a text opens with, and the walk would stand still for ever.
-    at = at < 2 ? 0 : text.lastIndexOf("\n", at - 2) + 1;
+    // one a text opens with, and answers index 1 again.
+    const above = at < 2 ? 0 : text.lastIndexOf("\n", at - 2) + 1;
+    // A step that does not move up has no line above it. The walk held the
+    // one server process for good the day it could stand still, so it is
+    // made unable to, twice over.
+    if (above >= at) return lineStart;
+    at = above;
     if (startsAnEntry(text, at)) return at;
   }
   return lineStart;
@@ -156,14 +164,16 @@ function startsAnEntry(text: string, at: number): boolean {
  * Where an entry runs on to below the line its words start on, when the
  * lines under that one are indented: the end of the last line before the
  * next one that starts an entry, looked for as far as `reach`. `lineEnd` is
- * where that line ends, and the line under it is looked at wherever `reach`
- * lies. Null when the next line that is not blank starts an entry itself, or
- * there is none.
+ * where that line ends, and the lines under it are looked at for the length
+ * of an excerpt wherever `reach` lies. Null when the next line that is not
+ * blank starts an entry itself, or none is met that far.
  */
 function entryRunsTo(text: string, lineEnd: number, reach: number): number | null {
   let last: number | null = null;
   let lineBreak = lineEnd;
-  const until = Math.max(reach, lineEnd);
+  // As far as an excerpt goes past the line too, so a blank line under a long
+  // first line does not hide the indented ones below it.
+  const until = Math.max(reach, lineEnd + HIT_AFTER);
   while (lineBreak < text.length && lineBreak <= until) {
     const nextStart = lineBreak + 1;
     const nextBreak = text.indexOf("\n", nextStart);
@@ -203,9 +213,9 @@ function shown(text: string): string {
 export function findInText(whole: string, words: readonly string[], from = 0, hangingIndent = true): TextFind {
   const hits: TextHit[] = [];
   const find: TextFind = { words: [...words], found: 0, hits };
-  // No words would be an empty pattern, which matches everywhere and moves
-  // nowhere.
-  if (words.length === 0) return find;
+  // No words, or only empty ones, would be an empty pattern, which matches
+  // everywhere and moves nowhere.
+  if (words.join("") === "") return find;
   // Literal words joined by `\s+`. A run of white space of any length does
   // not overflow the engine's stack, as the counted run of ruling 676 did:
   // measured on a 16,000,000-character run of spaces.
@@ -239,8 +249,8 @@ export function findInText(whole: string, words: readonly string[], from = 0, ha
     // that too: the lines before its head and after its last line are
     // another entry's.
     const entryStart = hangingIndent ? entryStartOf(whole, lineStart) : lineStart;
-    // A phrase may end on a later line than it starts on: the excerpt reaches
-    // at least to where that line ends.
+    // A phrase may end on a later line than it starts on: the excerpt may
+    // reach as far as where that line ends.
     const lastBreak = end <= lineEnd ? lineEnd : whole.indexOf("\n", end);
     const wordsLineEnd = lastBreak === -1 ? whole.length : lastBreak;
     const runsTo = ownLine || !hangingIndent ? null : entryRunsTo(whole, lineEnd, end + HIT_AFTER);

@@ -1222,6 +1222,14 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(inData.hits[0]!.text).toContain('"tag_name": "v2.9.0"');
     expect(inData.hits[0]!.text).not.toContain("v3.12.0");
 
+    // And prose is searched as prose: a line under a hanging indent is read
+    // from the head of its entry. CANARY: search every source as data.
+    const wrappedEntry = `41. **An entry wrapped under a hanging indent (2026-01-01).**\n${"    a line of the entry, wrapped at a hundred columns.\n".repeat(12)}    the words are down here\n\n42. **The next entry.**\n`;
+    keep("older-rulings.md", Buffer.from(wrappedEntry), "Older rulings");
+    const inProse = await find({ id: "S5", find: "the words are down here" });
+    expect(inProse.hits[0]!.offset).toBe(0);
+    expect(inProse.hits[0]!.text.startsWith("41. **An entry wrapped under a hanging indent (2026-01-01).**")).toBe(true);
+
     // What a search cannot answer, said in a sentence. CANARY: answer a
     // search with no `id` with the list of sources, and it reads as "found in
     // none of them".
@@ -1229,7 +1237,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       "[noop] `find` searches one source: pass that source's `id` with it. read_task_source without `id` and without `find` lists the sources.",
     );
     expect(await text({ id: "S9", find: "cached part" })).toBe(
-      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S4; call read_task_source without `id` to list them.",
+      "[noop] VIB-9 keeps no source `S9`. It keeps S1 to S5; call read_task_source without `id` to list them.",
     );
     expect(await text({ id: "S2", find: "cached part" })).toBe(
       "[noop] `chart.png` is an image: it has no text to search. Read it without `find` to look at it.",
