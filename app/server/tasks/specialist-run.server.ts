@@ -564,8 +564,8 @@ async function dispatchAgentRun(
   // push. One live delivering run per task: refuse a second until the first
   // finishes or is interrupted. Supporting agents run concurrently in their own
   // isolated checkouts (P8); their write posture is grants-derived on BOTH
-  // backends (ruling 183: Claude's denylist binds it; on Codex it is advisory
-  // since ruling 183, with the delivery gate as the boundary).
+  // backends (ruling 183: Claude's denylist binds it; on Codex it is advisory,
+  // with the delivery gate as the boundary).
   if (delivers) {
     const liveDelivering = listRunsForTaskRows(
       db,
@@ -774,7 +774,7 @@ async function dispatchAgentRun(
   // records the refusal as an honest terminal error and the normal completion
   // pipeline opens the blocked packet — it just never pays for a checkout, a
   // skill mount, a browser or a toolkit for a process that will not exist.
-  // Same shape the pre-127 "backend unavailable" path had (R7-2).
+  // Same shape the old instance-credential "backend unavailable" path had (R7-2).
   const realBackend = principal.ok;
 
   // P14-LV-09: resolve the MCP grants BEFORE the persona, and build it from what

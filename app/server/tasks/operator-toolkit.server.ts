@@ -107,8 +107,8 @@ import {
  */
 
 /**
- * Ruling 210: the operator's `correct_knowledge_doc`, which ruling 210 built as
- * `propose_ruling` for the project's rulings alone and ruling 210 widened into
+ * Ruling 210: the operator's `correct_knowledge_doc`, which began as
+ * `propose_ruling` for the project's rulings alone and was widened into
  * `propose_kb_correction`.
  */
 const KB_CORRECTION_TOOL_DESCRIPTION =
@@ -794,7 +794,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
       ),
       "flag_context_conflict",
     );
-    // F39-1/F39-7 (pass 39), generalized by ruling 210 (F40-53) and made a
+    // F39-1/F39-7 (pass 39), generalized by F40-53 and made a
     // write by ruling 210: the sibling of flag_context_conflict for the case
     // where a knowledge base is not merely disagreeing with the repo but
     // WRONG, and the operator can prove it. Nothing else in the delivery loop

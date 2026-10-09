@@ -260,7 +260,7 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   it("ruling 40: one person's refused credential does not make the INSTANCE unready", async () => {
-    // Before ruling 40 this pushed `credential:<backend>` into `degraded`, so
+    // Originally this pushed `credential:<backend>` into `degraded`, so
     // `?probe=readiness` answered 503 for the whole deployment because ONE
     // member's key expired — and an orchestrator drained traffic from an
     // instance serving everyone else fine. Since ruling 137 the credential is

@@ -4550,8 +4550,8 @@ describe("operatorLeaseFiles (ruling 61)", () => {
 describe("operatorCorrectKnowledgeDoc (ruling 210)", () => {
   /**
    * F39-1/F39-7 (pass 39): the operator could write a correction into the
-   * project's settled rulings as a proposal (ruling 210); ruling 210 (F40-53)
-   * widened it to every knowledge base a run on the task was given. Ruling 210
+   * project's settled rulings as a proposal; F40-53 widened it to every
+   * knowledge base a run on the task was given. Ruling 210
    * (owner, 2026-09-26: "No human can approve all of these while inspecting
    * them thoroughly") writes it into the document, and a person undoes it.
    */

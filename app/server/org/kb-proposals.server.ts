@@ -15,7 +15,7 @@ import { writeStoreDoc } from "./store-files.server";
 /**
  * Rulings 210 and 267: the knowledge-base corrections agents PROPOSED, filed in
  * the document beside what they correct, under "## Proposed corrections (not
- * binding)" (ruling 210's "## Proposed (not binding)" before that), for a
+ * binding)" ("## Proposed (not binding)" before that), for a
  * person to promote into the settled text or dismiss.
  *
  * Ruling 210 ended the filing. The owner, 2026-09-26: "proposal spam is

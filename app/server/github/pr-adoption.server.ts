@@ -125,9 +125,9 @@ export function prAdoptionRefusalNote(input: {
     `\`${input.branch}\`, but it is NOT ${input.taskKey}'s review PR: ${refusalCause(input)}. ` +
     `Viberr will not track it as one. Either that pull request was opened on ` +
     `\`${input.branch}\` after Viberr allocated the name to ${input.taskKey}, or ` +
-    `${input.taskKey}'s branch was recorded before ruling 228 under a task key an older ` +
-    `data root had already used (keys restart at 1; names allocated since take a suffix ` +
-    `when the canonical one is spoken for), and Viberr cannot tell which from here. ` +
+    `${input.taskKey}'s branch was recorded under a task key an older data root had ` +
+    `already used, before names took a suffix when the canonical one is spoken for ` +
+    `(keys restart at 1), and Viberr cannot tell which from here. ` +
     `Resolve it with a ` +
     `\`resolve_remote_collision\` decision (closes the unrelated PR, deletes the stale ` +
     `remote branch \`${input.branch}\`, and re-delivers this task's work) before delivering.`

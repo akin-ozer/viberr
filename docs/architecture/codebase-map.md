@@ -200,8 +200,8 @@ actors, notifications; `deriveDisplayReadiness` and the live-backend overlay liv
 the viewer's zone for the controller's prose), `ids/` (`newId` in `new-id.server.ts`,
 `slugify`), `text/` (`plural`, store text extensions, `BACKEND_LABEL` (ruling 298),
 `escapeRegExp`, `endSentence`, `wholeThousands`, `prettySize` (a byte count as people read it, ruling 319), `figures` (`formatCost` and `formatDuration`, a dollar total and a span of time as Insights and the completion card print them, ruling 316)), `auth/` (auth paths, password
-policy), `docs/` (six tests: `file-formats.md` against `PACKET_OPTION_KINDS`, the
-rulings supersession markers, the runbook's database-read rules, the vendored anti-slop
+policy), `docs/` (six tests: `file-formats.md` against `PACKET_OPTION_KINDS`, every
+"ruling N" citation resolving to `decisions.md`, the runbook's database-read rules, the vendored anti-slop
 tree against its manifest, every performance budget measured by some test, and
 `vite.config.ts`'s font and chunk rules).
 

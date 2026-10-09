@@ -43,9 +43,9 @@ export function ntfMeta(n: {
   if (n.kind === "approval") return { icon: "arrow", cls: "act-transition" };
   if (n.kind === "mention") return { icon: "message", cls: "act-comment" };
   if (n.kind === "quality") return { icon: "flag", cls: "act-quality" };
-  // Ruling 273: goal-chain progress an inbox kept from before ruling 273 — the
-  // comment palette (the controller is conversational), with the cpu glyph
-  // naming the sender.
+  // Ruling 273: goal-chain progress an inbox kept from before goal chains
+  // became epics — the comment palette (the controller is conversational),
+  // with the cpu glyph naming the sender.
   if (n.kind === "controller") return { icon: "cpu", cls: "act-comment" };
   // Ruling 272: an epic's membership or status moved — forward motion, on the
   // transition palette, with the stacked glyph the Epics rail item wears.

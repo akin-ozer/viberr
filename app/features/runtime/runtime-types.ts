@@ -14,7 +14,7 @@
 import type { RunFailureFacts, RunFailureKind } from "~/shared/run-failure";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 
-/** Lifecycle stored in agent_runs.state (orchestrator ruling 165). */
+/** Lifecycle stored in agent_runs.state (ruling 165). */
 export type RunState =
   | "queued"
   | "running"

@@ -2043,7 +2043,7 @@ export async function runOperator(
     // the operator is blind instead of letting it read its empty task folder as
     // "the repo" (F19-4).
     // Ruling 137: a drive with no credential principal is about to be recorded
-    // as a refusal, so it clones nothing — the same posture the pre-127
+    // as a refusal, so it clones nothing — the same posture the instance-credential
     // "backend unavailable" arm had. `kind: "none"` is exactly what the prompt
     // builders already handle for a project with no repo.
     const workspace: OperatorWorkspaceView = principal.ok

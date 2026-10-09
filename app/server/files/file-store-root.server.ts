@@ -22,7 +22,7 @@ import { AppError } from "../errors/app-error.server";
  *                                          store://skills/<name>/)
  *   state/projection.sqlite               (SQLite — managed by db/)
  *
- * UI copy renders REAL store-relative paths (orchestrator ruling 15(a)):
+ * UI copy renders REAL store-relative paths (ruling 15(a)):
  * `projects/viberr-core/tasks/VIB-142/task.md`, never the mock's `.viberr/…`.
  */
 

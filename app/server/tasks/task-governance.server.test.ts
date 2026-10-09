@@ -4259,9 +4259,9 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
 
   it("ruling 64: a directive typed on a RECOVERY packet stays out of the goal too", async () => {
     const store = setupProjectedStore(ctx);
-    // Ruling 64 amended here because "a typed directive is content a person
-    // wrote". Ruling 64 keeps free text out of the contract whatever packet it
-    // was typed on — the channel decides, not the packet.
+    // Because "a typed directive is content a person wrote", ruling 64 keeps
+    // free text out of the contract whatever packet it was typed on — the
+    // channel decides, not the packet.
     withTask(
       store,
       { stage: "impl", ownerUserId: store.users.arda.id },

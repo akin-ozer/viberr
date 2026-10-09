@@ -129,8 +129,9 @@ describe("prAdoptionRefusalNote (pass 34, U34-6): names both collision origins, 
     // branch AFTER Viberr allocated the name. JC-8 hit exactly this at
     // 10:17:52Z and read a note blaming a reused task key it never had.
     expect(note).toMatch(/opened on `jc-8` after Viberr allocated the name to JC-8/);
-    // Origin two: a branch recorded before ruling 228 under a reused task key.
-    expect(note).toMatch(/JC-8's branch was recorded before ruling 228 under a task key/);
+    // Origin two: a branch recorded under a reused task key, before names took a
+    // suffix (ruling 228).
+    expect(note).toMatch(/JC-8's branch was recorded under a task key an older data root had already used/);
     expect(note).toMatch(/keys restart at 1/);
     // Neither is asserted: the note says it cannot tell, and the old causal
     // paragraph ("This happens when a task key is reused … so this only

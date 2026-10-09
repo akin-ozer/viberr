@@ -210,11 +210,11 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
   /**
    * Ruling 249 (review G1). The dock's loader names `task_key` on the FIRST
    * signed-in page of every surface, so on a root that applied 0001 before
-   * ruling 249 the missing column would 500 that loader and, fetcher errors
-   * going to the route's boundary, replace every page with the root error
-   * page. Reproduced here against the PRE-121 controller schema.
+   * these columns existed, the missing column would 500 that loader and,
+   * fetcher errors going to the route's boundary, replace every page with the root error
+   * page. Reproduced here against the controller schema without them.
    */
-  it("adds the ruling-249 controller columns and the scope index a pre-121 root lacks", () => {
+  it("adds the ruling-249 controller columns and the scope index an older root lacks", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-ctlrow-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
@@ -279,7 +279,7 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
    * Ruling 11: the task page's freshness reads got composite indexes after
    * roots had applied the baseline; boot adds them to an older root.
    */
-  it("adds the freshness indexes a pre-457 root lacks", () => {
+  it("adds the freshness indexes an older root lacks", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "viberr-freshidx-"));
     try {
       const db = openDatabase(path.join(dir, "old.sqlite"));
@@ -728,7 +728,7 @@ describe("ensureBaselineColumns — baseline TABLES a pre-existing root lacks", 
   });
 
   it("rebuilds the one-account shape into the several-accounts shape, carrying every row (ruling 138)", () => {
-    // A root created before ruling 138 has `UNIQUE (user_id, backend)`, which
+    // A one-account root has `UNIQUE (user_id, backend)`, which
     // refuses a person's second Claude account at its INSERT, and ALTER TABLE
     // cannot drop a constraint. Canary: remove the rebuild and the second
     // INSERT below throws "UNIQUE constraint failed".

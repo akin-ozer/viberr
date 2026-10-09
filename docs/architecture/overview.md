@@ -215,7 +215,7 @@ gone or replaced. Everything else is best-effort and logged.
 | SSE heartbeat + re-authorization | 25 s per connection | `events/sse-broker.server.ts` |
 | Data-root lock guard | 20 s, fail-closed | `db/data-root-lock.server.ts` |
 | Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 122) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
-| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 55; the minute tick ruling 273's goal runner gave it, kept by ruling 273) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
+| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 55) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
 | GitHub reconcile poller | boot + 5 min; alert after 3 consecutive failures | `github/reconcile-poller.server.ts` |
 | Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |

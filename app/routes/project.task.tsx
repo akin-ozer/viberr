@@ -1702,8 +1702,8 @@ export default function TaskDetailRoute({
       taskLinks={loaderData.taskLinks}
       recommendations={loaderData.recommendations}
       schedules={loaderData.schedules}
-      // Ruling 10: the loader has read these since ruling 66 and the panel
-      // has rendered them since ruling 66, and the two were never joined —
+      // Ruling 10: the loader read these and the panel rendered them
+      // (ruling 66), but the two were never joined —
       // the prop defaults to `[]` at both ends, so the row simply never
       // appeared. See the wire test in task-detail-route.server.test.ts.
       queuedQuestions={loaderData.queuedQuestions}

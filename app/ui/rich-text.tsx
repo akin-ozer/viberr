@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { TASK_KEY_IN_TEXT_RE, type TaskLinks } from "~/shared/task-key-links";
 
 /**
- * THE shared rich-text micro-format renderer (orchestrator ruling 297,
+ * THE shared rich-text micro-format renderer (ruling 297,
  * contracts §1.4). Inline-only — NOT a markdown library:
  *
  *   **text**  → <strong>

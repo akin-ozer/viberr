@@ -385,7 +385,7 @@ files on the host.
 
 ### Moving the store to the named volume (ruling 38)
 
-A deployment from before ruling 38 keeps its store in `./docker-data` (a bind mount).
+An older deployment may keep its store in `./docker-data` (a bind mount).
 Move it once, with the app stopped:
 
 ```bash

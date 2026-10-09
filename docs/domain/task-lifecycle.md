@@ -1362,8 +1362,8 @@ retention in
 
 Kinds (`NOTIFICATION_KINDS`): `packet` (a decision waits, `ptype` `input | blocked`),
 `approval` (a stage approval or acceptance waits), `mention`, `quality`, `policy` (a
-violation, a refusal or a credential advisory), `controller` (ruling 273's goal progress,
-unwritten since ruling 273), `epic` (ruling 272: a task joined or left an epic the reader
+violation, a refusal or a credential advisory), `controller` (the retired goal progress,
+no longer written; ruling 273), `epic` (ruling 272: a task joined or left an epic the reader
 leads, they were made its lead, someone else closed or reopened it, or every task in it is
 done; its own routing toggle, "epics"),
 `dependency` (ruling 55: the work a task waited on landed and it was released, or a

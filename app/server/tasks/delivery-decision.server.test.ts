@@ -1453,8 +1453,8 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   /**
    * Ruling 243 (owner, 2026-09-14) — the surviving half of F37-43.
    *
-   * Ruling 243 built the guard for a PR head that is not the reviewed revision,
-   * and ruling 243 made it reachable against GitHub's real 422. What stayed was
+   * The guard for a PR head that is not the reviewed revision was built
+   * first, then made reachable against GitHub's real 422. What stayed was
    * A9's trade: a head that could not be VERIFIED still merged, with a note
    * naming the check that did not run rather than the consequence. Live, that
    * merged SHOP-17 at the revision its Code Reviewer had rejected.

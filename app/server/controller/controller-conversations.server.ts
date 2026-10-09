@@ -8,7 +8,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { withTransaction } from "~/server/db/transaction.server";
 
 /**
- * Controller conversation store (ruling 249; scope extended by ruling 249).
+ * Controller conversation store (ruling 249).
  *
  * App-owned SQLite, the notifications/sessions family (file-formats §5): a
  * transcript is single-writer app collaboration state, not board truth, so it

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { pinLivePose } from "./live-pose";
 
 /**
- * Dialog behavior required on EVERY dialog by orchestrator ruling 295, now on
+ * Dialog behavior required on EVERY dialog by ruling 295, now on
  * a native <dialog> opened via showModal(): the browser supplies the focus
  * trap, initial focus, Escape (cancel event), top-layer stacking and the
  * ::backdrop scrim. This hook adds what the platform doesn't: body scroll

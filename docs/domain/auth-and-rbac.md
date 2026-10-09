@@ -383,7 +383,7 @@ goal, metadata, dependencies, comments, attachments, transitions, ownership, pac
 acceptance, recommendations, quality, schedules, review deadlocks, agent and operator
 actions, session compactions `task.agent.compaction`, knowledge-base corrections
 `task.kb_correction.merged` and their undo `task.kb_correction.undone`, ruling 210, and
-before it the proposals `task.kb_proposal.filed`, ruling 210), `org.kb.proposal_promoted`
+the older proposals `task.kb_proposal.filed`), `org.kb.proposal_promoted`
 and `org.kb.proposal_dismissed` (ruling 267), `epic.*` (`epic.created`, `epic.updated`, and
 the conversion's `epic.converted`) and `task.epic.changed` (ruling 272), the `goal.*` rows an
 upgraded store holds, `github.*` (branches, PRs, delivery,
@@ -740,7 +740,7 @@ refusal Viberr observed on this account, which any completed run on that backend
 retires, so the absence of a pill is not proof the account works. Another person's
 refusal, or a record written before principals were stored, never appears on this card.
 The record is evidence about the account that was billed, so a change of the account the
-viewer's runs bill on that backend retires it too (ruling 160(b), extended by ruling 160): a
+viewer's runs bill on that backend retires it too (ruling 160): a
 confirmed sign-in, a pasted key the vendor accepted, a switch, the disconnect of the
 account in use, or the removal of their account
 (`retireBackendRecordsFor`, called from the credential store's own writers, so the

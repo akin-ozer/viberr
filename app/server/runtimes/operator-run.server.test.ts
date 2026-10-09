@@ -5088,7 +5088,7 @@ describe("runOperator — authority, ordering, orphans", () => {
 
     it("a task at the terminal stage refuses every trigger with `closed` and starts no run", async () => {
       // Canary: scope the closure check back to `trigger === "scheduled"`
-      // (the pre-177 shape): `agent-reply` and `manual` then start a run on a
+      // (the older shape): `agent-reply` and `manual` then start a run on a
       // shipped task — the F36-5 / F36-4 doors.
       deployAgents([operatorAgent()]);
       seedClosed();

@@ -383,7 +383,7 @@ describe("dependency hygiene: every imported package is declared (C6)", () => {
 });
 
 /**
- * Ruling 174, as amended by ruling 174: no context window rides a child
+ * Ruling 174: no context window rides a child
  * env any more, and the set of keys Viberr ADDS to a child env is pinned by
  * name — the credential (ruling 137), the home and the run marker (ruling
  * 141). A key added anywhere on the run path without a line here fails this

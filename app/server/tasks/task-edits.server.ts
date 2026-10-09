@@ -238,7 +238,7 @@ export async function createTask(
     waiting: blockedBy.length > 0 ? "none" : "human",
     // Ruling 137: creation SEATS the creator as owner. Every agent run on a
     // task bills the OWNER's own Claude/Codex accounts, so a task with no owner
-    // cannot run agents at all — and the pre-127 default (`null`) meant every
+    // cannot run agents at all — and the old default (`null`) meant every
     // brand-new task was born unable to do the one thing it exists for, with
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and

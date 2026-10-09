@@ -2153,8 +2153,8 @@ function admitRun(
   const cap = getMaxConcurrentRuns(db);
   const lane = laneOf(kind);
   // Ruling 175: the session is still being compacted after the run that left
-  // it. Two processes on one transcript is what ruling 175 made the whole
-  // settle wait to prevent; now only this run waits, parked like a run behind
+  // it. Two processes on one transcript is what the whole settle used to
+  // wait to prevent; now only this run waits, parked like a run behind
   // the cap, with the reason as its row's step.
   const held = Boolean(resumeSessionId && state.settling.has(resumeSessionId));
   if (!held && canAdmit(state, cap, lane)) {

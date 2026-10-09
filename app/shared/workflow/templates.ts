@@ -1,7 +1,7 @@
 import type { Guardrail, StageDef, WorkflowBoundary } from "~/schemas/project-file.schema";
 
 /**
- * The instance-default workflow template (orchestrator ruling 47).
+ * The instance-default workflow template (ruling 47).
  *
  * Stages are per-project (stored in project.md); this template feeds org
  * surfaces (the AgentModal instance stage list) and the create-project action.

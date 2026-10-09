@@ -2195,7 +2195,7 @@ export async function applyAgentCompletionEffects(
   //     event, escalate a recovery packet so it reaches a human's queue, and stop
   //     (no reconcile/verdict/react on a failed run). Interrupts are a deliberate
   //     human action and are handled elsewhere, so only `error` lands here.
-  // Ruling 69, moved EARLIER by ruling 69: a person's @mention refused by
+  // Ruling 69: a person's @mention refused by
   // the single-flight guard is delivered when the busy run completes —
   // whatever state it completed in. The call used to sit after the `error`
   // branch's return and after the closed-task branch's return, so a run that

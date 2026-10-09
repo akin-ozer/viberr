@@ -425,7 +425,7 @@ export async function performDelivery(
       ...dataCtx,
     });
     if (push.status === "pushed") pushedBranch = { branch: push.branch, headSha: push.headSha };
-    // Ruling 121, corrected by ruling 121: the drive DELIVERED — stamped
+    // Ruling 121: the drive DELIVERED — stamped
     // once the push has actually been attempted, not on entry. Stamping on
     // entry counted the arms that do nothing at all as progress
     // (`grant_withheld`, `no_workspace`, `bootstrap_failed`), so a nudged drive
@@ -951,7 +951,7 @@ export async function performDelivery(
         ctx.operatorRun?.autonomy ??
         resolveOperatorAuthority(ctx, projectSlug).autonomy;
       if (autonomy === "full") {
-        // Ruling 127 as amended by ruling 127: a newly opened PR, OR a head
+        // Ruling 127: a newly opened PR, OR a head
         // the push moved, is a new review subject and re-queues the operator.
         if (moved && ctx.operatorRun) {
           // Ruling 127 (pass 38, F38-11): the drive that delivered IS the

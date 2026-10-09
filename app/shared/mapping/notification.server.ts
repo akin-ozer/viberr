@@ -26,7 +26,7 @@ export const NOTIFICATION_KINDS = [
   "quality",
   "policy",
   // Ruling 273: chained-goal progress addressed to the goal's creator. Nothing
-  // has written one since ruling 273 turned goal chains into epics (their
+  // has written one since goal chains became epics (their
   // notices are `epic` rows now); the kind stays so the rows an upgraded inbox
   // already holds still read, and the CHECK still admits them. A conversation
   // reply is never a row: it reaches its open surfaces through the

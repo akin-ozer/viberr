@@ -16,7 +16,7 @@ import {
  * PR linker (Phase 7): finds the pull request for a task's execution
  * branch, fetches state/draft/merged + a checks summary + (P13-D-28) the
  * review state, and maps real GitHub PR states to the task-file cache
- * vocabulary (orchestrator ruling 237):
+ * vocabulary (ruling 237):
  *
  *   merged            → cache "merged"
  *   open (incl draft) → cache "review"

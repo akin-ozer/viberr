@@ -11,7 +11,7 @@ import { scopeIsAdvisory } from "~/shared/credential-scopes";
 
 /**
  * Scope-violation records (Phase 7 — replaces the phase-4 policy-event
- * derivation, orchestrator ruling 221).
+ * derivation, ruling 221).
  *
  * One row per violation with its own open/resolved lifecycle; the row
  * carries the task the policy engine flagged (`taskKey`, soft ref). The

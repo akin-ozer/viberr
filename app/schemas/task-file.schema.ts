@@ -141,8 +141,8 @@ export const TIMELINE_EVENT_TYPES = [
   // Ruling 267 (F40-59): a proposed correction to a knowledge base — the
   // project's rulings or any base a run was given. It asks a person for a
   // decision (promote or dismiss), so it is neither a review verdict
-  // (`quality`, where ruling 210 filed it) nor a neutral `note`. Nothing files
-  // one since ruling 210; task files keep the ones they hold.
+  // (`quality`, where it was once filed) nor a neutral `note`. Nothing files
+  // one now (ruling 210); task files keep the ones they hold.
   "proposal",
   // Ruling 210: a correction an agent WROTE into a knowledge base, or a
   // person's undo of one. It asks nobody for anything, so it is not a
@@ -150,7 +150,7 @@ export const TIMELINE_EVENT_TYPES = [
   "kb_correction",
 ] as const;
 
-/** Stable packet-option kinds (orchestrator ruling 62(a)). Dispatch on these,
+/** Stable packet-option kinds (ruling 62(a)). Dispatch on these,
  * never on English titles. */
 export const PACKET_OPTION_KINDS = [
   "accept_completion",

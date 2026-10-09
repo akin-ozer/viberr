@@ -156,7 +156,7 @@ describe("enforceStoreLayout: the store layout asserted at boot (ruling 15)", ()
     expect(mode(path.join(root, "kb", "mapping"))).toBe(0o775);
   });
 
-  it("closes what holds secrets, opens what runs write, and hands a pre-460 checkout over once", () => {
+  it("closes what holds secrets, opens what runs write, and hands a pre-isolation checkout over once", () => {
     const root = preRulingStore();
     const homes: string[] = [];
     const report = enforceStoreLayout(root, {

@@ -27,7 +27,7 @@ process.env.VIBERR_SECRET_ENCRYPTION_KEY ??=
 /**
  * Fail closed against ambient real-backend credentials (F10-10, ruling 137).
  *
- * Since ruling 137 no deployment-wide credential is DECLARED any more — a run's
+ * No deployment-wide credential is DECLARED any more — a run's
  * env is built from the credential of the ONE person it bills. But the spawn
  * env still starts from `process.env` (`filteredSpawnEnv`), and a developer's
  * `.env` or a CI host may carry a real provider key under one of these names.

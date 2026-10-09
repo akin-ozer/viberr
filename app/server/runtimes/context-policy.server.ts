@@ -63,7 +63,7 @@ export function contextWindowEnv(backend: ContextBackend, kind: RunKind): Record
  * every specialist and controller run (it steers the mid-run compaction at
  * the model's own limit AND the completion compaction of ruling 174, both of
  * which the CLI summarizes), plus the limit and its scope only for a kind
- * with a mid-run window (none, since ruling 174). Empty for the operator, so
+ * with a mid-run window (none any more). Empty for the operator, so
  * nothing is written that a reader could mistake for a decision.
  */
 export interface CodexCompactionConfig {

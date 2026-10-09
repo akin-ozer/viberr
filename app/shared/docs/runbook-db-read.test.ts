@@ -219,7 +219,7 @@ describe("ruling 23: the scripts page describes the reader that shipped", () => 
     expect(
       section,
       `${SCRIPTS.rel} still describes the VACUUM INTO as running "from a read-only connection", ` +
-        `which is the pre-158 shape: readOnly: true on a live root is what produced exit 135 twice. ` +
+        `which is the old shape: readOnly: true on a live root is what produced exit 135 twice. ` +
         `The live-lock path opens a COPY, read-write, so SQLite recovers the copied WAL into it.`,
     ).not.toMatch(/read-only\s+connection/i);
     expect(

@@ -9,7 +9,7 @@ import { getProject } from "./board-query.server";
 import { deployedSpecialistBackends } from "~/server/agents/deployment-view.server";
 
 /**
- * Live agent-deployment projection (agents spec §3.3, orchestrator ruling 62(a)):
+ * Live agent-deployment projection (agents spec §3.3, ruling 62(a)):
  * engagement instances derived from task assignment records (operator /
  * specialist / reviewers in task_projections — PROFILE-ID keyed, never the
  * mock's `role.toLowerCase()` string coincidence) joined with agent_runs so

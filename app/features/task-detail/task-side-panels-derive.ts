@@ -93,7 +93,7 @@ export function forceAcceptReason(
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   // Ruling 98: force-accept is an escape hatch, not a standing offer. It stays
   // visible OFF-BOUNDARY (ruling 98 — a pre-work wedge must be escapable), but a
-  // task with nothing to accept cannot be wedged yet: before ruling 98 every
+  // task with nothing to accept cannot be wedged yet: before this rule every
   // non-terminal task showed an admin "skips the remaining stages and the review
   // gate" in its GitHub card, ten seconds after creation, directly above "No
   // branch yet" and directly under "Not acceptable yet … move it through the

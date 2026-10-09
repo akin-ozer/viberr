@@ -10,7 +10,7 @@ import {
  * (docs/architecture/decisions.md: "Derivation lives ONLY in
  * app/server/interpretation/readiness-policy.server.ts").
  *
- * Rules (orchestrator ruling 44 + phase brief):
+ * Rules (ruling 44 + phase brief):
  * - The file's STORED readiness is respected unless derivation must
  *   downgrade (worsen) it:
  *     · parse diagnostics — warning → floor `input_required`,

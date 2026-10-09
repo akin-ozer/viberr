@@ -199,8 +199,8 @@ function readingWindowReset(
 /**
  * Ruling 161(c): a reading ages window by window.
  *
- * Since rulings 161(b) and 161(a) a reading lists every window it knows, and ruling
- * 161(c) aged it as one piece by its binding window's reset. So once the
+ * A reading lists every window it knows (rulings 161(a) and 161(b)), and it
+ * used to be aged as one piece by its binding window's reset. So once the
  * binding five-hour window reset, Profile and Insights read "five hour window
  * reset" and dropped the weekly figure beside it, which was still current; and
  * a lapsed window kept the figure of a window that is over. Each window now

@@ -4284,9 +4284,10 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 
   --agent: #957fff;
   --agent-dark: #c6baff;
-  /* Ruling 277 (owner, 2026-10-02): the blue-violet from before ruling 277.
-     Its plum (#3a2649) turned the Live run card and every message to an agent
-     into pink-purple slabs that read as a highlight left on the page. */
+  /* Ruling 277 (owner, 2026-10-02): the blue-violet, restored. The plum
+     (#3a2649) that had replaced it turned the Live run card and every message
+     to an agent into pink-purple slabs that read as a highlight left on the
+     page. */
   --agent-soft: #2b2452;
   --codex-soft: #2b2450;
   --claude-soft: #40261a;

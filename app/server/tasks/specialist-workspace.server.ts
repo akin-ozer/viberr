@@ -368,7 +368,7 @@ export async function cloneRepo(
     if (input.support) {
       const deliveringDir = supportCheckoutDir(workspaceRoot, name);
       const fromDelivering = existsSync(path.join(deliveringDir, ".git"));
-      // Ruling 197, fixed BEFORE any local step (ruling 197): a checkout cloned
+      // Ruling 197, fixed BEFORE any local step: a checkout cloned
       // from the delivering one never reaches GitHub, so no credential is
       // involved from the start. It used to be set after the removal below,
       // so the removal's own failure went out as `credential: absent`.

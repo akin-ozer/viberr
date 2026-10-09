@@ -1038,10 +1038,10 @@ describe("ruling 169: the controller prefix", () => {
 });
 
 /**
- * Ruling 273 (F40-61): a chain records the conversation that planned it.
+ * F40-61: a chain records the conversation that planned it.
  * Live, goal-1 was planned in a 16-message instance thread, and the project's
  * Controller page said "No conversations yet" beside it: the goal file named
- * its creator and nothing else, so nothing could link back. Ruling 273 kept
+ * its creator and nothing else, so nothing could link back. Ruling 273 keeps
  * the rule for the epic that replaced the chain: its file names the thread,
  * and its page links to it.
  */

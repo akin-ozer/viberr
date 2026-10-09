@@ -27,7 +27,7 @@ import {
 import { epicHref } from "~/shared/epic-href";
 
 /**
- * Per-user notification rows (orchestrator ruling 74): SQLite-owned,
+ * Per-user notification rows (ruling 74): SQLite-owned,
  * sorted by real timestamp DESC, task/project soft refs (cross-project
  * capable — the seed's DEP-31/BIL-9 rows point at the stub projects).
  * Read state is monotonic (no mark-unread) and idempotent.

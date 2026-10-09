@@ -588,8 +588,8 @@ A refused match is a **branch name collision**, recorded as `github.unownedPr` a
 blocking delivery. Two origins reach it and the refusal cannot tell them apart, so
 neither the note nor this page asserts one: an unowned OPEN pull request that appeared
 on the branch AFTER Viberr allocated the name (the case ruling 233 keeps the packet
-for), or a branch recorded before ruling 228 under a task key an older data root had
-already used (keys restart at 1 on a new data root, so `vib-4` on GitHub may still carry
+for), or a branch recorded under a task key an older data root had already used,
+before names took a suffix (ruling 228; keys restart at 1 on a new data root, so `vib-4` on GitHub may still carry
 an old instance's work; names allocated since take a suffix when the canonical one is
 spoken for). The remedy is the same either way. A NEW collision is a coordination event
 (U36-7): on the same transition edge as the note the reconciler sends the task watchers

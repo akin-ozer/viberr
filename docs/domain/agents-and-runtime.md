@@ -2245,7 +2245,7 @@ First of all, right after the projection opens, `bootAgentIsolation` (ruling 139
 `agent-isolation.server.ts`): with a launcher present it sets the server's umask to 0002,
 enforces the store layout (`enforceStoreLayout`: the root 0750 in the agent group, `state/`,
 `audit-exports/` and the raw run logs 0700, `runtimes/users/` 0710, `agents/`, `kb/`,
-`skills/`, `projects/` 0755, the shared directories of §7 2770, every task's pre-460
+`skills/`, `projects/` 0755, the shared directories of §7 2770, every task's pre-isolation
 workspace handed over once), hands each person's runtime root to their uid (whole when it
 is not yet theirs, else just the two vendor homes), and probes the store as the reserved
 uid below the range: refused → `on`, readable → `degraded` (a bind mount; health names

@@ -116,11 +116,11 @@ function kbsGivenToTaskRuns(
 }
 
 /**
- * F39-1/F39-7 (pass 39, ruling 210), generalized by ruling 210 (F40-53) and
- * made a write by ruling 210: the operator CORRECTS a knowledge base, in the
+ * F39-1/F39-7 (pass 39), generalized by F40-53 and made a write by
+ * ruling 210: the operator CORRECTS a knowledge base, in the
  * document itself.
  *
- * Ruling 210 gave it a proposal against the project's rulings only; ruling 210
+ * It began as a proposal against the project's rulings only; F40-53
  * widened it to every knowledge base a run on the task holds (live in pass 40
  * the stale facts were in the akin-dossier and the deploy runbook, and the
  * operator answered "I'm not changing them myself"). Ruling 210 (owner,

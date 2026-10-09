@@ -133,7 +133,7 @@ describe("createBackup", () => {
    * taken beside the store, the copy carries the WAL (so the artefact still
    * holds every committed row), the copy is gone when the backup returns, and
    * the manifest says which way the projection was read. Canary: put the
-   * pre-158 open back (`new DatabaseSync(source, { readOnly: true })` instead of
+   * older read-only open back (`new DatabaseSync(source, { readOnly: true })` instead of
    * the reader handle) and the provenance assertions fail; the snapshot
    * semantics themselves are pinned in `sqlite.server.test.ts`.
    */

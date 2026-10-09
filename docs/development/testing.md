@@ -256,7 +256,7 @@ the only gates. Jobs run again since 2026-10-01.
 | `mcp-upstream.ts` | real MCP servers for the gateway's tests (ruling 191): Streamable HTTP (`startHttpUpstream`, `startSessionfulHttpUpstream`), legacy SSE (`startSseUpstream`) and stdio (`writeStdioUpstream`, `writeSilentStdioUpstream`) upstreams that require their bearer and record the calls that arrived |
 | `mcp-oauth-server.ts` | `startOAuthMcpServer(options)`: an in-test MCP server that signs in with OAuth the way Cloudflare's does (401 with `resource_metadata`, dynamic client registration, PKCE S256, refresh and revocation; `options.holdTokenAnswer` holds the next token answer for a grant until a test's write lands), and `signInWithOAuth` / `consentAt`, which go through the real `startMcpOAuthSignIn` / `completeMcpOAuthSignIn` (ruling 192) |
 | `cloudflare-read-only-grant.ts` | `CLOUDFLARE_READ_ONLY_SCOPES` / `CLOUDFLARE_READ_ONLY_GRANT`: the 194 read scopes Cloudflare's read-only consent template granted the live sign-in (ruling 192) |
-| `kb-legacy-proposals.ts` | `withLegacyProposals(text, inputs)`: a knowledge-base document with a "Proposed corrections (not binding)" section, byte for byte the way ruling 210 filed them, for the readers that still meet one after ruling 210 |
+| `kb-legacy-proposals.ts` | `withLegacyProposals(text, inputs)`: a knowledge-base document with a "Proposed corrections (not binding)" section, byte for byte the way agents once filed them, for the readers that still meet one (ruling 210) |
 | `resource-boards.ts` | `writeBoardHolding(dataRoot, slug, resources, more?)`: one board's `project.md` whose Scout holds the given skills, knowledge bases and MCP servers beside an Operator, for the suites that ask which boards are given a resource (ruling 34) |
 | `css-rules.ts` | the one parser of `app/app.css` the stylesheet gates share (`cssRules`, `declsFor`, `requiredDecls`, `selectorParts`) |
 | `perf-*.ts`, `perf-budgets/`, `render-counter.ts`, `revalidation-harness.tsx`, `static-imports.ts`, `console-fixture.ts` | the ruling-11 perf harnesses and budget tables; [performance.md](performance.md) §4 documents them |
@@ -546,7 +546,7 @@ Playwright (`npm run e2e -- e2e/01-home-board.spec.ts`).
    (`fs.protected_hardlinks` 1, the host's setting and not the image's: an agent cannot
    link a server file it cannot write) and the server's `chmod -R -P` follows no link it
    is handed, the real skill mount leaves a run's plugin 2775 and group-readable for its
-   person to read and `rm`, a plugin written the pre-495 way is opened by the server and
+   person to read and `rm`, a plugin written the old way is opened by the server and
    removed by the person, an emptied workspace root no agent uid may unlink goes with the
    server's `rmdir`, and the server opens and removes nothing through a folder an agent
    swapped for a link, its own link or one of the server's it moved there (ruling 140), the launcher

@@ -300,7 +300,7 @@ CREATE TABLE notifications (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   -- 'controller' (ruling 273): chained-goal progress, addressed to the goal's
-  -- creator. Nothing writes one since ruling 273 retired the chains; the kind
+  -- creator. Nothing writes one since the chains were retired; the kind
   -- stays so the rows an upgraded inbox holds still read. A controller
   -- conversation reply is never a row.
   -- 'epic' (ruling 272): a task joined or left an epic the reader leads, they
@@ -407,8 +407,9 @@ CREATE TABLE user_backend_credentials (
   -- Ruling 138: when this account last became the active one (connected, or switched to). The
   -- active account is the newest value, so removing it hands runs back to the one used before.
   selected_at TEXT NOT NULL DEFAULT '',
-  -- Ruling 138: 1 = connected before ruling 138, so its vendor sign-in lives in the person's
-  -- backend home itself (`runtimes/users/<id>/claude-home`); 0 = it has a home of its own,
+  -- Ruling 138: 1 = connected before each account had a home of its own, so its vendor
+  -- sign-in lives in the person's backend home itself (`runtimes/users/<id>/claude-home`);
+  -- 0 = it has a home of its own,
   -- `<backend home>/accounts/<id>`, where its sign-in was written and stays.
   legacy_home INTEGER NOT NULL DEFAULT 0 CHECK (legacy_home IN (0, 1)),
   created_at TEXT NOT NULL,

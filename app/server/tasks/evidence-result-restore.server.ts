@@ -14,7 +14,7 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * Ruling 16, once at boot: a result the old 40-character cap cut gets back
  * the words its run reported.
  *
- * Until ruling 16 the writer kept 39 characters of an evidence row's result
+ * Before this rule the writer kept 39 characters of an evidence row's result
  * and an ellipsis, and the task file is the row's only copy, so a verdict read
  * "The proposed pay-as-you-go default list…" on every surface. The run's own
  * report still holds the sentence in its log: a Codex run's final envelope (an

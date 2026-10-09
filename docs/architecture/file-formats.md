@@ -18,7 +18,7 @@ Verified against `main` @ `7d9fbf72` (2026-09-23); the epic sections against rul
 
 Humans and agents may edit these files directly. The watcher (250 ms debounce) and the manual
 rescan reconcile them into projections. The UI always renders the REAL store-relative path
-(`projects/<slug>/tasks/<KEY>/task.md`), never the mock's `.viberr/…` (orchestrator ruling 15(a)).
+(`projects/<slug>/tasks/<KEY>/task.md`), never the mock's `.viberr/…` (ruling 15(a)).
 
 Data-root layout (the nine `DATA_ROOT_SUBDIRS` are created at boot by
 `app/server/files/file-store-root.server.ts`, the rest when first written; the full list is
@@ -784,8 +784,8 @@ Packet notes:
   agent assign continuity proposal kb_correction`); unknown types are kept (info diagnostic) and
   render as plain comments. `proposal` is a proposed knowledge-base correction (ruling 267),
   titled "Proposed ruling change" or "Proposed knowledge-base correction"; it asked a person to
-  decide, so it is neither a review verdict (`quality`, where ruling 210 filed it) nor a
-  neutral `note`. Nothing writes one since ruling 210, and task files keep theirs.
+  decide, so it is neither a review verdict (`quality`, where it was filed) nor a
+  neutral `note`. Nothing writes one now (ruling 210), and task files keep theirs.
   `kb_correction` is a correction an agent wrote into a knowledge base, titled "Knowledge base
   corrected" (or "Rulings corrected" in the project's rulings), or a person's undo of one,
   titled "Knowledge-base correction undone" (ruling 210, §8). Its text names the document and
@@ -1009,15 +1009,15 @@ re-attach them.)
 | `agents/definitions/{operator,controller}.md` | boot (`seedDefaultAgentAssets`) | frontmatter `id`, `name`, `backend` + the doctrine body. The controller's body is the instructions its settings edit (locked by default, ruling 270); a save keeps the frontmatter head. |
 | `agents/controller-requests.md` | the controller's `request_resource_grant` tool (ruling 271); Instance settings lists the open ones | frontmatter `requests:`, newest first, each `{ id, kind (skills \| kb \| mcps), name, reason, askedAt, askedByUserId, askedByLabel, status (open \| granted \| declined \| withdrawn), closedAt, closedByLabel }`, parsed per row, + a one-line header body. One open request per (`kind`, `name`). A request leaves `open` through `closeResourceRequest`: `granted` when a Controller-tab save (`saveControllerConfig`) leaves the resource in the controller's resolved grants, `declined` from the tab's Decline button. Either stamps `closedAt` and `closedByLabel` (the admin's email), and the closed row stays as history. Nothing in the app writes `withdrawn`. |
 | `skills/<name>/SKILL.md` | the org skill writers and the store browser | markdown; every writer judges the body with `assertSkillBodyWellFormed` (ruling 186). A mounted copy gets normalized frontmatter. |
-| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; an agent's correction from a task and a person's undo of one (ruling 210, §8) | any documents; agents read the live folder at run time. A document may still end in a proposals section filed before ruling 210 (§7) |
+| `kb/<dir>/**` | the KB store browser, uploads, GitHub import; an agent's correction from a task and a person's undo of one (ruling 210, §8) | any documents; agents read the live folder at run time. A document may still end in a proposals section agents once filed (§7) |
 | `state/shipped-assets.json` | boot | JSON map of store-relative asset path → SHA-256 of the bytes last shipped |
 | `audit-exports/audit-events-<YYYY-MM-DD>.jsonl` | the audit purge | one `audit_events` row per line, exactly as the table stores it, appended per purge day |
 | `runtimes/<backend>/<runId>.jsonl` | the run sink | one raw provider envelope per line; the truth `run_log_lines` projects |
 
 ## 7. A knowledge-base document's proposals section (ruling 210)
 
-Before ruling 210 an agent that proved a line of a knowledge-base document wrong filed the
-correction in that document, for a person to promote or dismiss. Nothing files one now
+An agent that proved a line of a knowledge-base document wrong once filed the correction in
+that document, for a person to promote or dismiss. Nothing files one now
 (§8 writes the correction into the settled text instead), but a document keeps the section it
 holds until its entries are closed: `app/server/org/kb-proposals.server.ts` reads them, and
 `resolveKbProposal` promotes or dismisses one. The section is the record: an entry is open

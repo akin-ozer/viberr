@@ -645,7 +645,7 @@ export function shareTreeBuiltForAgents(dir: string, deps: { gid?: number } = {}
 /**
  * Pass 40 review (R-seams-1): the project mirrors stay the server's alone. A
  * workspace cloned from a mirror shares its object files (hardlinks), and the
- * boot hand-over of a pre-460 workspace used to put them in the agent group
+ * boot hand-over of a pre-isolation workspace used to put them in the agent group
  * with group write, which reached the mirror's inode too. Every server-owned
  * file under `projects/<slug>/.repo-mirror/` loses group and other write (the
  * server, their owner, never needs them) and is back in the server's own
@@ -709,7 +709,7 @@ function setMode(dir: string, mode: number, gid?: number): void {
 }
 
 export interface LayoutReport {
-  /** Pre-460 task directories handed to the agent group this boot. */
+  /** Pre-isolation task directories handed to the agent group this boot. */
   sharedTrees: number;
   /** Entries changed inside them. */
   sharedEntries: number;

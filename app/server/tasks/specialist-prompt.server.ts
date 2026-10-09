@@ -197,7 +197,7 @@ export function buildSpecialistPromptPrefix(input: SpecialistPersonaInput): Prom
   const skillSet = readSkillBodies(injectable, input.dataRoot);
   // Index every declared knowledge base (F6, FR9; ruling 205). The KB leg was
   // decorative for specialists until F6 — no run received KB content — and from
-  // F6 to ruling 205 it was a shared character budget the docs of one KB spent
+  // F6 until the index it was a shared character budget the docs of one KB spent
   // in alphabetical order, so a long first document silently starved the rest.
   // An index costs a few hundred characters whatever the folder weighs, so
   // every declared KB now names every document it holds, and the run pulls the

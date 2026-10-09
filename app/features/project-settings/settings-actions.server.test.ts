@@ -1328,7 +1328,7 @@ describe("inviteMember", () => {
 /**
  * Pass 34 review: one prefix a project cannot take. It was `GOAL`, because the
  * dependency grammar (ruling 55) read `GOAL-1` as a goal chain's reference
- * missing its link; since ruling 55 it is `EPIC`, because an epic's id is
+ * missing its link; now it is `EPIC`, because an epic's id is
  * `epic-1` and tasks keyed EPIC-1 would read as epics wherever they are named.
  */
 describe("the reserved task prefix", () => {

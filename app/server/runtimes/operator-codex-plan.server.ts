@@ -124,7 +124,7 @@ const OPERATOR_PLAN_TOOLS = [
   // "" for none). The plan mirror of the Claude toolkit's `set_epic`.
   "set_epic",
   // F39-1/F39-7 (pass 39): the plan mirror of `propose_ruling`, generalized by
-  // ruling 210 into `propose_kb_correction` and made a write by ruling 210 as
+  // F40-53 into `propose_kb_correction` and made a write by ruling 210 as
   // `correct_knowledge_doc`. Every agent on the pass-39 instance ran on Codex,
   // so a tool that exists only on the Claude toolkit would have been
   // unreachable by the operator that actually found the false ruling. `text`

@@ -59,7 +59,7 @@ export function verdictStageFor(
     engagements: Engagement[];
     /** Ruling 90: which reviewers still owe a verdict is read from these. A
      *  caller that has no verdict history (none of the shipped ones) is treated
-     *  as "everybody owes", which is the pre-208 behaviour. */
+     *  as "everybody owes", which is the old behaviour. */
     verdicts?: ReviewVerdict[];
     workRevision?: WorkRevision | null;
   },
