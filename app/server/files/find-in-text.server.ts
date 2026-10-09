@@ -18,21 +18,36 @@ import { escapeRegExp } from "~/shared/text/regexp";
  * kept.
  */
 
-/** The longest phrase a search takes: a passage this long is read, not sought. */
+/**
+ * The longest phrase a search takes, in words and in characters: a passage
+ * longer than this is read, not sought.
+ *
+ * The word limit is what bounds a search's time, which grows with the words
+ * times the text. Measured on Node 26, one scan of 10 MB made of one letter
+ * and a space repeated, the worst text for it, by a phrase that fails on its
+ * last word: 15 ms for 2 words, 160 ms for 12, 1.8 s for 100 (which 200
+ * characters allow). One scan of 10 MB of prose by a 20-word phrase took
+ * 6 ms. The server is one process and a search holds it, so the limit is
+ * twelve.
+ */
+export const FIND_MAX_WORDS = 12;
 export const FIND_MAX_CHARS = 200;
-/** Where the count of places stops: words this common are not worth listing. */
-export const FIND_COUNT_MAX = 10_000;
 
 /** How much of the text an excerpt shows before the words and after them. */
 const HIT_BEFORE = 160;
 const HIT_AFTER = 240;
-/** How much of the head of a long line an excerpt opens with: in a record of
- *  one entry a line, that is the entry's number and date. */
-const HIT_LINE_HEAD = 120;
+/** How much of the head of its entry an excerpt opens with when the words
+ *  stand further in: in a record of dated entries, the entry's number, its
+ *  title and, for most, its date. */
+const HIT_ENTRY_HEAD = 200;
+/** How far above an indented line its entry's head is looked for, in
+ *  characters: no entry is this long, and a file indented from end to end
+ *  costs each place a bounded walk. */
+const ENTRY_HEAD_REACH = 200_000;
 /** The most places one answer lists, and the UTF-8 bytes they may take
  *  together: well inside a page (ruling 624), with room for the answer's own
- *  fields. */
-const HITS_MAX = 40;
+ *  fields. No one place comes near the second figure. */
+export const FIND_HITS_MAX = 40;
 const HITS_MAX_BYTES = 24_000;
 /** How far before the words a read starts when their line is longer than a
  *  page up to them. */
@@ -44,18 +59,19 @@ const EDGE_SLACK = 24;
 export interface TextHit {
   /** The line they start on, counted from 1. */
   line: number;
-  /** Where to read them from: the start of that line, or a little before the
-   *  words when the line runs longer than a page up to them. */
+  /** Where to read them from: the start of their entry (their own line, or
+   *  the line an indented one continues) when a page read from there reaches
+   *  them, and otherwise a little before the words. */
   offset: number;
-  /** The words where they stand, with what surrounds them. */
+  /** The words where they stand, with what surrounds them and, when they
+   *  stand far into an entry, the head of that entry before them. */
   text: string;
 }
 
 export interface TextFind {
   /** The words as they were sought: split on white space. */
   words: string[];
-  /** How many places in the whole text hold them, counted to
-   *  `FIND_COUNT_MAX`. */
+  /** How many places in the whole text hold them. */
   found: number;
   /** The places from the search's start on, in order. One that already shows
    *  in the excerpt before it is not listed again. */
@@ -101,9 +117,60 @@ function wordEnd(text: string, at: number, limit: number): number {
   return wholeChar(text, at);
 }
 
-/** Whether `at` is where a line starts, or ends. */
+/** Whether `at` is where a line starts, or ends (before its `\n` or its
+ *  `\r\n`). */
 function atLineBreak(text: string, at: number): boolean {
-  return at <= 0 || at >= text.length || text.charAt(at - 1) === "\n" || text.charAt(at) === "\n";
+  if (at <= 0 || at >= text.length || text.charAt(at - 1) === "\n") return true;
+  const next = text.charAt(at);
+  return next === "\n" || (next === "\r" && text.charAt(at + 1) === "\n");
+}
+
+/**
+ * Where the entry a line belongs to starts. A line that opens with white
+ * space continues the nearest line above it that does not: the hanging indent
+ * of a numbered entry, a list item or a quoted block wrapped over several
+ * lines. Half the rulings of this repository's own decisions file are written
+ * that way, with the number and the date on the first line or two and the
+ * rest indented under them. Any other line starts its own entry.
+ */
+function entryStartOf(text: string, lineStart: number): number {
+  if (!isSpace(text, lineStart)) return lineStart;
+  let at = lineStart;
+  while (at > 0 && lineStart - at <= ENTRY_HEAD_REACH) {
+    at = text.lastIndexOf("\n", at - 2) + 1;
+    if (startsAnEntry(text, at)) return at;
+  }
+  return lineStart;
+}
+
+/** Whether the line at `at` starts an entry: it is not empty and does not
+ *  open with white space. */
+function startsAnEntry(text: string, at: number): boolean {
+  return at < text.length && !isSpace(text, at);
+}
+
+/**
+ * Where an entry runs on to below the line its words stand on, when the
+ * lines under that one are indented: the end of the last line before the
+ * next one that starts an entry, looked for as far as `reach`. `lineEnd` is
+ * where the words' line ends. Null when the next line that is not blank
+ * starts an entry itself, or there is none.
+ */
+function entryRunsTo(text: string, lineEnd: number, reach: number): number | null {
+  let last: number | null = null;
+  let lineBreak = lineEnd;
+  while (lineBreak < text.length && lineBreak <= reach) {
+    const nextStart = lineBreak + 1;
+    const nextBreak = text.indexOf("\n", nextStart);
+    const nextEnd = nextBreak === -1 ? text.length : nextBreak;
+    if (text.slice(nextStart, nextEnd).trim() !== "") {
+      if (startsAnEntry(text, nextStart)) return last;
+      last = nextEnd;
+    }
+    lineBreak = nextEnd;
+  }
+  // Still indented where the excerpt would end: the block runs past it.
+  return last === null ? null : Math.max(last, reach);
 }
 
 /** A stretch of the text as an excerpt carries it: its line breaks kept, one
@@ -117,25 +184,29 @@ function shown(text: string): string {
 
 /**
  * Search `whole` for `words`, in order, from `from` on. Letters match in
- * either case; between two words any run of white space matches, so a phrase
- * a record wraps over two lines is found. Nothing else is loosened: no
- * pattern syntax, no stemming. The caller passes at least one word.
+ * either case, as the engine pairs them one to one (a Turkish dotted or
+ * dotless i matches only itself); between two words any run of white space
+ * matches, so a phrase a record wraps over two lines is found. Nothing else
+ * is loosened: no pattern syntax, no stemming.
  */
 export function findInText(whole: string, words: readonly string[], from = 0): TextFind {
-  // Literal words joined by `\s+`: measured on Node 26 against a 9 MB run of
-  // spaces and against 10 MB of prose, a scan takes a few milliseconds and
-  // does not overflow the engine's stack (the counted run of ruling 676 did).
+  const hits: TextHit[] = [];
+  const find: TextFind = { words: [...words], found: 0, hits };
+  // No words would be an empty pattern, which matches everywhere and moves
+  // nowhere.
+  if (words.length === 0) return find;
+  // Literal words joined by `\s+`. A run of white space of any length does
+  // not overflow the engine's stack, as the counted run of ruling 676 did:
+  // measured on a 16,000,000-character run of spaces.
   const pattern = new RegExp(words.map(escapeRegExp).join("\\s+"), "gi");
 
-  let found = 0;
-  while (found < FIND_COUNT_MAX && pattern.exec(whole)) found += 1;
+  while (pattern.exec(whole)) find.found += 1;
+  if (find.found === 0) return find;
 
   // Matches come in order, so the line count only ever moves forward.
   let line = 1;
   let lineStart = 0;
   let newline = whole.indexOf("\n");
-  const hits: TextHit[] = [];
-  const find: TextFind = { words: [...words], found, hits };
   let bytes = 0;
   let shownTo = -1;
   pattern.lastIndex = Math.min(Math.max(0, from), whole.length);
@@ -153,26 +224,37 @@ export function findInText(whole: string, words: readonly string[], from = 0): T
     // wrapped paragraph, and the excerpt takes the lines around the words.
     const lineEnd = newline === -1 ? whole.length : newline;
     const ownLine = lineEnd - lineStart > HIT_BEFORE + HIT_AFTER && end <= lineEnd;
-    let windowStart = wordStart(whole, Math.max(ownLine ? lineStart : 0, start - HIT_BEFORE), start);
-    const windowEnd = wordEnd(whole, Math.min(ownLine ? lineEnd : whole.length, end + HIT_AFTER), end);
-    // A line that starts a little before the excerpt is shown from its start;
-    // one that starts far before it lends the excerpt its head. `…` marks a
-    // line cut short.
+    // Where the words stand in an indented block, the excerpt stays inside
+    // that too: the lines before its head and after its last line are
+    // another entry's.
+    const entryStart = entryStartOf(whole, lineStart);
+    const wordsLineEnd = Math.max(end, lineEnd);
+    const runsTo = ownLine ? null : entryRunsTo(whole, wordsLineEnd, end + HIT_AFTER);
+    const inBlock = entryStart < lineStart || runsTo !== null;
+    const floor = ownLine ? lineStart : inBlock ? entryStart : 0;
+    const ceiling = ownLine ? lineEnd : inBlock ? (runsTo ?? wordsLineEnd) : whole.length;
+    let windowStart = wordStart(whole, Math.max(floor, start - HIT_BEFORE), start);
+    const windowEnd = wordEnd(whole, Math.min(ceiling, end + HIT_AFTER), end);
+    // An entry that starts a little before the excerpt is shown from its
+    // start; one that starts far before it lends the excerpt its head, so a
+    // reader sees which entry the words are in. `…` marks a line cut short.
     let lead = "";
-    if (lineStart < windowStart && windowStart - lineStart <= HIT_LINE_HEAD) windowStart = lineStart;
-    else if (lineStart < windowStart) {
-      lead = `${shown(whole.slice(lineStart, wordEnd(whole, lineStart + HIT_LINE_HEAD, lineStart)))} … `;
+    if (entryStart < windowStart && windowStart - entryStart <= HIT_ENTRY_HEAD) windowStart = entryStart;
+    else if (entryStart < windowStart) {
+      lead = `${shown(whole.slice(entryStart, wordEnd(whole, entryStart + HIT_ENTRY_HEAD, entryStart)))} … `;
     } else if (!atLineBreak(whole, windowStart)) lead = "…";
     const text =
       lead + shown(whole.slice(windowStart, windowEnd)) + (atLineBreak(whole, windowEnd) ? "" : "…");
+    // The furthest back of the entry's start and the line's start from which
+    // one page still reaches the words.
+    const readFrom = [entryStart, lineStart].find((at) => end <= pageEnd(whole, at));
     const hit: TextHit = {
       line,
-      // The line's own start, when a page read from there reaches the words.
-      offset: end <= pageEnd(whole, lineStart) ? lineStart : wholeChar(whole, Math.max(lineStart, start - READ_LEAD)),
+      offset: readFrom ?? wholeChar(whole, Math.max(lineStart, start - READ_LEAD)),
       text,
     };
     const size = Buffer.byteLength(JSON.stringify(hit, null, 1));
-    if (hits.length > 0 && (hits.length >= HITS_MAX || bytes + size > HITS_MAX_BYTES)) {
+    if (hits.length >= FIND_HITS_MAX || bytes + size > HITS_MAX_BYTES) {
       find.nextOffset = start;
       break;
     }

@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { FileActorRef } from "~/schemas/task-file.schema";
+import { FIND_HITS_MAX, FIND_MAX_WORDS } from "~/server/files/find-in-text.server";
 import { SOURCE_STAGING_PREFIX } from "~/server/files/task-sources.server";
 import { logger } from "~/server/logging/logger.server";
 import { toError } from "~/shared/errors";
@@ -207,8 +208,8 @@ export const READ_TASK_SOURCE_FIELDS = {
   id: "A source's id, as the list prints it, e.g. S7. Omit to list the task's sources.",
   taskKey: "The task the sources are on, e.g. AWSC-24. Omit for this task.",
   offset:
-    "Where to start reading, in characters: the `nextOffset` a truncated read returned, or the `offset` of a place `find` listed. With `find`, where the search starts. Omit for the start.",
-  find: "With `id`: a word or short phrase to look for in that source. Letters match in either case and a space matches any run of spaces and line breaks; nothing else is loosened. The answer is `found`, how many places in the source hold it, and `hits`, the places from `offset` on: each with its `line`, the words where they stand, and the `offset` to read it from. A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow.",
+    "Where to start reading, in characters: the `nextOffset` a truncated read returned, or the `offset` of a place `find` listed (a smaller number reads what leads up to it). With `find`, where the search starts. Omit for the start.",
+  find: `With \`id\`: a word or short phrase, up to ${FIND_MAX_WORDS} words, to look for in that source. Letters match in either case and a space matches any run of spaces and line breaks; nothing else is loosened. The answer is \`found\`, how many places in the source hold it, and \`hits\`, up to ${FIND_HITS_MAX} of them from \`offset\` on: each with its \`line\`, the words where they stand (after the head of their entry, when they stand far into one), and the \`offset\` to read it from. A place that shows in the excerpt before it is not listed again. \`nextOffset\` is where to search on from when more follow.`,
 } as const;
 
 export const TASK_SOURCE_TOOL: Tool = {

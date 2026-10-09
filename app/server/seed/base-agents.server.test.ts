@@ -245,27 +245,41 @@ describe("ruling 706: a record that grows is read to its latest entry on the sub
     const writer = said(dataRoot, "writer-expertise");
     expect(writer).toContain("**A record that grows goes stale inside itself.**");
     expect(writer).toContain("an entry says what held on its date, and a later entry may have changed it");
-    expect(writer).toContain("search the whole record for the later entries on the same subject, read them, and state what the latest one says. Cite that one.");
+    expect(writer).toContain(
+      "Before you state what holds now from one entry, search the whole record for the later entries on the same subject and read them. " +
+        "State what holds after the latest one that speaks to it, and cite that one.",
+    );
+    // The reviews of BLOG-7 read the cuts the writer had made of the record,
+    // where the later entry was not. CANARY: drop the sentence.
+    expect(writer).toContain("Keep the record whole, beside any cut of it you made for reading: the editor searches it.");
     const editor = said(dataRoot, "editor-expertise");
     expect(editor).toContain(
       "The source is a record that grows (a decisions file, a changelog, release notes, a thread) and the piece says what holds now: " +
         "the entry cited is where you start, not where you stop.",
     );
-    // What "the same subject" covers is said, so the search is of what one
-    // sentence states and not of everything the piece is about.
+    // The search is for the thing by its name, in the whole record. In
+    // rehearsal the sentence's own words led back to the entry it cited, and
+    // the later entry, whose title is about cost, came up only under the
+    // feature's name.
     expect(editor).toContain(
-      "Search the kept record for the later entries on the same subject: what that sentence states (the figure, the setting, the behaviour it names), under the words the record uses for it.",
+      "Search the whole kept record, not a cut of it, for the thing that sentence is about, under the name the record gives it, " +
+        "and go through every entry dated after the one cited: a later entry seldom repeats the earlier one's words.",
     );
-    expect(editor).toContain("`read_task_source` with `find` lists every place that holds a word or phrase, each with its line. Read the ones dated after the entry cited.");
+    // What the manual says of the tool is what the tool does: a page of
+    // places, not every one. CANARY: restore "lists every place".
+    expect(editor).toContain(
+      "`read_task_source` with `find` lists the places that hold a word or phrase, forty to a call, each with its line and the words around it; " +
+        "search on from `nextOffset` while it gives one.",
+    );
+    expect(editor).not.toContain("lists every place");
+    expect(editor).toContain("A record kept only as a cut cannot be checked this way, and that is a finding too.");
     expect(editor).toContain("A later entry that changes what the piece states is blocking: quote the piece, the entry it rests on and the later one.");
     // The line under the list told the Editor not to research the subject
     // again, which reads as a reason to stop at the line cited.
-    expect(editor).toContain("Reading a kept record past the line cited is neither: it is finding the words that hold now.");
-    // Neither sentence is about one kind of writing or one kind of record.
-    for (const manual of [writer, editor]) {
-      expect(manual).toContain("decisions file, a changelog, release notes");
-      expect(manual).not.toMatch(/\bblog\b/i);
-    }
+    // "Beyond", not "past the line": a changelog runs newest first.
+    expect(editor).toContain("Reading a kept record beyond the entry cited is neither: it is finding the words that hold now.");
+    // Neither rule is about one kind of record.
+    for (const manual of [writer, editor]) expect(manual).toContain("decisions file, a changelog, release notes");
     // A store whose copy nobody edited takes the new text at its next boot.
     // CANARY: remove either outgoing hash.
     expect(shippedCopyIsUnedited("skills/writer-expertise/SKILL.md", "92789f682bfe7b9bc16780687ce552ad79b729a9af4a768be5ef36b63935004f", {})).toBe(true);

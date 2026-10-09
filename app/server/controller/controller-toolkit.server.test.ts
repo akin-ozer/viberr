@@ -453,6 +453,13 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
         found: 1,
         hits: [{ line: 1, offset: 0, text: "<html>t3.medium $0.0416 per hour</html>" }],
       });
+      // The argument says what a search lists and leaves out, in the copy a
+      // model is handed. CANARY: declare `find` here with no description.
+      const published = await publishedSchemas((await toolkitAs(ids.viewer)).mcpServers.viberr_controller);
+      const findField = z
+        .object({ properties: z.object({ find: z.object({ description: z.string() }) }) })
+        .parse(published.get("read_task_source")).properties.find.description;
+      expect(findField).toContain("A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow.");
 
       // R15-4: the same sentence an unknown slug gets, before the task is read.
       const asks: Record<string, JsonValue>[] = [{ taskKey: "VIB-148" }, { taskKey: "VIB-148", id: "S1" }, search];

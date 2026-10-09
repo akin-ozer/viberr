@@ -1085,7 +1085,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const by = { backend: "claude", profileId: "writer", roleHint: "Writer" };
     const keep = (name: string, data: Buffer, title: string) =>
       writeTaskSource(store.slug, "VIB-9", { name, data, title, from: `https://example.com/${name}`, by, runId: "run_w" }, store.dataRoot);
-    // A record of four hundred entries, one to a line: thirteen pages of it.
+    // A record of four hundred entries, one to a line: fourteen pages of it.
     const filler = "The run finalizes first and the session is compacted after it, as the note on the task says. ";
     const entry = (n: number) =>
       n === 506
@@ -1096,7 +1096,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
             ? `372. **Compaction is left to the CLI** (2026-09-21) ${filler.repeat(11)}`
             : `${n}. **An entry on another subject** (2026-09-20) ${filler.repeat(11)}`;
     const record = Array.from({ length: 400 }, (_, i) => entry(i + 300)).join("\n");
-    expect(record.length).toBeGreaterThan(400_000);
+    expect(Math.ceil(record.length / 32_000)).toBe(14);
     keep("decisions.md", Buffer.from(record), "The decisions file");
     keep("chart.png", Buffer.from("not searched"), "A chart");
     // A page that embeds a picture: a read leaves the picture out (ruling
@@ -1179,7 +1179,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       hits: [],
       note:
         "Nothing in S1 reads this. Letters match in either case and a space matches any run of spaces and line breaks; " +
-        "nothing else is loosened. Try fewer words, or one word the passage has to use.",
+        "nothing else is loosened, so a curly quote, a dash or an accented letter matches only itself. " +
+        "Try fewer words, or one plain word the passage has to use.",
     });
     // Words in every entry: forty places, where to search on from, and no note.
     const common = await find({ id: "S1", find: "the session is compacted" });
@@ -1189,13 +1190,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(common.nextOffset).toBeGreaterThan(common.hits.at(-1)!.offset);
     expect(common.note).toBeUndefined();
     expect(Buffer.byteLength(JSON.stringify(common, null, 1))).toBeLessThan(32_000);
-    // A word too common to list: the count stops, and the answer says what
-    // to do about it. CANARY: print the capped count as if it were the total.
+    // A word in every sentence: every place is counted, a page of them is
+    // listed. CANARY: stop the count at a cap and print it as the total.
     const everywhere = await find({ id: "S1", find: "the" });
-    expect(everywhere.found).toBe(10_000);
-    expect(everywhere.note).toBe(
-      "The count stops at 10,000: these words are too common in S1 to list. Search for more of the passage.",
-    );
+    expect(everywhere.found).toBe(record.toLowerCase().split("the").length - 1);
+    expect(everywhere.found).toBeGreaterThan(10_000);
+    expect(everywhere.hits.length).toBeLessThanOrEqual(40);
+    expect(everywhere.note).toBeUndefined();
 
     // The text searched is the text a read returns: the embedded picture is
     // left out of both, and the answer says so.
@@ -1220,9 +1221,15 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(await text({ id: "S2", find: "cached part" })).toBe(
       "[noop] `chart.png` is an image: it has no text to search. Read it without `find` to look at it.",
     );
-    expect(await text({ id: "S1", find: "word ".repeat(41) })).toBe(
-      "[noop] `find` takes a word or a short phrase, up to 200 characters; this one is 204. Search for a few words of the passage, then read it from the place found.",
-    );
+    // A phrase is at most twelve words and 200 characters: a search's time
+    // grows with its words. CANARY: move either limit by one.
+    const tooLong = (words: number, chars: number) =>
+      `[noop] \`find\` takes a word or a short phrase, up to 12 words and 200 characters; this one is ${words} words and ${chars} characters. ` +
+      "Search for a few words of the passage, then read it from the place found.";
+    expect(await text({ id: "S1", find: "word ".repeat(13) })).toBe(tooLong(13, 64));
+    expect(await text({ id: "S1", find: "w".repeat(201) })).toBe(tooLong(1, 201));
+    expect(await find({ id: "S1", find: "word ".repeat(12) })).toMatchObject({ found: 0, hits: [] });
+    expect(await find({ id: "S1", find: `${"w".repeat(100)} ${"w".repeat(99)}` })).toMatchObject({ found: 0, hits: [] });
     expect(await text({ id: "S1", find: "cached part", offset: record.length + 10 })).toBe(
       `[noop] \`decisions.md\` reads as ${record.length.toLocaleString("en-US")} characters; offset ${(record.length + 10).toLocaleString("en-US")} is past its end.`,
     );
@@ -1236,8 +1243,31 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     );
     const fields = read.inputSchema["shape"] ?? {};
     expect(Object.keys(fields)).toEqual(["id", "taskKey", "offset", "find"]);
-    expect(fields.find?.description).toContain("`found`, how many places in the source hold it, and `hits`");
-    expect(fields.offset?.description).toContain("With `find`, where the search starts.");
+    expect(fields.find?.description).toBe(
+      "With `id`: a word or short phrase, up to 12 words, to look for in that source. " +
+        "Letters match in either case and a space matches any run of spaces and line breaks; nothing else is loosened. " +
+        "The answer is `found`, how many places in the source hold it, and `hits`, up to 40 of them from `offset` on: " +
+        "each with its `line`, the words where they stand (after the head of their entry, when they stand far into one), and the `offset` to read it from. " +
+        "A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow.",
+    );
+    expect(fields.offset?.description).toBe(
+      "Where to start reading, in characters: the `nextOffset` a truncated read returned, or the `offset` of a place `find` listed (a smaller number reads what leads up to it). " +
+        "With `find`, where the search starts. Omit for the start.",
+    );
+
+    // A source whose bytes a person took out of the store (the runbook's
+    // takedown) is searched no more than it is read. CANARY: answer such a
+    // search "found: 0", and a reviewer reads a removed source as one that
+    // does not hold the words.
+    const { rmSync } = await import("node:fs");
+    const nodePath = await import("node:path");
+    const { taskDir } = await import("~/server/files/file-store-root.server");
+    const { readTaskSources } = await import("~/server/files/task-sources.server");
+    const report = readTaskSources(store.slug, "VIB-9", store.dataRoot).sources.find((s) => s.id === "S3")!;
+    rmSync(nodePath.join(taskDir(store.slug, "VIB-9", store.dataRoot), "sources", report.file));
+    const gone = "[noop] S3 (`report.html`) is on VIB-9's list of sources, but its bytes are not in the store as they were kept.";
+    expect(await text({ id: "S3", find: "the needle" })).toBe(gone);
+    expect(await text({ id: "S3" })).toBe(gone);
   });
 
   it("capture_page hands a run the pictures of a page on its task in readable stretches, saves nothing on the task, and names a file that is not a page", async () => {

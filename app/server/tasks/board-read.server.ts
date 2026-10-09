@@ -13,7 +13,7 @@ import {
   listTaskAttachments,
   readTaskAttachment,
 } from "~/server/files/task-attachments.server";
-import { FIND_COUNT_MAX, FIND_MAX_CHARS, findWords, type TextHit } from "~/server/files/find-in-text.server";
+import { FIND_MAX_CHARS, FIND_MAX_WORDS, findWords, type TextHit } from "~/server/files/find-in-text.server";
 import { keptDeliveryMiss, listKeptDeliveries, type KeptDelivery } from "~/server/files/kept-deliveries.server";
 import {
   findInTaskSource,
@@ -480,9 +480,10 @@ function taskSourceSearch(
     );
   }
   const phrase = words.join(" ");
-  if (phrase.length > FIND_MAX_CHARS) {
+  if (words.length > FIND_MAX_WORDS || phrase.length > FIND_MAX_CHARS) {
     return (
-      `[noop] \`find\` takes a word or a short phrase, up to ${FIND_MAX_CHARS} characters; this one is ${phrase.length}. ` +
+      `[noop] \`find\` takes a word or a short phrase, up to ${FIND_MAX_WORDS} words and ${FIND_MAX_CHARS} characters; ` +
+      `this one is ${words.length} words and ${phrase.length} characters. ` +
       "Search for a few words of the passage, then read it from the place found."
     );
   }
@@ -494,16 +495,11 @@ function taskSourceSearch(
   if (find.found === 0) {
     notes.push(
       `Nothing in ${source.id} reads this. Letters match in either case and a space matches any run of spaces and line breaks; ` +
-        "nothing else is loosened. Try fewer words, or one word the passage has to use.",
+        "nothing else is loosened, so a curly quote, a dash or an accented letter matches only itself. " +
+        "Try fewer words, or one plain word the passage has to use.",
     );
   } else if (find.hits.length === 0) {
     notes.push(`No place at or after offset ${offset}: every one is before it. Search again without \`offset\`.`);
-  }
-  if (find.found >= FIND_COUNT_MAX) {
-    notes.push(
-      `The count stops at ${FIND_COUNT_MAX.toLocaleString("en-US")}: these words are too common in ${source.id} to list. ` +
-        "Search for more of the passage.",
-    );
   }
   if (find.truncated) {
     notes.push(`${source.id}'s text was cut where its rendering stopped, and the search covers that much of it.`);

@@ -825,8 +825,15 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       found: 1,
       hits: [{ line: 1, offset: 0, text: "db.t3.medium $0.068 per hour" }],
     });
-    const tool = tools.find((t) => t.name === "read_task_source");
-    expect(tool?.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
+    // And the operator is told so: the tool's description, and what a search
+    // lists and leaves out on the argument itself. CANARY: declare `find`
+    // here with no description.
+    const tool = tools.find((t) => t.name === "read_task_source")!;
+    expect(tool.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
+    expect(z.toJSONSchema(tool.inputSchema).properties?.find).toHaveProperty(
+      "description",
+      expect.stringContaining("A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow."),
+    );
   });
 
   it("ruling 569: a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pageEnd } from "~/server/runtimes/read-page-budget.server";
-import { FIND_COUNT_MAX, findInText, findWords } from "./find-in-text.server";
+import { FIND_HITS_MAX, findInText, findWords } from "./find-in-text.server";
 
 /**
  * Ruling 706: the search behind `read_task_source`'s `find`. The cases are
@@ -41,9 +41,15 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     const [hit] = found.hits;
     expect(hit!.line).toBe(2);
     expect(hit!.offset).toBe(RECORD.indexOf("536."));
-    // The head of a long line, then the stretch around the words. Canary:
-    // drop the head and the excerpt no longer says which entry it is in.
-    expect(hit!.text.startsWith("536. **The completion compaction adds only its own cost** (2026-09-28) The run finalizes first and the session is … ")).toBe(true);
+    // The head of the entry, cut between words within 200 characters, then
+    // the stretch around the words. Canary: drop the head and the excerpt no
+    // longer says which entry it is in.
+    const [head, around] = hit!.text.split(" … ");
+    expect(head!.startsWith("536. **The completion compaction adds only its own cost** (2026-09-28) The run finalizes first")).toBe(true);
+    expect(head!.length).toBeGreaterThan(170);
+    expect(head!.length).toBeLessThanOrEqual(200);
+    expect(RECORD).toContain(`${head} `);
+    expect(around).toContain("with the cached part named inside the input.");
     expect(hit!.text).toContain("The console line states that share, with the cached part named inside the input.");
     expect(hit!.text.endsWith("…")).toBe(true);
     // A read from the place found holds the words.
@@ -132,6 +138,111 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     expect(both.hits[0]!.line).toBe(3);
   });
 
+  it("an indented line continues the entry above it: the excerpt opens with that entry's head and the read starts there", () => {
+    // Half the rulings of this repository's decisions file are written this
+    // way: the number and the date on the first lines, the rest under a
+    // hanging indent, a blank line between entries.
+    const body = (words: string) => Array.from({ length: 30 }, (_, i) => `    ${words} line ${i + 2} of the entry, wrapped at a hundred columns or so.`).join("\n");
+    const older =
+      `295. **Saving the same words is a noop (owner,\n    2026-09-15).** It says so.\n${body("earlier")}\n\n` +
+      `296. **An argument Viberr does not know is a refusal, not a silent drop (owner,\n    2026-09-16, pass 37).** The SDK builds a plain object.\n${body("the call is refused")}\n\n` +
+      `297. **A server tells the model what it holds (owner, 2026-09-16).**\n${body("later")}\n`;
+    const deep = older.indexOf("the call is refused line 21");
+    const [hit] = find(older, "the call is refused line 21").hits;
+    // Canary: lend no head to a wrapped entry, and the excerpt is three lines
+    // of an entry with no number and no date; answer the line's own start and
+    // a read from there opens below both.
+    expect(hit!.text.startsWith("296. **An argument Viberr does not know is a refusal, not a silent drop (owner,\n2026-09-16, pass 37).** The SDK builds a plain object.")).toBe(true);
+    expect(hit!.text).toContain(" … ");
+    expect(hit!.text).toContain("the call is refused line 21 of the entry");
+    // Nothing of the entries on either side. Canary: let the excerpt run
+    // past the block's ends, and words on an entry's last line are shown
+    // with the number and title of the next entry after them.
+    expect(hit!.text).not.toContain("295.");
+    const [last] = find(older, "the call is refused line 31").hits;
+    expect(last!.text.endsWith("the call is refused line 31 of the entry, wrapped at a hundred columns or so.")).toBe(true);
+    expect(last!.text).not.toContain("297.");
+    const [first] = find(older, "An argument Viberr").hits;
+    expect(first!.text.startsWith("296. **An argument Viberr does not know")).toBe(true);
+    expect(first!.text).not.toContain("earlier");
+    expect(hit!.offset).toBe(older.indexOf("296. "));
+    expect(hit!.line).toBe(older.slice(0, deep).split("\n").length);
+    // Words on the entry's own first lines are shown from its start, once.
+    const [top] = find(older, "The SDK builds").hits;
+    expect(top!.text.startsWith("296. **An argument Viberr does not know")).toBe(true);
+    expect(top!.text).not.toContain(" … ");
+    expect(top!.offset).toBe(older.indexOf("296. "));
+    // An entry longer than a page up to the words: the read starts at the
+    // words' own line. Canary: answer the entry's start whatever lies between.
+    const long = `9. **A long entry (2026-01-01).**\n${Array.from({ length: 700 }, (_, i) => `    filler line ${i} of the long entry, wrapped.`).join("\n")}\n    the needle is here\n`;
+    const [far] = find(long, "the needle is here").hits;
+    expect(far!.offset).toBe(long.indexOf("    the needle is here"));
+    expect(far!.text.startsWith("9. **A long entry (2026-01-01).**")).toBe(true);
+    // A blank line inside an entry is not its head: a second paragraph under
+    // the same hanging indent still belongs to the line above the first.
+    // Canary: stop the walk up at the first line that does not open with a
+    // space, blank ones included.
+    const twoParagraphs = `5. **An entry of two paragraphs (2026-01-01).** Its first runs on\n    under a hanging indent.\n\n    Its second paragraph holds the needle.\n\n6. **The next entry.**\n`;
+    const [second] = find(twoParagraphs, "holds the needle").hits;
+    expect(second!.offset).toBe(0);
+    expect(second!.text).toBe("5. **An entry of two paragraphs (2026-01-01).** Its first runs on\nunder a hanging indent.\nIts second paragraph holds the needle.");
+    // The head is looked for 200,000 characters up and no further: no entry
+    // is that long, and a file indented from end to end would cost each
+    // place a walk to its top. Canary: walk up without a bound, and this
+    // place is lent the first line of a quarter-megabyte block.
+    const endless = `0. **The only unindented line (2026-01-01).**\n${Array.from({ length: 5_000 }, (_, i) => `    indented line ${i} of a file indented from end to end.`).join("\n")}\n    the needle is here\n`;
+    expect(endless.length).toBeGreaterThan(250_000);
+    const [lost] = find(endless, "the needle is here").hits;
+    expect(lost!.text).not.toContain("The only unindented line");
+    expect(lost!.offset).toBe(endless.indexOf("    the needle is here"));
+    // Paragraphs wrapped with no indent are no block: the last line of one
+    // is shown with the lines above it. Canary: take a blank line under the
+    // words for an indented line, and the excerpt is cut to its own line.
+    const paragraphs = "one line of the first paragraph\nand its second line\nand its last line here\n\nthe second paragraph\n";
+    const [tail] = find(paragraphs, "last line here").hits;
+    expect(tail!.text).toBe("one line of the first paragraph\nand its second line\nand its last line here\nthe second paragraph");
+    // A line that is not indented starts its own entry: nothing is lent from
+    // the entry above. Canary: walk up from every short line.
+    const flat = "- 2.4.0: the cache is on by default\n".repeat(40) + "- 2.3.0: the cache can be turned off\n";
+    const [own] = find(flat, "turned off").hits;
+    expect(own!.offset).toBe(flat.indexOf("- 2.3.0"));
+    expect(own!.text).not.toContain(" … ");
+  });
+
+  it("a phrase that runs off the end of a long line is shown whole, and a line under 400 characters is a wrapped one", () => {
+    // Canary: keep the excerpt inside the line the words start on, and a
+    // phrase that wraps onto the next line is cut before its last word.
+    const longLine = `41. **An entry** ${"early ".repeat(120)}the last words of it`;
+    const wrapped = `${longLine}\nrun on to the next line, which is short.\n`;
+    const [across] = find(wrapped, "the last words of it run on").hits;
+    expect(across!.line).toBe(1);
+    expect(across!.text).toContain("the last words of it\nrun on to the next line, which is short.");
+    // A line of 300 characters is a wrapped paragraph's: its excerpt carries
+    // the lines around the words. Canary: take any line over 100 characters
+    // for an entry of its own.
+    const para = [`first ${"alpha ".repeat(49)}`, `second ${"beta ".repeat(58)}`, `third ${"gamma ".repeat(49)}`].map((l) => l.trim());
+    expect(para.map((l) => l.length > 250 && l.length < 400)).toEqual([true, true, true]);
+    const [mid] = find(para.join("\n"), "second beta").hits;
+    expect(mid!.line).toBe(2);
+    expect(mid!.text).toContain("alpha\nsecond beta");
+  });
+
+  it("marks no cut where a line ends, whatever ends it, and never answers an offset inside a surrogate pair", () => {
+    // Canary: know only `\n`, and a line of a Windows file shown to its end
+    // is marked as cut.
+    const windows = `${"a ".repeat(50)}needle ${"b ".repeat(120).trim()}\r\nnext line\r\n`;
+    const [crlf] = find(windows, "needle").hits;
+    expect(crlf!.text.endsWith(" b")).toBe(true);
+    // A line of emoji longer than a page: the read starts 2,000 characters
+    // before the words, which here is the second half of a pair. Canary:
+    // answer that index as it is.
+    const pairs = `x${"😀".repeat(20_000)}yneedle`;
+    const [emoji] = find(pairs, "needle").hits;
+    expect(emoji!.offset).toBe(pairs.indexOf("needle") - 2_001);
+    expect(pairs.slice(emoji!.offset).isWellFormed()).toBe(true);
+    expect(pairs.slice(emoji!.offset, pageEnd(pairs, emoji!.offset))).toContain("needle");
+  });
+
   it("starts and ends an excerpt between words, never inside a surrogate pair", () => {
     // Canary: cut at the character count and the excerpt opens on half a
     // word, or on half of an emoji that then prints as a broken character.
@@ -176,15 +287,22 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     expect(find(many, "the marker", many.indexOf("\n90. ")).hits[0]!.line).toBe(90);
   });
 
-  it("keeps an answer inside a page whatever the text's bytes, and always lists a place", () => {
-    // Three-byte characters: forty excerpts of them would be far over a page.
+  it("keeps the places it lists inside 24,000 bytes whatever the text's bytes", () => {
+    // Three-byte characters: an excerpt of them weighs about 775 bytes, so
+    // thirty fit, and forty would be 31,000: a whole page (ruling 624) before
+    // the answer's own fields are added.
     const wide = Array.from({ length: 60 }, (_, i) => `${i + 1}. 記録 ${"東京都".repeat(200)}`).join("\n");
+    const weigh = (hit: { line: number; offset: number; text: string }) => Buffer.byteLength(JSON.stringify(hit, null, 1));
     const listed = find(wide, "記録");
-    // Canary: cap the list by count alone.
-    expect(listed.hits.length).toBeGreaterThan(0);
-    expect(listed.hits.length).toBeLessThan(40);
-    expect(Buffer.byteLength(JSON.stringify(listed.hits, null, 1))).toBeLessThan(32_000);
+    const bytes = listed.hits.reduce((sum, hit) => sum + weigh(hit), 0);
+    // Canary: cap the list by count alone, or raise the cap to 30,000.
+    expect(listed.hits.length).toBeLessThan(FIND_HITS_MAX);
+    expect(bytes).toBeLessThanOrEqual(24_000);
     expect(listed.nextOffset).toBe(wide.indexOf("記録", wide.indexOf(`\n${listed.hits.length + 1}. `)));
+    // The place it stopped before is the one that would have passed the cap.
+    const [next] = find(wide, "記録", listed.nextOffset).hits;
+    expect(next!.line).toBe(listed.hits.length + 1);
+    expect(bytes + weigh(next!)).toBeGreaterThan(24_000);
   });
 
   it("reads a place from a little before it when its line is longer than a page up to there", () => {
@@ -197,12 +315,17 @@ describe("ruling 706: the places in a text that hold a phrase", () => {
     expect(oneLine.slice(hit!.offset, pageEnd(oneLine, hit!.offset))).toContain(" needle ");
   });
 
-  it("stops counting where words are too common to list", () => {
-    // Canary: count to the end, and a one-letter search of a ten-megabyte
-    // source holds the server for as long as it takes.
-    const common = "a ".repeat(FIND_COUNT_MAX + 500);
+  it("counts every place, however common the words, and answers nothing for no words", () => {
+    // Canary: stop the count at some cap and a reader is told a word stands
+    // in 10,000 places of a text that holds it 12,000 times.
+    const common = "a ".repeat(12_000);
     const counted = find(common, "a");
-    expect(counted.found).toBe(FIND_COUNT_MAX);
+    expect(counted.found).toBe(12_000);
     expect(counted.hits.length).toBeGreaterThan(0);
+    expect(counted.hits.length).toBeLessThanOrEqual(FIND_HITS_MAX);
+    // No words is an empty pattern, which matches at every index and never
+    // moves. Canary: drop the early return and this call does not come back.
+    expect(findInText("abc", [])).toEqual({ words: [], found: 0, hits: [] });
+    expect(findInText("", ["abc"])).toEqual({ words: ["abc"], found: 0, hits: [] });
   });
 });

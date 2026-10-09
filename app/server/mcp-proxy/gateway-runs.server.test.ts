@@ -617,6 +617,9 @@ describe("ruling 690: a Codex run keeps and reads a task's sources through the b
     const listed = (await keeper.client.listTools()).tools.find((tool) => tool.name === "read_task_source");
     expect(listed?.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
     expect(Object.keys(listed?.inputSchema.properties ?? {})).toEqual(["id", "taskKey", "offset", "find"]);
+    expect(z.object({ find: z.object({ description: z.string() }) }).parse(listed?.inputSchema.properties).find.description).toContain(
+      "A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow.",
+    );
     // An argument the tool does not declare is refused, as on Claude.
     const undeclared = await keeper.client.callTool({
       name: "keep_source",
