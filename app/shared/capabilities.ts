@@ -75,7 +75,7 @@ export const UNIFIED_CAP_CATALOG: readonly UnifiedCapabilityDef[] = [
   // (updateBranchGate) — the capability postdates every deployment.
   cap("update-task-branch", "Bring the task branch up to date", ["operator"], "Permissions"),
   // Agent repository/execution toggles (bind via the Claude tool denylist; on
-  // Codex they are advisory since ruling 183 removed the OS sandbox — the
+  // Codex they are advisory (ruling 183), with no OS sandbox — the
   // prompt and the server-owned delivery gate carry them, disclosed by
   // codexRepoWriteAdvisory).
   // Ruling 188: withholding the headline grant also denies the org MCP tools an

@@ -324,7 +324,7 @@ describe("shipped-asset refresh (B-OP1)", () => {
     // call it" again after the packet sentence.
     const { shippedCopyIsUnedited } = await import("./default-assets.server");
     expect(shippedCopyIsUnedited(OPERATOR_REL, "ee212fda34ef04e0447ed1edd1a2f50b6c1cd92cde5ac498956cea61dbcfb6d8", {})).toBe(true);
-    // The text as ruling 116 first shipped it, before its review named the tool.
+    // The text as first shipped, before a review named the tool.
     expect(shippedCopyIsUnedited(OPERATOR_REL, "43a9a0b59ee0c6d6e58cbc5c6807467005b5b343f7e5f7909d622a944d23d5e4", {})).toBe(true);
     const doctrine = shipped();
     expect(doctrine).toContain(
@@ -1003,7 +1003,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(guide).not.toContain("still needs a repository");
     expect(results).toContain("The\n  board needs no repository (ruling 199)");
     expect(results).toContain("**The result is summarized before it is accepted** (ruling 103).");
-    expect(handbook).toContain("a board that delivers results needs none (ruling 224)");
+    expect(handbook).toContain("a board that delivers results needs none\n  (ruling 224)");
     expect(operator).toContain("or that the project has no repository at all (ruling 199)");
     expect(operator).toContain("what stays on the task as its result once they do");
     for (const field of ["`considerations`", "`assumptions`", "`gaps`", "`completionPacket.resultFileCandidates`"]) {
@@ -1048,7 +1048,7 @@ describe("the seeded-prompt sweep: the shipped prompts say what the code does", 
     expect(operator).toContain("and when opening decision packets is not granted to you. Without it, deliver what can be delivered as files");
     expect(skill).toContain("- `ask_for_repository` asks a person to connect a repository to a board that has none (ruling 107)");
     expect(definition).toContain("A board that builds software can start without one too (ruling 224)");
-    expect(handbook).toContain("which it may connect later (ruling 224)");
+    expect(handbook).toContain("which it may connect later; a board that delivers results needs none");
     expect(markdownSection(guide, "Bringing up a new project")).toContain(
       "**A software board can start without its repository** (ruling 224).",
     );

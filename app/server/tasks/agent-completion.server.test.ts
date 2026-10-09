@@ -328,7 +328,7 @@ async function finishedRunWith(
   };
   // Ruling 153: what the run was dispatched on, when the case says.
   if (reviewSubject !== undefined) input.reviewSubject = reviewSubject;
-  // Ruling 66: dispatched with its verdict channel withheld, when the case says.
+  // Ruling 87: dispatched with its verdict channel withheld, when the case says.
   if (verdictWithheld) input.verdictWithheld = true;
   const started = await startRun(store.db, input);
   await pollUntil(() => {
@@ -684,7 +684,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(claimed).not.toContain(uncitedLog);
   });
 
-  it("ruling 193: a snapshot cited only in a file the run saved is kept", async () => {
+  it("ruling 78: a snapshot cited only in a file the run saved is kept", async () => {
     // Live on AWSC-1 the Workflow Researcher's findings file named eleven
     // browser snapshots and its report named none: the prune deleted all
     // eleven, and the Estimate Judge rejected the findings for citing files
@@ -710,7 +710,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(existsSync(findings)).toBe(true);
   });
 
-  it("ruling 76: a file a person attaches while a deliverer runs stays theirs, and delivers nothing", async () => {
+  it("ruling 77: a file a person attaches while a deliverer runs stays theirs, and delivers nothing", async () => {
     // A run's files are found by mtime, so a person's upload during the run
     // is in its window too. Claimed, it named the deliverer as its author and
     // stamped `deliveredAt` from the person's own input: a files-only task
@@ -1803,7 +1803,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     deployOperator();
     // The owner has BOTH backends, and the other one is out of quota — the
     // exact live shape. `describeRunFailure` no longer composes the retry
-    // (ruling 156's first half), so force the refusal directly: an option set
+    // (ruling 156(b)), so force the refusal directly: an option set
     // whose `resolve_remote_collision` has no collision to clear is refused by
     // an authoring guard the same way.
     writeReviewTask({ validation: "changed" });
@@ -2051,7 +2051,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
   /**
    * Ruling 119 (pass 40, F40-68): a reply that MOVED the task's head is a
-   * boundary for the depth count, like an approve (ruling 119).
+   * boundary for the depth count, like an approve.
    *
    * Live on WEB-8 the Site Engineer reported its rework done: the new head
    * 178dc22 merged main in and fixed every reviewer finding, and Viberr's gates
@@ -2577,8 +2577,8 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     writeReviewTask();
     /** Ruling 92: the deliverer took a turn. A run row is the whole signal,
      *  whatever its state, because a rework that was dispatched and crashed
-     *  still means a round was fought. Ruling 92 carves out one state: a run
-     *  the PROVIDER refused fought nothing (see the deadlock block below). */
+     *  still means a round was fought. One state is carved out: a run the
+     *  PROVIDER refused fought nothing (see the deadlock block below). */
     let delivererRuns = 0;
     const delivererRan = (): void => {
       delivererRuns += 1;
@@ -2911,10 +2911,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
        * open — which it must, since a task holds one packet. Nothing came back.
        *
        * So the escalation was attempted EXACTLY ONCE, and any unrelated packet
-       * standing at that instant killed it for good. Ruling 156 established
-       * what those packets usually are: a quota or credential failure, raised
-       * in bursts across several tasks at once and nothing to do with the
-       * review.
+       * standing at that instant killed it for good. Those packets are usually
+       * a quota or credential failure (ruling 156), raised in bursts across
+       * several tasks at once and nothing to do with the review.
        *
        * Measured: five tasks on the shopify-clone board reached a second
        * consecutive request_changes and TWO never got the packet. SHOP-18's
@@ -3210,7 +3209,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       );
       expect(engaged?.verdictCapable).toBe(true);
 
-      // Ruling 66: and the RUN remembers it, because the prompt is not the
+      // Ruling 87: and the RUN remembers it, because the prompt is not the
       // only thing that has to honour the withholding — the completion path
       // reads this row to tell an answer from a silence, long after the
       // dispatch is gone. CANARY: stop persisting `verdictWithheld` at run
@@ -3222,10 +3221,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
-     * Ruling 66. Ruling 87 withheld the verdict TOOL on the deadlock question
-     * and closed nothing, because the prose fallback manufactures a verdict
+     * Ruling 87. Withholding the verdict TOOL on the deadlock question closes
+     * nothing by itself, because the prose fallback manufactures a verdict
      * from the reply regardless: `verdictAuthorized` reads the ENGAGEMENT
-     * snapshot, which 313 deliberately left intact.
+     * snapshot, which stays intact on purpose.
      *
      * Live on SHOP-68 the reviewer said so in words and viberr wrote the
      * verdict under its name 70ms later: "No verdict recorded — the directive
@@ -3242,11 +3241,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      */
     /**
      * Ruling 88. The stored `verdicts[].reason` is a 2,000-character clip whose
-     * own marker says "Its full report is on this task's timeline, whole"
-     * (ruling 262) — and compaction folded that comment away, because the two
-     * fields protecting a comment (`evidence`, `attachments`) are moved OFF the
-     * reply precisely when it carries a verdict. The title is what compaction
-     * reads instead.
+     * own marker says "Its full report is on this task's timeline, whole" — and
+     * compaction folded that comment away, because the two fields protecting a
+     * comment (`evidence`, `attachments`) are moved OFF the reply precisely
+     * when it carries a verdict. The title is what compaction reads instead.
      */
     it("ruling 88: the verdict's reply comment is TITLED, so compaction can spare it", async () => {
       writeReviewTask();
@@ -3262,7 +3260,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(reply?.evidence ?? null).toBeNull();
     });
 
-    it("ruling 66: a run whose verdict channel was withheld gets no prose verdict", async () => {
+    it("ruling 87: a run whose verdict channel was withheld gets no prose verdict", async () => {
       writeReviewTask();
       await review(blocks(1));
       const genuine = taskFile().parsed.frontmatter.verdicts.at(-1);
@@ -3289,7 +3287,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       rework();
       const quiet = await finishedRunWith(answer, undefined, { verdictWithheld: true });
       // The deadlock question's run: dispatched with its verdict channel taken
-      // away (ruling 87), which ruling 66 makes the completion path honour.
+      // away, which the completion path honours (ruling 87).
       await complete(quiet, reviewerInput("reviewer"));
 
       /**
@@ -3323,7 +3321,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
      * opposite: "anything you type below is recorded on the task's contract and
      * every later run reads it".
      *
-     * Ruling 262 permitted a cut on a VERDICT because "the full text is never
+     * Ruling 88 permitted a cut on a VERDICT because "the full text is never
      * lost — the agent's own report is on the same timeline, untruncated". A
      * person's typed note has no second copy, so the identical cut is loss.
      */
@@ -3562,10 +3560,10 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
     it("ruling 52: no packet on a task that CLOSED while the reviewer was running", async () => {
       // A reviewer run that finishes after its task was accepted still records
-      // its verdict — evidence is evidence, and ruling 52 says so — but no
-      // coordination follows it. An escalation asking a person to decide
-      // something about a shipped task is exactly the packet ruling 52
-      // refused, and `operatorOpenPacket` would have refused it by name.
+      // its verdict — evidence is evidence — but no coordination follows it
+      // (ruling 52). An escalation asking a person to decide something about a
+      // shipped task is exactly the packet a closed task refuses, and
+      // `operatorOpenPacket` would have refused it by name.
       // CANARY: drop the `taskClosure(...).closed` clause from the escalation
       // guard and this opens a decision packet on a Done task.
       writeReviewTask();
@@ -4587,7 +4585,7 @@ describe("superseded stuck-packet withdrawal (owner ruling 2026-07-18)", () => {
  * Ruling 65: a refusal in a window the owner already decided. Live on AWSC-52
  * at 13:20 a Judge run in flight when the Codex window closed was refused two
  * minutes after Arda had chosen to wait on AWSC-51, and its packet asked the
- * same question again: ruling 65 answers only the siblings open at the time.
+ * same question again: fan-out answers only the siblings open at the time.
  */
 describe("a refusal in a window the owner already decided (ruling 65)", () => {
   const resetsAt = new Date(Date.now() + 2 * 3_600_000).toISOString();

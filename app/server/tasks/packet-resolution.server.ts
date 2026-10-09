@@ -120,13 +120,13 @@ import { answerAskingAgent, answerNamesAnotherActor } from "./task-comments.serv
  * Ruling 67 — does this `create_task` option also make the DECIDING task wait
  * on what it creates?
  *
- * Ruling 67 built the option and wrote, in the resolver and again in the note
+ * The option first shipped saying, in the resolver and again in the note
  * it leaves, that *"`<KEY>` is unchanged; the new task carries the work"* — with
  * a comment beside it calling the mutation "a deliberate NO-OP… this option
  * says something about work that is NOT this task". Both were true when they
  * were written.
  *
- * Ruling 67 then added `newTask.blocks`, the reverse edge: the EXISTING tasks
+ * Then came `newTask.blocks`, the reverse edge: the EXISTING tasks
  * that must wait on the new one. Nothing excludes the deciding task from that
  * list, and it is the most natural entry on it — a task is usually created
  * because the work in front of you cannot proceed without it. When it is
@@ -300,7 +300,7 @@ export async function resolvePacket(
    * `project.task.tsx` used to slice it to 2,000 characters in the route,
    * before this function ever saw it — no `maxLength` on the textarea, no
    * counter, no marker on the record and no error, and nothing anywhere holds
-   * the discarded tail. Ruling 262 allowed a cut on a VERDICT because "the full
+   * the discarded tail. Ruling 88 allowed a cut on a VERDICT because "the full
    * text is never lost — the agent's own report is on the same timeline,
    * untruncated". A person's typed note has no second copy, so the same cut is
    * actual loss.
@@ -789,8 +789,8 @@ export async function resolvePacket(
       break;
     }
     case "retry_other_backend": {
-      // Ruling 66 (pass 38, F38-8): ruling 66's rule at this arm too. The
-      // retry is an agent dispatch, which ruling 56 refuses on a held task;
+      // Ruling 66 (F38-8) holds at this arm too. The retry is an agent
+      // dispatch, which ruling 56 refuses on a held task;
       // reading the hold only in the start below meant the decision was
       // written, the packet cleared, and THEN "The retry could not start" —
       // the person's choice bought nothing and there was no packet to choose
@@ -1156,7 +1156,7 @@ export async function resolvePacket(
       // this write claiming a reach it does not have.
       //
       // Ruling 67: that is not the same as "this task is unchanged". When
-      // `newTask.blocks` names this task (ruling 67's reverse edge), the
+      // `newTask.blocks` names this task (the reverse edge), the
       // resolution below writes the new key into its `blockedBy` through
       // `setTaskDependencies` — the task's own editor — which is where a wait
       // belongs. What this arm must not do is pretend the wait is not coming;
@@ -1509,11 +1509,12 @@ export async function resolvePacket(
   // another actor's tools. Nothing is lost by leaving it out: the directive is
   // written verbatim to the timeline, and it reaches the operator in its own
   // `note` field on the re-queue, which is the channel it was actually for.
-  // Ruling 64: the list is module-scope and exported now (ruling 64).
+  // The recovery-choice list is module-scope and exported
+  // (`PROCESS_ONLY_OPTION_KINDS`).
 
   // Ruling 64 excludes "a resolution that ENDS the task", and `acceptsInto`
   // catches only ONE of the two doors that do: `force_accept` closes the task
-  // through `forceAcceptCompletion` and never assigns it (ruling 64). A
+  // through `forceAcceptCompletion` and never assigns it. A
   // contract amendment on a task being closed in the same breath binds no
   // future run's work, which is the whole test the exclusion applies.
   const endsTheTask = acceptsInto !== null || option.kind === "force_accept";
@@ -2748,7 +2749,7 @@ export async function resolvePacket(
 
   // ------------------------------------------------- ruling 65: the fan-out
   //
-  // `packet.cause` (ruling 63) names what actually failed when the failure
+  // `packet.cause` (ruling 65) names what actually failed when the failure
   // belongs to an ACCOUNT rather than to this task: a quota that runs out, a
   // credential that is revoked, a backend that goes away. It takes out every
   // task that account is paying for at the same instant, and each one raised
@@ -2763,8 +2764,8 @@ export async function resolvePacket(
   // answer is named on this task's timeline with the reason, because the person
   // who just cleared four packets with one click is the one who has to know
   // that the fifth is still open.
-  // Ruling 94: an escalation ruling 94 had to skip — because THIS packet was
-  // the one already open — is raised now that it is answered. Before the
+  // Ruling 94: an escalation skipped because THIS packet was the one already
+  // open is raised now that it is answered. Before the
   // fan-out, so a sibling resolution meets the same state this one leaves.
   if (clearPacket) {
     await retryReviewDeadlockEscalation(db, ctx, input.projectSlug, input.taskKey);

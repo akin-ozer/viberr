@@ -163,8 +163,8 @@ describe("runInputRows (P19-G11)", () => {
   });
 
   /**
-   * Ruling 167 (pass 37, F37-182): two of these rows describe an ABSENCE, and
-   * ruling 167 gave that absence two new meanings the same day.
+   * Ruling 167 (F37-182): two of these rows describe an ABSENCE, which for a
+   * coordinator is by design.
    *
    * The operator and the controller both legitimately record `cwd: null` and
    * `anchor: null` — neither has a checkout, and neither is handed a canonical

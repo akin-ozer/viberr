@@ -354,7 +354,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   before `startRun` refuses it, where serially the check refuses it first ("Queued
   question not put"). `releaseDependents` and the dependency runner's per-project tick
   (`releaseDueDependents`): each release awaits its operator's start. The tick is ruling
-  55's once-a-minute backstop, never overlapped (`running`); the task-write hooks
+  57's once-a-minute backstop, never overlapped (`running`); the task-write hooks
   (`maybeReleaseDependents`) are the live release path, and `releaseTask` re-checks the
   wait under the lock, so a late sweep loses nothing. One project's slow start (a first
   clone can take minutes) holds later projects' backstop releases for as long as it
@@ -482,7 +482,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
   (lookups into ruling 44's one vocabulary table, `READINESS_BY_VALUE` /
   `VALIDATION_BY_VALUE`, that the pills render from), app/ui/markdown.tsx
   `sameMarkdownProps` (`Markdown`'s own `memo` comparator, measured by
-  `markdown.perf.test.ts`), and controller/controller-examples.tsx (rulings 321 and 256
+  `markdown.perf.test.ts`), and controller/controller-examples.tsx (rulings 319 and 256
   keep the examples and `ControllerExampleList` in one module). Every other flagged export
   lives in a sibling `.ts` module (the `initials.ts` / `avatar.tsx` pattern). Verify each
   still reads the private table or is still that `memo`'s comparator.
@@ -490,7 +490,7 @@ scan run from inside an agent worktree under `.claude/` sees no files at all.
 - `react-doctor/rerender-memo-with-default-value` — `= []`/`= {}` prop defaults, each for
   its own reason. task-detail-page.tsx: the one route always supplies a never-`undefined`
   loader field, so the default fires only in bare test renders, and every memoised
-  consumer stabilises the value by content first (`useStableValue`, ruling 21) because
+  consumer stabilises the value by content first (`useStableValue`, ruling 11) because
   each revalidation decodes new objects anyway; verify the route's prop and that consumers
   stabilise before memo/deps. board-page.tsx `epics`: the one route passes
   `loaderData.epics` (`listEpicChips`, a parsed array, never `undefined`), so the default
@@ -603,8 +603,8 @@ design-system or cross-file decision — revisit deliberately, not per lint run.
   each.
 
 - `react-doctor/no-high-complexity-react-function` / `no-giant-component` — none left.
-  Ruling 13(b) piloted the split on TaskDetailPage and ruling 13(b) rolled it out to
-  every other surface these two rules flagged (85 findings in 42 files): each surface's
+  Ruling 13(b)'s split covers TaskDetailPage and every other surface these two rules
+  flagged (85 findings in 42 files): each surface's
   posts became hooks its component still calls in the order its fetchers registered
   (`*-actions`), what it reads off its props became pure functions (`*-derive.ts`), and
   its regions became hook-free components in sibling modules, with the server and

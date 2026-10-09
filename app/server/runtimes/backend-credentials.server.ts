@@ -118,8 +118,8 @@ export interface BackendCredentialRow {
   label: string | null;
   /** Ruling 138: when this account last became the active one. */
   selectedAt: string;
-  /** Ruling 138: connected before the ruling, so its sign-in lives in the
-   *  backend home itself rather than in a home of its own. */
+  /** Ruling 138(b): a legacy row, whose sign-in lives in the backend home
+   *  itself rather than in a home of its own. */
   legacyHome: boolean;
   createdAt: string;
   updatedAt: string;
@@ -573,16 +573,16 @@ async function retireAccount(
 }
 
 /**
- * Ruling 160(b), carried into ruling 160: the account that bills the next run on
- * this backend is about to change — a connect, a switch, the active account's
- * removal — so the refusals and the reading Viberr observed on the one that
- * billed until now go. A spent window or a rejected credential is evidence
- * about the account that was billed, and the next one is not that account;
- * left standing, the Profile card kept "usage window spent · reopens 21:30"
- * over a freshly connected account whose runs were going through, and the
- * dispatch hold parked the new account until the old one's instant. Switching
- * BACK to a spent account retires it too: one refused run re-records the
- * window, which is cheaper than a notice that lies about the other account.
+ * Ruling 160(b): the account that bills the next run on this backend is about
+ * to change — a connect, a switch, the active account's removal — so the
+ * refusals and the reading Viberr observed on the one that billed until now go.
+ * A spent window or a rejected credential is evidence about the account that
+ * was billed, and the next one is not that account; left standing, the Profile
+ * card kept "usage window spent · reopens 21:30" over a freshly connected
+ * account whose runs were going through, and the dispatch hold parked the new
+ * account until the old one's instant. Switching BACK to a spent account
+ * retires it too: one refused run re-records the window, which is cheaper than
+ * a notice that lies about the other account.
  */
 function activeAccountChanged(db: DatabaseSync, userId: string, backend: RealBackend): void {
   retireBackendRecordsFor(db, backend, userId);
@@ -603,7 +603,7 @@ function assertRoomForAnotherAccount(db: DatabaseSync, userId: string, backend: 
 /** The probe each pasted credential is verified against. Authenticated with the
  *  pasted value itself (it rides a request header, which is why the catch below
  *  never echoes a fetch failure's cause), and free of any cost: listing models
- *  bills nothing (ruling 220's spirit — never spend the person's money to find
+ *  bills nothing (ruling 149's spirit — never spend the person's money to find
  *  out whether their key works). */
 const KEY_PROBE = {
   claude: { host: "api.anthropic.com", url: "https://api.anthropic.com/v1/models" },
@@ -1121,9 +1121,9 @@ async function vendorBinaryIfPresent(
 // -------------------------------------------------------------- health
 
 /** Per-person backend health — the ONE answer the task page, the packets, the
- *  Agents page, the controller and the run service all read. Since ruling 138
- *  it is the health of the person's ACTIVE account on the backend, the one a
- *  run would bill; {@link backendAccountHealth} answers for any one account. */
+ *  Agents page, the controller and the run service all read. It is the health
+ *  of the person's ACTIVE account on the backend, the one a run would bill
+ *  (ruling 138); {@link backendAccountHealth} answers for any one account. */
 export interface UserBackendHealth {
   backend: RealBackend;
   userId: string;

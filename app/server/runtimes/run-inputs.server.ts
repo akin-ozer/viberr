@@ -198,7 +198,7 @@ export function recordRunInputs(
     backend: RealBackend;
     inputs: RunInputs;
     /** U39-25: which kind of run, for the headline; absent reads as a
-     *  specialist's, the only kind that recorded this before ruling 167. */
+     *  specialist's, the only kind that once recorded this. */
     kind?: RunKind;
     dataRoot?: string;
   },

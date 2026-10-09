@@ -25,7 +25,7 @@ import { controllerRun } from "../../../test-support/run-view";
  * accounts.
  */
 
-// jsdom's Element has no `scrollIntoView`; the ruling 321 case spies on it
+// jsdom's Element has no `scrollIntoView`; the ruling 320 case spies on it
 // to prove the page never calls it.
 Element.prototype.scrollIntoView = () => {};
 
@@ -256,11 +256,11 @@ describe("controller page: the Claude-not-connected state (ruling 137)", () => {
     // CANARY: put a not-connected placeholder back on the disabled box.
     expect(box.placeholder).toBe("");
     // The pill states the state in the header's title row, and neither of them
-    // blames the deployment: since ruling 137 it holds no credential to blame.
+    // blames the deployment, which holds no credential to blame (ruling 137).
     expect(container.querySelector(".ctl-head-title .pill")?.textContent).toBe("Claude not connected");
     expect(container.textContent).not.toContain("backend unavailable");
-    // The blame, not the words: ruling 321 puts ruling 319's instance
-    // examples on this page, and one of them asks about the agent profiles
+    // The blame, not the words: ruling 319 puts the instance examples on
+    // this page, and one of them asks about the agent profiles
     // "on this instance", which blames nothing.
     expect(container.textContent).not.toMatch(/unavailable[^.]*on this instance/i);
   });
@@ -708,7 +708,7 @@ describe("ruling 321: the page's navigation is at its top", () => {
   });
 });
 
-describe("ruling 321: the transcript scrolls itself, never the page", () => {
+describe("ruling 320: the transcript scrolls itself, never the page", () => {
   /** A thread of one message, the viewer's own. */
   const thread = () =>
     view({
@@ -758,7 +758,7 @@ describe("ruling 321: the transcript scrolls itself, never the page", () => {
   });
 });
 
-describe("ruling 321: the send hint names the key this keyboard has", () => {
+describe("ruling 319: the send hint names the key this keyboard has", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("says Ctrl on a keyboard with no ⌘, and prints no ⌘ anywhere in the footer", async () => {
@@ -774,7 +774,7 @@ describe("ruling 321: the send hint names the key this keyboard has", () => {
   });
 });
 
-describe("ruling 321: the page's blank transcript offers ruling 319's examples", () => {
+describe("ruling 319: the page's blank transcript offers the scope's examples", () => {
   it("lists the board examples and SENDS the one clicked, as the dock does", async () => {
     // CANARY: drop the `ctl-examples` list from the blank transcript.
     const posted: Record<string, string>[] = [];
@@ -1448,7 +1448,7 @@ describe("ruling 320: the controller page", () => {
  * where the owner looks, with a count, and Promote and Dismiss ask the
  * controller to carry the decision out. Live on WEB-1 two operator proposals
  * existed only as timeline events that looked like failed reviews, and nothing
- * brought them back. Since ruling 210 nothing files one, and the ones that
+ * brought them back. Nothing files one now (ruling 210(c)); the ones that
  * documents still hold are listed under the corrections, with Promote all.
  */
 describe("the project's open knowledge-base proposals (ruling 267)", () => {

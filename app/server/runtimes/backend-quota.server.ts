@@ -32,8 +32,8 @@ import {
  *
  * ## D5 (pass 31): the exhaustion the card could not see
  *
- * The live `rate_limit_event` channel is CLAUDE-only. (Since ruling 161(b) a
- * Codex run's rollout supplies live readings too, but only once it makes a
+ * The live `rate_limit_event` channel is CLAUDE-only. (A Codex run's rollout
+ * supplies live readings too, ruling 161(b), but only once it makes a
  * model call.) A Codex subscription that is already spent never emits one — it fails the run with a sentence naming
  * the limit and the date it reopens ("You've hit your usage limit … try again
  * at Sep 18th, 2026 5:20 PM"). So the panel read "no reading yet" for codex on
@@ -160,9 +160,9 @@ export interface BackendQuotaRow {
   /**
    * D5: set while the last thing this backend told us was "you are over your
    * limit". Cleared by the only honest re-probe there is — a real run that
-   * completes (the same rule model availability uses, ruling 220) — by the
-   * person it names changing their credential on the backend (ruling 160(b)), by
-   * the packet option that states the window has reset (ruling 151), and
+   * completes (the same rule model availability uses, ruling 149) — by the
+   * person it names changing their credential on the backend, by the packet
+   * option that states the window has reset (ruling 160(b)), and
    * dropped by the reader once the provider's own reset instant has passed
    * (plus a grace window for a prose-derived one) or, for a record that named
    * no reset at all, once it is older than `UNDATED_EXHAUSTION_TTL_MS`.
@@ -199,15 +199,15 @@ function readingWindowReset(
 /**
  * Ruling 161(c): a reading ages window by window.
  *
- * A reading lists every window it knows (rulings 161(a) and 161(b)), and it
- * used to be aged as one piece by its binding window's reset. So once the
- * binding five-hour window reset, Profile and Insights read "five hour window
- * reset" and dropped the weekly figure beside it, which was still current; and
- * a lapsed window kept the figure of a window that is over. Each window now
- * ages on its own reset: a lapsed one keeps its name and reset but loses its
- * figure (no run has reported on the new window), and when the binding window
- * is the one that lapsed, the current window closest to its limit binds in its
- * place. A reading with no current figure left is aged whole, as before.
+ * A reading lists every window it knows, and it used to be aged as one piece by
+ * its binding window's reset. So once the binding five-hour window reset,
+ * Profile and Insights read "five hour window reset" and dropped the weekly
+ * figure beside it, which was still current; and a lapsed window kept the
+ * figure of a window that is over. Each window now ages on its own reset: a
+ * lapsed one keeps its name and reset but loses its figure (no run has reported
+ * on the new window), and when the binding window is the one that lapsed, the
+ * current window closest to its limit binds in its place. A reading with no
+ * current figure left is aged whole, as before.
  */
 function agedReading(reading: BackendRateLimitReading | null, nowMs: number): BackendRateLimitReading | null {
   if (!reading?.windows?.length || !Number.isFinite(nowMs)) return reading;
@@ -492,7 +492,7 @@ export function recordBackendQuotaExhaustion(
 
 /**
  * D5: a run on this backend just COMPLETED, so the account is demonstrably not
- * refusing work any more. That real run is the re-probe (ruling 220's rule for
+ * refusing work any more. That real run is the re-probe (ruling 149's rule for
  * model availability, applied to the same kind of claim) — there is no synthetic
  * check, and none is wanted. Best-effort.
  */

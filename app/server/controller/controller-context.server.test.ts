@@ -433,9 +433,10 @@ describe("gatherControllerContext", () => {
   });
 
   /**
-   * Ruling 254 (pass 37). The instance scope has named the person's role per
-   * project since ruling 253; the two BOUND scopes — the ones a person is
-   * standing in when they ask for something — named nothing about them at all.
+   * Ruling 253: the instance scope names the person's role per project, and
+   * a bound scope names the asker's. The two BOUND scopes — the ones a person
+   * is standing in when they ask for something — named nothing about them at
+   * all.
    * The controller, asked on a live task what the person in front of it could
    * do, answered right and then said how: "your project role was not in
    * anything I had... I bridged that gap with a rule from my playbook", having
@@ -605,7 +606,7 @@ describe("gatherControllerContext", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 210, and still standing in its document.
+    // A legacy proposal, still standing in its document (ruling 210(c)).
     const body = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",

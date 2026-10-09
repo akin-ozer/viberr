@@ -360,7 +360,7 @@ function getKnowledgeBase(
 }
 
 /**
- * Ruling 267: make a knowledge base private, or open it again. Private is its
+ * Ruling 209: make a knowledge base private, or open it again. Private is its
  * folder closed to group and others (0700, the server's alone); open is 0755,
  * what ruling 15(c) gives `kb/` itself. The flag is the folder's own mode, so
  * it needs no column, survives a backup, and no boot widens it: the layout
@@ -1232,8 +1232,8 @@ export function mcpSpawnEnv(
 
 /**
  * Spawn a registered stdio MCP command the way every server-side caller does:
- * the discovery probe, the warm-up and, since ruling 191, the MCP gateway's
- * upstream for a credentialed stdio server. One definition, so what a probe
+ * the discovery probe, the warm-up and the MCP gateway's upstream for a
+ * credentialed stdio server (ruling 191). One definition, so what a probe
  * measures is what a run's calls then reach.
  */
 export const spawnMcpProcess: McpSpawn = (command, args, token) => {

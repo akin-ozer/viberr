@@ -46,12 +46,10 @@ export function projectRulingsKb(
  *
  * Appended, not prepended: ruling 208(a) puts a profile's own grants first and the
  * project's rulings last, and `readKbIndexes` emits the indexes in that order.
- * It is a reading order now; until ruling 205 it was a shared character budget
- * spent in order, and a rulings KB in front would have silently taken context
- * from the thing the profile was deployed to do. Deduped, because a profile
- * that ALSO grants it explicitly must not have it indexed twice — which is the
- * likely shape when an existing KB is promoted into this role, as the owner
- * asked to be possible.
+ * It is only a reading order: no character budget is shared (ruling 205).
+ * Deduped, because a profile that ALSO grants it explicitly must not have it
+ * indexed twice — which is the likely shape when an existing KB is promoted
+ * into this role, as the owner asked to be possible.
  */
 export function withProjectRulings(
   kb: readonly string[],

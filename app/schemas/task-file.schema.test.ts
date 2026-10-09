@@ -1418,8 +1418,8 @@ describe("DIVERGED_BRANCH_REMEDY (ruling 230)", () => {
  * fifteen seconds on a conflict that no longer existed, and the policy engine
  * then told the human the operator had held the stage deliberately.
  *
- * `paths` has been pinned to its head since ruling 242. The verdict that
- * BLOCKS had no pin at all.
+ * `paths` was already pinned to its head. The verdict that BLOCKS had no pin
+ * at all.
  */
 describe("ruling 242: a conflict verdict belongs to the head it was measured on", () => {
   const prAt = (mergeableAt: string | null, headSha: string) => {

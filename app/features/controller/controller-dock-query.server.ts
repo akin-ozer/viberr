@@ -87,7 +87,7 @@ export interface ControllerDockView {
   turn: ConversationTurnState;
   threads: ControllerDockThread[];
   viewerOwnsActive: boolean;
-  /** Ruling 11: the caller is not signed in. Only the view
+  /** Ruling 256: the caller is not signed in. Only the view
    *  `/resources/controller` answers with its 401 carries it, `unavailable`
    *  with it, and the panel then asks for a sign-in instead of blaming the
    *  scope or the person's Claude account. */
@@ -159,9 +159,9 @@ export function getControllerDock(
     /**
      * O39-d: the panel is OPEN and shows this transcript, so its owner has
      * seen it. A load without it reads nothing: a load nobody looked at must
-     * not mark the reply it fetched as read. (Since ruling 11 the dock loads
-     * this view only while the panel is open; the closed button reads the
-     * dock's status instead.)
+     * not mark the reply it fetched as read. (The dock loads this view only
+     * when the panel opens, ruling 256; the closed button reads the dock's
+     * status instead.)
      */
     markSeen?: boolean;
     dataRoot?: string;
@@ -295,7 +295,7 @@ export function unavailableDockView(
   };
 }
 
-/** Ruling 11 (test audit L14-29): the view for a caller who is not signed in
+/** Ruling 256 (test audit L14-29): the view for a caller who is not signed in
  *  (no session, or a forced password reset pending), which
  *  `/resources/controller` answers with its 401 instead of a login redirect.
  *  Nothing is read for it, not even the controller's configured name: nobody

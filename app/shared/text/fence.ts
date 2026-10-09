@@ -6,9 +6,10 @@
  * (review finding 6). CommonMark closes on a run of the same length or longer,
  * so one more than the longest run inside can never be matched.
  *
- * Its home since ruling 210: the controller's context read fences what people
- * and agents wrote, and a refused knowledge-base correction fences the
- * document's own lines back to the agent that must copy them exactly.
+ * It lives here because two callers need it: the controller's context read
+ * fences what people and agents wrote, and a refused knowledge-base correction
+ * (ruling 210) fences the document's own lines back to the agent that must
+ * copy them exactly.
  */
 export function fenceFor(content: string): string {
   let longest = 0;

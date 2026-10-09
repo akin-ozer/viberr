@@ -151,11 +151,11 @@ summary stays on the finished task as its result
 
 | Surface | Who | Notes |
 |---|---|---|
-| `/controller` | any signed-in user | Instance scope, under the app header every standalone page carries (brand, `Home › Controller`, search, bell, account menu; ruling 321). `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 278). |
+| `/controller` | any signed-in user | Instance scope, under the app header every standalone page carries (brand, `Home › Controller`, search, bell, account menu; ruling 321). `?c=<id>` selects a conversation (`?c=new` starts one); `?all=1` lets an org admin list everyone's. With a thread open, the thread's execution (§2.2). `POST intent=delete-conversation` is the rail's Delete (§2.3, ruling 250). |
 | `/projects/:slug/controller` | project members (non-members get the unknown-slug 404) | Board scope: the same conversation machinery bound to the project, plus the **Knowledge base panel** (§4.3, rulings 210 and 321); `POST intent=kb-correction-undo` is the panel's Undo (org admins). `?all=1` lists everyone's threads about the project for an org admin, and, sealed, for a holder of `delete-controller-conversations` (§2.3, ruling 26). Fourth item in the workspace rail (after Board, Epics and Review queue). Same execution panels as the instance page. |
 | Instance settings → Controller tab | org admins | Configures the controller itself (§6). |
 | **The dock**, on every signed-in surface | any signed-in user | Ruling 256: a floating Controller button, bottom-right, opening a non-modal panel bound to the place the person is standing (§2.1). |
-| `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected; `mode=queue` queues it behind a working turn instead of steering it, ruling 251), `POST intent=send-now` / `intent=retract` (`conversationId`, `messageId`) are ruling 251's moves on a message still waiting, for the conversation's owner (409 with a sentence once it is not waiting). |
+| `/resources/controller` | any signed-in user; project and task scopes require membership; a signed-out request gets a 401, never a login redirect | The dock's data route: `GET ?project=&task=&c=` answers the scope's view, `POST intent=send` records the message and runs the turn (409 when the asker has no Claude connected; `mode=queue` queues it behind a working turn instead of steering it), `POST intent=send-now` / `intent=retract` (`conversationId`, `messageId`) are ruling 251's moves on a message still waiting, for the conversation's owner (409 with a sentence once it is not waiting). |
 | `/resources/controller-unseen` | any signed-in user; a signed-out request gets a 401 with an empty status, never a login redirect | The dock's status: the viewer's unseen controller replies in every scope, each with the page that opens it (§3, ruling 257), and the viewer's turns working right now with their scope, phase and step (ruling 11). |
 
 Entry points: the dock (everywhere), the workspace rail item, the Home hero link (once a
@@ -185,15 +185,15 @@ conversation on the row under it (ruling 320). The page has no Home button: the 
 header's brand and crumb are the way back (ruling 321). A link in a message, and any other long token in
 its prose (a word joined by slashes), wraps inside the transcript rather than scrolling it
 sideways (`.md-body a`, and `.md-body` paragraphs, list items, blockquotes and headings;
-a code block and a table keep their own scrollers; ruling 320, (i)). Where the transcript puts
+a code block and a table keep their own scrollers; ruling 320). Where the transcript puts
 its reader is one rule for the page and the dock (`useTranscriptFollow`,
-`transcript-follow.ts`, ruling 320): an opened thread shows its newest reply from the
+`transcript-follow.ts`): an opened thread shows its newest reply from the
 first line when a reply is the newest message, and its end otherwise; a controller message
 that lands is scrolled to its first line, unless the reader has scrolled up above the
 newest reply they had, and then nothing moves; the person's own message, and a turn that
 starts while they follow the thread, go to the end. A reader who has scrolled away from the
 newest message has the transcript's jump, pinned to the foot of its box
-(`TranscriptJumpButton`, `transcript-jump.tsx`, ruling 320): "New reply" on the primary
+(`TranscriptJumpButton`, `transcript-jump.tsx`): "New reply" on the primary
 face when a reply landed while they read history, which puts that reply's first line at the
 top of the box, and "Latest" otherwise, which goes where opening the thread would. It shows
 only while that place is below what they can see, leaves once it comes into view, and hands
@@ -202,7 +202,7 @@ and centred: the person's messages are bubbles at its end, and a reply is the co
 with no frame of its own, under the header that names who wrote it (ruling 320). One visually hidden `role="status"`
 region, mounted outside the per-thread subtree and changing only its text, says "<name> is
 working" when a turn starts and "<name> replied: <first sentence>" when the reply lands
-(`useTurnAnnouncement`, ruling 320); the working row is visual only. The transcript
+(`useTurnAnnouncement`); the working row is visual only. The transcript
 is in REPLY order (ruling 320, `inReplyOrder` in `app/shared/controller-thread.ts`): each
 controller row that names the message it answers sits directly under it, and user messages
 and unlinked notes keep their `seq` order. A user message with no reply yet says where it
@@ -340,7 +340,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   nothing but what was typed (F35-4): `projectName` is null, the label reads "Not
   available here", and the projection is never read for it, so a non-member cannot learn
   a project's display name from a guessed slug. A request the server never answers (a
-  restart, a 5xx, a dead network) keeps the page too (ruling 11). Both routes have a
+  restart, a 5xx, a dead network) keeps the page too (ruling 256). Both routes have a
   `clientLoader` that answers a failed load with null, which the dock reads as not
   loaded yet: no dot and no working poll, and the open panel's loading lines over a held
   composer that keeps what was typed, until a load answers (the next
@@ -349,7 +349,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
   failed send with `{ ok:false }`, which the dock toasts ("The controller could not take
   that. Try again.") while the message stays in its composer. Neither says why, so the
   handlers still answer rather than throw.
-- **Never a login redirect** (ruling 11, test audit L14-29): both routes answer a
+- **Never a login redirect** (ruling 256, test audit L14-29): both routes answer a
   request with no session, or with a forced password reset pending, with a 401, returned
   like every other answer. `requireAuth`'s login redirect named the route and the scope's
   query as the returnTo, and a fetcher follows a redirect as a navigation, so a stale
@@ -391,7 +391,7 @@ a `showModal()` overlay, which would leave the dock inert behind it.
 
 A controller turn is a run like any other (§3), so with a thread open both pages show
 it the way the task page shows a task's runs, fed by the same projection
-(`listRunsForTask(db, "", <conversation id>)`, the ruling-247 scope): every turn of the
+(`listRunsForTask(db, "", <conversation id>)`, the ruling-251 scope): every turn of the
 thread resumes the same agent, so the runs group into ONE console entry with `run N of
 M` boundaries between turns.
 
@@ -445,7 +445,7 @@ project role to hold, so it stays its starter's and the org admins'. The engine
 delete: a stranger to an instance conversation gets the 404 shape, a project member
 without the row gets the guard's 403 ("Only project admins can delete another person's
 controller conversation."), audited as `project.authority.denied`. Each page deletes only
-the scope it lists (ruling 249): the instance page its instance threads, a project page
+the scope it lists (ruling 250): the instance page its instance threads, a project page
 its board's and its tasks'.
 
 **What.** The conversation and its messages, and what its turns said and did: their
@@ -559,7 +559,7 @@ a notification row: replies stay out of the bell (§8).
    passes it too); effort only when set. The newest prior controller run is resumed when
    it has a session id, otherwise a fresh run starts — unless that session is BOTH idle
    past its cache TTL (60 min on a sign-in, 5 min on an API key) AND above 150k tokens
-   (`RESUME_FRESH_CONTEXT_TOKENS`), in which case ruling 255 starts a fresh run instead of
+   (`RESUME_FRESH_CONTEXT_TOKENS`), in which case ruling 173 starts a fresh run instead of
    replaying it: the prior run gets a `run·session_stale` line, the fresh turn's prompt
    says the session was set aside on purpose and points at the digest below, and the
    run's start audit records `continuityReset: "stale_large_session"`.
@@ -595,7 +595,7 @@ a notification row: replies stay out of the bell (§8).
      running, and waiting on them (ruling 253);
    - on a board or a task, the project's open knowledge-base proposals (ruling 267,
      `projectProposalsContextLine`): the ones its tasks filed under "Proposed corrections
-     (not binding)" in any knowledge base before ruling 210 ended the filing, up to 10 by id
+     (not binding)" in any knowledge base (nothing files one now, ruling 210(c)), up to 10 by id
      with the document, the task and filer, the line and the correction, and the instruction
      to tell the person they wait and to close one with `resolve_kb_proposal` only when the
      person asks; at the instance scope, the count per visible project. Corrections agents
@@ -739,8 +739,8 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `read_knowledge_base_doc` | One document of any KB by id, with the `version` a replace must name (ruling 212(a)) | org admin |
 | `read_knowledge_doc` | One document of a KB granted to THIS turn, by the name and path its index gives (ruling 205) | the turn's own grants |
 | `list_skills` | Org skills led by `grantKey` (the folder name), with name, summary, the body's length as `chars` and, when a run is never given its end, how much as `charsPastBudget` (ruling 267) | org admin |
-| `list_mcp_servers` | Org MCP connections led by `grantKey` (the registry name): transport, target, the cached `up` verdict with `lastCheckedAt` / `warmingSince`, ruling 188's `writeTools` and `writeToolsReviewed` and what the marking does, and `storeAccessNote` for a command pointed inside Viberr's own store (ruling 188); `signIn` (an HTTP server's OAuth sign-in: null, or `needs_sign_in`, `signed_in` with `expiresAt` and `renews`, or `expired` with its reason) and `signInNote`, which says what it means for runs and that only an org admin signs a server in or out, in Instance settings (ruling 192); `signIn.grant`, what the sign-in was granted ({`scopes`, `writes`, `readOnly`, `summary` such as "read-only · 194 scopes", `writeScopes`}, never the whole list; null when the server did not say), with the note ending in the grant and, for a read-only one, that every write is refused until an admin signs in again with write scopes, and `requestedScopes`, what the next sign-in asks for (ruling 192); never credentials or tokens | org admin |
-| `list_global_agents` | Global templates with full persona, grants (`skills` / `mcps` / `kbs`), default model and effort, `copiesDiffering` (ruling 177) and `copiesWithOlderText` (ruling 177) | org admin |
+| `list_mcp_servers` | Org MCP connections led by `grantKey` (the registry name): transport, target, the cached `up` verdict with `lastCheckedAt` / `warmingSince`, `writeTools` and `writeToolsReviewed` and what the marking does, and `storeAccessNote` for a command pointed inside Viberr's own store (ruling 188); `signIn` (an HTTP server's OAuth sign-in: null, or `needs_sign_in`, `signed_in` with `expiresAt` and `renews`, or `expired` with its reason) and `signInNote`, which says what it means for runs and that only an org admin signs a server in or out, in Instance settings (ruling 192); `signIn.grant`, what the sign-in was granted ({`scopes`, `writes`, `readOnly`, `summary` such as "read-only · 194 scopes", `writeScopes`}, never the whole list; null when the server did not say), with the note ending in the grant and, for a read-only one, that every write is refused until an admin signs in again with write scopes, and `requestedScopes`, what the next sign-in asks for (ruling 192); never credentials or tokens | org admin |
+| `list_global_agents` | Global templates with full persona, grants (`skills` / `mcps` / `kbs`), default model and effort, `copiesDiffering` and `copiesWithOlderText` (ruling 177) | org admin |
 | `inspect_audit_log` | Audit rows filtered by project, action PREFIX, actor and time range (limit 1..200); every reply carries the `actions` vocabulary with counts, and an empty match lists the ids the window does contain (ruling 33); rows are retained 90 days | org admin |
 | `inspect_run_analytics` | Run totals, success rate, cost and tokens, oversight, and breakdowns by backend, kind, project, model, profile and task, each a window carrying `hidden` / `hiddenRuns` / `hiddenCost`; an unreported cost is `null`, never zero (ruling 35). `byTask` is per backend and a window of the eight largest; one task's whole figure across backends is `get_task`'s `whatItTook`, and `list_tasks` with `withWhatItTook` carries the run part for every task of a project with no org admin needed (ruling 27) | org admin |
 
@@ -754,15 +754,15 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `request_resource_grant` | Records an ask for a skill, KB or MCP server on the controller's OWN profile in `agents/controller-requests.md`; idempotent per (kind, name) while open; a name no resource carries is refused (§6, ruling 271) | org admin |
 | `save_knowledge_base` | Create or update a KB (name, refresh mode) and optionally write one document (§4.1) | org admin |
 | `edit_knowledge_base_doc` | Replace one passage of a KB document in place (ruling 212(b)): `was` must stand exactly once, `now` takes its place (empty deletes it); one write under the lock agent corrections take, each side at most 8 KB, and the `org.store.doc_written` row carries `edited` (the passage and what replaced it) | org admin |
-| `copy_task_file_to_knowledge_base` | Copy one file from a task's attachments (or from a kept delivery, `delivery`) into a knowledge base's folder byte for byte (ruling 267), kept as the `kind` it names (ruling 267): a `template` (later results are filled into it; one whose text, read as the file it is on the task, holds no `[[placeholder]]` is refused; a placeholder is on one line, opens on a letter, is at most 160 characters between its brackets and is not a link's text; in a page, what a browser does not show (the code it runs, its style, its comments) is not read for one, while a data block (`application/json`, `text/template`) is; so a citation, a chart's arrays or a shell test does not count; a file whose text nothing read is kept and said to be unchecked), a `sample` (a worked example with one task's content, stored as `sample-<task key>-<name>`) or an `asset` (no task's work: a logo, a letterhead). It is where a file a board's work must follow lives, a report template or a sample, so it stops depending on the task that made it. `as` renames it; a name the folder holds (in either Unicode form, ruling 76) is refused unless `replace: true`, a name the index could not print on one line (a line break, a control character, a backtick), one over 200 characters or 255 bytes, or one the store would not keep (two dots in a row) is refused, a document it already holds is always refused (those change through `edit_knowledge_base_doc` or `save_knowledge_base`), and so is a file that is not a document for a private knowledge base and one over 10 MB. Audited `org.store.files_added` with `copiedFrom` | org admin |
-| `resolve_kb_proposal` | Close one open knowledge-base proposal by id (§4.3, ruling 267; filed before ruling 210): `promote` writes `text` into the document's settled text in place of `replaces` (which must stand there once, outside the proposals section) or appended to it, and removes the entry; `dismiss` removes the entry only; audited `org.kb.proposal_promoted` / `org.kb.proposal_dismissed` with the `reason` | org admin |
+| `copy_task_file_to_knowledge_base` | Copy one file from a task's attachments (or from a kept delivery, `delivery`) into a knowledge base's folder byte for byte, kept as the `kind` it names (ruling 267): a `template` (later results are filled into it; one whose text, read as the file it is on the task, holds no `[[placeholder]]` is refused; a placeholder is on one line, opens on a letter, is at most 160 characters between its brackets and is not a link's text; in a page, what a browser does not show (the code it runs, its style, its comments) is not read for one, while a data block (`application/json`, `text/template`) is; so a citation, a chart's arrays or a shell test does not count; a file whose text nothing read is kept and said to be unchecked), a `sample` (a worked example with one task's content, stored as `sample-<task key>-<name>`) or an `asset` (no task's work: a logo, a letterhead). It is where a file a board's work must follow lives, a report template or a sample, so it stops depending on the task that made it. `as` renames it; a name the folder holds (in either Unicode form, ruling 76) is refused unless `replace: true`, a name the index could not print on one line (a line break, a control character, a backtick), one over 200 characters or 255 bytes, or one the store would not keep (two dots in a row) is refused, a document it already holds is always refused (those change through `edit_knowledge_base_doc` or `save_knowledge_base`), and so is a file that is not a document for a private knowledge base and one over 10 MB. Audited `org.store.files_added` with `copiedFrom` | org admin |
+| `resolve_kb_proposal` | Close one open knowledge-base proposal by id (§4.3, ruling 267; nothing files one now, ruling 210(c)): `promote` writes `text` into the document's settled text in place of `replaces` (which must stand there once, outside the proposals section) or appended to it, and removes the entry; `dismiss` removes the entry only; audited `org.kb.proposal_promoted` / `org.kb.proposal_dismissed` with the `reason` | org admin |
 | `undo_kb_correction` | Undo one knowledge-base correction an agent wrote, by its `kc-` id (§4.3, ruling 210): puts back the passage it replaced (or removes the text it added) when the written text still stands once, notes the undo on the task that made it, and records `task.kb_correction.undone` with the person's `reason`, which an agent that tries to write the same text again is shown; a document edited since is refused | org admin, when a person asks |
 | `read_kb_correction` | One knowledge-base correction whole, by its `kc-` id (ruling 262): the passage it replaced, the text it wrote, its evidence, the task and agent that made it, and whether a person undid it. `get_project` lists a project's with each passage cut to its first 160 characters. An id of a project the asker cannot see is answered as one that does not exist | member of the correction's project |
 | `save_skill` | Create or update a skill (name, summary, SKILL.md body) (§4.1); its reply says when the body is past the 24,000 characters a run handed its skills as text is given, and by how much; a skill the controller's own profile holds is measured against what its turn has left for it of 40,000, its guide drawn first (ruling 267) | org admin |
-| `edit_skill` | Replace one passage of a skill's SKILL.md in place (ruling 267), under `edit_knowledge_base_doc`'s rules and in the same code: `was` must stand exactly once, each side at most 8 KB, one write under the file's lock, and the body that results is judged as every SKILL.md write is (ruling 186). The reply carries ruling 267's note | org admin |
-| `save_mcp_server` | Create or update a connection; takes no credential; reserved names refused; `writeTools` marks the tools withheld from runs without repo-write and from every operator run (ruling 188), and a save with none set names the tools that look like writes. Its description says an HTTP server that asks for an OAuth sign-in is signed in by an org admin in Instance settings, which the controller cannot do, and a save that meets the sign-in challenge says so instead of "add a secret" (ruling 192). `requestedScopes` records the OAuth scopes the next sign-in asks for (space-separated; omitted keeps them, "" clears them), which the authorization server may grant or not (ruling 192) | org admin |
-| `test_mcp_server` | Probe one connection, named by its id or its name (ruling 189), now and report its health in the command's words; an OAuth server reads "needs sign-in", "healthy … signed in (expires in …, renews itself)" or "sign-in expired: an admin must sign in again" (ruling 192), a healthy one ending with its grant ("· read-only · 194 scopes", ruling 192) | org admin |
-| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants (ruling 177) and, on a call that changes the persona, the persona of every copy still running older text (ruling 177) | org admin |
+| `edit_skill` | Replace one passage of a skill's SKILL.md in place (ruling 267), under `edit_knowledge_base_doc`'s rules and in the same code: `was` must stand exactly once, each side at most 8 KB, one write under the file's lock, and the body that results is judged as every SKILL.md write is (ruling 186). Its reply carries the same budget note as `save_skill`'s | org admin |
+| `save_mcp_server` | Create or update a connection; takes no credential; reserved names refused; `writeTools` marks the tools withheld from runs without repo-write and from every operator run (ruling 188), and a save with none set names the tools that look like writes. Its description says an HTTP server that asks for an OAuth sign-in is signed in by an org admin in Instance settings, which the controller cannot do, and a save that meets the sign-in challenge says so instead of "add a secret". `requestedScopes` records the OAuth scopes the next sign-in asks for (space-separated; omitted keeps them, "" clears them), which the authorization server may grant or not (ruling 192) | org admin |
+| `test_mcp_server` | Probe one connection, named by its id or its name (ruling 189), now and report its health in the command's words; an OAuth server reads "needs sign-in", "healthy … signed in (expires in …, renews itself)" or "sign-in expired: an admin must sign in again", a healthy one ending with its grant ("· read-only · 194 scopes", ruling 192) | org admin |
+| `save_global_agent` | Create or update a specialist template: backend, summary, persona, stages, default model and effort, grants (§4.1, §4.2); `propagate: true` rewrites differing project copies' grants and, on a call that changes the persona, the persona of every copy still running older text (ruling 177) | org admin |
 
 **Project creation**
 
@@ -779,13 +779,13 @@ name its task, or it is refused (the same rule scopes `list_decisions`, ruling 2
 | `list_tasks` | Key, title, stage, readiness, waiting, owner, priority, `epic` and `waitsOn`; `epicId` filters to one epic (`none` for the tasks in no epic, ruling 273); Done included, archived only with `includeArchived`; with `withWhatItTook: true` (ruling 83) each task a run started on carries `whatItTook`, one line ("3 runs, 35 min, $1.75"): the runs that started, their agent minutes and the dollars they reported ("cost not reported" when no run reported one), from one read of the project's run rows, so a board is ranked by cost; a run still going or cut by a restart is named on the line and adds no minutes ("1 run, 0 min, cost not reported (1 still going: not in the minutes)"); a task without the key has no run on record, and a listing that does not ask carries none. The listing has no pages and its reply is cut at what a turn carries (ruling 260), which is why the figure is opt-in and one line: on this reply's rows an object of three numbers cost five lines and cut a board a quarter sooner. `stageId` or `epicId` narrows a board too large for one reply |
 | `get_task` | Live state (stage, readiness, goal, engaged agents, PR, open packet), its `epic` by id and title (ruling 273), `notAcceptableReason` (the acceptance gate's own verdict, ruling 262), `gates` (ruling 315: the PR card's line, the state, each gate's outcome, time and log, or null), pending `schedules` (ruling 264), kept `deliveries` (ruling 86: each files delivery as it was delivered, newest first), `whatItTook` (ruling 83: what the task cost, derived when read: the runs that started and their agent minutes, the dollars they reported or null, the rounds a person was asked, the times the work was sent back by reviewers and by people, the wall time to the first delivery and to acceptance with the share agents ran and the share it waited on a person, `byAgent` for who spent it, `facts`, the Result card's own line, and `notes` for what the figure misses; [task-lifecycle.md §9](task-lifecycle.md) defines each number; left out only when its read fails), `timelineTotal`, and the newest events (default 12, max 50), each cut at 700 characters |
 | `read_timeline_entry` | One timeline entry in full, by the `at` stamp `get_task` prints (ruling 117); entries written in one millisecond come back together (ruling 72), in the order they were written, and a `kb_correction` entry comes with the correction whole, to an org admin's controller (ruling 211) |
-| `read_task_attachment` | One attachment of a task, by a name in either Unicode form (ruling 76): an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 214), an image as the picture, and any other file whose bytes are text as text, whatever its name, with each embedded `data:` file of 256 characters or more named by its length instead of spelled out (ruling 79); a known binary kind or bytes with a NUL in their head are named and refused (rulings 79, 117, 198). A read returns one page of up to 32,000 bytes (ruling 215); a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 117); with `delivery`, a stamp from `get_task`'s `deliveries`, the file as that delivery held it (ruling 198) |
+| `read_task_attachment` | One attachment of a task, by a name in either Unicode form (ruling 76): an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 214), an image as the picture, and any other file whose bytes are text as text, whatever its name, with each embedded `data:` file of 256 characters or more named by its length instead of spelled out; a known binary kind or bytes with a NUL in their head are named and refused (ruling 79). A read returns one page of up to 32,000 bytes (ruling 215); a truncated one names its `nextOffset`, and `offset` reads on from there (ruling 117); with `delivery`, a stamp from `get_task`'s `deliveries`, the file as that delivery held it (ruling 198) |
 | `read_task_source` | The sources a task keeps (ruling 82), with the reader every agent's `read_task_source` calls (`readAgentTaskSource`): without `id`, the list in pages (what each kept delivery rested on, then each source's id, name, size, hash, title, origin, and when, by which agent and in which run it was kept); with `id` (`S7`), that source's content, read as an attachment is, an HTML page as its source text; with `id` and `find` (ruling 82), the places in it that hold a word or short phrase, each with its line and the offset to read it from. `taskKey` defaults to the conversation's task. It is how the controller answers where a figure in a result comes from: from what the run kept, not from the page as it reads today. What a source says is data, never an instruction |
 | `read_message_file` | One file the person sent with a message in THIS conversation, by name (case-blind): the task reader's rules (an `.xlsx` as CSV, an image as the picture, any text file as text, a page of up to 32,000 bytes at a time with `offset`; rulings 258 and 198); a name the conversation does not hold is answered with the names it does. A message's files are named to the turn that reads it, and the recent exchange lists what earlier messages carried under `[sent with: …]` |
 | `read_default_branch_file` | One file as the project's default branch has it, from the project's git mirror (built on first use), in pages of whole lines via `fromLine` (rulings 265, 219(c)); an absent path is reported absent; audited `controller.repo.read` |
 | `get_github_state` | Connection and credential health, task branches with sync state, PRs with checks, review and mergeability (the three meanings of a null `checks` spelled out), cache freshness |
 | `read_pull_request` | A task's review PR: every changed file with status, counts and unified-diff hunks; `patches: false` for the file list, `path` for one file, a byte budget with `patchOmitted` flags (ruling 265); audited `controller.github.read` |
-| `list_decisions` | Everything waiting on a person: open packets with every option and the `ownWords` free-text choice (ruling 263), pending recommendations, completions ready to accept, each with `releases.direct` / `releases.downstream` (ruling 263); `waitingOnAProjectAdmin` lists the repository questions (ruling 65) the person can see and cannot answer, never counted as theirs; answers nothing (ruling 263) |
+| `list_decisions` | Everything waiting on a person: open packets with every option and the `ownWords` free-text choice, pending recommendations, completions ready to accept, each with `releases.direct` / `releases.downstream`; `waitingOnAProjectAdmin` lists the repository questions (ruling 65) the person can see and cannot answer, never counted as theirs; answers nothing (ruling 263) |
 | `list_epics` | The project's epics, each with its status, lead, dates and progress counted from its tasks (§7.2) |
 | `get_epic` | One epic in full: what it is, its progress by stage, every task in it (archived ones included) with its stage, readiness, owner and what it waits on, and its history, newest first |
 
@@ -794,7 +794,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 
 | Tool | What it does |
 |---|---|
-| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held, and released at once when every entry is already done), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 50), `dueDate`, `priority: urgent` as the urgent flag, and `epic`, the epic it is born in (checked before a key is allocated; ruling 273) |
+| `create_task` | A task at the entry stage [contributor, `create-task`]; takes `blockedBy` (validated before a key is allocated; the task is born held, and released at once when every entry is already done), `owner` (a member email or `me`, seated in the creating write before the first operator run; ruling 48), `dueDate`, `priority: urgent` as the urgent flag, and `epic`, the epic it is born in (checked before a key is allocated; ruling 273) |
 | `move_task` | A stage move [`approve-transition`]; a move into the terminal stage is refused and pointed at the task page; a move to an EARLIER stage requires `reason`, which lands on the transition entry (ruling 47) |
 | `continue_when_done` | Leave THIS conversation its next step for when a task is accepted (ruling 259) [member; refused on an archived project]: at most 2,000 characters; one open step a conversation and task (set again to replace, empty to drop); refused with no conversation, on an archived task, on one already accepted, and from the turn that answers a follow-up's own message, unless a message was steered into that turn, which only a person does (the rule is the turn's: a person's turn still working when the task is accepted keeps its steps, and may leave one on each of several tasks). What the task says and what is kept change together: a step whose note cannot be written is not left, and one whose "dropped" note cannot be written stays. The step is written on the task in a "Controller follow-up" note, which every member and run reads, and audited `controller.follow_up.set` / `.dropped`. When the task is accepted, by either writer of the last stage, Viberr starts the conversation's next turn with the step: queued, with no page as its surface, as the person who asked, checked as they stand then (an active account, still a member or an org admin, Claude connected; read plainly, so nothing is recorded in their name). A step that cannot start is said on the task and audited `controller.follow_up.not_started` |
 | `comment_on_task` | A comment signed `_Posted by the controller for <name>._` [member; refused on an archived project]; @mentions of people notify; an @mention of an agent starts nothing and the line is stamped saying so (ruling 70) |
@@ -828,7 +828,7 @@ Invariants pinned by tests: there is **no** tool for merge, acceptance,
 force-accept, packet resolution or a move into the terminal stage (ruling 97's
 disclosure ceremony is what chat cannot impersonate), and no tool deletes an entity
 (`update_stages op: remove`, `update_epic`'s `removeTasks`, an empty
-`set_file_leases` and, since ruling 248, `remove_agent_deployment` edit a file's list;
+`set_file_leases` and `remove_agent_deployment` (ruling 248) edit a file's list;
 they do not delete a project, task, user, template or resource). The toolkit test pins
 `remove_agent_deployment` as the only `remove_*` tool. Policy edits **are** offered, gated on the asker's `edit-policy`, because the
 controller never initiates: it executes an explicit human directive with the same
@@ -889,7 +889,7 @@ as intended).
   `disk:<name>`) id whose folder has since gained a row resolves to that row and updates
   it (`kbRowForId` / `skillRowForId` in `resources.server.ts`); the folder conflict fires
   only for its real case, another row holding the target name.
-- **A KB document write never destroys text silently** (rulings 212, 212(a), 269/F39-3).
+- **A KB document write never destroys text silently** (ruling 212/F39-3).
   `save_knowledge_base`'s `doc` REPLACES a whole file, so a name that already exists is
   refused unless the call passes `replace: true` AND `replaces`, the `version`
   `read_knowledge_base_doc` returned; a document that moved between the read and the
@@ -992,7 +992,7 @@ thoroughly"). The task records it in one `kb_correction` event (the document, th
 passage before and after, and the evidence, each clipped to a line; ruling 211) and notifies
 nobody. `read_timeline_entry` on that event adds `correction`, read from the record by the id:
 both passages and the evidence whole, and whether it stands or who undid it, when and why, for a
-reader given that knowledge base (ruling 211; an org admin's controller reads every one). Ruling 211: the event quotes the passages only
+reader given that knowledge base (ruling 211; an org admin's controller reads every one). The event quotes the passages only
 for the project's rulings or a knowledge base every deployed specialist is given; otherwise it
 names the document and the id, says which agents are not given it, and points to the panel
 below, and an undo's event follows the same rule, because a task's timeline is read by every
@@ -1018,11 +1018,11 @@ edit in reverse.
   notes it on the task that made the correction ("Knowledge-base correction undone", as the
   person), and records `task.kb_correction.undone`. An agent that later tries to write the
   same text into that document is refused, told who undid it and why.
-- **Proposals filed before ruling 210.** Ruling 267 filed each correction as a proposal under
+- **Proposals documents still hold.** Corrections were once filed as proposals under
   `## Proposed corrections (not binding)` in the document
   ([file-formats.md §7](../architecture/file-formats.md)) for a person to promote. Nothing
-  files one now, but documents keep the ones they hold, and the document is still their
-  record: `listKbProposals` / `listProjectKbProposals` (`app/server/org/kb-proposals.server.ts`)
+  files one now (ruling 210(c)), but documents keep the ones they hold (ruling 267), and the
+  document is still their record: `listKbProposals` / `listProjectKbProposals` (`app/server/org/kb-proposals.server.ts`)
   read every knowledge base's documents (parsed entries cached per file identity), a proposal
   belongs to the project whose task its stamp names, and a person who deletes an entry in the
   document editor has closed it. The per-turn context read of a board or a task lists them
@@ -1108,7 +1108,7 @@ intent, `saveControllerConfig`):
   in-app grant while the section is locked."). Every open request rides in the
   controller's own context read in every scope (`openRequestsContextLine`), so a new
   conversation knows it asked and does not claim the resource.
-- **Answering a request** (ruling 271, amended 2026-09-23). A request leaves `open` in
+- **Answering a request** (ruling 271). A request leaves `open` in
   one of two ways, both through `closeResourceRequest`, both org-admin only:
   - **Granted.** `saveControllerConfig` closes, as `granted`, every open request whose
     name its save leaves in the resolved grants of that kind
@@ -1135,8 +1135,8 @@ An epic is **a named body of work inside one project**, the way Jira draws an ep
 Linear a project (ruling 272). Tasks join and leave it one at a time, whoever they are
 and whatever stage they stand at. An epic never creates, starts, orders or holds a task:
 what a task waits on is its own `blockedBy` (ruling 55), and the release engine starts
-it when that work is done, whatever epic it is in. Epics replaced ruling 273's chained
-goals, which the controller defined and the server advanced link by link; §7.6 is how an
+it when that work is done, whatever epic it is in. Epics replaced the chained goals
+(ruling 273), which the controller defined and the server advanced link by link; §7.6 is how an
 upgraded store's chains became epics.
 
 ### 7.1 The file
@@ -1236,7 +1236,7 @@ epic.
   nothing: the line would repeat with a smaller count. The status stays the person's:
   "every task I filed is done" and "the work has landed" are different claims.
 
-The release engine kept the minute tick the goal runner gave it (ruling 55,
+The release engine kept the minute tick the goal runner gave it (ruling 57,
 `startDependencyRunner`), so a hand edit the hooks never saw still releases within a
 minute.
 
@@ -1299,7 +1299,7 @@ Both epic routes read the project's domain and run facts (ruling 11), which
   task-anchored one names the task's epic.
 - **Operator** ([operator.md §4](operator.md)): the snapshot carries `epic` (the epic
   this task is in, its description clipped, and its OTHER tasks with their stage and
-  `blockedBy`; it replaced ruling 116's `goalChain`) and `openEpics`, the ones `set_epic`
+  `blockedBy`) and `openEpics`, the ones `set_epic`
   can put the task in. A Codex operator reaches `set_epic` through the plan schema's
   `epicId` argument.
 
@@ -1384,8 +1384,8 @@ columns (`goal_id`, `goal_link_index`), which nothing reads or writes.
   and `goal.completed` rows an upgraded store holds still read in the Activity column.
 - Notification kind: `epic` (§7.3), addressed to the epic's lead or, while nobody leads
   it, its creator; its profile category is `epics` ("Epic updates", default on). The
-  `controller` kind, written only for goal-chain progress, has no writer since ruling
-  273; the rows an upgraded inbox holds still read and answer to the `epics` toggle, and
+  `controller` kind, written only for goal-chain progress, has no writer (ruling
+  273); the rows an upgraded inbox holds still read and answer to the `epics` toggle, and
   a person who had silenced the old `controller` category keeps `epics` silenced. A
   conversation reply is not a notification: the unseen-reply dot (§3) is its signal.
 - SSE: `controller.updated {conversationId, userId}` (owner-routed),

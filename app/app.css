@@ -6926,11 +6926,10 @@ a.card:active { transform: scale(.99); }
      auto` is for the one-line row). */
   .rq-meta { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
   /* home project rows drop the least-load-bearing stat: "· quiet", never the
-     decisions waiting on you (ruling 280; it used to drop that pill) */
+     decisions waiting on you */
   .pj-row .pj-stats .pj-quiet { display: none; }
   /* A notification row leads with its 26px icon, not the queue's 62px key, so
-     its wrapped meta indents under the title, not under the icon (ruling 280;
-     it hung 42px left of the title). */
+     its wrapped meta indents under the title, not under the icon. */
   .ntf-wait .rq-row { row-gap: .375rem; }
   .ntf-wait .rq-row .rq-main { flex-basis: calc(100% - 26px - 1rem); }
   .ntf-wait .rq-row .rq-meta { margin-left: calc(26px + 1rem); padding-top: 0; }

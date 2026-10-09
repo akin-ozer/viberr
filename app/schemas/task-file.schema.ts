@@ -375,7 +375,8 @@ export function deliveringEngagement(fm: {
  * deliverer commits nothing, so no new revision is ever minted and the count sat
  * at 1 while the loop ran. The distinction it was reaching for survives in the
  * `rounds` field itself, which the verdict upsert increments only when a
- * completed review returns the SAME result again; a re-DISPATCH that records no
+ * completed review returns the SAME result again after a deliverer run its
+ * provider did not refuse (`deliveredRoundSince`); a re-DISPATCH that records no
  * verdict still counts for nothing.
  */
 export function consecutiveRequestChanges(

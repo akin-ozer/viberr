@@ -1099,9 +1099,9 @@ describe("F19-8: an archived card is inert and honest", () => {
     expect(card).not.toContain("awaiting verdict");
     expect(container.querySelector(".chip.st.agent")).toBeNull();
     // "How far did this get?" stays answerable — the hero keeps its stage pill
-    // for the same reason. Ruling 306: the PR is the one trace when a PR
-    // exists (it implies the branch); ruling 306: a branch alone is the mark,
-    // its name the tooltip and accessible name.
+    // for the same reason. Ruling 306(d): the PR is the one trace when a PR
+    // exists (it implies the branch); a branch alone is the mark, its name the
+    // tooltip and accessible name.
     expect(card).toContain("VIB-9");
     expect(card).toContain("#124");
     cleanup();

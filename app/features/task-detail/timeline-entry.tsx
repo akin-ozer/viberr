@@ -40,9 +40,8 @@ const ENTRY_HEADING_BASE = 3;
  * A comment body that clamps when it's very tall (long agent replies) so a
  * single answer can't dominate the timeline: `Collapsible` (`~/ui/collapsible`)
  * measures it and folds it behind Show more / Show less, the fold the
- * attachments panel shares (ruling 314). Ruling 314: the pictures under the
- * card fold with it, so the item holds the fold's state and says what they
- * hide (`more`).
+ * attachments panel shares. The pictures under the card fold with it, so the
+ * item holds the fold's state and says what they hide (`more`, ruling 314).
  */
 function CollapsibleComment({
   text,
@@ -166,8 +165,8 @@ export function TimelineEntryMeta({
   );
 }
 
-/** The entry's body: a comment's card, a gate run's note (ruling 313), a
- *  reviewer's verdict (ruling 313), or any other typed event. */
+/** The entry's body: a comment's card, a gate run's note, a reviewer's
+ *  verdict (ruling 313), or any other typed event. */
 export function TimelineEntryBody({
   ev,
   mentionNames,
@@ -382,7 +381,7 @@ export function TimelineEntryFiles({
         const ext = fileExtension(name);
         const label = ext.length > 0 && ext.length <= 5;
         return (
-          // Ruling 78 (+ addendum): a text-typed file opens the in-app
+          // Ruling 317 (+ addendum): a text-typed file opens the in-app
           // read-only viewer; any other kind the no-preview card with
           // its Download button.
           <a

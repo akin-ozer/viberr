@@ -19,7 +19,7 @@ import { toError } from "~/shared/errors";
 /**
  * R19-8 (ruling 101) — the whole "Completed — no changes" contract:
  * the live proof, the accept-time gate, and the ONE completion event every
- * writer to Done uses. Extends ruling 101 (R17-2) to the shape it was named for.
+ * writer to Done uses.
  *
  * F19-21, live: VC-5 was a verification-only task ("confirm the file exists on
  * main; NO changes are expected"). The operator correctly engaged the reviewer

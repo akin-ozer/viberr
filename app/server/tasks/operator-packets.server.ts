@@ -151,9 +151,9 @@ export async function writeOperatorComment(
   // were waiting behind. The doctrine now names `run_agent`. This is the
   // backstop for when it tags an agent anyway: the record says plainly that
   // nothing was sent, instead of the tag going nowhere in silence.
-  // Ruling 70: the sentence itself now lives beside the resolver, because the
-  // controller and a mid-run agent needed the same one.
-  // Ruling 70: all of them, in one sentence, from the disclosure resolver.
+  // Ruling 70: the sentence lives beside the resolver, because the controller
+  // and a mid-run agent need the same one: all of them, in one sentence, from
+  // the disclosure resolver.
   const { unreachedAgents, unreachedAgentNote } = await import("./agent-reply.server");
   const note = unreachedAgentNote(
     unreachedAgents(ctx, projectSlug, taskKey, text2),
@@ -501,7 +501,7 @@ export interface OperatorOpenPacketInput {
   body?: string;
   observations?: { k: string; v: string; code?: boolean }[];
   options: OperatorPacketOptionInput[];
-  /** Ruling 63: the account-level cause that raised this, when the cause is
+  /** Ruling 65: the account-level cause that raised this, when the cause is
    *  bigger than the task. Packets sharing it are resolved together. */
   cause?: string;
   /** Ruling 123: a stall escalation (`openStuckLoopPacket`), the one family a
@@ -740,7 +740,7 @@ export async function operatorOpenPacket(
   }
   // Owner ruling (pass 32): an `accept_completion` option is only coherent at
   // the acceptance boundary with a healthy verdict — everywhere else the
-  // acceptance gate refuses the very decision the option offers (ruling 97:
+  // acceptance gate refuses the very decision the option offers (ruling 95:
   // verdict-gated; ruling 101: a no-change completion needs one too), and the
   // human is left confirming a card that cannot succeed. Live (VIB-3): a triage
   // packet offered "Accept as complete now" on a task at Triage with no
@@ -1284,7 +1284,7 @@ export async function operatorOpenPacket(
     })),
     options,
   };
-  // Ruling 63: an account-level cause travels onto the packet, so a sibling
+  // Ruling 65: an account-level cause travels onto the packet, so a sibling
   // raised by the same failure can be found when this one is answered.
   if (input.cause) packet.cause = input.cause;
   // Ruling 123: what lets a later successful run withdraw it, and nothing else.

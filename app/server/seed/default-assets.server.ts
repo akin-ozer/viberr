@@ -146,9 +146,8 @@ work and the result comes back on that task (ruling 268).
   through an audited override.
 - Projects carry stages, workflow boundaries (auto, approval, human), members,
   deployed agents and, on a board that delivers software, a GitHub repository,
-  which it may connect later (ruling 224);
-  a board that delivers results needs none (ruling 224). The move into the
-  final stage is always a human decision.
+  which it may connect later; a board that delivers results needs none
+  (ruling 224). The move into the final stage is always a human decision.
 - Knowledge bases, skills and MCP connections are org resources granted to
   agent profiles. Deleting and renaming them is done by admins in Instance
   settings → Agent resources.
@@ -413,7 +412,7 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // and the done-signal paragraph read the task's `epic` instead of
     // `goalChain`.
     "919af42febe8d3a50cdae2fdc52c873a5d63c435e5ed73ed53068e2dc4248f67",
-    // Ruling 116's review: the doctrine as ruling 116 first shipped it, with
+    // The doctrine as ruling 116 first shipped it, with
     // its `baseBehindBy` sentences between `update_branch_from_base`'s own
     // sentences and the "Never call it" that pointed back to the tool, so
     // "it" read as the packet or the count. The sentence now names the tool.
@@ -718,6 +717,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // Ruling 224 (owner, 2026-10-06): before it said a board that delivers
     // software may connect its repository later.
     "627b7bdd1cf2eeedc3ece72bd1d713918054e5243059a18d312d7d6d8335b746",
+    // The rulings compaction (2026-10-09): before the ruling numbers this
+    // text cites were renumbered.
+    "b676420991c1ecb0be52d32c41f12cbc7fe2380f7333d1c7e62595589d610b10",
   ],
   [path.join("agents", "profiles", "developer.md")]: [
     "bf84fe28d0f2d21172f415f4c49ceb2aaf10bc824d14bc01d82e391d90bbde19",

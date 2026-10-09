@@ -56,8 +56,8 @@ function below(box: HTMLElement, id: string | null): boolean {
 
 /**
  * Ruling 320: the way back for a reader who has scrolled away from the newest
- * message. `reply` is a reply that landed while they read history, which
- * ruling 320 leaves where it is; `newest` is the place an open would show.
+ * message. `reply` is a reply that landed while they read history, left
+ * where it is; `newest` is the place an open would show.
  */
 export type JumpKind = "reply" | "newest";
 

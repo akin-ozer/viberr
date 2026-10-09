@@ -2707,8 +2707,8 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   /**
    * Ruling 148 (F37-13, live): every agent discovered its own shell one
    * exit-127 at a time — `pnpm`, `corepack`, `make`, `curl`, Docker, 75
-   * `command not found` lines across one pass — while Viberr had measured the
-   * inventory since ruling 40 and offered it only through the controller's
+   * `command not found` lines across one pass — while Viberr measured the
+   * inventory (ruling 40) and offered it only through the controller's
    * opt-in `instance_health`. The people whose shell it is now get it.
    */
   it("ruling 148: the prompt names what this host's shell has and has not", () => {
@@ -2881,7 +2881,7 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   it("F10-12 / C02-R4: a SUPPORTING run's local write posture follows its grants (ruling 183); it never ships either way", () => {
     // Ruling 183: a write-GRANTED supporting agent may edit and commit in
     // its OWN isolated checkout (Claude's supporting denylist narrowed to the
-    // delivery commands; Codex runs every thread `danger-full-access` since
+    // delivery commands; Codex runs every thread `danger-full-access`,
     // ruling 144). The prompt used to
     // forbid "edit files / git commit" for EVERY supporting run — stricter
     // than the enforcement, the mirror image of XS-4 — so a granted reviewer
@@ -2989,9 +2989,9 @@ describe("buildAnalyzePrompt — server-side delivery contract (both backends)",
   });
 
   it("ruling 144: no prompt claims an OS sandbox, on either backend", () => {
-    // Ruling 144's section existed to explain an `EPERM` the CLI's own sandbox
-    // produced; with the sandbox gone (owner Q36-14) the section would describe
-    // a confinement the run does not have, in whatever words. Canary: re-add it.
+    // The prompt's sandbox section existed to explain an `EPERM` the CLI's own
+    // sandbox produced; with no sandbox (owner Q36-14) it would describe a
+    // confinement the run does not have, in whatever words. Canary: re-add it.
     for (const delivers of [true, false]) {
       const prompt = buildAnalyzePrompt({
         ...base,
@@ -3622,7 +3622,7 @@ describe("directiveRequestsDelivery (F10-31)", () => {
       "Code Reviewer's request-changes finding on the open PR", // SHOP-12
       "**This branch has an open pull request**, so merge never rebase.", // SHOP-14
       "Rules for this round: `shop-34` has an open PR.", // SHOP-34
-      "The no-history rule (ruling 26(a)): this branch has an open PR.", // SHOP-36
+      "The no-history rule (ruling 230): this branch has an open PR.", // SHOP-36
       "Working on published history, this branch has an open PR.", // SHOP-49
       "§2 governs: `shop-54` has an open PR. **Merge, never rebase.**", // SHOP-54
       "this branch is published history behind an open PR", // SHOP-54

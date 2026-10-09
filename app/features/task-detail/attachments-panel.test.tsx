@@ -580,7 +580,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     expect(baseElement.querySelector(DIALOG)).toBeTruthy();
   });
 
-  // Ruling 78: a text-typed chip opens the read-only viewer in the same
+  // Ruling 317: a text-typed chip opens the read-only viewer in the same
   // popup — with the content fetched from the serving route and a Download
   // button that forces the save dialog (`?download=1`).
   it("a yml chip opens the read-only text viewer with a Download button", async () => {
@@ -686,7 +686,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     }
   });
 
-  // Ruling 78 addendum: a kind the popup cannot render still opens the card,
+  // Ruling 317 addendum: a kind the popup cannot render still opens the card,
   // showing a no-preview note in place of content — the point is the uniform
   // Download button, not the preview.
   it("a chip the popup cannot render (zip) opens the no-preview card with Download", async () => {
@@ -774,7 +774,7 @@ describe("attachment lightbox (image evidence opens a popup, not a tab)", () => 
     }
   });
 
-  // Ruling 78 addendum: the Download button is on EVERY kind's card — before
+  // Ruling 317 addendum: the Download button is on EVERY kind's card — before
   // it, an image opened with only "Open original" and saving took a
   // right-click on the raw tab.
   it("the image lightbox carries the same Download button", () => {

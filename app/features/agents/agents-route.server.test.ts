@@ -558,7 +558,7 @@ describe("profile CRUD round trip (project.md writers + audit)", () => {
       icon: "agents",
       backends: ["codex"],
       // No picked model in FORM → per-backend catalog default, GPT-6.1 Sol on
-      // Codex since ruling 149.
+      // Codex (ruling 149).
       model: "gpt-6.1-sol",
       effort: "medium",
       scope: "Created in Viberr Core",

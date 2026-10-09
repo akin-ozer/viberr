@@ -375,7 +375,7 @@ describe("a failed rebuild is retried (ruling 22)", () => {
    * The ruled ladder, pinned (ruling 22). `scheduleRetry` gives up after
    * the last rung, which is why the test ladder above is 500 long: a test
    * ladder that runs out mid-wait stops retrying and the canary fails for a
-   * reason that has nothing to do with ruling 22.
+   * reason that has nothing to do with the ladder.
    */
   it("ruling 22's ladder is 2s, 5s, 15s, 45s, 120s", () => {
     expect(RETRY_BACKOFF_MS).toEqual([2_000, 5_000, 15_000, 45_000, 120_000]);

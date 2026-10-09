@@ -889,7 +889,7 @@ describe("ruling 35: one backend's runs under a switch", () => {
     expect(cost.querySelector(".metric-val")?.textContent).toBe("Not reported");
     expect(cost.querySelector(".metric-val")?.classList.contains("na")).toBe(true);
     expect(cost.querySelector(".metric-sub")?.textContent).toBe("none of the 14 Codex runs reported one");
-    // Ruling 324: "3864.3M" read as a typo. Ruling 324: "33.0M" is 33M.
+    // Ruling 324: "3864.3M" read as a typo, and "33.0M" is 33M.
     const tokens = metric(container, "Tokens");
     expect(tokens.querySelector(".metric-val")?.textContent).toBe("3.86B");
     expect(tokens.querySelector(".metric-sub")?.textContent).toBe("3.83B in, 96% cached · 33M out");
@@ -1086,7 +1086,7 @@ describe("the prompt-cache panel (ruling 36)", () => {
   });
 
   it("scrolls the table in its own keyboard-reachable box, not the page (layo-21)", () => {
-    // The nowrap columns (eight then, ~690px; eleven since ruling 172) are
+    // The nowrap columns (eleven; the first eight alone were ~690px) are
     // wider than a phone: without the wrap, /insights scrolled sideways at
     // phone width and at 200% zoom.
     const { getByRole } = renderPage(FULL);

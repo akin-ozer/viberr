@@ -1480,7 +1480,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(runBtn.disabled).toBe(true);
   });
 
-  it("a closed task withdraws the operator run and no longer advertises an @operator side door (N20-17 → ruling 52, 280)", () => {
+  it("a closed task withdraws the operator run and no longer advertises an @operator side door (N20-17 → ruling 52, 310)", () => {
     const { container } = renderExec(
       execTask({ operator: attachedOperator, displayReadiness: "accepted" }),
     );
@@ -1532,7 +1532,7 @@ describe("ExecutionProfile — 'operator active' pill honesty (F7-UI1)", () => {
     expect(container.textContent).toContain(
       "Runs on this task use your own account",
     );
-    // No instance credential is named: since ruling 137 there is none to name.
+    // No instance credential is named: there is none to name (ruling 137).
     expect(container.textContent).not.toContain("on this instance");
   });
 
@@ -1867,7 +1867,7 @@ describe("ExecutionProfile — the agent listbox dismisses cleanly", () => {
     fireEvent.keyDown(input, { key: "Escape" });
     expect(agentMenu(container)).toBeNull();
     expect(input.value).toBe("");
-    // Nothing is picked, so the start (enabled since ruling 288) submits nothing.
+    // Nothing is picked, so the start (enabled, ruling 288(a)) submits nothing.
     fireEvent.click(agentRunBtn(container));
     expect(onRunAgent).not.toHaveBeenCalled();
   });

@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 /**
- * Ruling 284, amended by ruling 287: whether a live status line has changed
+ * Ruling 284(a): whether a live status line has changed
  * since it was first painted — AnimatePresence's `initial={false}`, by hand.
  *
  * The words on screen when the page, dock or strip opens are not news, so they

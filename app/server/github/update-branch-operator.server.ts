@@ -71,11 +71,11 @@ import { errorMessage } from "~/shared/errors";
  *
  * A conflict is never retried, forced or narrated away: the merge is aborted
  * and the branch is left exactly as it was (R18-4's shape, a remote branch is
- * never force-reset). Who resolves it is ruling 129's owner decision
- * (2026-09-25, superseding the "a person decides" half of ruling 129 for this case): the operator hands it straight to the task's delivering
- * agent when that agent is deployed with a repo-write grant, and the resolved
- * branch goes back through the reviewers before anyone accepts it. The
- * blocking decision packet is the fallback, for when no agent can take it.
+ * never force-reset). Who resolves it is ruling 129's: the operator hands it
+ * straight to the task's delivering agent when that agent is deployed with a
+ * repo-write grant, and the resolved branch goes back through the reviewers
+ * before anyone accepts it. The blocking decision packet is the fallback, for
+ * when no agent can take it.
  */
 
 /** What the operator's branch-update audit row records about the outcome. */
@@ -86,7 +86,7 @@ type BranchUpdateAuditDetails = {
   /** Conflicting paths (`conflict`), or the store-layout paths that refused the
    *  update (`store_layout`, ruling 229). */
   files?: string[];
-  /** Ruling 229: origin's copy of the branch as it stood BEFORE the call. */
+  /** Ruling 241: origin's copy of the branch as it stood BEFORE the call. */
   remote?: RemoteBranchState["kind"];
   remoteHeadSha?: string | null;
   /** Ruling 239: the merge commit an `updated` refresh created. */
@@ -222,7 +222,7 @@ function conflictPhrase(files: readonly string[]): string {
 }
 
 /**
- * Ruling 129 (ruling 129's one agent merge): the directive the delivering
+ * Ruling 129 (the one merge an agent makes): the directive the delivering
  * agent's run starts with. It says what to merge, where it already is, what to
  * resolve, and that delivering is not the agent's job.
  */
@@ -283,7 +283,7 @@ function remoteHeadOf(remote: RemoteBranchState): string | null {
 }
 
 /**
- * Ruling 229: the sentence about origin's copy of the branch, FOR THE MODEL
+ * Ruling 241: the sentence about origin's copy of the branch, FOR THE MODEL
  * (the tool result). The tool stays the BASE tool: when origin lags it points
  * at `deliver_for_review` (pushing is delivery, ruling 126) and never at a
  * person. Ruling 241 (F40-60): the timeline gets {@link remotePersonSentence}
@@ -315,8 +315,8 @@ function remoteSentence(branch: string, remote: RemoteBranchState): string {
 /**
  * Ruling 241 (F40-60): the same fact for the PERSON reading the timeline.
  *
- * Ruling 229 put origin's lag on the record for the humans and then wrote
- * the model's sentence there: live on WEB-1, WEB-2 and WEB-4, every delivery
+ * Origin's lag went on the record for the humans in the model's sentence:
+ * live on WEB-1, WEB-2 and WEB-4, every delivery
  * was preceded by "call `deliver_for_review` to push it. Do not ask a person
  * to push.", an imperative addressed to the operator about a tool no control
  * on the page carries, and the diverged variant told the person who has to act
@@ -536,8 +536,8 @@ function outcomeSentence(r: UpdateBranchResult, lead = "Brought"): string {
  * unreviewed. (B) Reconcile, so `pr.revisionDrift` is re-measured NOW rather
  * than by the five-minute poll (the PR is open, so no divergence arm fires; the
  * reconcile may still notify watchers or wake the operator on an out-of-band
- * change, which is the same behaviour any pass has). Since ruling 238 this is
- * the push's re-compare (`recompareAfterPush`): the push is recorded first, so
+ * change, which is the same behaviour any pass has). This is the push's
+ * re-compare (`recompareAfterPush`, ruling 238): the push is recorded first, so
  * a count the pass could not replace reads as the one before it. (C) Re-read
  * and write the timeline event from the re-read, carrying the canonical drift sentence; the
  * returned sentence is built from that same re-read. The crash window between
@@ -819,7 +819,7 @@ export async function operatorUpdateBranchFromBase(
   }
 
   if (result.status === "already_current" && result.remote.kind !== "current") {
-    // Ruling 229: origin lagging the workspace is a fact the humans need on
+    // Ruling 241: origin lagging the workspace is a fact the humans need on
     // the record, not only the model. The tool is idempotent by contract, so
     // the record is too: the line is SUPPRESSED when the newest `github` event
     // already says exactly this; the audit row above still fires every call.
@@ -848,7 +848,7 @@ export async function operatorUpdateBranchFromBase(
     // `narrateRefusedActions` headlined it "The operator's plan was not carried
     // out in full." 51 of the 57 such notes on the pass-37 board were this one
     // line. Worse, the sentence was already on the timeline as the `github`
-    // event three lines up — the event ruling 229 deliberately suppresses
+    // event three lines up — the event ruling 241 deliberately suppresses
     // when it would duplicate, re-added by the refusal narration with no
     // suppression and a worse headline.
     stampRefreshed(ctx);

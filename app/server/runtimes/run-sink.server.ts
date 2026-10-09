@@ -557,7 +557,7 @@ export function createRunSink(
 
         // D5 (pass 31): the OTHER half of quota telemetry. The live channel
         // above has no reading from a run refused before its first model call
-        // (and before ruling 161(b), none from Codex at all), so an already-spent
+        // (and once none from Codex at all), so an already-spent
         // Codex subscription produced no reading and /insights read "no
         // reading yet" for a backend that had been refusing every run for days
         // — with the reset date sitting in the failure the human just read.
@@ -775,7 +775,7 @@ export function createRunSink(
         patchRun(db, spec.runId, patch);
       });
       // D5: a run that COMPLETED on this backend is proof the account is not
-      // refusing work any more — the real run IS the re-probe (ruling 220), so
+      // refusing work any more — the real run IS the re-probe (ruling 160), so
       // the exhaustion flag is retired here rather than by a synthetic check.
       // Only on `finished`: an interrupted or errored run proves nothing.
       if (written && state === "finished") {

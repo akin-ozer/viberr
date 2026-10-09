@@ -815,7 +815,7 @@ describe("operatorDispatchAgent", () => {
     await interruptRunningRuns("VIB-1");
   });
 
-  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy after ruling 181", async () => {
+  it("Q34-14 (owner, 2026-09-04): an explicit hand-off to another deployed deliverer still runs directly under direct autonomy (ruling 181)", async () => {
     // The regression guard for the owner's answer: it fails the moment
     // somebody re-gates the hand-off with a refusal or a card.
     deployRoster(DEFAULT_POLICY);
@@ -1312,8 +1312,8 @@ describe("dispatchGate — absent means the catalog default (hunt 2026-08-29)", 
 });
 
 /**
- * Ruling 93 (F39-43). Ruling 93 has the operator ask a reviewer that keeps
- * objecting for everything it would still block on, and on ax-clone every
+ * Ruling 93 (F39-43): the operator asks a reviewer that keeps objecting for
+ * everything it would still block on, and on ax-clone every
  * operator folded that question into the review of a fresh rework. Nothing
  * recorded that it had, so three deadlock packets in 25 minutes (AX-20, AX-22,
  * AX-24) recommended asking again the question their own verdict had answered.
@@ -1418,8 +1418,8 @@ describe("ruling 93: a dispatch that puts the completeness question says so", ()
  * Ruling 124. On AWSC-19 the operator told the Estimate Judge "Record no
  * verdict" in its directive, the Judge kept to it, and Viberr read one into its
  * report all the same: a heading, "Not done or not checked", matched the prose
- * fallback. A directive is a request; `noVerdict` withholds the verdict the way
- * ruling 87 does for the deadlock question, which ruling 66 honours.
+ * fallback. A directive is a request; `noVerdict` withholds the verdict as the
+ * deadlock question does (ruling 87).
  */
 describe("ruling 124: a dispatch that must not judge withholds the verdict", () => {
   const newestReviewerWithheld = () => {
@@ -3106,7 +3106,7 @@ describe("operatorAcceptCompletion", () => {
       expect((await accept("full", callCtx)).outcome).toBe("done");
       expect(task().frontmatter.stage).toBe("done");
       expect(task().frontmatter.pr?.state).toBe("accepted");
-      // The acceptance's own sweep (ruling 55) releases the read, and the
+      // The acceptance's own sweep (ruling 57) releases the read, and the
       // release hands the read task to its operator last.
       await waitFor(
         () =>
@@ -3310,8 +3310,8 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
     expect(packets(store.users.arda.id).length).toBeGreaterThanOrEqual(1);
     expect(packets(store.users.murat.id).length).toBeGreaterThanOrEqual(1);
     // Ruling 75: the row opens the packet, where it is decided. CANARY: drop
-    // `about` from the notice and the row opens the task's top. Ruling 75:
-    // the link names the packet, so the row can follow it once it closes.
+    // `about` from the notice and the row opens the task's top. The link
+    // names the packet, so the row can follow it once it closes.
     expect(packets(store.users.murat.id)[0]!.href).toBe(
       `/projects/${store.slug}/tasks/VIB-1#decision-${p.id}`,
     );
@@ -3324,7 +3324,7 @@ describe("operatorOpenPacket (decision/blocking packet generator)", () => {
   /**
    * Owner ruling (pass 32): `accept_completion` is only coherent AT the
    * acceptance boundary with a healthy verdict — anywhere else the gate refuses
-   * the decision the option offers (rulings 97/101). Live (VIB-3): a triage
+   * the decision the option offers (rulings 95/101). Live (VIB-3): a triage
    * packet offered "Accept as complete now" on a task at Triage with no
    * verdict. Authoring refuses it and names the verbs that fit.
    */
@@ -4177,11 +4177,10 @@ describe("applyRecommendation / dismissRecommendation", () => {
   }
 
   /**
-   * Ruling 117 (pass 37, F37-137): the operator's timeline WINDOW says it is a
-   * window.
+   * Ruling 117 (F37-137): the operator's timeline WINDOW says it is a window.
    *
-   * Ruling 117 fixed the per-ENTRY cut in this very function: a clipped entry
-   * now carries a `clipped` note and the `occurredAt` that reads it whole,
+   * The per-ENTRY cut in this very function was fixed first: a clipped entry
+   * carries a `clipped` note and the `occurredAt` that reads it whole,
    * because "an entry that ends mid-sentence with a '…' and no way to ask for
    * the rest is how a coordinator states half a report as the whole of it,
    * which it did, live, on SHOP-42." The `.slice(0, 6)` immediately beside it
@@ -6570,7 +6569,7 @@ describe("ruling 63: edit_goal options carry an explicit goalDraft", () => {
   /**
    * Ruling 131 (pass 37, F37-73). `resolve_remote_collision` clears a FOREIGN
    * remote — ruling 233's case. With no collision recorded, the resolution
-   * takes ruling 233's `own_pr_open` arm and answers "no collision to
+   * takes the `own_pr_open` arm and answers "no collision to
    * clear", leaving the block untouched.
    *
    * Live on SHOP-11: a rebase diverged the branch from its OWN PR #15, the

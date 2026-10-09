@@ -66,7 +66,7 @@ const GATE_NOTE_META = {
 
 /**
  * Ruling 313: a verdict's mark on the rail is the reviewer's own verdict, as a
- * gate run's is its ending (ruling 313): the check on green for an approval
+ * gate run's is its ending: the check on green for an approval
  * (ruling 315), the cross on red for changes requested. Its pill stays the
  * category; the card under it says the rest.
  */
@@ -152,7 +152,7 @@ export const TimelineItem = memo(function TimelineItem({
   // fold with a comment's text, or behind their own toggle under a typed
   // event, and the toggle says how many it hides. Ruling 313: a typed event's
   // row that names a file already opens it, so a file that is not a picture
-  // is not drawn a second time as a tile (a gate note's logs, ruling 313).
+  // is not drawn a second time as a tile (a gate note's logs).
   const files = useMemo(() => {
     if (!ev.attachments || !attachmentsBase) return NO_NAMES;
     const cited = isTyped && ev.evidence && attachmentNames ? citedFiles(ev.evidence, attachmentNames) : null;
@@ -309,9 +309,9 @@ export function Timeline({
     submitDraft,
     keepDraft,
   } = useCommentPost({ ask, canAttach, onAgentLog });
-  // The filter tab, which a link to an event opens to All (ruling 302), the
-  // event it marks and, ruling 302(c), the one it keeps focusable
-  // (`useTimelineTab`, timeline-actions.ts).
+  // The filter tab, which a link to an event opens to All, the event it marks
+  // and the one it keeps focusable (ruling 302; `useTimelineTab`,
+  // timeline-actions.ts).
   const { f, setF, targeted, arrived } = useTimelineTab({ tlDefault, rows, hasMore, nextLimit });
 
   const items = useMemo(() => rows.filter((e) => shownBy(f, e)), [rows, f]);
@@ -434,7 +434,7 @@ export function Timeline({
             )}
             {/* Ruling 319: the controller composer's hint, in its words and
                 its class: the body face (a key hint is not code), and gone
-                on a touch screen (ruling 321). */}
+                on a touch screen (ruling 319). */}
             <span className="fine dim push kbd-hint" suppressHydrationWarning>
               {sendHint} sends
             </span>

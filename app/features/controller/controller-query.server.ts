@@ -75,7 +75,8 @@ export interface ControllerSurfaceView {
    *  admin (`canInterruptControllerRun`, re-checked by the engine on submit). */
   canInterruptTurn: boolean;
   /** Ruling 267 (F40-59): the open knowledge-base proposals agents filed from
-   *  this project's tasks before ruling 210. Project surface only. */
+   *  this project's tasks; nothing files one now (ruling 210(c)). Project
+   *  surface only. */
   proposals: KbProposalView[] | null;
   /** Ruling 321: the knowledge-base corrections agents on this project's
    *  tasks wrote, newest first. Project surface only. */
@@ -326,7 +327,7 @@ export function getControllerSurface(
   }
   const unseen = new Set(listUnseenReplies(db, viewer.id).map((r) => r.id));
   const working = new Set(liveTurnConversationIds());
-  // Ruling 321: a person is named on this page the way the rest of the app
+  // Ruling 320: a person is named on this page the way the rest of the app
   // names them. A conversation stores its owner's EMAIL at creation (the
   // controller's prompt keeps it: an address is unambiguous to a model), and
   // the transcript and the rail printed that address beside every message
@@ -384,7 +385,7 @@ export function getControllerSurface(
     turn: conversation
       ? conversationTurnState(db, conversation.id)
       : IDLE_TURN,
-    // Ruling 247: a controller run is stored at `project_slug = ''` with the
+    // Ruling 251: a controller run is stored at `project_slug = ''` with the
     // conversation id for its task key, which is the scope the grouping
     // projection is asked for here.
     runtime: conversation

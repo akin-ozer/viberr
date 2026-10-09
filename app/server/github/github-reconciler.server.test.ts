@@ -2596,8 +2596,8 @@ describe("ruling 243: the unpushed delivered revision", () => {
   });
 
   it("ruling 243: a 422 that is not the missing-commit sentence measures nothing", async () => {
-    // 422 is GitHub's generic validation status (ruling 243 kept it scoped to
-    // this sentence); anything else carries the cached record forward.
+    // 422 is GitHub's generic validation status, so only this sentence
+    // counts; anything else carries the cached record forward.
     const cached = { revisionSha: REV, prHeadSha: "olderhead", relation: "behind" as const };
     const { run } = seedOwned({ unpushed: cached });
     const routes = happyRoutes();
@@ -3726,7 +3726,7 @@ describe("ruling 238: the reconcile row names the head it compared", () => {
     // `get_task` would read "head unknown" until something else changed.
     const { store, actor } = setup();
     await pass(store, actor, behindAt(OLD), false);
-    // The shape every row had before ruling 238: a count and no head.
+    // An older row's shape: a count and no head.
     store.db
       .prepare(
         `INSERT INTO provenance (source_path, content_hash, observed_at, action, details_json)

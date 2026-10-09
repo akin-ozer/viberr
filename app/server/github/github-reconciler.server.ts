@@ -517,7 +517,7 @@ async function reconcileTaskUnlocked(
         projectSlug: input.projectSlug,
         taskKey: input.taskKey,
         scope: "checks:read",
-        // F39-5: `checks:read` is advisory (ruling 237 says merging never
+        // F39-5: `checks:read` is advisory (ruling 221 says merging never
         // needed it), so the picker writes the advisory sentence and a neutral
         // note rather than a violation under a shield.
         detail: scopeFlagText(
@@ -551,7 +551,7 @@ async function reconcileTaskUnlocked(
   // Ruling 242: the head this verdict was measured on travels WITH it. A value
   // measured this pass is pinned to the head this pass read; a carried one
   // keeps the pin it already had, so a conflict cannot outlive the commit that
-  // resolved it. Same discipline `paths` has carried since ruling 242.
+  // resolved it. Same discipline `paths` already follows.
   const mergeableAt = mergeableMeasuredNow
     ? (pr.headSha ?? null)
     : (cachedPr?.mergeableAt ?? null);
@@ -666,8 +666,8 @@ async function reconcileTaskUnlocked(
           commitShaSchema,
         );
         // Ruling 243: the commit read answers a well-formed sha it cannot find
-        // with 422 "No commit found for SHA", not 404 (ruling 243 found it on
-        // the acceptance probe). Asking the ref predicate here meant this
+        // with 422 "No commit found for SHA", not 404 (found on the
+        // acceptance probe). Asking the ref predicate here meant this
         // record could never be written on the real API: live on ax-clone
         // AX-20's rework 7ce74b2 sat in the workspace while PR #13 carried
         // c5001a3, `unpushedRevision` stayed null, and the operator sent the

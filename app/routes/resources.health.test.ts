@@ -263,8 +263,8 @@ describe("/resources/health — honest status (gap 17)", () => {
     // Originally this pushed `credential:<backend>` into `degraded`, so
     // `?probe=readiness` answered 503 for the whole deployment because ONE
     // member's key expired — and an orchestrator drained traffic from an
-    // instance serving everyone else fine. Since ruling 137 the credential is
-    // per person, so that is not an instance fact.
+    // instance serving everyone else fine. The credential is per person
+    // (ruling 137), so that is not an instance fact.
     // Canary: push `credential:`/`quota:` back into `degraded` in
     // health-snapshot.server.ts and the readiness probe below 503s again.
     const { getDb } = await import("~/server/db/sqlite.server");
@@ -295,9 +295,9 @@ describe("/resources/health — honest status (gap 17)", () => {
   });
 
   it("reports a per-backend CONNECTED-USER count, and zero is never degraded (R17-5, ruling 137)", async () => {
-    // Ruling 137 replaced "is this backend configured on the instance" with the
-    // only instance-level fact that survives a per-person credential model: how
-    // many people have connected it. Nobody has here, and an instance where
+    // In place of "is this backend configured on the instance", ruling 137
+    // leaves the only instance-level fact that survives a per-person credential
+    // model: how many people have connected it. Nobody has here, and an instance where
     // nobody uses Codex is a CORRECT deployment — alarming would train the
     // operator to ignore the whole field.
     const fresh = await probe();

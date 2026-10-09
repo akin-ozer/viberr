@@ -181,7 +181,7 @@ describe("removeStage", () => {
   it("re-joins the neighbours and leaves no orphan rule", async () => {
     const store = setupProjectedStore(ctx);
     // A person approves the move into Review on this board (the Standard
-    // template's is `auto` since ruling 91), so the merge has a gate to keep.
+    // template's is `auto`, ruling 91), so the merge has a gate to keep.
     approveReviewEntry(store);
     await removeStage(
       store.db,
@@ -266,7 +266,7 @@ describe("stage writes: audit names, boundary disclosure, hex color", () => {
   it("F20-13: removing a stage that collapses two edges to a stricter hop discloses it (toast + audit)", async () => {
     const store = setupProjectedStore(ctx);
     // A chain where a person approves the move into Review (the Standard
-    // template's is `auto` since ruling 91): ready→impl (auto) + impl→review
+    // template's is `auto`, ruling 91): ready→impl (auto) + impl→review
     // (approval). Removing In Progress merges them to the STRICTER `approval`
     // — a tightening the toast and audit must name, not swallow.
     approveReviewEntry(store);

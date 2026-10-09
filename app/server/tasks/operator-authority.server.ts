@@ -186,7 +186,7 @@ export function planRefusalOf(
 }
 
 /**
- * Ruling 121 on Claude (ruling 121): record a Claude drive's refused governed
+ * Ruling 121 on Claude: record a Claude drive's refused governed
  * call on the drive, for the settle's hold note. A Codex plan's refusals are
  * narrated onto the timeline once the plan has run (`narrateRefusedActions`);
  * a Claude drive's reach the model in-run, as its tool's reply, and nothing
@@ -240,7 +240,7 @@ const AUTONOMY_CLAMPED_AUDIT_ACTION = "task.operator.autonomy_clamped";
  * `recommend` capability (stage transitions, packets, typed events,
  * `deliver-review-pr`) to direct execution, with no confirm, no distinct audit
  * row, and only a toast. The Policy page presents operator autonomy as PROJECT
- * configuration (ruling 26(a)); a per-run dropdown that silently outranks it makes
+ * configuration (ruling 108); a per-run dropdown that silently outranks it makes
  * that page a lie.
  *
  * This is a CEILING, not a pin: choosing LESS autonomy for a single run stays
@@ -639,10 +639,10 @@ export function deliverGate(authority: OperatorAuthority): Gate {
 
 /**
  * The `dispatch-agents` gate with ABSENT-means-granted polarity (dispatch-
- * rework bug hunt, 2026-08-29). Ruling 124 collapsed the persisted
- * `assign-primary-specialist` + `summon-reviewers` pair into this id, and the
- * canon (capabilities.ts, ruling 124) promised that an absent grant resolves to
- * the catalog default so existing operator deployments keep dispatching — but
+ * rework bug hunt, 2026-08-29). This id replaced the persisted
+ * `assign-primary-specialist` + `summon-reviewers` pair, and the canon
+ * (capabilities.ts) promised that an absent grant resolves to the catalog
+ * default (ruling 109) so existing operator deployments keep dispatching — but
  * every consumer went through the plain `gate()`, whose absent arm is `off` →
  * deny: on EVERY deployment persisted before the rework (which stores only the
  * retired ids) the operator silently lost the ability to put any agent to

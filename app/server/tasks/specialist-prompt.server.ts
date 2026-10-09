@@ -431,7 +431,7 @@ export interface PromptCloneFailure {
 
 /** Everything the fresh-run prompt is composed from (`buildAnalyzePrompt`). */
 export interface AnalyzePromptInput {
-  /** Ruling 204: the run's own system prompt, read so the shell inventory can
+  /** Ruling 148: the run's own system prompt, read so the shell inventory can
    *  name the tools that prompt plans around and this host does not have. Not
    *  emitted — only scanned. */
   persona?: string;
@@ -454,7 +454,7 @@ export interface AnalyzePromptInput {
   /** Whether this engagement DELIVERS. A supporting (non-delivering) run never
    *  ships anything (P8 isolation): its prompt must NOT instruct push/PR work
    *  regardless of the profile's capabilities (XS-4). Its LOCAL write posture
-   *  follows `delivery` — grants-derived on both backends since ruling 183,
+   *  follows `delivery` — grants-derived on both backends (ruling 183),
    *  so a write-granted supporting run may edit and commit in its own checkout
    *  and the prompt says so (C02-R4). */
   delivers: boolean;
@@ -824,7 +824,7 @@ export function buildAnalyzePrompt(input: AnalyzePromptInput): string {
   // was already measured (ruling 40) and reachable ONLY through the
   // controller's opt-in `instance_health`; the agents whose shell it is could
   // not see it at all.
-  // Ruling 204: the inventory also names the absent tools the run's OWN
+  // Ruling 148: the inventory also names the absent tools the run's OWN
   // persona plans around, because "NOT installed: docker, make" a paragraph
   // below a role description saying the Compose stack is yours is a
   // contradiction the reader has to spot unaided — and the persona is the half

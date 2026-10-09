@@ -306,7 +306,7 @@ CREATE TABLE notifications (
   -- 'epic' (ruling 272): a task joined or left an epic the reader leads, they
   -- were made its lead, someone else closed or reopened it, or every task in
   -- it is done.
-  -- 'dependency' (ruling 55): the work a task waited on landed (or can never).
+  -- 'dependency' (ruling 57): the work a task waited on landed (or can never).
   -- 'ownership' (ruling 50): the reader's task-owner seat changed hands.
   -- 'question' (ruling 74): an agent's question only a person can answer.
   -- This list IS NOTIFICATION_KINDS in app/shared/mapping/notification.server.ts,
@@ -537,8 +537,8 @@ CREATE TABLE org_mcp_servers (
   -- Viberr registered as and the tokens; `oauth_json` is the public half every
   -- surface reads without opening it (status needs_sign_in | signed_in |
   -- expired, expiry, whether it renews, issuer host). NULL for a connection
-  -- that is not an OAuth one. Ruling 192: the public half also carries the
-  -- scope the server granted.
+  -- that is not an OAuth one. The public half also carries the scope the
+  -- server granted.
   oauth_ref TEXT,
   oauth_json TEXT,
   -- Ruling 192: the scope an admin asks the next OAuth sign-in for
@@ -552,7 +552,7 @@ CREATE TABLE org_mcp_servers (
 -- Org-level (unscoped, like org_mcp_servers): the credential is a deployment
 -- fact, not a project one. Written only from a REAL run's failure whose
 -- redacted text matches MODEL_UNSUPPORTED_RE; cleared by a real run's success.
--- Never written by a synthetic probe (ruling 220). Presence of a row =
+-- Never written by a synthetic probe (ruling 149). Presence of a row =
 -- unavailable; absence = unknown-but-offered (never "proven available", the
 -- claim we cannot make).
 CREATE TABLE model_availability (
@@ -700,7 +700,7 @@ CREATE TABLE "agent_runs" (
   -- "Primary specialist"/"Reviewer" literals in the shadow-kind cleanup.
   -- idx_agent_runs__one_delivering below is keyed on this, and reads correctly
   -- BECAUSE 'primary' means delivering.
-  -- 'controller' (ruling 247): a controller conversation turn. Its rows carry
+  -- 'controller' (ruling 251): a controller conversation turn. Its rows carry
   -- project_slug = '' (instance machinery — never a member-visible task scope)
   -- and task_key = the conversation id, so every task-scoped query, which
   -- filters by real (project_slug, task_key) equality, never matches them.
@@ -720,7 +720,7 @@ CREATE TABLE "agent_runs" (
   cached_input_tokens INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
   total_cost_usd REAL,
-  -- Ruling 66: this run was dispatched with its VERDICT channel withheld, so a
+  -- Ruling 87: this run was dispatched with its VERDICT channel withheld, so a
   -- reply carrying no envelope verdict is an ANSWER and not silence. The prose
   -- fallback that manufactures a verdict from a reply must not fire here: the
   -- reviewer was told not to judge, and obeying is not an omission to repair.

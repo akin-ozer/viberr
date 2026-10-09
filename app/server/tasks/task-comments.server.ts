@@ -304,7 +304,7 @@ export async function appendComment(
      *  is). Never set by a route. */
     alsoWrite?: (parsed: ParsedTaskFile) => void;
     /** Ruling 76: the files the comment carries, already on the task; the
-     *  comment claims them (ruling 76). Set by `commentToAgent` only. */
+     *  comment claims them. Set by `commentToAgent` only. */
     attachments?: readonly string[];
   },
   actor: TaskActor,
@@ -453,7 +453,7 @@ export interface CommentToAgentResult extends AppendCommentResult {
    * refusal signal.
    */
   runNotStarted: string | null;
-  /** Ruling 68: the run did not start because this agent is already running
+  /** Ruling 69: the run did not start because this agent is already running
    *  on the task, which is the one refusal viberr makes good on: that run's
    *  completion starts it on this comment (`deliverDeferredMention`). */
   deferred?: true;
@@ -838,7 +838,7 @@ export async function commentToAgent(
   let runId: string;
   let triggered: "resumed" | "started";
   let resumeOutcomeKey: string | undefined;
-  /** Ruling 68: the single-flight guard refused it, so it is owed, not lost. */
+  /** Ruling 69: the single-flight guard refused it, so it is owed, not lost. */
   let deferred = false;
 
   // A8 (pass 23): the comment is ALREADY on the timeline. A run-start failure

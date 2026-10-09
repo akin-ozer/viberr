@@ -588,10 +588,9 @@ describe("run analytics", () => {
  * cost, and the runtime treats them as one class.
  *
  * Ruling 35 takes the share one backend at a time, in the backend's measure.
- * Ruling 36 guarded the cross-backend sum, where a whole side was
- * silent by construction (every Codex run); ruling 36's test still decides
- * when there is no share, and ruling 36's stricter one gives way to counting
- * the incidental silence inside one backend.
+ * Ruling 36 decides when there is no share: a side that ran and reported
+ * nothing at all. A run inside one backend that reported nothing is
+ * incidental silence, counted rather than a reason to drop the share.
  */
 describe("coordination share (F31-D6, rulings 36 and 35)", () => {
   it("F31-D6: is the operator AND controller share of the backend's cost", () => {
@@ -618,8 +617,8 @@ describe("coordination share (F31-D6, rulings 36 and 35)", () => {
     // token gap is.
     insertRun(db, { kind: "primary", state: "interrupted", cost: null, turns: 4 });
     const s = runsOf(db);
-    // CANARY: restore ruling 36's test (null unless EVERY run reported) and
-    // one stopped run blanks the card for good on an ordinary instance.
+    // CANARY: make the share null unless EVERY run reported, and one stopped
+    // run blanks the card for good on an ordinary instance.
     expect(s.coordination.share).toBeCloseTo(0.25, 5);
     expect(s.coordination.silent).toEqual({ delivery: 1, coordination: 0 });
     expect(s.coordination.reached).toEqual({ delivery: 2, coordination: 1 });
@@ -1109,8 +1108,8 @@ describe("backend quota readings (pass 29)", () => {
   });
 
   /**
-   * Ruling 161(c): a reading that lists its windows (rulings 161(b), 161(a)) ages each
-   * one on its own reset. A lapsed window keeps its name and reset but loses
+   * Ruling 161(c): a reading that lists its windows ages each one on its own
+   * reset. A lapsed window keeps its name and reset but loses
    * its figure, and when it was the binding window, the current window closest
    * to its limit binds in its place, so the week stays on the card after the
    * five-hour window resets.
@@ -1205,8 +1204,8 @@ describe("backend quota readings (pass 29)", () => {
  * specialist runs: `WRITTEN 0 · READ 45.0M · WRITE/READ 0.000`. Codex declares
  * `cache_write_input_tokens` in the SDK's own types and returned exactly 0 for
  * it in 101 of 101 usage envelopes, against 67.2M tokens reported read. A
- * reader checking whether rulings 369-376 do anything on Codex would take
- * `0.000` for an answer.
+ * reader checking whether the prompt-cache rulings (169 to 173) do anything on
+ * Codex would take `0.000` for an answer.
  *
  * Every neighbouring column on that page already refuses to do this: the cost
  * breakdowns print "not reported" rather than $0.00, the quota panel prints
@@ -1274,7 +1273,7 @@ describe("ruling 172: the prompt-cache table reproduces PLAN.md's baseline", () 
     insertRun(db, { kind: "primary", firstCall: { write: 14_000, read: 0 }, cachedTok: 5_000_000, peak: 10_000 });
     insertRun(db, { kind: "primary", firstCall: { write: 2_000, read: 40_000 }, cachedTok: 3_000_000, peak: 20_000 });
     insertRun(db, { kind: "primary", state: "error" });
-    // A row from before ruling 36: reads, no first call. CANARY: take the
+    // An older row: reads, no first call. CANARY: take the
     // reads over every run and read/run is (5M + 3M + 9M) / 2.
     insertRun(db, { kind: "primary", cachedTok: 9_000_000 });
     for (const peak of [30_000, 40_000, 50_000, 60_000, 70_000, 80_000, 90_000, 100_000]) {

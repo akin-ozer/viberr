@@ -409,7 +409,7 @@ describe("O39-d: a reply its owner has not seen", () => {
 /**
  * Stopping a turn from the controller page.
  *
- * `interruptControllerTurn` hands the engine the ruling-247 scope of a
+ * `interruptControllerTurn` hands the engine the ruling-251 scope of a
  * controller run so neither page has to know it, and the engine's interrupt
  * asks `canInterruptControllerRun` instead of a project membership the run
  * has none of. A stopped turn settles like a finished one: the transcript
@@ -717,7 +717,7 @@ describe("a failed queued start accounts for the messages behind it", () => {
 });
 
 /**
- * Ruling 249: a turn a restart orphans gets an honest "interrupted" note.
+ * Ruling 252: a turn a restart orphans gets an honest "interrupted" note.
  *
  * Message ORDER cannot see the common case. A turn taken off the FIFO always
  * has the PREVIOUS turn's reply sitting after its own user message, because

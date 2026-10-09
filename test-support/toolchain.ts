@@ -1,7 +1,7 @@
 import type { Toolchain } from "~/server/ops/toolchain.server";
 
 /**
- * The suite's hermetic toolchain reading (ruling 9, narrowed by ruling 144).
+ * The suite's hermetic toolchain reading (ruling 9).
  *
  * `cachedToolchain()` spawns `npm`, `git`, `python3`, `go`, `make`, `docker`,
  * `pnpm`, `yarn` and `curl` once per process for their versions. A unit test

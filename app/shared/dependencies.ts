@@ -57,8 +57,7 @@ export const DEPENDENCY_GRAMMAR_HINT = "a task key like JC-6";
  * `epic-<n>` (ruling 55), so a project keyed `EPIC` would have tasks whose
  * keys read as epic ids everywhere a person or an agent reads them: on a
  * card, in a wait, in the controller's replies. Every writer of `taskPrefix`
- * refuses it by name. (Before ruling 55 the reserved prefix was `GOAL`,
- * because `GOAL-1` read as a goal-link reference missing its link.)
+ * refuses it by name.
  */
 const RESERVED_TASK_PREFIX = "EPIC";
 
@@ -82,7 +81,7 @@ export function splitDependencyText(text: string): string[] {
 }
 
 /**
- * Ruling 55: what the `dependencies-released` operator trigger carries —
+ * Ruling 57: what the `dependencies-released` operator trigger carries —
  * the entries the task waited on, and the person who cleared the list by hand
  * when it was not the engine (null for an engine release).
  */

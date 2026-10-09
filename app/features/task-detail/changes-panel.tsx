@@ -185,7 +185,7 @@ export function ChangesBody({ url, revisionSha, githubHost }: ChangesBodyProps) 
   if (!view.ok) {
     // Drawn here, not in a component of its own: this `div` sits in the slot
     // the body's `div` fills, so a read that fails and then succeeds (or the
-    // reverse) keeps the same node, as before ruling 13(b).
+    // reverse) keeps the same node, as it did before the ruling 13(b) split.
     return (
       <div className="chg-fail" role="alert">
         <p>{view.reason}</p>

@@ -36,10 +36,10 @@ export function resolveNewProject(entries: NewProjectEntries, keyPool: string[])
   const slug = slugify(name);
   // The effective repo owner: a picked connection. A board that delivers
   // software delivers through GitHub, so it takes a repository, and with it a
-  // PAT connection, unless the person connects it later (ruling 224: the
-  // operator asks for one when a task needs it, so a board without is no dead
-  // end). Ruling 224: a board that delivers results needs none, and takes one
-  // only when the person attaches it.
+  // PAT connection, unless the person connects it later (the operator asks
+  // for one when a task needs it, so a board without is no dead end). A board
+  // that delivers results needs none, and takes one only when the person
+  // attaches it (ruling 224).
   const effOwner = connOwner;
   const needsRepo = delivers === "software" ? !repoLater : attachRepo;
   const ok =

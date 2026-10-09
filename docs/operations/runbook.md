@@ -192,7 +192,7 @@ failure met while moving around the app, it is the failing `.data` request's. An
 records share one id. The error page shows it too, as "Request id: …", when the failure
 arrived with the document itself (a server render, or the hydration that reuses it); an
 error met on a later navigation shows none rather than an earlier request's, so read that
-one from devtools (ruling 11 raised the ruling-11 ceilings for the error page's id).
+one from devtools.
 
 The app logs JSON lines on stdout. To find one request's records:
 
@@ -294,8 +294,8 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   again. A delivery never pushes a task branch as the repository's first ref.
   A repository whose default branch is not named for one of the project's tasks is
   not given another (ruling 227): when the project names a branch the repository does
-  not have (written unconfirmed before ruling 225 while GitHub was unreachable, or
-  renamed on GitHub since), the project takes the repository's default, the task's
+  not have (an older project written while GitHub was unreachable, or renamed on GitHub
+  since), the project takes the repository's default, the task's
   timeline says so, and
   the audit row is `project.default_branch.adopted`. After a rename, a workspace that
   already has commits on the old name stays on it: rename that branch in the workspace,
@@ -377,7 +377,7 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   sign-in lives only in its account's own home (ruling 138),
   `$VIBERR_DATA_ROOT/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json`
   or `.../codex-home/accounts/<accountId>/auth.json` (directly in `claude-home/` or
-  `codex-home/` for an account connected before ruling 138); deleting or recreating that
+  `codex-home/` for a legacy account); deleting or recreating that
   directory removes it while the credential ROW stays in `user_backend_credentials` (a
   wipe of the WHOLE `viberr-data` volume takes the database with it, and then the row is
   gone too). Health for that person then reads "Your <Backend> sign-in file is missing
@@ -660,7 +660,7 @@ rest of the data root (`DATA_ROOT_SUBDIRS`) and is one of `npm run backup`'s
 **Tables with no retention:** `provenance` (append-only observation ledger, the one that
 grows fastest; prune by hand with the app stopped: `DELETE FROM provenance WHERE
 observed_at < …; VACUUM;`), better-auth `session`, `agent_runs`, `goal_projections` (an
-upgraded root's; nothing writes it since ruling 273),
+upgraded root's; nothing writes it, ruling 273),
 `controller_conversations`, `controller_messages`, `staged_outcomes` (24 h TTL in code,
 rows kept), `scope_violations`, `model_availability`. `diagnostics` is rebuilt, not
 pruned.
@@ -684,8 +684,8 @@ enter (wrangler's 0700 `.wrangler/tmp/dev-*`), and the server's own `rm -rf` the
 `.git` and stops half-way. By hand, do the same: find the owner with `docker compose exec
 -T app stat -c '%u' <dir>` and remove it as that uid, `docker compose exec -T -u
 <uid>:20000 app rm -rf <dir>`; anything left belongs to another uid, removed the same way.
-What is left as uid 1000 is the server's own (a run's skill plugin copied before ruling
-140, the `workspace/` root itself). Viberr opens that to the agents' group and never
+What is left as uid 1000 is the server's own (a run's skill plugin from an older copy,
+the `workspace/` root itself). Viberr opens that to the agents' group and never
 removes it with `rm` (ruling 140): do the same, `docker compose exec -T app chmod -R -P
 g+rwX <dir>`, then remove as the owner again, and take an emptied `workspace/` root with
 `docker compose exec -T app rmdir <dir>`. A finished task's reclaim does all of this

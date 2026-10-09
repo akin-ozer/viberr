@@ -4,10 +4,10 @@ import { z } from "zod";
 /**
  * Ruling 67 — the `create_task` confirm says what already looks like it.
  *
- * Ruling 67's option creates a real task on a person's confirm, and the card
- * discloses what it WILL create. It says nothing about what already exists,
- * and the operator authoring it is reasoning about a board it cannot see all
- * of.
+ * The option creates a real task on a person's confirm, and the card
+ * discloses what it WILL create. Without this it says nothing about what
+ * already exists, and the operator authoring it is reasoning about a board it
+ * cannot see all of.
  *
  * The controller named three near-misses from this board, unprompted, when
  * asked what a reader of the final state would not learn from it: *"the
@@ -18,7 +18,7 @@ import { z } from "zod";
  * packet and recognising the work. A task that was never created leaves
  * nothing behind, so the rate is invisible in the record.
  *
- * `read_board` (ruling 131) gave the operator a way to check before it offers.
+ * `read_board` (ruling 213) gave the operator a way to check before it offers.
  * This is the other half: the person confirming gets the same fact, at the
  * moment the confirm is in front of them, without having to recognise it.
  */

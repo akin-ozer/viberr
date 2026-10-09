@@ -47,9 +47,8 @@ const PRIVATE_RUNTIME_ENV_RE =
 const RUNTIME_HOME_ENV_RE = /^(?:CLAUDE_CONFIG_DIR|CODEX_HOME|CODEX_SQLITE_HOME)$/;
 
 /**
- * Ruling 169: the CLI's prompt-cache switches, stripped because ruling 171
- * made the cache lifetime the CLI's automatic choice and Viberr sets none of
- * them.
+ * Ruling 171: the CLI's prompt-cache switches, stripped because the cache
+ * lifetime is the CLI's automatic choice and Viberr sets none of them.
  *
  * Not setting them was not enough. None of these names is credential-shaped
  * or declared by the env schema, so one on the host (a developer's shell, a
@@ -65,9 +64,9 @@ const PROMPT_CACHE_ENV_RE =
   /^(?:DISABLE_PROMPT_CACHING(?:_[A-Z0-9]+)?|ENABLE_PROMPT_CACHING_1H(?:_[A-Z0-9]+)?|FORCE_PROMPT_CACHING_5M|CLAUDE_CODE_(?:SUBAGENT_)?PROMPT_CACHE_TTL)$/;
 
 /**
- * Ruling 169: the CLI's compaction switches, stripped for the same reason
- * under ruling 171: the CLI compacts at its model's own limit, and Viberr
- * compacts a large session at the end of its run with `/compact`.
+ * Ruling 171: the CLI's compaction switches, stripped for the same reason: the
+ * CLI compacts at its model's own limit, and Viberr compacts a large session at
+ * the end of its run with `/compact`.
  *
  * On the host, the window (`CLAUDE_AUTO_COMPACT_WINDOW_ENV`) and
  * `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` would move where every run compacts (a
@@ -142,7 +141,7 @@ const APP_CONFIG_ENV: ReadonlySet<string> = new Set(ENV_KEYS);
  * `OPENAI_API_KEY` on the host can never quietly pay for a ChatGPT-workspace
  * run.
  *
- * Ruling 169: and NO prompt-cache or compaction switch
+ * Ruling 171: and NO prompt-cache or compaction switch
  * ({@link PROMPT_CACHE_ENV_RE}, {@link COMPACTION_ENV}), so the cache
  * lifetime and the compaction point a run gets are the CLI's own choice, as
  * rulings 171 and 171 decided.

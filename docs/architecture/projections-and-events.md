@@ -167,9 +167,8 @@ an unparseable epic file counts as one.
 - `dependencies.server.ts` (ruling 55) is the READ model beside the rebuilder:
   `resolveDependencies` / `dependencyResolver` map each stored entry to
   `open | done | failed | missing` from the live projections (a task at the
-  terminal stage is `done`, archived there or not (ruling 55), and one archived before it
-  `failed`; every entry is a task key since
-  ruling 55 retired the goal-link spelling). The board
+  terminal stage is `done`, archived there or not, and one archived before it
+  `failed`; every entry is a task key). The board
   query resolves every row through ONE resolver; the task query resolves on read;
   nothing caches a resolved state. `listHeldTasks` feeds the release engine.
 - Each file's re-projection (project, task, epic) runs as ONE transaction, its
@@ -254,10 +253,9 @@ and to nothing else. `controller.log-appended` rides the `user` scope every sign
 surface subscribes; `run.log-appended` reaches only a connection holding its task's scope
 (the workspace layout of the page showing that task), because nothing on a board, the
 controller page or another task's page changes per line of someone else's run: the
-board's "agent running" fact moves on `run.state-changed`. Until ruling 300 a board
-received and dropped every line, and the task's own page revalidated root, layout and
-task on its run's lines at most once per 2 s (`RUN_LINE_REVALIDATE_MS`) to move the Live
-run strip; the strip now reads the facts every console tail read returns (below).
+board's "agent running" fact moves on `run.state-changed`. A board never receives these
+lines (ruling 300), and the task's own page does not revalidate on them: the Live run
+strip reads the facts every console tail read returns (below).
 
 A data event reaches `onLiveFrame` too, once per id, after the ledger has recorded it
 (ruling 74). Its one listener is the root's `AttentionWatcher`, which re-reads

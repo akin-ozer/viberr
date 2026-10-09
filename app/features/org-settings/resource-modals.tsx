@@ -213,12 +213,12 @@ export function McpModal({
   // live sign-in this editor had not seen yet) is said at that field.
   const credErr = credentialError(err, errField);
   // Ruling 192: while signed in, the credential field gives way to a
-  // sentence, and (ruling 192) what it held goes with it. A draft typed, or
+  // sentence, and what it held goes with it. A draft typed, or
   // filled in by the browser, before the sign-in landed used to ride the next
   // save unseen, where the server refused it as a pasted credential over the
   // live sign-in. Dropped while rendering, so no save sends it and a sign-out
-  // brings the field back empty. Ruling 192: the sign-in is read live from the
-  // row, which the panel keeps current.
+  // brings the field back empty. The sign-in is read live from the row, which
+  // the panel keeps current.
   const credReplaced = credentialReplaced(initial, transport, target);
   if (credReplaced && (cred !== "" || clearCred || credErr !== null)) {
     setCred("");

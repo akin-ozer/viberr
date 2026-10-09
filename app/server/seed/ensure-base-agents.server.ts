@@ -111,8 +111,9 @@ export function ensureBaseAgentsDeployed(
   }
 }
 
-/** The deployment without the operator fields a save stored before ruling 176,
- *  or the deployment itself when it is not the operator or stores none. */
+/** The deployment without the fixed operator fields an older save stored
+ *  (ruling 176), or the deployment itself when it is not the operator or
+ *  stores none. */
 function withoutOperatorIdentity(
   deployment: AgentDeployment,
   dataRoot: string | undefined,

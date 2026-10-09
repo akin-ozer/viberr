@@ -403,14 +403,14 @@ if as_agent "$UID_A" "rm -rf '$plugin'" && [ ! -e "$plugin" ]; then
 else
   fail "the person's own rm could not remove the mounted plugin"
 fi
-# What the mount wrote before this ruling: the folder at the store's 0755,
+# What the old mount wrote: the folder at the store's 0755,
 # its file in the server's group.
 OLD="$TASK_WS/.viberr-plugins/run_before-495"
 (umask 0002 && mkdir -p "$OLD/skills/sourced-content" && chmod 0755 "$OLD/skills/sourced-content" \
   && echo "# Sourced content" > "$OLD/skills/sourced-content/SKILL.md")
 as_agent "$UID_A" "rm -rf '$OLD'" 2>/dev/null
 if [ -f "$OLD/skills/sourced-content/SKILL.md" ]; then
-  pass "the person alone cannot remove a plugin the mount wrote before ruling 140 (F40-71)"
+  pass "the person alone cannot remove a plugin the old mount wrote (F40-71)"
 else
   fail "the person removed the old plugin alone (this check proves nothing)"
 fi

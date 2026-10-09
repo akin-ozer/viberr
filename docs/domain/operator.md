@@ -55,13 +55,13 @@ rulings (ruling 208(a)).
 
 - **Autonomy is a ceiling, not a pin** (ruling 108). A per-run level may sit at or
   below the configured one. Only an agent-reply react carries one, the autonomy of the
-  drive that dispatched the agent (ruling 108), so a clamp bites when the ceiling was
+  drive that dispatched the agent, so a clamp bites when the ceiling was
   lowered while the chain ran. A clamp that bites writes the audit fact
   `task.operator.autonomy_clamped`, and the run's own prompt names it beside its autonomy:
   "Autonomy: **supervised** (this run asked for full; supervised is this project's ceiling
   for every run, ruling 108)." A run nothing reduced reads the bare line. The task page's
   run control shows the backend and offers Run; it picks neither backend nor autonomy
-  (ruling 298).
+  (ruling 310).
 - **An operator run bills the TASK OWNER** (ruling 137), like every other run on a task:
   `runOperator` resolves `resolveTaskRunPrincipal` before it starts anything and spawns
   with that person's own Claude or Codex credential. Authority is still the operator's
@@ -109,11 +109,11 @@ rulings (ruling 208(a)).
 | `goal-updated` | re-scope | `updateTaskGoal` |
 | `agent-reply` | react | the agent completion pipeline |
 | `pr-diverged` | recover | the GitHub reconciler on an out-of-band PR change |
-| `delivered` | proceed | a full-autonomy delivery that opened a new PR or moved the head of the task's open PR, made outside a drive (ruling 127); for a delivery a drive made itself, the drive's lease release, only when the drive stopped right after delivering (`deliveredFollowUpFor`, ruling 127) |
+| `delivered` | proceed | a full-autonomy delivery that opened a new PR or moved the head of the task's open PR, made outside a drive; for a delivery a drive made itself, the drive's lease release, only when the drive stopped right after delivering (`deliveredFollowUpFor`, ruling 127) |
 | `packet-resolved` | proceed | `resolvePacket`, when no asking agent absorbed the answer, or when the answer names another actor (ruling 68). The payload carries the option (kind, title), the person's own note, and, for a ceremony that performs work of its own (`resolve_remote_collision`), Viberr's record of what it did in a separate `serverOutcome` field rendered as Viberr's sentence, never inside the quoted note (ruling 233) |
-| `dependencies-released` | proceed after a hold | the release engine (ruling 55): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot. A release at birth (`createTask`, when every entry was done before the task existed) carries `atBirth`, and the doctrine says instead that nothing held the task and there is nothing to bring up to date (F39-65) |
+| `dependencies-released` | proceed after a hold | the release engine (ruling 57): the payload names what was waited on and who cleared it; the doctrine says the base branch has changed since the hold and that a hold packet the operator opened itself is now moot. A release at birth (`createTask`, when every entry was done before the task existed) carries `atBirth`, and the doctrine says instead that nothing held the task and there is nothing to bring up to date (F39-65) |
 | `head-unpushed` | deliver | a person's refused acceptance whose cause is an unpushed reviewed revision, which only the operator can push (ruling 96) |
-| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict (ruling 244), or the reconciler's flip of an open PR to conflicting (ruling 244); the instruction names both origins |
+| `pr-conflicting` | resolve the conflict | a person's refused acceptance whose acceptance-time refresh met a conflict, or the reconciler's flip of an open PR to conflicting (ruling 244); the instruction names both origins |
 | `gates-failed` | rework | Viberr's own run of the project's gates on the revision under review finished with a gate that did not exit 0 (ruling 130). The turn names each failing gate, its command and its log's attachment name, tells the operator to `run_agent` the deliverer with them and deliver the fix, and forbids asking an agent to re-run the gates to report them |
 | `stranded` | decide what happens next | the stranded-task sweep (§3.1, ruling 122) |
 | `relayed` | read what arrived | another task of the project relayed text here (ruling 135): the operator's `relay_to_task` there, or a specialist's `relay` entry posted at its completion. The payload (`relay`) carries the source task, the author's name, the text and the relayed comment's stamp; the turn quotes the text (cut at `AGENT_REPORT_CAP_TOOLLESS`, with the stamp for the rest), says it is data, says to act on it when it delivers what the task waited for, and forbids asking a person to copy it or confirm it arrived. It goes first, ahead of the held doctrine, the way a person's comment does. Not refused by an open packet or a dependency hold |
@@ -196,8 +196,8 @@ stranded resumes; a human move resets the chain), and a boot recovery re-invoke 
 packet (or, for the stranded resume, leaves a note) instead of looping.
 
 The react depth counts hops that got nowhere, so a reply that reached a boundary resets it
-to 0 before the cap is checked: a reply whose recorded verdict is `approve` (ruling 119),
-and a reply whose hop moved the task's head (ruling 119). The head signal is the one the
+to 0 before the cap is checked: a reply whose recorded verdict is `approve`, and a reply
+whose hop moved the task's head (ruling 119). The head signal is the one the
 server writes, never the agent's prose: `headMovedSince` (`react-progress.server.ts`)
 reads the active work revision after the completion's workspace reconcile, and the hop
 moved it when a `delivered` revision was minted, or a revision's `pushedAt` was stamped by
@@ -225,8 +225,8 @@ more, the drive keeps it on `ctx.operatorRun` for every agent it dispatches, and
 own `delivered` follow-up and stranded resume carry it on. A trigger a person causes carries
 none, so a comment, a packet answer, a Run press or a person's own dispatch starts it over;
 in the lease queue two of the chain's own triggers keep the deeper count, and a person's
-trigger overwrites it. A moved head does not restart it; an approve does (ruling 119), and
-an acceptable task at the ceiling gets no packet (ruling 119). Otherwise no operator turn
+trigger overwrites it. A moved head does not restart it; an approve does, and an acceptable
+task at the ceiling gets no packet (ruling 119). Otherwise no operator turn
 follows the twelfth hop, and the stuck-loop packet opens with the same state lines, its
 reason "The chain made progress but ran 12 hops without a person or a boundary." A restart
 loses the count, as it loses the depth.
@@ -237,13 +237,12 @@ loses the count, as it loses the depth.
 is live on the task, a finished drive whose task is stranded gets ONE resume nudge (a
 `transition` trigger with `strandedResume: true`) instead of a flip to "waiting on you".
 `operatorLeftTaskStranded` says a task is stranded when it is not archived, has no packet,
-no pending recommendation, no `blockedBy` and no pending schedule (ruling 120: a run with its
-time on the record will move the task, so the nudge that told the operator to "record the
-hold" with a packet no longer comes), and any of: the drive's own last transition
-landed it on this stage (`ctx.operatorRun.movedToStageId`, ruling 120 — its move queues
-no re-trigger, whatever the new stage's boundary); the drive's whole plan was refused
-(ruling 120); the drive refreshed the branch and stopped without delivering (ruling 120);
-or the stage's outbound boundary is `auto`. Only a drive that knows its starting stage, has
+no pending recommendation, no `blockedBy` and no pending schedule (a run with its time on
+the record will move the task, so no nudge tells the operator to "record the hold" with a
+packet), and any of: the drive's own last transition landed it on this stage
+(`ctx.operatorRun.movedToStageId`: its move queues no re-trigger, whatever the new stage's
+boundary); the drive's whole plan was refused; the drive refreshed the branch and stopped
+without delivering; or the stage's outbound boundary is `auto` (ruling 120). Only a drive that knows its starting stage, has
 a run row and finished cleanly is judged; a stage someone else moved during the drive
 belongs to that move's own re-trigger. The nudge's instruction says why it came: a
 plan-refused nudge quotes every refusal in full (rulings 121, 116), a refresh nudge says a
@@ -256,7 +255,7 @@ and stay quiet until a person re-litigates it (a transition, a packet resolution
 edit, a person's Run). An action carried out is any governed action that answered `done`,
 or one whose outcome is the packet it opened (ruling 118), on either backend: a Codex plan
 step through the executor's `record` and a Claude tool call through the toolkit's reply
-both stamp it with `noteCarriedOutAction` (ruling 121). When the nudged drive tried to act
+both stamp it with `noteCarriedOutAction`. When the nudged drive tried to act
 and Viberr refused all of it, the note says the operator was STOPPED, not holding, and
 names the three remedies (ruling 121). On Codex that is the nudge's plan refused in full,
 and the note points at the refusal notes left directly above it. It says the run before
@@ -316,12 +315,11 @@ specialist run the same guide under a framing of its own
 ([agents-and-runtime.md](agents-and-runtime.md)).
 
 `operatorTurnDoctrine` builds the trigger-specific instruction and
-`operatorTurnInstruction` wraps it for every trigger: it PREPENDS, in order, the
-unfinished report a failed run left standing (ruling 116), the refusal nothing has
-answered yet (ruling 116), the person's decisions on the task (ruling 116), the
-collisions with other open PRs (ruling 116), where the branch refresh is refused
-(ruling 116), a behind count that describes an older head than the branch now carries
-(ruling 116: the snapshot's `baseBehindBySentence`, plus "A decision packet never states a
+`operatorTurnInstruction` wraps it for every trigger: it PREPENDS, in order (ruling 116),
+the unfinished report a failed run left standing, the refusal nothing has answered yet,
+the person's decisions on the task, the collisions with other open PRs, where the branch
+refresh is refused, a behind count that describes an older head than the branch now
+carries (the snapshot's `baseBehindBySentence`, plus "A decision packet never states a
 behind count for a head other than the one the packet puts up."; nothing when the count
 is current), whose the open packet is (ruling 131) and the runs already scheduled on the
 task with whose each is (ruling 125: a hold one of them explains needs one note and no
@@ -329,7 +327,7 @@ packet), and it APPENDS the capability-gap
 remedy clause (ruling 110: a packet must name the grantable capability and where a human
 grants it, not only workarounds). The backend prompt builders wrap the result; the
 Codex prompt adds `CODEX_PLAN_WHOLE_TURN` (nothing re-invokes it for a step of its own,
-so a refresh goes in the same plan as the step it prepares, ruling 120). The default
+so a refresh goes in the same plan as the step it prepares, ruling 118). The default
 arm states that `liveRuns` is the only proof a run is in flight: `waiting` is a display
 flag and a directive comment is not a running agent. The pre-work rule says to call
 `transition_stage` again in the same turn when the new stage's outbound boundary is
@@ -346,18 +344,18 @@ correct.
 (ruling 93): its successive request-changes verdicts, counted back from its newest and
 reset by its own first approve; a re-review that blocks the SAME revision again counts as
 another objection (ruling 92), and a re-dispatch that records no verdict counts as
-nothing. At TWO the move is the operator's and it is not another rework (ruling 93):
-run that reviewer once with no rework behind it, `completeness: true` on the `run_agent`
-(ruling 93, so the verdict it returns is recorded as the complete set), and rework ONCE
-against the whole answer. When the reviewer names something outside the work — a tool the
+nothing. At TWO the move is the operator's and it is not another rework: run that
+reviewer once with no rework behind it, `completeness: true` on the `run_agent` (so the
+verdict it returns is recorded as the complete set), and rework ONCE against the whole
+answer. When the reviewer names something outside the work — a tool the
 shell inventory says is absent, a baseline the repository does not have yet, a decision
 nobody has made — the deliverer owes nothing: say so in one comment and
 `open_decision_packet`, naming the real exits (drop or replace the required reviewer,
 accept past the gate, fund the baseline as its own task). At THREE
 (`REVIEW_DEADLOCK_ROUNDS`) Viberr opens the deadlock packet itself inside the verdict's
-locked write, offering `question_reviewer` among its options (ruling 94); when another
-packet is open at that instant the escalation is skipped and raised again when that one is
-answered (ruling 94).
+locked write, offering `question_reviewer` among its options; when another packet is open
+at that instant the escalation is skipped and raised again when that one is answered
+(ruling 94).
 
 **Rework through stages** (ruling 124). A verdict's findings go to the agents that own
 them, each told which findings it is not getting and who has them. On a board whose stages
@@ -429,7 +427,7 @@ disagree with.
   "exists but not granted here" is distinguishable from "does not exist".
 - **The PR**: number, state, title, `revisionDrift` with the canonical sentence, `headSha`,
   the current `unpushedRevision` with the acceptance gate's own sentence (ruling 243),
-  `mergeable` (ruling 95); `notAcceptableReason` (the acceptance gate's own verdict,
+  `mergeable` (ruling 242); `notAcceptableReason` (the acceptance gate's own verdict,
   ruling 95), `unownedPr`, `foreignHead` (ruling 234), `baseBehindBy` (how far the base
   is ahead of the branch from the reconciler's last compare: `0` is level, `null` is "not
   compared yet" and never a reason to skip `update_branch_from_base`),
@@ -437,8 +435,8 @@ disagree with.
   count was counted on and when; `current` is false when the count was not read on the head
   Viberr's newest push published, `pushedSince` naming it: the push came after the
   compare, or the compare right after the push read another head because GitHub had not
-  shown the push yet. It is null when the compare named no head, a row written before the
-  ruling; neither is ever read as current) with
+  shown the push yet. It is null when the compare named no head, an older row; neither is
+  ever read as current) with
   `baseBehindBySentence` (what to say instead of quoting the count, "" when it describes
   the current head), and
   `notRefreshableReason` (the sentence `update_branch_from_base` refuses with from where
@@ -454,7 +452,7 @@ disagree with.
   move), `humanDecisions` (the newest five decisions a person made on the task, newest
   first, read from the whole timeline with their own words; ruling 116), `recentTimeline` (default 6
   entries, `events` up to 50), `timelineTotal` and `timelineOlder` (ruling 117),
-  `unfinishedReport` (ruling 116), `unansweredRefusal` (ruling 116).
+  `unfinishedReport` and `unansweredRefusal` (ruling 116).
 - **What it took** (ruling 83): `whatItTook`, what the task has cost so far, derived at
   this read from its run rows and its own timeline: `runs` (the runs that started, the
   operator's among them, their agent minutes, the ones not in that time, and the ones
@@ -467,13 +465,11 @@ disagree with.
   the figure misses on this task). It is information for the operator's judgement and
   changes no gate; each number's source and what it misses are in
   [task-lifecycle.md §9](task-lifecycle.md). The key is left out only when its read fails.
-- **The board around it**: `epic` (ruling 116: the epic this task is in, its status, its
+- **The board around it** (ruling 116): `epic` (the epic this task is in, its status, its
   description clipped at `EPIC_DESCRIPTION_CAP`, and its OTHER tasks, archived ones left
-  out, each with its stage and `blockedBy`; absent for a task in no epic; it replaced
-  ruling 116's `goalChain`), `openEpics` (the project's open epics, for `set_epic`),
-  `collisions` (the other open review PRs whose
-  diff shares a file with this one, ruling 116), `fileLeases` (the leases that bind now,
-  ruling 116).
+  out, each with its stage and `blockedBy`; absent for a task in no epic), `openEpics` (the
+  project's open epics, for `set_epic`), `collisions` (the other open review PRs whose
+  diff shares a file with this one), `fileLeases` (the leases that bind now).
 
 Each `recentTimeline` entry is cut at 1,500 characters for an operator that can call
 `read_timeline_entry`; a Codex operator, which returns a plan and cannot call tools, is
@@ -521,14 +517,15 @@ and returns a structured plan over twenty-one verbs (`post_comment`, `open_packe
 (`operatorPlanToolsFor`; the two schedule verbs only on a `direct` dispatch grant, and never
 in the all-denied fallback; `ask_for_repository` only on a project with no repository whose
 rulings hold no decision to keep none, ruling 107, and never in the fallback) and its packet options carrying every payload the
-Claude tool does (ruling 132). `relay_to_task` takes the target in the plan's `taskKey` and the files it carries in `files` (ruling 135)
-field (required and nullable, ruling 135) and the text in `text`, and like `post_comment`
-it still posts after a step of the plan opened a packet. The server executes the plan after the run
+Claude tool does (ruling 132). `relay_to_task` takes the target in the plan's `taskKey`
+field (required and nullable), the files it carries in `files` and the text in `text`
+(ruling 135), and like `post_comment` it still posts after a step of the plan opened a
+packet. The server executes the plan after the run
 (`runtime.operator.plan_executed` is the idempotency marker boot recovery reads). Once a
 step leaves the task holding a packet it did not hold when the plan began, the remaining
-acting steps are not carried out and a note lists them (ruling 118); a step whose outcome
-IS the packet it opened is not narrated as refused (ruling 118); a dispatch carries the
-refusals the plan collected before it (`withEarlierRefusals`, ruling 118).
+acting steps are not carried out and a note lists them; a step whose outcome IS the packet
+it opened is not narrated as refused; a dispatch carries the refusals the plan collected
+before it (`withEarlierRefusals`; ruling 118).
 
 ## 5. Tools and the governed actions behind them
 
@@ -538,8 +535,8 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | Tool (`viberr`) | Action | Capability |
 |---|---|---|
 | `get_task` | `operatorSnapshot` (§4), with `whatItTook`, what the task has cost so far (ruling 83) | always |
-| `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 117); one task carries its `outcome` once it has one, the current completion summary and each current verdict's report (read whole from its "Review verdict" comment, not the 2,000-character stored excerpt), each up to 8,000 characters (ruling 213(a)); a goal past 2,000 characters comes back as its opening with every decision recorded on it kept whole (ruling 213(a)); one task also lists its `timeline`, every entry by stamp, type, author and title, newest first, the newest 200 (ruling 213), and its kept `deliveries` (ruling 86) | always |
-| `read_task_attachment` | one of this task's attachments: an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 214), an image as the picture, any other file whose bytes are text as text whatever its name, a binary one named and refused (rulings 79, 117, 198), a page of up to 32,000 bytes at a time with `offset` (ruling 215) reading on from a truncated read's `nextOffset` (ruling 117); with `delivery`, a stamp from `read_board`'s `deliveries`, the file as that delivery held it, not as a rework left it (ruling 198) | always |
+| `read_board` | `readBoardList` / `readBoardTask`: this project's tasks, or one task by key, archived included (ruling 117); one task carries its `outcome` once it has one, the current completion summary and each current verdict's report (read whole from its "Review verdict" comment, not the 2,000-character stored excerpt), each up to 8,000 characters; a goal past 2,000 characters comes back as its opening with every decision recorded on it kept whole; one task also lists its `timeline`, every entry by stamp, type, author and title, newest first, the newest 200 (ruling 213(a)), and its kept `deliveries` (ruling 86) | always |
+| `read_task_attachment` | one of this task's attachments: an `.xlsx` as its sheets in CSV, a PDF as its text (ruling 214), an image as the picture, any other file whose bytes are text as text whatever its name, a binary one named and refused (rulings 79 and 198), a page of up to 32,000 bytes at a time with `offset` (ruling 215) reading on from a truncated read's `nextOffset` (ruling 117); with `delivery`, a stamp from `read_board`'s `deliveries`, the file as that delivery held it, not as a rework left it (ruling 198) | always |
 | `read_task_source` | `readAgentTaskSource` (ruling 82), the reader every agent's `read_task_source` calls: the sources this task keeps, or another task's with `taskKey`. Without `id`, the list in pages (what each kept delivery rested on, then each source's id, name, size, hash, title, origin, and when, by which agent and in which run it was kept); with `id`, that source's content, read as an attachment is; with `id` and `find` (ruling 82), the places in it that hold a word or short phrase, each with its line and the offset to read it from. `completionPacket.sources` in the snapshot counts them; this is how the operator reads one before it repeats a figure a result states | always |
 | `read_timeline_entry` | one timeline entry in full, by its `occurredAt` stamp: this task's, or with `taskKey` another task's, by the stamp `read_board` lists in that task's `timeline` (rulings 117, 213); entries written in one millisecond come back together under `entries` (ruling 72), in the order they were written, and a `kb_correction` entry comes with `correction`, the correction whole from its record, when the operator itself is given that knowledge base (ruling 211) | always |
 | `read_knowledge_doc` | one document of a KB attached to the operator (ruling 205) | always, when it holds a KB |
@@ -549,7 +546,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `take_from_task` | `operatorTakeFromTask` → `takeFromTask` (ruling 135: copies named attachments of ANOTHER task of this project, open or Done but not archived, onto THIS task, claimed by the operator's comment headed "From <that task> (operator):" (a relay's header, so no run here is credited with them), writes "Taken by <this task>: …" on that task and audits `task.files.taken {from, to, files}`; the relay's file checks, all or none; refuses this task, another project's task, a missing task, an archived source, a closed THIS task) | `append-typed-events` |
 | `set_goal` | `operatorSetGoal` (fills only an unspecified goal; refuses to overwrite a specified one). Its `goal` field is described with `DONE_SIGNAL_RULE`, as are `goalDraft` and `newTask.goal` (§6) and, in the Codex plan, the `text` that carries `set_goal`'s goal (ruling 105) | `append-typed-events` |
 | `flag_context_conflict` | `operatorFlagContextConflict` (repo convention vs KB, ruling 206) | `append-typed-events` |
-| `correct_knowledge_doc` | `operatorCorrectKnowledgeDoc` → `correctKnowledgeDoc` → `mergeKbCorrection` (rulings 210 and 210(b): writes `text` in place of `replaces`, the exact passage, which must stand once in the settled text (an empty `text` deletes it), or at the end of the document when `replaces` is omitted, in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; when the written text would not stand once afterwards the record takes the lines around it (ruling 210(b)), each side at most 8 KB; an addition the document already holds, or a correction whose record still stands, is a `noop`, and so is text a person undid in that document, naming them and their reason; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold, a missing passage with the document's closest lines; writes a `kb_correction` event titled "Rulings corrected" or "Knowledge base corrected" and audit `task.kb_correction.merged` carrying both passages and the evidence, and notifies nobody; ruling 210(a) widens its use to a convention review shows is MISSING, and ruling 210 to relaying a correction an agent's report proved; a person undoes it from the Controller page) | `append-typed-events` |
+| `correct_knowledge_doc` | `operatorCorrectKnowledgeDoc` → `correctKnowledgeDoc` → `mergeKbCorrection` (ruling 210: writes `text` in place of `replaces`, the exact passage, which must stand once in the settled text (an empty `text` deletes it), or at the end of the document when `replaces` is omitted, in a document of any knowledge base a run on the task was given, the operator's own or an engaged agent's; `kb` omitted means the project's rulings; when the written text would not stand once afterwards the record takes the lines around it, each side at most 8 KB; an addition the document already holds, or a correction whose record still stands, is a `noop`, and so is text a person undid in that document, naming them and their reason; refuses a knowledge base no run on the task was given, a project with no rulings KB when `kb` is omitted, and a document the knowledge base does not hold, a missing passage with the document's closest lines; writes a `kb_correction` event titled "Rulings corrected" or "Knowledge base corrected" and audit `task.kb_correction.merged` carrying both passages and the evidence, and notifies nobody; it also writes a convention review shows is MISSING, and relays a correction an agent's report proved; a person undoes it from the Controller page) | `append-typed-events` |
 | `edit_comment` | `operatorEditComment` (ruling 133: edits or deletes a comment the operator or an agent wrote on this task, itself and silently; an edit keeps the author, time, title and files, a delete takes the entry off, and the linked notifications follow; a person's comment is refused; audit `task.comment.edited` or `task.comment.deleted`, never the words) | `append-typed-events` |
 | `open_decision_packet` | `operatorOpenPacketDisclosed` → `operatorOpenPacket` (appends the delegated-ask disclosure, ruling 114; refuses while a packet is open) | `generate-packets` |
 | `resolve_decision_packet` | `operatorResolvePacket` (withdraws only a packet the operator raised: `from: operator` and no `askedBy`, `packetIsOperators`) | `generate-packets` |
@@ -563,7 +560,7 @@ A withheld capability means the tool is **not built**; the model cannot reach it
 | `lease_files` | `operatorLeaseFiles` (ruling 61: lease path globs to THIS task until it merges) | `deliver-review-pr` |
 | `update_branch_from_base` | `operatorUpdateBranchFromBase` (merge, never rebase; conflict → the delivering agent, or a packet when no agent can take it, ruling 129) | `update-task-branch` |
 | `transition_stage` | `operatorTransitionStage` | `stage-transitions` |
-| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 130: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 130: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 86) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; ruling 316: its description tells the operator that when Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each with its pictures, which show beside it on the result, never to name one as a screenshot, to open a page's picture with `read_task_attachment` before it says how the page looks, that a page listed with no picture carries the reason and that a page not listed was not pictured (`PAGE_PICTURES_PACKET_SENTENCE`; the Codex plan's `screenshots` field carries the short form), and a capture named anyway is left out with a sentence; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`; ruling 83: Viberr prints what the task took (runs, agent time, cost, questions, send-backs) on the same card from the record, so the tool's description tells the operator never to restate those figures in the packet) | `completion-for-acceptance` |
+| `write_completion_packet` | `operatorWriteCompletionPacket` → `writeCompletionPacket` (ruling 103: records `completionPacket` in task.md for the review subject, the operator's `summary`, its `changes` summary, required for a change of more than 200 lines, and up to 6 `screenshots` named from the task's image attachments with a caption each; ruling 103: also `considerations`, `assumptions` and `gaps`, each optional markdown of at most 2,000 characters, and `files`, up to 12 result files with a caption each, required on a task delivered as files and taken only from that delivery as it was kept (ruling 86) and still on the task, while a revision's `files` are left out with a line saying its pull request holds them; refuses (`noop`) while nothing is delivered, an empty or oversized summary or note, a large change without `changes`, a files delivery that names no result file or one outside the delivery, listing the delivered files, and a screenshot that is not an image or not among the attachments, listing the images it has; ruling 316: its description tells the operator that when Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each with its pictures, which show beside it on the result, never to name one as a screenshot, to open a page's picture with `read_task_attachment` before it says how the page looks, that a page listed with no picture carries the reason and that a page not listed was not pictured (`PAGE_PICTURES_PACKET_SENTENCE`; the Codex plan's `screenshots` field carries the short form), and a capture named anyway is left out with a sentence; writes a `note` titled "Completion packet" and audit `task.completion_packet.written`; the Codex plan carries the summary in `text`, the changes in `reason`, the notes and the files in `result`; ruling 83: Viberr prints what the task took (runs, agent time, cost, questions, send-backs) on the same card from the record, so the tool's description tells the operator never to restate those figures in the packet) | `completion-for-acceptance` |
 | `accept_completion` | `operatorAcceptCompletion` | `completion-for-acceptance` |
 
 Every action returns `OperatorActionResult` with `outcome: done | recommended |
@@ -670,7 +667,7 @@ Details that matter:
   `current | stale | none | not_applicable`, `changedLines`, `changesSummaryRequired`,
   `screenshotCandidates`, the newest 20 image attachments, `resultFilesRequired` and
   `resultFileCandidates`, the delivered files a packet may name as the result (ruling
-  130), `sources` (ruling 82: `kept`, how many sources the task keeps, and `restedOn`,
+  103), `sources` (ruling 82: `kept`, how many sources the task keeps, and `restedOn`,
   how many of them the delivery under review rests on: the ones a files delivery
   recorded, or for a revision the ones kept by the time it was minted, plus any the
   deliverer kept afterwards, so a source a reviewer kept while checking the work is in
@@ -701,7 +698,7 @@ Details that matter:
   proposes "Push `<sha>` to PR #N". A supervised delivery always leaves an actionable next
   step (a "Move to Review" recommendation) when the operator recorded none (ruling 126), on
   a board where a person approves that move; where the move is `auto` (the Standard
-  template, ruling 126) the operator makes it itself and no card is filed;
+  template, ruling 91) the operator makes it itself and no card is filed;
   a full-autonomy delivery whose PR is new or whose head moved owes the `delivered`
   follow-up (§3). The doctrine and the seeded persona say that pushing is never a
   person's job and never an agent's. A pull request a person closed without merging is
@@ -765,7 +762,7 @@ Details that matter:
   carries `rework: true` and says "The task returns to Review for the re-verdict." when
   the task stands past the stage where its reviewers can run (ruling 90), and a person
   who routes the conflict to the deliverer through it gets the same directive (ruling
-  129). An open packet offering `accept_completion` is withdrawn first. Ruling 229: it
+  129). An open packet offering `accept_completion` is withdrawn first. Ruling 241: it
   also fetches origin's copy of the TASK branch and reports it beside the base answer:
   current, behind by N ("call `deliver_for_review` to push it; do not ask a person to
   push"), diverged ("a person resolves the branch history"), absent, or unknown with
@@ -859,7 +856,7 @@ Resolution effects by option kind (`resolvePacket`):
 | Kind | Effect |
 |---|---|
 | `accept_completion` | Runs the full acceptance contract (authority, disclosure echo, live no-change probe, refusal stack, PR head check, merge). Not re-queued. |
-| `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued. An agent question resumes the asker's own session with the answer, unless the chosen option or the person's note names another deployed agent or the operator (`answerNamesAnotherActor`, longest names first), in which case the operator gets it as `packet-resolved` and a note says why the asker was not resumed (ruling 68), or the asker cannot run on the task now (the resume gate: stage, hold, closure), in which case nothing is posted to it and the same note names the gate's reason (ruling 68). An asker still running on the task is owed the answer instead: it is posted, a note says it waits for that run, the operator is not handed it, and the run's completion starts the asker on it (`deliverDeferredMention`, ruling 68). The decision's record for an agent question names the option only. An option carrying `reply: true` is refused without a note ("… needs your answer …"), nothing recorded (ruling 68). |
+| `request_edit`, `redirect`, `custom` | Task back to `waiting: agent`, `readiness: ready`, packet cleared, operator re-queued. An agent question resumes the asker's own session with the answer, unless the chosen option or the person's note names another deployed agent or the operator (`answerNamesAnotherActor`, longest names first), in which case the operator gets it as `packet-resolved` and a note says why the asker was not resumed (ruling 68), or the asker cannot run on the task now (the resume gate: stage, hold, closure), in which case nothing is posted to it and the same note names the gate's reason (ruling 68). An asker still running on the task is owed the answer instead: it is posted, a note says it waits for that run, the operator is not handed it, and the run's completion starts the asker on it (`deliverDeferredMention`, ruling 69). The decision's record for an agent question names the option only. An option carrying `reply: true` is refused without a note ("… needs your answer …"), nothing recorded (ruling 68). |
 | `block_on_policy` | The re-run kind: `readiness: ready`, `waiting: agent`, re-queued (ruling 63). Its label states what the human asserts ("The usage window has reset (…), or I switched the Claude account: re-run", "I connected a different Claude account or an API key on Profile → Agent accounts: re-run", or the stock "Re-run the operator now"); the recorded decision is the option's pre-authored `ev` or its own title (ruling 62). The toast says "Unblocked · the operator re-runs to re-check", and the re-run's instruction tells the operator to assume nothing about credentials or policy beyond the decision's own words. The credential half is a person connecting their own backend on Profile → Agent accounts, usually the task owner (ruling 137). |
 | `hold_runtime_debug` | `readiness: blocked`, `waiting: human`, packet cleared, not re-queued; lifted by the next person-started operator run, a scheduled operator run, or any dispatch (ruling 54: `readiness: ready`, a "Hold lifted" note, `task.hold.lifted`). |
 | `retry_other_backend` | Re-runs the failed agent on the named backend under operator authority; the switch sticks on the engagement's `pinnedBackend`. Offered only when the TASK OWNER has that backend connected (ruling 137). |

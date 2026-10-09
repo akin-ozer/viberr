@@ -185,11 +185,11 @@ describe("global agent profiles", () => {
   });
 
   /**
-   * Ruling 264 (pass 35, G35-2): a template carries its default model and
-   * effort, checked by name against its backend (ruling 261); an edit that
-   * omits both keeps them. Canary: drop `effort` from the created frontmatter.
+   * Ruling 261 (G35-2): a template carries its default model and effort,
+   * checked by name against its backend; an edit that omits both keeps them.
+   * Canary: drop `effort` from the created frontmatter.
    */
-  it("ruling 264: create stores model and effort, a foreign model is refused, and an edit omitting both keeps them", async () => {
+  it("ruling 261: create stores model and effort, a foreign model is refused, and an edit omitting both keeps them", async () => {
     const { db, dataRoot, ctx } = setup();
     await saveGlobalAgentProfile(
       db,

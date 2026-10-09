@@ -34,8 +34,8 @@ describe("codexRepoWriteAdvisory (ruling 183)", () => {
     // The seeded Reviewer shape: no headline grant at all (grant-required ⇒
     // withheld), evidence left at its default.
     expect(codexRepoWriteAdvisory([g("report-validation-verdict", "direct")])).toBe(true);
-    // Evidence withheld TOO — before ruling 183 the sandbox bound this one
-    // read-only, so it was not advisory. Now nothing confines it.
+    // Evidence withheld TOO — a sandbox once bound this one read-only, so it
+    // was not advisory. Now nothing confines it (ruling 144).
     expect(
       codexRepoWriteAdvisory([
         g("execute-code-or-write-repo", "off"),

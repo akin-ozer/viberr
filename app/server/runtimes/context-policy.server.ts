@@ -19,7 +19,7 @@ export type ContextBackend = RunBackend;
 
 /**
  * The context window past which the CLI is asked to compact MID-RUN, per
- * backend and run kind. Every entry is `null` since ruling 174 (owner,
+ * backend and run kind. Every entry is `null` (ruling 174; owner,
  * 2026-09-21, "drop it, model default"): the CLI compacts at its model's own
  * limit (near 967k on a native-1M Claude model, near the 258k window on
  * Codex), and the size a session carries between runs is bounded by
@@ -48,7 +48,7 @@ function autoCompactWindow(backend: ContextBackend, kind: RunKind): number | nul
 
 /**
  * The env overlay a Claude run carries for its mid-run window: exactly one key
- * when the kind has a window, nothing otherwise (nothing, since ruling 174).
+ * when the kind has a window, nothing otherwise (no kind has one, ruling 174).
  * Codex takes its window through `config.toml` keys (`codexCompactionConfig`),
  * never the environment.
  */

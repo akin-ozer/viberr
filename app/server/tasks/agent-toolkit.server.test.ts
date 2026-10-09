@@ -1790,8 +1790,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
      * Ruling 210 (F40-53): an agent that PROVES a line of one of its knowledge
      * bases wrong corrects the document. Live on WEB-3 the Platform Engineer
      * wrote "the knowledge-base runbook is read-only to me", an hour after the
-     * Site Engineer found the same stale dossier fact. Ruling 210 writes the
-     * correction into the settled text as it is made.
+     * Site Engineer found the same stale dossier fact. The correction goes into
+     * the settled text as it is made.
      */
     it("ruling 210: correct_knowledge_doc writes into the agent's own knowledge base, and only its own", async () => {
       const { saveKnowledgeBase, resolveStoreTarget } = await import("~/server/org/resources.server");
@@ -1818,7 +1818,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         admin,
       );
       // Ruling 211: an agent on the project is not given the dossier, so the
-      // correction's entry quotes none of it (ruling 211).
+      // correction's entry quotes none of it.
       reconfigureProject(store, (fm) => ({
         agents: [
           ...fm.agents,

@@ -251,10 +251,10 @@ export interface CompletionPacketFact {
   changesSummaryRequired: boolean;
   /** Image attachments you may name as screenshots, newest first. */
   screenshotCandidates: string[];
-  /** Ruling 130: the packet must name the result's files (`files`): the
+  /** Ruling 103: the packet must name the result's files (`files`): the
    *  delivery is files on the task. */
   resultFilesRequired: boolean;
-  /** Ruling 130: the delivered files you may name as the result. */
+  /** Ruling 103: the delivered files you may name as the result. */
   resultFileCandidates: string[];
   /** Ruling 82: how many sources the task keeps (`kept`) and how many of
    *  them the delivery under review rests on (`restedOn`); `read_task_source`

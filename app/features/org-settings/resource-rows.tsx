@@ -138,7 +138,7 @@ export function KbPanel({
                   <>
                     {kb.injectableCount} doc
                     {kb.injectableCount === 1 ? "" : "s"} ·{" "}
-                    {/* Ruling 267: a private folder is closed to every shell. */}
+                    {/* Ruling 209: a private folder is closed to every shell. */}
                     {kb.private
                       ? "private: only the runs it is granted read it"
                       : "agents read the live folder"}
@@ -371,8 +371,8 @@ export function McpPanel({
                       // the Codex limitation it described).
                       " · auth: configured (held by Viberr; runs connect through its gateway)"
                   : m.oauth?.status === "signed_in"
-                    ? // Ruling 192: the sign-in's tokens take the same road.
-                      // Ruling 192: and the row says what the sign-in may do.
+                    ? // Ruling 192: the sign-in's tokens take the same road,
+                      // and the row says what the sign-in may do.
                       ` · auth: OAuth, ${signInPhrase(m.oauth, hydrated)}${grantPhrase(m.oauth.scope)}; held by Viberr, runs connect through its gateway`
                     : ""}
                 {/* P14-KM-09: KB and skill rows have counted their templates
@@ -383,9 +383,9 @@ export function McpPanel({
                   ? " · " + countLabel(usedBy(m.name), "template")
                   : ""}
                 {/* Ruling 188: how many of its tools are withheld from agents
-                    that may not write, so the row says the server is gated.
-                    Ruling 188 (F37-40): and the row says so for the other two
-                    cases too. It used to render NOTHING unless a server was
+                    that may not write, so the row says the server is gated,
+                    and (F37-40) the row says so for the other two cases too.
+                    It used to render NOTHING unless a server was
                     gated, so the one state worth seeing — tools that look like
                     writes, nobody has reviewed them, so nothing is withheld —
                     was the one the list was silent about. Live, `kb-architecture`
@@ -396,8 +396,8 @@ export function McpPanel({
                     The controller reasoned about exactly that hazard for a THIRD
                     such server and granted nothing; this list gave it and the
                     admin no standing signal at all. The controller's own read
-                    has carried all three cases since ruling 188 — this is the
-                    human's half of the same sentence. */}
+                    carries all three cases — this is the human's half of the
+                    same sentence. */}
                 {writeToolPosture(m)}
               </span>
               {/* R19-17: WHY it is unreachable, in the command's own words.
@@ -573,7 +573,7 @@ export function AgentPanel({
       <div className="rsrc-list">
         {gagents.map((a) => {
           const res = a.skills.length + a.mcps.length + a.kbs.length;
-          // Ruling 184: a stored id the default workflow lacks says so.
+          // Ruling 326: a stored id the default workflow lacks says so.
           const stageNames = a.stages
             .map((id) => storedStageLabel(id, stages))
             .join(" · ");

@@ -30,8 +30,8 @@ import { filteredSpawnEnv } from "./spawn-env.server";
  *    Both adapters are built on a base env with EVERY credential-shaped
  *    variable stripped, so a child process starts from a blank credential
  *    slate and sees only what the run service explicitly adds for its
- *    principal — and, since ruling 141(a), with every name the app's own env
- *    schema declares stripped too ({@link APP_CONFIG_ENV}), so the child
+ *    principal — and with every name the app's own env schema declares
+ *    stripped too ({@link APP_CONFIG_ENV}, ruling 141(a)), so the child
  *    never sees this server's configuration either.
  *  - {@link createAdapters} / {@link selectAdapter} — construction and lookup.
  */
@@ -85,8 +85,8 @@ export function createAdapters(deps: AdapterDeps = {}): AdapterSet {
 /**
  * The adapter for a backend.
  *
- * A plain lookup since ruling 137: whether a run may proceed is decided
- * upstream, by resolving its credential principal — `startRun` calls
+ * A plain lookup: whether a run may proceed is decided upstream, by
+ * resolving its credential principal (ruling 137) — `startRun` calls
  * `runCredentialFor` and takes the refusal path before it ever asks for an
  * adapter. The name stays because every caller reads as "pick the runtime for
  * this backend", which is exactly what it still does.

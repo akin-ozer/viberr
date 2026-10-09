@@ -157,7 +157,7 @@ describe("ruling 81: the task's files set against the delivery a reviewer judged
   });
 
   it("answers null when the judged delivery was not kept, or its stamp cannot be one", () => {
-    // A task delivered before ruling 86 has no folder for that delivery.
+    // A delivery that was not kept (ruling 86) has no folder.
     // Canary: answer a comparison with an empty kept side, and a reviewer is
     // told every file is new.
     save("post.md", "one");

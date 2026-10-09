@@ -487,9 +487,7 @@ describe("createProject — policy preset shapes REAL governance", () => {
   });
 
   // Ruling 224: a repository is named whole, connection and name, or not at
-  // all, whatever the board delivers. (Every project took one under the
-  // 2026-07-17 ruling; ruling 224 lifted that for a board that delivers
-  // results, and 672 for one that delivers software.)
+  // all, whatever the board delivers.
   it.each([
     ["a blank repository name", "akin-ozer", "   "],
     ["a repository name with no owner", "", "some-repo"],

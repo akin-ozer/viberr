@@ -100,7 +100,7 @@ export const ALWAYS_HUMAN_ROWS: readonly {
  *  runtime combination checked in operator-moves.server.ts. Exported with no
  *  importer on purpose: exported, the build inlines it at its one use;
  *  module-local, it ships as a variable, 4 B more on the budgeted profile
- *  closure (ruling 11's ratchet; measured for ruling 11). */
+ *  closure (ruling 11's ratchet). */
 export const DIRECT_ACCEPT_CAPABILITY_ID = "completion-for-acceptance";
 
 export interface OperatorAutonomyState {

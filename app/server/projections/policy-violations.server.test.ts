@@ -24,16 +24,16 @@ describe("scope violations (phase 7 — table-backed, ruling 221)", () => {
 
   /**
    * Ruling 221(b) (F39-13): live on ax-clone the Settings rail carried a bold red
-   * `4` and every one of the four rows was `checks:read` — the scope ruling 237
-   * settled as NOT required and ruling 221(b) taught the timeline and the
-   * credential card to call an advisory. The row is kept on purpose (360); what
-   * was wrong was counting it as something a person must go and fix.
+   * `4` and every one of the four rows was `checks:read` — a scope that is NOT
+   * required, and that the timeline and the credential card call an advisory.
+   * The row is kept on purpose; what was wrong was counting it as something a
+   * person must go and fix.
    */
   it("ruling 221(b): an ADVISORY scope is recorded, and does not light the rail badge", () => {
     const db = ctx.makeDb();
     openScopeViolation(db, { projectSlug: "ax-clone", taskKey: "AX-9", scope: "checks:read" });
     openScopeViolation(db, { projectSlug: "ax-clone", taskKey: "AX-11", scope: "checks:read" });
-    // The record stays — ruling 237 settled that it is worth having.
+    // The record stays — ruling 221 settled that it is worth having.
     expect(listScopeViolations(db, "ax-clone", { status: "open" })).toHaveLength(2);
     // CANARY: drop the `scopeIsAdvisory` filter and this is 2.
     expect(countOpenPolicyViolations(db, "ax-clone")).toBe(0);

@@ -145,7 +145,7 @@ const OPERATOR_PLAN_TOOLS = [
   "cancel_task_schedule",
   // Ruling 135 (F40-67): post on ANOTHER task of this project. The plan mirror
   // of the Claude toolkit's `relay_to_task`: `taskKey` names the task, `text`
-  // is what lands there, `files` (ruling 135) the attachments it carries.
+  // is what lands there, `files` the attachments it carries.
   "relay_to_task",
   // Ruling 135: the relay's other direction. `taskKey` names the task that
   // holds the files, `files` which of them to take onto this task, `text` an
@@ -374,10 +374,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
             description: "For relay_to_task (ruling 135): names of THIS task's attachments to put on the other task with the text, exactly as this task lists them (an input that task works from, a file it is to judge). They land on its attachments, where its agents read them. Null for a relay of text alone. For take_from_task (ruling 135): names of the OTHER task's attachments to put on THIS task, exactly as it lists them: only what this task works from, never a file that task keeps from this one (an answer key). Use it instead of asking a person to attach or carry a file. Null for every other tool.",
             items: { type: "string" },
           },
-          // Ruling 130: the images write_completion_packet puts on the packet.
+          // Ruling 103: the images write_completion_packet puts on the packet.
           screenshots: {
             type: ["array", "null"],
-            description: "For write_completion_packet ONLY (ruling 130): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. " +
+            description: "For write_completion_packet ONLY (ruling 103): up to 6 image attachments of this task that show the result, by exact file name from the snapshot's `completionPacket.screenshotCandidates`, each with a one-line caption of what it shows. " +
               PAGE_PICTURES_PLAN_SENTENCE +
               " Null when nothing visible changed, and for every other tool.",
             items: {
@@ -390,10 +390,10 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
               required: ["name", "caption"],
             },
           },
-          // Ruling 130: what write_completion_packet says beside the summary.
+          // Ruling 103: what write_completion_packet says beside the summary.
           result: {
             type: ["object", "null"],
-            description: "For write_completion_packet ONLY (ruling 130): the rest of what a person reads before accepting, which stays on the task as its result. Null for every other tool.",
+            description: "For write_completion_packet ONLY (ruling 103): the rest of what a person reads before accepting, which stays on the task as its result. Null for every other tool.",
             additionalProperties: false,
             properties: {
               considerations: { type: ["string", "null"], description: "The choices the work made that the person should weigh: an option taken over another and why, a trade-off, a default. Markdown; null when there are none (never write \"none\")." },
@@ -417,7 +417,7 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
           },
           completeness: {
             type: ["boolean", "null"],
-            description: "For run_agent ONLY (ruling 93): true when this run puts ruling 93's completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
+            description: "For run_agent ONLY (ruling 93): true when this run puts the completeness question to a reviewer (name EVERYTHING it would still block on, including anything it would hold for a later round), whether on its own or folded into the review of a fresh rework. Viberr records the verdict that run returns as the reviewer's complete set, so a later deadlock packet recommends one rework against it instead of asking again. Null for every other run and every other tool.",
           },
           noVerdict: {
             type: ["boolean", "null"],
@@ -486,9 +486,9 @@ function buildOperatorPlanSchema(tools: readonly OperatorPlanTool[]) {
                     "edit_goal only: the proposed goal text itself, written AS a goal (the deliverable plus its acceptance criteria); it is what the goal editor opens with when the human confirms. Without it the editor prefills the option's title and detail verbatim, so never phrase those as an instruction to the human. Null on every other kind. " +
                     DONE_SIGNAL_RULE,
                 },
-                // Ruling 132 (F39-55): ruling 132 gave the Claude tool the
-                // payloads of rulings 157, 66 and 67, and this schema never
-                // got them. A Codex operator could name the three kinds, was
+                // Ruling 132 (F39-55): the Claude tool carries the payloads
+                // of rulings 157, 66 and 67, and this schema never got
+                // them. A Codex operator could name the three kinds, was
                 // refused for the missing payload, and had no field to send
                 // it in. Live on ax-clone: AX-4 twice, AX-27 once.
                 blockedBy: {
@@ -571,13 +571,13 @@ const operatorPlanActionSchema = z.strictObject({
   // Ruling 61: lease_files — `.optional()` so plans persisted before the
   // field existed still replay across a restart-resume.
   paths: z.array(z.string()).nullable().optional(),
-  // Ruling 130: write_completion_packet's images — `.optional()` for the same
+  // Ruling 103: write_completion_packet's images — `.optional()` for the same
   // replay reason.
   screenshots: z
     .array(z.strictObject({ name: z.string(), caption: z.string().nullable() }))
     .nullable()
     .optional(),
-  // Ruling 130: write_completion_packet's notes and result files, `.optional()`
+  // Ruling 103: write_completion_packet's notes and result files, `.optional()`
   // for the same replay reason.
   result: z
     .strictObject({
@@ -870,7 +870,7 @@ export async function executeCodexPlan(
   for (const a of plan.actions) {
     if (a.text) a.text = normalizeEscapedNewlines(a.text);
     if (a.reason) a.reason = normalizeEscapedNewlines(a.reason);
-    // Ruling 130: the completion packet's notes are prose a person reads too.
+    // Ruling 103: the completion packet's notes are prose a person reads too.
     if (a.result) {
       for (const key of ["considerations", "assumptions", "gaps"] as const) {
         const note = a.result[key];
@@ -1094,7 +1094,7 @@ export async function executeCodexPlan(
             if (a.screenshots?.length) {
               packet.screenshots = a.screenshots.map((s) => ({ name: s.name, caption: s.caption }));
             }
-            // Ruling 130: the notes and the result's files.
+            // Ruling 103: the notes and the result's files.
             if (a.result) {
               packet.considerations = a.result.considerations;
               packet.assumptions = a.result.assumptions;
@@ -1217,8 +1217,8 @@ export async function executeCodexPlan(
           } else skippedMalformed(a.tool, "the schedule to cancel");
           break;
         case "relay_to_task":
-          // Ruling 135: `taskKey` is the other task, `text` what lands there;
-          // ruling 135: `files` what it carries with it.
+          // Ruling 135: `taskKey` is the other task, `text` what lands there,
+          // `files` what it carries with it.
           if (a.taskKey && a.text) {
             record(
               a.tool,

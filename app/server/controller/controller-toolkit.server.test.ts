@@ -327,11 +327,11 @@ describe("list_decisions briefs the person and decides nothing (ruling 263)", ()
   }
 
   /**
-   * Ruling 117, extended to the sibling it was first written without.
+   * Ruling 117, for the controller's `get_task` as for the operator's.
    *
-   * It fixed the OPERATOR's timeline window and left the controller's, which
-   * is the defect shape ruling 262's own comment had already named inside this
-   * pass's own fix: "a rule applied to one actor and not its sibling, which is
+   * A fix to the OPERATOR's timeline window once left the controller's, which
+   * is the defect shape a comment inside this pass's own fix had already
+   * named: "a rule applied to one actor and not its sibling, which is
    * this pass's own defect shape inside this pass's own fix." The controller
    * found it within the hour, on live work: "I read 5 of 121 entries on
    * SHOP-36 and 4 of 111 on SHOP-27, and coordinated from them. I can derive
@@ -957,9 +957,9 @@ describe("list_decisions briefs the person and decides nothing (ruling 263)", ()
   /**
    * Ruling 60 (F37-85): `get_project` reads leases the way the GATES read them.
    *
-   * Ruling 60 made a lease whose holder has finished bind nobody, and wired it
-   * into the push and the canonical anchor — not into the read the controller
-   * uses. Live, the controller said so itself: "I cannot tell you from a direct
+   * A lease whose holder has finished binds nobody in the push and the
+   * canonical anchor, and the read the controller uses once missed that.
+   * Live, the controller said so itself: "I cannot tell you from a direct
    * read whether SHOP-11's lease had already self-released when it merged."
    */
   it("ruling 60: get_project resolves leases and names the spent ones apart", async () => {
@@ -1359,7 +1359,7 @@ describe("instance scope: org-role gate on every management tool", () => {
       { dataRoot: app.dataRoot },
     );
     const target = resolveStoreTarget(app.db, "kb", kb.id, { dataRoot: app.dataRoot })!;
-    // Filed before ruling 210, and still standing in its document.
+    // A proposal no tool files now (ruling 210(c)), still standing in its document.
     const seeded = withLegacyProposals("# Facts\n\n- T-003: wrangler 4.138.0\n", [
       {
         taskKey: "VIB-142",
@@ -2222,12 +2222,11 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 70 (pass 37, F37-92). This is the LIVE text from SHOP-26 that
-   * motivated ruling 70 — and under ruling 70 alone it still carried no
-   * stamp. `resolveMentionedAgent` answers "which ONE agent would a run go
-   * to", and `@operator` is precedence 1, so it returned the operator, the
-   * stamp was skipped for being the operator, and @platform-architect was
-   * never mentioned. A ruling has to fix the case it was written for.
+   * Ruling 70 (pass 37, F37-92). This is the LIVE text from SHOP-26, which
+   * once carried no stamp: `resolveMentionedAgent` answers "which ONE agent
+   * would a run go to", and `@operator` is precedence 1, so it returned the
+   * operator, the stamp was skipped for being the operator, and
+   * @platform-architect was never mentioned.
    */
   it("comment_on_task: @operator alongside an agent still discloses the agent (ruling 70)", async () => {
     await call(ids.projectAdmin, "comment_on_task", {
@@ -2346,9 +2345,9 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 124, amended. The controller had no `noVerdict` on its own dispatch
-   * door: on AWSC-25 it asked the task's operator to start the Estimate Judge
-   * with the verdict withheld, because it could not.
+   * Ruling 124: the controller's own dispatch door carries `noVerdict` too.
+   * Without it, on AWSC-25 the controller asked the task's operator to start
+   * the Estimate Judge with the verdict withheld, because it could not.
    */
   it("ruling 124: run_agent_on_task withholds the verdict of a run that must not judge", async () => {
     const withheld = () =>
@@ -2406,14 +2405,14 @@ describe("project scope: the asking user's project role decides, arm by arm", ()
   });
 
   /**
-   * Ruling 310 (pass 37, F37-105): ruling 152 put R21-9's law on the SPECIALIST
-   * arm of `run_agent_on_task` and returned above it for the operator, so the
-   * one dispatch door still sending a human's words off the record was the
-   * operator half of the door ruling 152 had just fixed. The controller caught
-   * it three minutes after the deploy by counting the task's own comments
+   * Ruling 152 (pass 37, F37-105): a person's prompted dispatch records the
+   * directive on both arms of `run_agent_on_task`. The record once covered
+   * only the SPECIALIST arm and returned above it for the operator, so the
+   * operator half still sent a human's words off the record. The controller
+   * caught it three minutes after the deploy by counting the task's own comments
    * across two reads: "my directive is nowhere in the +1".
    */
-  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 310)", async () => {
+  it("run_agent_on_task: an OPERATOR directive is recorded too, not just a specialist's (ruling 152)", async () => {
     const { readTaskFile } = await import("~/server/files/task-writer.server");
     const handOffs = (key: string): string[] =>
       readTaskFile({ projectSlug: SLUG, taskKey: key, dataRoot: app.dataRoot })!
@@ -2694,9 +2693,9 @@ describe("ruling 69: a prompted run_agent_on_task runs once", () => {
 
   /**
    * Ruling 152 (owner, 2026-09-24): a prompted dispatch refused because the
-   * agent is already running here. Recorded before the start (ruling 69), the
-   * directive sits inside that live run's window, so ruling 69 delivers it
-   * when the run finishes. The note said "No run started" and the reply said to
+   * agent is already running here. Recorded before the start, the directive
+   * sits inside that live run's window, so it is delivered when the run
+   * finishes (ruling 69). The note said "No run started" and the reply said to
    * wait for the run and start another, and a caller who did delivered the
    * words twice.
    */
@@ -3113,8 +3112,8 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
 
   /**
    * Ruling 183 (pass 37, F37-94): the deploy reply says which delivery posture
-   * it stored, because since ruling 177 the deploy COPIES the template's own
-   * grants. Live, the shipped `developer` template carries
+   * it stored, because the deploy COPIES the template's own grants
+   * (ruling 177). Live, the shipped `developer` template carries
    * `execute-code-or-write-repo: direct`, so every deploy of it produced a
    * profile that can push to the repo under a reply promising the opposite.
    */
@@ -3232,12 +3231,12 @@ describe("save_global_agent: grants are store keys, and an omitted list is left 
   });
 
   /**
-   * Ruling 264 (pass 35, G35-2): the template's default model and effort are
-   * settable here, checked by name (ruling 261), and the reply states what a
+   * Ruling 261 (pass 35, G35-2): the template's default model and effort are
+   * settable here, checked by name, and the reply states what a
    * deploy will take. U35-1: the name is stored as the person meant it.
    * Canary: drop `model`/`effort` from the `SaveGagentInput` the tool builds.
    */
-  it("ruling 264 / U35-1: sets the template's model and effort by name, and decodes the name", async () => {
+  it("ruling 261 / U35-1: sets the template's model and effort by name, and decodes the name", async () => {
     const created = await call(ids.orgAdmin, "save_global_agent", {
       name: "Test &amp; CI Engineer",
       backend: "codex",
@@ -3639,7 +3638,7 @@ describe("effort and model at deploy are settable and refused by name (ruling 26
     expect(row.details).toMatchObject({ name: "Effort Probe", model: "opus", effort: "max" });
   });
 
-  // Ruling 264 (pass 35, G35-2): an omitted `effort` takes the TEMPLATE's tier,
+  // Ruling 261 (pass 35, G35-2): an omitted `effort` takes the TEMPLATE's tier,
   // not the backend default. The description is this door's only contract for
   // the model calling it, so it has to say the shipped rule.
   it("deploy_agent takes the template's own effort when none is given, and says so", async () => {
@@ -3662,11 +3661,11 @@ describe("effort and model at deploy are settable and refused by name (ruling 26
 });
 
 /**
- * Ruling 50 (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
+ * Ruling 48 (pass 34, G34-3): `create_task` takes `owner` and `dueDate`;
  * a named owner is seated before the first operator run; the release word is
  * refused by name at creation.
  */
-describe("create_task seats a named owner and takes dueDate (ruling 50)", () => {
+describe("create_task seats a named owner and takes dueDate (ruling 48)", () => {
   it("seats the named owner in the creating write, records dueDate, derives urgent from priority", async () => {
     // Canary: drop the owner pass-through (the seat becomes the caller); drop
     // the dueDate pass-through.
@@ -4517,7 +4516,7 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
     // CANARY: drop `documents` from list_knowledge_bases and the model has no
     // way to know the name it is about to write is taken.
     // SAFETY: `list_knowledge_bases` answers `json()` over rows that always
-    // carry `id` and, since ruling 212, `documents`.
+    // carry `id` and `documents`.
     const kbs = JSON.parse(await call(ids.orgAdmin, "list_knowledge_bases")) as {
       id: string;
       documents: string[];
@@ -4583,8 +4582,8 @@ describe("save_knowledge_base's reply carries the id the next call needs (U36-4)
    * Ruling 212(a) (pass 37, F37-140): a whole-document replace names the version
    * it read, and a document that moved underneath it is refused.
    *
-   * Ruling 212's guard asks whether the file EXISTS. This asks whether it is
-   * still the one you read. The controller hit the difference live, correcting
+   * `replace: true` alone asks whether the file EXISTS. The version asks
+   * whether it is still the one you read. The controller hit the difference live, correcting
    * one paragraph of the 26,693-character rulings document that is injected
    * into every run on the board: it re-read first and found that "§9 had grown
    * a whole existence-oracle section I had not written". A blind replace would

@@ -218,8 +218,8 @@ describe("controller mounts (ruling 269)", () => {
   it("ruling 203: the controller reads the people rule on every turn, a resumed conversation included", async () => {
     // Live, it wrote "her comment" about the board's owner into AWSC-98's goal.
     // The system prompt is recorded when a conversation starts and kept until
-    // it compacts (ruling 255), so the rule rides in the turn, where ruling 255
-    // put the model. CANARY: drop it from `buildTurnPrompt` and no turn of a
+    // it compacts (ruling 255), so the rule rides in the turn, as the model
+    // does. CANARY: drop it from `buildTurnPrompt` and no turn of a
     // conversation started before the deploy reads it.
     const { PEOPLE_RULE } = await import("~/server/runtimes/people-rule.server");
     const { buildTurnPrompt } = await import("./controller-run.server");
@@ -271,8 +271,8 @@ describe("controller mounts (ruling 269)", () => {
    * times, meaning VIBERR's own product decisions — which no run can read. A
    * project's rulings knowledge base numbers its rules from 1, and operator
    * directives on a live board cite those as "ruling 44", "ruling 293". Two
-   * namespaces, one word, neither marked; no collision today only because every
-   * viberr ruling happens to be ≥107.
+   * namespaces, one word, neither marked, and both number from 1, so the same
+   * number names a rule in each.
    *
    * The controller found it auditing its own prompt for claims that do not say
    * where they came from: "the product rulings are cited AT me as authority and
@@ -510,7 +510,7 @@ describe("the turn carries the context read (ruling 253)", () => {
 
   /**
    * Ruling 255. The controller's system prompt is recorded when its
-   * conversation starts and replayed until it compacts (ruling 255). It named
+   * conversation starts and replayed until it compacts. It named
    * the model, so after the switch to Opus 5.5 the controller found "Opus 5
    * ... claude-opus-5[1m]" in its own context and had to reason its way past it.
    */
@@ -881,7 +881,7 @@ describe("ruling 79: the coordinators can read the evidence", () => {
     expect(text).toMatchObject({ kind: "text", truncated: false });
     expect(text && "text" in text ? text.text : "").toContain("MUTANT RED");
 
-    // Ruling 117: a person's screenshot is the picture, not a description.
+    // Ruling 79: a person's screenshot is the picture, not a description.
     const image = readTaskAttachment("viberr-core", "VIB-1", "portal.png", app.dataRoot);
     expect(image).toMatchObject({ kind: "image", mimeType: "image/png", data: png.toString("base64") });
 

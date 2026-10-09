@@ -318,7 +318,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
    *  already tell the same asker. */
   function runRow(row: AgentRunRow): RunRowView {
     // Ruling 269 (F37-100): a CONTROLLER turn has no project and no task —
-    // ruling 247 stores the conversation id in `task_key` because the runs
+    // ruling 251 stores the conversation id in `task_key` because the runs
     // table has one identity column. Reporting that raw put a `cnv_…` in a
     // field named `taskKey` with `projectSlug: ""`, so "anything filtering by
     // task has to know to discard that row". A storage shape is not a reply
@@ -410,10 +410,9 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
    * Ruling 117, third sibling. `list_runs` clipped at `limit` and said nothing:
    * a caller asking "which runs are live right now" got a list that looked
    * complete, and could not reconcile it with the count `instance_health`
-   * reports for the same instant. `read_run_log` beside it has carried
-   * `olderExist`/`newerExist` and recovery cursors since pass 32, and
-   * `inspect_audit_log` has carried `total`/`shown` since ruling 33. This is
-   * the one that did not.
+   * reports for the same instant. `read_run_log` beside it carries
+   * `olderExist`/`newerExist` and recovery cursors, and `inspect_audit_log`
+   * carries `total`/`shown` (ruling 33). This is the one that did not.
    */
   const windowNote = (total: number, shown: number): RunWindowNote => {
     if (total <= shown) return {};

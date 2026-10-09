@@ -588,7 +588,7 @@ function shareEntry(entry: string, gid: number, want: (st: Stats) => number): bo
 }
 
 /**
- * A tree the server created before ruling 15 (every file `node:node`, 0644):
+ * A tree the server created as its own (every file `node:node`, 0644):
  * hand it to the agent group once — group, setgid on directories, group write
  * on everything — so an agent can edit a checkout it did not clone. Only
  * entries the server owns are touched; symlinks are left alone. Returns how

@@ -574,7 +574,7 @@ describe("notification destinations + acceptance decisions (B-FD5/B-FD6)", () =>
     row("event", 9, taskEventLink(slug, "VIB-1", "2026-07-01T02:59:00.123Z"));
     row("decision", 8, taskDecisionLink(slug, "VIB-1"));
     row("recs", 7, taskRecommendationsLink(slug, "VIB-1"));
-    // A proposal's row from before ruling 210 (no writer files one now).
+    // A proposal's row (no writer files one now, ruling 210(c)).
     row("proposal", 6, `/projects/${slug}/controller#proposal-kp-0123456789`);
     row("github", 5, projectGithubLink(slug), { taskKey: null });
     // Ruling 272: an epic's page, where the goal-chain anchor used to go.
