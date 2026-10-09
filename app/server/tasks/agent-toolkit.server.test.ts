@@ -367,6 +367,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       githubRead?: boolean;
     },
     outcomeKey: string,
+    /** The run holds the browser grant (ruling 193). */
+    browser = false,
   ): Record<string, RegisteredTool> {
     const store = setupTestStore(ctx);
     writeTask(store.dataRoot, store.slug, {
@@ -383,7 +385,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       collab: { ...collab, githubRead: collab.githubRead ?? false },
       kb: [],
       webEgress: true,
-      browser: false,
+      browser,
     })!;
     lastStore = store;
     return mountedTools.parse(built.mcpServers.viberr_agent);
@@ -1251,6 +1253,39 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
         by: { backend: "claude", profileId: "security-reviewer", roleHint: "Security review" },
       },
     ]);
+  });
+
+  it("ruling 327: keep_page_look is on the toolkit only for a run that may keep sources and holds the browser grant, on a server that can render a page, and answers at the look's own door", async () => {
+    // It opens a page on the web through Viberr's own browser, so it follows
+    // the browser grant (ruling 193) as well as the grant to keep a source.
+    // CANARY: mount it for every run that keeps sources and a run the
+    // browser is withheld from reaches the web through the renderer.
+    const { withEnv } = await import("../../../test-support/env");
+    const { writeFakeBrowser } = await import("../../../test-support/fake-browser");
+    const keeps = { comment: false, ask: false, verdict: false, evidence: true };
+    // A server with no browser offers neither tool it could not answer.
+    const none = toolkitTools(keeps, "oc_look_no_browser", true);
+    expect([none.keep_page_look, none.measure_page]).toEqual([undefined, undefined]);
+
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      expect(toolkitTools(keeps, "oc_look_no_grant", false).keep_page_look).toBeUndefined();
+      expect(toolkitTools({ ...keeps, evidence: false, comment: true }, "oc_look_no_keep", true).keep_page_look).toBeUndefined();
+      // `measure_page` reads the run's own task and reaches nothing else, so
+      // it goes where `capture_page` goes.
+      expect(toolkitTools({ ...keeps, evidence: false, comment: true }, "oc_look_measures", false).measure_page).toBeTruthy();
+
+      const tools = toolkitTools(keeps, "oc_look", true);
+      // SAFETY: the tool answers the text block `{ content: [{ type: "text", text }] }`.
+      const out = (await tools.keep_page_look!.handler({ url: "http://localhost:5173/board" } as never, {} as never)) as {
+        content: { text: string }[];
+      };
+      expect(out.content[0]!.text).toBe(
+        "[noop] A look is of a page on the web, and this address is this machine's or a private network's. " +
+          "A page among the task's files is looked at with `capture_page`. Nothing was kept.",
+      );
+      expect(fake.launches()).toEqual([]);
+    });
   });
 
   it("ruling 82: read_task_source lists a task's sources with what each delivery rested on, opens one by id in pages, and reads another task's with taskKey", async () => {

@@ -879,6 +879,69 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
     await interrupt(runId);
     await settle();
   });
+
+  it("ruling 327: a Codex run's board server offers keep_page_look only where the run holds the browser grant, and answers it at the look's own door", async () => {
+    // CANARY: list it for every mount that keeps sources and a Codex run the
+    // browser is withheld from opens a page on the web through the renderer;
+    // leave it out of the call switch and the listed tool answers that the
+    // server has no such tool.
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    const connectAs = async (browser: boolean, sessionId: string) => {
+      const mount = resolveBoardMcp({
+        backend: "codex",
+        collaborates: true,
+        keepsSources: true,
+        webEgress: true,
+        browser,
+        agent: { profileId: "writer", roleHint: "Writer" },
+        dataRoot: store.dataRoot,
+      });
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "building" }], sessionId, backend: "codex", keepRunning: true }, "codex");
+      await startRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        role: "Writer",
+        // One run delivers on a task at a time; the other reads beside it.
+        kind: browser ? "primary" : "reviewer",
+        backend: "codex",
+        model: defaultModelFor("codex"),
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        mcpServers: { viberr_board: mount! },
+        agentProfileId: "writer",
+        credentialUserId: store.users.arda.id,
+        threadId: `look-${sessionId}`,
+      });
+      await settle();
+      const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      return client;
+    };
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) => z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const without = await connectAs(false, "no-browser");
+      expect((await without.listTools()).tools.map((tool) => tool.name)).not.toContain("keep_page_look");
+      expect((await without.callTool({ name: "keep_page_look", arguments: { url: "https://look.example/" } })).isError).toBe(true);
+      await without.close();
+
+      const client = await connectAs(true, "browser");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("keep_page_look");
+      // The door's own refusal, as a Claude run's reads: an answer, not an error.
+      const local = await client.callTool({ name: "keep_page_look", arguments: { url: "http://127.0.0.1:5173/" } });
+      expect(local.isError).toBeFalsy();
+      expect(textOf(local)).toBe(
+        "[noop] A look is of a page on the web, and this address is this machine's or a private network's. " +
+          "A page among the task's files is looked at with `capture_page`. Nothing was kept.",
+      );
+      // Arguments that are not the tool's are refused by name (ruling 136).
+      const stray = await client.callTool({ name: "keep_page_look", arguments: { url: "https://look.example/", width: 1280 } });
+      expect(stray.isError).toBe(true);
+      expect(textOf(stray)).toBe("keep_page_look takes `url` or `from` as text, and nothing else. Nothing was kept.");
+      expect(fake.launches()).toEqual([]);
+      await client.close();
+    });
+  });
 });
 
 describe("ruling 158(b): a run that keeps sending one call and getting one answer is stopped", () => {
