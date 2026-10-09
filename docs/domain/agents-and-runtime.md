@@ -495,10 +495,14 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   attachments folder (`spec.attachmentsWritableDir`, its profile holds
   `attach-evidence-references`) whose grants deny `Edit`, `MultiEdit` and `Write` keeps
   the three: `fileWriteRoots` (`file-tool-policy.server.ts`) names the folder and the temp
-  directory, the SDK is handed the denylist without them (`NotebookEdit` stays denied),
-  and a second `PreToolUse` hook, matcher `Edit|MultiEdit|Write`, refuses a call whose
-  `file_path` resolves outside both roots (symlinks resolved, so `/tmp` and `/private/tmp`
-  compare), naming the withheld grant and the folder. Its refusals write the same
+  directory and, on a task with no checkout (a board with no repository, ruling 199), the
+  run's working directory between them (`spec.scratchDir`, set fresh and on resume), which
+  the workspace contract calls the task's scratch. A board with a repository never adds
+  its working directory, even when the clone failed. The SDK is handed the denylist
+  without the three (`NotebookEdit` stays denied), and a second `PreToolUse` hook, matcher
+  `Edit|MultiEdit|Write`, refuses a call whose `file_path` resolves outside every root
+  (symlinks resolved, so `/tmp` and `/private/tmp` compare), naming the withheld grant,
+  the folder and the scratch roots. Its refusals write the same
   `permission_denied` frame, named for the file tool. The Bash hook's reasons still read
   the grants' whole denylist, so a refused `git commit` names the repo-write grant. The
   operator and the controller never qualify. The run's disclosure takes the same
@@ -1563,7 +1567,7 @@ resources, MCP server editor), per mounted server, derived from the same denylis
 
 | Withheld capability | Claude denies | Codex |
 |---|---|---|
-| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)`; a run with an attachments folder keeps `Edit MultiEdit Write`, confined by a hook to that folder and the temp directory (ruling 217(d)) | advisory (ruling 183) |
+| `execute-code-or-write-repo` (headline) | `Edit MultiEdit Write NotebookEdit Bash(git commit:*)`; a run with an attachments folder keeps `Edit MultiEdit Write`, confined by a hook to that folder and the temp directory, and on a task with no checkout its working directory (rulings 217(d) and 199) | advisory (ruling 183) |
 | `execute-code-or-write-repo`, org MCP write tools (ruling 188) | `mcp__<server>__<tool>` for each marked tool; an HTTP config also carries `always_deny` | that server's `disabled_tools` (binds) |
 | the same, on a server reached through the MCP gateway (ruling 191) | as above, and the gateway leaves the tool out of `tools/list` and refuses a call to it | as above, plus the gateway's filter and refusal |
 | `create-task-branch` | `Bash(git checkout -b:*)`, `-B`, `git switch -c/-C` | advisory |

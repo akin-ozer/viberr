@@ -1003,6 +1003,8 @@ export async function commentToAgent(
       if (confinement.attachmentsWritableDir) {
         resume.attachmentsWritableDir = confinement.attachmentsWritableDir;
       }
+      // Ruling 199: and the no-checkout scratch its file tools may write.
+      if (confinement.scratchDir) resume.scratchDir = confinement.scratchDir;
     }
     if (target.effort) resume.effort = target.effort;
     if (!resumePrincipal.ok) resume.principalRefusal = resumePrincipal.refusal;

@@ -1507,7 +1507,7 @@ function assembleClaudeOptions(
   const writeRoots =
     spec.kind === "operator" || spec.kind === "controller"
       ? null
-      : fileWriteRoots(spec.disallowedTools, spec.attachmentsWritableDir);
+      : fileWriteRoots(spec.disallowedTools, spec.attachmentsWritableDir, spec.scratchDir);
   const denied = [
     // `Skill` leaves the base list for a run that mounted granted skills:
     // denying it would remove the tool from the model's context entirely

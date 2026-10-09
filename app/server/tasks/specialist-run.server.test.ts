@@ -6063,11 +6063,20 @@ describe("P19-G11 — the run records what it was given", () => {
     expect(confinement.runInputs.delivers).toBe(true);
   });
 
-  it("ruling 217(d): a Claude run that posts files records its file tools as confined, not denied", async () => {
+  it("ruling 217(d): a Claude run that posts files records its file tools as confined, not denied, and with no repository its working directory beside them (ruling 199)", async () => {
     // The console reads what the adapter's hook reads (`fileWriteRoots`), so it
     // cannot say "denied: Write" on a run whose Write works. Canaries: drop the
     // `fileWriteRoots:` argument on the fresh path (the first block fails) or on
     // the resume path (the second fails).
+    //
+    // Ruling 199: on a board with no repository the workspace contract calls
+    // the run's working directory its scratch, so the confined tools write it
+    // too; with a repository, even one whose clone failed, it stays out.
+    // Canaries: leave `scratchDir` off the fresh run's spec (its adapter would
+    // refuse the scratch), test the clone instead of the repository on the
+    // fresh path (the repository block lists the working directory), or drop
+    // the support root from `taskScratchDir` (a supporting resume is handed the
+    // deliverer's root).
     const fm = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!
       .parsed.frontmatter;
     const postsFiles = (backend: "claude" | "codex") => ({
@@ -6085,23 +6094,44 @@ describe("P19-G11 — the run records what it was given", () => {
     });
     writeProject(store.dataRoot, { ...fm, agents: [postsFiles("claude")] });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
-    const drop = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1", "attachments");
+    const taskRoot = path.join(store.dataRoot, "projects", store.slug, "tasks", "VIB-1");
+    const drop = path.join(taskRoot, "attachments");
+    const scratch = path.join(taskRoot, "workspace");
     const fresh = inputsLine(await assignAndRun())!;
-    expect(fresh.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(lastRunSpec()!.workdir).toBe(scratch);
+    expect(lastRunSpec()!.scratchDir).toBe(scratch);
+    expect(fresh.tools.fileWriteRoots).toEqual([drop, scratch, tmpdir()]);
     expect(fresh.tools.denied).toContain("NotebookEdit");
     expect(fresh.tools.denied).not.toContain("Write");
 
-    const resume = (backend: "claude" | "codex") =>
+    const resume = (backend: "claude" | "codex", delivers = true) =>
       resolveResumeConfinement(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend, delivers: true },
+        { projectSlug: store.slug, taskKey: "VIB-1", profileId: "dev", backend, delivers },
       );
     const claude = await resume("claude");
-    expect(claude.runInputs.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    expect(claude.scratchDir).toBe(scratch);
+    expect(claude.runInputs.tools.fileWriteRoots).toEqual([drop, scratch, tmpdir()]);
     expect(claude.runInputs.tools.denied).not.toContain("Write");
     // The adapter is still handed the grants' whole denylist, and confines from it.
     expect(claude.disallowedTools).toContain("Write");
+    // A supporting agent's scratch is its own root, never the deliverer's.
+    const supporting = await resume("claude", false);
+    const ownRoot = path.join(scratch, "support", "dev");
+    expect(supporting.scratchDir).toBe(ownRoot);
+    expect(supporting.runInputs.tools.fileWriteRoots).toEqual([drop, ownRoot, tmpdir()]);
+
+    // With a repository the working directory is a checkout, out of the tools'
+    // reach whether or not the clone succeeded (here it cannot).
+    writeProject(store.dataRoot, { ...fm, repo: "acme/widgets", agents: [postsFiles("claude")] });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const withRepo = inputsLine(await assignAndRun())!;
+    expect(lastRunSpec()!.scratchDir).toBeUndefined();
+    expect(withRepo.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
+    const resumedWithRepo = await resume("claude");
+    expect(resumedWithRepo.scratchDir).toBeUndefined();
+    expect(resumedWithRepo.runInputs.tools.fileWriteRoots).toEqual([drop, tmpdir()]);
 
     // Codex: the write posture is advisory (ruling 183), nothing is confined,
     // and the row keeps every entry the grants deny.

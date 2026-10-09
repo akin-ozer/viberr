@@ -83,6 +83,23 @@ export function taskCloneDir(
 }
 
 /**
+ * Ruling 199: the working directory of a run on a task with no checkout (the
+ * workspace root, or a supporting engagement's own root under it), which its
+ * workspace contract calls the task's scratch; null when the project has a
+ * repository. The same directory `startAgentRun` and `resumeWorkdir` run in.
+ */
+export function taskScratchDir(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  support?: { profileId: string },
+): string | null {
+  if (projectRepo(ctx, projectSlug)) return null;
+  const root = taskWorkspaceRoot(projectSlug, taskKey, ctx.dataRoot);
+  return support ? path.join(root, "support", support.profileId) : root;
+}
+
+/**
  * P8 (pass 25): per-engagement workspace isolation. The DELIVERING engagement
  * owns the canonical checkout `<workspaceRoot>/<repo>` — the tree delivery's
  * `git add -A` ships (push-workspace), the operator reads, and evidence paths

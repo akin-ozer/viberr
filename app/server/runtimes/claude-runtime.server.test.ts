@@ -2176,6 +2176,29 @@ describe("the file tools of a run that posts files (ruling 217(d))", () => {
     expect(await call(hook, "Read", `${CHECKOUT}/mapping.md`)).toEqual({});
   });
 
+  it("on a task with no checkout also writes the run's working directory, and nothing wider (ruling 199)", async () => {
+    // The workspace contract of a run with no repository calls its working
+    // directory the task's scratch. Canary: leave `spec.scratchDir` out of the
+    // adapter's `fileWriteRoots` call and the first loop is refused.
+    const SCRATCH = "/srv/vib564/tasks/VIB-1/workspace";
+    const { options } = await started({ ...POSTS_FILES, workdir: SCRATCH, scratchDir: SCRATCH });
+    const hook = fileHookOf(options)!;
+    for (const [tool, filePath] of [
+      ["Write", `${SCRATCH}/draft.md`],
+      ["Edit", `${SCRATCH}/notes/sources.md`],
+      ["Write", `${DROP}/post.md`],
+    ] as const) {
+      expect(await call(hook, tool, filePath), filePath).toEqual({});
+    }
+    for (const filePath of [`${SCRATCH}/../task.md`, `${SCRATCH}-evil/draft.md`, SCRATCH]) {
+      const answer = await call(hook, "Write", filePath);
+      expect(answer.hookSpecificOutput?.permissionDecision, filePath).toBe("deny");
+    }
+    expect((await call(hook, "Write", `${SCRATCH}/../task.md`)).hookSpecificOutput?.permissionDecisionReason).toContain(
+      `where the files you post on the task go, and \`${SCRATCH}\` and \`${tmpdir()}\` for scratch.`,
+    );
+  });
+
   it("changes nothing without a folder, with repo-write granted, or on an operator", async () => {
     // No attachments folder: the grants' deny stands and no hook is added.
     const noDrop = (await started({ ...SPEC, disallowedTools: WRITE_WITHHELD })).options;

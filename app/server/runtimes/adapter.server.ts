@@ -138,6 +138,11 @@ export interface RunSpec {
    *  Ruling 217(d): on Claude it also keeps the file tools a withheld repo-write
    *  grant denies, confined to it and the temp directory by a hook. */
   attachmentsWritableDir?: string | null;
+  /** Ruling 199: the run's working directory when its task has no checkout (a
+   *  board with no repository), which its workspace contract calls the task's
+   *  scratch. Ruling 217(d)'s hook lets the confined file tools write it too.
+   *  Absent on a board with a repository, even when the clone failed. */
+  scratchDir?: string | null;
   /** The GRANTED skills Viberr mounted for this run (`mountGrantedSkills`),
    *  by exact name. Claude only: the adapter turns these into the SDK's native
    *  skills context filter (qualified by the plugin below), so the model gets

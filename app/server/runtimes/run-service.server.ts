@@ -476,6 +476,9 @@ export interface StartRunInput {
   /** See RunSpec.attachmentsWritableDir — set by specialist-run when the
    *  profile holds `attach-evidence-references`. */
   attachmentsWritableDir?: string | null;
+  /** See RunSpec.scratchDir — set by specialist-run when the task has no
+   *  checkout. */
+  scratchDir?: string | null;
   /** Override the data root (tests). */
   dataRoot?: string;
   /** Who caused the run (audit). Defaults to the operator system actor. */
@@ -1098,6 +1101,7 @@ export async function startRun(
   if (input.attachmentsWritableDir) {
     spec.attachmentsWritableDir = input.attachmentsWritableDir;
   }
+  if (input.scratchDir) spec.scratchDir = input.scratchDir;
   if (input.mcpServers) spec.mcpServers = input.mcpServers;
   // Ruling 190: only servers this run mounts can be optional.
   const mcpOptional = (input.mcpOptional ?? []).filter((name) =>
@@ -1900,6 +1904,9 @@ export interface ResumeRunInput {
    *  the run was not told about. Same fresh-vs-resume parity class as
    *  XS-1/F7. */
   attachmentsWritableDir?: string;
+  /** Ruling 199: the resumed run's no-checkout working directory, re-armed
+   *  for the same parity (see RunSpec.scratchDir). */
+  scratchDir?: string;
 }
 
 /**
@@ -1935,6 +1942,7 @@ function carryResumeOptions(target: StartRunInput, input: ResumeRunInput): void 
   if (input.attachmentsWritableDir) {
     target.attachmentsWritableDir = input.attachmentsWritableDir;
   }
+  if (input.scratchDir) target.scratchDir = input.scratchDir;
 }
 
 /**

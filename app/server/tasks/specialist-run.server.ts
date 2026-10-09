@@ -228,6 +228,7 @@ import {
   cloneRepo,
   projectRepo,
   taskCloneDir,
+  taskScratchDir,
   taskWorkspaceRoot,
   workspaceRunEnv,
 } from "./specialist-workspace.server";
@@ -1512,6 +1513,10 @@ async function dispatchAgentRun(
   if (collab.evidence && realBackend) {
     runInput.attachmentsWritableDir = attachmentsDir;
   }
+  // Ruling 199: with no repository there is no checkout, and the working
+  // directory is the task's scratch the contract names. A repository whose
+  // clone failed keeps its working directory out: that run reports and stops.
+  if (!repo && runWorkdir) runInput.scratchDir = runWorkdir;
   // R21-4: hand the reserved row over — `startRun` adopts it rather than
   // minting a second one.
   if (pending.reservation) runInput.reservation = pending.reservation;
@@ -1568,7 +1573,7 @@ async function dispatchAgentRun(
         // Ruling 217(d): what the Claude adapter's hook confines the file tools to.
         fileWriteRoots:
           backend === "claude"
-            ? fileWriteRoots(disallowedTools, runInput.attachmentsWritableDir)
+            ? fileWriteRoots(disallowedTools, runInput.attachmentsWritableDir, runInput.scratchDir)
             : null,
       }),
       promptChars: prompt.length,
@@ -2094,6 +2099,9 @@ export interface ResumeConfinement {
    *  run mounts it — the path the "Posting files" section promises. Absent
    *  when evidence is withheld. */
   attachmentsWritableDir?: string;
+  /** Ruling 199: the resumed run's working directory when the task has no
+   *  checkout, as the fresh run's `scratchDir`. Absent with a repository. */
+  scratchDir?: string;
 }
 
 /**
@@ -2351,6 +2359,9 @@ export async function resolveResumeConfinement(
       );
       shareDirWithAgents(attachmentsWritableDir);
     }
+    // Ruling 199: the scratch `resumeWorkdir` runs the resumed run in when the
+    // task has no checkout, as the fresh run's.
+    const scratchDir = taskScratchDir(ctx, input.projectSlug, input.taskKey, support);
     const confinement: ResumeConfinement = {
       disallowedTools,
       env,
@@ -2375,11 +2386,12 @@ export async function resolveResumeConfinement(
         toolkit: toolkit?.toolNames ?? null,
         fileWriteRoots:
           input.backend === "claude"
-            ? fileWriteRoots(disallowedTools, attachmentsWritableDir)
+            ? fileWriteRoots(disallowedTools, attachmentsWritableDir, scratchDir)
             : null,
       }),
     };
     if (attachmentsWritableDir) confinement.attachmentsWritableDir = attachmentsWritableDir;
+    if (scratchDir) confinement.scratchDir = scratchDir;
     if (resumeMcps.toolDenials.length) confinement.mcpToolDenials = resumeMcps.toolDenials;
     // Ruling 190: the same split the fresh run takes, from the same disclosure.
     const resumeOptional = resumeMcps.unresolved.filter((u) => u.mounted).map((u) => u.name);

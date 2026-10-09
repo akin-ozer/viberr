@@ -23,7 +23,11 @@ import { capabilityById } from "~/shared/capabilities";
  * Such a run keeps the three tools, and a PreToolUse hook refuses a call whose
  * target is outside the attachments folder and the temp directory, with a
  * sentence naming both. The checkout stays out of their reach, which is what
- * the withheld grant is about, and NotebookEdit stays denied. Coverage, not
+ * the withheld grant is about, and NotebookEdit stays denied. On a board with
+ * no repository there is no checkout, and the workspace contract calls the
+ * run's working directory the task's scratch (ruling 199), so the tools write
+ * it too; a run on a board with a repository never has its working directory
+ * added, even when its clone failed. Coverage, not
  * containment, like the Bash hook beside it (ruling 219(a)): the run keeps
  * Bash, which writes anywhere its user can. Codex is unchanged: since ruling
  * 183 its write posture is advisory, and its patch tool already writes the
@@ -36,17 +40,19 @@ export const DROP_FILE_TOOLS = ["Edit", "MultiEdit", "Write"] as const;
 /**
  * Where a Claude run's Edit, MultiEdit and Write may write, or null when
  * nothing changes: the grants leave the tools alone, or the run has no
- * attachments folder. The one derivation the adapter's hook and the run's
- * disclosure share.
+ * attachments folder. `scratchDir` is the run's working directory when its
+ * task has no checkout (a board with no repository), and absent otherwise.
+ * The one derivation the adapter's hook and the run's disclosure share.
  */
 export function fileWriteRoots(
   denied: readonly string[] | undefined,
   attachmentsDir: string | null | undefined,
+  scratchDir: string | null | undefined,
   tempDir: string = tmpdir(),
 ): string[] | null {
   if (!attachmentsDir || !denied) return null;
   if (!DROP_FILE_TOOLS.every((tool) => denied.includes(tool))) return null;
-  return [attachmentsDir, tempDir];
+  return scratchDir ? [attachmentsDir, scratchDir, tempDir] : [attachmentsDir, tempDir];
 }
 
 /** The denylist the SDK is handed once the file tools are confined instead. */
@@ -98,7 +104,7 @@ export function fileWriteDenyReason(
   return (
     `Withheld by capability policy: "${label}" (${id}) is not granted on this run, so ${tool} ` +
     `writes only into the task's attachments folder \`${attachments}\`, where the files you ` +
-    `post on the task go, and ${scratch.map((dir) => `\`${dir}\``).join(", ")} for scratch. ` +
+    `post on the task go, and ${scratch.map((dir) => `\`${dir}\``).join(" and ")} for scratch. ` +
     `\`${filePath}\` is outside both: write the file there by its absolute path, and leave ` +
     "everything else as it is. This confines Edit, MultiEdit and Write and nothing else: your " +
     "shell still runs commands."
