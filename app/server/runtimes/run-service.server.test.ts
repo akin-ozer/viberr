@@ -1,6 +1,7 @@
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { setMaxConcurrentRuns, setMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
 import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "./agent-isolation.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
@@ -2730,7 +2731,7 @@ describe("compaction at completion (ruling 174)", () => {
     // CANARY: launch the held run without admitting it and it starts past a
     // full cap; leave its step and a run parked behind the cap still says it
     // waits for a summary.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     queueFakeRun(finished("sess-then-the-cap", 120_000));
     const compaction = heldCompaction();
     const { runId } = await startTestRun(store.db, specialist());
@@ -2765,7 +2766,7 @@ describe("compaction at completion (ruling 174)", () => {
     // CANARY: keep the run's slot, or drain the queue only once the
     // compaction is over, and at a cap of one the next agent stays parked
     // behind a run that has finished.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     let open!: () => void;
     queueFakeRun({ ...finished("sess-slot", 120_000), gate: new Promise<void>((r) => (open = r)) });
     const compaction = heldCompaction();
@@ -2785,7 +2786,7 @@ describe("compaction at completion (ruling 174)", () => {
     // CANARY: register the session after the queue is drained, or promote
     // the oldest parked run whatever its session, and it starts under the
     // compaction.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     let open!: () => void;
     queueFakeRun({ ...finished("sess-parked", 120_000), gate: new Promise<void>((r) => (open = r)) });
     const compaction = heldCompaction();
@@ -2813,7 +2814,7 @@ describe("compaction at completion (ruling 174)", () => {
     // lane take a cap slot only when no build is parked for one. CANARY: count
     // the run held for its session as such a build and the turn below waits
     // for a compaction it has nothing to do with.
-    setMaxConcurrentRuns(store.db, 4);
+    setMaxConcurrentRuns(store.db, 4, SYSTEM_ACTOR);
     queueFakeRun(finished("sess-borrow", 120_000));
     const compaction = heldCompaction();
     const { runId } = await startTestRun(store.db, specialist());

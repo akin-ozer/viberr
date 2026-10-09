@@ -22,6 +22,7 @@ import {
   runConcurrencySnapshot,
   startRun,
 } from "./run-service.server";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 
@@ -94,7 +95,7 @@ describe("run concurrency cap", () => {
   });
 
   it("parks a run past the cap as `queued`, launching nothing", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("r0");
     await settle();
     expect(getRun(store.db, a)?.state).toBe("running");
@@ -120,7 +121,7 @@ describe("run concurrency cap", () => {
    * fresh agent that re-derived the work and re-spent the budget.
    */
   it("ruling 154: interrupting a run with NO provider session says so instead of promising a resume", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     await startHeldRun("r0");
     const queued = await startHeldRun("r1");
     await settle();
@@ -152,7 +153,7 @@ describe("run concurrency cap", () => {
   }
 
   it("drains the oldest queued run when a live run finishes — and the timeline says so", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1");
     await settle();
@@ -180,7 +181,7 @@ describe("run concurrency cap", () => {
   });
 
   it("drops a run interrupted WHILE queued — it never springs to life", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1"); // queued
     const c = await startHeldRun("r2"); // queued behind b
@@ -209,7 +210,7 @@ describe("run concurrency cap", () => {
   });
 
   it("cap increase is honored on the next drain (multiple promotions)", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1"); // queued
     const c = await startHeldRun("r2"); // queued
@@ -218,7 +219,7 @@ describe("run concurrency cap", () => {
     expect(getRun(store.db, c)?.state).toBe("queued");
 
     // Raise the cap to 3, then free a slot: the drain promotes BOTH waiters.
-    setMaxConcurrentRuns(store.db, 3);
+    setMaxConcurrentRuns(store.db, 3, SYSTEM_ACTOR);
     await interruptRun(
       store.db,
       { projectSlug: store.slug, taskKey: "VIB-1", runId: a, dataRoot: store.dataRoot },
@@ -242,13 +243,13 @@ describe("run concurrency cap", () => {
     // Canary: make `drainRunQueue` read a cap captured at module load (or drop
     // the `drainRunQueue(db)` line from the set-concurrency action) and the
     // queued run stays queued.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("r0");
     const b = await startHeldRun("r1"); // over the cap
     await settle();
     expect(getRun(store.db, b)?.state).toBe("queued");
 
-    setMaxConcurrentRuns(store.db, 2);
+    setMaxConcurrentRuns(store.db, 2, SYSTEM_ACTOR);
     drainRunQueue(store.db);
     await settle();
 
@@ -315,7 +316,7 @@ describe("run concurrency cap — a real specialist dispatch", () => {
     // cap check) and the dispatched run is `running` immediately — the exact
     // cosmetic-cap regression pass 26 found.
     await deployAndAssignDev();
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
 
     // One live run occupies the single slot.
     const held = await startHeldRun("held");
@@ -346,7 +347,7 @@ describe("run concurrency cap — a real specialist dispatch", () => {
     });
 
     // Raise the cap the way an org admin does, and it drains.
-    setMaxConcurrentRuns(store.db, 2);
+    setMaxConcurrentRuns(store.db, 2, SYSTEM_ACTOR);
     drainRunQueue(store.db);
     await settle();
     expect(getRun(store.db, dispatched.runId)?.state).toBe("running");
@@ -392,7 +393,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
   }
 
   it("a reserved run holds a slot while preparing (counts as live, no adapter yet)", () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const res = reserve();
     expect(res).not.toBeNull();
     // The reserved row is `running` for the strip, but no adapter launched.
@@ -402,7 +403,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
   });
 
   it("declines a reservation when the cap is full — the bug: it used to grant one anyway", () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const first = reserve();
     expect(first).not.toBeNull();
     // Second dispatch under cap=1: before the fix this returned a running
@@ -414,7 +415,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
   });
 
   it("two reserved runs fit under cap 2; a third is declined", () => {
-    setMaxConcurrentRuns(store.db, 2);
+    setMaxConcurrentRuns(store.db, 2, SYSTEM_ACTOR);
     expect(reserve()).not.toBeNull();
     expect(reserve()).not.toBeNull();
     expect(runConcurrencySnapshot(store.db)).toMatchObject({ cap: 2, live: 2 });
@@ -422,7 +423,7 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
   });
 
   it("abandoning a reservation frees its slot and drains a queued run into it", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const res = reserve();
     expect(res).not.toBeNull();
     // A normal run now exceeds the cap (the reservation holds the one slot) → queued.
@@ -439,14 +440,14 @@ describe("run concurrency cap — reserved (specialist) runs", () => {
   });
 
   it("cap 0 (unlimited) always grants the reservation", () => {
-    setMaxConcurrentRuns(store.db, 0);
+    setMaxConcurrentRuns(store.db, 0, SYSTEM_ACTOR);
     expect(reserve()).not.toBeNull();
     expect(reserve()).not.toBeNull();
     expect(reserve()).not.toBeNull();
   });
 
   it("F28-R1: INTERRUPTING a still-reserved run frees its slot and drains a queued run", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const res = reserve();
     expect(res).not.toBeNull();
     // A normal run now exceeds the cap (the reservation holds the one slot) → queued.
@@ -520,7 +521,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
     // Canary: admit every kind through the delivery bound (drop the lane from
     // `canAdmit`: `laneSize` 0) and the operator lands `queued` behind the two
     // builds.
-    setMaxConcurrentRuns(store.db, 2);
+    setMaxConcurrentRuns(store.db, 2, SYSTEM_ACTOR);
     const a = await startHeldRun("d0");
     const b = await startHeldRun("d1");
     await settle();
@@ -541,7 +542,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
   });
 
   it("a controller turn takes the lane the same way", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const a = await startHeldRun("d0");
     const ctl = await startHeldCoordinationRun("controller", "controller");
     await settle();
@@ -557,7 +558,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
     // that slot back. Canary: drop the `state.pending.delivery.length === 0`
     // clause from `canAdmit` and the third operator turn takes the freed slot
     // again while the build keeps waiting under a cap with delivery room.
-    setMaxConcurrentRuns(store.db, 2);
+    setMaxConcurrentRuns(store.db, 2, SYSTEM_ACTOR);
     const a = await startHeldRun("d0");
     const b = await startHeldRun("d1");
     const op1 = await startHeldCoordinationRun("op-1");
@@ -600,7 +601,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
     // builds): coordination's bound used to contain delivery's, so every freed
     // slot was re-lent to the next parked operator turn and a build waited
     // with the cap's own delivery slot held by coordination.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const op1 = await startHeldCoordinationRun("op-1");
     const op2 = await startHeldCoordinationRun("op-2"); // borrows the cap slot
     await settle();
@@ -628,7 +629,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
     // in `canAdmit`) and the build parks behind the operator turn at cap 1,
     // which is the "capped at 1, 1 run live" an admin would read as a cap
     // that does not hold for builds.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const op = await startHeldCoordinationRun("op-0");
     await settle();
     expect(getRun(store.db, op)?.state).toBe("running");
@@ -657,7 +658,7 @@ describe("run concurrency cap — the coordination lane (ruling 150)", () => {
     // The operator drive reserves its row before its clone (operator-run);
     // that reservation used to be declined by a full delivery cap, demoting
     // the turn to the stripless queued path. It now commits a lane slot.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const build = reserveRun(store.db, {
       projectSlug: store.slug,
       taskKey: "VIB-1",

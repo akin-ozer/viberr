@@ -4,12 +4,15 @@ import {
   setupAppTest,
   type AppTestContext,
 } from "../../test-support/test-app";
+import { listAuditEvents } from "../../test-support/audit-log";
 import { getMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 
 /**
  * The org-settings `set-concurrency` intent persists the instance run
  * concurrency cap. The action is uniformly org-admin gated (requireRoleAuth);
- * this pins the happy path + the input validation.
+ * this pins the happy path, the input validation, and ruling 31's audit: the
+ * cap is instance policy, so every change is recorded as
+ * `org.run_concurrency_cap.changed` with the value before and after.
  */
 
 let app: AppTestContext;
@@ -63,8 +66,27 @@ describe("org-settings set-concurrency", () => {
 
   it("rejects a negative / non-numeric value without changing the cap", async () => {
     await setCap(ardaId, "4");
+    const audited = listAuditEvents(app.db, { action: "org.run_concurrency_cap.changed" }).length;
     const bad = await setCap(ardaId, "-1");
     expect(bad.body.ok).toBe(false);
     expect(getMaxConcurrentRuns(app.db)).toBe(4);
+    // A refused value changed nothing, so it records nothing.
+    expect(listAuditEvents(app.db, { action: "org.run_concurrency_cap.changed" })).toHaveLength(audited);
+  });
+
+  // Ruling 31 and the Conventions' audit rule: changing how many runs the
+  // instance admits is a policy change, audited like the spending cap beside it.
+  // CANARY: drop the `recordAudit` call from `setMaxConcurrentRuns`, or record
+  // the typed value instead of the clamped one, and this goes red.
+  it("audits every change with the stored value before and after and the acting admin", async () => {
+    await setCap(ardaId, "2");
+    await setCap(ardaId, "999");
+    // Newest first; the ceiling clamps 999, and the row records what was stored.
+    const [row] = listAuditEvents(app.db, { action: "org.run_concurrency_cap.changed" });
+    expect(row?.details).toEqual({ before: 2, after: 64 });
+    expect(row?.actorUserId).toBe(ardaId);
+    expect(row?.actorLabel).toBe("arda@viberr.dev");
+    expect(row?.subjectKind).toBe("instance_setting");
+    expect(row?.subjectId).toBe("maxConcurrentRuns");
   });
 });

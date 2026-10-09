@@ -34,6 +34,7 @@ import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun } from "~/server/runtimes/run-store.server";
 import { sealSecret } from "~/server/secrets/secret-box.server";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import { resolveBoardMcp, resolveKnowledgeMcp, resolveSpecialistMcpServersDetailed } from "~/server/tasks/specialist-mcp.server";
 import { defaultModelFor } from "~/server/runtimes/model-catalog.server";
@@ -285,7 +286,7 @@ describe("every path that ends a run revokes its token (ruling 191)", () => {
   });
 
   it("no live handle: a queued run interrupted before it ever started loses its token", async () => {
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const first = await startWithMounts("claude", { keepRunning: true });
     expect(first.outcome).toBe("started");
     const queued = await startWithMounts("claude", { keepRunning: true, taskKey: "VIB-2" });

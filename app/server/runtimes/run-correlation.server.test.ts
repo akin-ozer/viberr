@@ -12,6 +12,7 @@ import {
 import { connectFakeBackend } from "../../../test-support/backend-credentials";
 import { settle } from "../../../test-support/polling";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { setMaxConcurrentRuns } from "~/server/settings/instance-settings.server";
 import {
   currentCorrelation,
@@ -163,7 +164,7 @@ describe("a run's records name the run and the request behind it (ruling 43)", (
   it("a run parked behind the cap launches in its own request's correlation", async () => {
     // CANARY: park `launchThunk` itself (no `carryCorrelation`) and the parked
     // run starts under req_a / u_a, the request of the run that freed the slot.
-    setMaxConcurrentRuns(store.db, 1);
+    setMaxConcurrentRuns(store.db, 1, SYSTEM_ACTOR);
     const running = await runWithRequestContext({ requestId: "req_a", userId: "u_a" }, () =>
       start("r0"),
     );

@@ -106,13 +106,27 @@ export function coordinationLane(cap: number): number {
 }
 
 /** Persist the cap. Clamps into [0, ceiling]; a non-integer/NaN is refused so a
- *  bad form value can never disable the gate silently. */
-export function setMaxConcurrentRuns(db: DatabaseSync, value: number): number {
+ *  bad form value can never disable the gate silently. How many runs the
+ *  instance admits is instance policy (ruling 31), so every change is audited
+ *  with the stored value before and after, as the spending cap is. */
+export function setMaxConcurrentRuns(
+  db: DatabaseSync,
+  value: number,
+  actor: AuditActor,
+): number {
   if (!Number.isFinite(value)) {
     throw new Error("Concurrency cap must be a number.");
   }
   const clamped = Math.max(0, Math.min(MAX_CONCURRENT_RUNS_CEILING, Math.floor(value)));
+  const before = getMaxConcurrentRuns(db);
   setSetting(db, MAX_CONCURRENT_RUNS_KEY, clamped);
+  recordAudit(db, {
+    action: "org.run_concurrency_cap.changed",
+    actor,
+    subjectKind: "instance_setting",
+    subjectId: MAX_CONCURRENT_RUNS_KEY,
+    details: { before, after: clamped },
+  });
   return clamped;
 }
 

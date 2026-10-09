@@ -339,7 +339,9 @@ their own.
   See
   [controller-and-epics.md §6](controller-and-epics.md#6-configuring-the-controller-ruling-270).
 - **Run concurrency**: `set-concurrency` writes `maxConcurrentRuns` (0 = unlimited,
-  ceiling 64, `MAX_CONCURRENT_RUNS_CEILING`) and drains the queue. The control shows the
+  ceiling 64, `MAX_CONCURRENT_RUNS_CEILING`) and drains the queue. Every change records
+  `org.run_concurrency_cap.changed` with the value before and after, the after being the
+  clamped value stored (ruling 31). The control shows the
   cap, the live and queued counts, and under the field, for a positive cap, the lane
   sentence of ruling 150: "Cap N: up to N agent runs at once, plus M slots for
   operator and controller turns so a decision is not stuck behind the builds it is
@@ -374,7 +376,8 @@ Action families (about 200 distinct strings; the authoritative list is a grep fo
 `action:` and the `*_AUDIT_ACTION` constants under `app/`): `auth.*`, `identity.*`,
 `profile.*`, `org.user.*`, `org.domain.*`, `org.oauth_provider.*`, `org.connection.*`,
 `org.kb.*`, `org.mcp.*`, `org.skill.*`, `org.store.*`, `org.agent_profile.*`,
-`org.controller.updated`, `org.run_spend_cap.changed` {before, after} (ruling 31),
+`org.controller.updated`, `org.run_spend_cap.changed` and
+`org.run_concurrency_cap.changed` {before, after} (ruling 31),
 `org.audit_export.*`, `github.pat.*`, `github.credential.*`, `project.*` (including
 `project.org_admin.override`, `project.authority.denied`,
 `project.required_reviewers.updated`, `project.file_leases.updated`,

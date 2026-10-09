@@ -372,7 +372,7 @@ export async function action({ request }: Route.ActionArgs) {
         if (!Number.isFinite(raw) || raw < 0) {
           return fail("Enter a whole number (0 = unlimited).");
         }
-        const applied = setMaxConcurrentRuns(db, raw);
+        const applied = setMaxConcurrentRuns(db, raw, actor);
         // A raised (or lifted) cap frees slots right away — promote any runs
         // that were waiting behind the old, lower limit.
         drainRunQueue(db);

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestDbContext } from "../../../test-support/test-db";
+import { SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import {
   coordinationLane,
   deleteSetting,
@@ -21,25 +22,25 @@ describe("instance settings — run concurrency cap", () => {
 
   it("round-trips a set value", () => {
     const db = ctx.makeDb();
-    setMaxConcurrentRuns(db, 4);
+    setMaxConcurrentRuns(db, 4, SYSTEM_ACTOR);
     expect(getMaxConcurrentRuns(db)).toBe(4);
-    setMaxConcurrentRuns(db, 0);
+    setMaxConcurrentRuns(db, 0, SYSTEM_ACTOR);
     expect(getMaxConcurrentRuns(db)).toBe(0);
   });
 
   it("clamps into [0, ceiling] and floors a fractional value", () => {
     const db = ctx.makeDb();
-    expect(setMaxConcurrentRuns(db, -5)).toBe(0);
+    expect(setMaxConcurrentRuns(db, -5, SYSTEM_ACTOR)).toBe(0);
     expect(getMaxConcurrentRuns(db)).toBe(0);
-    expect(setMaxConcurrentRuns(db, 999)).toBe(64);
+    expect(setMaxConcurrentRuns(db, 999, SYSTEM_ACTOR)).toBe(64);
     expect(getMaxConcurrentRuns(db)).toBe(64);
-    expect(setMaxConcurrentRuns(db, 3.9)).toBe(3);
+    expect(setMaxConcurrentRuns(db, 3.9, SYSTEM_ACTOR)).toBe(3);
   });
 
   it("refuses a non-finite value rather than disabling the gate", () => {
     const db = ctx.makeDb();
-    setMaxConcurrentRuns(db, 5);
-    expect(() => setMaxConcurrentRuns(db, Number.NaN)).toThrow();
+    setMaxConcurrentRuns(db, 5, SYSTEM_ACTOR);
+    expect(() => setMaxConcurrentRuns(db, Number.NaN, SYSTEM_ACTOR)).toThrow();
     // The prior value is intact — a bad write never silently reset the cap.
     expect(getMaxConcurrentRuns(db)).toBe(5);
   });
