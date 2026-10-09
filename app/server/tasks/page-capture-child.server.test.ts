@@ -725,6 +725,81 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(existsSync(path.join(b.out, "1-menu-a.png"))).toBe(false);
   });
 
+  it("pictures a whole page in stretches from `from` to its end: each starts where the one before ended and is retaken shorter by itself, at most as many as asked, and only the last says the page runs on", async () => {
+    const b = bench({ "long.html": "<p>fake-height:9000</p>" });
+    const stretches = (report: Report) => report.pages[0]!.shots.map((shot) => [shot.file, shot.from, shot.height, shot.cut]);
+
+    // To the page's end, which here comes before the third stretch asked for.
+    const whole = await b.run({ pages: ["long.html"], views: [{ ...DESKTOP, whole: true, stretches: 3 }, PHONE] });
+    expect(whole.pages[0]).toMatchObject({ error: null, ended: [] });
+    // CANARY: say `cut` on every stretch with more page below it and the
+    // first of these says so, though the second carries the page on.
+    expect(stretches(whole)).toEqual([
+      ["1-desktop.png", 0, 4800, false],
+      ["1-desktop-s2.png", 4800, 4200, false],
+      // A view without `whole` beside it is one stretch, as ever.
+      ["1-phone.png", 0, 5064, true],
+    ]);
+    expect(pngSize(path.join(b.out, "1-desktop-s2.png"))).toEqual({ width: 1280, height: 4200 });
+    expect(b.browser.shots().slice(0, 2).map((shot) => shot.clip)).toEqual([
+      { x: 0, y: 0, width: 1280, height: 4800, scale: 1 },
+      { x: 0, y: 4800, width: 1280, height: 4200, scale: 1 },
+    ]);
+    // A whole page is walked to its end, at most forty screens, where a
+    // stretch is walked to its own end. CANARY: walk a whole page as a
+    // stretch is walked and what loads only when scrolled to is missing from
+    // every stretch after the first.
+    expect(b.browser.asks().filter((asked) => asked.ask === "walk").map((asked) => asked.args)).toEqual([
+      { screens: 40 },
+      { to: 5064 },
+    ]);
+
+    // No more stretches than asked: the last one then says the page runs on.
+    // And one alone when the view names no number.
+    const capped = await b.run({ pages: ["long.html"], views: [{ ...DESKTOP, maxHeight: 2000, from: 1000, whole: true, stretches: 3 }] });
+    expect(stretches(capped)).toEqual([
+      ["1-desktop.png", 1000, 2000, false],
+      ["1-desktop-s2.png", 3000, 2000, false],
+      ["1-desktop-s3.png", 5000, 2000, true],
+    ]);
+    const one = await b.run({ pages: ["long.html"], views: [{ ...DESKTOP, whole: true }] });
+    expect(stretches(one)).toEqual([["1-desktop.png", 0, 4800, true]]);
+
+    // Each stretch is retaken shorter by itself when its picture is too
+    // large (the stand-in's weigh 1,000 bytes per px of height here), and the
+    // next starts where it ended. CANARY: start the nth stretch at `from`
+    // plus n times the cap and the page between 1,200 and 4,800 px is in no
+    // picture.
+    const taken = b.browser.shots().length;
+    const heavy = await b.run({
+      pages: ["long.html"],
+      views: [{ ...DESKTOP, whole: true, stretches: 3 }],
+      mode: "big",
+      maxBytes: 2_000_000,
+    });
+    expect(stretches(heavy)).toEqual([
+      ["1-desktop.png", 0, 1200, false],
+      ["1-desktop-s2.png", 1200, 1200, false],
+      ["1-desktop-s3.png", 2400, 1200, true],
+    ]);
+    expect(b.browser.shots().slice(taken).map((shot) => [shot.clip.y, shot.height])).toEqual([
+      [0, 4800],
+      [0, 2400],
+      [0, 1200],
+      [1200, 4800],
+      [1200, 2400],
+      [1200, 1200],
+      [2400, 4800],
+      [2400, 2400],
+      [2400, 1200],
+    ]);
+
+    // Nothing at `from` at this width is still the view's own outcome.
+    const past = await b.run({ pages: ["long.html"], views: [{ ...DESKTOP, from: 9500, whole: true, stretches: 2 }, PHONE] });
+    expect(past.pages[0]).toMatchObject({ error: null, ended: [{ view: "desktop", pageHeight: 9000 }] });
+    expect(stretches(past)).toEqual([["1-phone.png", 0, 5064, true]]);
+  });
+
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
     // A view is one kind of picture: a box, a whole page, an act or a moving
     // screen.

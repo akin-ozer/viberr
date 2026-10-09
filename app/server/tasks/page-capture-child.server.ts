@@ -54,6 +54,9 @@ import { z } from "zod";
  *    view's cap. A picture too large to hand to an agent is retaken shorter,
  *    and a width at which the page ends before `from` is reported as ended
  *    while the other width is still pictured.
+ *  - **Or pictures the whole of it** (a view with `whole`): walked to its
+ *    end, then taken in stretches from `from` down, each where the one before
+ *    ended, until the page ends or the job's count is reached.
  *  - **Or pictures it as one box of an exact size** (ruling 194, a view with
  *    `box`): laid out in a viewport of that size and cut to it from the top
  *    left, as a PNG of exactly the box times its scale. That one is never
@@ -909,21 +912,33 @@ const foundSchema = z.object({
 const focusSchema = z.object({ on: z.object({ name: z.string() }).nullable() });
 const screenSchema = z.object({ x: z.number(), y: z.number(), href: z.string() });
 
+/** The most screens a whole page is walked. A page that grows as it is
+ *  scrolled has no end to reach. */
+const WHOLE_WALK_SCREENS = 40;
+
 /**
  * Run in the page before it is pictured: wait for its fonts, walk it from the
  * top to the end of the stretch in viewport steps, come back, and let what
  * the walk started finish. Lazy pictures and scroll-in sections are then
- * drawn as for a reader who scrolled.
+ * drawn as for a reader who scrolled. A whole page is walked to its own end,
+ * read again at every step, since what loads as it is scrolled makes it
+ * longer. Not written with `inPage`: it answers with the page's address, as
+ * text, and needs none of the helpers.
  */
 function walkExpression(view: JobView): string {
-  const end = view.from + view.maxHeight;
-  return `(async () => {
+  const asked = view.whole === true ? { screens: WHOLE_WALK_SCREENS } : { to: view.from + view.maxHeight };
+  const steps =
+    view.whole === true
+      ? `for (let y = 0, stops = 0; y < height() && stops < ${WHOLE_WALK_SCREENS}; y += step, stops += 1) { window.scrollTo(0, y); await pause(80); }`
+      : `const end = Math.min(height(), ${view.from + view.maxHeight});
+  for (let y = 0; y < end; y += step) { window.scrollTo(0, y); await pause(80); }`;
+  return `/* viberr:walk ${JSON.stringify(asked)} */ (async () => {
   const pause = (ms) => new Promise((done) => setTimeout(done, ms));
   try { await Promise.race([document.fonts.ready, pause(3000)]); } catch {}
   const root = document.documentElement;
   const step = ${view.height};
-  const end = Math.min(Math.max(root ? root.scrollHeight : 0, document.body ? document.body.scrollHeight : 0), ${end});
-  for (let y = 0; y < end; y += step) { window.scrollTo(0, y); await pause(80); }
+  const height = () => Math.max(root ? root.scrollHeight : 0, document.body ? document.body.scrollHeight : 0);
+  ${steps}
   window.scrollTo(0, 0);
   const loading = Array.from(document.images).filter((img) => !img.complete).map((img) => new Promise((done) => {
     img.addEventListener("load", done, { once: true });
@@ -1203,46 +1218,52 @@ function pageSize(layout: z.infer<typeof layoutSchema>, view: JobView): PageSize
   };
 }
 
-/** Picture the page at one view. The stretch starts at `view.from`, is never
- *  less than one screen and never more than the view's cap. Heights and
- *  widths are in the picture's own px: what the screen shows, after a phone
- *  has shrunk a page it lays out wider than itself. A page that is over
- *  before `view.from` at this width is this view's own outcome, not a
- *  failure: a phone lays a page out taller than a desktop does, so a stretch
- *  further down one may not exist on the other. */
-async function pictureView(ctx: ViewContext, view: JobView, file: string): Promise<Shot | Ended> {
-  if (view.box) return pictureBox(ctx, view, view.box.scale, file);
-  const { browser, sessionId } = ctx;
-  const { scale, contentWidth, contentHeight, pageHeight } = pageSize(await loadView(ctx, view, 1), view);
-  if (view.from >= pageHeight) return { view: view.id, pageHeight };
-  let height = Math.min(pageHeight - view.from, view.maxHeight);
+/**
+ * One stretch of the page from `from` down, at most the view's cap tall and
+ * never less than one screen. A picture too large to hand to an agent is
+ * retaken half as tall, down to one screen. Resolves with the shot and the
+ * height that was asked of the browser, which is where the next stretch
+ * starts.
+ */
+async function pictureStretch(
+  ctx: ViewContext,
+  view: JobView,
+  size: PageSize,
+  from: number,
+  file: string,
+): Promise<{ shot: Shot; height: number }> {
+  const { scale } = size;
+  let height = Math.min(size.pageHeight - from, view.maxHeight);
   for (;;) {
     const shot = screenshotSchema.parse(
-      await browser.send(
+      await ctx.browser.send(
         "Page.captureScreenshot",
         {
           format: "png",
           captureBeyondViewport: true,
-          clip: { x: 0, y: view.from / scale, width: view.width / scale, height: height / scale, scale },
+          clip: { x: 0, y: from / scale, width: view.width / scale, height: height / scale, scale },
         },
-        sessionId,
+        ctx.sessionId,
       ),
     );
     const bytes = Buffer.from(shot.data, "base64");
     if (bytes.length <= ctx.maxBytes) {
-      const size = pngSize(bytes);
-      if (!size) throw new Error("the browser returned a picture that is not a PNG");
+      const png = pngSize(bytes);
+      if (!png) throw new Error("the browser returned a picture that is not a PNG");
       writeFileSync(path.join(ctx.out, file), bytes);
       return {
-        view: view.id,
-        width: size.width,
-        height: size.height,
-        from: view.from,
-        contentHeight,
-        contentWidth,
-        scale,
-        cut: view.from + height < pageHeight,
-        file,
+        height,
+        shot: {
+          view: view.id,
+          width: png.width,
+          height: png.height,
+          from,
+          contentHeight: size.contentHeight,
+          contentWidth: size.contentWidth,
+          scale,
+          cut: false,
+          file,
+        },
       };
     }
     // Too large to hand to an agent: half as tall, down to one screen.
@@ -1250,6 +1271,42 @@ async function pictureView(ctx: ViewContext, view: JobView, file: string): Promi
     if (height <= floor) throw new Error("the picture of one screen of it is too large to keep");
     height = Math.max(Math.ceil(height / 2), floor);
   }
+}
+
+/** Picture the page at one view: a box, or stretches of it. A stretch starts
+ *  at `view.from`, is never less than one screen and never more than the
+ *  view's cap. Heights and widths are in the picture's own px: what the
+ *  screen shows, after a phone has shrunk a page it lays out wider than
+ *  itself. A page that is over before `view.from` at this width is this
+ *  view's own outcome, not a failure: a phone lays a page out taller than a
+ *  desktop does, so a stretch further down one may not exist on the other.
+ *
+ *  One stretch, into the first of `files`, unless the view is a whole page:
+ *  then one per file, each starting where the one before ended, until the
+ *  page does. Only the last says the page runs on below it: the ones before
+ *  are carried on by the next. Each is kept as it is taken, so a page that
+ *  fails at a later one still reports those it has. */
+async function pictureView(ctx: ViewContext, view: JobView, files: readonly string[]): Promise<void> {
+  const [first = ""] = files;
+  if (view.box) {
+    ctx.pictures.shots.push(await pictureBox(ctx, view, view.box.scale, first));
+    return;
+  }
+  const size = pageSize(await loadView(ctx, view, 1), view);
+  if (view.from >= size.pageHeight) {
+    ctx.pictures.ended.push({ view: view.id, pageHeight: size.pageHeight });
+    return;
+  }
+  let from = view.from;
+  let last: Shot | null = null;
+  for (const file of files) {
+    if (from >= size.pageHeight) break;
+    const stretch = await pictureStretch(ctx, view, size, from, file);
+    ctx.pictures.shots.push(stretch.shot);
+    last = stretch.shot;
+    from += stretch.height;
+  }
+  if (last) last.cut = from < size.pageHeight;
 }
 
 /**
@@ -1499,15 +1556,10 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
       await browser.send("Network.enable", {}, sessionId);
       await browser.send("Audits.enable", {}, sessionId);
       for (const view of job.views) {
-        const [name] = pictureNames(view);
-        const file = `${index + 1}-${name}.png`;
-        if (view.act) {
-          await pictureAct(ctx, view, view.act, file);
-          continue;
-        }
-        const pictured = await pictureView(ctx, view, file);
-        if ("pageHeight" in pictured) ended.push(pictured);
-        else shots.push(pictured);
+        const files = pictureNames(view).map((name) => `${index + 1}-${name}.png`);
+        const [first = ""] = files;
+        if (view.act) await pictureAct(ctx, view, view.act, first);
+        else await pictureView(ctx, view, files);
       }
     } finally {
       stop();
