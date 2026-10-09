@@ -221,6 +221,15 @@ export interface ReviewDeadlockPacketInput {
 }
 
 /**
+ * The packet's title, which raising it also writes onto the timeline. It names
+ * the reviewer and the count, and the retry reads it back to tell an
+ * escalation already made from one still owed (ruling 94).
+ */
+export function reviewDeadlockTitle(reviewerName: string, rounds: number): string {
+  return `${reviewerName} has requested changes ${rounds} times running`;
+}
+
+/**
  * Build the packet. Pure, so the caller can write it inside the SAME locked
  * write that records the verdict: the objection and the escalation it triggers
  * land together or not at all, and no second lock can fail between them.
@@ -260,7 +269,7 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
     type: "input",
     kind: "Decision required",
     from: "policy-engine",
-    title: `${input.reviewerName} has requested changes ${input.deadlock.rounds} times running`,
+    title: reviewDeadlockTitle(input.reviewerName, input.deadlock.rounds),
     body:
       `${handle} returned its ${ordinal(input.deadlock.rounds)} consecutive request for changes on ` +
       `${input.taskKey}, with no approve in between` +

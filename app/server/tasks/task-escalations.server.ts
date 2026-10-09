@@ -15,6 +15,8 @@ import {
   buildReviewDeadlockPacket,
   delivererNameOf,
   reviewDeadlockOf,
+  reviewDeadlockTitle,
+  type ReviewDeadlock,
 } from "./review-deadlock.server";
 import {
   OPERATOR_AUDIT_ACTOR,
@@ -534,16 +536,11 @@ export async function retryReviewDeadlockEscalation(
     // Only an engagement that can actually record a verdict can deadlock a
     // review; a stale verdict from a profile nobody has engaged is history.
     const candidates = fm.engagements.filter((e) => e.verdictCapable);
-    let found: { deadlock: ReturnType<typeof reviewDeadlockOf>; profileId: string } | null = null;
-    for (const e of candidates) {
+    const deadlocked = candidates.flatMap((e) => {
       const deadlock = reviewDeadlockOf(fm, e.profileId, consecutiveRequestChanges(fm, e.profileId));
-      if (deadlock) {
-        found = { deadlock, profileId: e.profileId };
-        break;
-      }
-    }
-    if (!found || !found.deadlock) return;
-    const deadlock = found.deadlock;
+      return deadlock ? [{ deadlock, engagement: e }] : [];
+    });
+    if (deadlocked.length === 0) return;
     const names = deadlockAgentNames(ctx, projectSlug);
     /**
      * The retry is for an escalation that was NEVER MADE — not for one a person
@@ -561,10 +558,25 @@ export async function retryReviewDeadlockEscalation(
      * silence there is what makes one owed. A LATER objection raises the count
      * and is a new escalation, which is ruling 94's own rule.
      */
-    const alreadyEscalated = existing.parsed.timeline.some((e) =>
-      (e.text ?? "").includes(`requested changes ${deadlock.rounds} times running`),
-    );
-    if (alreadyEscalated) return;
+    // Ruling 94: the reviewer AND the count. On the count alone, two reviewers
+    // standing at the same count read as one, and the escalation the first was
+    // given hid the one the second was owed. The title is the raise's entry
+    // title or opens this retry's note, never just somewhere in a text, since
+    // one name can end with another ("Security reviewer"). Where the project
+    // names nobody, the raise wrote the engagement's role and this retry the
+    // profile id.
+    const carries = (title: string) =>
+      existing.parsed.timeline.some((e) => e.title === title || (e.text ?? "").startsWith(title));
+    let found: { deadlock: ReviewDeadlock; profileId: string } | null = null;
+    for (const { deadlock, engagement } of deadlocked) {
+      const named = names.get(engagement.profileId);
+      const calledBy = named ? [named] : [engagement.profileId, engagement.role];
+      if (calledBy.some((who) => carries(reviewDeadlockTitle(who, deadlock.rounds)))) continue;
+      found = { deadlock, profileId: engagement.profileId };
+      break;
+    }
+    if (!found) return;
+    const deadlock = found.deadlock;
     const packet = buildReviewDeadlockPacket({
       taskKey,
       packetId: newId("pkt"),

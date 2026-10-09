@@ -3101,6 +3101,69 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.packet).toBeNull();
     });
 
+    it("ruling 94: two reviewers at the same count are two escalations, and answering one raises the other", async () => {
+      // Ruling 94: the retry skips an escalation whose title the timeline
+      // already carries, and the title names the reviewer as well as the
+      // count. Here the first reviewer in the engagement order is escalated at
+      // three; the second reaches three while that packet is open, so its own
+      // escalation is skipped and owed. Its name ends with the first one's on
+      // purpose: "Security reviewer" contains "reviewer".
+      // CANARY (a): match the timeline on "requested changes 3 times running"
+      // alone and the answered packet hides the owed one: nothing is raised.
+      // CANARY (b): stop at the first deadlocked reviewer instead of the first
+      // owed one, and the escalated "Security reviewer" ends the search.
+      // CANARY (c): find the title anywhere in an entry's text and "Security
+      // reviewer has requested changes 3 times running" reads as this one.
+      writeReviewTask({
+        engagements: [
+          DEV_DELIVERS_ENGAGEMENT,
+          {
+            profileId: "second",
+            backend: "claude",
+            role: "Review & validation",
+            delivers: false,
+            verdictCapable: true,
+          },
+          REVIEWER_ENGAGEMENT,
+        ],
+      });
+      reconfigureProject(store, (fm) => ({
+        agents: [
+          ...fm.agents,
+          {
+            profileId: "second",
+            capabilities: VERDICT_GRANT,
+            extras: [],
+            definition: {
+              kind: "specialist",
+              name: "Security reviewer",
+              role: "Review & validation",
+              backends: ["claude"],
+              model: "sonnet",
+            },
+          },
+        ],
+      }));
+      for (const n of [1, 2, 3]) await review(blocks(n), "second");
+      expect(taskFile().parsed.packet?.title).toBe("Security reviewer has requested changes 3 times running");
+      for (const n of [1, 2, 3]) await review(blocks(n), "reviewer");
+      // Three rounds, so its escalation is owed; skipped only for the open packet.
+      expect(taskFile().parsed.frontmatter.verdicts.find((v) => v.profileId === "reviewer")?.rounds).toBe(3);
+      expect(taskFile().parsed.packet?.title).toBe("Security reviewer has requested changes 3 times running");
+
+      // A person answers the first escalation.
+      await resolvePacket(
+        store.db,
+        { projectSlug: store.slug, taskKey: "VIB-1", optionIndex: 1 },
+        actorOf(store.users.arda),
+        { dataRoot: store.dataRoot },
+      );
+
+      // The owed one is raised, and the answered one is not raised again
+      // (ruling 87's loop).
+      expect(taskFile().parsed.packet?.title).toBe("reviewer has requested changes 3 times running");
+    });
+
     it("resets on that reviewer's own approve", async () => {
       writeReviewTask();
 
