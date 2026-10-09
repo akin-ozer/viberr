@@ -101,7 +101,7 @@ import type { PrOverlap } from "~/shared/pr-overlaps";
 import { interruptRun, listRunsForTask } from "~/server/runtimes/run-service.server";
 import { listRunsForTaskRows, liveRunStateByTask } from "~/server/runtimes/run-store.server";
 import { type TookShipped, whatItTook } from "~/server/tasks/what-it-took.server";
-import { withLiveRun } from "~/shared/mapping/task.server";
+import { queuedRunWait, withLiveRun } from "~/shared/mapping/task.server";
 import {
   runOperator,
   type RunOperatorInput,
@@ -542,12 +542,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }
   }
 
+  // Ruling 44: the hero and the rail read the run row, like the board card.
+  const liveRun = liveRunStateByTask(db, params.slug).get(params.key) ?? null;
+  const task = { ...withLiveRun(detail, liveRun), timeline: slice.events };
+  // Ruling 166: why a parked run waits, from the rows read above, sent only
+  // while one is parked so no other task's payload grows (ruling 11).
+  if (liveRun === "queued") task.liveRunWait = queuedRunWait(runRows);
+
   return {
-    // Ruling 44: the hero and the rail read the run row, like the board card.
-    task: {
-      ...withLiveRun(detail, liveRunStateByTask(db, params.slug).get(params.key) ?? null),
-      timeline: slice.events,
-    },
+    task,
     // The project's existing label vocabulary, for the Details panel's label
     // autocomplete — same source the board's New-task modal draws from.
     labelSuggestions: listProjectLabels(db, params.slug),

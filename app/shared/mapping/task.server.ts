@@ -894,3 +894,19 @@ export function withLiveRun<T extends TaskSummary>(
       : task.displayReadiness;
   return { ...task, liveRun, displayReadiness };
 }
+
+/**
+ * Ruling 166: why the queued run carrying a task waits, for the task page's
+ * "Agent queued" title, built from the task's run rows as the console's footer
+ * builds its own. A queued row's step, when it has one, is what the run waits
+ * for before a slot: the summary of its session's last run, still being
+ * compacted (ruling 175). A row with no step waits for a slot, and while any
+ * of the task's parked runs does, the sentence names the cap.
+ */
+export function queuedRunWait(rows: readonly { state: string; step: string | null }[]): string {
+  const parked = rows.filter((r) => r.state === "queued");
+  const step = parked.every((r) => r.step !== null) ? parked[0]?.step : null;
+  return step
+    ? `Queued, ${step}; then it starts when a slot frees.`
+    : "Behind the instance's concurrent-run cap; it starts when a slot frees.";
+}

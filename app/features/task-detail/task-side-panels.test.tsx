@@ -10,9 +10,7 @@ import { CurrentStatePanel } from "./task-side-panels";
 import { TaskDetailsPanel } from "./task-details-panel";
 import type { EpicOption } from "~/ui/epic-chip";
 import { Icon, type IconName } from "~/ui/icon";
-import type { RunView } from "~/features/runtime/runtime-types";
 import { acceptanceAffordance, taskDetail } from "../../../test-support/task-detail";
-import { controllerRun } from "../../../test-support/run-view";
 
 /**
  * Pass-19 gap 10 — the task page showed stage, readiness, validation, owner and
@@ -36,7 +34,7 @@ function detail(patch: Partial<TaskDetail> = {}): TaskDetail {
   });
 }
 
-function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer", runtime: RunView[] = []) {
+function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer") {
   const task = detail(patch);
   const Stub = createRoutesStub([
     {
@@ -44,7 +42,6 @@ function renderPanel(patch: Partial<TaskDetail> = {}, myRole = "viewer", runtime
       Component: () => (
         <CurrentStatePanel
           task={task}
-          runtime={runtime}
           stage={task.stages[1]}
           meId="u-arda"
           myRole={myRole}
@@ -799,46 +796,20 @@ describe("ruling 63: Waiting on · a decided edit_goal packet", () => {
  * Ruling 166: the rail's "Agent queued" says why the run waits from its row. A
  * run that resumes a session still being compacted is parked with the step
  * ruling 175 writes, whatever the cap says: it waits for a summary, not a slot.
+ * Which sentence the rows give is the loader's (task-detail-route suite); this
+ * is the rail printing it.
  */
 describe("ruling 166: Waiting on · a queued run says what it waits for", () => {
-  /** A delivering agent's run, parked, carrying the step its row holds. */
-  const parked = (step: string | null) =>
-    controllerRun({
-      id: "primary",
-      serverRunId: "run_dev",
-      kind: "primary",
-      role: "Developer",
-      profileId: "developer",
-      who: { kind: "agent", backend: "claude", name: "Developer", role: "Developer" },
-      state: "idle",
-      lifecycle: "queued",
-      phase: null,
-      step,
-      startedAt: null,
-    });
-  /** The Waiting-on fact of a task whose run is queued, beside these runs. */
-  const queuedFact = (runtime: RunView[]) => {
-    const { container } = renderPanel({ waiting: "agent", liveRun: "queued" }, "viewer", runtime);
+  it("titles the queued fact with the loader's reason, never a cap it assumed", () => {
+    // CANARY: put the one cap sentence back on the row and a run held for its
+    // session's summary reads "Behind the instance's concurrent-run cap".
+    const held = "Queued, waiting for the summary of its last run; then it starts when a slot frees.";
+    const { container } = renderPanel({ waiting: "agent", liveRun: "queued", liveRunWait: held });
     const fact = container.querySelector(".kv.props .v > .prop-fact")!;
-    return { words: fact.textContent, title: fact.getAttribute("title") };
-  };
-  const CAP = "Behind the instance's concurrent-run cap; it starts when a slot frees.";
-
-  it("names the cap for a run waiting for a slot, and the summary its step names for one whose session is being compacted", () => {
-    // CANARY: put the one cap sentence back on the row and the held run reads
-    // "Behind the instance's concurrent-run cap" while no slot is what it lacks.
-    expect(queuedFact([parked(null)])).toEqual({ words: "Agent queued", title: CAP });
-    expect(queuedFact([parked("waiting for the summary of its last run")])).toEqual({
+    expect({ words: fact.textContent, title: fact.getAttribute("title") }).toEqual({
       words: "Agent queued",
-      title: "Queued, waiting for the summary of its last run; then it starts when a slot frees.",
+      title: held,
     });
-  });
-
-  it("names the cap while any of the task's parked runs waits for a slot", () => {
-    // CANARY: take the step of the first parked run whatever the others hold
-    // and a run behind the cap reads as waiting for a summary.
-    const behindCap = { ...parked(null), id: "c0", serverRunId: "run_rev", kind: "reviewer" as const };
-    expect(queuedFact([parked("waiting for the summary of its last run"), behindCap]).title).toBe(CAP);
   });
 });
 

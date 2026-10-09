@@ -2041,3 +2041,56 @@ describe("run-gates (ruling 104)", () => {
     expect(none.data.error).toBe("The project declares no gates.");
   });
 });
+
+/**
+ * Ruling 166: the task page's "Agent queued" says why the run waits, built from
+ * the rows by the loader. A run that resumes a session still being compacted is
+ * parked by `admitRun` with the step ruling 175 writes, whatever the cap says:
+ * it waits for a summary, not a slot. Last in the file: it parks runs on
+ * VIB-151 and stops them when it is done.
+ */
+describe("loader — ruling 166: why a queued run waits", () => {
+  it("names the step a held run carries, the cap while any parked run has none, and nothing once one runs", async () => {
+    const { upsertRun, patchRun } = await import("~/server/runtimes/run-store.server");
+    const { SESSION_SETTLING_STEP } = await import("~/server/runtimes/adapter.server");
+    const park = (id: string, kind: "primary" | "reviewer") =>
+      upsertRun(app.db, {
+        id,
+        projectSlug: "viberr-core",
+        taskKey: "VIB-151",
+        threadId: `${kind}-r166`,
+        role: "Developer",
+        kind,
+        backend: "claude",
+        model: "sonnet",
+        sdk: "test",
+        agentProfileId: "developer",
+        state: "queued",
+      });
+    try {
+      park("run_r166held", "primary");
+      // The write `admitRun` makes for a resume of a session still settling.
+      patchRun(app.db, "run_r166held", { step: SESSION_SETTLING_STEP });
+      // CANARY: build the sentence without the row's step and the held run
+      // reads "Behind the instance's concurrent-run cap".
+      const held = (await runLoader("VIB-151", ids.arda)).task;
+      expect(held.liveRun).toBe("queued");
+      expect(held.liveRunWait).toBe(
+        "Queued, waiting for the summary of its last run; then it starts when a slot frees.",
+      );
+      // CANARY: take the step of the first parked run whatever the others hold
+      // and a run behind the cap reads as waiting for a summary.
+      park("run_r166capped", "reviewer");
+      expect((await runLoader("VIB-151", ids.arda)).task.liveRunWait).toBe(
+        "Behind the instance's concurrent-run cap; it starts when a slot frees.",
+      );
+      // CANARY: send the sentence whatever `liveRun` says and a task with a
+      // streaming run carries it too.
+      patchRun(app.db, "run_r166capped", { state: "running" });
+      expect((await runLoader("VIB-151", ids.arda)).task).not.toHaveProperty("liveRunWait");
+    } finally {
+      patchRun(app.db, "run_r166held", { state: "interrupted" });
+      patchRun(app.db, "run_r166capped", { state: "interrupted" });
+    }
+  });
+});

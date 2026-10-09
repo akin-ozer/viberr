@@ -11,7 +11,6 @@ import { LocalDayDotTime, LocalRelative } from "~/ui/local-time";
 import { asProjectRole, roleCan } from "~/shared/rbac";
 import { stageLabel } from "~/shared/workflow/stage-label";
 import type { AcceptanceAffordance } from "~/server/tasks/task-acceptance.server";
-import type { RunView } from "~/features/runtime/runtime-types";
 import { gatesPill, prStatePill, type PillView } from "~/features/github/github-pills";
 import type { GatesView } from "~/shared/project-gates";
 import { useAttachmentLightbox } from "./attachment-lightbox";
@@ -806,7 +805,6 @@ function holdSentenceKeepingLabels(entries: readonly DependencyRender[]): ReactN
  * here: accepting the completion (P14-LV-06) and archiving (R14-3). */
 export function CurrentStatePanel({
   task,
-  runtime,
   stage,
   meId,
   myRole,
@@ -823,9 +821,6 @@ export function CurrentStatePanel({
   dispositionBusy,
 }: {
   task: TaskDetail;
-  /** The task's runs as the console draws them: a queued one's row says what
-   *  it waits for (ruling 166). */
-  runtime: readonly RunView[];
   stage: TaskDetail["stages"][number] | undefined;
   meId: string;
   myRole: string | null;
@@ -919,7 +914,7 @@ export function CurrentStatePanel({
         </div>
         <div className="kv-row">
           <span className="k">Waiting on</span>
-          <span className="v">{waitingOnFact(task, runtime)}</span>
+          <span className="v">{waitingOnFact(task)}</span>
         </div>
         {/* Gap-10 — last activity, ALWAYS on, unlike the board's threshold-gated
             cue. This is the detail surface; a supervisor who has opened the task
@@ -1014,7 +1009,7 @@ export function CurrentStatePanel({
  */
 
 /** Who owes the task's next move, in the board card's marks (ruling 306). */
-function waitingOnFact(task: TaskDetail, runtime: readonly RunView[]) {
+function waitingOnFact(task: TaskDetail) {
   if (task.packet?.awaiting === "goal_edit") {
     // Ruling 63: a decided edit_goal packet owes exactly one thing.
     return (
@@ -1083,19 +1078,11 @@ function waitingOnFact(task: TaskDetail, runtime: readonly RunView[]) {
       );
     }
     // Ruling 44: the run is parked; nothing streams, so the board's ring
-    // rather than its pulse. Ruling 166: the title says why from the run
-    // rows, as the console's footer does. A queued run's step, when it has
-    // one, is what it waits for before a slot: the summary of its session's
-    // last run, which is still being compacted (ruling 175). One with no
-    // step waits for a slot, and while any of the task's parked runs does,
-    // the title names the cap.
-    const parked = runtime.filter((r) => r.lifecycle === "queued");
-    const step = parked.every((r) => r.step !== null) ? parked[0]?.step : null;
+    // rather than its pulse. Ruling 166: the title is why it waits, which
+    // the loader builds from the run rows (`queuedRunWait`): the summary of
+    // its session's last run (ruling 175), or the concurrent-run cap.
     return (
-      <span
-        className="prop-fact by-agent"
-        title={`${step ? `Queued, ${step}; then` : "Behind the instance's concurrent-run cap;"} it starts when a slot frees.`}
-      >
+      <span className="prop-fact by-agent" title={task.liveRunWait}>
         {MARK.ring}
         Agent queued
       </span>

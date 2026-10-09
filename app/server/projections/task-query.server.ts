@@ -66,6 +66,9 @@ export interface TaskDetail extends TaskSummary {
   lastActivityAt: string | null;
   /** Gap-10: past its threshold, no run in flight, not archived, not terminal. */
   quiet: boolean;
+  /** Ruling 166: why the queued run carrying the task waits (`queuedRunWait`),
+   *  annotated by the task loader only while `liveRun` is `queued`. */
+  liveRunWait?: string;
 }
 
 /** The `diagnostics` columns the query below selects. A type alias, not an
