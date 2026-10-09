@@ -137,7 +137,8 @@ async function sourceBoard(): Promise<TestStore> {
   ).deployment;
   const qaLead: AgentDeployment = {
     profileId: "qa-lead",
-    capabilities: [],
+    // The board's required reviewer, so it holds the grant one must (ruling 17).
+    capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" }],
     extras: [],
     definition: {
       kind: "specialist",
@@ -575,6 +576,36 @@ describe("ruling 32: what an import refuses", () => {
     await expect(importInto(target, broken)).rejects.toThrow(/cannot be imported until 4 problems/);
     expect(readProjectFile({ projectSlug: "release-train", dataRoot: target.dataRoot })).toBeNull();
     expect(existsSync(skillDirPath("release-notes", target.dataRoot))).toBe(false);
+  });
+
+  it("ruling 17: refuses a required reviewer the board deploys without the verdict grant, as Settings does", async () => {
+    // A required reviewer that cannot report a verdict never approves, so
+    // `requiredReviewerRefusals` holds every delivered task until an admin
+    // force-accepts. CANARY: drop the `grantsValidationVerdict` check from
+    // `checkBoard` and this board imports, its rule unanswerable.
+    const source = await sourceBoard();
+    const project = readProjectFile({ projectSlug: source.slug, dataRoot: source.dataRoot })!.parsed;
+    writeProject(
+      source.dataRoot,
+      {
+        ...project.frontmatter,
+        agents: project.frontmatter.agents.map((a) =>
+          a.profileId === "qa-lead"
+            ? { ...a, capabilities: [{ capabilityId: "report-validation-verdict", mode: "off" as const }] }
+            : a,
+        ),
+      },
+      project.description,
+    );
+    reprojectProject(source.db, { dataRoot: source.dataRoot }, source.slug);
+    const target = targetStore();
+    const file = exported(source);
+    expect(previewBoardImport(target.db, file, { dataRoot: target.dataRoot }).problems).toEqual([
+      "board.md: a required reviewer names the agent `qa-lead`, which the board deploys without " +
+        "`report-validation-verdict`, so it could never give the approval acceptance waits on.",
+    ]);
+    await expect(importInto(target, file)).rejects.toThrow(/cannot be imported: board\.md: a required reviewer/);
+    expect(readProjectFile({ projectSlug: "release-train", dataRoot: target.dataRoot })).toBeNull();
   });
 
   it("refuses a board file from a newer format, and a zip with no board.md", () => {

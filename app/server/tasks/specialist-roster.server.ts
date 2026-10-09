@@ -10,7 +10,6 @@ import type { DatabaseSync } from "node:sqlite";
 import { taskWorkspaceGit, type WorkspaceGit } from "./workspace-git.server";
 import { deliveringEngagement, type TaskFileEvent } from "~/schemas/task-file.schema";
 import { effectiveCollabMode } from "./agent-outcome.server";
-import { coerceSpecialistCapabilityMode } from "~/shared/capabilities";
 import { holdRefusalFor } from "~/server/projections/dependencies.server";
 import {
   resolveDeclaredStages,
@@ -40,7 +39,7 @@ import { resolveRunModel } from "~/server/runtimes/model-catalog.server";
 import type { RunStartOutcome } from "~/server/runtimes/run-service.server";
 import type { McpToolDenial } from "~/shared/mcp-tools";
 import { requireRunAgents } from "~/server/auth/project-authority.server";
-import { grantsWriteRepository } from "./specialist-tool-policy";
+import { grantsValidationVerdict, grantsWriteRepository } from "./specialist-tool-policy";
 import {
   type McpRunGrant,
   resolveSpecialistMcpServersDetailed,
@@ -918,12 +917,6 @@ export function listDeployedSpecialists(
     // Same empty-grant resolution the run path uses (AP-06), so what the
     // operator is told a candidate can do matches what it may actually do.
     const grants = deploymentGrants(deployment, projectSlug);
-    const granted = (id: string) =>
-      grants.some(
-        (g) =>
-          g.capabilityId === id &&
-          coerceSpecialistCapabilityMode(g.mode) === "direct",
-      );
     const specialist: DeployedSpecialistView = {
       id: resolved.profileId,
       name: resolved.name,
@@ -941,7 +934,9 @@ export function listDeployedSpecialists(
         // RECORDING rule, not a selection signal; applying it here made every
         // profile look review-capable and mis-picked the reviewer.
         postsFiles: effectiveCollabMode(grants, "attach-evidence-references") === "direct",
-        verdict: granted("report-validation-verdict"),
+        // The predicate an imported board's required reviewers are held to
+        // (ruling 17), so the two doors that set them read one grant.
+        verdict: grantsValidationVerdict(grants),
         askHuman: effectiveCollabMode(grants, "ask-human") === "direct",
         // D8/R19-19: whether this agent can drive a browser — the mount's own
         // gate (`resolveBrowserMcp`), so a task with a browser-capable agent

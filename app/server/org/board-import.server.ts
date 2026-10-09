@@ -37,7 +37,7 @@ import {
 import { assertSkillBodyWellFormed } from "~/server/files/skill-body.server";
 import { getProject, listProjects } from "~/server/projections/board-query.server";
 import { baseAgentDeployments } from "~/server/seed/agent-catalog.server";
-import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
+import { grantsValidationVerdict, grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { BoardDelivers } from "~/shared/board-delivers";
 import { errorMessage } from "~/shared/errors";
 import { slugify } from "~/shared/ids/slugify";
@@ -374,8 +374,17 @@ function checkBoard(board: BoardDefinition, problems: string[], notes: string[])
     else if (isTerminalStage(rule.stageId, board.stages)) {
       problems.push(`board.md: a required reviewer is set at ${stage.name}, the final stage; a review runs before it.`);
     }
-    if (!seen.has(rule.profileId)) {
+    const deployed = board.agents.find((d) => d.profileId === rule.profileId);
+    if (!seen.has(rule.profileId) || !deployed) {
       problems.push(`board.md: a required reviewer names the agent \`${rule.profileId}\`, which the board does not deploy.`);
+    } else if (!grantsValidationVerdict(deployed.capabilities)) {
+      // Ruling 17: the grant the Settings writer checks, by the same
+      // predicate. Without it the agent never approves, and acceptance of
+      // every delivered task waits on it until an admin force-accepts.
+      problems.push(
+        `board.md: a required reviewer names the agent \`${rule.profileId}\`, which the board deploys without ` +
+          "`report-validation-verdict`, so it could never give the approval acceptance waits on.",
+      );
     }
   }
   if (board.gates) {

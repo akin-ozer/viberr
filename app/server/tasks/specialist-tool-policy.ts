@@ -158,6 +158,23 @@ export function grantsWriteRepository(grants: readonly CapabilityGrant[]): boole
   );
 }
 
+/**
+ * Ruling 17: whether these grants let an agent give a validation verdict,
+ * which is what a required reviewer (ruling 89) must hold: an EXPLICIT direct
+ * `report-validation-verdict`. One reading for whoever picks a reviewer (the
+ * roster's `capabilities.verdict`, which the Settings writer of required
+ * reviewers checks) and for an imported board's rules. The completion-time
+ * default that records a supporting engagement's verdict with no grant is a
+ * recording rule, not this.
+ */
+export function grantsValidationVerdict(grants: readonly CapabilityGrant[]): boolean {
+  return grants.some(
+    (g) =>
+      g.capabilityId === "report-validation-verdict" &&
+      coerceSpecialistCapabilityMode(g.mode) === "direct",
+  );
+}
+
 function isWithheld(
   modeById: Map<string, string>,
   capabilityId: string,

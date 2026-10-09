@@ -1158,7 +1158,10 @@ How an import reads one (`readBoardFile`, `parseBoardFile`):
   problem that refuses the import. Then the board is checked whole: at least two stages,
   unique stage ids, the move into the final stage `human`, unique agents and none of them the
   controller, every required
-  reviewer at a non-final stage of the board on an agent it deploys, gates by
+  reviewer at a non-final stage of the board on an agent it deploys with a direct
+  `report-validation-verdict` (ruling 17; `grantsValidationVerdict`, the predicate the
+  Settings writer of required reviewers reads, so a rule naming an agent that could never
+  approve is refused rather than holding every delivered task), gates by
   `validateProjectGates`, and a rulings knowledge base the file or the instance has. A
   workflow that does not step through the stages one at a time is rewired as a stage edit
   would (`realignChainToStages`), with a note, and a board with no operator gets the base
