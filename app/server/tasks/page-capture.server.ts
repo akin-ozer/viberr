@@ -1900,6 +1900,10 @@ function actReplyText(name: string, page: RenderedPage, reduce: boolean, scratch
   return parts.join(" ");
 }
 
+/** A moment as a sentence gives it: the renderer reports the ms its clock
+ *  read, and a reader is told the moment it aimed for. */
+export const aboutMs = (ms: number): number => Math.round(ms / 50) * 50;
+
 /** Ruling 194: the reply to a page pictured while it moves. */
 function movingReplyText(name: string, page: RenderedPage, from: number, reduce: boolean, scratchNote: string): string {
   const parts = [
@@ -1909,7 +1913,7 @@ function movingReplyText(name: string, page: RenderedPage, from: number, reduce:
   for (const view of PAGE_CAPTURE_VIEWS) {
     const frames = page.shots.filter((shot) => shot.view === view.id);
     if (frames.length === 0) continue;
-    const moments = frames.map((shot) => `${px(shot.moment ?? 0)} ms`);
+    const moments = frames.map((shot) => `${px(aboutMs(shot.moment ?? 0))} ms`);
     parts.push(`${view.label}: ${frames.length === 1 ? "1 picture" : `${frames.length} pictures`}, about ${LIST_AND.format(moments)} after it came into view.`);
   }
   parts.push(...loadRemarks(page), scratchNote);

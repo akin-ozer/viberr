@@ -1390,6 +1390,21 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(reduced.text).toContain("with reduced motion asked for");
       expect(fake.pages().at(-1)!.reducedMotion).toBe("reduce");
 
+      // The screen while it moves: three pictures a width, and when each was
+      // taken, in place of a stretch.
+      const moving = await ask("site.html", { moving: true, view: "desktop", runId });
+      expect(moving.text).toContain(
+        "[done] `site.html` while it moves: the screen at 0 px, pictured more than once as the page loaded. " +
+          "What differs between two pictures of one width is what moved. Desktop, 1280 px wide: 3 pictures, about ",
+      );
+      // The moments are the renderer's own clock, so only their shape is read.
+      expect(moving.text).toMatch(/about [\d,]+ ms, [\d,]+ ms, and [\d,]+ ms after it came into view\./);
+      expect(handedBack(moving)).toEqual([
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 1280, height: 800 },
+      ]);
+
       // A state goes with no size and an act with no place on the page: each
       // is refused in a sentence that says what to leave out, and no browser
       // is started for it.

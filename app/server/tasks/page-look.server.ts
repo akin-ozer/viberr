@@ -16,7 +16,7 @@ import {
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readsAsCredential } from "~/server/secrets/git-output-redact.server";
 import { PAGE_CAPTURE_VIEWS, pageCaptureView } from "~/shared/page-capture";
-import { pictureWebPage, type PageMotion, type WebPagePicture } from "./page-capture.server";
+import { aboutMs, pictureWebPage, type PageMotion, type WebPagePicture } from "./page-capture.server";
 import { keptLooks } from "./page-looks.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -179,7 +179,7 @@ function lookNote(address: string, at: string, kept: readonly KeptPicture[], mot
     if (frames.length > 0) {
       lines.push(
         `- Its first screen while it loaded: ${idRange(frames.map((entry) => entry.source.id))}, about ` +
-          `${LIST_AND.format(frames.map((entry) => `${px(entry.picture.moment ?? 0)} ms`))} after it came into view. ` +
+          `${LIST_AND.format(frames.map((entry) => `${px(aboutMs(entry.picture.moment ?? 0))} ms`))} after it came into view. ` +
           (frames.length === 1 ? "The moments pictured did not differ, so one is kept." : "What differs between them is what moved."),
       );
     }
@@ -200,7 +200,7 @@ function pictureName(host: string, picture: WebPagePicture, n: number): string {
 function pictureTitle(host: string, picture: WebPagePicture, n: number, of: number): string {
   const width = pageCaptureView(picture.view).width;
   return picture.kind === "frame"
-    ? `${host} at ${width} px: its first screen about ${px(picture.moment ?? 0)} ms after it came into view`
+    ? `${host} at ${width} px: its first screen about ${px(aboutMs(picture.moment ?? 0))} ms after it came into view`
     : `${host} at ${width} px, picture ${n} of ${of}: ${px(picture.from)} to ${px(picture.to)} px of ${px(picture.pageHeight)}`;
 }
 
