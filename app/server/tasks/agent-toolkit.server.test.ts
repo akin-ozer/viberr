@@ -806,11 +806,319 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       .parse(JSON.parse(out.content[0]!.text));
     expect(read.occurredAt).toBe(at);
     expect(read.shared).toContain("in the order they were written: the first was written first");
+    // Ruling 707: nothing was cut, so the answer names no cut.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(out.content[0]!.text)))).toEqual(["occurredAt", "shared", "entries"]);
     expect(read.entries.map((e) => [e.type, e.title, e.truncated])).toEqual([
       ["comment", "Review verdict", false],
       ["quality", "Changes requested", false],
     ]);
     expect(read.entries[0]!.text).toBe(report);
+  });
+
+  /**
+   * Ruling 707: a long entry is read in pages. The reader stopped at 40,000
+   * characters, said `truncated` and took nothing to read on with: the wall
+   * ruling 551 took out of the attachment reader. And 40,000 characters is
+   * more than the 32,000 bytes ruling 624 sized every other read to, so a
+   * Codex run could be handed a long entry with its middle cut out. Found
+   * live on BLOG-10 by the board's own Writer, which told the person so.
+   */
+  it("ruling 707: read_timeline_entry reads a long entry in pages that join back into the whole of it", async () => {
+    const tools = toolkitTools({ ...BASE, comment: true, evidence: false }, "oc_pages");
+    const store = lastStore;
+    const judge = { kind: "agent" as const, backend: "claude" as const, profileId: "editor", roleHint: "Editor" };
+    const entry = (occurredAt: string, type: "comment" | "quality", title: string | null, text: string) => ({
+      occurredAt,
+      type,
+      actor: judge,
+      title,
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+    // One report of some 93,000 characters, one in twenty three bytes wide.
+    const alone = "2026-10-09T03:00:00.001Z";
+    const report = `## Review\n\n${"A finding, with its passage quoted. 記録 ".repeat(2_400)}\n\nSENTINEL-AT-THE-END`;
+    // A report beside its one-line quality marker, written in one instant.
+    const pair = "2026-10-09T03:00:00.002Z";
+    // Fewer characters than a page has bytes, and more bytes than a page.
+    const verdict = `## Verdict: request changes\n\n${"記録の第二の所見。".repeat(2_300)}END-OF-THE-VERDICT`;
+    expect(verdict.length).toBeLessThan(32_000);
+    expect(Buffer.byteLength(verdict)).toBeGreaterThan(32_000);
+    const marker = "**Validation:** failing.";
+    // Two long entries under one stamp.
+    const twins = "2026-10-09T03:00:00.003Z";
+    const first = `FIRST ${"alpha ".repeat(8_000)}END-OF-THE-FIRST`;
+    const second = `SECOND ${"beta ".repeat(11_000)}END-OF-THE-SECOND`;
+    // Three under one stamp: a note, a report of emoji (two code units and
+    // four bytes each) longer than two pages, and one of 9,000 characters.
+    const triple = "2026-10-09T03:00:00.004Z";
+    const short = "A note.";
+    const long = `x${"🚀".repeat(20_000)}END-OF-THE-LONG`;
+    const middle = `${"A middle entry. ".repeat(560)}END-OF-THE-MIDDLE`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl" }),
+      // The file holds entries newest first, so the last written is listed first.
+      timeline: [
+        entry(triple, "comment", "Middle", middle),
+        entry(triple, "comment", "Long", long),
+        entry(triple, "comment", "Short", short),
+        entry(twins, "comment", "Second", second),
+        entry(twins, "comment", "First", first),
+        entry(pair, "quality", "Changes requested", marker),
+        entry(pair, "comment", "Review verdict", verdict),
+        entry(alone, "comment", "Review verdict", report),
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    // SAFETY: every tool in this toolkit answers `{ content: [{ type: "text", text }] }`.
+    const text = async (args: Record<string, string | number>) =>
+      ((await tools.read_timeline_entry!.handler(args as never, {} as never)) as { content: { text: string }[] }).content[0]!.text;
+    const page = z.object({
+      occurredAt: z.string(),
+      entry: z.number().optional(),
+      type: z.string(),
+      title: z.string().nullable(),
+      offset: z.number().optional(),
+      truncated: z.boolean(),
+      text: z.string(),
+      nextOffset: z.number().optional(),
+      characters: z.number().optional(),
+    });
+    const read = async (args: Record<string, string | number>) => page.parse(JSON.parse(await text(args)));
+    const bytes = (value: string) => Buffer.byteLength(value);
+
+    // The first page: as much as 32,000 bytes hold, and where to read on.
+    // CANARY: count the page in characters and it is 32,000 of them, which
+    // with these three-byte characters is well over a page.
+    const head = await read({ occurredAt: alone });
+    expect(head.truncated).toBe(true);
+    expect(head.offset).toBeUndefined();
+    expect(head.entry).toBeUndefined();
+    expect(head.characters).toBe(report.length);
+    expect(head.text).toBe(report.slice(0, head.nextOffset));
+    expect(bytes(head.text)).toBeLessThanOrEqual(32_000);
+    expect(bytes(head.text)).toBeGreaterThan(31_990);
+    expect(head.text.length).toBeLessThan(32_000);
+    // What a reader pages by leads the entry's text, and the text closes the
+    // answer. CANARY: print any of them after the text.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: alone }))))).toEqual([
+      "occurredAt",
+      "type",
+      "actor",
+      "title",
+      "truncated",
+      "characters",
+      "nextOffset",
+      "text",
+    ]);
+    // And the pages after it, to the end. CANARY: ignore `offset` and every
+    // read is the first page again; leave `nextOffset` out and a reader is
+    // told the entry is cut and handed nothing to pass back, as before.
+    let whole = head.text;
+    let next = head.nextOffset;
+    let pages = 1;
+    // Bounded, so a reader that never ends fails here and does not spin.
+    while (next !== undefined && pages < 20) {
+      const more = await read({ occurredAt: alone, offset: next });
+      expect(more.offset).toBe(next);
+      expect(more.characters).toBe(report.length);
+      expect(bytes(more.text)).toBeLessThanOrEqual(32_000);
+      whole += more.text;
+      next = more.nextOffset;
+      pages += 1;
+      expect(more.truncated).toBe(next !== undefined);
+    }
+    expect(whole).toBe(report);
+    expect(pages).toBe(Math.ceil(bytes(report) / 32_000));
+    expect(pages).toBeGreaterThan(3);
+    // An entry that fits one page says nothing of pages.
+    expect(await read({ occurredAt: pair, entry: 2 })).toEqual({
+      occurredAt: pair,
+      entry: 2,
+      type: "quality",
+      title: "Changes requested",
+      truncated: false,
+      text: marker,
+    });
+    // Past the end is said, with the entry's length. CANARY: answer an empty
+    // page, and a reader takes the report to end where it stopped.
+    expect(await text({ occurredAt: alone, offset: report.length })).toBe(
+      `[noop] The entry reads as ${report.length.toLocaleString("en-US")} characters; offset ${report.length.toLocaleString("en-US")} is past its end.`,
+    );
+    expect((await read({ occurredAt: alone, offset: report.length - 3 })).text).toBe("END");
+
+    // Entries that share a stamp share the first page, each numbered in the
+    // order it was written: the marker whole, the verdict with the rest.
+    const shared = z
+      .object({ occurredAt: z.string(), shared: z.string(), entries: z.array(page.omit({ occurredAt: true })) })
+      .parse(JSON.parse(await text({ occurredAt: pair })));
+    expect(shared.entries.map((e) => [e.entry, e.title, e.truncated])).toEqual([
+      [1, "Review verdict", true],
+      [2, "Changes requested", false],
+    ]);
+    expect(shared.entries[1]!.text).toBe(marker);
+    expect(shared.entries[1]!.nextOffset).toBeUndefined();
+    const verdictHead = shared.entries[0]!;
+    expect(verdictHead.text).toBe(verdict.slice(0, verdictHead.nextOffset));
+    expect(verdictHead.characters).toBe(verdict.length);
+    // The answer opens with what it cut short and where each reads on, ahead
+    // of the entries: an output over a Codex run's limit is cut from the
+    // middle, which is where the second of two long entries puts its own
+    // fields. CANARY: leave `cut` out, or print it after `entries`.
+    const sharedRaw = z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: pair })));
+    expect(Object.keys(sharedRaw)).toEqual(["occurredAt", "shared", "cut", "entries"]);
+    expect(sharedRaw.cut).toEqual([{ entry: 1, characters: verdict.length, nextOffset: verdictHead.nextOffset }]);
+    // Together they are one page, filled. CANARY: give each entry a page of
+    // its own and two long entries come back as 64,000 bytes in one answer;
+    // share the page by characters and this verdict, whose characters are
+    // three bytes wide, is handed two thirds of what the page holds.
+    expect(bytes(verdictHead.text) + bytes(marker)).toBeLessThanOrEqual(32_000);
+    expect(bytes(verdictHead.text) + bytes(marker)).toBeGreaterThan(31_990);
+    // `offset` alone reads on in the one entry long enough to reach it, with a
+    // page to itself. CANARY: ask for `entry` whenever a stamp names two, and
+    // the usual pair costs a refused call.
+    const rest = await read({ occurredAt: pair, offset: verdictHead.nextOffset! });
+    expect(rest.entry).toBe(1);
+    expect(rest.offset).toBe(verdictHead.nextOffset);
+    expect(verdictHead.text + rest.text).toBe(verdict);
+    expect(rest.truncated).toBe(false);
+    // `entry` alone reads that entry from its start, a whole page of it.
+    const alonePage = await read({ occurredAt: pair, entry: 1 });
+    expect(alonePage.entry).toBe(1);
+    expect(alonePage.text.length).toBeGreaterThan(verdictHead.text.length);
+    expect(bytes(alonePage.text)).toBeGreaterThan(31_990);
+
+    // Two entries cut on the first page: which one to read on in must be said.
+    const both = z
+      .object({ entries: z.array(page.omit({ occurredAt: true })) })
+      .parse(JSON.parse(await text({ occurredAt: twins })));
+    expect(both.entries.map((e) => [e.entry, e.title, e.truncated])).toEqual([
+      [1, "First", true],
+      [2, "Second", true],
+    ]);
+    expect(bytes(both.entries[0]!.text) + bytes(both.entries[1]!.text)).toBeLessThanOrEqual(32_000);
+    const cut = both.entries[1]!.nextOffset!;
+    expect(z.object({ cut: z.array(z.unknown()) }).parse(JSON.parse(await text({ occurredAt: twins }))).cut).toEqual([
+      { entry: 1, characters: first.length, nextOffset: both.entries[0]!.nextOffset },
+      { entry: 2, characters: second.length, nextOffset: cut },
+    ]);
+    // A page read from further in still ends on its text, with which entry
+    // it is and where it starts ahead of it.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: twins, entry: 2, offset: cut }))))).toEqual([
+      "occurredAt",
+      "entry",
+      "type",
+      "actor",
+      "title",
+      "offset",
+      "truncated",
+      "characters",
+      "nextOffset",
+      "text",
+    ]);
+    // CANARY: read on in the first entry found, and the second's reader is
+    // handed the middle of the first as its continuation.
+    expect(await text({ occurredAt: twins, offset: cut })).toBe(
+      `[noop] 2 entries on VIB-3 carry the stamp \`${twins}\` and 2 of them run past offset ${cut.toLocaleString("en-US")} (entries 1, 2): say which to read on with \`entry\`.`,
+    );
+    const secondRest = await read({ occurredAt: twins, entry: 2, offset: cut });
+    expect(secondRest.entry).toBe(2);
+    expect(both.entries[1]!.text + secondRest.text).toBe(second.slice(0, secondRest.nextOffset ?? second.length));
+    // Past the first entry's end, the second is the only one that reaches,
+    // and an entry that ends exactly at the offset does not reach it.
+    // CANARY: count an entry as long as the offset among those that run past.
+    expect((await read({ occurredAt: twins, offset: first.length + 10 })).entry).toBe(2);
+    expect((await read({ occurredAt: twins, offset: first.length })).entry).toBe(2);
+    expect(await text({ occurredAt: twins, offset: second.length + 10 })).toBe(
+      `[noop] None of the 2 entries on VIB-3 that carry the stamp \`${twins}\` runs to offset ${(second.length + 10).toLocaleString("en-US")}: the longest reads as ${second.length.toLocaleString("en-US")} characters.`,
+    );
+    expect(await text({ occurredAt: twins, entry: 1, offset: first.length })).toBe(
+      `[noop] Entry 1 of 2 reads as ${first.length.toLocaleString("en-US")} characters; offset ${first.length.toLocaleString("en-US")} is past its end.`,
+    );
+    // An `entry` the stamp does not have. CANARY: read the last entry for any
+    // number past it.
+    expect(await text({ occurredAt: twins, entry: 3 })).toBe(
+      `[noop] 2 entries on VIB-3 carry the stamp \`${twins}\`: \`entry\` is 1 to 2, in the order they were written.`,
+    );
+    expect(await text({ occurredAt: alone, entry: 2 })).toBe(
+      `[noop] One entry on VIB-3 carries the stamp \`${alone}\`: \`entry\` can only be 1, or left out.`,
+    );
+    expect((await read({ occurredAt: alone, entry: 1 })).text).toBe(head.text);
+
+    // Three entries under one stamp: the page is split shortest first, so the
+    // two short ones come whole and the long one takes what is left. A first
+    // read and then each cut entry's `nextOffset` recover every character.
+    // CANARY: split the page into equal parts and the long entry is handed a
+    // third of it while the note leaves nearly all of its own unused.
+    const tripleRead = z
+      .object({ shared: z.string(), entries: z.array(page.omit({ occurredAt: true })) })
+      .parse(JSON.parse(await text({ occurredAt: triple })));
+    expect(tripleRead.shared).toContain("3 entries were written with this stamp");
+    expect(tripleRead.entries.map((e) => [e.entry, e.title, e.truncated])).toEqual([
+      [1, "Short", false],
+      [2, "Long", true],
+      [3, "Middle", false],
+    ]);
+    expect(tripleRead.entries[2]!.text).toBe(middle);
+    expect(tripleRead.entries.reduce((sum, e) => sum + bytes(e.text), 0)).toBeLessThanOrEqual(32_000);
+    expect(tripleRead.entries.reduce((sum, e) => sum + bytes(e.text), 0)).toBeGreaterThan(31_980);
+    let longText = tripleRead.entries[1]!.text;
+    let longNext = tripleRead.entries[1]!.nextOffset;
+    for (let i = 0; longNext !== undefined && i < 10; i += 1) {
+      const more = await read({ occurredAt: triple, offset: longNext });
+      expect(more.entry).toBe(2);
+      // No page starts or ends on half an emoji. CANARY: cut a page at the
+      // byte count and a pair is split across two pages.
+      expect(more.text).not.toMatch(/^[\uDC00-\uDFFF]|[\uD800-\uDBFF]$/);
+      expect(bytes(more.text)).toBeLessThanOrEqual(32_000);
+      longText += more.text;
+      longNext = more.nextOffset;
+    }
+    expect(longText).toBe(long);
+    expect(tripleRead.entries[1]!.text).not.toMatch(/[\uD800-\uDBFF]$/);
+
+    // These pages of prose reach a Codex run whole (ruling 624): what the
+    // tool answers, printed as an agent prints a tool result, is under the
+    // 10,000 tokens (bytes / 4) its output is cut to from the middle. A page
+    // of code or of JSON prints longer, here as in the attachment reader.
+    // CANARY: put the page back at 40,000 characters and the first four of
+    // these are over.
+    const printed = (answer: string) => Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text: answer }] })) / 4;
+    const calls: Record<string, string | number>[] = [
+      { occurredAt: alone },
+      { occurredAt: alone, offset: head.nextOffset! },
+      { occurredAt: pair },
+      { occurredAt: twins },
+      { occurredAt: twins, entry: 2, offset: cut },
+    ];
+    for (const args of calls) {
+      expect(printed(await text(args)), JSON.stringify(args)).toBeLessThanOrEqual(10_000);
+    }
+
+    // And the tool says so, where a run reads it. CANARY: page the reader and
+    // leave its description at "in full", and no run sends `offset`.
+    const tool = tools.read_timeline_entry!;
+    expect(tool.description).toContain(
+      "A long entry comes in pages of up to 32,000 bytes, sized to reach you whole (ruling 624): read and print one page per call, " +
+        "because a Codex run's tool output is cut from the middle above about 40,000 bytes. " +
+        "A read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, " +
+        "which you pass back as `offset` to read on, until a read is not `truncated`. " +
+        "Entries that share a stamp share the first page and are numbered (`entry`); `entry` reads one of them alone, a whole page of it.",
+    );
+    const fields = tool.inputSchema["shape"] ?? {};
+    expect(Object.keys(fields)).toEqual(["occurredAt", "taskKey", "offset", "entry"]);
+    expect(fields.offset?.description).toBe(
+      "Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start. " +
+        "When several entries share the stamp, `offset` alone reads on in the one long enough to reach it; say which with `entry` when more than one is.",
+    );
+    expect(fields.entry?.description).toBe(
+      "Which of the entries that share the stamp, counted from 1 in the order they were written, as a first read numbers them. " +
+        "Omit when the stamp names one entry, or to read them all from the start.",
+    );
+    // Neither takes a fraction or a number below its floor.
+    expect([-1, 0, 1.5, 7].map((value) => fields.offset?.safeParse(value).success)).toEqual([false, true, false, true]);
+    expect([0, 1, 1.5, 2].map((value) => fields.entry?.safeParse(value).success)).toEqual([false, true, false, true]);
   });
 
   it("ruling 594: read_task_attachment reads one file of this task or another, and read_board lists a task's files", async () => {

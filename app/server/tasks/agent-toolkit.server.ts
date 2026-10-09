@@ -48,6 +48,8 @@ import {
   READ_TASK_SOURCE_FIELDS,
   READ_TIMELINE_ENTRY_AT_DESCRIPTION,
   READ_TIMELINE_ENTRY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
   captureBoxScale,
   captureBoxSide,
@@ -833,12 +835,22 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         {
           occurredAt: z.string().describe(READ_TIMELINE_ENTRY_AT_DESCRIPTION),
           taskKey: z.string().optional().describe(READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION),
+          offset: z.number().int().min(0).optional().describe(READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION),
+          entry: z.number().int().min(1).optional().describe(READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION),
         },
         async (args) => {
           try {
             const entryTask = args.taskKey?.trim() || taskKey;
             // Ruling 648: a correction to a knowledge base this run is given reads whole.
-            return textResult(await readTimelineEntry({ db, ctx, projectSlug, readerKbs: kb }, entryTask, args.occurredAt));
+            return textResult(
+              await readTimelineEntry(
+                { db, ctx, projectSlug, readerKbs: kb },
+                entryTask,
+                args.occurredAt,
+                args.offset ?? 0,
+                args.entry,
+              ),
+            );
           } catch (error) {
             logger.warn("agent read_timeline_entry failed", { taskKey, err: toError(error) });
             return textResult("[error] The timeline could not be read.");

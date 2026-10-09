@@ -30,6 +30,9 @@ import {
   READ_TASK_ATTACHMENT_FIELDS,
   READ_TASK_SOURCE_DESCRIPTION,
   READ_TASK_SOURCE_FIELDS,
+  READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION,
+  TIMELINE_ENTRY_PAGES_SENTENCE,
 } from "~/server/mcp-proxy/board-tool.server";
 import { findMessageFile, listConversationFileNames } from "./controller-conversations.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
@@ -3001,15 +3004,19 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "read_timeline_entry",
-      "Read ONE timeline entry of a task in full, addressed by the `at` stamp `get_task` prints for it. `get_task` cuts every entry at 700 characters; this is how you read the rest. Call it before you summarise an agent's report for a person, before you raise anything that turns on what a report said, and before you conclude a report did not mention something - findings are routinely past the cut, and a report you only half-read is one you cannot coordinate from. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.",
+      "Read ONE timeline entry of a task in full, addressed by the `at` stamp `get_task` prints for it. `get_task` cuts every entry at 700 characters; this is how you read the rest. Call it before you summarise an agent's report for a person, before you raise anything that turns on what a report said, and before you conclude a report did not mention something - findings are routinely past the cut, and a report you only half-read is one you cannot coordinate from. " +
+        `${TIMELINE_ENTRY_PAGES_SENTENCE} ` +
+        "Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.",
       {
         projectSlug: z.string().optional(),
         taskKey: z.string().optional().describe("Defaults to this conversation's task."),
         at: z
           .string()
           .describe("The entry's `at` stamp, exactly as get_task prints it (ISO, to the millisecond)."),
+        offset: z.number().int().min(0).optional().describe(READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION),
+        entry: z.number().int().min(1).optional().describe(READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION),
       },
-      runWith(async (args: { projectSlug?: string; taskKey?: string; at: string }) => {
+      runWith(async (args: { projectSlug?: string; taskKey?: string; at: string; offset?: number; entry?: number }) => {
         const slug = slugOf(args.projectSlug);
         const key = keyOf(args.taskKey, slug);
         requireVisible(slug, "read this task");
@@ -3019,6 +3026,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           { db, ctx: { dataRoot }, projectSlug: slug, readerKbs: orgAdmin() ? "all" : [] },
           key,
           args.at,
+          args.offset ?? 0,
+          args.entry,
         );
       }),
     ),

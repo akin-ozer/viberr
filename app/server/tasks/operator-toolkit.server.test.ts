@@ -999,6 +999,51 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     expect(missed).toContain("2026-09-15T13:53:26.000Z");
   });
 
+  it("ruling 707: read_timeline_entry reads a report longer than a page to its end, here as at every door", async () => {
+    // The operator reads a reviewer's report before it summarises it for a
+    // person, and one over 40,000 characters came back cut with nothing to
+    // read on with. CANARY: drop `args.offset` on the way to the reader and
+    // the second read is the first page again; drop `args.entry` and a report
+    // beside its marker cannot be read alone.
+    const store = setupTestStore(ctxDb);
+    const reviewer = { kind: "agent" as const, backend: "claude" as const, profileId: "code-reviewer", roleHint: "Code Reviewer" };
+    const at = "2026-10-09T03:10:00.000Z";
+    const report = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
+    writeTask(store.dataRoot, store.slug, {
+      frontmatter: baseTaskFrontmatter("VIB-1", { stage: "review" }),
+      timeline: [
+        { occurredAt: at, type: "quality", actor: reviewer, title: "Changes requested", text: "**Validation:** failing.", toAgent: false, evidence: null },
+        { occurredAt: at, type: "comment", actor: reviewer, title: "Review verdict", text: report, toAgent: false, evidence: null },
+      ],
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    const { tools } = storeToolkit(store);
+    const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
+    const read = async (args: Record<string, string | number>) =>
+      page.parse(JSON.parse(await callToolText(tools, "read_timeline_entry", { occurredAt: at, ...args })));
+    let part = await read({ entry: 1 });
+    expect(part.truncated).toBe(true);
+    let whole = part.text;
+    // Bounded, so a door that drops `offset` fails here and does not spin.
+    for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
+      part = await read({ entry: 1, offset: part.nextOffset });
+      whole += part.text;
+    }
+    expect(whole).toBe(report);
+    expect((await read({ entry: 2 })).text).toBe("**Validation:** failing.");
+    // And the operator is told so: its own description, and both arguments.
+    const tool = tools.find((t) => t.name === "read_timeline_entry")!;
+    expect(tool.description).toContain("A long entry comes in pages of up to 32,000 bytes");
+    expect(tool.description).toContain("`entry` reads one of them alone, a whole page of it.");
+    const fields = z.toJSONSchema(tool.inputSchema).properties;
+    expect(fields?.offset).toHaveProperty("description", expect.stringContaining("the `nextOffset` a truncated read returned"));
+    expect(fields?.entry).toHaveProperty("description", expect.stringContaining("counted from 1 in the order they were written"));
+    // Whole numbers with their floors, as the model is told. CANARY: declare
+    // either as any number.
+    expect(fields?.offset).toMatchObject({ type: "integer", minimum: 0 });
+    expect(fields?.entry).toMatchObject({ type: "integer", minimum: 1 });
+  });
+
   /**
    * Ruling 287's DOOR, tested for the reason ruling 270 exists: rulings 224 and
    * 230 each added an option payload and never added the field to the tool that

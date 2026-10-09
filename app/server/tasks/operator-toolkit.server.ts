@@ -11,6 +11,9 @@ import {
   READ_TASK_ATTACHMENT_FIELDS,
   READ_TASK_SOURCE_DESCRIPTION,
   READ_TASK_SOURCE_FIELDS,
+  READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION,
+  READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION,
+  TIMELINE_ENTRY_PAGES_SENTENCE,
 } from "~/server/mcp-proxy/board-tool.server";
 import { z } from "zod";
 import {
@@ -506,7 +509,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   add(
     tool(
       "read_timeline_entry",
-      "Read ONE timeline entry in full, addressed by its `occurredAt` stamp: this task's, as `get_task` prints it, or another task's in this project with `taskKey`, as `read_board` lists it in that task's `timeline` (ruling 596). The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500; this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`, when you are given its knowledge base: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.",
+      "Read ONE timeline entry in full, addressed by its `occurredAt` stamp: this task's, as `get_task` prints it, or another task's in this project with `taskKey`, as `read_board` lists it in that task's `timeline` (ruling 596). The agent report in your prompt is clipped at 4,000 characters and every `recentTimeline` entry is clipped at 1,500; this is how you read the rest. Call it before you summarise a report for a human, before you raise a packet about one, and before you conclude a report did not mention something: an agent's findings are routinely past the clip, and a report you only half-read is a report you cannot coordinate from. " +
+        `${TIMELINE_ENTRY_PAGES_SENTENCE} ` +
+        "Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`, when you are given its knowledge base: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.",
       {
         occurredAt: z
           .string()
@@ -517,8 +522,10 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           .string()
           .optional()
           .describe("The task the entry is on, e.g. AWSC-24. Omit for this task."),
+        offset: z.number().int().min(0).optional().describe(READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION),
+        entry: z.number().int().min(1).optional().describe(READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION),
       },
-      async (args: { occurredAt: string; taskKey?: string }) =>
+      async (args: { occurredAt: string; taskKey?: string; offset?: number; entry?: number }) =>
         textResult(
           // Ruling 648: the operator's own grants, never the ones its agents hold: what
           // it reads, it can restate in a directive the agents under test read.
@@ -526,6 +533,8 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             { db, ctx, projectSlug, readerKbs: authority.kb },
             args.taskKey?.trim() || taskKey,
             args.occurredAt,
+            args.offset ?? 0,
+            args.entry,
           ),
         ),
     ),

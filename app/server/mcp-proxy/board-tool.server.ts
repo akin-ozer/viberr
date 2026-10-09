@@ -52,9 +52,28 @@ export const READ_BOARD_DESCRIPTION =
 
 export const READ_BOARD_TASK_KEY_DESCRIPTION = "One task's key, e.g. SHOP-39. Omit to list the whole board.";
 
+/**
+ * Ruling 707: what every `read_timeline_entry` says of a long entry, at all
+ * four doors (a specialist's on either backend, the operator's and the
+ * controller's). The reader used to stop at 40,000 characters and say
+ * `truncated` with nothing to pass back.
+ */
+export const TIMELINE_ENTRY_PAGES_SENTENCE =
+  `A long entry comes in pages of up to ${READ_PAGE_BYTES.toLocaleString("en-US")} bytes, sized to reach you whole (ruling 624): read and print one page per call, because a Codex run's tool output is cut from the middle above about 40,000 bytes. ` +
+  "A read that stops short says `truncated`, gives the entry's length in `characters` and gives `nextOffset`, which you pass back as `offset` to read on, until a read is not `truncated`. " +
+  "Entries that share a stamp share the first page and are numbered (`entry`); `entry` reads one of them alone, a whole page of it.";
+
+/** Ruling 707: the two arguments a page takes, on every door. */
+export const READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION =
+  "Where to start reading, in characters: the `nextOffset` a truncated read returned. Omit for the start. When several entries share the stamp, `offset` alone reads on in the one long enough to reach it; say which with `entry` when more than one is.";
+export const READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION =
+  "Which of the entries that share the stamp, counted from 1 in the order they were written, as a first read numbers them. Omit when the stamp names one entry, or to read them all from the start.";
+
 /** Ruling 563: what `read_timeline_entry` says it does, on either backend. */
 export const READ_TIMELINE_ENTRY_DESCRIPTION =
-  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`, when you are given its knowledge base: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.";
+  "Read ONE timeline entry in full, by its `occurredAt` stamp: this task's by default, or another task's in this project with `taskKey`. The recent timeline in your prompt clips each entry at 220 characters and ends a clipped one with its stamp; an older entry is not in your prompt at all, and `read_board` with the task's key lists every entry's stamp in its `timeline` (ruling 596). Call this before you act on, summarise or question an entry you only have part of, above all a person's answer to you, and before you restate an earlier verdict. " +
+  `${TIMELINE_ENTRY_PAGES_SENTENCE} ` +
+  "Entries written in the same millisecond (a verdict's report and its quality marker) come back together, under `entries`, in the order they were written. A knowledge-base correction's entry comes back with the correction whole, under `correction`, when you are given its knowledge base: the passage it replaced, the text it wrote, its evidence, and whether a person undid it. Read-only.";
 
 export const READ_TIMELINE_ENTRY_AT_DESCRIPTION =
   "The entry's stamp, exactly as your prompt or `read_board`'s `timeline` prints it (ISO, to the millisecond).";
@@ -72,6 +91,7 @@ export const BOARD_READ_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: { taskKey: { type: "string", description: READ_BOARD_TASK_KEY_DESCRIPTION } },
+    additionalProperties: false,
   },
   annotations: { title: "Read the project's board", ...READ_ONLY },
 };
@@ -85,8 +105,11 @@ export const TIMELINE_ENTRY_TOOL: Tool = {
     properties: {
       occurredAt: { type: "string", description: READ_TIMELINE_ENTRY_AT_DESCRIPTION },
       taskKey: { type: "string", description: READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION },
+      offset: { type: "integer", minimum: 0, description: READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION },
+      entry: { type: "integer", minimum: 1, description: READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION },
     },
     required: ["occurredAt"],
+    additionalProperties: false,
   },
   annotations: { title: "Read one timeline entry in full", ...READ_ONLY },
 };
@@ -116,6 +139,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
       delivery: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.delivery },
     },
     required: ["name"],
+    additionalProperties: false,
   },
   annotations: { title: "Read one attachment of a task", ...READ_ONLY },
 };
@@ -308,12 +332,22 @@ export function keepSourceTool(web: boolean): Tool {
  *  `read_task_source`; `keep_source` follows them for a run that holds it. */
 export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL, TASK_ATTACHMENT_TOOL, TASK_SOURCE_TOOL];
 
-/** `read_board`'s arguments, parsed where the gateway receives the call. */
-export const boardReadArgsSchema = z.object({ taskKey: z.string().optional() });
+/**
+ * `read_board`'s arguments, parsed where the gateway receives the call.
+ *
+ * Ruling 707: every reader of this server parses strictly, as its Claude twin
+ * does (ruling 296). An argument this door dropped was a silent one: asked
+ * for an attachment with `nextOffset` under its own name, or `page: 2`, it
+ * answered the first page again as a good read. Measured on the stored run
+ * logs before the change, as ruling 296 was: of 12,892 calls Codex runs had
+ * made to these tools, the only two that carried an argument the tools do
+ * not declare (`stamp`) were refused already, for want of `occurredAt`.
+ */
+export const boardReadArgsSchema = z.strictObject({ taskKey: z.string().optional() });
 export type BoardReadArgs = z.infer<typeof boardReadArgsSchema>;
 
 /** `read_task_attachment`'s arguments, parsed where the gateway receives the call. */
-export const taskAttachmentArgsSchema = z.object({
+export const taskAttachmentArgsSchema = z.strictObject({
   name: z.string(),
   taskKey: z.string().optional(),
   offset: z.number().int().min(0).optional(),
@@ -321,8 +355,17 @@ export const taskAttachmentArgsSchema = z.object({
 });
 export type TaskAttachmentArgs = z.infer<typeof taskAttachmentArgsSchema>;
 
-/** `read_timeline_entry`'s arguments, parsed where the gateway receives the call. */
-export const timelineEntryArgsSchema = z.object({ occurredAt: z.string(), taskKey: z.string().optional() });
+/** `read_timeline_entry`'s arguments, parsed where the gateway receives the call.
+ *  Ruling 707: strict, as the tool's Claude twins are (ruling 296). Two of its
+ *  arguments now choose which text comes back, and an argument this door
+ *  dropped (`nextOffset` for `offset`, `page` for anything) answered the first
+ *  page again as a good read, which a run in a loop took for the next one. */
+export const timelineEntryArgsSchema = z.strictObject({
+  occurredAt: z.string(),
+  taskKey: z.string().optional(),
+  offset: z.number().int().min(0).optional(),
+  entry: z.number().int().min(1).optional(),
+});
 export type TimelineEntryArgs = z.infer<typeof timelineEntryArgsSchema>;
 
 /** `read_task_source`'s arguments, parsed where the gateway receives the call.
@@ -383,7 +426,7 @@ export async function boardReadResult(input: BoardCallContext, args: BoardReadAr
   }
 }
 
-/** `read_timeline_entry`: one entry, whole, of the run's own task or, with
+/** `read_timeline_entry`: one entry, in pages, of the run's own task or, with
  *  `taskKey`, of another task in the project (ruling 596). */
 export async function timelineEntryResult(
   input: BoardCallContext,
@@ -392,7 +435,7 @@ export async function timelineEntryResult(
   try {
     const { readTimelineEntry } = await import("~/server/tasks/board-read.server");
     const taskKey = args.taskKey?.trim() || input.taskKey;
-    return textResult(await readTimelineEntry(readContext(input), taskKey, args.occurredAt));
+    return textResult(await readTimelineEntry(readContext(input), taskKey, args.occurredAt, args.offset ?? 0, args.entry));
   } catch (error) {
     logger.warn("gateway read_timeline_entry failed", { taskKey: input.taskKey, err: toError(error) });
     return textResult("[error] The timeline could not be read.", true);
@@ -538,8 +581,44 @@ export function pageCaptureArgsRefusal(): CallToolResult {
   );
 }
 
-/** The answer to arguments that are not the tool's. */
+/** One argument of a board tool, as its published schema declares it. */
+const boardArgumentSchema = z.object({ type: z.string().optional(), minimum: z.number().optional() });
+
+/** What an argument of that declaration takes, in the refusal's words; null
+ *  for one that takes text. */
+function numberArgument(argument: z.infer<typeof boardArgumentSchema>): string | null {
+  if (argument.type === "integer") {
+    return argument.minimum === undefined ? "as a whole number" : `as a whole number from ${argument.minimum}`;
+  }
+  return argument.type === "number" ? "as a number" : null;
+}
+
+/** "a", "a and b", "a, b and c". */
+function listed(items: readonly string[]): string {
+  return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * The answer to arguments that are not the tool's, read off the schema the
+ * tool publishes: each argument by what it takes. Ruling 707: it used to say
+ * every argument is text, which was true until a reader took `offset`; a run
+ * told a number is text sends `"32000"` and is refused again (the trap
+ * {@link pageCaptureArgsRefusal} names). A tool that refuses an argument it
+ * does not declare says so, and one that requires an argument names it.
+ */
 export function boardArgsRefusal(tool: Tool): CallToolResult {
-  const fields = Object.keys(tool.inputSchema.properties ?? {});
-  return textResult(`${tool.name} takes ${fields.map((name) => `\`${name}\``).join(", ")} as text. Nothing was read.`, true);
+  const texts: string[] = [];
+  const numbers: string[] = [];
+  for (const [name, declared] of Object.entries(tool.inputSchema.properties ?? {})) {
+    const takes = numberArgument(boardArgumentSchema.parse(declared));
+    if (takes === null) texts.push(`\`${name}\``);
+    else numbers.push(`\`${name}\` ${takes}`);
+  }
+  const parts = [...numbers];
+  if (texts.length > 0) parts.unshift(`${listed(texts)} as text`);
+  const takes = listed(parts);
+  const strict = tool.inputSchema.additionalProperties === false ? ", and nothing else" : "";
+  const required = (tool.inputSchema.required ?? []).map((name) => `\`${name}\``);
+  const needs = required.length > 0 ? `; ${listed(required)} ${required.length > 1 ? "are" : "is"} required` : "";
+  return textResult(`${tool.name} takes ${takes}${strict}${needs}. Nothing was read.`, true);
 }

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { callToolText, publishedSchemas } from "../../../test-support/mcp-tool-meta";
+import { callToolText, connectedClient, publishedSchemas } from "../../../test-support/mcp-tool-meta";
 import {
   setupAppTest,
   type AppTestContext,
@@ -325,6 +325,77 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
     });
     rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
   }
+
+  it("ruling 707: read_timeline_entry reads a report longer than a page to its end, for the controller too", async () => {
+    // The controller reads an agent's report before it tells a person what
+    // it said, and one over 40,000 characters came back cut with nothing to
+    // read on with. CANARY: drop `args.offset` or `args.entry` on the way to
+    // the reader.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { rebuildProject } = await import("~/server/projections/rebuilder.server");
+    const at = "2026-10-09T03:20:00.000Z";
+    const report = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
+    const task = { projectSlug: SLUG, taskKey: "VIB-148", dataRoot: app.dataRoot };
+    const note = (title: string, text: string) => ({
+      occurredAt: at,
+      type: "note" as const,
+      actor: { kind: "operator" as const },
+      title,
+      text,
+      toAgent: false,
+      evidence: null,
+    });
+    // Newest first: the second note was written after the report.
+    await updateTaskFile(
+      task,
+      (parsed) => {
+        parsed.timeline.unshift(note("A note beside it", "One line."), note("A long report", report));
+      },
+      { stamp: false },
+    );
+    rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    try {
+      const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
+      const read = async (args: Record<string, JsonValue>) =>
+        page.parse(JSON.parse(await call(ids.viewer, "read_timeline_entry", { taskKey: "VIB-148", at, ...args })));
+      let part = await read({ entry: 1 });
+      expect(part.truncated).toBe(true);
+      let whole = part.text;
+      // Bounded, so a door that drops `offset` fails here and does not spin.
+      for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
+        part = await read({ entry: 1, offset: part.nextOffset });
+        whole += part.text;
+      }
+      expect(whole).toBe(report);
+      expect((await read({ entry: 2 })).text).toBe("One line.");
+      // The copy a model is handed says so: the description and both arguments.
+      const toolkit = await toolkitAs(ids.viewer);
+      const published = await publishedSchemas(toolkit.mcpServers.viberr_controller);
+      const argument = z.object({ description: z.string(), type: z.string(), minimum: z.number() });
+      const fields = z
+        .object({ properties: z.object({ offset: argument, entry: argument }) })
+        .parse(published.get("read_timeline_entry")).properties;
+      expect(fields.offset.description).toContain("the `nextOffset` a truncated read returned");
+      expect(fields.entry.description).toContain("counted from 1 in the order they were written");
+      // Whole numbers with their floors, as the model is told. CANARY: declare
+      // either as any number.
+      expect([fields.offset.type, fields.offset.minimum, fields.entry.type, fields.entry.minimum]).toEqual(["integer", 0, "integer", 1]);
+      const listed = (await (await connectedClient((await toolkitAs(ids.viewer)).mcpServers.viberr_controller)).listTools()).tools;
+      const described = listed.find((t) => t.name === "read_timeline_entry")?.description;
+      expect(described).toContain("A long entry comes in pages of up to 32,000 bytes");
+      expect(described).toContain("`entry` reads one of them alone, a whole page of it.");
+    } finally {
+      // The fixture is shared by the tests after this one.
+      await updateTaskFile(
+        task,
+        (parsed) => {
+          parsed.timeline = parsed.timeline.filter((e) => e.occurredAt !== at);
+        },
+        { stamp: false },
+      );
+      rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
+    }
+  });
 
   /**
    * Ruling 302, extended to the sibling it was first written without.
