@@ -169,7 +169,8 @@ SOFTWARE.
 
 `.claude/skills/ponytail/SKILL.md` is copied unchanged from the ponytail skill
 by DietrichGebert (<https://github.com/DietrichGebert/ponytail>,
-`skills/ponytail/SKILL.md`).
+`skills/ponytail/SKILL.md`), version 5.1.0, commit
+`9cc65d03aa2da1db7121b912d03596409ee340b8`.
 
 ```
 MIT License
