@@ -56,7 +56,7 @@ export function toolLoading(
  * authority) and passes its `tools`; a name that is not there fails the test.
  */
 export async function callToolText(
-  tools: SdkMcpToolDefinition<any>[],
+  tools: SdkMcpToolDefinition[],
   toolName: string,
   args: Record<string, JsonValue>,
 ): Promise<string> {

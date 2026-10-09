@@ -136,7 +136,7 @@ import { newId } from "~/shared/ids/new-id.server";
 import { errorMessage, toError } from "~/shared/errors";
 import { emptyRunFailureFacts } from "~/shared/run-failure";
 import { agentLaunchFor } from "./agent-isolation.server";
-import { claudeReportedTotals } from "./wire-format.server";
+import { claudeReportedTotals, claudeWire } from "./wire-format.server";
 
 /**
  * The only module routes call
@@ -1064,7 +1064,7 @@ export async function startRun(
   // memory of the session.
   if (input.backend === "claude" && input.resumeSessionId) {
     const raw = lastSessionResultRaw(db, input.resumeSessionId, runId);
-    const reported = raw ? claudeReportedTotals(JSON.parse(raw)) : null;
+    const reported = raw ? claudeReportedTotals(claudeWire.parse(JSON.parse(raw))) : null;
     if (reported) spec.resumedSessionReported = reported;
     // Ruling 159: and whether the CLI will restore its cost state at all,
     // which decides whether the spending cap has to make room for it.

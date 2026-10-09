@@ -34,6 +34,7 @@ import { SESSION_MISSING_RE } from "./session-export.server";
 import { isSdkSkillName, skillPluginInPlace } from "./skill-mount.server";
 import {
   claudeReportedTotals,
+  claudeWire,
   projectEnvelope,
   type ClaudeResultUsage,
   type EnvelopeFacts,
@@ -909,7 +910,7 @@ function estimateOutputTokens(blocks: ClaudeContentBlock[]): number {
 /**
  * The fields the ADAPTER itself reads off a streamed SDK envelope, decoded once
  * per message at the stream boundary (the console line is projected separately
- * by `projectEnvelope`, which decodes the same envelope for its own purposes).
+ * by `projectEnvelope`, from the same message decoded by `claudeWire`).
  *
  * Every field is independently tolerant — a junk one reads as absent and never
  * ends a run — because both vendors add envelope shapes between minor versions
@@ -1698,11 +1699,11 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
         });
         for await (const message of q) {
           const occurredAt = new Date().toISOString();
+          const wire = claudeWire.parse(message);
           // Ruling 165(c): the compaction's result reports the session's totals
           // too (ruling 165(c)); its share is what the run had not reported.
           const { display, facts } = projectEnvelope(
-            "claude",
-            message,
+            wire,
             occurredAt,
             reportedBySession.get(sessionId),
           );
@@ -1739,7 +1740,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             resultText = envelope.result ?? null;
             // Ruling 165(c): the facts are the compaction's own share already
             // (ruling 165(c)'s projection), added to the run's figures.
-            const reported = claudeReportedTotals(message);
+            const reported = claudeReportedTotals(wire);
             if (reported) rememberReported(sessionId, reported);
             if (facts.costUsd != null) folded.costAddUsd = facts.costUsd;
             const own = facts.usage && !facts.usage.outputEstimated ? facts.usage : null;
@@ -1958,7 +1959,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               ? `Permission to use Bash with command ${subject} has been denied.`
               : `Permission to use ${tool} on ${subject} has been denied.`,
         };
-        const { display, facts } = projectEnvelope("claude", envelope, occurredAt);
+        const { display, facts } = projectEnvelope(claudeWire.parse(envelope), occurredAt);
         cb.onLine({ raw: JSON.stringify(envelope), display, facts, occurredAt });
       };
 
@@ -2265,9 +2266,9 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
             const occurredAt = new Date().toISOString();
             // Ruling 165(c): a result states this run's share of its session.
             const session = sessionId ?? spec.resumeSessionId ?? null;
+            const wire = claudeWire.parse(message);
             const { display, facts } = projectEnvelope(
-              "claude",
-              message,
+              wire,
               occurredAt,
               session ? reportedBySession.get(session) : null,
             );
@@ -2306,7 +2307,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
               resultSubtype = envelope.subtype;
               resultErrorText = envelope.result;
               resultCostUsd = facts.costUsd ?? null;
-              const reported = claudeReportedTotals(message);
+              const reported = claudeReportedTotals(wire);
               const reportedFor = sessionId ?? spec.resumeSessionId;
               if (reported && reportedFor) rememberReported(reportedFor, reported);
               evidence.apiErrorStatus = envelope.api_error_status;

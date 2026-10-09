@@ -329,6 +329,9 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 - `app/shared/docs/anti-slop-vendor-sync.test.ts`: `tools/oxlint/anti-slop/` matches the
   committed `tools/oxlint/anti-slop.manifest.json` file for file (SHA-256; re-pin with
   `node scripts/anti-slop-manifest.mjs`).
+- `app/shared/docs/lint-directives.test.ts` (ruling 7): no source file under `app/`,
+  `scripts/`, `test-support/` or `e2e/` carries an `eslint-disable` or `oxlint-disable`
+  comment, whether or not its rule is enabled, naming each file and line it finds.
 - `app/shared/docs/perf-budgets-sync.test.ts` (ruling 11): every budget id in
   `test-support/perf-budgets/` is asserted inside an `expectWithinBudget(…)` call of some
   `*.perf.test.*` file, every perf file asserts a budget, every perf file that loads
@@ -485,8 +488,13 @@ Every test under `app/shared/docs/`, and the ones elsewhere that read a doc or a
 (`.agent`, `.agents`, `.claude`, `.codex`, `.continue`, `.cursor`, `.gemini`,
 `.opencode`, `.pi`, `.roo`, `.windsurf`) and the plugin's own source, loads
 `tools/oxlint/anti-slop/index.ts` as a JS plugin, and sets all 15 `anti-slop/*` rules to
-`error`. There is no override, allowlist or baseline file anywhere, so every anti-slop
-finding fails CI (ruling 7). The rules:
+`error`. There is no override, allowlist or baseline file anywhere, and no disable
+directive (`lint-directives.test.ts`, §2), so every anti-slop finding fails CI (ruling 7).
+A control character a pattern would match is handled by code instead
+(`stripAnsiCsi`, `stripControlChars` in `git-output-redact.server.ts`), so the default
+`no-control-regex` has nothing to report, and an untyped message is decoded at its seam
+(`claudeWire`, `codexWire` in `wire-format.server.ts`) before anything takes it. The
+rules:
 
 `no-chained-type-assertions`, `no-conditional-empty-object-spread`,
 `no-known-value-widening`, `no-module-mocking` (no `vi.mock`; use real seams),

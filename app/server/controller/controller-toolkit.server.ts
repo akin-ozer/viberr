@@ -348,8 +348,7 @@ export interface ControllerToolkitDeps {
 export interface ControllerToolkit {
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
   allowedTools: string[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools: SdkMcpToolDefinition<any>[];
+  tools: SdkMcpToolDefinition[];
 }
 
 const CONTROLLER_TOOLKIT_INSTRUCTIONS =
@@ -657,11 +656,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
     return name;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
   const allowed: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const add = (t: SdkMcpToolDefinition<any>, name: string) => {
+  const add = (t: SdkMcpToolDefinition, name: string) => {
     tools.push(t);
     allowed.push(`mcp__viberr_controller__${name}`);
   };

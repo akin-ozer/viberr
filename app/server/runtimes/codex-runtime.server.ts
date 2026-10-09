@@ -45,7 +45,7 @@ import {
   type RunHomePerson,
 } from "./user-homes.server";
 import { removeAgentTreeSync } from "./agent-trees.server";
-import { projectEnvelope } from "./wire-format.server";
+import { codexWire, projectEnvelope } from "./wire-format.server";
 import { causeMessages, redactProviderText } from "~/server/secrets/git-output-redact.server";
 import {
   reapRunProcesses,
@@ -1190,7 +1190,7 @@ export function createCodexAdapter(
           message: fullMessage,
         } satisfies ThreadErrorEvent;
         const occurredAt = new Date().toISOString();
-        const { display, facts } = projectEnvelope("codex", event, occurredAt);
+        const { display, facts } = projectEnvelope(codexWire.parse(event), occurredAt);
         // Ruling 155(a): the same typed record the Claude adapter attaches;
         // Codex streams no structured refusal facts, so every field but the
         // kind (and, U35-11, the origin of an overload) is unknown.
@@ -1356,11 +1356,7 @@ export function createCodexAdapter(
           for await (const event of events) {
             armIdle(); // reset the inactivity window on every event
             const occurredAt = new Date().toISOString();
-            let { display, facts } = projectEnvelope(
-              "codex",
-              event,
-              occurredAt,
-            );
+            let { display, facts } = projectEnvelope(codexWire.parse(event), occurredAt);
             if (facts.sessionId) sessionId = facts.sessionId;
             const type = event.type;
             const live = usageTail?.read(sessionId) ?? null;
@@ -1373,8 +1369,7 @@ export function createCodexAdapter(
               // 100 runs of the pinned CLI).
               if (live && spec.resumeSessionId) {
                 ({ display, facts } = projectEnvelope(
-                  "codex",
-                  { ...event, usage: live.usage },
+                  codexWire.parse({ ...event, usage: live.usage }),
                   occurredAt,
                 ));
               }

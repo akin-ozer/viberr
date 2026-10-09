@@ -1,5 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { projectEnvelope } from "./wire-format.server";
+import type { JsonValue } from "~/features/runtime/runtime-types";
+import {
+  claudeWire,
+  codexWire,
+  projectEnvelope,
+  type ClaudeResultUsage,
+} from "./wire-format.server";
+
+/** Project a message as an adapter does: decoded at its seam, then projected. */
+function project(
+  backend: "claude" | "codex",
+  raw: JsonValue,
+  occurredAtIso?: string,
+  claudeSession?: ClaudeResultUsage | null,
+) {
+  const wire = backend === "claude" ? claudeWire.parse(raw) : codexWire.parse(raw);
+  return projectEnvelope(wire, occurredAtIso, claudeSession);
+}
 
 describe("projectEnvelope — Claude stream-json", () => {
   it("system·init → init line with session/model/tools/mcp facts", () => {
@@ -12,7 +29,7 @@ describe("projectEnvelope — Claude stream-json", () => {
       mcp_servers: [{ name: "github", status: "connected" }],
       cwd: "/work/viberr",
     };
-    const { display, facts } = projectEnvelope("claude", raw);
+    const { display, facts } = project("claude", raw);
     expect(display?.ev).toBe("init");
     expect(display?.tag).toBe("system·init");
     expect(display?.text).toContain("51d8f0e2");
@@ -26,7 +43,7 @@ describe("projectEnvelope — Claude stream-json", () => {
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test" } }] },
     };
-    const { display } = projectEnvelope("claude", raw);
+    const { display } = project("claude", raw);
     expect(display?.ev).toBe("tool");
     expect(display?.name).toBe("Bash");
     expect(display?.text).toBe("npm test");
@@ -34,14 +51,14 @@ describe("projectEnvelope — Claude stream-json", () => {
 
   it("assistant text → text line", () => {
     const raw = { type: "assistant", message: { content: [{ type: "text", text: "Running tests." }] } };
-    expect(projectEnvelope("claude", raw).display).toMatchObject({ ev: "text", text: "Running tests." });
+    expect(project("claude", raw).display).toMatchObject({ ev: "text", text: "Running tests." });
   });
 
   it("user tool_result (ok / error) → out / err lines", () => {
     const ok = { type: "user", message: { content: [{ type: "tool_result", content: "290 passing", is_error: false }] } };
     const err = { type: "user", message: { content: [{ type: "tool_result", content: "boom", is_error: true }] } };
-    expect(projectEnvelope("claude", ok).display?.ev).toBe("out");
-    expect(projectEnvelope("claude", err).display?.ev).toBe("err");
+    expect(project("claude", ok).display?.ev).toBe("out");
+    expect(project("claude", err).display?.ev).toBe("err");
   });
 
   it("result → result line + usage/cost/turns facts, is_error honored", () => {
@@ -60,7 +77,7 @@ describe("projectEnvelope — Claude stream-json", () => {
         output_tokens: 2140,
       },
     };
-    const { display, facts } = projectEnvelope("claude", raw);
+    const { display, facts } = project("claude", raw);
     expect(display?.ev).toBe("result");
     expect(facts.isResult).toBe(true);
     expect(facts.isError).toBe(false);
@@ -78,17 +95,17 @@ describe("projectEnvelope — Claude stream-json", () => {
 
   it("a result without cache figures keeps the plain input", () => {
     const raw = { type: "result", subtype: "success", is_error: false, num_turns: 1, duration_ms: 1000, total_cost_usd: 0.01, usage: { input_tokens: 10, output_tokens: 3 } };
-    expect(projectEnvelope("claude", raw).facts.usage).toEqual({ input_tokens: 10, cached_input_tokens: 0, output_tokens: 3, outputEstimated: false });
+    expect(project("claude", raw).facts.usage).toEqual({ input_tokens: 10, cached_input_tokens: 0, output_tokens: 3, outputEstimated: false });
   });
 
   it("result with error subtype → isError true", () => {
     const raw = { type: "result", subtype: "error_during_execution", is_error: true, num_turns: 5, usage: {} };
-    expect(projectEnvelope("claude", raw).facts.isError).toBe(true);
+    expect(project("claude", raw).facts.isError).toBe(true);
   });
 
   it("unknown type → meta line, never throws", () => {
-    expect(projectEnvelope("claude", { type: "system", subtype: "api_retry", error: "overloaded" }).display?.ev).toBe("meta");
-    expect(projectEnvelope("claude", { type: "brand_new_2027" }).display?.ev).toBe("meta");
+    expect(project("claude", { type: "system", subtype: "api_retry", error: "overloaded" }).display?.ev).toBe("meta");
+    expect(project("claude", { type: "brand_new_2027" }).display?.ev).toBe("meta");
   });
 
   it("system/permission_denied (SDK ≥ 0.3.223) → an err line naming the refused tool and the reason, never a dim meta row", () => {
@@ -98,7 +115,7 @@ describe("projectEnvelope — Claude stream-json", () => {
     // render as `system·permission_denied` in meta grey, so a human scanning the
     // console for the VIB-30 class (a review agent reaching for `git push`) saw
     // nothing. Canary: remove the `permission_denied` branch and `ev` is "meta".
-    const denied = projectEnvelope("claude", {
+    const denied = project("claude", {
       type: "system",
       subtype: "permission_denied",
       tool_name: "Bash",
@@ -120,7 +137,7 @@ describe("projectEnvelope — Claude stream-json", () => {
 
     // No deciding component's reason → the SDK's rejection sentence (the string
     // `message`, which shares its key with the assistant envelope's object).
-    const noReason = projectEnvelope("claude", {
+    const noReason = project("claude", {
       type: "system",
       subtype: "permission_denied",
       tool_name: "Edit",
@@ -132,12 +149,12 @@ describe("projectEnvelope — Claude stream-json", () => {
     expect(noReason.display).toMatchObject({ ev: "err", name: "Edit", text: "denied: The session has no approval surface." });
 
     // A frame missing even the tool name still says what happened.
-    const bare = projectEnvelope("claude", { type: "system", subtype: "permission_denied" });
+    const bare = project("claude", { type: "system", subtype: "permission_denied" });
     expect(bare.display).toMatchObject({ ev: "err", tag: "permission_denied", text: "tool call denied" });
     expect(bare.display).not.toHaveProperty("name");
 
     // The assistant/user envelopes' object `message` is untouched by the shared key.
-    const assistant = projectEnvelope("claude", {
+    const assistant = project("claude", {
       type: "assistant",
       message: { content: [{ type: "text", text: "hello" }] },
     });
@@ -155,7 +172,7 @@ describe("projectEnvelope — Claude stream-json", () => {
         isUsingOverage: false,
       },
     };
-    const { display, facts } = projectEnvelope("claude", raw);
+    const { display, facts } = project("claude", raw);
     // Same telemetry tag the client already groups; a human-readable summary.
     expect(display).toMatchObject({ ev: "meta", tag: "rate_limit_event" });
     expect(display?.text).toContain("91%");
@@ -170,11 +187,11 @@ describe("projectEnvelope — Claude stream-json", () => {
   });
 
   it("rate_limit_event with no/malformed info → meta line, NO fabricated facts", () => {
-    const bare = projectEnvelope("claude", { type: "rate_limit_event" });
+    const bare = project("claude", { type: "rate_limit_event" });
     expect(bare.display?.tag).toBe("rate_limit_event");
     expect(bare.facts.rateLimit).toBeUndefined();
     // A malformed utilization must read as "not reported", never a fake 0.
-    const partial = projectEnvelope("claude", {
+    const partial = project("claude", {
       type: "rate_limit_event",
       rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: "high" },
     });
@@ -186,31 +203,31 @@ describe("projectEnvelope — Claude stream-json", () => {
 
 describe("projectEnvelope — Codex JSONL", () => {
   it("thread.started → init + sessionId fact", () => {
-    const { display, facts } = projectEnvelope("codex", { type: "thread.started", thread_id: "0199a1f3-4c02-7d31" });
+    const { display, facts } = project("codex", { type: "thread.started", thread_id: "0199a1f3-4c02-7d31" });
     expect(display?.ev).toBe("init");
     expect(facts.sessionId).toBe("0199a1f3-4c02-7d31");
   });
 
   it("turn.completed → result line with usage facts (tokens, no cost)", () => {
     const raw = { type: "turn.completed", usage: { input_tokens: 51234, cached_input_tokens: 38912, output_tokens: 1954 } };
-    const { display, facts } = projectEnvelope("codex", raw);
+    const { display, facts } = project("codex", raw);
     expect(display?.ev).toBe("result");
     expect(facts.usage).toEqual({ input_tokens: 51234, cached_input_tokens: 38912, output_tokens: 1954, outputEstimated: false });
     expect(facts.costUsd).toBeUndefined();
   });
 
   it("item.completed reasoning/agent_message/file_change map to think/text/diff", () => {
-    expect(projectEnvelope("codex", { type: "item.completed", item: { type: "reasoning", text: "think" } }).display?.ev).toBe("think");
-    expect(projectEnvelope("codex", { type: "item.completed", item: { type: "agent_message", text: "hi" } }).display?.ev).toBe("text");
+    expect(project("codex", { type: "item.completed", item: { type: "reasoning", text: "think" } }).display?.ev).toBe("think");
+    expect(project("codex", { type: "item.completed", item: { type: "agent_message", text: "hi" } }).display?.ev).toBe("text");
     expect(
-      projectEnvelope("codex", { type: "item.completed", item: { type: "file_change", changes: [{ path: "a.ts", kind: "add" }] } }).display?.ev,
+      project("codex", { type: "item.completed", item: { type: "file_change", changes: [{ path: "a.ts", kind: "add" }] } }).display?.ev,
     ).toBe("diff");
   });
 
   it("ruling 168: a completed todo_list carries its steps, done or waiting, and says how far it got", () => {
     // CANARY: drop `todos` from the line and the console draws the empty row
     // it drew before.
-    const { display } = projectEnvelope("codex", {
+    const { display } = project("codex", {
       type: "item.completed",
       item: {
         type: "todo_list",
@@ -231,27 +248,27 @@ describe("projectEnvelope — Codex JSONL", () => {
       ],
     });
     // The plan as the turn left it: a started or updated list is not a row.
-    expect(projectEnvelope("codex", { type: "item.updated", item: { type: "todo_list", items: [] } }).display).toBeNull();
+    expect(project("codex", { type: "item.updated", item: { type: "todo_list", items: [] } }).display).toBeNull();
     // A list with junk steps keeps the good ones.
-    const junk = projectEnvelope("codex", { type: "item.completed", item: { type: "todo_list", items: [7, { text: "Ship", completed: false }] } });
+    const junk = project("codex", { type: "item.completed", item: { type: "todo_list", items: [7, { text: "Ship", completed: false }] } });
     expect(junk.display?.todos).toEqual([{ text: "Ship", status: "pending" }]);
   });
 
   it("command_execution started → tool; completed exit 0 → out, non-zero → err", () => {
-    expect(projectEnvelope("codex", { type: "item.started", item: { type: "command_execution", command: 'bash -lc "ls"' } }).display?.ev).toBe("tool");
-    expect(projectEnvelope("codex", { type: "item.completed", item: { type: "command_execution", exit_code: 0, aggregated_output: "ok\n" } }).display?.ev).toBe("out");
-    const err = projectEnvelope("codex", { type: "item.completed", item: { type: "command_execution", exit_code: 2, aggregated_output: "fail\n" } });
+    expect(project("codex", { type: "item.started", item: { type: "command_execution", command: 'bash -lc "ls"' } }).display?.ev).toBe("tool");
+    expect(project("codex", { type: "item.completed", item: { type: "command_execution", exit_code: 0, aggregated_output: "ok\n" } }).display?.ev).toBe("out");
+    const err = project("codex", { type: "item.completed", item: { type: "command_execution", exit_code: 2, aggregated_output: "fail\n" } });
     expect(err.display?.ev).toBe("err");
     expect(err.display?.exit).toBe(2);
   });
 
   it("turn.failed / error → err line + isError fact", () => {
-    expect(projectEnvelope("codex", { type: "turn.failed", error: { message: "stream ended" } }).facts.isError).toBe(true);
-    expect(projectEnvelope("codex", { type: "error", message: "broken pipe" }).facts.isError).toBe(true);
+    expect(project("codex", { type: "turn.failed", error: { message: "stream ended" } }).facts.isError).toBe(true);
+    expect(project("codex", { type: "error", message: "broken pipe" }).facts.isError).toBe(true);
   });
 
   it("ErrorItem is visible but non-fatal", () => {
-    const { display, facts } = projectEnvelope("codex", {
+    const { display, facts } = project("codex", {
       type: "item.completed",
       item: { id: "err-1", type: "error", message: "retry warning" },
     });
@@ -260,7 +277,7 @@ describe("projectEnvelope — Codex JSONL", () => {
   });
 
   it("in-progress items other than command_execution yield no line", () => {
-    expect(projectEnvelope("codex", { type: "item.started", item: { type: "reasoning", text: "x" } }).display).toBeNull();
+    expect(project("codex", { type: "item.started", item: { type: "reasoning", text: "x" } }).display).toBeNull();
   });
 
   // P14-RT-07: these two fell to the default branch, which rendered them as dim
@@ -268,7 +285,7 @@ describe("projectEnvelope — Codex JSONL", () => {
   // does not have — so the panel could not say which MCP tool a Codex agent
   // called, or with what, while Claude logged tool name + input.
   it("mcp_tool_call started → tool line naming server.tool + its arguments", () => {
-    const { display } = projectEnvelope("codex", {
+    const { display } = project("codex", {
       type: "item.started",
       item: {
         id: "mcp-1",
@@ -289,13 +306,13 @@ describe("projectEnvelope — Codex JSONL", () => {
   });
 
   it("a SUCCEEDING mcp_tool_call adds no second line; a failing one reports why", () => {
-    const ok = projectEnvelope("codex", {
+    const ok = project("codex", {
       type: "item.completed",
       item: { id: "mcp-1", type: "mcp_tool_call", server: "s", tool: "t", arguments: {}, status: "completed" },
     });
     expect(ok.display).toBeNull();
 
-    const failed = projectEnvelope("codex", {
+    const failed = project("codex", {
       type: "item.completed",
       item: {
         id: "mcp-2",
@@ -318,7 +335,7 @@ describe("projectEnvelope — Codex JSONL", () => {
   });
 
   it("web_search → tool line carrying the query", () => {
-    const { display } = projectEnvelope("codex", {
+    const { display } = project("codex", {
       type: "item.completed",
       item: { id: "ws-1", type: "web_search", query: "react router v8 loaders" },
     });
@@ -338,7 +355,7 @@ describe("projectEnvelope — Codex JSONL", () => {
  */
 describe("ruling 155(a): structured refusal facts", () => {
   it("an assistant envelope carrying `error` projects as an err line, never as reply text", () => {
-    const { display, facts } = projectEnvelope("claude", {
+    const { display, facts } = project("claude", {
       type: "assistant",
       error: "oauth_org_not_allowed",
       message: { content: [{ type: "text", text: "You are not allowed to use this account here." }] },
@@ -347,33 +364,33 @@ describe("ruling 155(a): structured refusal facts", () => {
     expect(display?.text).toContain("not allowed");
     expect(facts.apiError).toBe("oauth_org_not_allowed");
     // A plain assistant message stays reply text.
-    expect(projectEnvelope("claude", { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }).display?.ev).toBe("text");
+    expect(project("claude", { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } }).display?.ev).toBe("text");
   });
 
   it("result facts carry `api_error_status` / `terminal_reason`; the label is never `success` on an error", () => {
-    const refused = projectEnvelope("claude", {
+    const refused = project("claude", {
       type: "result", subtype: "success", is_error: true, num_turns: 1, usage: {},
       api_error_status: 403, terminal_reason: "api_error",
     });
     expect(refused.facts).toMatchObject({ isError: true, apiErrorStatus: 403, terminalReason: "api_error" });
     expect(refused.display?.text).toBe("error · 1 turns · api 403 · api_error");
     expect(refused.display?.stats?.subtype).toBe("error");
-    const maxTurns = projectEnvelope("claude", { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 9, usage: {} });
+    const maxTurns = project("claude", { type: "result", subtype: "error_max_turns", is_error: true, num_turns: 9, usage: {} });
     expect(maxTurns.display?.text).toBe("error_max_turns · 9 turns");
-    const ok = projectEnvelope("claude", { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: {}, duration_ms: 1000, total_cost_usd: 0.1 });
+    const ok = project("claude", { type: "result", subtype: "success", is_error: false, num_turns: 2, usage: {}, duration_ms: 1000, total_cost_usd: 0.1 });
     expect(ok.display?.text).toContain("success · 2 turns");
     expect(ok.facts.apiErrorStatus).toBeNull();
   });
 
   it("a REJECTED rate-limit line names the window, the status and the reset, and is not telemetry", () => {
-    const { display, facts } = projectEnvelope("claude", {
+    const { display, facts } = project("claude", {
       type: "rate_limit_event",
       rate_limit_info: { status: "rejected", rateLimitType: "five_hour", utilization: null, resetsAt: 1_788_781_800, isUsingOverage: false },
     });
     expect(display).toMatchObject({ ev: "err", tag: "rate_limit_event·rejected" });
     expect(display?.text).toBe("rate limit · five_hour · rejected · utilization not reported · resets 2026-09-07 11:50 UTC");
     expect(facts.rateLimit?.status).toBe("rejected");
-    const allowed = projectEnvelope("claude", {
+    const allowed = project("claude", {
       type: "rate_limit_event",
       rate_limit_info: { status: "allowed", rateLimitType: "five_hour", utilization: 0.4, resetsAt: null, isUsingOverage: false },
     });
@@ -402,7 +419,7 @@ describe("ruling 159: the result fold reads modelUsage", () => {
   };
 
   it("sums every model's whole prompt, cache reads, output and cost", () => {
-    const { display, facts } = projectEnvelope("claude", {
+    const { display, facts } = project("claude", {
       ...RESULT,
       modelUsage: {
         "claude-opus-4-8": { inputTokens: 10, outputTokens: 500, cacheReadInputTokens: 20_000, cacheCreationInputTokens: 1_000, webSearchRequests: 0, costUSD: 0.3, contextWindow: 200_000, maxOutputTokens: 32_000 },
@@ -427,9 +444,15 @@ describe("ruling 159: the result fold reads modelUsage", () => {
 
   it("falls back to usage and total_cost_usd when modelUsage is absent, empty or zeroed", () => {
     const expected = { input_tokens: 21_010, cached_input_tokens: 20_000, output_tokens: 500, outputEstimated: false };
-    for (const modelUsage of [undefined, {}, { "claude-opus-4-8": { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } }]) {
-      const { display, facts } = projectEnvelope("claude", { ...RESULT, modelUsage });
-      expect(facts.usage, JSON.stringify(modelUsage)).toEqual(expected);
+    // Absent is the key left out, as a JSON message has it.
+    const messages: JsonValue[] = [
+      RESULT,
+      { ...RESULT, modelUsage: {} },
+      { ...RESULT, modelUsage: { "claude-opus-4-8": { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, webSearchRequests: 0, costUSD: 0, contextWindow: 0, maxOutputTokens: 0 } } },
+    ];
+    for (const message of messages) {
+      const { display, facts } = project("claude", message);
+      expect(facts.usage, JSON.stringify(message)).toEqual(expected);
       expect(facts.costUsd).toBe(0.4);
       expect(display?.stats).not.toHaveProperty("models");
       expect(display?.text).not.toContain("models");
@@ -437,7 +460,7 @@ describe("ruling 159: the result fold reads modelUsage", () => {
   });
 
   it("a malformed model entry costs that entry, not the others", () => {
-    const { facts } = projectEnvelope("claude", {
+    const { facts } = project("claude", {
       ...RESULT,
       modelUsage: {
         "claude-opus-4-8": { inputTokens: 10, outputTokens: 500, cacheReadInputTokens: 20_000, cacheCreationInputTokens: 1_000, costUSD: 0.3 },
@@ -449,7 +472,7 @@ describe("ruling 159: the result fold reads modelUsage", () => {
   });
 
   it("the budget cut-off result carries its spend like any other result", () => {
-    const { display, facts } = projectEnvelope("claude", {
+    const { display, facts } = project("claude", {
       ...RESULT,
       subtype: "error_max_budget_usd",
       is_error: true,
@@ -470,7 +493,7 @@ describe("ruling 159: the result fold reads modelUsage", () => {
  */
 describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
   it("tool_progress → a meta heartbeat naming the tool, its call and the provider's figure", () => {
-    const { display, facts } = projectEnvelope(
+    const { display, facts } = project(
       "claude",
       {
         type: "tool_progress",
@@ -496,12 +519,12 @@ describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
     });
     expect(facts).toEqual({});
     expect(
-      projectEnvelope("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: 30 }).display?.progress?.at,
+      project("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: 30 }).display?.progress?.at,
     ).toBeNull();
   });
 
   it("a frame with no figure says still running and invents no number; no parent → keyed on its own id", () => {
-    const { display } = projectEnvelope("claude", {
+    const { display } = project("claude", {
       type: "tool_progress",
       tool_use_id: "toolu_02",
       tool_name: "Agent",
@@ -515,13 +538,13 @@ describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
     });
     // A garbled figure reads as none, never as a number.
     expect(
-      projectEnvelope("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: "soon" })
+      project("claude", { type: "tool_progress", tool_name: "Bash", elapsed_time_seconds: "soon" })
         .display?.progress?.elapsed,
     ).toBeNull();
   });
 
   it("an MCP call's arguments read as key: value pairs — clipped strings, collections by size", () => {
-    const { display } = projectEnvelope("claude", {
+    const { display } = project("claude", {
       type: "assistant",
       message: {
         content: [
@@ -550,14 +573,14 @@ describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
   });
 
   it("a single string argument is the row, on both backends; a built-in keeps its own summary", () => {
-    const claude = projectEnvelope("claude", {
+    const claude = project("claude", {
       type: "assistant",
       message: {
         content: [{ type: "tool_use", name: "mcp__viberr__read_default_branch_file", input: { path: "services/orders/src/app.ts" } }],
       },
     });
     expect(claude.display?.text).toBe("services/orders/src/app.ts");
-    const codex = projectEnvelope("codex", {
+    const codex = project("codex", {
       type: "item.started",
       item: {
         id: "m",
@@ -569,14 +592,14 @@ describe("projectEnvelope — ruling 168: heartbeats and MCP arguments", () => {
       },
     });
     expect(codex.display).toMatchObject({ name: "viberr-agent.read_knowledge_doc", text: "kb: rulings · path: rulings.md" });
-    const bash = projectEnvelope("claude", {
+    const bash = project("claude", {
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "Bash", input: { command: "npm test", description: "run tests" } }] },
     });
     expect(bash.display?.text).toBe("npm test");
     // A built-in with no bespoke summary reads as the arguments line too,
     // never as one JSON blob.
-    const todo = projectEnvelope("claude", {
+    const todo = project("claude", {
       type: "assistant",
       message: { content: [{ type: "tool_use", name: "TodoWrite", input: { todos: [{ content: "a" }, { content: "b" }] } }] },
     });
@@ -606,13 +629,13 @@ describe("projectEnvelope — ruling 168(b): MCP result blocks", () => {
 
   it("reads a content-block array as its text, so a multi-line answer takes the code block", () => {
     const json = '{\n  "key": "BNB-27",\n  "title": "Become a host"\n}';
-    const { display } = projectEnvelope("claude", result([{ type: "text", text: json }]));
+    const { display } = project("claude", result([{ type: "text", text: json }]));
     expect(display).toMatchObject({ ev: "out", tag: "tool_result", text: json });
     expect(display?.text.startsWith("[{")).toBe(false);
   });
 
   it("notes an image by its media type and a tool reference by its name, never the bytes", () => {
-    const { display } = projectEnvelope(
+    const { display } = project(
       "claude",
       result([
         { type: "text", text: "Navigated." },
@@ -628,14 +651,14 @@ describe("projectEnvelope — ruling 168(b): MCP result blocks", () => {
   });
 
   it("keeps the error flag through the unwrapping, and a plain string as it was", () => {
-    expect(projectEnvelope("claude", result([{ type: "text", text: "[denied] not at this stage" }], true)).display).toMatchObject({
+    expect(project("claude", result([{ type: "text", text: "[denied] not at this stage" }], true)).display).toMatchObject({
       ev: "err",
       text: "[denied] not at this stage",
     });
-    expect(projectEnvelope("claude", result("290 passing")).display?.text).toBe("290 passing");
-    expect(projectEnvelope("claude", result(null)).display?.text).toBe("");
+    expect(project("claude", result("290 passing")).display?.text).toBe("290 passing");
+    expect(project("claude", result(null)).display?.text).toBe("");
     // A block that is not an object costs its own slot, never the answer.
-    expect(projectEnvelope("claude", result([{ type: "text", text: "a" }, 7])).display?.text).toBe("a\n[block]");
+    expect(project("claude", result([{ type: "text", text: "a" }, 7])).display?.text).toBe("a\n[block]");
   });
 });
 
@@ -646,16 +669,18 @@ describe("projectEnvelope — ruling 168(b): MCP result blocks", () => {
  * misses no surface can show.
  */
 describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
-  interface Usage {
+  // Type aliases, not interfaces, so a message built from them is JSON as the
+  // seam decodes it (`project` takes a `JsonValue`).
+  type Usage = {
     input_tokens: number;
     cache_creation_input_tokens: number;
     cache_read_input_tokens: number;
     cache_creation?: { ephemeral_5m_input_tokens: number; ephemeral_1h_input_tokens: number };
     output_tokens?: number;
-  }
-  interface Extra {
+  };
+  type Extra = {
     diagnostics?: { cache_miss_reason: { type: string } };
-  }
+  };
   const assistant = (usage: Usage, extra: Extra = {}) => ({
     type: "assistant",
     parent_tool_use_id: null,
@@ -669,7 +694,7 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   });
 
   it("an assistant envelope carries the call's prompt, its cache write and read, the TTL split and the miss reason", () => {
-    const { facts } = projectEnvelope(
+    const { facts } = project(
       "claude",
       assistant(
         {
@@ -694,7 +719,7 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   });
 
   it("no TTL split and no diagnostics read as null, never as zeros or empty strings", () => {
-    const { facts } = projectEnvelope(
+    const { facts } = project(
       "claude",
       assistant({ input_tokens: 2, cache_creation_input_tokens: 10, cache_read_input_tokens: 20 }),
     );
@@ -704,19 +729,19 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   it("a subagent's envelope and an all-zero usage carry no cache fact", () => {
     // Canary: drop the `parent_tool_use_id` gate and a subagent's prompt
     // becomes the run's first call.
-    const sub = projectEnvelope("claude", {
+    const sub = project("claude", {
       ...assistant({ input_tokens: 5, cache_creation_input_tokens: 5, cache_read_input_tokens: 5 }),
       parent_tool_use_id: "toolu_agent",
     });
     expect(sub.facts.cache).toBeNull();
-    const zero = projectEnvelope(
+    const zero = project(
       "claude",
       assistant({ input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 }),
     );
     expect(zero.facts.cache).toBeNull();
     // A tool_use envelope and an API-error banner carry the fact too: the
     // call happened, whatever the model did with it.
-    const tool = projectEnvelope("claude", {
+    const tool = project("claude", {
       ...assistant({ input_tokens: 1, cache_creation_input_tokens: 1, cache_read_input_tokens: 1 }),
       message: {
         id: "msg_2",
@@ -728,7 +753,7 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   });
 
   it("a compact_boundary names the trigger and the sizes, and rides facts.compaction", () => {
-    const { display, facts } = projectEnvelope("claude", {
+    const { display, facts } = project("claude", {
       type: "system",
       subtype: "compact_boundary",
       compact_metadata: { trigger: "auto", pre_tokens: 972032, post_tokens: 10041 },
@@ -740,13 +765,13 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
     });
     expect(facts.compaction).toEqual({ trigger: "auto", preTokens: 972032, postTokens: 10041 });
     // Without metadata the line still says a compaction happened.
-    const bare = projectEnvelope("claude", { type: "system", subtype: "compact_boundary" });
+    const bare = project("claude", { type: "system", subtype: "compact_boundary" });
     expect(bare.display?.text).toBe("context compacted (auto)");
     expect(bare.facts.compaction).toEqual({ trigger: "auto", preTokens: null, postTokens: null });
   });
 
   it("a Codex turn's usage carries its cache write and cached read as a TURN total, never a prompt size", () => {
-    const { display, facts } = projectEnvelope("codex", {
+    const { display, facts } = project("codex", {
       type: "turn.completed",
       usage: { input_tokens: 26_000, cached_input_tokens: 21_248, cache_write_input_tokens: 1_500, output_tokens: 300 },
     });
@@ -761,7 +786,7 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
     });
     expect(display?.text).toContain("wrote 1.5k");
     // An SDK that sent no write figure (the default 0) prints none.
-    const silent = projectEnvelope("codex", {
+    const silent = project("codex", {
       type: "turn.completed",
       usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 1 },
     });
@@ -770,14 +795,14 @@ describe("projectEnvelope — ruling 172: cache facts and compactions", () => {
   });
 
   it("a Codex context_compaction item counts as a compaction", () => {
-    const { display, facts } = projectEnvelope("codex", {
+    const { display, facts } = project("codex", {
       type: "item.completed",
       item: { id: "cc-1", type: "context_compaction" },
     });
     expect(display).toMatchObject({ ev: "meta", tag: "context_compaction", text: "context compacted" });
     expect(facts.compaction).toEqual({ trigger: "auto", preTokens: null, postTokens: null });
     expect(
-      projectEnvelope("codex", { type: "item.started", item: { id: "cc-1", type: "context_compaction" } }).display,
+      project("codex", { type: "item.started", item: { id: "cc-1", type: "context_compaction" } }).display,
     ).toBeNull();
   });
 });

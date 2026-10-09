@@ -95,8 +95,7 @@ export interface ControllerOpsDeps {
 export interface ControllerOpsMcp {
   mcpServers: Record<string, McpSdkServerConfigWithInstance>;
   allowedTools: string[];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools: SdkMcpToolDefinition<any>[];
+  tools: SdkMcpToolDefinition[];
 }
 
 /** The mount key, exported so the run assembly can never disagree about
@@ -256,11 +255,9 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
   const allowed: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const add = (t: SdkMcpToolDefinition<any>, name: string) => {
+  const add = (t: SdkMcpToolDefinition, name: string) => {
     tools.push(t);
     // Ruling 204: the manifest's spelling of the mounted name.
     allowed.push(mountedToolName(CONTROLLER_OPS_MCP_NAME, name));

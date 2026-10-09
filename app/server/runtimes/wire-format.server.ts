@@ -490,30 +490,56 @@ const codexEnvelopeFields = z.object({
 const codexEnvelope = codexEnvelopeFields.catch(() => codexEnvelopeFields.parse({}));
 type CodexEnvelope = z.infer<typeof codexEnvelopeFields>;
 
+// ------------------------------------------------------------ the seam
+
+/**
+ * One provider envelope, decoded where it enters: the Claude SDK's message
+ * stream, the Codex SDK's ThreadEvents, a stored line read back. `envelope` is
+ * total (every field `.catch()`es), and `verbatim` is the provider's own text,
+ * which only the row of an envelope type this build does not know prints, so it
+ * is rendered when that row asks and never for every line on the hot path.
+ * Ruling 7: what arrives untyped is decoded here, by `claudeWire` and
+ * `codexWire`, and nothing past this seam takes an unknown.
+ */
+export interface ClaudeWire {
+  backend: "claude";
+  envelope: ClaudeEnvelope;
+  verbatim: () => string;
+}
+export interface CodexWire {
+  backend: "codex";
+  envelope: CodexEnvelope;
+  verbatim: () => string;
+}
+export type WireEnvelope = ClaudeWire | CodexWire;
+
+/** Decode a Claude SDK message at the adapter's seam. */
+export const claudeWire = z.unknown().transform(
+  (raw): ClaudeWire => ({
+    backend: "claude",
+    envelope: claudeEnvelope.parse(raw),
+    verbatim: () => wireText.parse(raw),
+  }),
+);
+
+/** Decode a Codex ThreadEvent at the adapter's seam. */
+export const codexWire = z.unknown().transform(
+  (raw): CodexWire => ({
+    backend: "codex",
+    envelope: codexEnvelope.parse(raw),
+    verbatim: () => wireText.parse(raw),
+  }),
+);
+
 // ------------------------------------------------------------ projection
 
 /**
- * Project one real wire envelope (parsed JSON) → LogLine + facts. Tolerant:
- * unknown types produce a `meta` line, never throw (both vendors add event
- * types between minor versions — runtime-adapters.md gotcha 9).
- *
- * `raw` STAYS `unknown`, and the `no-unknown-parameters` waiver below is the
- * considered answer, not an oversight. The rule's remedy — "parse at the I/O
- * boundary before calling this function" — has no target here, because this
- * function IS that boundary: `claudeEnvelope`/`codexEnvelope` are total (every
- * field `.catch()`es, see the note above) and every branch past line one reads a
- * decoded `ClaudeEnvelope`/`CodexEnvelope`, never this parameter. What flows in
- * is `AsyncGenerator<unknown>` from the Claude SDK seam and a `ThreadEvent` from
- * the Codex one, so no annotation narrower than `unknown` accepts both.
- *
- * The two alternatives were costed and both regress:
- *   · taking the DECODED envelope loses the raw text `unknownEnvelope` renders,
- *     so an event type this build has never seen would print a fabricated
- *     full-shape object instead of the provider's own envelope — the one line a
- *     human has to read when a vendor ships a new event;
- *   · taking the wire LINE (`string`) forces a JSON round-trip per console line
- *     on both adapters' hottest path, to buy a type the schemas re-widen on the
- *     very next statement.
+ * Project one real wire envelope (decoded at the seam, `WireEnvelope`) →
+ * LogLine + facts. Tolerant: unknown types produce a `meta` line, never throw
+ * (both vendors add event types between minor versions — runtime-adapters.md
+ * gotcha 9), and that line prints the provider's own envelope (`verbatim`),
+ * never a decoded full-shape object: it is the one line a human has to read
+ * when a vendor ships a new event.
  */
 /** One model's share of a Claude result, in the run row's terms. */
 export interface ModelUsageShare {
@@ -549,11 +575,8 @@ export interface ClaudeResultUsage {
  */
 /** Ruling 165(c): the totals a Claude result REPORTS (the session's), or null
  *  when the message is not a result. What the next share is taken from. */
-export function claudeReportedTotals(
-  // eslint-disable-next-line anti-slop/no-unknown-parameters -- the raw SDK message, parsed here
-  raw: unknown,
-): ClaudeResultUsage | null {
-  const e = claudeEnvelope.parse(raw);
+export function claudeReportedTotals(wire: ClaudeWire): ClaudeResultUsage | null {
+  const e = wire.envelope;
   return e.type === "result" ? foldClaudeResultUsage(e) : null;
 }
 
@@ -635,23 +658,21 @@ function usageText(inTok: number, cached: number, outTok: number): string {
 }
 
 export function projectEnvelope(
-  backend: "claude" | "codex",
-  // eslint-disable-next-line anti-slop/no-unknown-parameters -- see above
-  raw: unknown,
+  wire: WireEnvelope,
   occurredAtIso?: string,
   /** Ruling 165(c): the totals the Claude session last reported, so a result's
    *  line and facts state this query's share (see `sessionShareOf`). */
   claudeSession?: ClaudeResultUsage | null,
 ): ProjectedEnvelope {
   const t = clockOf(occurredAtIso);
-  if (backend === "codex") {
-    const e = codexEnvelope.parse(raw);
-    return projectCodex(e, t) ?? unknownEnvelope(e.type, wireText.parse(raw), t);
+  if (wire.backend === "codex") {
+    const e = wire.envelope;
+    return projectCodex(e, t) ?? unknownEnvelope(e.type, wire.verbatim(), t);
   }
-  const e = claudeEnvelope.parse(raw);
+  const e = wire.envelope;
   return (
     projectClaude(e, t, occurredAtIso ?? null, claudeSession ?? null) ??
-    unknownEnvelope(e.type, wireText.parse(raw), t)
+    unknownEnvelope(e.type, wire.verbatim(), t)
   );
 }
 

@@ -24,7 +24,7 @@ import {
   type ClaudeQueryOptions,
 } from "./claude-runtime.server";
 import type { ReapTargets } from "./run-processes.server";
-import { claudeReportedTotals } from "./wire-format.server";
+import { claudeReportedTotals, claudeWire } from "./wire-format.server";
 import type { SDKControlGetUsageResponse } from "@anthropic-ai/claude-agent-sdk";
 import { filteredSpawnEnv } from "./runtime-registry.server";
 import { resolveSpecialistDisallowedTools } from "~/server/tasks/specialist-tool-policy";
@@ -2640,11 +2640,11 @@ describe("claude adapter compact() (ruling 174)", () => {
     const opus = (inputTokens: number, outputTokens: number, cacheRead: number, cacheWrite: number, costUSD: number) => ({
       "claude-opus-5-5[1m]": { inputTokens, outputTokens, cacheReadInputTokens: cacheRead, cacheCreationInputTokens: cacheWrite, costUSD },
     });
-    const before = claudeReportedTotals({
+    const before = claudeReportedTotals(claudeWire.parse({
       type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
       usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779,
       modelUsage: opus(2_889, 32_390, 2_328_378, 106_679, 1.9779),
-    })!;
+    }))!;
     const resumed = fakeQuery([
       { type: "system", subtype: "init", session_id: "sess-559", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
       { type: "result", subtype: "success", is_error: false, num_turns: 8, duration_ms: 29_000, usage: { input_tokens: 8, cache_read_input_tokens: 132_029, cache_creation_input_tokens: 56_088, output_tokens: 2_757 }, total_cost_usd: 2.5097, modelUsage: opus(4_383, 35_162, 2_460_407, 162_767, 2.5097) },
@@ -2680,10 +2680,10 @@ describe("claude adapter compact() (ruling 174)", () => {
     // cap raised by the session's old spend was spend the run could overrun
     // by. CANARY: raise the cap whenever the session has totals, and this
     // reads 5 + 1.9779.
-    const before = claudeReportedTotals({
+    const before = claudeReportedTotals(claudeWire.parse({
       type: "result", subtype: "success", is_error: false, num_turns: 60, duration_ms: 331_000,
       usage: { input_tokens: 60, output_tokens: 28_716 }, total_cost_usd: 1.9779, modelUsage: {},
-    })!;
+    }))!;
     const resumed = fakeQuery([
       { type: "system", subtype: "init", session_id: "sess-553", model: "claude-opus-5-5", tools: [], mcp_servers: [] },
       { type: "result", subtype: "success", is_error: false, num_turns: 2, duration_ms: 9_000, usage: { input_tokens: 8, output_tokens: 100 }, total_cost_usd: 0.2 },

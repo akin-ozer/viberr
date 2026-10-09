@@ -32,7 +32,7 @@ import {
   patchRun,
 } from "./run-store.server";
 import { defaultModelFor } from "./model-catalog.server";
-import { claudeReportedTotals } from "./wire-format.server";
+import { claudeReportedTotals, claudeWire } from "./wire-format.server";
 import { COMPACTING_AFTER_RUN_STEP, RUN_PHASE, SESSION_SETTLING_STEP } from "./adapter.server";
 import { COMPLETION_COMPACT_DEADLINE_MS } from "./context-policy.server";
 import type { LogLine } from "~/features/runtime/runtime-types";
@@ -1577,7 +1577,7 @@ describe("startRun spec derivation (P13-RT-02 / P13-RT-08)", () => {
       backend: "claude", model: "sonnet", prompt: "go", dataRoot: store.dataRoot, resumeSessionId: "sess-559",
     });
     await settle();
-    expect(specs[0]?.resumedSessionReported).toEqual(claudeReportedTotals(result));
+    expect(specs[0]?.resumedSessionReported).toEqual(claudeReportedTotals(claudeWire.parse(result)));
     // Ruling 159: the newest run where it works is this session's, so the CLI
     // will restore its cost state. CANARY: always false and the resumed run's
     // cap cannot make room for the restored spend.

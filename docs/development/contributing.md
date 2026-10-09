@@ -48,7 +48,8 @@ A change that makes a perf budget move fails `npm test` in either direction: low
 ceiling to keep a win, or raise it with the reason beside it
 ([performance.md](performance.md)).
 
-Lint has no suppression list: fix findings, never allowlist them (ruling 7). A change
+Lint has no suppression list: fix findings, never allowlist them or disable a rule in a
+comment (ruling 7; `lint-directives.test.ts` fails on any disable directive). A change
 that contradicts a numbered ruling in
 [../architecture/decisions.md](../architecture/decisions.md) must say so and be re-ruled;
 never reverse one silently. Each ruling states its decision as it holds today: a changed

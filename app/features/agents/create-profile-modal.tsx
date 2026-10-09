@@ -179,7 +179,6 @@ export function useModelCatalog(
     if (!backend) return;
     catalogLoadFired.current = false;
     loadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [backend]);
   const catalog = catalogFetcher.data?.data ?? null;
   const catalogLoading = catalogFetcher.state === "loading";
@@ -218,7 +217,6 @@ export function useModelCatalog(
     // the backend-wide list, and checking the wide one would leave a tier
     // standing that the picker never shows and the save refuses.
     seedEffort(catalog, nextModel, effort, setEffort);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [catalog]);
 
   // A model change can NARROW the tiers on offer. The pick is clamped to what
@@ -229,7 +227,6 @@ export function useModelCatalog(
   useEffect(() => {
     if (!catalog || !model) return;
     seedEffort(catalog, model, effort, setEffort);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model]);
 
   // Effort options come from the selected model (when it constrains them),

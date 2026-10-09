@@ -88,7 +88,6 @@ export function ChangesPanel({
   // An open-from-the-start reader fetches its chunk once the page is live.
   useEffect(() => {
     if (defaultOpen) fetchBody();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const reader = (

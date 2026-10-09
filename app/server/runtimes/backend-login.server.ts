@@ -9,7 +9,11 @@ import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { ERROR_CODES } from "~/server/errors/error-codes";
 import { logger } from "~/server/logging/logger.server";
-import { ANSI_CSI_RE, redactGitOutput } from "~/server/secrets/git-output-redact.server";
+import {
+  redactGitOutput,
+  stripAnsiCsi,
+  stripControlChars,
+} from "~/server/secrets/git-output-redact.server";
 import { newId } from "~/shared/ids/new-id.server";
 import { BACKEND_LABEL } from "~/shared/text/backend-label";
 import {
@@ -526,15 +530,12 @@ function pruneEndedSessions(nowMs: number): void {
 
 // ------------------------------------------------------------ stdout parsing
 
-/** Control characters that survive the strip (BEL from a prompt, NUL). */
-// eslint-disable-next-line no-control-regex
-const CONTROL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
-
 /** Both CLIs colourise their prompts when they think they have a TTY, and a
  *  coloured `https://…` must still parse as a URL: ANSI CSI escapes go first
- *  (git-output-redact's `ANSI_CSI_RE`), then the stray controls. */
+ *  (git-output-redact's `stripAnsiCsi`), then the stray controls (BEL from a
+ *  prompt, NUL), keeping the tab and the line breaks the parse splits on. */
 function stripAnsi(chunk: string): string {
-  return chunk.replace(ANSI_CSI_RE, "").replace(CONTROL_RE, "");
+  return stripControlChars(stripAnsiCsi(chunk), "\t\n\r");
 }
 
 /** The first `https://` URL in a line, without the trailing punctuation a

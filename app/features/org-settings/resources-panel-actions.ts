@@ -118,6 +118,5 @@ export function useWarmingRevalidation(mcps: McpView[]) {
     return () => clearInterval(id);
     // `revalidator` is stable enough to omit; re-arming on every render would
     // reset the 20s window each time the page re-read itself.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [warming]);
 }

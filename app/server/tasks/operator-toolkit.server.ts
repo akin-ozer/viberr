@@ -172,8 +172,7 @@ export interface OperatorToolkit {
    * appears when a handler actually runs (R20-9's delegated-ask disclosure) is
    * otherwise untestable without a live model.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  tools: SdkMcpToolDefinition<any>[];
+  tools: SdkMcpToolDefinition[];
 }
 
 interface ToolkitDeps {
@@ -330,11 +329,9 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   const { db, ctx, projectSlug, taskKey, authority } = deps;
   const base = { projectSlug, taskKey };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
   const allowed: string[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const add = (t: SdkMcpToolDefinition<any>, name: string) => {
+  const add = (t: SdkMcpToolDefinition, name: string) => {
     tools.push(t);
     allowed.push(`mcp__viberr__${name}`);
   };
@@ -437,7 +434,6 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           .optional()
           .describe("One task's key, e.g. SHOP-39. Omit to list the whole board."),
       },
-      // eslint-disable-next-line @typescript-eslint/require-await
       async (args: { taskKey?: string }) => {
         const boardDeps = { db, ctx, projectSlug };
         const wanted = args.taskKey?.trim();
@@ -470,7 +466,6 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           .describe(READ_TASK_ATTACHMENT_FIELDS.offset),
         delivery: z.string().optional().describe(READ_TASK_ATTACHMENT_FIELDS.delivery),
       },
-      // eslint-disable-next-line @typescript-eslint/require-await
       async (args: { name: string; offset?: number; delivery?: string }) => {
         const delivery = args.delivery?.trim() || undefined;
         const read = readTaskAttachment(projectSlug, taskKey, args.name, ctx.dataRoot, args.offset, delivery);
@@ -510,7 +505,6 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         offset: z.number().int().min(0).optional().describe(READ_TASK_SOURCE_FIELDS.offset),
         find: z.string().optional().describe(READ_TASK_SOURCE_FIELDS.find),
       },
-      // eslint-disable-next-line @typescript-eslint/require-await
       async (args: { id?: string; taskKey?: string; offset?: number; find?: string }) => {
         const read = readAgentTaskSource(
           { db, ctx, projectSlug },
@@ -580,7 +574,6 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             .describe("The document's path inside that knowledge base, e.g. 'conventions.md'."),
           offset: z.number().int().min(0).optional().describe(KB_DOC_OFFSET_DESCRIPTION),
         },
-        // eslint-disable-next-line @typescript-eslint/require-await
         async (args: { kb: string; path: string; offset?: number }) =>
           textResult(readKbDocForRun(grantedKb, args.kb, args.path, ctx.dataRoot, args.offset ?? 0)),
       ),

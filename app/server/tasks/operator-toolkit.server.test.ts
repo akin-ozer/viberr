@@ -73,6 +73,15 @@ function bareToolkit(auth: OperatorAuthority, workspace?: { dir: string; default
   return buildOperatorToolkit(deps);
 }
 
+/** One argument of a tool as its published JSON Schema declares it: the copy
+ *  the model is handed (ruling 136: a schema is a whole strict object). */
+async function publishedField(toolkit: ReturnType<typeof buildOperatorToolkit>, toolName: string, field: string) {
+  const schema = (await publishedSchemas(toolkit.mcpServers.viberr)).get(toolName);
+  return z
+    .object({ properties: z.record(z.string(), z.object({ description: z.string() }).partial()) })
+    .parse(schema).properties[field];
+}
+
 /** The toolkit for VIB-1 of a test store, whose files the read tools open. */
 function storeToolkit(store: TestStore, auth: OperatorAuthority = authority([])) {
   return buildOperatorToolkit({
@@ -334,11 +343,12 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("update_branch_from_base")).toContain("the acceptance ceremony brings the branch up to date once and merges in the same step");
   });
 
-  it("ruling 112: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", () => {
+  it("ruling 112: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", async () => {
     // Canary: restore the description from before ruling 112. The operator on
     // BLOG-8 read "populated only while validation is failing" and asked a
     // person for the move.
-    const tool = bareToolkit(withPolicy(uniform("direct"))).tools.find((t) => t.name === "transition_stage")!;
+    const toolkit = bareToolkit(withPolicy(uniform("direct")));
+    const tool = toolkit.tools.find((t) => t.name === "transition_stage")!;
     const desc = tool.description;
     expect(desc).toContain("Backwards is also allowed on a task that has NO delivering agent you can run (one whose profile is no longer deployed counts as none) and has delivered nothing, when the agent its remaining work needs cannot be engaged where the task stands");
     expect(desc).toContain("each with `engage` naming the agents (`id` and `name`)");
@@ -354,7 +364,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc).not.toContain("to send failed work back");
     // The parameter said "must be a declared next stage" beside a description
     // that offers backward moves. Canary: restore it.
-    expect(z.toJSONSchema(tool.inputSchema).properties?.toStageId).toHaveProperty(
+    expect(await publishedField(toolkit, "transition_stage", "toStageId")).toHaveProperty(
       "description",
       "The target stage id: one from `nextStages`, or one from `reworkStages` for a backward move.",
     );
@@ -799,7 +809,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
       );
     keepOn("VIB-1", "ec2-pricing.html", "t3.medium $0.0416 per hour");
     keepOn("VIB-2", "rds-pricing.html", "db.t3.medium $0.068 per hour");
-    const { tools } = storeToolkit(store);
+    const toolkit = storeToolkit(store);
+    const { tools } = toolkit;
     const read = async (args: Record<string, string>) =>
       z.record(z.string(), z.unknown()).parse(JSON.parse(await callToolText(tools, "read_task_source", args)));
     const own = await read({});
@@ -830,7 +841,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
     // here with no description.
     const tool = tools.find((t) => t.name === "read_task_source")!;
     expect(tool.description).toContain("With `id` and `find`, the places in that source that hold a word or short phrase");
-    expect(z.toJSONSchema(tool.inputSchema).properties?.find).toHaveProperty(
+    expect(await publishedField(toolkit, "read_task_source", "find")).toHaveProperty(
       "description",
       expect.stringContaining("A place that shows in the excerpt before it is not listed again. `nextOffset` is where to search on from when more follow."),
     );

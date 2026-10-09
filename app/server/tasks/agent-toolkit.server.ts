@@ -419,7 +419,7 @@ const ASK_HUMAN_MAX_OPTIONS = 4;
 export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
   const { db, ctx, projectSlug, taskKey, actorRef, outcomeKey, collab, kb } = deps;
 
-  const tools: SdkMcpToolDefinition<any>[] = [];
+  const tools: SdkMcpToolDefinition[] = [];
 
   if (collab.comment) {
     tools.push(
