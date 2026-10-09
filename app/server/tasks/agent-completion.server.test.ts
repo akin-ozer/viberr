@@ -3360,6 +3360,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain(
         "objection number 1",
       );
+      // Nor is the answer filed as a review that failed to judge: it was asked
+      // not to. CANARY: drop `verdictSilenced` from the note's guard and the
+      // task tells a person to re-run a review nobody asked for.
+      expect(
+        taskFile().parsed.timeline.some(
+          (e) => e.type === "note" && e.text.includes("finished without a readable verdict"),
+        ),
+      ).toBe(false);
 
       // And the rest of the path WOULD have done it: the identical completion
       // on a run whose channel was NOT withheld overwrites the genuine record.

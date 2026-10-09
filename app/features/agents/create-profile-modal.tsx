@@ -727,7 +727,8 @@ function CapabilityGrants({
 }: {
   capCatalog: readonly ModalCapGroup[];
   /** The mode buttons offered per row: 4 for the operator, 3 honest ones
-   *  (Allowed/Human-only/Off) for a specialist (R7-5). */
+   *  (Acts directly, Human-only, Off) for a specialist (`MODE_LABEL`,
+   *  ruling 298). */
   capModes: readonly { id: CapMode; label: string }[];
   caps: CapSelection;
   setCaps: Dispatch<SetStateAction<CapSelection>>;
@@ -786,8 +787,8 @@ function CapabilityGrants({
                     and position did not disambiguate either because a zero
                     count renders nothing. Each count now carries the SAME word
                     the expanded segment below uses for that mode on this
-                    profile kind (Allowed/Human-only/Off for a specialist,
-                    Direct/Recommend/Human/Off for the operator), the way the
+                    profile kind (`MODE_LABEL`: Acts directly, Human-only and
+                    Off, plus Recommends only for the operator), the way the
                     Policy page's identical strip already reads (`.pcap-counts`
                     in policy-page.tsx's `AgentCapability`). */}
                 <span className="cap-msum">

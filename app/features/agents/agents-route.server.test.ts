@@ -243,10 +243,10 @@ describe("loader", () => {
     expect(operator.actions.direct).toHaveLength(6);
     expect(operator.actions.recommend).toHaveLength(2);
     expect(operator.actions.forbidden).toHaveLength(3);
-    // A1: the operator's absent web-egress renders Allowed (matches the runtime).
+    // A1: the operator's absent web-egress renders Acts directly (matches the runtime).
     expect(operator.actions.direct).toContain("Search & fetch from the web");
     // A-1 (pass 24): the absent branch-update grant renders at the delivery-gate
-    // mode (Allowed on this auto project), not omitted, not a flat catalog direct.
+    // mode (Acts directly on this auto project), not omitted, not a flat catalog direct.
     expect(operator.actions.direct).toContain("Bring the task branch up to date");
     // Dynamic-dispatch rework (2026-08-29): the retired assign/summon slot pair
     // collapsed into ONE `dispatch-agents` grant, labelled "Select & run agents".

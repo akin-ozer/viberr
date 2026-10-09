@@ -2170,7 +2170,9 @@ export async function applyAgentCompletionEffects(
     // "re-run the review" is bad advice for a condition a re-run reproduces.
     // It fires even for a run that asked a question: the question reaches a
     // person as a packet, and the task's own record should still say plainly
-    // that the review did not happen and why.
+    // that the review did not happen and why. A run told not to judge
+    // (`verdictSilenced`) answered the question it was asked, so it gets no
+    // "re-run the review" note unless it had no tree to read.
     const noteText = readNothing
       ? "This review run had no checkout of the repository, so it read nothing and recorded no verdict. Validation is unchanged and acceptance stays gated. The workspace failure is on the server, not on the agent: fix that first, then run the review again."
       : "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.";
@@ -2178,6 +2180,7 @@ export async function applyAgentCompletionEffects(
       verdictAuthorized &&
       !verdict &&
       (!question || readNothing) &&
+      (!verdictSilenced || readNothing) &&
       atReviewStage &&
       !input.fromHumanDirective
     ) {

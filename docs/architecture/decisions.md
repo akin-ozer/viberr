@@ -885,7 +885,7 @@ Each kept files delivery, never a revision, is then pictured from its kept copy 
 Whether a run may record a verdict is decided per run (`collab` in `app/server/tasks/specialist-run.server.ts`, `verdictAuthorized` in `agent-completion.server.ts`):
 
 - A run dispatched to deliver, fresh or resumed, is offered no verdict, and completion discards any verdict it states: the deliverer mints, others judge. A review run whose profile is handed delivery mid-run keeps its verdict.
-- A run dispatched with `withholdVerdict` (the deadlock question, `run_agent`'s `noVerdict`) gets no verdict field or prompt line on Claude, and `agent_runs.verdict_withheld` makes completion record no verdict from it: a verdict its Codex envelope fills anyway (the schema is static) is discarded, and the prose fallback does not run. The engagement is untouched: the reviewer stays verdict-capable and required.
+- A run dispatched with `withholdVerdict` (the deadlock question, `run_agent`'s `noVerdict`) gets no verdict field or prompt line on Claude, and `agent_runs.verdict_withheld` makes completion record no verdict from it: a verdict its Codex envelope fills anyway (the schema is static) is discarded, and the prose fallback does not run; its answer gets no "re-run the review" note unless it had no checkout. The engagement is untouched: the reviewer stays verdict-capable and required.
 - A run whose workspace could not be provisioned records no verdict (`agent_runs.no_checkout`), and its note names the missing checkout.
 - The prose classifier is a fallback for silence only, never for a run that asked a question.
 
