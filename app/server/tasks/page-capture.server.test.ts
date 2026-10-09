@@ -229,6 +229,11 @@ interface AskOver {
   height?: number;
   scale?: number;
   keeps?: boolean;
+  press?: string;
+  hover?: string;
+  tab?: number;
+  motion?: "reduce";
+  moving?: boolean;
 }
 
 /** An agent's `capture_page`, at the door both backends call. */
@@ -1327,6 +1332,86 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(opened()).toEqual([".viberr-render.html"]);
       expect(fake.pages()[0]!.html).toContain(`<body>\n${drawing}\n</body>`);
     });
+  });
+
+  it("ruling 194: an agent's ask puts a page in a state before the picture, says what the act found at each width, refuses a state it cannot show, and writes down no look", async () => {
+    // A still picture of a page at rest hides its menu, what a control looks
+    // like under the pointer and where the keyboard goes. On the first board
+    // asked for a page, its agents scripted a browser of their own to see
+    // them, at a width Viberr pictures nothing at.
+    const runId = await liveRun("writer");
+    saveFiles("VIB-1", {
+      "site.html":
+        '<nav>fake-find:{"Menu":[340,28,"button"],"Docs":[120,28,"a"]}</nav>' +
+        '<p>fake-names:["Docs","Menu","Sign in"]</p>' +
+        '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Sign in"]]</p><p>fake-tab-order:[0,1,2]</p>' +
+        "<p>fake-height:3000</p>",
+    });
+    await withBrowser("", async () => {
+      // A press: one screen at each width, as it stood after it.
+      const pressed = await ask("site.html", { press: "Menu", runId });
+      expect(pressed.text).toContain("[done] `site.html` in the state asked for: each picture is one screen, as it stood after the act.");
+      expect(pressed.text).toContain('At the desktop width (1280 px): pressed button "Menu".');
+      expect(pressed.text).toContain('At the phone width (390 px): pressed button "Menu".');
+      expect(handedBack(pressed)).toEqual([
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 390, height: 844 },
+      ]);
+      // The press reached the browser as a pointer's press and release on the
+      // control, at each width.
+      // CANARY: drop `act` from the view the door builds and the reply is a
+      // stretch of the page at rest, with nothing pressed.
+      expect(fake.inputs().filter((input) => input.type === "mousePressed")).toEqual([
+        expect.objectContaining({ x: 340, y: 28 }),
+        expect.objectContaining({ x: 340, y: 28 }),
+      ]);
+
+      // Tab, then the pointer on another control, in one call at one width.
+      const before = fake.inputs().length;
+      const focused = await ask("site.html", { tab: 2, hover: "Docs", view: "phone", runId });
+      expect(focused.text).toContain('At the phone width (390 px): 2 presses of Tab: focus is on button "Menu"; the pointer is on a "Docs".');
+      expect(handedBack(focused)).toEqual([{ mimeType: "image/png", width: 390, height: 844 }]);
+      const sent = fake.inputs().slice(before);
+      expect(sent.filter((input) => input.type === "rawKeyDown").map((input) => input.key)).toEqual(["Tab", "Tab"]);
+      expect(sent.at(-1)).toEqual(expect.objectContaining({ type: "mouseMoved", x: 120, y: 28 }));
+
+      // A name nothing answers to is said with the names that are there, and
+      // no picture stands in for the state that was not reached.
+      const missed = await ask("site.html", { press: "Pricing", view: "desktop", runId });
+      expect(missed.text).toBe(
+        "[noop] `site.html` was not pictured: the act found nothing to act on. " +
+          'At the desktop width (1280 px): nothing at this width is called "Pricing". The controls on it: "Docs", "Menu", "Sign in".',
+      );
+      expect(missed.images).toEqual([]);
+
+      // Reduced motion is the reader's setting, told to the browser before
+      // the page loads.
+      const reduced = await ask("site.html", { motion: "reduce", view: "desktop", runId });
+      expect(reduced.text).toContain("with reduced motion asked for");
+      expect(fake.pages().at(-1)!.reducedMotion).toBe("reduce");
+
+      // A state goes with no size and an act with no place on the page: each
+      // is refused in a sentence that says what to leave out, and no browser
+      // is started for it.
+      const launched = fake.launches().length;
+      for (const [over, why] of [
+        [{ press: "Menu", width: 1200, height: 630 }, "a size makes one picture of the page at rest, so it goes with none of `press`, `hover`, `tab`, `moving` and `motion`."],
+        [{ tab: 1, from: 2000 }, "`press`, `hover` and `tab` picture the screen where the act leaves it, so they go with no `from`. Leave `from` out."],
+        [{ hover: "Docs", moving: true }, "`moving` pictures the screen while the page loads, before anything is pressed, so it goes with none of `press`, `hover` and `tab`."],
+      ] as const) {
+        const refused = await ask("site.html", { ...over, runId });
+        expect(refused.text).toContain(`[noop] \`site.html\` was not pictured: ${why}`);
+        expect(refused.images).toEqual([]);
+      }
+      expect(fake.launches()).toHaveLength(launched);
+    });
+    // Ruling 329: a look is a stretch of the page as it reads at rest. One
+    // screen in a state, or the page with reduced motion asked for, is not
+    // the page a reader scrolls, and counts for none of it.
+    // CANARY: record every picture `capture_page` hands back and a reviewer
+    // that opened the menu once has looked at the page's first 800 px.
+    expect(runLooks(store.db, runId)).toEqual([]);
+    await stopRun(runId);
   });
 
   it("keeps an agent's pictures for the run that asked: only the pictures, apart from another run's, until that run ends", async () => {
