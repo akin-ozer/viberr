@@ -630,10 +630,12 @@ function entryActor(entry: TaskFileEvent): string {
 function entryPage(entry: TaskFileEvent, offset: number, bytes: number, numbered: number | null): TimelineEntryReading {
   const end = pageEnd(entry.text, offset, bytes);
   const more = end < entry.text.length;
-  // Everything a reader pages by stands before the text. A page of code or of
-  // JSON prints longer than a page of prose, and a Codex run's output is cut
-  // from the middle past its limit (ruling 624): what leads the answer
-  // survives the cut, and what trails a long text may not.
+  // What a reader pages by leads the entry's own text. A page of JSON prints
+  // longer than a page of prose, and a Codex run's output is cut from the
+  // middle past its limit (ruling 624), which keeps both ends of the answer.
+  // An entry alone keeps its fields either way; among entries that share a
+  // page, the ones after the first sit towards the middle, so the answer
+  // also opens with what was cut (`cut`, below).
   const which: Pick<TimelineEntryReading, "entry"> = {};
   if (numbered !== null) which.entry = numbered;
   const from: Pick<TimelineEntryReading, "offset"> = {};
@@ -806,13 +808,16 @@ export async function readTimelineEntry(
   if (readings.length === 1) {
     return JSON.stringify({ occurredAt: wanted, ...readings[0] }, null, 1);
   }
-  return JSON.stringify(
-    {
-      occurredAt: wanted,
-      shared: `${readings.length} entries were written with this stamp. They are listed in the order they were written: the first was written first.`,
-      entries: readings,
-    },
-    null,
-    1,
+  // Ruling 707: the entries this page cut short, with where each reads on,
+  // ahead of the entries themselves. Two long entries split a page evenly,
+  // which puts the second one's own fields at the middle of the answer,
+  // where an output over a Codex run's limit is cut.
+  const cut = readings.flatMap((r) =>
+    r.nextOffset === undefined ? [] : [{ entry: r.entry, characters: r.characters, nextOffset: r.nextOffset }],
   );
+  const head = {
+    occurredAt: wanted,
+    shared: `${readings.length} entries were written with this stamp. They are listed in the order they were written: the first was written first.`,
+  };
+  return JSON.stringify(cut.length === 0 ? { ...head, entries: readings } : { ...head, cut, entries: readings }, null, 1);
 }

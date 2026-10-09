@@ -806,6 +806,8 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       .parse(JSON.parse(out.content[0]!.text));
     expect(read.occurredAt).toBe(at);
     expect(read.shared).toContain("in the order they were written: the first was written first");
+    // Ruling 707: nothing was cut, so the answer names no cut.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(out.content[0]!.text)))).toEqual(["occurredAt", "shared", "entries"]);
     expect(read.entries.map((e) => [e.type, e.title, e.truncated])).toEqual([
       ["comment", "Review verdict", false],
       ["quality", "Changes requested", false],
@@ -898,14 +900,18 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     expect(bytes(head.text)).toBeLessThanOrEqual(32_000);
     expect(bytes(head.text)).toBeGreaterThan(31_990);
     expect(head.text.length).toBeLessThan(32_000);
-    // What a reader pages by leads the answer and the text closes it: an
-    // output cut from the middle keeps its head. CANARY: print `nextOffset`
-    // after 32,000 bytes of text, where the cut falls.
-    const raw = await text({ occurredAt: alone });
-    for (const field of ['"truncated"', '"characters"', '"nextOffset"']) {
-      expect(raw.indexOf(field), field).toBeGreaterThan(0);
-      expect(raw.indexOf(field), field).toBeLessThan(raw.indexOf('"text"'));
-    }
+    // What a reader pages by leads the entry's text, and the text closes the
+    // answer. CANARY: print any of them after the text.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: alone }))))).toEqual([
+      "occurredAt",
+      "type",
+      "actor",
+      "title",
+      "truncated",
+      "characters",
+      "nextOffset",
+      "text",
+    ]);
     // And the pages after it, to the end. CANARY: ignore `offset` and every
     // read is the first page again; leave `nextOffset` out and a reader is
     // told the entry is cut and handed nothing to pass back, as before.
@@ -956,6 +962,13 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     const verdictHead = shared.entries[0]!;
     expect(verdictHead.text).toBe(verdict.slice(0, verdictHead.nextOffset));
     expect(verdictHead.characters).toBe(verdict.length);
+    // The answer opens with what it cut short and where each reads on, ahead
+    // of the entries: an output over a Codex run's limit is cut from the
+    // middle, which is where the second of two long entries puts its own
+    // fields. CANARY: leave `cut` out, or print it after `entries`.
+    const sharedRaw = z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: pair })));
+    expect(Object.keys(sharedRaw)).toEqual(["occurredAt", "shared", "cut", "entries"]);
+    expect(sharedRaw.cut).toEqual([{ entry: 1, characters: verdict.length, nextOffset: verdictHead.nextOffset }]);
     // Together they are one page, filled. CANARY: give each entry a page of
     // its own and two long entries come back as 64,000 bytes in one answer;
     // share the page by characters and this verdict, whose characters are
@@ -986,6 +999,24 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     ]);
     expect(bytes(both.entries[0]!.text) + bytes(both.entries[1]!.text)).toBeLessThanOrEqual(32_000);
     const cut = both.entries[1]!.nextOffset!;
+    expect(z.object({ cut: z.array(z.unknown()) }).parse(JSON.parse(await text({ occurredAt: twins }))).cut).toEqual([
+      { entry: 1, characters: first.length, nextOffset: both.entries[0]!.nextOffset },
+      { entry: 2, characters: second.length, nextOffset: cut },
+    ]);
+    // A page read from further in still ends on its text, with which entry
+    // it is and where it starts ahead of it.
+    expect(Object.keys(z.record(z.string(), z.unknown()).parse(JSON.parse(await text({ occurredAt: twins, entry: 2, offset: cut }))))).toEqual([
+      "occurredAt",
+      "entry",
+      "type",
+      "actor",
+      "title",
+      "offset",
+      "truncated",
+      "characters",
+      "nextOffset",
+      "text",
+    ]);
     // CANARY: read on in the first entry found, and the second's reader is
     // handed the middle of the first as its continuation.
     expect(await text({ occurredAt: twins, offset: cut })).toBe(
@@ -1019,7 +1050,7 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
     // two short ones come whole and the long one takes what is left. A first
     // read and then each cut entry's `nextOffset` recover every character.
     // CANARY: split the page into equal parts and the long entry is handed a
-    // third of it while the other two leave most of theirs unused.
+    // third of it while the note leaves nearly all of its own unused.
     const tripleRead = z
       .object({ shared: z.string(), entries: z.array(page.omit({ occurredAt: true })) })
       .parse(JSON.parse(await text({ occurredAt: triple })));

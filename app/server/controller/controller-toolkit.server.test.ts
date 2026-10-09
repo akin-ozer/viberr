@@ -346,9 +346,13 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       evidence: null,
     });
     // Newest first: the second note was written after the report.
-    await updateTaskFile(task, (parsed) => {
-      parsed.timeline.unshift(note("A note beside it", "One line."), note("A long report", report));
-    });
+    await updateTaskFile(
+      task,
+      (parsed) => {
+        parsed.timeline.unshift(note("A note beside it", "One line."), note("A long report", report));
+      },
+      { stamp: false },
+    );
     rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
     try {
       const page = z.object({ entry: z.number(), offset: z.number().optional(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
@@ -382,9 +386,13 @@ describe("list_decisions briefs the person and decides nothing (ruling 251)", ()
       expect(described).toContain("`entry` reads one of them alone, a whole page of it.");
     } finally {
       // The fixture is shared by the tests after this one.
-      await updateTaskFile(task, (parsed) => {
-        parsed.timeline = parsed.timeline.filter((e) => e.occurredAt !== at);
-      });
+      await updateTaskFile(
+        task,
+        (parsed) => {
+          parsed.timeline = parsed.timeline.filter((e) => e.occurredAt !== at);
+        },
+        { stamp: false },
+      );
       rebuildProject(app.db, SLUG, { dataRoot: app.dataRoot });
     }
   });

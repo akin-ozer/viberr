@@ -91,6 +91,7 @@ export const BOARD_READ_TOOL: Tool = {
   inputSchema: {
     type: "object",
     properties: { taskKey: { type: "string", description: READ_BOARD_TASK_KEY_DESCRIPTION } },
+    additionalProperties: false,
   },
   annotations: { title: "Read the project's board", ...READ_ONLY },
 };
@@ -138,6 +139,7 @@ export const TASK_ATTACHMENT_TOOL: Tool = {
       delivery: { type: "string", description: READ_TASK_ATTACHMENT_FIELDS.delivery },
     },
     required: ["name"],
+    additionalProperties: false,
   },
   annotations: { title: "Read one attachment of a task", ...READ_ONLY },
 };
@@ -330,12 +332,22 @@ export function keepSourceTool(web: boolean): Tool {
  *  `read_task_source`; `keep_source` follows them for a run that holds it. */
 export const BOARD_TOOLS: Tool[] = [BOARD_READ_TOOL, TIMELINE_ENTRY_TOOL, TASK_ATTACHMENT_TOOL, TASK_SOURCE_TOOL];
 
-/** `read_board`'s arguments, parsed where the gateway receives the call. */
-export const boardReadArgsSchema = z.object({ taskKey: z.string().optional() });
+/**
+ * `read_board`'s arguments, parsed where the gateway receives the call.
+ *
+ * Ruling 707: every reader of this server parses strictly, as its Claude twin
+ * does (ruling 296). An argument this door dropped was a silent one: asked
+ * for an attachment with `nextOffset` under its own name, or `page: 2`, it
+ * answered the first page again as a good read. Measured on the stored run
+ * logs before the change, as ruling 296 was: of 12,892 calls Codex runs had
+ * made to these tools, the only two that carried an argument the tools do
+ * not declare (`stamp`) were refused already, for want of `occurredAt`.
+ */
+export const boardReadArgsSchema = z.strictObject({ taskKey: z.string().optional() });
 export type BoardReadArgs = z.infer<typeof boardReadArgsSchema>;
 
 /** `read_task_attachment`'s arguments, parsed where the gateway receives the call. */
-export const taskAttachmentArgsSchema = z.object({
+export const taskAttachmentArgsSchema = z.strictObject({
   name: z.string(),
   taskKey: z.string().optional(),
   offset: z.number().int().min(0).optional(),
@@ -572,6 +584,15 @@ export function pageCaptureArgsRefusal(): CallToolResult {
 /** One argument of a board tool, as its published schema declares it. */
 const boardArgumentSchema = z.object({ type: z.string().optional(), minimum: z.number().optional() });
 
+/** What an argument of that declaration takes, in the refusal's words; null
+ *  for one that takes text. */
+function numberArgument(argument: z.infer<typeof boardArgumentSchema>): string | null {
+  if (argument.type === "integer") {
+    return argument.minimum === undefined ? "as a whole number" : `as a whole number from ${argument.minimum}`;
+  }
+  return argument.type === "number" ? "as a number" : null;
+}
+
 /** "a", "a and b", "a, b and c". */
 function listed(items: readonly string[]): string {
   return items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
@@ -589,9 +610,9 @@ export function boardArgsRefusal(tool: Tool): CallToolResult {
   const texts: string[] = [];
   const numbers: string[] = [];
   for (const [name, declared] of Object.entries(tool.inputSchema.properties ?? {})) {
-    const argument = boardArgumentSchema.parse(declared);
-    if (argument.type === "integer") numbers.push(`\`${name}\` as a whole number from ${argument.minimum ?? 0}`);
-    else texts.push(`\`${name}\``);
+    const takes = numberArgument(boardArgumentSchema.parse(declared));
+    if (takes === null) texts.push(`\`${name}\``);
+    else numbers.push(`\`${name}\` ${takes}`);
   }
   const parts = [...numbers];
   if (texts.length > 0) parts.unshift(`${listed(texts)} as text`);

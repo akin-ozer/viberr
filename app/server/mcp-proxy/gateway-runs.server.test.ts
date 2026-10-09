@@ -507,9 +507,9 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(refused.isError).toBe(true);
     // Ruling 707: a long entry in pages, through the door a Codex run has.
     // This is the run a page was sized for (ruling 624): over about 40,000
-    // bytes its tool output is cut from the middle. CANARY: leave `offset` or
-    // `entry` out of the arguments this door parses, and a Codex run's second
-    // read is the first page again.
+    // bytes its tool output is cut from the middle. CANARY: drop `offset` or
+    // `entry` on the way from this door to the reader, and a Codex run's
+    // second read is the first page again.
     const entryPage = z.object({ entry: z.number(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
     const readPage = async (args: Record<string, number>) => {
       const result = await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: longAt, ...args } });
@@ -550,14 +550,27 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     // as a good read. CANARY: parse this door's arguments loosely.
     expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, nextOffset: 31_976 })).toBe(entryRefusal);
     expect(await refusedWith("read_timeline_entry", { occurredAt: longAt, entry: 1, page: 2 })).toBe(entryRefusal);
-    // The same sentence builder answers for the other readers of this server.
-    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", offset: "5" })).toBe(
-      "read_task_attachment takes `name`, `taskKey` and `delivery` as text and `offset` as a whole number from 0; `name` is required. Nothing was read.",
-    );
+    // The other readers of this server hold to the same two rules: the
+    // attachment reader pages too, and it answered `nextOffset` under its own
+    // name with the first page again. CANARY: leave either parser loose, or
+    // either published schema silent on it.
+    const attachmentRefusal =
+      "read_task_attachment takes `name`, `taskKey` and `delivery` as text and `offset` as a whole number from 0, and nothing else; `name` is required. Nothing was read.";
+    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", offset: "5" })).toBe(attachmentRefusal);
+    expect(await refusedWith("read_task_attachment", { name: "holdout-comparison.md", nextOffset: 32_000 })).toBe(attachmentRefusal);
     expect(await refusedWith("read_task_source", { id: "S1", page: 2 })).toBe(
       "read_task_source takes `id`, `taskKey` and `find` as text and `offset` as a whole number from 0, and nothing else. Nothing was read.",
     );
-    expect(await refusedWith("read_board", { taskKey: 5 })).toBe("read_board takes `taskKey` as text. Nothing was read.");
+    const boardRefusal = "read_board takes `taskKey` as text, and nothing else. Nothing was read.";
+    expect(await refusedWith("read_board", { taskKey: 5 })).toBe(boardRefusal);
+    expect(await refusedWith("read_board", { undeclared: "x" })).toBe(boardRefusal);
+    const strictOnes = (await client.listTools()).tools.filter((tool) => tool.name !== "keep_source");
+    expect(strictOnes.map((tool) => [tool.name, tool.inputSchema.additionalProperties])).toEqual([
+      ["read_board", false],
+      ["read_timeline_entry", false],
+      ["read_task_attachment", false],
+      ["read_task_source", false],
+    ]);
     const listedEntry = (await client.listTools()).tools.find((tool) => tool.name === "read_timeline_entry");
     expect(listedEntry?.description).toContain("A long entry comes in pages of up to 32,000 bytes");
     expect(listedEntry?.description).toContain("read and print one page per call");
