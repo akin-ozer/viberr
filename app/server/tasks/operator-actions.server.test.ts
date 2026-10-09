@@ -4851,6 +4851,20 @@ describe("operatorCorrectKnowledgeDoc (rulings 378, 483 and 498)", () => {
       },
     );
     expect((await read()).standing).toMatch(/^undone by Arda at \S+: "the host has cc now"$/);
+    // Ruling 707: the correction rides with the entry's first page, however
+    // the entry is asked for, and not with a page read from further in.
+    // CANARIES: attach it only to a read of every entry of the stamp; attach
+    // it to every page.
+    const deps = { db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug };
+    const byNumber = z
+      .object({ correction: z.object({ id: z.string() }).optional(), text: z.string() })
+      .parse(JSON.parse(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, 0, 1)));
+    expect(byNumber.correction?.id).toBe(id);
+    const fromFurtherIn = z
+      .object({ correction: z.unknown().optional(), offset: z.number(), text: z.string() })
+      .parse(JSON.parse(await readTimelineEntry(deps, "VIB-1", entry.occurredAt, 10)));
+    expect(fromFurtherIn.text).toBe(entry.text.slice(10));
+    expect(fromFurtherIn.correction).toBeUndefined();
   });
 
   it("refuses a knowledge base no run on the task was given, and a passage the document does not hold exactly", async () => {

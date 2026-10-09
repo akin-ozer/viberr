@@ -436,9 +436,15 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
       ],
     });
     const answer = `1: Yes, the owner approves the redesign. ${"2: the address is app01's own. ".repeat(12).trim()}`;
+    // Ruling 707: a report longer than a page, beside its marker.
+    const longAt = "2026-09-29T11:30:00.000Z";
+    const longReport = `## Findings\n\n${"A finding with its file and line. ".repeat(2_500)}\n\nSENTINEL-AT-THE-END`;
+    const judge = { kind: "agent" as const, backend: "codex" as const, profileId: "estimate-judge", roleHint: "Estimate Judge" };
     writeTask(store.dataRoot, store.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", { stage: "impl", ownerUserId: store.users.arda.id }),
       timeline: [
+        { occurredAt: longAt, type: "quality", actor: judge, title: "Changes requested", text: "**Validation:** failing.", toAgent: false, evidence: null },
+        { occurredAt: longAt, type: "comment", actor: judge, title: "Review verdict", text: longReport, toAgent: false, evidence: null },
         {
           occurredAt: "2026-09-29T11:11:33.126Z",
           type: "comment",
@@ -499,6 +505,37 @@ describe("ruling 589: the gateway answers a Codex run's board server itself", ()
     expect(entry.text).toBe(answer);
     const refused = await client.callTool({ name: "read_timeline_entry", arguments: { at: "2026-09-29T11:11:33.126Z" } });
     expect(refused.isError).toBe(true);
+    // Ruling 707: a long entry in pages, through the door a Codex run has.
+    // This is the run a page was sized for (ruling 624): over about 40,000
+    // bytes its tool output is cut from the middle. CANARY: leave `offset` or
+    // `entry` out of the arguments this door parses, and a Codex run's second
+    // read is the first page again.
+    const entryPage = z.object({ entry: z.number(), truncated: z.boolean(), text: z.string(), nextOffset: z.number().optional() });
+    const readPage = async (args: Record<string, number>) => {
+      const result = await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: longAt, ...args } });
+      const printedAs = z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+      expect(Buffer.byteLength(JSON.stringify(result.content)) / 4).toBeLessThanOrEqual(10_000);
+      return entryPage.parse(JSON.parse(printedAs));
+    };
+    let part = await readPage({ entry: 1 });
+    expect(part.truncated).toBe(true);
+    let joined = part.text;
+    // Bounded, so a door that drops `offset` fails here and does not spin.
+    for (let pages = 1; part.nextOffset !== undefined && pages < 10; pages += 1) {
+      part = await readPage({ entry: 1, offset: part.nextOffset });
+      joined += part.text;
+    }
+    expect(joined).toBe(longReport);
+    expect((await readPage({ entry: 2 })).text).toBe("**Validation:** failing.");
+    // A fraction is no offset, here as on Claude.
+    expect((await client.callTool({ name: "read_timeline_entry", arguments: { occurredAt: longAt, offset: 1.5 } })).isError).toBe(true);
+    const listedEntry = (await client.listTools()).tools.find((tool) => tool.name === "read_timeline_entry");
+    expect(listedEntry?.description).toContain("A long entry comes in pages of up to 32,000 bytes");
+    expect(Object.keys(listedEntry?.inputSchema.properties ?? {})).toEqual(["occurredAt", "taskKey", "offset", "entry"]);
+    expect(z.object({ offset: z.object({ description: z.string() }), entry: z.object({ description: z.string() }) }).parse(listedEntry?.inputSchema.properties)).toMatchObject({
+      offset: { description: expect.stringContaining("the `nextOffset` a truncated read returned") },
+      entry: { description: expect.stringContaining("counted from 1 in the order they were written") },
+    });
     // Ruling 596: another task's entry, by the stamp read_board lists for it.
     // CANARY: bind the gateway's reader to the run's own task and this reads a miss.
     expect(z.object({ timeline: z.array(z.string()) }).parse(JSON.parse(await call("read_board", { taskKey: "VIB-2" }))).timeline).toEqual([
