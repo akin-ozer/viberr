@@ -85,8 +85,8 @@ const sha256Of = (key: string, id: string) =>
  *  something of each kind of motion the renderer reads. */
 const REFERENCE =
   "<h1>The reference</h1><p>fake-height:4500</p>" +
-  '<p>fake-animations:[{"name":"drift","target":"div.hero","loops":true,"durationMs":null},{"name":"rise","target":"h1","loops":false,"durationMs":600}]</p>' +
-  '<p>fake-videos:[{"width":960,"height":540,"playing":true,"loop":true}]</p>' +
+  '<p>fake-animations:[{"name":"drift","target":"div.hero","loops":true,"durationMs":8000},{"name":"rise","target":"h1","loops":false,"durationMs":600}]</p>' +
+  '<p>fake-videos:[{"autoplay":true,"loop":true,"playing":true,"width":960,"height":540}]</p>' +
   '<p>fake-sticky:{"what":"header.site","position":"sticky"}</p><p>fake-on-scroll:3</p>' +
   '<p>fake-hover:[{"what":"a.cta","at":[640,420],"changes":["background-color"],"durationMs":150}]</p>';
 
@@ -166,7 +166,7 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // and a second review is held to a page that had changed since the first.
       const launches = fake.launches().length;
       expect(await keep({ url: "https://look.example/" })).toBe(
-        `[noop] VIB-1 already keeps how https://look.example/ looked on ${day} (S1 to S3 and S4 to S6). ` +
+        `[noop] VIB-1 already keeps how https://look.example/ looked on ${day} (S1 to S3 and S5 to S7). ` +
           "A result is judged against one look of an address: read that one. `read_task_source` lists every picture of it.",
       );
       expect(fake.launches()).toHaveLength(launches);
@@ -184,11 +184,12 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // Taken twice, it is already there.
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[noop] VIB-2 already keeps what VIB-1 keeps of");
 
-      // Each keep is on the audit record, with the address, the date and the
-      // sources. CANARY: drop recordAudit from auditKept.
+      // Each keep is on the audit record, newest first, with the address,
+      // the date and the task it was taken over from. CANARY: drop
+      // recordAudit from auditKept.
       expect(lookAudits().map((row) => [row.taskKey, row.details?.url, row.details?.at, row.details?.from])).toEqual([
-        ["VIB-1", "https://look.example/", at, null],
         ["VIB-2", "https://look.example/", at, "VIB-1"],
+        ["VIB-1", "https://look.example/", at, null],
       ]);
     });
   });

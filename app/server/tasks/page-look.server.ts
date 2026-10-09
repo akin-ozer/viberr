@@ -17,7 +17,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readsAsCredential } from "~/server/secrets/git-output-redact.server";
 import { PAGE_CAPTURE_VIEWS, pageCaptureView } from "~/shared/page-capture";
 import { aboutMs, pictureWebPage, type PageMotion, type WebPagePicture } from "./page-capture.server";
-import { keptLooks } from "./page-looks.server";
+import { idRange, keptLooks } from "./page-looks.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -101,13 +101,6 @@ function webAddress(raw: string): { address: URL } | { not: string } {
   }
   address.hash = "";
   return { address };
-}
-
-/** "S4 to S9" for ids that run on, each named when they do not. */
-function idRange(ids: readonly string[]): string {
-  const numbers = ids.map((id) => Number(id.slice(1)));
-  const runsOn = numbers.every((n, i) => i === 0 || n === numbers[i - 1]! + 1);
-  return ids.length > 2 && runsOn ? `${ids[0]} to ${ids.at(-1)}` : LIST_AND.format([...ids]);
 }
 
 /** What the renderer read of a page's motion, as the lines of the note. */

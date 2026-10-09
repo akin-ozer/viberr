@@ -264,11 +264,16 @@ const HOW_TO_LOOK =
   "A page is looked at with `capture_page`: its name, one `view` at a time, reading on from each `nextFrom` until the reply says the page ends. " +
   "A look the task keeps is opened picture by picture with `read_task_source`.";
 
-/** "S4 to S9" for a run of ids, each id named when they do not run on. */
-function idRange(ids: readonly string[]): string {
-  const numbers = ids.map((id) => Number(id.slice(1)));
-  const runsOn = numbers.every((n, i) => i === 0 || n === numbers[i - 1]! + 1);
-  return ids.length > 2 && runsOn ? `${ids[0]} to ${ids.at(-1)}` : LIST_AND.format([...ids]);
+/** Source ids as a sentence names them: "S4 to S9" for three or more that
+ *  run on, each id by itself otherwise, so "S1 to S3 and S5 to S7". */
+export function idRange(ids: readonly string[]): string {
+  const runs: string[][] = [];
+  for (const id of ids) {
+    const run = runs.at(-1);
+    if (run && Number(id.slice(1)) === Number(run.at(-1)!.slice(1)) + 1) run.push(id);
+    else runs.push([id]);
+  }
+  return LIST_AND.format(runs.flatMap((run) => (run.length > 2 ? [`${run[0]} to ${run.at(-1)}`] : run)));
 }
 
 /**
