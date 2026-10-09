@@ -112,7 +112,7 @@ export async function openStuckLoopPacket(
      *  "Provider said" observation beside the Signal so the human reads the
      *  actual cause on the packet, not only in the timeline. */
     providerText?: string;
-    /** Ruling 63: the account-level cause, when this failure is one. Packets
+    /** Ruling 65: the account-level cause, when this failure is one. Packets
      *  sharing it are resolved together — see `taskPacketSchema.cause`. */
     cause?: string;
     /** Ruling 119: where the work stands (the last report, the head and its
@@ -158,10 +158,10 @@ export async function openStuckLoopPacket(
       options,
       // Ruling 123: a stall is the one premise a later successful run can
       // disprove, so this marker is what `withdrawSupersededStuckPacket` reads.
-      // The ruling 123 fallback below spreads `open`, and keeps it.
+      // The stock-set fallback below spreads `open`, and keeps it.
       stalled: true,
     };
-    // Ruling 63: when the failure belongs to an ACCOUNT rather than this task,
+    // Ruling 65: when the failure belongs to an ACCOUNT rather than this task,
     // the packet carries that, so the N identical siblings one quota or
     // credential failure raises can be answered once.
     if (input.cause) open.cause = input.cause;
@@ -361,7 +361,7 @@ export async function withdrawSupersededStuckPacket(
     followClosedDecision(db, input.projectSlug, input.taskKey, withdrawn);
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // Ruling 94: the automatic clear. The verdict that just landed was written
-    // while this packet stood, so ruling 94's escalation was skipped; seconds
+    // while this packet stood, so the escalation was skipped; seconds
     // later the same run's success withdraws the packet, and the escalation
     // would be gone with nothing having decided it should be. This path has
     // never fired on a real board — the live misses came through the human
@@ -496,15 +496,14 @@ export function deadlockAgentNames(
  * Ruling 94 — the deadlock escalation is retried when the packet that blocked
  * it clears.
  *
- * Ruling 94 raises the "N times running" packet from inside the locked write
+ * Viberr raises the "N times running" packet from inside the locked write
  * that records the verdict, and skips it when a packet is already open — which
  * it must, since a task holds one packet. What nothing did was come back.
  *
  * The escalation was attempted EXACTLY ONCE, at the instant the objection was
  * written, and any unrelated packet standing at that instant killed it for good.
- * Ruling 156 established what those packets usually are: a quota or credential
- * failure, raised in bursts across several tasks at once and nothing to do with
- * the review.
+ * Those packets are usually a quota or credential failure (ruling 156), raised
+ * in bursts across several tasks at once and nothing to do with the review.
  *
  * Measured on the shopify-clone board: five tasks reached a second consecutive
  * `request_changes`; **two never got the packet**. SHOP-18's second objection
@@ -550,7 +549,7 @@ export async function retryReviewDeadlockEscalation(
      * spot: the reviewer is still at N consecutive objections the instant the
      * card closes. That is the loop the owner called out on SHOP-76 — "that
      * shop-76 constantly bringing up ask what else would block on packet" —
-     * and ruling 87 is the whole file about not rebuilding it.
+     * and ruling 94 is the whole file about not rebuilding it.
      *
      * The packet's own title carries the round count, and raising it writes
      * that title onto the timeline ("**Decision packet:** …"). So a timeline

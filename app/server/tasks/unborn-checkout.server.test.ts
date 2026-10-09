@@ -24,8 +24,8 @@ import { ensureOperatorRepoCheckout } from "~/server/runtimes/operator-run.serve
 
 /**
  * Ruling 227 (F40-12): viberr initializes an empty repository instead of
- * asking a person to push a commit. Ruling 227 already bootstrapped the base
- * before a task BRANCH; the operator runs before any branch, and live its first
+ * asking a person to push a commit. The base was already bootstrapped before
+ * a task BRANCH; the operator runs before any branch, and live its first
  * checkout of `akin-ozer/website` held an unborn `main` and it opened a packet
  * asking the owner to "push one initial commit (a README)". Its checkout is now
  * the other path that needs the base: an unborn checkout gets the first commit

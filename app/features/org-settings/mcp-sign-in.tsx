@@ -8,7 +8,7 @@ import { signInStateKey, signInStatus } from "./resource-modals-derive";
 import { useOrgAction, type OrgAction } from "./use-org-action";
 
 /**
- * The MCP-server editor's OAuth sign-in (ruling 192) and what it was granted
+ * The MCP-server editor's OAuth sign-in and what it was granted
  * (ruling 192). Split out of `resource-modals.tsx` by ruling 13(b), along
  * the task-page recipe: McpSignIn keeps the two posts it always owned, and
  * its controls take their slot of its markup without a hook of their own.

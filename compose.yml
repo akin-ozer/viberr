@@ -137,7 +137,7 @@ volumes:
   # Ruling 38: the store. Named `viberr-data` exactly (not project-prefixed),
   # so the one-time move, the backup and the runbook can name it.
   #
-  # Ruling 38: Compose owns it, so a starter's first `up` creates it.
+  # Compose owns it, so a starter's first `up` creates it.
   # `docker compose down` keeps it; `docker compose down -v` deletes it, with
   # the canonical files, the database and everyone's sealed credentials and
   # sign-ins in it, as that flag asks.

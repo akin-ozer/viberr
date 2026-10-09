@@ -430,7 +430,7 @@ describe("resolve-packet action — kind dispatch + RBAC", () => {
    *
    * Live on SHOP-76 a 4,454-character decision was stored at exactly 2,000,
    * ending mid-word, and a rework round ran on the operator's reconstruction of
-   * the deleted sentence. Ruling 262 permits a cut on a VERDICT because "the
+   * the deleted sentence. Ruling 88 permits a cut on a VERDICT because "the
    * full text is never lost — the agent's own report is on the same timeline,
    * untruncated"; a typed note has no second copy.
    *
@@ -1631,10 +1631,10 @@ describe("acceptance disclosure (ruling 97) — the indirect HTTP doors", () => 
  */
 describe("run-agent auto-engage — reviewer vs supporting agent, and release-agent", () => {
   /**
-   * Ruling 137 + ruling 152: both tasks below ship OWNERLESS in the seed, and a
-   * run bills the owner's accounts — so the dispatch was refused for a missing
-   * principal and, until ruling 152, still toasted "Claude run started for
-   * Reviewer · streaming to agent logs". Owning the task is what a person has
+   * Ruling 137: both tasks below ship OWNERLESS in the seed, and a run bills
+   * the owner's accounts — so the dispatch is refused for a missing principal
+   * (and says so, ruling 152; it once toasted "Claude run started for
+   * Reviewer · streaming to agent logs" anyway). Owning the task is what a person has
    * already done before they run an agent on it; these tests are about the
    * engagement's posture, not about ownership.
    */

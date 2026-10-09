@@ -94,8 +94,8 @@ auto-invokes the operator with the `create` trigger. Every check that can refuse
 (priority, due date, named owner, dependencies, the epic) runs before the key is
 allocated, so a refused creation burns no counter value.
 
-**Creation seats the creator as owner** (ruling 137), or the member named at creation
-(ruling 50: `CreateTaskInput.ownerUserId`, the controller's `create_task` `owner`).
+**Creation seats the creator as owner** (ruling 48), or the member named at creation
+(`CreateTaskInput.ownerUserId`, the controller's `create_task` `owner`).
 A named owner is checked by the hand-off rule `requireOwnable` that `setOwner` shares
 and seated in the same `task.md` write, before the operator's `create` trigger, so the
 first triage run bills the named owner and is refused honestly when they have no
@@ -252,7 +252,7 @@ profile's stages.
    owner decision Q35-15). Consecutive operator-authored moves carry a depth; at
    `OPERATOR_TRANSITION_CHAIN_CAP` (8) the chain stops and a stuck-loop packet opens
    instead. The task's epic is checked for being all done (`maybeNoteEpicComplete`,
-   ruling 55), held dependents are swept (`maybeReleaseDependents`, ruling 55), and
+   ruling 55), held dependents are swept (`maybeReleaseDependents`, ruling 57), and
    entering the review stage with no live PR writes a "Review reached
    with no PR yet" `github` event, so the gap is never silent, except on a task
    delivered as the files saved on it, where there is no PR to open (ruling 235).
@@ -273,8 +273,8 @@ run does not (ruling 120).
   "Hold lifted" note and `task.hold.lifted` (ruling 54).
   Surfaces render a derived display value from `deriveDisplayReadiness`
   (`app/shared/mapping/task.server.ts`) rather than the stored one:
-  `agent_working` while `waiting === "agent"` over a stored `ready` or `input_required`
-  (ruling 44); `agent_queued` when the run carrying the task is parked behind the
+  `agent_working` while `waiting === "agent"` over a stored `ready` or `input_required`;
+  `agent_queued` when the run carrying the task is parked behind the
   concurrent-run cap, which the loaders read off the run row through `withLiveRun`
   (ruling 44); `goal_edit_pending` while a decided `edit_goal` packet waits for the
   edited goal (ruling 63: below `agent_working`, above `input_required` and a stored
@@ -303,8 +303,8 @@ run does not (ruling 120).
   reviewer; otherwise `changed`. The review subject is `reviewSubjectId` (ruling 84):
   the active work revision, or, for a task whose deliverable is not a commit, the moment
   a delivering run that finished last saved files (`files:<deliveredAt>`; a stopped
-  run's files are its work in progress, ruling 85, and so are the drafts of a run
-  that ended by asking a person, ruling 85), so a report or attachment
+  run's files are its work in progress, and so are the drafts of a run that ended by
+  asking a person, ruling 85), so a report or attachment
   deliverable is reviewable like a commit and a later save stales older verdicts. The
   browser's working files alone (`page-….yml`, `console-….log`, `isBrowserWorkingArtifact`)
   never move it: they are tool transport, not a delivery (ruling 85). A run not
@@ -327,8 +327,8 @@ run does not (ruling 120).
   waiting on <names>" while required reviewers still owe a verdict (`changed`); otherwise
   "Approval noted" (ruling 81). A request for changes that sent nothing back says so
   in its title (ruling 83, `VERDICT_NOTE_TITLE`): "Changes requested, not counted" when it
-  bound to no delivery (nothing delivered yet, ruling 245; the reviewer made the delivery
-  itself, ruling 245; the delivery moved while it read, ruling 84), and "Changes
+  bound to no delivery (nothing delivered yet or the reviewer made the delivery itself,
+  ruling 245; the delivery moved while it read, ruling 84), and "Changes
   requested, on unchanged work" when the same reviewer objects again to a delivery nobody
   has reworked since its last objection (the repeat that adds no round, ruling 92). The
   timeline draws each as the reviewer's verdict all the same; what a task took counts the
@@ -368,8 +368,8 @@ the write (`listDependencyCandidates` in `app/server/projections/dependencies.se
 ruling 59). Every hold sentence is
 built by `holdEntriesSentence` and `holdRefusal` (`app/shared/dependencies.ts`;
 `holdRefusalFor` on the server): pending entries first, each done entry tagged in its
-own parenthesis ("JC-2 and JC-3 (done)", ruling 58), and an entry that can never
-complete named as such, with no promised release (ruling 58).
+own parenthesis ("JC-2 and JC-3 (done)"), and an entry that can never complete named
+as such, with no promised release (ruling 58).
 
 **A hold refuses every agent dispatch** (ruling 56). `startAgentRun` refuses a
 non-empty `blockedBy` beside the closure gate and before any auto-engage, with the
@@ -380,7 +380,7 @@ Delivery is refused the same way (ruling 56, §10), and so are a `retry_other_ba
 or `resolve_remote_collision` resolution, before anything is written: the packet stays
 open (ruling 66). A `question_reviewer` answer that lands on a held task is queued in
 `queuedQuestions` instead of dropped, shown in the Details panel, and put when the hold
-goes away, whoever clears it (rulings 66, 205). The operator holds without a packet
+goes away, whoever clears it (rulings 66, 94). The operator holds without a packet
 (ruling 115): `create`, `transition` and `scheduled` are refused at fire time
 (`refused: "blocked-by"`, the refusal settling `waiting` to `none` when nothing else is
 pending), the stranded backstop never nudges a held task, and every turn that does run
@@ -388,7 +388,7 @@ is given the held doctrine in place of the stage rule, which tells it `run_agent
 `deliver_for_review` are refused. Other operator triggers are not narrowed: with
 dispatch gated they cannot cause work.
 
-A PERSON emptying the list is the release itself (ruling 55): the same two halves
+A PERSON emptying the list is the release itself (ruling 57): the same two halves
 the engine uses (`clearDependencies`, then `announceRelease`: the "Dependencies
 released" note naming who cleared it, a stored `blocked` lifted to `ready`, the hold's
 `waiting: none` settled to `human`, the `task.dependencies.released` audit row, a
@@ -559,7 +559,7 @@ order of an epic's work is each task's own list.
   long body whose line breaks arrived as literal `\n` is repaired before the other
   guardrails run (`repairDoubledNewlines`, ruling 20).
 - `attach-file` (contributor+, ruling 76) uploads a file into the task's attachments
-  (`writeTaskAttachment`): a file of any kind (ruling 76); names that traverse or start
+  (`writeTaskAttachment`): a file of any kind; names that traverse or start
   with a dot, files over 10 MB (`MAX_UPLOAD_BYTES`) and archived tasks are refused; an accepted upload writes a
   timeline note that claims the file for the uploader (`attachments:`) and an audit row.
 - `remove-from-record` (admin, ruling 80) takes a file off a task's record:
@@ -641,10 +641,10 @@ discarded`, verdicts kept as history, `validation: none`); readers of "the revis
 under review" go through `activeWorkRevision`, so no verdict binds to a retired head and
 a re-created head mints a fresh id. A task whose deliverable is not a commit stamps
 `deliveredAt` when its delivering run saves files (ruling 84), and when any other
-agent's run rewrites one of the delivered files (ruling 85), in both cases only for a
-run that finished: a run that stopped (an error, a Stop, a restart) posts its files
-under its name and moves nothing (ruling 85). Nor does a run that ended with a question
-for a person (ruling 85): the Calculator Builder's headline ask comes before the
+agent's run rewrites one of the delivered files, in both cases only for a run that
+finished (ruling 85): a run that stopped (an error, a Stop, a restart) posts its files
+under its name and moves nothing. Nor does a run that ended with a question for a
+person: the Calculator Builder's headline ask comes before the
 delivered link, so what it saved is drafts, posted under its name, and its next report
 once the question is answered is the delivery.
 
@@ -672,7 +672,7 @@ reviewer reads a record that grows (a changelog, a decisions file) beyond the en
 claim cites, to the latest one on its subject.
 
 **A delivered page is pictured (ruling 86).** Once a files delivery is stamped and kept
-(ruling 86) and the completion's delivery reconcile has run, Viberr renders each page in
+and the completion's delivery reconcile has run, Viberr renders each page in
 it, a `.html`, `.htm`, `.md` or `.markdown` file,
 in a headless browser at a desktop width (1280 px) and a phone width (390 px), and keeps
 the pictures: `<file>.capture-desktop.png` and `<file>.capture-phone.png` in the task's
@@ -713,7 +713,7 @@ A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`
 bound to the review subject (§6). A run whose workspace could not be provisioned
 records no verdict (ruling 87). The reason is capped at 2,000 characters
 (`VERDICT_REASON_MAX_CHARS`), and the full report stays on the timeline as a "Review
-verdict" comment that compaction never folds (rulings 262, 88). The standing verdicts
+verdict" comment that compaction never folds (rulings 73, 88). The standing verdicts
 ride whole in every agent's canonical anchor (ruling 201), and so does the project's gate
 record on the revision under review, each gate's outcome, time and log, with the rule
 that an agent never re-runs the gates to report them (ruling 315). A project member's GitHub
@@ -729,8 +729,8 @@ previous verdict, and a deliverer run the provider refused does not count
 asking the reviewer for its complete blocking set) the policy engine opens a deadlock
 packet inside the verdict's own write (`task.review.deadlock`, ruling 94) whose options
 include `question_reviewer`, which dispatches the reviewer with its verdict withheld
-(`withholdVerdict`, ruling 87). The deliverer never gets the channel: a verdict from
-a run dispatched to deliver is discarded and its reply stamps the delivery (ruling 87).
+(`withholdVerdict`). The deliverer never gets the channel: a verdict from a run
+dispatched to deliver is discarded and its reply stamps the delivery (ruling 87).
 Only such a run stamps it: a review run whose profile was handed delivery while it
 worked keeps its captures as evidence.
 A completeness question the operator asks through
@@ -754,7 +754,7 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 94).
   characters); a longer one is refused and nothing is recorded (ruling 63).
   An answer that names another deployed agent or the operator goes to the operator with
   the `packet-resolved` trigger rather than back to the agent that asked
-  (`answerNamesAnotherActor`, ruling 68), and so does one for an asker that cannot run
+  (`answerNamesAnotherActor`), and so does one for an asker that cannot run
   on the task now, such as a mapping agent whose question was answered after the task
   moved on to Estimate (ruling 68). An asker still running when its question is
   answered is not one of those: the answer waits for that run, a note says so, and the
@@ -779,7 +779,7 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 94).
   `setTaskDependencies` (ruling 66). `create_task` creates a task through `createTask`
   under the resolving person's authority, leaves this task's goal alone, writes a "Task
   created from a decision" note naming the new key, and can add the new key to existing
-  tasks' `blockedBy` (`newTask.blocks`, ruling 67); the card lists open tasks with
+  tasks' `blockedBy` (`newTask.blocks`); the card lists open tasks with
   similar titles before the confirm (ruling 67). `force_accept` is the admin override
   (§11 gate 4). `wait_for_window` closes the packet and schedules an operator run for one
   minute after the reopen instant (ruling 157).
@@ -899,8 +899,8 @@ packet goes away (`retryReviewDeadlockEscalation`, ruling 94).
     delivery count two. An objection that bound to nothing ("Changes requested, not
     counted") and the same reviewer's repeat on work nobody reworked ("Changes requested,
     on unchanged work") sent nothing back and are not counted; the writer titles them
-    apart (§6). A note written before ruling 83 carries the bare title in those cases
-    too, and is counted.
+    apart (§6). An older note carries the bare title in those cases too, and is
+    counted.
   - `sentBack.byPeople`: a person's moves of the task to an earlier stage, by the board's
     stage order and names as they stand now (the move's own sentence on the timeline). A
     decision answered with a request for changes is an asked round, not a send-back, and
@@ -1108,7 +1108,7 @@ them.
    that finishes after the closure records its report with a "Completed after the task
    closed" note and wakes no operator.
 4. **Verdict gate**: every required reviewer must have approved the current review
-   subject and none may request changes (ruling 97). The engaged reviewers' gate
+   subject and none may request changes (ruling 89). The engaged reviewers' gate
    (`acceptanceBlockedReason`) reads the subject through `reviewSubjectId`, as the
    project rule below does (ruling 81): a delivery that is files on the task is
    released by an approval bound to `files:<deliveredAt>`, and its refusals name "the
@@ -1125,7 +1125,7 @@ them.
    first") stays in `bypassedGates` only. A decision the force ANSWERS (ruling 100, step
    7) is not withdrawn, so `withdrawnPacket` is null and the list does not name it. The
    row and the event read one disclosure, built once with the live no-change probe the
-   acceptance closes on (ruling 81). A task that claimed no changes and whose re-check did
+   acceptance closes on (ruling 98). A task that claimed no changes and whose re-check did
    not pass is closed over that refusal, so it is one of the gates too: the event quotes it
    in full ("The check said: …") and its "Bypassed:" clause leaves it out rather than say
    it twice. The force dialog lists the same gates
@@ -1150,7 +1150,7 @@ them.
    "Required reviewer <Agent> (project rule at <Stage>) has not approved revision
    <sha7>. Run the review at <Stage>, or an admin can force-accept." ("the work
    delivered on this task" when the deliverable is not a commit, ruling 81). When the
-   rule's agent is the task's own deliverer (engaged before ruling 89 refused it), the
+   rule's agent is the task's own deliverer (engaged before the rule named it, ruling 89), the
    sentence says it "is this task's deliverer, so its review cannot count" and names the
    ways out (hand delivery to another agent, have that agent deliver, and run its review;
    or force-accept), whatever has been delivered. Otherwise a task that has delivered
@@ -1179,11 +1179,11 @@ them.
    [github-delivery.md §5](github-delivery.md#5-revisions-verdicts-and-acceptance).
 5. **PR head containment** (`acceptancePrHeadCheck`): the PR head must contain the
    delivered commit. A head ahead of the reviewed revision is accepted with a disclosed
-   divergence (ruling 96; since ruling 239 the disclosure is the classified drift
-   sentence: authored commits are named unreviewed, a base refresh is named as one); a
+   divergence (ruling 96; the disclosure is the classified drift sentence, ruling 239:
+   authored commits are named unreviewed, a base refresh is named as one); a
    diverged head refuses; a compare GitHub answers 404 to, confirmed by a commit read
    GitHub answers "not found" to (`isMissingCommitAnswer`: 404, the empty-repository
-   409, or 422 "No commit found for SHA", ruling 243), is a never-pushed revision and
+   409, or 422 "No commit found for SHA"), is a never-pushed revision and
    refuses with the same "deliver the branch" sentence (ruling 243), records a `github`
    event and a `task.acceptance.head_unpushed` audit row, and hands the task to the
    operator (`head-unpushed`, ruling 96). A PR GitHub answers but whose compare it
@@ -1237,7 +1237,7 @@ them.
 
 Post-acceptance: the task workspace is reclaimed once no run is live, the task's epic is
 checked for being all done (ruling 55: its history says so once and its lead is told),
-held dependents are swept (ruling 55: a task whose every `blockedBy`
+held dependents are swept (ruling 57: a task whose every `blockedBy`
 entry is now done is released), a controller conversation that left itself a step for this
 acceptance has its next turn started with it, as the person who asked (ruling 259), and the
 board renders "accepted" (or "merged"). Both writes that set the last stage run the epic
@@ -1306,7 +1306,7 @@ audit row is `task.archived`. `restore-task` brings it back waiting on a human
 terminal stage is finished work, so it comes back with `waiting: none` and a note that
 says it is done and nothing waits on it (ruling 52). Archiving through a `pr-diverged` recovery packet may also delete
 the remote branch. An archived task cannot be moved. Archiving an unfinished task another
-task waits on does not release the dependent (ruling 55): before the archive returns,
+task waits on does not release the dependent (ruling 57): before the archive returns,
 `noteDeadDependency` writes one "Waiting on work that cannot complete" note on each
 dependent, notifies its owner and supervisors once (`dependency`, titled "<KEY> waits on
 archived work"), and sets it `waiting: human`, because a person owes the list an edit;
@@ -1347,7 +1347,7 @@ events on demand (NFR5).
 The compaction guardrail folds old routine comments into one "Compacted" marker once the
 configured threshold is passed, wherever they sit in the older region
 (`compactTimelineEvents`, ruling 73). It keeps every typed governance event, and it
-never folds a person's comment, a controller-authored comment (ruling 73), a `toAgent`
+never folds a person's comment, a controller-authored comment, a `toAgent`
 hand-off, a comment carrying `evidence` or `attachments`, the "Review verdict" report
 (ruling 88), or an event whose `notified` list is non-empty (ruling 20).
 
@@ -1367,7 +1367,7 @@ violation, a refusal or a credential advisory), `controller` (the retired goal p
 no longer written; ruling 273), `epic` (ruling 272: a task joined or left an epic the reader
 leads, they were made its lead, someone else closed or reopened it, or every task in it is
 done; its own routing toggle, "epics"),
-`dependency` (ruling 55: the work a task waited on landed and it was released, or a
+`dependency` (ruling 57: the work a task waited on landed and it was released, or a
 dependency can never complete; its own routing toggle, "dependencies"), and `ownership`
 (ruling 50: the reader's owner seat changed hands, addressed to that one person
 rather than to the watcher set). Watcher notifications (`notifyTaskWatchers`) go to the

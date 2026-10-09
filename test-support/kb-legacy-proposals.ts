@@ -1,8 +1,8 @@
 /**
- * Knowledge-base documents as ruling 210 left them: settled text, then
+ * Knowledge-base documents that still hold proposals: settled text, then
  * a "## Proposed corrections (not binding)" section of agents' proposals
- * (docs/architecture/file-formats.md §7). Ruling 210 ended the filing; stores
- * still hold such sections until someone closes them, so the reader, the
+ * (docs/architecture/file-formats.md §7). Nothing files one now (ruling
+ * 210(c)); stores still hold such sections until someone closes them, so the reader, the
  * Controller page and the controller's tools are tested against documents
  * built here, byte for byte the way the filing wrote them.
  */

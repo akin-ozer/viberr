@@ -296,10 +296,10 @@ export async function cloneRepo(
     /** Ruling 240 (pass 36): the task's active work revision. A SUPPORTING
      *  checkout is detached at it when it is present after the refresh — a
      *  reviewer judges the revision under review, not the delivering tree's
-     *  head, and a sandboxed Codex run could not move `.git` itself (the CLI
-     *  kept it read-only until ruling 144). Live (HLC-18, 19:46Z): the
-     *  external revision the reconciler minted was never in the reviewer's
-     *  clone of the delivering tree, and the reviewer could not check it out. */
+     *  head, and a sandboxed Codex run could not move `.git` itself (the
+     *  sandbox kept it read-only; there is none now, ruling 144). Live
+     *  (HLC-18, 19:46Z): the external revision the reconciler minted was never
+     *  in the reviewer's clone of the delivering tree, and the reviewer could not check it out. */
     pinSubject?: ReviewSubject | null;
     /** Ruling 240: the task branch, for the delivering refresh's fast-forward
      *  to origin's copy (`refreshWorkspaceFromMirror`). */
@@ -307,9 +307,9 @@ export async function cloneRepo(
   },
 ): Promise<CloneOutcome> {
   // Ruling 197: `absent` until an arm proves otherwise — the local arm sets
-  // `not_involved` because it never reaches GitHub (ruling 197: before its
-  // first step), the network arm sets `supplied` when a token was actually
-  // handed to git, and a workspace fault in either arm is `not_involved`.
+  // `not_involved` because it never reaches GitHub (before its first step),
+  // the network arm sets `supplied` when a token was actually handed to git,
+  // and a workspace fault in either arm is `not_involved`.
   let credential: CloneCredential = "absent";
   // F19-6: hoisted out of the try so the catch can scrub it BY VALUE. The token
   // never reaches argv or the remote URL (askpass env only), so this literal

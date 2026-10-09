@@ -132,10 +132,10 @@ describe("ProfilePage", () => {
     const { container, getByText, queryByText } = renderProfile();
     expect(getByText("Notification routing")).toBeTruthy();
     const rows = container.querySelectorAll(".pref-row");
-    // 9 routing rows (controller joined, ruling 247; dependencies, ruling 55;
+    // 9 routing rows (controller joined, ruling 247; dependencies, ruling 57;
     // ownership, ruling 50; agent questions, ruling 74) + the desktop
     // notifications row (ruling 74) + 2 appearance rows (theme, timeline
-    // default — ruling 323 removed the reduce-motion row).
+    // default; ruling 323 has no reduce-motion row).
     expect(rows).toHaveLength(12);
     const toggles = container.querySelectorAll(".tgl[role='switch']");
     // The 9 category toggles and the desktop switch; nothing else on the page
@@ -198,16 +198,16 @@ describe("ProfilePage", () => {
     // the one a person reads about THEMSELVES, so a maintainer learning they
     // hold "Edit task priority, labels & due date" has to also learn that the
     // grant releases held tasks. CANARY: drop `covers` from RBAC_ROWS.
-    // Ruling 26 added the epic a task is in to the same line.
+    // The same line names the epic a task is in.
     expect(
       getByText("the epic a task is in, and what it waits on, which releases it when cleared"),
     ).toBeTruthy();
-    // Ruling 76 added the `attach-file` row (contributor and above), and
-    // ruling 26 `manage-epics` (the same tiers), so a maintainer holds two more.
+    // A maintainer's 16 include `attach-file` (contributor and above, ruling
+    // 76) and `manage-epics` (the same tiers, ruling 26(b)).
     expect(container.querySelectorAll(".rbac-yes")).toHaveLength(16);
-    // Ruling 26 added `delete-controller-conversations`, which admins alone
-    // hold, so a maintainer is refused one more, and ruling 80
-    // `remove-from-record` one more again.
+    // A maintainer's 7 refusals include two that admins alone hold:
+    // `delete-controller-conversations` (ruling 26(b)) and `remove-from-record`
+    // (ruling 80).
     expect(container.querySelectorAll(".rbac-no")).toHaveLength(7);
     // Ruling 291: each cell says the fact. The check is aria-hidden, so a
     // glyph-only pair announced nothing at all, and the denied "−" read as a

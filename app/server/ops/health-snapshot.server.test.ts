@@ -75,9 +75,9 @@ describe("healthSnapshot reports the toolchain (ruling 40)", () => {
     // G36-4: nothing probed whether a sandboxed Codex run could exec at all,
     // so bubblewrap's refusal surfaced as a reviewer's "missing evidence"
     // verdict. The reading rides the health body and, through the spread,
-    // `instance_health`. Canary: drop `toolchain` from the snapshot. It was
-    // the last key until ruling 40 appended `agentIsolation` behind it, as
-    // the contract says a new field must be.
+    // `instance_health`. Canary: drop `toolchain` from the snapshot.
+    // `agentIsolation` comes after it, appended last as the contract says a
+    // new field must be.
     const store = setupTestStore(ctx);
     const snapshot = healthSnapshot(store.db);
     // Ruling 191 appended `mcpProxy` after it, and ruling 40 `agentIsolation` after that.

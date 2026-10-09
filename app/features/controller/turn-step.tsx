@@ -28,10 +28,10 @@ export function TurnStep({ turn }: { turn: ConversationTurnState }): React.React
   // Before the early return: a turn with no step yet is the first paint too.
   const fresh = useFreshLine(detail);
   if (!detail) return null;
-  // Ruling 284: keyed on the step, so a new step is a new line that rises
+  // Ruling 284(a): keyed on the step, so a new step is a new line that rises
   // in (the sheet's `swap-in`) instead of words changing under the reader.
-  // Ruling 284: only a step that replaces the one on screen when the page or
-  // dock opened rises (`data-fresh`); that first one stands still.
+  // Only a step that replaces the one on screen when the page or dock opened
+  // rises (`data-fresh`); that first one stands still.
   return (
     <span
       key={detail}

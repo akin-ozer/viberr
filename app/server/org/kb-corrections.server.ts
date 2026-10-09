@@ -19,9 +19,8 @@ import { type StoreTarget, utf8Bytes, writeStoreDoc } from "./store-files.server
  * Ruling 210: a correction an agent PROVED, written straight into the
  * knowledge-base document it corrects, and undone by a person who disagrees.
  *
- * Rulings 210 and 267 filed every correction as a proposal under "Proposed
- * corrections (not binding)" for a person to promote, one controller turn per
- * Promote. The owner, 2026-09-26, on a Platform Engineer's proposal about the
+ * Corrections were once filed as proposals under "Proposed corrections (not
+ * binding)" for a person to promote, one controller turn per Promote. The owner, 2026-09-26, on a Platform Engineer's proposal about the
  * deploy runbook: "proposal spam is exhausting, it should be easier to get them
  * merged to the kb. No human can approve all of these while inspecting them
  * thoroughly." A queue nobody can review thoroughly is a rubber stamp with a

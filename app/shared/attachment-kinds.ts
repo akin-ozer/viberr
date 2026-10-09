@@ -26,7 +26,7 @@ export const INLINE_TYPES = new Map<string, string>([
   [".log", "text/plain; charset=utf-8"],
   [".md", "text/plain; charset=utf-8"],
   [".json", "application/json"],
-  // Ruling 78: yaml/csv join the inert-text set so the in-app read-only
+  // Ruling 76: yaml/csv join the inert-text set so the in-app read-only
   // viewer can fetch them. Plain text on purpose — never a renderable type.
   [".yml", "text/plain; charset=utf-8"],
   [".yaml", "text/plain; charset=utf-8"],
@@ -34,7 +34,7 @@ export const INLINE_TYPES = new Map<string, string>([
 ]);
 
 /** Extensions a reader always takes as text: `readTaskAttachment` never
- *  treats one as binary (ruling 198 sniffs only the others), and
+ *  treats one as binary (ruling 79 sniffs only the others), and
  *  `savedFilesText` reads only these into a run's citation corpus. The inline
  *  set above is about what a BROWSER may render on the app origin, a
  *  different question. */
@@ -51,7 +51,7 @@ export const READABLE_TEXT_EXTENSIONS = new Set([
 ]);
 
 /** Kinds no reader opens as text: bytes with no text to show, decided by the
- *  name (ruling 317, the task page's viewer; ruling 198, the coordinators'
+ *  name (ruling 317, the task page's viewer; ruling 79, the coordinators'
  *  readers), before the bytes' own NUL test gets its say. Bare extensions,
  *  without the dot. */
 export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -77,8 +77,7 @@ export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 /** Ruling 76: how many files one task may be filed with, and their total
  *  size. A task's input, not a folder of them; the rest attach from the task
- *  page. Ruling 76: one comment or one controller message carries the same
- *  batch. */
+ *  page. One comment or one controller message carries the same batch. */
 export const ATTACHMENT_BATCH_MAX = 10;
 export const ATTACHMENT_BATCH_MAX_BYTES = 25 * 1024 * 1024;
 

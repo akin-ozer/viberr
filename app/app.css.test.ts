@@ -263,7 +263,7 @@ describe("app.css dead-and-drifted rules (P16-UI-04)", () => {
     expect(hover![1]).toMatch(/color:\s*var\(--fg\)/);
     // The destructive treatment is opt-in: by position where the row's remove
     // IS its last control, and by name (`.destructive`) where it is not —
-    // ruling 278: ruling 278's Disable sits before the user row's Remove.
+    // ruling 278(c): the user row's Disable sits before its Remove.
     expect(CODE).toMatch(/\.rsrc-acts \.stg-x:last-child:not\(\.off\):hover/);
     expect(CODE).toMatch(/\.member-row \.stg-x:last-child:not\(\.off\):hover/);
     expect(CODE).toMatch(/\.stg-x\.destructive:not\(\.off\):hover/);
@@ -605,7 +605,7 @@ describe("app.css defines every class the markup uses (P16-UI-02)", () => {
 /* ---------------------------- ruling 275: headless yes, utility classes no --- */
 
 /**
- * Ruling 275 lets an UNSTYLED primitive package (`@base-ui/react`, `radix-ui`)
+ * Ruling 14 lets an UNSTYLED primitive package (`@base-ui/react`, `radix-ui`)
  * into `app/` on the condition that every element it renders wears a class
  * `app.css` already defines. The orphan-class gate above already fails a
  * Tailwind class that reaches a `className` — but only once someone ships one,
@@ -2882,9 +2882,9 @@ describe("app.css ruling 323 (profile pass, 2026-09-06)", () => {
   });
 });
 
-/* -------------------------- ruling 278: the fields that had no chrome ---- */
+/* -------------------------- ruling 289: the fields that had no chrome ---- */
 
-describe("app.css ruling 278: every typing control wears the sheet's chrome", () => {
+describe("app.css ruling 289: every typing control wears the sheet's chrome", () => {
   const mobile = CODE.match(/@media \(max-width: 720px\)\s*\{([\s\S]*?)\n\}/)![1];
 
   it("the guardrail threshold field is boxed", () => {
@@ -2976,10 +2976,9 @@ describe("app.css ruling 278: the destructive control is GitHub's danger button"
     expect(decls(".menu-item.danger:hover")).not.toMatch(/--coral-/);
   });
 
-  it("(150a) error boxes print their sentence in --fg on dark", () => {
-    // Ruling 278: 148(d)'s split, applied to the pair ruling 278 keeps for
-    // errors — the box holds its coral border, fill and icon, and only the
-    // SENTENCE moves, and only on dark, where `--coral-dark` is #ff9e9e: a
+  it("ruling 278(b): error boxes print their sentence in --fg on dark", () => {
+    // Ruling 278(b): the error box holds its coral border, fill and icon, and
+    // only the SENTENCE moves, and only on dark, where `--coral-dark` is #ff9e9e: a
     // tint doing a paragraph's work. Light keeps GitHub's near-black red,
     // which is already body-weight ink.
     //
@@ -3187,7 +3186,7 @@ describe("app.css controller layout (ruling 321)", () => {
     expect(ruleBody(collapse(), ".ctl-wrap .ctl-side")).toMatch(/position:\s*static/);
   });
 
-  it("ruling 321: the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
+  it("ruling 318: the open dock's button perches ABOVE the phone sheet, clear of its header", () => {
     // Measured live at 375×812: the sheet's top at y=172 and the perched button
     // at 169-203, across the header's pop-out and Close buttons. The travel
     // must count the dock's own bottom inset and the scaled button's
@@ -3241,7 +3240,7 @@ describe("app.css controller layout (ruling 321)", () => {
     expect(ruleBody(CODE, ".dock-title")).toMatch(/flex:\s*0 0 auto;\s*max-width:\s*45%/);
   });
 
-  it("ruling 321: inline code in markdown may break a long token rather than overflow", () => {
+  it("ruling 320: inline code in markdown may break a long token rather than overflow", () => {
     // CANARY: drop `overflow-wrap: anywhere` from `.md-body code.mono`.
     expect(ruleBody(CODE, ".md-body code.mono")).toMatch(/overflow-wrap:\s*anywhere/);
   });
@@ -3272,7 +3271,7 @@ describe("app.css controller layout (ruling 321)", () => {
     expect(ruleBody(narrow, ".ctl-wrap .ctl-picker")).toMatch(/flex:\s*1 1 100%/);
   });
 
-  it("ruling 321: a packet's code observation keeps its line breaks", () => {
+  it("ruling 312: a packet's code observation keeps its line breaks", () => {
     // CANARY: drop `white-space: pre-wrap` from `.obs code`.
     expect(ruleBody(CODE, ".obs code")).toMatch(/white-space:\s*pre-wrap/);
   });
@@ -3676,9 +3675,9 @@ describe("app.css ruling 283: the Apple design pass", () => {
   it("(b) a pinned close never replays an entrance: a closing dialog switches its own off", () => {
     // pinLivePose switches the entrance off inline and releases it once
     // data-closing lands, so the closing rule has to keep it off. Dialogs
-    // outrank their own reduced-motion fade-in by weight. Amended by ruling
-    // 285's deferred dock half: the dock's entrance is a transition, so it is
-    // not pinned ("app.css ruling 285: the dock's deferred half").
+    // outrank their own reduced-motion fade-in by weight. The dock's entrance
+    // is a transition (ruling 285(b)), so it is not pinned ("app.css ruling
+    // 285: the dock's deferred half").
     // CANARY: drop `animation: none` from `dialog[data-closing]`.
     expect(requiredDecls(plain, "dialog[data-closing]").get("animation")).toBe("none");
   });
@@ -5398,13 +5397,12 @@ describe("app.css ruling 282: the better-ui pass — icons", () => {
         if ((m[1]!.match(/<Icon name="chevron" className="disc-chev" \/>/g) ?? []).length !== 1) bare.push(where);
       }
     }
-    // Four, and since ruling 222 a GitHub connection's reach, and since ruling
-    // 184 the capability matrix's "Advisory only" list, and since ruling 246
-    // a changed file in the task's Changes panel, and since ruling 192 the
-    // scopes an MCP server's OAuth sign-in was granted, and since ruling 321 a
-    // knowledge-base correction's evidence. Ruling 273 took the goal chains'
-    // three (a chain, a link's waits, "About this chain") and added an epic's
-    // archived tasks, and ruling 324 the prompt cache's details on Insights.
+    // Eight: the Agents page's advisory lines and the capability matrix's
+    // "Advisory only" list (ruling 184), a GitHub connection's reach (ruling
+    // 222), the scopes an MCP server's OAuth sign-in was granted (ruling 192),
+    // an epic's archived tasks, a knowledge-base correction's evidence (ruling
+    // 321), a changed file in the task's Changes panel (ruling 246), and the
+    // prompt cache's details on Insights (ruling 324).
     expect(summaries).toHaveLength(8);
     expect(bare).toEqual([]);
   });
@@ -5431,8 +5429,8 @@ describe("app.css ruling 282: the better-ui pass — icons", () => {
     expect(loaders.length).toBeGreaterThanOrEqual(8);
     // The control whose arrow IS the meaning and already its glyph at rest,
     // so busy swaps nothing: the board's re-scan. Home's re-scan, re-index and
-    // test connection spun their own arrow too until ruling 286's 2026-09-24
-    // extension put the loader in place of every in-flight starter's icon.
+    // test connection are starters, so the loader takes their icon's place
+    // in flight (ruling 286).
     expect(arrows.sort()).toEqual([path.join("features", "board", "board-page.tsx")]);
   });
 
@@ -5782,8 +5780,8 @@ describe("app.css ruling 284: the better-ui pass — contextual icon motion", ()
 /* ------------------------------------- ruling 285: the dock's deferred half */
 
 /**
- * Ruling 285 deferred two dock findings until they could be built on ruling
- * 285's sheet (owner, 2026-09-24: "do the two dock fixes now").
+ * Ruling 285(b) settles two dock findings (owner, 2026-09-24: "do the two
+ * dock fixes now").
  *
  *   F20 — the dock's open and close could not be turned around. The entrance
  *     was a keyframe, which restarts instead of retargeting, and Chrome starts
@@ -6979,7 +6977,7 @@ describe("app.css ruling 320: scrollers the keyboard reaches", () => {
     /^transparent(\s|$)/.test(decls.get("outline-color") ?? "");
 
   it("no rule at any width takes the ring off a focused scroller", () => {
-    // CANARY: widen ruling 322's rule back to `.panel:focus-visible:not([data-targeted])`,
+    // CANARY: widen ruling 320's rule back to `.panel:focus-visible:not([data-targeted])`,
     // which took the ring off the page's transcript, a .panel, once it became a tab stop.
     const found = SCROLLERS.flatMap((el) =>
       RULES.filter((r) => erases(r.decls)).flatMap((r) =>

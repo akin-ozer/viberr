@@ -468,8 +468,8 @@ describe("createTask", () => {
   });
 
   // R19-14: every task passes the triage quality gate — creation lands at the
-  // entry stage ONLY. The pre-ruling behavior (create mid-stage, operator
-  // assigned at birth) is exactly what the ruling forbids.
+  // entry stage ONLY. The old behavior (create mid-stage, operator assigned
+  // at birth) is exactly what ruling 48 forbids.
   it("refuses a non-entry stage and names the entry stage (R19-14)", async () => {
     const store = setupProjectedStore(ctx);
     await expect(
@@ -1219,7 +1219,7 @@ describe("operatorPromptAgent directive fan-out (P14-GV-06 → ruling 70)", () =
   /**
    * S5-G3 asserted the OPPOSITE of this: the posted directive carried the
    * ambiguity disclosure so the humans reading the timeline would learn the tag
-   * reached nobody. Ruling 70 removed that note's premise. A directive now
+   * reached nobody. Under ruling 70 that note has no premise: a directive
    * notifies nobody by declared audience, so the disclosure's remedy - "mention
    * the full name ('@First Last') or the email handle" - names a cause that is
    * not the reason and sends a reader to fix the spelling of something that
@@ -3475,8 +3475,8 @@ describe("F21-2 / ruling 97: the server-side acceptance disclosure", () => {
   });
 
   it("a card dropped on the board's FINAL column is refused bare and accepted with the echo", async () => {
-    // The board's own ceremony has fronted this drop since ruling 97 (R18-7),
-    // and the reorder POST carried nothing back from it. CANARY: drop the
+    // The board's own ceremony fronts this drop (ruling 97, R18-7), and the
+    // reorder POST carried nothing back from it. CANARY: drop the
     // `"ack" in input` line from reorderTask.
     const store = setupProjectedStore(ctx);
     seedReviewed(store);
@@ -3524,9 +3524,9 @@ describe("F21-2 / ruling 97: the server-side acceptance disclosure", () => {
     // from a projection summary, the summary carried no delivered revision, and
     // the ceremony therefore disclosed "No delivered revision recorded." and
     // echoed `revision: "none"` on every task. Against a task that HAD
-    // delivered, that echo is stale by construction — so ruling 97 turned the
-    // board's terminal column into a door no delivered work could pass, while
-    // ruling 97 requires that same ceremony to disclose what it accepts.
+    // delivered, that echo is stale by construction — so the ceremony ruling
+    // 97 requires, which must disclose what it accepts, turned the board's
+    // terminal column into a door no delivered work could pass.
     //
     // Built here the way the COMPONENT builds it (`ceremonyFacts`'s
     // `disclosure` in accept-confirm-derive.ts, off the fields the board hands
@@ -4334,7 +4334,7 @@ describe("ruling 76: a task filed with its input", () => {
 });
 
 /**
- * Ruling 50 (pass 34, G34-3): a named owner is seated in the SAME write
+ * Ruling 48 (pass 34, G34-3): a named owner is seated in the SAME write
  * that creates the task, before the operator's `create` trigger, so the first
  * run bills the named owner; the hand-off rule is the ONE shared check.
  */
@@ -4446,7 +4446,7 @@ describe("ruling 76: a comment with files", () => {
   });
 });
 
-describe("ruling 50: a named owner at creation", () => {
+describe("ruling 48: a named owner at creation", () => {
   it("the operator's create trigger reads the NAMED owner from the file, exactly once", async () => {
     // Asserting right after `await createTask` proves nothing: the hand-off is
     // fired with `void` and awaits a dynamic import first. The injected

@@ -213,9 +213,9 @@ export interface OperatorTaskSnapshot {
   /**
    * Ruling 116: the EPIC this task is in, with the rest of its work.
    *
-   * Ruling 116 (F39-29) gave the operator the goal chain its task was a link
-   * of, because a link that had not started had no task and `read_board`
-   * could not see it: live on ax-clone AX-4 the operator planned a packet
+   * F39-29: the operator once got the goal chain its task was a link of,
+   * because a link that had not started had no task and `read_board` could
+   * not see it: live on ax-clone AX-4 the operator planned a packet
    * offering to create a follow-on for the missing `/logs` baseline, which
    * goal-4 link 5 already held, waiting on AX-4 itself. Every task an epic
    * holds exists from the moment it joins, so the same question has a plain
@@ -287,15 +287,14 @@ export interface OperatorTaskSnapshot {
    * Ruling 116: the OTHER open review PRs whose diff shares a file with this
    * task's, by shared path.
    *
-   * Viberr has computed this since ruling 242 and rendered it on exactly one
+   * Viberr computes this (ruling 242) and once rendered it on exactly one
    * surface, the human's review queue, described there as "read-only and quiet
    * by design". The operator is the actor that decides what to dispatch, when
    * to deliver and whether to refresh a branch, and it had no cross-task view
    * at all: asked where it was weakest, the ax-clone controller answered that
    * `get_task` is single-task, "so every cross-task correlation on this board
-   * is currently done by you". Ruling 116 gave it the goal chain for the same
-   * reason (ruling 116: its epic now); this is the other fact viberr already
-   * holds.
+   * is currently done by you". It gets its epic for the same reason; this is
+   * the other fact viberr already holds.
    *
    * Read live on ax-clone: all five open PRs carried one, and AX-20 and AX-21
    * had already spent a run, a decision packet and a human answer on a
@@ -474,7 +473,7 @@ export interface OperatorTaskSnapshot {
    *  it): the push came after the compare, or the compare right after the
    *  push read another head because GitHub had not shown the push yet. The
    *  count then describes another head than the pushed one. It is null when
-   *  the compare named no head (a compare recorded before ruling 238), which
+   *  the compare named no head (an older compare record), which
    *  never reads as current either, and true otherwise. Null while
    *  `baseBehindBy` is null. */
   baseComparedHead: {
@@ -813,8 +812,8 @@ const OLDER_DECISION_WORDS_CAP = TIMELINE_ENTRY_CAP;
  * Ruling 117 (F39-67): the one cut for everything an operator that cannot
  * call tools (a Codex plan) is handed in place of an address. That covers a
  * window entry, a decision's words, an unfinished report, and the report that
- * woke it (`agentReportBlock`). Ruling 116 raised only the last of those to
- * this. So the same reviewer report read whole on the turn it woke, and cut
+ * woke it (`agentReportBlock`). Once only the last of those was raised to
+ * this, so the same reviewer report read whole on the turn it woke, and cut
  * at 1,500 characters on any other turn, which "cannot fetch the rest".
  */
 export const AGENT_REPORT_CAP_TOOLLESS = 16000;
@@ -978,7 +977,7 @@ export function operatorSnapshot(
   authority: OperatorAuthority,
   events: number = OPERATOR_TIMELINE_DEFAULT,
   /**
-   * Ruling 116: `toolless` is a Codex operator, which returns a plan and "cannot
+   * Ruling 117: `toolless` is a Codex operator, which returns a plan and "cannot
    * call tools". Every note that names a tool (`get_task`, `read_timeline_entry`)
    * sent it somewhere it cannot go, so for it the snapshot carries the content
    * instead of the address, and says plainly when content is out of reach.
@@ -1245,8 +1244,8 @@ export function operatorSnapshot(
       }
       return { unfinishedReport: found };
     })(),
-    // Ruling 116: whole timeline, for ruling 116's reason — a person's decision
-    // falls out of the window while it is still the one that governs.
+    // Ruling 116: whole timeline, because a person's decision falls out of the
+    // window while it is still the one that governs.
     ...((): Pick<OperatorTaskSnapshot, "humanDecisions"> => {
       const found = findHumanDecisions(file.parsed.timeline, toolless);
       return found ? { humanDecisions: found } : {};
@@ -1453,7 +1452,7 @@ export function operatorSnapshot(
     // part of a history as the whole of it.
     const older = snapshot.timelineTotal - snapshot.recentTimeline.length;
     const notShown = `${older} older ${older === 1 ? "entry is" : "entries are"} not shown, newest first. `;
-    // Ruling 116: the address is only worth giving to an operator that can go
+    // Ruling 117: the address is only worth giving to an operator that can go
     // there. For one that cannot, say where the parts of that history that
     // still bind were carried instead.
     snapshot.timelineOlder = toolless

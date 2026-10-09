@@ -33,7 +33,7 @@ import { MESSAGE_BATCH } from "~/shared/attachment-kinds";
  */
 
 /** Ruling 319's examples for the scope the dock is open on (shared with the
- *  page, ruling 321). */
+ *  page). */
 function emptyExamples(view: ControllerDockView): ControllerExample[] {
   return controllerExamples(
     view.scope.kind === "task" && view.scope.taskKey
@@ -166,7 +166,7 @@ export function DockBodyBox({
       <section className="dock-body" aria-label="Controller unavailable here">
         <p className="empty sm">
           {current?.signedOut ? (
-            // Ruling 11: the dock's loads answer a signed-out tab 401, never
+            // Ruling 256: the dock's loads answer a signed-out tab 401, never
             // a login redirect; the page's own navigation asks for the sign-in.
             <>
               You're signed out, so the controller can't answer here. Reload

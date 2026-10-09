@@ -187,7 +187,7 @@ HSTS, certificate renewal and redirect-to-https all belong to the proxy layer.
 The image ships everything needed to run real agents: the Claude/Codex SDKs' native
 linux binaries (inside the production `node_modules` from the `prod-deps` stage) plus, in
 the runtime stage, `git` and a CA bundle (a real run clones the task's repo and the coding
-agent shells out to git), `make`, `curl` and a pinned `pnpm` (ruling 42), Debian
+agent shells out to git), `make`, `curl` and a pinned `pnpm`, Debian
 `chromium` with `fonts-liberation` and `fonts-noto-color-emoji`, and with
 `fonts-inter-variable`, `fonts-ebgaramond` and `fonts-jetbrains-mono` (ruling 42: 1.8, 1.2
 and 7.5 MB installed, so a picture an agent draws can name Inter, EB Garamond or JetBrains
@@ -224,8 +224,8 @@ Two ways to connect, per backend:
   signed in (ruling 138), inside that person's runtime home,
   `<dataRoot>/runtimes/users/<userId>/claude-home/accounts/<accountId>/.credentials.json` or
   `.../codex-home/accounts/<accountId>/auth.json` (Viberr creates the directory mode `0700`
-  and nothing else about that file; an account connected before ruling 138 keeps its file
-  directly in `claude-home/` or `codex-home/`). This is what Anthropic's
+  and nothing else about that file; a legacy account keeps its file directly in
+  `claude-home/` or `codex-home/`). This is what Anthropic's
   [Claude Code legal and compliance page](https://code.claude.com/docs/en/legal-and-compliance)
   requires of a platform that hosts Claude Code: each end user authenticates with their
   own credentials, billed to them, through the vendor's own flow, and the app may not
@@ -263,8 +263,8 @@ admin, open **Profile → Agent accounts**, and connect at least one backend for
 Home's setup checklist (ruling 322) lists it with the instance's other gaps, each a link
 to where it is closed: a GitHub connection, an account of your own beside the bootstrap
 admin, and the first project. GitHub is needed only for a board that delivers through a
-repository: a board that delivers results is created with none (ruling 224), a software
-board can connect its repository later (ruling 224), and the
+repository: a board that delivers results is created with none, a software board can
+connect its repository later (ruling 224), and the
 checklist stops listing GitHub once a project exists on an instance with no connection.
 Until somebody does, the instance runs no agents: an agent started on a task whose owner
 has nothing connected is refused before any process starts, with an honest
@@ -370,8 +370,8 @@ curl -s localhost:3000/resources/health | grep -o '"agentIsolation":{[^}]*}'   #
 ```
 
 No `.env` is needed (ruling 38): Compose treats it as optional, the two secrets are
-generated into the store, and Compose creates the store, the named volume `viberr-data`
-(ruling 38), on this first `up`. Docker initialises the empty volume from the image's
+generated into the store, and Compose creates the store, the named volume `viberr-data`,
+on this first `up`. Docker initialises the empty volume from the image's
 `/data` (owned `node:viberr-agents`, 0750), so there is no host directory to create or
 chown.
 
@@ -439,7 +439,7 @@ is the two-second check, and the same URL over `http://` shows the throttle.
   skill, the base profile templates) into a store that lacks them.
 - Home's setup checklist lists what is still missing, until nothing is (ruling 322): for
   an org admin a GitHub connection (only while the instance has one or has no project
-  yet, ruling 322), an account other than the bootstrap admin, their own
+  yet), an account other than the bootstrap admin, their own
   Claude or Codex account and the first project; for everyone else the last two. Once
   there is a project, its cross hides it until the sign-in or the browser's session ends
   (ruling 322).
@@ -805,8 +805,8 @@ Two ways this bites in practice, both to avoid:
   notices and exits. Stop the app first, then reset the store.
 - **Beware the same-port `::1` vs IPv4 split.** A host dev server on `[::1]:5173` and a
   compose container's docker-proxy on `*:5173` both answer `localhost:5173` (macOS resolves
-  `localhost` → `::1` first). Two live servers can look like one app. Since ruling 38 they
-  no longer write the same store (the container's is the named volume, the dev server's
+  `localhost` → `::1` first). Two live servers can look like one app. They do not write
+  the same store (the container's is the named volume, ruling 38, the dev server's
   `./docker-data`), which makes the split worse to notice, not better: you may be looking
   at the wrong store. Run exactly one per port; the health holder names which.
 

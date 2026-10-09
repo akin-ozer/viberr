@@ -734,8 +734,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
     saveFiles("VIB-1", { "landing.capture-desktop.png": "the agent's own", "other.html.capture-phone.png": "the agent's own" });
     // A reviewer's run that started before the render: its window holds the
     // pictures by their time, and must not hold them by name. Claiming one
-    // would name the run as its author and, since ruling 85, move
-    // `deliveredAt` under the verdict it is about to give.
+    // would name the run as its author and so move `deliveredAt` (ruling 85)
+    // under the verdict it is about to give.
     // CANARY: drop the picture skip in attachmentNamesSince and the run is
     // credited with post.html.capture-desktop.png. Recognise a picture by its
     // suffix alone and the agent's own two files are credited to nobody.

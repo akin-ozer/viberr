@@ -1223,9 +1223,9 @@ describe("ruling 181: the @mention resume door is stage-gated like every other d
   });
 
   it("F37-62: the RESUME door refuses a HELD task, like every other dispatch door", async () => {
-    // Ruling 56's comment claims "Every dispatch door lands here, so every one
-    // of them refuses" — this door does not land in `startAgentRun` at all.
-    // Same hole ruling 56 closed on the delivery path.
+    // `startAgentRun`'s hold comment (ruling 56) claims "Every dispatch door
+    // lands here, so every one of them refuses" — this door does not land in
+    // `startAgentRun` at all. The delivery path had the same hole.
     // CANARY: delete the hold block from `assertResumeEligible`.
     scopeBothToReview();
     writeTask(store.dataRoot, store.slug, {

@@ -1312,9 +1312,9 @@ export async function action({ request, params }: Route.ActionArgs) {
         // R21-9's law, applied to the dispatch prompt: a directive that reaches
         // an agent off the record is invisible to supervision — record it as the
         // human's own timeline comment addressed to the agent. BEFORE the start
-        // (ruling 69): ruling 69's redelivery window is "a human comment
-        // addressed to this agent, posted after this run started", and the
-        // record used to be written after the start, so every prompted manual
+        // (ruling 69): the redelivery window is every human comment addressed
+        // to this agent since this run started, and the record used to be
+        // written after the start, so every prompted manual
         // dispatch ran twice — the run, then the same words redelivered as an
         // @mention the moment it finished (live, 2026-09-21: two identical
         // replies on BNB-26 and on BNB-28, one session each). Recorded first,

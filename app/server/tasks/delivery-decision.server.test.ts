@@ -299,13 +299,13 @@ describe("ruling 121: a delivering drive marks itself as having acted", () => {
   });
 
   /**
-   * Ruling 121 — the correction to 202's own fix, from the adversarial
+   * Ruling 121 — the correction to an earlier fix, from the adversarial
    * self-review. Stamping on ENTRY counted the arms that do nothing at all as
    * progress, so a nudged drive whose only action was a delivery that could
    * never leave the machine looked like it had moved: the stranded backstop
    * then skipped its durable `heldAtStage` marker and every later trigger
    * re-armed the nudge from scratch — F31-11's fourteen-drives loop, reached
-   * through the fix for ruling 121.
+   * through that fix.
    */
   it("ruling 121: a delivery REFUSED before the remote is not progress", async () => {
     seed({ stage: "review", branch: "vib-1" });
@@ -1419,8 +1419,8 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
   });
 
   it("A9: an UNVERIFIABLE head that still merges records the caveat in the completion event", async () => {
-    // A9's own case, narrowed by ruling 243 to what it always described:
-    // GitHub is UNREACHABLE, so the containment check cannot run — and the
+    // A9's own case, as ruling 243 keeps it: GitHub is UNREACHABLE, so the
+    // containment check cannot run — and the
     // merge attempt is subject to the same unreachability, which is what made
     // "the merge's own honesty covers it" true here. Acceptance proceeds and
     // the record must say the check did not run. Canary: drop the A9 branch in
@@ -1519,7 +1519,7 @@ describe("R15-1 gate 2 (F15-15): the PR head must contain the delivered revision
       expect(note!.text).toContain(head.slice(0, 7));
 
       // And NOT a packet: a known mismatch is not a decision. The reviewed
-      // revision must be pushed, ruling 229 reserves pushing for the operator,
+      // revision must be pushed, ruling 126 reserves pushing for the operator,
       // so there is nothing for a person to choose. Only the UNVERIFIABLE case
       // (ruling 243) asks.
       // `packet` is the signal, not `waiting`: a task sitting at the acceptance
@@ -2106,7 +2106,7 @@ describe("ruling 234 (pass 35, G35-6): the delivery push stamps workRevision.pus
  * same credential, same repo, nothing touched, and the retry was the operator's
  * own. A successful push to that same origin is recorded two minutes earlier.
  *
- * Ruling 227's comment twelve lines above this arm already states the rule —
+ * Ruling 231's comment twelve lines above this arm already states the rule —
  * never "unreachable" paired with "fix the credential settings (nothing is wrong
  * with them)" — and fixed only the `base_branch_missing` arm.
  */

@@ -3,10 +3,10 @@
  *
  *   npm run deploy            — stamp from git, build, up, verify
  *   npm run deploy -- --no-up — stamp and build only
- *   --skip-disk-check         — build without measuring the host first (ruling 41)
+ *   --skip-disk-check         — build without measuring the host first
  *
  * After the verify, it removes the older untagged builds of this project's app
- * and keeps the one it replaced, to roll back to (ruling 41).
+ * and keeps the one it replaced, to roll back to.
  *
  * `build-info.server.ts` has resolved build identity from env since gap 18, and
  * says plainly that env "is the only source a container can have" —

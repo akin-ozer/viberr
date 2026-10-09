@@ -12,14 +12,14 @@ import { buildReviewDeadlockPacket } from "./review-deadlock.server";
  * with "Anything you type below is recorded on the task's contract and every
  * later run reads it (ruling 64), so say why rather than just yes."
  *
- * That sentence is what landed in the goal — five times, across SHOP-5,
- * SHOP-25 and SHOP-76 (twice) — while the reasoning the person actually typed
- * went to the timeline. It was false in both directions: the note box under a
- * listed option posts `note`, which has never amended a goal, before ruling 64
- * or after it. So the card asked for reasoning on the highest-stakes decision it
- * raises, promised the reasoning would bind, filed it elsewhere, and wrote its
- * own dialog instruction into the permanent record instead — telling every
- * later run to type in a textarea it will never see.
+ * That sentence is what landed in the goal — five times, across SHOP-5, SHOP-25
+ * and SHOP-76 (twice) — while the reasoning the person actually typed went to
+ * the timeline. It was false in both directions: the note box under a listed
+ * option posts `note`, which has never amended a goal. So the card asked for
+ * reasoning on the highest-stakes decision it raises, promised the reasoning
+ * would bind, filed it elsewhere, and wrote its own dialog instruction into the
+ * permanent record instead — telling every later run to type in a textarea it
+ * will never see.
  */
 describe("ruling 64: what a deadlock option writes into the goal", () => {
   const packet = buildReviewDeadlockPacket({

@@ -335,8 +335,8 @@ describe("buildResumeScript", () => {
     // The run sink redacts Viberr's own .jsonl and the console (P13-U-1), but
     // this bundle embedded the VENDOR's transcript verbatim — the sibling
     // channel that bypassed it. One `env`-printing tool call puts the run's
-    // credential in there, and since ruling 137 that is somebody's PERSONAL
-    // key, while any member of the run's project can download this file.
+    // credential in there, and that is somebody's PERSONAL key (ruling 137),
+    // while any member of the run's project can download this file.
     // Canary: drop the `redact(...)` around the readFileSync and the token
     // below comes back in the decoded payload.
     const leaked = `sk-ant-api03-${"x".repeat(40)}`;

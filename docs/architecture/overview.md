@@ -73,9 +73,9 @@ Rules that hold in the tree (verified by grep, restated from
    DB row → camelCase only in `shared/mapping/*`.
 5. `logger.server.ts` imports only `request-context.server.ts`;
    `tasks/task-mutation.server.ts` exists to break the `specialist-run → agent-toolkit
-   → task-actions` cycle; since ruling 13(a) the task actions are thirteen family modules
-   that import only downward from `task-action-core`, and a call that must reach upward
-   loads its module when it runs (ruling 70).
+   → task-actions` cycle; the task actions are `task-action-core` and twelve family modules
+   that import only downward, and a call that must reach upward loads its module
+   when it runs (ruling 13(a)).
 6. Runtime adapters (`claude-runtime`, `codex-runtime`) never touch the DB, the canonical
    files or the SSE broker; they emit lines and an exit, and `run-service` + `run-sink`
    persist and publish.
@@ -215,7 +215,7 @@ gone or replaced. Everything else is best-effort and logged.
 | SSE heartbeat + re-authorization | 25 s per connection | `events/sse-broker.server.ts` |
 | Data-root lock guard | 20 s, fail-closed | `db/data-root-lock.server.ts` |
 | Schedule runner + stranded-task sweep | boot + 60 s; the sweep (ruling 122) runs after the schedules on each interval tick | `tasks/schedule.server.ts`, `tasks/stranded-sweep.server.ts` |
-| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 55) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
+| Dependency release | boot + 60 s; each tick releases held tasks whose waits are done (ruling 57) | `tasks/dependencies.server.ts` (`startDependencyRunner`) |
 | GitHub reconcile poller | boot + 5 min; alert after 3 consecutive failures | `github/reconcile-poller.server.ts` |
 | Maintenance pass (retention, transcripts, workspaces) | boot + 6 h (`VIBERR_MAINTENANCE_INTERVAL_SECONDS`); the workspace reclaim skips while any run is queued or running | `ops/maintenance.server.ts` |
 | Disk-pressure check | 5 min (`VIBERR_DISK_CHECK_INTERVAL_SECONDS`); extra pass at most every 30 min | `ops/maintenance.server.ts` |

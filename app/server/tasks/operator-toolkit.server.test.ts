@@ -344,7 +344,7 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
   });
 
   it("ruling 112: transition_stage says the way back to a delivering agent is the operator's own move, and when to take it", async () => {
-    // Canary: restore the description from before ruling 112. The operator on
+    // Canary: restore the old description. The operator on
     // BLOG-8 read "populated only while validation is failing" and asked a
     // person for the move.
     const toolkit = bareToolkit(withPolicy(uniform("direct")));
@@ -850,7 +850,7 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   it("ruling 213(a): a verdict's report is read whole from its Review verdict comment, not the stored excerpt", async () => {
     // Live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000 of
     // 5,382: a verdict stores 2,000 characters and points at the timeline
-    // (ruling 262), which another task's reader cannot open. CANARY: return
+    // (ruling 88), which another task's reader cannot open. CANARY: return
     // the stored reason and the report stops at the cut; drop the opening
     // match and an earlier round's report can stand in for this one.
     const store = setupTestStore(ctxDb);
@@ -1087,8 +1087,8 @@ describe("buildOperatorToolkit — open_decision_packet declares goalDraft (ruli
   });
 
   /**
-   * Ruling 132 (F39-55): ruling 132 opened this door on the Claude tool and
-   * left the Codex plan's closed. The same three kinds stayed named, refused
+   * Ruling 132 (F39-55): this door was open on the Claude tool and closed on
+   * the Codex plan. The same three kinds stayed named, refused
    * and impossible to satisfy for every Codex operator, and on ax-clone, where
    * every operator is Codex, that was AX-4 twice and AX-27 once. A new option
    * field is added to both doors or the suite goes red.

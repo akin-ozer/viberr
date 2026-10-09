@@ -37,8 +37,7 @@ interface MenuPlace {
  * Ruling 323: which of a backend's accounts the person's runs use, as a select
  * (owner, 2026-10-01: "make this part shadcn like selection from the dropdown
  * between accounts of saved accounts to use a selected one in every
- * provider"). It replaces ruling 138's list of the other accounts, each with
- * its own Use this account.
+ * provider"). The store's rules are ruling 138's.
  *
  * The trigger names the account in use. The menu lists every account the
  * person keeps on the backend, up to the store's ceiling, with the one in use

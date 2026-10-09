@@ -119,8 +119,8 @@ function isTaskRegionAnchor(id: string): boolean {
  * Ruling 302: the element a region link lands on: the place it names while
  * the page shows it, else the timeline, which records what became of it (the
  * decision answered or withdrawn, the recommendations applied or dismissed).
- * A link naming a packet opens the card only for that packet; the bare
- * `#decision` of a row written before ruling 302 opens whichever is open.
+ * A link naming a packet opens the card only for that packet; a bare
+ * `#decision` opens whichever is open (ruling 302(d)).
  */
 function regionPlace(
   id: string,
@@ -463,9 +463,9 @@ export function useRunConsole({
   );
 
   // D6: interrupt a live run — discards uncommitted in-flight work. That
-  // discard is ruling 278's destructive class, so the commit keeps the
-  // shared `danger` default and, under ruling 278, the `LiveRunPanel`
-  // trigger that opens this dialog carries the same red label.
+  // discard is destructive (ruling 278(a)), so the commit keeps the shared
+  // `danger` default and the `LiveRunPanel` trigger that opens this dialog
+  // carries the same red label.
   const interruptDialog = confirmInterrupt && (
     <ConfirmDialog
       screenLabel="Interrupt run dialog"
@@ -649,7 +649,7 @@ export function useStageTransition(
   // the LAST stage as an acceptance: transitionStage's own comment reads "A
   // HUMAN manually moving a task INTO the final stage IS accepting completion",
   // and it calls acceptCompletion — the real, irreversible PR merge. The board's
-  // identical stage menu has confirmed since ruling 97/R18-7; this one was the
+  // identical stage menu confirms (ruling 97, R18-7); this one was the
   // last surface where dropping a card on Done merged silently. Same ceremony,
   // and the confirmed click still posts `transition` (the server's own
   // stage-move contract writes the acceptance from there).

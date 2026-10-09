@@ -197,8 +197,8 @@ export interface ClaudeQueryOptions {
   disallowedTools?: string[];
   /** Which filesystem settings to load. ALWAYS `[]` on a Viberr run (SDK
    *  isolation mode): none of the host's `~/.claude` tiers leak in, and no
-   *  project source is opened over the checkout either — since ruling 185 the
-   *  granted skills arrive through `plugins`, so nothing under cwd needs
+   *  project source is opened over the checkout either — the granted skills
+   *  arrive through `plugins` (ruling 185), so nothing under cwd needs
    *  reading. Never `'user'` or `'local'` (the host machine's tiers, F13) and
    *  never `'project'` (the repository under review's own `.claude` and
    *  CLAUDE.md at system-prompt tier). */
@@ -223,7 +223,7 @@ export interface ClaudeQueryOptions {
    *  process group (`claude-spawn.server.ts`), instead of the SDK's local
    *  spawn. */
   spawnClaudeCodeProcess?: (request: ClaudeSpawnRequest) => ClaudeSpawnedProcess;
-  /** Ruling 219(a), amended (Option D PR 5): the PreToolUse hook that refuses a
+  /** Ruling 183 (Option D PR 5): the PreToolUse hook that refuses a
    *  Bash command reaching one of the run's argument-level denies, however it
    *  is wrapped, with a reason the model reads. It only ever denies.
    *  Ruling 170: the `SessionStart` hook on the `compact` source that hands
@@ -441,7 +441,7 @@ export const INTERRUPT_GRACE_MS = 20_000;
 /**
  * After the cooperative grace elapses the adapter aborts the SDK's
  * AbortController, which tears the child down (SIGTERM, then SIGKILL ~5s later,
- * to the CLI's whole process group since ruling 142). That abort ends the
+ * to the CLI's whole process group, ruling 142). That abort ends the
  * stream, and the loop's own catch settles the run once the process is
  * actually gone — the point being that a settled run no longer leaves a live
  * process writing the workspace (the settle sweep, `reapRunProcesses`, takes
@@ -1401,9 +1401,9 @@ function assembleClaudeOptions(
   // can name the group. The handle is this run's alone.
   options.spawnClaudeCodeProcess = (request) => ctx.spawn(request);
   // Ruling 159: the instance's spending cap, when one is set. The SDK
-  // stops the query past it and says so with `error_max_budget_usd`.
-  // Ruling 165(c): the CLI measures the cap against the session's restored
-  // total, so a resumed session's allowance starts from what it had spent.
+  // stops the query past it and says so with `error_max_budget_usd`. The
+  // CLI measures the cap against the session's restored total, so a
+  // resumed session's allowance starts from what it had spent.
   if (spec.maxSpendUsd) {
     // Ruling 159: only when the CLI will restore the session's spend does its
     // cap need the room; otherwise the room is spend the run could overrun by.
@@ -1541,7 +1541,7 @@ function assembleClaudeOptions(
   // list still names the withheld capability in the Bash hook's reasons.
   const sdkDenied = writeRoots ? withoutConfinedFileTools(denied) : denied;
   if (sdkDenied.length) options.disallowedTools = sortedNames(sdkDenied);
-  // Ruling 219(a), amended (Option D PR 5): the prefix rules above match a
+  // Ruling 183 (Option D PR 5): the prefix rules above match a
   // command by its leading words, and the pinned CLI, which already splits
   // `&&` and `;` chains, still let `git -C . push` and `sh -c 'git push'`
   // through (measured 2026-09-11: both refs landed on a local remote). A
@@ -1677,7 +1677,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
       });
       options.resume = sessionId;
       options.maxTurns = 1;
-      // Ruling 165(c): the compaction resumes the session too, so its cap starts
+      // Ruling 159: the compaction resumes the session too, so its cap starts
       // from the session's restored total, not from the run's own spend.
       if (spec.maxSpendUsd) options.maxBudgetUsd = spec.maxSpendUsd + restoredSpendUsd(sessionId);
       // Its own marker: the run's settle sweep must not reap this process.
@@ -1701,7 +1701,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           const occurredAt = new Date().toISOString();
           const wire = claudeWire.parse(message);
           // Ruling 165(c): the compaction's result reports the session's totals
-          // too (ruling 165(c)); its share is what the run had not reported.
+          // too; its share is what the run had not reported.
           const { display, facts } = projectEnvelope(
             wire,
             occurredAt,
@@ -1739,7 +1739,7 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           } else if (facts.isResult) {
             resultText = envelope.result ?? null;
             // Ruling 165(c): the facts are the compaction's own share already
-            // (ruling 165(c)'s projection), added to the run's figures.
+            // (the projection took it), added to the run's figures.
             const reported = claudeReportedTotals(wire);
             if (reported) rememberReported(sessionId, reported);
             if (facts.costUsd != null) folded.costAddUsd = facts.costUsd;
@@ -2152,8 +2152,8 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps = {}): RuntimeAdapte
           cb.onLine(postTurnTransportLine(detail));
         };
         /**
-         * A result that reports a CAP, not a task failure: the turn cap and,
-         * since ruling 159, the spending cap. Writes the cut-off's classified
+         * A result that reports a CAP, not a task failure: the turn cap and
+         * the spending cap (ruling 159). Writes the cut-off's classified
          * line and says whether it did. Without it a turn-capped run surfaced as
          * `run·error·unknown` with "review the runtime configuration" copy
          * (observed live: a completed implementation died at turn 51 running

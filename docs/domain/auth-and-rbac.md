@@ -23,7 +23,7 @@ only in `users.role`.
 |---|---|
 | Mount | `/api/auth/*` (`AUTH_BASE_PATH`), GET and POST forwarded to `getAuth().handler`. Only six endpoints are allowed (`ALLOWED_AUTH_PATHS`: `/sign-in/email`, `/sign-in/social`, `/callback/:id`, `/error`, `/get-session`, `/sign-out`); every other better-auth endpoint answers 404. |
 | Cookie | `viberr.session_token` (`cookiePrefix: "viberr"`), signed with `BETTER_AUTH_SECRET ?? VIBERR_SESSION_SECRET`. With an `https://` `BETTER_AUTH_URL` in production better-auth issues `__Secure-` cookies; an `http://` non-loopback origin in production only produces a boot warning. |
-| Session | 30-day rolling, slid at most once a day. The renewal `Set-Cookie` is captured by `authenticateWithHeaders` and forwarded by root's `sessionRenewalMiddleware` on whichever GET resolved the session (ruling 11: root's loader no longer runs on every request), so active users are not signed out at login + 30 days. Expired rows are never honoured and are not pruned on a timer. A GET or HEAD resolves its session once however many loaders and guards ask (the router hands them one Request; ruling 21); a POST resolves on every call. |
+| Session | 30-day rolling, slid at most once a day. The renewal `Set-Cookie` is captured by `authenticateWithHeaders` and forwarded by root's `sessionRenewalMiddleware` on whichever GET resolved the session (ruling 11: root's loader no longer runs on every request), so active users are not signed out at login + 30 days. Expired rows are never honoured and are not pruned on a timer. A GET or HEAD resolves its session once however many loaders and guards ask (the router hands them one Request; ruling 11); a POST resolves on every call. |
 | Passwords | better-auth's own scrypt, stored as `<saltHex>:<keyHex>` in the `account` row with `providerId = 'credential'`. Minimum 8 characters (`MIN_PASSWORD_LENGTH`). A legacy `scrypt$…` hash is not verifiable; only the seed CLI re-hashes such a row. `users` has no password column. |
 | Sign-up | Disabled. Accounts exist only because an admin created or whitelisted them (§2). |
 | Login | `POST /login` `intent=login`: origin check (no session yet), pre-checks on `users` (unknown, disabled, no password) that each consume a throttle token, then better-auth `/sign-in/email`. Success records `users.last_login_at` and audits `auth.login.success`; failures audit `auth.login.failure` / `auth.login.rate_limited`. Unknown email and OAuth-only accounts share one error string. |
@@ -174,7 +174,7 @@ the Policy page refuses anything else.
 emergency override (`project.org_admin.override`, repeats collapsed per minute);
 or a denial audited as `project.authority.denied` (silent only on the `@mention`
 run-agents probe). Reads go through the workspace layout loader (and the board
-loader, through the same `readWorkspace` read, ruling 21) and `requireProjectMember`,
+loader, through the same `readWorkspace` read, ruling 11) and `requireProjectMember`,
 which return the **same 404 bytes** for a non-member and for an unknown slug (ruling 27); actions go through `requireProjectFormAction`, which runs
 `requireVisibleProject` (`app/routes/project-visibility.server.ts`) before any try block. Config surfaces use
 `assertProjectAction`, which re-reads `project.md` and refuses an archived project
@@ -545,7 +545,7 @@ operator reads the same figure in its snapshot.
   and a stopped run inside a backend is counted on the Cost and Tokens cards rather than
   suppressing the share (ruling 35, amending 201).
 - **Outcomes** and success rate; a restart-interrupted run is stopped, not an error,
-  and a never-started one is outside the completion rate (ruling 153).
+  and a never-started one is outside the completion rate (ruling 36).
 - **Breakdowns** by kind, project, model, task and profile (ruling 35), each the top 8
   (half the slots reserved for the busiest groups, the rest led by the measure) with
   `hidden`, `hiddenRuns`, `hiddenCost` and `hiddenTokens` naming what the window left
@@ -710,7 +710,7 @@ Two routes in, both the vendor's own:
   page's error boundary. The card renders the flow as two numbered
   steps: the vendor's link is an "Open sign-in page" button that names its host and is
   never printed in full, with a "Copy link" button beside it on both backends (ruling
-  161: the browser holding the vendor session is often not the one reading this page);
+  137: the browser holding the vendor session is often not the one reading this page);
   Codex's code sits beside a Copy button; Claude's code field is a real labelled input
   whose Submit follows ruling 288 (enabled, an empty submit refused with the field marked
   and focused). A step marker is pending until its input arrives, current while
@@ -724,7 +724,7 @@ Two routes in, both the vendor's own:
   card saying so. A saved key is a new account and becomes the one in use (ruling 138);
   nothing that was connected is logged out. `backend-disconnect` {account} removes ONE
   account: it runs the vendor's own logout in that account's home, removes the account's
-  home (its credential file only, for an account connected before ruling 138) and drops
+  home (its credential file only, for a `legacy_home` account) and drops
   the row (transcripts stay). Removing the one in use hands runs to the account used
   before it, and the toast names both. The card's Disconnect asks first (ruling 323):
   the shared `ConfirmDialog`, "Disconnect Claude?" (or Codex) for a person's only account

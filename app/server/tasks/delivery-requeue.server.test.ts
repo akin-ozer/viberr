@@ -165,7 +165,7 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
 
   it("B. supervised does NOT re-trigger — but LEAVES an actionable next step (R19-4)", async () => {
     // VC-1's board: a person approves the move into Review (the Standard
-    // template's is `auto` since ruling 126, and files no card).
+    // template's is `auto` and files no card, ruling 126).
     approveReviewEntry(store);
     deployDeliveryOperator(store, "supervised");
     seedTask();
@@ -268,10 +268,10 @@ describe("R18-2 — a full-autonomy delivery re-queues the operator", () => {
  * (`hold_runtime_debug` asked for no run). Reuses the same `runOperator` mock.
  */
 /**
- * Ruling 56 (F37-61, owner): a HELD task refuses delivery, the same way ruling
- * 56 made every dispatch door refuse it.
+ * Ruling 56 (F37-61, owner): a HELD task refuses delivery, the same way every
+ * dispatch door refuses it.
  *
- * Ruling 56's own live case is the argument: SHOP-2 was marked "Held until
+ * The ruling's own live case is the argument: SHOP-2 was marked "Held until
  * every entry is done" and a run "pushed a branch cut from a base that predated
  * the foundation it waited on". Publishing that branch to a review PR is
  * `performDelivery`, which had no `blockedBy` check at all — while the

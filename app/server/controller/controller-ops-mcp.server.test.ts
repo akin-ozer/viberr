@@ -106,7 +106,7 @@ beforeAll(async () => {
   });
   upsertRun(app.db, {
     id: CONTROLLER_RUN,
-    // Ruling 247's controller scope: no project, task_key = conversation id.
+    // Ruling 251's controller scope: no project, task_key = conversation id.
     projectSlug: "",
     taskKey: conversation.id,
     threadId: "thread_ops_controller",
@@ -473,9 +473,9 @@ describe("instance_health: aggregates, open to any signed-in person", () => {
       const claude = body.quota.find((q) => q.backend === "claude")!;
       expect(claude.exhausted?.runId).toBe("run_quota_probe");
 
-      // What ruling 40 (owner, 2026-09-06) changed: since ruling 137 an
-      // agent-backend credential belongs to a PERSON, so one member's refused
-      // key or spent window is not a statement about this deployment. It used
+      // Ruling 40: an agent-backend credential belongs to a PERSON (ruling
+      // 137), so one member's refused key or spent window is not a statement
+      // about this deployment. It used
       // to push `credential:<backend>` / `quota:<backend>` into `degraded`,
       // which made `/resources/health?probe=readiness` answer 503 for the whole
       // instance and drained traffic from a deployment serving everyone else.
@@ -667,7 +667,7 @@ describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
   });
 
   /**
-   * Ruling 269 (F37-100): ruling 247 stores a controller turn's CONVERSATION id
+   * Ruling 269 (F37-100): ruling 251 stores a controller turn's CONVERSATION id
    * in the runs table's `task_key` column, because that table has one identity
    * column. Reporting it raw put a `cnv_…` in a field named `taskKey` with
    * `projectSlug: ""` — the controller's own words: "a conversation id in a
@@ -722,8 +722,8 @@ describe("list_runs: the run ids read_run_log needs (ruling 269)", () => {
    * nothing: a caller asking "which runs are live right now" got a list that
    * looked complete and could not reconcile it with the count
    * `instance_health` reports for the same instant. `read_run_log` beside it
-   * has carried `olderExist`/`newerExist` since pass 32, and
-   * `inspect_audit_log` has carried `total`/`shown` since ruling 33.
+   * carries `olderExist`/`newerExist`, and `inspect_audit_log` carries
+   * `total`/`shown`.
    */
   it("ruling 117: a clipped listing says how many it left out, and is silent when it left out none", async () => {
     const full = parsed(

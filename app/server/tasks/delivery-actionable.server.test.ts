@@ -46,8 +46,8 @@ import type { runOperator } from "~/server/runtimes/operator-run.server";
  * `performDelivery` now records that transition recommendation itself when
  * nothing else made the task actionable. The test project is VC-1's shape:
  * `impl → review` at an `approval` boundary, as the Standard template had it
- * then (`approveReviewEntry`). Since ruling 126 the Standard board's move into
- * Review is `auto`: the operator makes it, and the delivery records nothing.
+ * then (`approveReviewEntry`). On the Standard board the move into Review is
+ * `auto` (ruling 91): the operator makes it, and the delivery records nothing.
  *
  * push-workspace + pr-open are stubbed through `performDelivery`'s ctx `deps`
  * seam so it reaches the `result.status === "ok"` branch without git or GitHub;

@@ -105,9 +105,9 @@ function refusalCause(input: {
  * asserts NEITHER, because a refused match cannot tell them apart: an unowned
  * OPEN pull request that appeared on the branch AFTER Viberr allocated the
  * name (pass 34, U34-6: JC-8 hit this one at 10:17:52Z while the note blamed
- * the other), and a branch recorded before ruling 228 under a task key an
- * older data root had already used (keys restart at 1; names allocated since
- * take a suffix when the canonical one is spoken for). The remedy is the same
+ * the other), and an older branch recorded under a task key an older data
+ * root had already used (keys restart at 1; ruling 228 now gives a name a
+ * suffix when the canonical one is spoken for). The remedy is the same
  * either way, so the note commits to the remedy and not to a cause.
  *
  * The `**Branch name collision:**` opener is the marker the reconciler, the

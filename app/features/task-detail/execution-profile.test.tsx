@@ -188,7 +188,7 @@ describe("ruling 115: the run control on a held task", () => {
   /**
    * Ruling 310 (pass 37, F37-2). The OPERATOR control stays enabled on a held
    * task — a manual run still answers a person. The AGENT control does not:
-   * since ruling 310 the server refuses every dispatch onto a held task, so the
+   * the server refuses every dispatch onto a held task (ruling 56), so the
    * words before the click have to be the words the server answers with.
    */
   const agentRunButton = (root: HTMLElement) =>

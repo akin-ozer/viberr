@@ -52,9 +52,10 @@ const TEST_FROM = { kind: "system" as const, name: "Test" };
  * The task-mutation SUBSTRATE (`task-mutation.server.ts`) — the three helpers
  * every governed write path threads. It was carved out of
  * `task-actions.server.ts` to break a real import cycle, and
- * `task-actions.server.ts` re-exported all of it until ruling 13(a) split it, so
+ * `task-actions.server.ts` re-exported all of it until the family split
+ * (ruling 13(a)), so
  * until this file existed NOTHING imported the module by name: its guards could
- * be deleted and every gate would stay green (ruling 27 — "an owner ruling
+ * be deleted and every gate would stay green (ruling 8 — "an owner ruling
  * whose guard cannot go red is a ruling that gets reverted in silence").
  *
  * The two things worth guarding here:

@@ -317,7 +317,7 @@ describe("ruling 59: the Blocked by editor finds tasks and takes entries out by 
     // The picker takes the focus in an effect as it mounts, which a loaded
     // suite runs after `findByRole` has returned.
     await waitFor(() => expect(document.activeElement).toBe(field));
-    // Archived JC-6 is refused on every Save while it is listed (ruling 58).
+    // Archived JC-6 is refused on every Save while it is listed (ruling 59).
     expect(within(dialog).getByText("JC-6 can never complete: take it out to save.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove JC-6" }));
     expect(within(dialog).queryByText(/can never complete/)).toBeNull();
@@ -393,7 +393,7 @@ describe("ruling 59: the Blocked by editor finds tasks and takes entries out by 
     expect(chips(dialog)).toEqual([]);
     fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(view.posted).toHaveLength(1));
-    // Ruling 55: an empty list clears the wait, which for a person IS the release.
+    // Ruling 57: an empty list clears the wait, which for a person IS the release.
     expect(view.posted[0]).toMatchObject({ intent: "set-task-dependencies", blockedBy: "" });
   });
 
@@ -578,7 +578,7 @@ describe("ruling 325: the Details panel's Epic row", () => {
  * editor the Blocked by row's own chips carry the Owner row's cross. A press
  * saves the wait without that entry at once, through the wait's own intent,
  * and the trigger is the plus after the chips. A cross that leaves nothing
- * still open releases the task (ruling 55), so that one asks first, as the
+ * still open releases the task (ruling 59), so that one asks first, as the
  * Owner row's cross does.
  */
 describe("ruling 309: the Blocked by row's chips carry the remove cross", () => {

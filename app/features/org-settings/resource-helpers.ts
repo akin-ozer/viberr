@@ -31,13 +31,13 @@ export function useModalAction(onDone: (d: OrgActionData & { ok: true }) => void
 }
 
 /**
- * Ruling 184: what a global agent profile's stored stage id says beside the
+ * Ruling 326: what a global agent profile's stored stage id says beside the
  * default workflow's stages. A template deployed onto a project with its own
  * stages keeps that project's ids (`build` on akinozer.com): the row printed
  * the raw id and the editor offered no chip for it at all, so Content Writer
- * looked eligible nowhere while it worked at `build`. Since ruling 326 the
- * editor offers such a stage in its project's row of Custom stages, and only
- * the row still says this.
+ * looked eligible nowhere while it worked at `build`. The editor now offers
+ * such a stage in its project's row of Custom stages, and only the row still
+ * says this.
  */
 const STAGE_OUTSIDE_DEFAULT = "not in the default workflow";
 

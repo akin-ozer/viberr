@@ -77,7 +77,7 @@ export interface RunSpec {
   resumeSessionId?: string | null;
   /** Ruling 165(c): the totals the resumed Claude session last reported, read
    *  from its run log by `startRun`. The adapter takes the run's share from
-   *  them (ruling 165(c)) when this process holds nothing for the session, which
+   *  them when this process holds nothing for the session, which
    *  is every resumed session's first run after a restart. */
   resumedSessionReported?: ClaudeResultUsage;
   /** Ruling 159: the CLI will restore the resumed session's cost state (it was
@@ -131,9 +131,9 @@ export interface RunSpec {
   mcpOptional?: string[];
   /** The task's attachments directory, when this run's profile holds
    *  `attach-evidence-references` — where the agent copies files to "post a
-   *  file on the task thread" (ruling 183). Neither adapter has to widen
-   *  anything for it: Claude runs at bypassPermissions, and since ruling 144
-   *  every Codex thread starts `danger-full-access`, which already writes it
+   *  file on the task thread" (ruling 78). Neither adapter has to widen
+   *  anything for it: Claude runs at bypassPermissions, and every Codex
+   *  thread starts `danger-full-access` (ruling 144), which already writes it
    *  (the `--add-dir` it once rode went with the `workspace-write` sandbox).
    *  Ruling 217(d): on Claude it also keeps the file tools a withheld repo-write
    *  grant denies, confined to it and the temp directory by a hook. */
@@ -160,7 +160,7 @@ export interface RunSpec {
   skillPlugin?: SkillPlugin;
   /** The run's `execute-code-or-write-repo` grant is WITHHELD (mode `off` or
    *  `human`). Claude enforces it via the tool denylist. On Codex it is
-   *  ADVISORY since ruling 183 removed the OS sandbox: no adapter reads this
+   *  ADVISORY (ruling 183), with no OS sandbox: no adapter reads this
    *  flag to confine the run, and the prompt plus the server-owned delivery
    *  gate carry the withholding (`codexRepoWriteAdvisory` renders that).
    *  Deliberately NOT folded into `autonomous`, which also drives Claude's

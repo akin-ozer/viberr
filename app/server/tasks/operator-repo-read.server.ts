@@ -71,7 +71,7 @@ const GIT_SHOW_TIMEOUT_MS = 20_000;
 /** Bound on the `git config` that names the checkout's repository. */
 const GIT_CONFIG_TIMEOUT_MS = 10_000;
 /**
- * Ruling 219(c): one read hands back at most this many characters, as whole lines.
+ * Ruling 219(c): one read hands back at most this many UTF-8 bytes, as whole lines.
  *
  * It was 60,000, and the Claude CLI refuses an MCP result over its own limit
  * (`MAX_MCP_OUTPUT_TOKENS`, 25,000 tokens by default), which dense code reaches

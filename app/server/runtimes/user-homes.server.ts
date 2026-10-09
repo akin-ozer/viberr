@@ -72,15 +72,14 @@ import { toError } from "~/shared/errors";
  * credential file would spend each other's). What must stay ONE per person is
  * shared by link: a Claude account home's `projects/` points at the backend
  * home's, so every transcript lands where resume, the exporter and the
- * retention sweep look, whichever account wrote it. An account connected
- * before ruling 138 keeps its sign-in in the backend home itself
- * (`legacyHome`).
+ * retention sweep look, whichever account wrote it. A legacy account keeps
+ * its sign-in in the backend home itself (`legacyHome`, ruling 138(b)).
  */
 
 /** The directory under `<dataRoot>/runtimes` that holds the per-person homes. */
 const USER_RUNTIMES_DIR = "users";
 
-/** A user id — and, since ruling 145, a run id — may become a PATH SEGMENT
+/** A user id — and a run id (ruling 145) — may become a PATH SEGMENT
  *  here, so each is validated as one. Viberr mints ids as `u_<base64url>` /
  *  `run_<base64url>` (`newId`), which this matches; anything else — a
  *  hand-edited row, a traversal attempt, an empty string — is refused rather
@@ -352,7 +351,7 @@ const CODEX_HOME_SHARED_DIRS = ["sessions", "skills", "memories"] as const;
 const CODEX_HOME_SEEDED_FILES = ["auth.json", "config.toml"] as const;
 
 const AUTH_WRITE_BACK_LOCK = ".auth.json.lock";
-/** Ruling 138: beside a run home's seeded `auth.json`, the digest of what it
+/** Ruling 145: beside a run home's seeded `auth.json`, the digest of what it
  *  was seeded with, so the settle can tell a token the CLI refreshed from a
  *  copy that merely went stale while another run refreshed the account. */
 const AUTH_SEED_DIGEST = ".auth.json.seed";
@@ -389,7 +388,7 @@ export function codexRunHomeDir(sharedHome: string, runId: string): string {
   return path.join(sharedHome, CODEX_RUN_HOMES_DIR, assertPathSafeRunId(runId));
 }
 
-/** Ruling 138: the id a run's completion compaction forks its own private home
+/** Ruling 145: the id a run's completion compaction forks its own private home
  *  under (`runs/<runId>-compaction`), beside the run's. Path-safe, unlike the
  *  compaction's process marker (`compactionRunId`, which carries a colon). */
 export function codexCompactionHomeId(runId: string): string {
@@ -684,7 +683,7 @@ function codexStateDatabases(sharedHome: string): string[] {
 function writeBackAuth(home: CodexRunHome): boolean {
   const refreshed = readIfPresent(path.join(home.dir, "auth.json"));
   if (!refreshed) return false;
-  // Ruling 138: a copy the CLI never refreshed is not news — handing it back
+  // Ruling 145: a copy the CLI never refreshed is not news — handing it back
   // would put the seed over a token another run of the same account refreshed
   // meanwhile (and a refresh token that was rotated away with it). A run home
   // from before the digest existed has none, and keeps the old comparison.

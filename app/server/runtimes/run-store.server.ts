@@ -82,7 +82,7 @@ export type AgentRunRow = {
    *  runs carry the task owner, controller turns the asker. Null only on a run
    *  refused before any credential was looked up (an unowned task). */
   credential_user_id: string | null;
-  /** Ruling 66: 1 when this run was dispatched with its verdict channel
+  /** Ruling 87: 1 when this run was dispatched with its verdict channel
    *  withheld. A reply with no envelope verdict is then an ANSWER, not silence,
    *  and the prose fallback must not manufacture one over it. */
   verdict_withheld: number;
@@ -260,7 +260,7 @@ export interface InsertRunInput {
    *  The rule "a run that spawned a process has a principal" is enforced one
    *  level up, where `StartRunInput`/`ReserveRunInput` require the field. */
   credentialUserId?: string | null;
-  /** Ruling 66: this run was dispatched with its verdict channel withheld, so
+  /** Ruling 87: this run was dispatched with its verdict channel withheld, so
    *  a reply carrying no envelope verdict is an ANSWER, not silence to repair. */
   verdictWithheld?: boolean;
   /** Ruling 153: see `AgentRunRow.review_subject`. Omitted stores NULL. */
@@ -993,17 +993,17 @@ export function insertRunLine(
  * Ruling 92 (pass 37, F37-69): the runs `profileId` made on this task since
  * `since`, oldest first, with their states.
  *
- * The signal ruling 92's round counter was reaching for. That ruling made a
- * reviewer's repeat objection on the same revision count as a fresh round,
- * because in a real deadlock the deliverer commits nothing and no new revision
- * is ever minted (SHOP-9, where the count would otherwise have sat at 1 while
- * the loop ran). What it could not distinguish is a repeat objection with NO
- * rework behind it at all, which is what ruling 94's own escalation question
- * provokes: the reviewer is asked to answer, answers, and verdicts again on an
- * untouched revision. A DELIVERER RUN is the thing that separates them.
+ * The signal the round counter reads. A reviewer's repeat objection on the
+ * same revision can be a fresh round, because in a real deadlock the
+ * deliverer commits nothing and no new revision is ever minted (SHOP-9, where
+ * a count of revisions would have sat at 1 while the loop ran). It can also
+ * be a repeat objection with NO rework behind it at all, which is what ruling
+ * 94's escalation question provokes: the reviewer is asked to answer,
+ * answers, and verdicts again on an untouched revision. A DELIVERER RUN is
+ * the thing that separates them.
  *
- * Which of these runs count is `deliveredRoundSince`'s call (ruling 92): every
- * state does, except a run the PROVIDER refused.
+ * Which of these runs count is `deliveredRoundSince`'s call: every state
+ * does, except a run the PROVIDER refused.
  */
 export function profileRunsSince(
   db: DatabaseSync,

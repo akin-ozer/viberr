@@ -148,11 +148,11 @@ function renderPage(props: {
 }
 
 /**
- * Ruling 315 (pass 40, F40-54): the Changes panel stands on the page while
+ * Ruling 246 (pass 40, F40-54): the Changes panel stands on the page while
  * the review PR is open and carries a delivered revision, and nowhere else: a
  * merged PR's review is over, and without a delivery there is nothing to read.
  */
-describe("ruling 315: the task page offers the Changes panel for an open review PR", () => {
+describe("ruling 246: the task page offers the Changes panel for an open review PR", () => {
   const openPr: PrRef = { number: 3, state: "review", title: "Notes" };
   const heading = (container: HTMLElement) =>
     [...container.querySelectorAll(".panel-head h2")].some((h) => h.textContent === "Changes");
@@ -2431,7 +2431,7 @@ describe("D6: consequential actions confirm before they act", () => {
     });
     const trigger = findButton(container, "Interrupt")!;
     // Ruling 278: the stop discards the work in flight, so BOTH ends of the
-    // action wear ruling 278's red — the shared `LiveRunPanel` trigger and the
+    // action wear the danger red — the shared `LiveRunPanel` trigger and the
     // commit below, which keeps the confirm's `danger` default. Canary: drop
     // `danger` from the trigger's class, or pass `tone="primary"` to the
     // dialog, and one of the two assertions fails.
@@ -2587,7 +2587,7 @@ describe("ruling 302: a region link lands where the page still shows it", () => 
     // an answered question rings the next one.
     ["the timeline, for a packet closed since", "/#decision-pkt_gone", OPEN, "#timeline"],
     ["the timeline, with no packet open", "/#decision-pkt_gone", null, "#timeline"],
-    ["the timeline, for a row written before ruling 302", "/#decision", null, "#timeline"],
+    ["the timeline, for a bare #decision with no packet open", "/#decision", null, "#timeline"],
     ["the timeline, with no recommendation pending", "/#recommendations", null, "#timeline"],
   ])("%s", async (_place, entry, packet, landsOn) => {
     const { container } = renderPage({ entry, task: { packet } });

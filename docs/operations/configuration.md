@@ -56,7 +56,7 @@ deployment environment and restart.
 |---|---|---|
 | `NODE_ENV` | `development` | `development \| production \| test`. The image sets `production` and compose forces it. Also read raw by the logger (default level) and the SSE broker (no signal handlers under `test`). |
 | `PORT` | `5173` | Dev server and `react-router-serve`. The image sets `3000`; compose publishes `${PORT:-3000}` on both sides. `vite.config.ts` reads it raw for the dev server (`strictPort`). |
-| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it (the named volume `viberr-data`, ruling 38); `.env.example` sets `./docker-data`, the host dev server's own store, not the container's, whose named volume the host cannot open (ruling 38). Relative paths resolve against the working directory. The agent launcher is compiled against the image's value (the Dockerfile's global `VIBERR_DATA_ROOT` ARG) and refuses a home outside `<that root>/runtimes/users/`. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
+| `VIBERR_DATA_ROOT` | `./data` | The runtime data root (canonical markdown, SQLite, run logs, KBs, skills, per-person runtime homes). The image sets `/data` and compose forces it (the named volume `viberr-data`, ruling 38); `.env.example` sets `./docker-data`, the host dev server's own store, not the container's, whose named volume the host cannot open. Relative paths resolve against the working directory. The agent launcher is compiled against the image's value (the Dockerfile's global `VIBERR_DATA_ROOT` ARG) and refuses a home outside `<that root>/runtimes/users/`. `vite.config.ts` reads it raw to keep the root out of the dev watcher. |
 | `VIBERR_FORCE_DATA_ROOT_LOCK` | unset | `1`, `true` or `yes` for ONE boot (or one CLI run) to take over a `state/writer.lock` whose holder cannot be judged, typically one left by a process on another host (`forceDataRootTakeover` in `app/server/db/data-root-lock.server.ts`). See the single-writer lock in the [runbook](runbook.md#the-single-writer-lock-and-cli-refusals). |
 | `VIBERR_RUN_TMP_ROOT` | `viberr-runs` under the server's temp directory (the container's `/tmp` in the image) | Where each agent run's own temporary directory is made, `<root>/<runId>` (ruling 141(c), `app/server/runtimes/run-tmp.server.ts`). The run's processes get it as `TMPDIR`, `TMP` and `TEMP`, and a run whose file tools are confined (ruling 217(d)) writes it, not the rest of the server's temp directory; it is removed as the run's person a grace after the run settles, and boot removes any a stopped server left. The root is the server's own, `0710` in the agent group, so an agent enters its run's directory and lists no other; a root that is a link or another user's is refused, and each run then starts without one, saying so on its console. |
 | `BETTER_AUTH_URL` | unset | Absolute public origin. Optional in dev (inferred per request). **Required behind a reverse proxy**: better-auth derives OAuth callback URLs, `trustedOrigins` and the cookie `Secure` attribute from it, and its origin is the one the app's origin check (`assertTrustedOrigin`) accepts sign-ins and form posts from besides the request's own, so unset behind the proxy every sign-in and form post answers 403 (ruling 28). `publicOrigin()` (its origin, else the request's) gives the callback the Sign-in & SSO card shows and the Google probe sends, and the redirect URI an MCP OAuth sign-in registers and sends, `<origin>/resources/mcp-oauth/callback` (rulings 192 and 28). `appOrigin()` uses it for the back-links in PR bodies (no link at all when unset). Boot warns when an OAuth client id is configured without it, and when it is an `http://` non-loopback origin under `NODE_ENV=production` (`insecureAuthOriginWarning`). |
@@ -241,11 +241,11 @@ sign-in driver and the vendor sign-out all start from `filteredSpawnEnv`
 - the Claude CLI's prompt-cache switches `DISABLE_PROMPT_CACHING` (and its per-model
   variants), `ENABLE_PROMPT_CACHING_1H` (and `_BEDROCK`), `FORCE_PROMPT_CACHING_5M`,
   `CLAUDE_CODE_PROMPT_CACHE_TTL` and `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`
-  (`PROMPT_CACHE_ENV_RE`, ruling 169), so one on the host cannot turn caching off or
+  (`PROMPT_CACHE_ENV_RE`, ruling 171), so one on the host cannot turn caching off or
   force a lifetime for every run;
 - the Claude CLI's compaction switches `CLAUDE_CODE_AUTO_COMPACT_WINDOW`,
   `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`, `DISABLE_AUTO_COMPACT` and `DISABLE_COMPACT`
-  (`COMPACTION_ENV`, ruling 169), which a server started from inside a Claude Code
+  (`COMPACTION_ENV`, ruling 171), which a server started from inside a Claude Code
   session inherits, so one cannot move, stop or refuse any run's compaction.
 
 **A name the schema does not declare passes through**: `PATH`, `HOME`, locale, proxy
@@ -279,17 +279,16 @@ No context window rides a run's child env (ruling 174): every `AUTO_COMPACT_WIND
 in `app/server/runtimes/context-policy.server.ts` is null,
 so the CLI compacts at its model's own limit, and a session above
 `COMPACT_AT_COMPLETION_TOKENS` (100k) is compacted at the end of its run instead (not
-after an interrupt, not after a run its provider refused, ruling 174, and never an
-operator's session, ruling 175). A compaction that gives no answer within
+after an interrupt or a run its provider refused, and never an operator's session). A compaction that gives no answer within
 `COMPLETION_COMPACT_DEADLINE_MS` (10 minutes, same file) is given up, and its session
 keeps its size. The key
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` would be set by the run service from that table if an
 entry were ever non-null again, and Codex would take its window through `config.toml`
 (§2.5 of `agents-and-runtime.md`). It is not a deployment knob, and one in the server's own
-environment is stripped before it reaches a child (ruling 169). No cache-TTL variable is
-set on any run (ruling 171: `CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M`
-stay unset; the CLI's automatic choice stands), and one in the server's own environment
-is stripped before it reaches a child (ruling 169).
+environment is stripped before it reaches a child. No cache-TTL variable is set on any
+run (`CLAUDE_CODE_PROMPT_CACHE_TTL` and `FORCE_PROMPT_CACHING_5M` stay unset; the CLI's
+automatic choice stands), and one in the server's own environment is stripped before it
+reaches a child (ruling 171).
 
 The server's own git (clone, mirror fetch, delivery push) never puts a token in argv, a
 URL or a config file: `createGitHubAskpassEnv` / `createGitHubClonePlan`
@@ -354,8 +353,8 @@ they are process plumbing, not configuration, and nothing reads them from `.env`
 `.claude/launch.json` defines two launchers: `viberr-dev` exports
 `VIBERR_DATA_ROOT=<repo>/docker-data` on port 5173 and **refuses to start while the
 `viberr-app-1` container is running** (two writers on one data root corrupt the
-SQLite WAL — true while the container still ran on that directory; since ruling 38 it
-runs on the named volume, and the host dev server's `./docker-data` is its own store);
+SQLite WAL, though the container runs on the named volume, ruling 38, and the host dev
+server's `./docker-data` is its own store);
 `viberr-dev-hermetic` uses `<repo>/data` on port 5174. The host dev server has no agent
 launcher, so its runs spawn as your own user and its health says `agentIsolation: off`.
 `vite.config.ts`

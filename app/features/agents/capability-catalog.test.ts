@@ -12,8 +12,8 @@ import {
   capabilityPatchRefusal,
 } from "./capability-catalog";
 
-describe("CAP_MODAL_CATALOG (ruling 62(a) — id-based against the shared catalog)", () => {
-  it("carries only runtime-consulted agent toggles (ruling 62(a) prune + generic-agents Collaboration)", () => {
+describe("CAP_MODAL_CATALOG (ruling 62(b) — id-based against the shared catalog)", () => {
+  it("carries only runtime-consulted agent toggles (ruling 62(b) prune + generic-agents Collaboration)", () => {
     // The toggleable catalog holds ONLY ids whose mode is consulted at runtime:
     // the repo-enforced delivery family, the Collaboration gates the
     // generic-agents plan (D10) and P13-D-26 promoted to real agent-toolkit

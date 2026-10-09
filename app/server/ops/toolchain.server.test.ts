@@ -21,9 +21,9 @@ import {
 } from "./toolchain.server";
 
 /**
- * Ruling 40, narrowed by ruling 144: the once-per-process reading of what an
- * agent's shell would find on this host. The sandbox probe went with the
- * sandbox. Nothing here spawns a program: the runner is the seam.
+ * Ruling 40: the once-per-process reading of what an agent's shell would find
+ * on this host. There is no sandbox probe (ruling 144). Nothing here spawns a
+ * program: the runner is the seam.
  */
 const ctx = createTestDbContext();
 
@@ -188,16 +188,16 @@ describe("shellInventoryPrompt (ruling 148)", () => {
   });
 
   /**
-   * Ruling 204 (pass 37, F37-108): ruling 148 put this measurement into every
-   * prompt and it says what the host lacks — it did not say "and the role
-   * description above plans around three of them". A contradiction inside one
+   * Ruling 148 (pass 37, F37-108): the measurement in every prompt says what
+   * the host lacks, and must also say "and the role description above plans
+   * around three of them". A contradiction inside one
    * prompt is resolved by the model, and the persona is the half written with
    * more authority and read first. Live on this instance: the Infrastructure
    * Engineer's persona said "you own … the Docker Compose stack" and "`make
    * up` is your headline deliverable and it must be honest", while it ran two
    * tasks on a host with neither.
    */
-  it("ruling 204: names the absent tools the run's OWN persona plans around", () => {
+  it("ruling 148: names the absent tools the run's OWN persona plans around", () => {
     const persona =
       "You own the shared surfaces: the workspace scaffolding, the Docker Compose stack, " +
       "and the CI pipeline. `make up` is your headline deliverable.";
@@ -220,7 +220,7 @@ describe("shellInventoryPrompt (ruling 148)", () => {
     expect(text).toContain("Nothing goes in `/tmp` itself");
   });
 
-  it("ruling 204: says nothing when the persona plans around what is actually here", () => {
+  it("ruling 148: says nothing when the persona plans around what is actually here", () => {
     // CANARY: match on substrings instead of word boundaries and "nodemon" or
     // "encurl" would name `node`/`curl`; scan the PRESENT tools too and a
     // persona that correctly says "run npm test" gets contradicted.
@@ -259,7 +259,7 @@ describe("shellInventoryPrompt (ruling 148)", () => {
    * Self-review: the advice half was two hardcoded sentences. Both could lie —
    * one by promising `npx` on a host with no npm, the other by naming an
    * INSTALLED tool as its example of something uninstallable, which is exactly
-   * what happened the moment ruling 42 put `make` and `curl` in the image.
+   * what happened the moment `make` and `curl` went into the image.
    */
   it("derives both halves of the advice from the reading, so neither can go stale", () => {
     // Ruling 42's host: make and curl present, docker still absent.

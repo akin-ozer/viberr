@@ -134,8 +134,8 @@ export function classifyRunEndOf(
  * Ruling 92 (F39-42): did the task's deliverer fight a ROUND of rework since
  * `since`?
  *
- * Ruling 92 (owner) counts a round by the deliverer having RUN since the
- * reviewer's previous verdict, whatever the run's state, "because a rework
+ * A round was counted by the deliverer having RUN since the reviewer's
+ * previous verdict, whatever the run's state, "because a rework
  * dispatched that crashed is still a round fought". A run the PROVIDER refused
  * fought nothing. Live on ax-clone AX-19 the rework was refused for quota three
  * minutes in, with no commit and no report; that refusal counted, so the

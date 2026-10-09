@@ -268,17 +268,17 @@ function latestSessionRun(
 }
 
 /**
- * Ruling 70 (pass 37, F37-92): every agent handle a comment cannot reach, not
- * just the one a RUN would have gone to.
+ * Ruling 70 (F37-92): every agent handle a comment cannot reach, not just the
+ * one a RUN would have gone to.
  *
- * Ruling 70's stamp was computed from `resolveMentionedAgent`, a resolver
+ * The stamp was once computed from `resolveMentionedAgent`, a resolver
  * built to pick ONE target because `commentToAgent` needs exactly one agent to
  * start. Reused as a completeness report it under-reports in four ways, and the
- * first of them is the live comment that prompted ruling 70 in the first
+ * first of them is the live comment that prompted the stamp in the first
  * place: "@operator @platform-architect The funded amendment now exists as a
  * task". `@operator` is precedence 1, so the resolver returns the operator, the
  * stamp is skipped for being the operator, and @platform-architect is never
- * mentioned. Ruling 70 did not fix its own motivating example.
+ * mentioned. The stamp did not fix its own motivating example.
  *
  * The other three: a second specialist tagged alongside the first is dropped by
  * `specialists.find`; an ambiguous backend handle (`@claude` on a board with
@@ -702,7 +702,7 @@ export function runFailureReason(
   let last: LogLine | null = null;
   for (const l of lines) {
     // Ruling 174: the completion compaction runs after the run has ended and
-    // is never its failure (ruling 174). Live on AWSC-60 its "did not happen"
+    // is never its failure. Live on AWSC-60 its "did not happen"
     // line, tagged `run·compaction·failed`, displaced the usage-limit refusal
     // before it: the packet lost the reset instant and its wait option.
     if ((l.tag ?? "").startsWith("run·compact")) continue;

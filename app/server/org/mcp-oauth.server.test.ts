@@ -534,8 +534,8 @@ describe("what a sign-in was granted, and what it asks for (ruling 192)", () => 
    *  missing, which is what a canary that drops it produces. */
   const publicHalf = z.object({ status: z.string(), scope: z.string().nullable().optional() });
 
-  /** The public half as a row written before ruling 192 held it: every field
-   *  but `scope` (zod drops the key it does not name). */
+  /** The public half as an older row holds it: every field but `scope` (zod
+   *  drops the key it does not name). */
   const publicWithoutScope = z.object({
     status: z.string(),
     expiresAt: z.string().nullable(),
@@ -580,7 +580,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 192)", () => 
     expect(mcpRow()?.oauth?.scope).toBeNull();
   });
 
-  it("a sign-in stored before ruling 192 learns its grant at boot from the sealed token scope, once", async () => {
+  it("a sign-in stored without a public scope learns its grant at boot from the sealed token scope, once", async () => {
     // Live 2026-09-25: the owner's cloudflare-api sign-in predates the public
     // scope, so every surface would name no grant until a refresh repeated it.
     await startServer({ grantedScope: CLOUDFLARE_READ_ONLY_GRANT });
@@ -623,7 +623,7 @@ describe("what a sign-in was granted, and what it asks for (ruling 192)", () => 
     await expect(saveMcpServer(db, { ...base, requestedScopes: 'zone.read "x"' }, ADMIN.actor)).rejects.toThrow(
       'The requested scope "x" is not one OAuth allows',
     );
-    // Empty: the resource's advertised scopes, as before ruling 192.
+    // Empty: the resource's advertised scopes, the default.
     await signIn();
     expect(server.authorizeRequests.at(-1)?.get("scope")).toBe("mcp.read mcp.write");
     // A token reply that names no scope granted what was asked (RFC 6749 §5.1).

@@ -23,7 +23,7 @@ import { resolvePacket } from "./packet-resolution.server";
 import { releaseDependents, setTaskDependencies } from "./dependencies.server";
 
 /**
- * Ruling 125 (pass 34, A15): the two live holds convert by setting the
+ * Ruling 57 (pass 34, A15): the two live holds convert by setting the
  * list, and Viberr releases them itself. Both shapes drive the REAL
  * `runOperator` behind a controlled Codex adapter, so the run start flips
  * `waiting` to `agent` and the settle is actually exercised.
@@ -82,7 +82,7 @@ const planStep = (tool: string, reason: string) => ({
   blockedBy: null,
 });
 
-describe("ruling 125: converting the two live holds", () => {
+describe("ruling 57: converting the two live holds", () => {
   let ctx: TestDbContext;
   let store: TestStore;
   let adapter: ControlledAdapter;
@@ -99,7 +99,7 @@ describe("ruling 125: converting the two live holds", () => {
       repo: null,
       // A person approves the move out of In Progress, as on the live board
       // then: a release turn that stops there settles, and draws no stranded
-      // nudge (the Standard template's move is `auto` since ruling 120).
+      // nudge (the Standard template's move is `auto`, ruling 91).
       workflow: REVIEW_APPROVAL_WORKFLOW,
       agents: [
         {

@@ -93,7 +93,7 @@ export type EnsureDefaultBranchResult =
 export interface EnsureDefaultBranchContext {
   dataRoot?: string;
   /** Ruling 227: what waited on the base, for the timeline line. Omitted,
-   *  the task's branch (ruling 227's first caller). */
+   *  the task's branch (its first caller). */
   before?: "task-branch" | "operator-checkout";
 }
 

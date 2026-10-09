@@ -139,9 +139,10 @@ The module map, directory by directory, is [`codebase-map.md`](codebase-map.md).
   change, run start or interrupt) writes an audit event and, when a person would see it, a
   typed timeline event in `task.md`.
 - Secrets never appear in files under `projects/`, in logs, in SSE payloads or in error
-  messages. The instance's own keys (`VIBERR_SECRET_ENCRYPTION_KEY`, with `_PREVIOUS` for
-  rotation, and `VIBERR_SESSION_SECRET`) come from the environment, or from
-  `state/instance-secrets.json` when unset (ruling 38); every secret a person
+  messages. The instance's own keys (`VIBERR_SECRET_ENCRYPTION_KEY` and
+  `VIBERR_SESSION_SECRET`) come from the environment, or from
+  `state/instance-secrets.json` when unset (ruling 38), and a rotation's retired keys only
+  from `VIBERR_SECRET_ENCRYPTION_KEY_PREVIOUS`; every secret a person
   enters (a GitHub PAT, an agent API key or token, an OAuth client secret, S3 audit
   credentials, an MCP server credential) is sealed with AES-256-GCM in SQLite
   (`app/server/secrets/secret-box.server.ts`), and a vendor sign-in lives only in its
@@ -185,7 +186,7 @@ How binding decisions and the documentation are kept, what the repository holds,
 
 ### 3. The repository holds what ships, its tests, its tooling and one docs set
 
-The tree holds the app, its tests, its tooling and `docs/`. Planning notes, pass ledgers, QA evidence and design mocks stay out: the outcome goes into the code, a docs page or a ruling, and the working notes into the pull request. That history is in git (commit `d423716` is the last that holds it), where pass and finding ids in code comments resolve. The shipped app is the design source (ruling 275). `README.md` is the front door, and `docs/getting-started.md` walks a first instance from `docker compose up` to a task's first run. Every skill under `.claude/skills/` resolves in a fresh clone. Viberr is MIT-licensed: the root `LICENSE` names Akın Özer as copyright holder and `package.json` declares `"license": "MIT"`. Code adapted from other projects keeps its own licence, recorded in `THIRD_PARTY_NOTICES.md`, and a vendored work whose licence cannot be confirmed is not carried. No page or entry point calls Viberr pre-production.
+The tree holds the app, its tests, its tooling and `docs/`. Planning notes, pass ledgers, QA evidence and design mocks stay out: the outcome goes into the code, a docs page or a ruling, and the working notes into the pull request. That history is in git (commit `d423716` is the last that holds it), where pass and finding ids in code comments resolve. The shipped app is the design source (Conventions, UI rules). `README.md` is the front door, and `docs/getting-started.md` walks a first instance from `docker compose up` to a task's first run. Every skill under `.claude/skills/` resolves in a fresh clone. Viberr is MIT-licensed: the root `LICENSE` names Akın Özer as copyright holder and `package.json` declares `"license": "MIT"`. Code adapted from other projects keeps its own licence, recorded in `THIRD_PARTY_NOTICES.md`, and a vendored work whose licence cannot be confirmed is not carried. No page or entry point calls Viberr pre-production.
 
 ### 4. The PRD is one copy and states only what the product is held to
 
@@ -274,7 +275,7 @@ names the value used ("; using <fallback>."). Formats: `docs/architecture/file-f
 (b) An evidence row is `- [<status>] <label> · <result>`, status `pass | fail | info`, label and
 result each at most 200 characters (`normalizeEvidenceRows`). `—` (`EVIDENCE_EMPTY_COLUMN`) means
 no result. It is the one dash a server string may carry (ruling 292), and the page never
-shows it. An unknown status reads as `info`, never `pass`. A row with no
+shows it. A supplied row with an unknown status is written as `info`, never `pass`. A row with no
 status, `<label> · <a> · <b>`, reads as `info` with its two cells as the result
 (`parseEvidenceRow`) and is written in the current shape on the file's next write.
 
@@ -288,17 +289,17 @@ profile, and only where exactly one reported result matches. It writes with `sta
   non-terminal stages and deployed agents holding `report-validation-verdict`. Its writer refuses
   anything else by name and writes nothing (ruling 89).
 - `project.md` `gates` is absent when none are declared. Its limits are in
-  `project-file.schema.ts`: at most 10 gates, timeouts 1–3600 s, default 600. Only
-  `setProjectGates` (`edit-policy`) writes it (ruling 104).
+  `project-file.schema.ts`: at most 10 gates, timeouts 1–3600 s, default 600. On an
+  existing project only `setProjectGates` (`edit-policy`) writes it (ruling 104); a board
+  import seeds it through the same checks (`validateProjectGates`).
 - `task.md` `gateRun` keeps the latest run only, bound to revision and head sha. A malformed
   record reads as absent, and absent blocks. Gate logs never count as files a run produced
   (`isGateLogName`).
 - `completionPacket` binds to `reviewSubjectId`, so a new revision or delivery makes it stale.
   Verdicts and the diff are never copied in (ruling 103).
 - Only `epic-writer.server.ts` writes epic files, minting ids by directory scan under a
-  per-project lock. An epic's status and deletion are ruling 272's. Boot's idempotent
-  `convertGoalsToEpics` turns a chained-goal file into the epic with its number and files it
-  under `goals/converted/` (ruling 273).
+  per-project lock. An epic's status and deletion are ruling 272's; boot converts chained-goal
+  files into epics once (ruling 273).
 
 ### 18. No write puts the app's bytes back over another writer's
 
@@ -314,7 +315,9 @@ the bytes sent, with no trim and no separator. The caller owns separators.
 
 (c) A replace that names the version it read (`replaces`, from `storeDocVersion`) is refused if
 the file has changed since, writing nothing. The store browser's editor always sends the version
-and keeps the typed text on a refusal.
+and keeps the typed text on a refusal. A replace naming a version of a file longer than the
+256 KB the editor opens is refused, writing nothing, because the editor held only its first part
+(ruling 212).
 
 ### 19. Attachments are read and written as the files they are, within size bounds
 
@@ -446,7 +449,7 @@ controller transcript, including those about projects they are not a member of.
 A control a role cannot use is withdrawn, not disabled. It is withdrawn on the same
 `ACTION_ROLES` entry the guard enforces, and the loader redacts on the same rule: only
 `grant-github-scope` holders see the credential card. A task's dollar cost shows to every project
-member on its card and in the controller's task reads; Insights is for org admins only.
+member on its completion card and in the controller's task reads; Insights is for org admins only.
 
 ### 28. Sign-in leads with what works, OAuth is configured and proven in the app, and one origin check guards actions
 
@@ -487,7 +490,7 @@ Changes audit `org.user.github_handle.set` / `.cleared` with the previous value.
 ### 30. Preferences route notifications in-app only; reduced motion comes from the OS
 
 There is no mailer. Each notification category has one in-app toggle, on by default. Plural
-preference ids map to notification kinds in one place (`notification-prefs.ts`). `ghConnected`
+preference ids map to notification kinds in one place (`notification-prefs.ts`). `githubConnected`
 is derived from the user row, never stored. OS `prefers-reduced-motion` is the only motion
 signal.
 
@@ -496,7 +499,9 @@ signal.
 Instance settings (`/org/settings`) is for org admins only. Instance-wide policy lives in
 `instance_settings`, which never holds a secret. The Claude run spend cap, `maxRunSpendUsd`, is
 blank by default and has no per-profile field. Each change is audited as
-`org.run_spend_cap.changed` with the values before and after. Enforcement is ruling 159.
+`org.run_spend_cap.changed` with the values before and after. Enforcement is ruling 159. The run concurrency cap,
+`maxConcurrentRuns`, is instance policy too: each change is audited as
+`org.run_concurrency_cap.changed` with the value before and the clamped value stored after.
 
 ### 32. A board travels as a board file, through Instance settings only
 
@@ -525,8 +530,9 @@ import is recorded as `project.created` with `template: "imported"`.
   alone).
   Export, retention and freshness reads still see every row. The org-scoped view is its own
   query.
-- **Controller search:** `inspect_audit_log` matches `action` as an escaped, end-anchored
-  prefix (`actionPrefix`), while the CSV/JSON export keeps exact match. An empty filtered result
+- **Controller search:** `inspect_audit_log` matches `action` as a prefix
+  (`actionPrefix`: the caller's `%` and `_` escaped, the wildcard only at the end), while
+  the CSV/JSON export keeps exact match. An empty filtered result
   says it matched nothing, and every reply lists the action ids in the window, with counts.
 - **Content:** a row records what happened, never what was said. `controller.conversation.deleted`
   names the starter, how the deleter held the right and the counts, never the title or content,
@@ -672,7 +678,7 @@ How a task's state is stored and shown, how a task is created, owned, moved, sch
 
 `READINESS_VALUES` (`app/schemas/task-file.schema.ts`) is the only stored readiness: `ready`, `input_required`, `inconsistency_risk_detected`, `blocked`, shared by task files, Zod and SQLite. Every surface renders `displayReadiness`, derived server-side in `deriveDisplayReadiness` and `withLiveRun` (`app/shared/mapping/task.server.ts`) and never re-decided in a component. In order:
 
-- while `waiting === "agent"`, `ready` and `input_required` show `agent_working`, or `agent_queued` while the carrying run is parked by the concurrency cap (`liveRunStateByTask`, controller turns excluded); a packet-less, list-less stored `blocked` hold carried by an agent also shows `agent_working`; otherwise `blocked` and `inconsistency_risk_detected` never yield;
+- while `waiting === "agent"`, `ready` and `input_required` show `agent_working`, or `agent_queued` while the carrying run is parked (by the concurrency cap, or held while its session is compacted, ruling 175; `liveRunStateByTask`, controller turns excluded); a packet-less, list-less stored `blocked` hold carried by an agent also shows `agent_working`; otherwise a stored `blocked` or `inconsistency_risk_detected` never shows `agent_working`;
 - a decided `edit_goal` packet shows `goal_edit_pending`, unless an agent carries the task;
 - a stored `ready` with `waiting: human` and an open `input` packet shows `input_required`.
 
@@ -680,12 +686,12 @@ How a task's state is stored and shown, how a task is created, owned, moved, sch
 
 ### 45. A task resting on a clock reads "schedule", never "waiting on a human"
 
-The file's `waiting` says who is next. The projection (`app/server/projections/rebuilder.server.ts`) derives two values nobody writes: `none` at the terminal stage, and `schedule` when the file says exactly `human`, a schedule occurrence is pending, `blockedBy` is empty, the task is not archived, and nobody could act now: no open packet, no live recommendation, and no completion a person could accept (`acceptanceRefusal` null and `isAtAcceptanceBoundary`). A decision a person owes always outranks the clock, because the decisions inbox reads this column. Every reader uses the derived value: card, board subtitle and filters, review queue, the task page's "Waiting on" rail and the controller's board summary, which counts clock rests apart and names the instant. The no-activity cue's idle clock restarts at the due instant. A derived promise is bounded by what the mechanism behind it will actually do.
+The file's `waiting` says who is next. The projection (`app/server/projections/rebuilder.server.ts`) derives two values over it: `none` at the terminal stage, and `schedule`, which no file holds, when the file says exactly `human`, a schedule occurrence is pending, `blockedBy` is empty, the task is not archived, and nobody could act now: no open packet, no live recommendation, and no completion a person could accept (`acceptanceRefusal` null and `isAtAcceptanceBoundary`). A decision a person owes always outranks the clock, because the decisions inbox reads this column. Every reader uses the derived value: card, board subtitle and filters, review queue, the task page's "Waiting on" rail and the controller's board summary, which counts clock rests apart and names the instant. The no-activity cue's idle clock restarts at the due instant. A derived promise is bounded by what the mechanism behind it will actually do.
 
 ### 46. "Blocked or waiting" selects stuck work; "Waiting on me" is the viewer's own
 
 - The board's "Waiting on me" chip and Home's waiting count are member-scoped (`waitingOnMe`: an open decision this viewer can act on). The review queue's rows are project-wide, split per viewer into "Waiting on your acceptance" and "Still in review" (`review-queue.server.ts`).
-- "Blocked or waiting" (`?filter=risk`, `matchesBoardFilter` in `app/features/board/board-filters.ts`) is project-wide and selects work that cannot proceed: stored `blocked` or `inconsistency_risk_detected`; `input_required` unless an agent carries the task or it rests on a schedule; `waiting: human` with an open packet of either type, whatever the stored readiness; failing validation; urgent; a PR closed without merging. A human-next task with no open packet is not selected. Archived tasks match only the Archived filter.
+- "Blocked or waiting" (`?filter=risk`, `matchesBoardFilter` in `app/features/board/board-filters.ts`) is project-wide and selects work that cannot proceed: stored `blocked` or `inconsistency_risk_detected`; `input_required` unless an agent carries the task or it rests on a schedule; `waiting: human` with an open packet of either type, whatever the stored readiness; failing validation; urgent; a PR closed without merging. `waiting: human` without an open packet selects nothing by itself. Archived tasks match only the Archived filter.
 - A question asked while an agent works (an open `input` packet beside `waiting: agent`) does not hold the work: the card keeps the agent's seat and adds "waiting on you" for the viewer who owes it, the task page draws the packet as not blocking, and the task stays out of "Blocked or waiting".
 
 ### 47. Stages are a per-project list; a backward move carries its reason
@@ -696,7 +702,7 @@ The file's `waiting` says who is next. The projection (`app/server/projections/r
 
 ### 48. A task is created at the entry stage, whole, in one write
 
-`createTask` (`app/server/tasks/task-edits.server.ts`, `create-task` tier) creates only at the entry stage: a non-entry `stageId` is refused by name, and the board offers New task on the entry lane only. File fixtures (`createTaskFile`) may still seed mid-stage tasks. In the write that creates `task.md`, before the operator's `create` trigger, it seats a named owner (`ownerUserId`, contributor or above via `requireOwnable`), the epic, the wait (`blockedBy`) and the files it was filed with (checked before a key is allocated, ruling 76), so triage and billing see them; `task.created` records `seat: creator | named | none`. Agents never invent tasks: the operator offers a `create_task` option a person confirms (ruling 67), and the controller creates tasks only as the instrument of the person asking. Every event of the creating write shares one instant (ruling 72).
+`createTask` (`app/server/tasks/task-edits.server.ts`, `create-task` tier) creates only at the entry stage: a non-entry `stageId` is refused by name, and the board offers New task on the entry lane only. The file writer beneath it (`createTaskFile`) takes any stage, so test fixtures seed mid-stage tasks through it. In the write that creates `task.md`, before the operator's `create` trigger, it seats a named owner (`ownerUserId`, contributor or above via `requireOwnable`), the epic, the wait (`blockedBy`) and the files it was filed with (checked before a key is allocated, ruling 76), so triage and billing see them; `task.created` records `seat: creator | named | none`. Agents never invent tasks: the operator offers a `create_task` option a person confirms (ruling 67), and the controller creates tasks only as the instrument of the person asking. Every event of the creating write shares one instant (ruling 72).
 
 ### 49. A title is corrected under the goal's tier; planning metadata is advisory
 
@@ -727,7 +733,7 @@ A stored `blocked` with no open packet and an empty `blockedBy` is a hold (the `
 
 ### 55. `blockedBy` names what a task waits on
 
-`task.md`'s `blockedBy` lists task keys in the same project; `EPIC` is a reserved task-key prefix every `taskPrefix` writer refuses. While the list is non-empty, `deriveReadiness` floors readiness at `blocked`, the task is `waiting: none` unless a packet or recommendation is open, and no agent runs or delivers (ruling 56). Every writer (a person under `edit-task-meta`, the controller under the asker's gate, the operator's `set_dependencies`, and packet options) goes through `setTaskDependencies` (`app/server/tasks/dependencies.server.ts`). A write refuses, naming the reference: unparseable, the task itself, not a task here, archived, a cycle, or an added entry already done; an archived task's list is frozen. Each write leaves a "Dependencies updated" note and a `task.dependencies.updated` audit row. Entry states (`open`, `done`, `failed`, `missing`) are resolved at read time: a task archived at the terminal stage is `done`, one archived before it was done is `failed`. Epics order and hold nothing; an open epic whose last open task finishes says so once in its history and tells its lead, and marking it done stays a person's call.
+`task.md`'s `blockedBy` lists task keys in the same project; `EPIC` is a reserved task-key prefix every `taskPrefix` writer refuses. While the list is non-empty, `deriveReadiness` floors readiness at `blocked`, the task is `waiting: none` unless a packet or recommendation is open or an agent carries it, and no agent runs or delivers (ruling 56). Every writer (a person under `edit-task-meta`, the controller under the asker's gate, the operator's `set_dependencies`, and packet options) goes through `setTaskDependencies` (`app/server/tasks/dependencies.server.ts`). A write refuses, naming the reference: unparseable, the task itself, not a task here, archived, a cycle, or an added entry already done; an archived task's list is frozen. Each write leaves a "Dependencies updated" note and a `task.dependencies.updated` audit row. Entry states (`open`, `done`, `failed`, `missing`) are resolved at read time: a task archived at the terminal stage is `done`, one archived before it was done is `failed`. Epics order and hold nothing; an open epic whose last open task finishes says so once in its history and tells its lead, and marking it done stays a person's call.
 
 ### 56. A dependency hold refuses every agent run and every delivery
 
@@ -743,7 +749,7 @@ The release engine (`releaseTask` and `announceRelease`, run from task-write hoo
 
 ### 59. The Blocked-by editor offers the project's tasks and the writer's refusals
 
-Each wait entry is a chip with a remove cross; a cross saves the list without it at once and first asks "Release <key>?" when nothing open would remain. The editor's field reads `GET /projects/:slug/tasks/:key/dependency-candidates` (member-only, `listDependencyCandidates`): every other task, newest first, with title, stage and the refusal the writer would give it as a new entry (`archived`, `cycle` with its chain, `done`), worded by the same sentences the writer throws (`app/shared/dependency-candidates.ts`); barred tasks are dimmed and cannot be added. Save posts the full canonical list through `set-task-dependencies`; an empty list releases; an entry that can never complete blocks Save until it is taken out.
+Each wait entry is a chip with a remove cross; a cross saves the list without it at once and first asks "Release <KEY>?", naming the waiting task, when nothing open would remain. The editor's field reads `GET /projects/:slug/tasks/:key/dependency-candidates` (member-only, `listDependencyCandidates`): every other task, newest first, with title, stage and the refusal the writer would give it as a new entry (`archived`, `cycle` with its chain, `done`), worded by the same sentences the writer throws (`app/shared/dependency-candidates.ts`); barred tasks are dimmed and cannot be added. Save posts the full canonical list through `set-task-dependencies`; an empty list releases; an entry that can never complete blocks Save until it is taken out.
 
 ### 60. A file lease gives one task a shared path until it finishes
 
@@ -825,7 +831,7 @@ Contributors and above hold `attach-file`, its own RBAC row. Every upload door (
 
 ### 77. A file belongs to whoever claims it
 
-A completion credits its run with the files saved in the run's window, except names claimed by a person's note (the `attachments:` of a filing, upload or comment), by a relay comment, or by a writer still putting a file down. `withAttachmentClaims` (`task-attachments.server.ts`) holds a writer's names in memory from before the files land until the claiming entry is written; `attachTaskFile`, `relayToTask` and `takeFromTask` write inside it, and a completion reads held names after listing its files and before reading the timeline. A file lands with its claim or not at all: if the claim cannot be written, every file put is taken back. A writer releases only its own entry. Filing a new task needs no hold. An unclaimed file is credited to the next completion.
+A completion credits its run with the files saved in the run's window, except names claimed by a person's note (the `attachments:` of a filing, upload or comment), by a relay comment, or by a writer still putting a file down. `withAttachmentClaims` (`task-attachments.server.ts`) holds a writer's names in memory from before the files land until the claiming entry is written; `attachTaskFile`, a comment's files, `relayToTask` and `takeFromTask` write inside it, and a completion reads held names after listing its files and before reading the timeline. A file lands with its claim or not at all: if the claim cannot be written, every file put is taken back. A writer releases only its own entry. Filing a new task needs no hold. An unclaimed file is credited to the next completion.
 
 ### 78. Runs post files on the task thread; the browser's working files are pruned
 
@@ -878,7 +884,7 @@ Each kept files delivery, never a revision, is then pictured from its kept copy 
 Whether a run may record a verdict is decided per run (`collab` in `app/server/tasks/specialist-run.server.ts`, `verdictAuthorized` in `agent-completion.server.ts`):
 
 - A run dispatched to deliver, fresh or resumed, is offered no verdict, and completion discards any verdict it states: the deliverer mints, others judge. A review run whose profile is handed delivery mid-run keeps its verdict.
-- A run dispatched with `withholdVerdict` (the deadlock question, `run_agent`'s `noVerdict`) gets no verdict field or prompt line, and `agent_runs.verdict_withheld` stops the prose fallback. The engagement is untouched: the reviewer stays verdict-capable and required.
+- A run dispatched with `withholdVerdict` (the deadlock question, `run_agent`'s `noVerdict`) gets no verdict field or prompt line on Claude, and `agent_runs.verdict_withheld` makes completion record no verdict from it: a verdict its Codex envelope fills anyway (the schema is static) is discarded, and the prose fallback does not run. The engagement is untouched: the reviewer stays verdict-capable and required.
 - A run whose workspace could not be provisioned records no verdict (`agent_runs.no_checkout`), and its note names the missing checkout.
 - The prose classifier is a fallback for silence only, never for a run that asked a question.
 
@@ -888,7 +894,7 @@ Verdicts are last-write-wins per reviewer and subject. A verdict's `reason` is c
 
 ### 89. Acceptance waits on the task's reviewers and the project's; a required reviewer never delivers
 
-Two sets gate acceptance. The task's own set is every engaged, non-delivering, verdict-capable engagement (`requiredReviewers(fm)`, checked by `acceptanceBlockedReason`). The project's rule (`requiredReviewers: [{ stageId, profileId }]` in project.md) adds each named agent, engaged or not: `requiredReviewerRefusals` (`app/server/tasks/required-reviewers.server.ts`) requires its approve on the current subject and holds nothing before a delivery. The acceptance gate, `validation_block_reason`, the operator snapshot and the controller's `get_project` read it. Its one writer is `setRequiredReviewers` (Settings and the controller's `set_required_reviewers`, `edit-policy` tier), audited `project.required_reviewers.updated`.
+Two sets gate acceptance. The task's own set is every engaged, non-delivering, verdict-capable engagement (`requiredReviewers(fm)`, checked by `acceptanceBlockedReason`). The project's rule (`requiredReviewers: [{ stageId, profileId }]` in project.md) adds each named agent, engaged or not: `requiredReviewerRefusals` (`app/server/tasks/required-reviewers.server.ts`) requires its approve on the current subject and holds nothing before a delivery. The acceptance gate, `validation_block_reason`, the operator snapshot and the controller's `get_project` read it. On an existing project its one writer is `setRequiredReviewers` (Settings and the controller's `set_required_reviewers`, `edit-policy` tier), audited `project.required_reviewers.updated`; a board import sets it when it creates the project (ruling 32).
 
 An agent the rule names never delivers on the project: `assignSpecialist` refuses it `delivers: true`, and with no delivery asked it is engaged to review, which the Run control says before the click. Since a verdict never binds to its agent's own work (`reviewSubjectAuthor`), a task whose deliverer or subject author is a required reviewer is refused with the remedy: another agent delivers, or an admin force-accepts.
 
@@ -916,7 +922,7 @@ The operator snapshot carries `consecutiveRequestChanges` for each engaged revie
 
 ### 94. From round three Viberr raises a review-deadlock decision itself
 
-When a binding `request_changes` leaves a reviewer's `consecutiveRequestChanges` at `REVIEW_DEADLOCK_ROUNDS` (3) or more, the verdict's own locked write adds a decision packet (`buildReviewDeadlockPacket`, `app/server/tasks/review-deadlock.server.ts`), unless a packet is open or the task is closed. The policy engine writes it, not the operator, so `generate-packets` is not consulted: an `input` packet "<Reviewer> has requested changes N times running", audited `task.review.deadlock`; the completion that raised it hands nothing to the operator. Options: `question_reviewer` (the reviewer answers `REVIEW_DEADLOCK_QUESTION` in a comment with its verdict withheld; queued on a held task, ruling 66), "Let the rework continue" ("Rework once against this verdict" when the objection is itself the answer), and `force_accept`; replacing the reviewer is prose only. The question is recommended only while unanswered in the streak. An escalation skipped for an open packet is retried when that packet is resolved or withdrawn as superseded (`retryReviewDeadlockEscalation`), unless the timeline already carries its title at that count.
+When a binding `request_changes` leaves a reviewer's `consecutiveRequestChanges` at `REVIEW_DEADLOCK_ROUNDS` (3) or more, the verdict's own locked write adds a decision packet (`buildReviewDeadlockPacket`, `app/server/tasks/review-deadlock.server.ts`), unless a packet is open or the task is closed. The policy engine writes it, not the operator, so `generate-packets` is not consulted: an `input` packet "<Reviewer> has requested changes N times running", audited `task.review.deadlock`; the completion that raised it hands nothing to the operator. Options: `question_reviewer` (the reviewer answers `REVIEW_DEADLOCK_QUESTION` in a comment with its verdict withheld; queued on a held task, ruling 66), "Let the rework continue" ("Rework once against this verdict" when the objection is itself the answer), and `force_accept`; replacing the reviewer is prose only. The question is recommended only while unanswered in the streak. An escalation skipped for an open packet is retried when that packet is resolved or withdrawn as superseded (`retryReviewDeadlockEscalation`), unless the timeline already carries that reviewer's own title at that count (the raise's entry title, or the opening of the retry's note); two reviewers at the same count are two escalations, so answering one raises the other's.
 
 ## Acceptance
 
@@ -940,11 +946,11 @@ Force-accept (`forceAcceptCompletion`, admin-only `force-accept-completion`) ski
 
 ### 99. Acceptance offers are bound to the revision they were made for and say what the record holds
 
-Every `accept_completion` recommendation carries `forHeadSha` and renders "for revision <sha>". `withdrawAcceptanceOffers` (`app/server/tasks/task-mutation.server.ts`) removes acceptance cards and terminal-stage transition cards, inside the lock, when a work revision is minted, a decision packet opens, or the task moves off the acceptance boundary, writing a "Recommendation withdrawn" note and a `task.recommendation.withdrawn` row; `run_agent` and `delivery` cards survive. The card's words come from the record: `acceptanceOfferBasis` names who approved what is accepted, or that no verdict is recorded and whom the project requires, and the merge promise appears only when a pull request exists, never on the agent's `noChanges` flag. No offer comes before a current completion packet (ruling 103).
+Every `accept_completion` recommendation carries `forHeadSha` and renders "for revision <sha>". `withdrawAcceptanceOffers` (`app/server/tasks/task-mutation.server.ts`) removes acceptance cards, inside the lock, when a work revision is minted, a decision packet opens, or the task moves off the acceptance boundary, and on the last two also transition cards into the terminal stage, writing a "Recommendation withdrawn" note and a `task.recommendation.withdrawn` row; `run_agent` and `delivery` cards survive. The card's words come from the record: `acceptanceOfferBasis` names who approved what is accepted, or that no verdict is recorded and whom the project requires, and the merge promise appears only when a pull request exists, never on the agent's `noChanges` flag. No offer comes before a current completion packet (ruling 103).
 
 ### 100. An acceptance answers the open decision that offers it, and runs the same follow-ups from either door
 
-Two writes set the last stage: `applyAcceptanceWrite` (Accept, a board move, an applied card, force-accept, the operator) and `resolvePacket`'s `accept_completion` option. Both call `afterAcceptance` (the epic all-done check and the dependents' release, ruling 55; the controller's follow-up, ruling 259), the option only for an acceptance it performed. Which acceptances end the task's live runs is ruling 154's. A person's direct acceptance answers an open decision that offers it (`acceptanceAnswerOf`, `app/shared/packet-acceptance-answer.ts`): plain answers `accept_completion`, never `force_accept`; forced answers `force_accept`, else `accept_completion`; the recommended option first; an already-decided packet takes none. The answer clears the packet without a withdrawal, records `task.packet.resolved` with `via`, starts no operator hand-off and is named in the completion event. Any other decision, and every one under the operator's acceptance, is withdrawn with a note and `task.packet.withdrawn`; an open `blocked` packet still refuses a plain acceptance. Every acceptance clears all recommendation cards and marks the task's decision rows read for everyone (`markTaskPacketApprovalRead`).
+Two writes set the last stage: `applyAcceptanceWrite` (Accept, a board move, an applied card, force-accept, the operator) and `resolvePacket`'s `accept_completion` option. Both call `afterAcceptance` (the epic all-done check, ruling 55; the dependents' release, ruling 57; the controller's follow-up, ruling 259), the option only for an acceptance it performed. Which acceptances end the task's live runs is ruling 154's. A person's direct acceptance answers an open decision that offers it (`acceptanceAnswerOf`, `app/shared/packet-acceptance-answer.ts`): plain answers `accept_completion`, never `force_accept`; forced answers `force_accept`, else `accept_completion`; the recommended option first; an already-decided packet takes none. The answer clears the packet without a withdrawal, records `task.packet.resolved` with `via`, starts no operator hand-off and is named in the completion event. Any other decision, and every one under the operator's acceptance, is withdrawn with a note and `task.packet.withdrawn`; an open `blocked` packet still refuses a plain acceptance. Every acceptance clears all recommendation cards and marks the task's decision rows read for everyone (`markTaskPacketApprovalRead`).
 
 ### 101. A task with nothing to deliver closes as "Completed with no changes" through the same verdict gate
 
@@ -1012,7 +1018,7 @@ At triage the operator flags an underspecified goal (`triageQualityGate`, shared
 
 ### 115. A refused trigger settles the task and is written where a person waits
 
-`runOperator` refuses before any run row exists: a closed task refuses every trigger (ruling 52); a non-empty `blockedBy` refuses `create`, `transition` and `scheduled` (`HELD_TRIGGERS`); an open packet refuses `manual` and `scheduled` (`PACKET_REFUSED_TRIGGERS`). Reactive triggers still run; on a held task the held doctrine replaces the stage doctrine and says `run_agent` and `deliver_for_review` are refused (ruling 55). Every refusal arm settles `waiting` (`clearWaitingToHuman`), since a packet opened mid-work does not stop machine triggers. A scheduled occurrence that cannot run, at fire time or at the front of the lease queue, is retired with a timeline note and a final audit row and spends no retry. A `manual` trigger refused at the door gets a note that no run was started; machine triggers stay silent.
+`runOperator` refuses before any run row exists: a closed task refuses every trigger (ruling 52); a non-empty `blockedBy` refuses `create`, `transition` and `scheduled` (`HELD_TRIGGERS`); an open packet refuses `manual` and `scheduled` (`PACKET_REFUSED_TRIGGERS`). Reactive triggers still run; on a held task the held doctrine replaces the stage doctrine and says `run_agent` and `deliver_for_review` are refused (ruling 56). Every refusal arm settles `waiting` (`clearWaitingToHuman`), since a packet opened mid-work does not stop machine triggers. A scheduled occurrence that cannot run, at fire time or at the front of the lease queue, is retired with a timeline note and a final audit row and spends no retry. A `manual` trigger refused at the door gets a note that no run was started; machine triggers stay silent.
 
 ### 116. Every turn is told the standing facts first, on both backends
 
@@ -1032,11 +1038,11 @@ A Codex operator returns one plan over the verbs its policy allows (`operatorPla
 
 ### 120. A drive that leaves its task stranded gets one nudge, then a recorded hold
 
-A live operator run's own transition queues no fresh turn: the reply names the next boundary and the operator walks consecutive `auto` boundaries in one turn. At settle (`maybeResumeStrandedOperator`, `operator-run.server.ts`) a cleanly finished drive whose task has no live run, packet, recommendation, `blockedBy` or pending schedule is stranded when its own move landed it there, its whole Codex plan was refused, it refreshed the branch and stopped (resumed with `REFRESH_ENDED_NUDGE`), or the stage's way out is `auto`. It gets one resume nudge. A nudged drive that again makes no progress (ruling 121) records the durable `heldAtStage` hold with a note and settles to a person. A person's transition, packet answer, goal edit, acceptance, dependency release or Run press lifts it (`liftStageHoldForPerson`); a schedule does not. Nudges share `OPERATOR_TRANSITION_CHAIN_CAP`.
+A live operator run's own transition queues no fresh turn: the reply names the next boundary and the operator walks consecutive `auto` boundaries in one turn. At settle (`maybeResumeStrandedOperator`, `operator-run.server.ts`) a cleanly finished drive whose task has no live run, packet, recommendation, `blockedBy` or pending schedule is stranded when its own move landed it there, its whole Codex plan was refused, it refreshed the branch and stopped (resumed with `REFRESH_ENDED_NUDGE`), or the stage's way out is `auto`. It gets one resume nudge. A nudged drive that again makes no progress (ruling 121) records the durable `heldAtStage` hold with a note and settles to a person. Any stage move, a person's packet answer, goal edit or acceptance, a dependency release, or a person's Run press (`liftStageHoldForPerson`) lifts it; a schedule does not. Nudges share `OPERATOR_TRANSITION_CHAIN_CAP`.
 
 ### 121. Progress is anything the drive did; a refused drive was stopped, not holding
 
-The backstop counts as progress a stage move, a live dispatch, a packet or recommendation, a delivery whose push was attempted (`operatorRun.delivered`: a refused push counts, a withheld grant, missing workspace or failed bootstrap does not) and any governed action that answered `done` or opened a packet. `noteCarriedOutAction` and `planRefusalOf` (`operator-authority.server.ts`) are the one "acted" and "refused" predicates on both backends: the Codex executor's `record` and every Claude tool reply call them. When Viberr refused everything a nudged drive tried, the hold note says the operator was stopped, quotes or points at the refusals, and names the remedies: do what a refusal names, change what made the step impossible, or take the action yourself. Codex's one plan-refused nudge quotes every refusal in full and forbids re-planning the same action; a Claude drive read its refusals in the run and gets no such nudge.
+The backstop counts as progress a stage move, a live dispatch, a packet or recommendation, a delivery whose push was attempted (`operatorRun.delivered`: a refused push counts, a withheld grant, missing workspace or failed bootstrap does not) and any governed action that answered `done` or opened a packet. `noteCarriedOutAction` and `planRefusalOf` (`operator-authority.server.ts`) are the one "acted" and "refused" predicates on both backends: the Codex executor's `record` and every Claude tool reply call them. A Claude governed call that throws counts as refused: the toolkit keeps it through `noteRefusedCall` in the words it failed with, and `strictTool` still answers the model (ruling 136). When Viberr refused everything a nudged drive tried, the hold note says the operator was stopped, quotes or points at the refusals, and names the remedies: do what a refusal names, change what made the step impossible, or take the action yourself. Codex's one plan-refused nudge quotes every refusal in full and forbids re-planning the same action; a Claude drive read its refusals in the run and gets no such nudge.
 
 ### 122. A sweep invokes the operator on any task nothing is moving
 
@@ -1200,11 +1206,11 @@ A dispatch is held when the backend's exhaustion record names the account it wou
 
 ### 153. A run row records whose account it billed and what it was dispatched on; its log answers only its readers
 
-Each `agent_runs` row records `credential_user_id` and `credential_account_id`; `review_subject` (the subject's `reviewSubjectId` or `none`, read at dispatch from the checkout-pinning task-file read and carried across continuity resets; ruling 84); and `started_at`, kept so a historical start can be classified. A run a restart ended is `interrupted` with `interrupted_reason = 'restart'`, while `interrupted_by` holds only a `users.id` or null. A reviewer run's thread id is `r<n>`, its index into the task's supporting engagements (`reviewerIndex`); no other prefix is read. `/resources/run-log` answers a viewer who may not read the run with 404, never 403, and the console treats a window load it aborted itself as neither failure nor answer (`run-log-store.ts`).
+Each `agent_runs` row records `credential_user_id` and `credential_account_id`; `review_subject` (the subject's `reviewSubjectId` or `none`, read at dispatch from the checkout-pinning task-file read and carried across continuity resets; ruling 84); and `started_at`, null while a run waits in the queue, so a restart can tell what was running from what never started (ruling 163). A run a restart ended is `interrupted` with `interrupted_reason = 'restart'`, while `interrupted_by` holds only a `users.id` or null. A reviewer run's thread id is `r<n>`, its index into the task's supporting engagements (`reviewerIndex`); no other prefix is read. `/resources/run-log` answers a viewer who may not read the run with 404, never 403, and the console treats a window load it aborted itself as neither failure nor answer (`run-log-store.ts`).
 
 ### 154. Closing a task ends its live runs; an interrupt says whether a thread survives
 
-A person's acceptance (by the button or a decision packet), force-accept and archive interrupt every running or queued run on the task (`interruptLiveRunsOnClosure` → `interruptRunOnClosure`), audited `runtime.run.interrupted` with reason `task-closed`, the cause and the person, under the system actor. The task gets one "Interrupted by acceptance" note and one `task.acceptance.interrupted_runs` audit row, and no completion of those runs re-invokes the operator. The operator's own acceptance ends no run. An interrupt of a run that never reported a session (reserved before any provider process) says there is no thread to resume; any other says the thread stays resumable.
+A person's acceptance (by the button or a decision packet), force-accept and archive interrupt every running or queued run on the task (`interruptLiveRunsOnClosure` → `interruptRunOnClosure`), audited `runtime.run.interrupted` with reason `task-closed`, the cause and the person, under the system actor. The task gets one note titled for its cause ("Interrupted by acceptance", "Interrupted by force-accept" or "Interrupted by archiving") naming every run, and one `task.acceptance.interrupted_runs` audit row, and no completion of those runs re-invokes the operator. The operator's own acceptance ends no run. An interrupt of a run that never reported a session (reserved before any provider process) says there is no thread to resume; any other says the thread stays resumable.
 
 ## Failures, quotas and recovery
 
@@ -1255,7 +1261,7 @@ Viberr never probes how much of a window is left; it records what runs report, o
 ### 162. A resume that cannot continue its session starts one fresh anchored run and says why
 
 `resumeRun` checks the stored session first (`probeSessionContinuity`) and, when it cannot continue, starts one fresh run anchored on `task.md`, stamps the dead run `run·session_missing` so it is never selected again, and writes a continuity note naming the real loss:
-- `session_missing`: the provider transcript is gone (retention sweep, wiped volume);
+- `transcript_gone`: the provider transcript is gone (retention sweep, wiped volume);
 - `transcript_damaged`: a located Codex rollout whose first line is not `session_meta`; an unreadable file is not evidence, and the session resumes normally;
 - `owner_changed`: the task's owner changed since the session's run, decided from the change itself (the prior run's `credential_user_id`), never by reading another person's home; the note says the transcript is intact but not this principal's to read.
 
@@ -1289,6 +1295,7 @@ What a run records about itself, and how the console, the footer and the input d
 Where the system holds an outcome, reason or class for a run, every sentence describing the run is built from it.
 
 - The timeline's dispatch line follows `startRun`'s `outcome` (`runDispatchLine`): started and streaming, queued behind the concurrent-run cap with nothing streaming yet, or refused with the run's own refusal; a queued run that later starts writes a "Run started" note (`noteRunStarted`). Its display state is ruling 44's.
+- The task page's Waiting-on row titles a queued run with what its row says it waits for (`queuedRunWait`, built by the task loader): the step a held run carries (`SESSION_SETTLING_STEP`, ruling 175), as the Agent-logs footer prints it, and the concurrent-run cap while any of the task's parked runs has none.
 - The Agent-logs footer (`logsFooter`, `runs-panels-derive.ts`) follows the classified failure (ruling 155) for every run kind; only the retry clause depends on kind. A person's interrupt promises a resumable thread only when a session exists (ruling 154); a restart's says only that and points at the task record, since the row cannot tell a re-invoked run from one the crash-loop cap refused (ruling 163).
 - The live step names the running tool, then reads `composing · <tool> · <input> answered` once its result lands (`answeredStep`). Step writes are throttled to one a second; a suppressed one is written when the window closes, never onto a settled row.
 
@@ -1360,7 +1367,7 @@ Every profile kind but the operator requires a `role`, in the project editor and
 
 ### 177. A deployment is its own copy of the template; drift is named and propagation is explicit
 
-A library deploy copies the template's definition, grants and persona onto `project.md` `agents[].definition`, and runs mount from that copy (`effectiveProfileView`); only a deployment with no definition resolves its template live, so a template save never reaches into a copy. Instead the save names each non-archived project whose copy's grants differ (`templateDrift`) or whose persona or `desc` is older (`copiesWithOlderText`). Propagation is an org admin's explicit act (`propagate` on `save_global_agent`, the org modal's box, or "Use the template's grants" on the Agents page, which confirms first): it replaces the copy's three grant lists (`propagateTemplateResources`, audited `project.agent_profile.resources_synced`), the operator's included, and never touches capability policy, model, backend or stages. A copy's persona changes on the Agents page, through `update_agent_deployment`'s `persona`, or by a template save that changes the persona with `propagate`, which rewrites only the copies still running the older text; a summary never propagates. Home: `app/server/org/template-propagation.server.ts`. For a differing resource a board import (ruling 32) offers "Import a copy" (the default) or "Use this instance's", rewriting grants to match.
+A library deploy copies the template's definition, grants and persona onto `project.md` `agents[].definition`, and runs mount from that copy (`effectiveProfileView`); only a deployment with no definition resolves its template live, so a template save never reaches into a copy. Instead the save names each non-archived project whose copy's grants (`listTemplateResourceDrift`) or persona or `desc` (`listTemplateTextDrift`) differ from the template's. Propagation is an org admin's explicit act (`propagate` on `save_global_agent`, the org modal's box, or "Use the template's grants" on the Agents page, which confirms first): it replaces the copy's three grant lists (`propagateTemplateResources`, audited `project.agent_profile.resources_synced`), the operator's included, and never touches capability policy, model, backend or stages. A copy's persona changes on the Agents page, through `update_agent_deployment`'s `persona`, or by a template save that changes the persona with `propagate`, which rewrites every copy whose persona differs from the new one, a project's own edit included; a summary never propagates. Home: `app/server/org/template-propagation.server.ts`. For a differing resource a board import (ruling 32) offers "Import a copy" (the default) or "Use this instance's", rewriting grants to match.
 
 ### 178. The seeded Developer runs on Claude with browser and egress; the Reviewer cannot write
 
@@ -1456,7 +1463,7 @@ The "Files on the task thread" section (`attachmentsDropSection`), the browser s
 
 ### 199. On a board with no repository, agents deliver files
 
-A results board's roster, the base one or the controller's, is written without repository write (ruling 224); its deliverer hands back the files it saves (ruling 128), even once a repository is attached for reading. A run with no checkout keeps a workspace contract: its knowledge-base folders, the attachments folder, and for the deliverer "Your delivery is the files you save on the task"; resumed directives and the operator's no-checkout paragraph say to deliver files with `delivers: true`, never `deliver_for_review` or `update_branch_from_base`, and a delivery attempt is refused naming files delivery. A person's answer to keep a board without a repository (ruling 224) is recorded as `no-repository-<slug>.md` in the project's rulings knowledge base (created as `<slug>-rulings` if none; audited `project.repo.ruling_recorded`): the file's presence is the decision, it moves with `rulingsKb`, board files never carry it, and clearing the rulings knowledge base removes it.
+A results board's roster, the base one or the controller's, is written without repository write (ruling 224); its deliverer hands back the files it saves (ruling 128), even once a repository is attached for reading. A run with no checkout keeps a workspace contract: its knowledge-base folders, the attachments folder, and for the deliverer "Your delivery is the files you save on the task"; resumed directives and the operator's no-checkout paragraph say to deliver files with `delivers: true`, never `deliver_for_review` or `update_branch_from_base`, and a delivery attempt is refused naming files delivery. A person's answer to keep a board without a repository (ruling 224) is recorded as `no-repository-<slug>.md` in the project's rulings knowledge base (created as `<slug>-rulings` if none; audited `project.repo.ruling_recorded`): the file's presence is the decision, it moves with `rulingsKb` (which follows a knowledge base's rename, `resource-references.server.ts`, while a delete leaves the name for settings and runs to report unresolved), board files never carry it, and clearing the rulings knowledge base removes it.
 
 ### 200. Delivery is the operator's decision; a delivering run hands back its work, not a verdict
 
@@ -1464,11 +1471,11 @@ The delivering prompt branches, the seeded Developer's description and its manua
 
 ### 201. A reviewer names everything at once, and is given the standing verdicts and what changed
 
-A reviewer's `request_changes` is the complete list for the revision: it sweeps the whole owned surface, names every change it would block on (unverified ones marked) and says this is the complete set; a genuinely new later finding says why it could not be named before (`specialist-run.server.ts`). Repeated new objections escalate under ruling 94. Because an agent cannot read the timeline, the canonical anchor every fresh specialist run and @mention resume opens with (`canonicalTaskAnchor`) carries up to three standing verdicts with their reasons whole, superseding any it remembers. A reviewer whose newest verdict judged a kept files delivery gets, on its next fresh review run, `rereviewChangesNote` (`specialist-roster.server.ts`): the task's files compared byte for byte with that delivery (`changesSinceKeptDelivery`) as changed, new, gone and unchanged, excluding browser working files, page captures and files only it names. Checks an unchanged file passed still hold, sent-back items are rechecked, and the review stays a full sweep. There is no note on a first review, a commit verdict, an unkept or unchanged delivery, or a comment resume.
+A reviewer's `request_changes` is the complete list for the revision: it sweeps the whole owned surface, names every change it would block on (unverified ones marked) and says this is the complete set; a genuinely new later finding says why it could not be named before (`specialist-run.server.ts`). Repeated new objections escalate under ruling 94. The canonical anchor every fresh specialist run and @mention resume opens with (`canonicalTaskAnchor`) carries up to three standing verdicts with their reasons whole, superseding any it remembers, so no run needs a timeline read to know them (ruling 213). A reviewer whose newest verdict judged a kept files delivery gets, on its next fresh review run, `rereviewChangesNote` (`specialist-roster.server.ts`): the task's files compared byte for byte with that delivery (`changesSinceKeptDelivery`) as changed, new, gone and unchanged, excluding browser working files, page captures and files only it names. Checks an unchanged file passed still hold, sent-back items are rechecked, and the review stays a full sweep. There is no note on a first review, a commit verdict, an unkept or unchanged delivery, or a comment resume.
 
 ### 202. An agent asks a person once, only what they alone know, and relays through one door
 
-`ask_human` declares at most four answer choices on its own schema; a fifth is refused by name with nothing written, and the field text says to keep the genuinely different choices and put the rest in `body`. The Codex envelope, parsed after the run has ended, keeps every option; the packet builder never cuts options, and operator-authored options have no cap. `ASK_HUMAN_ONLY_NOTE` ("Ask what only a person knows or may decide, and put all of it in one question. A choice that is yours to make, make it and state it in your report as an assumption: never ask a person to approve your own choices.") is in Claude's `ask_human` description, the Codex outcome's `question` field and the collaboration note. `report_outcome` and the Codex envelope carry `relay: [{taskKey, text}]`, at most `RELAY_MAX_ENTRIES` (2; the schema refuses a third, the envelope keeps all), posted after completion by `postOutcomeRelays`, with every entry not posted named in one "Not relayed" note (ruling 71).
+`ask_human` declares at most four answer choices on its own schema; a fifth is refused by name with nothing written, and the field text says to keep the genuinely different choices and put the rest in `body`. The Codex envelope, parsed after the run has ended, keeps every option; the packet builder never cuts an agent's options. The operator is asked for two to four options: Claude's `open_decision_packet` keeps however many it sends, and a Codex plan's past the fourth are dropped (`authoredPacketOptions`). `ASK_HUMAN_ONLY_NOTE` ("Ask what only a person knows or may decide, and put all of it in one question. A choice that is yours to make, make it and state it in your report as an assumption: never ask a person to approve your own choices.") is in Claude's `ask_human` description, the Codex outcome's `question` field and the collaboration note. `report_outcome` and the Codex envelope carry `relay: [{taskKey, text}]`, at most `RELAY_MAX_ENTRIES` (2; the schema refuses a third, the envelope keeps all), posted after completion by `postOutcomeRelays`, with every entry not posted named in one "Not relayed" note (ruling 71).
 
 ### 203. Every writer is told never to use gendered pronouns
 
@@ -1535,7 +1542,7 @@ What an agent can read beyond its prompt, how reads page, how a Codex run gets t
 
 (a) `read_board` lists the project's tasks (archived ones included) or answers one key: title, stage, readiness, waits, and for one task its goal, `outcome`, `files`, `timeline` index, kept deliveries and sources (rulings 86, 82). It reads this project only, exposes nothing a member could not read on the task page, and answers a key not on the board as a wrong claim. The goal's own text is capped at 2,000 characters with a marker giving its length and pointing to the task page; the decisions recorded on it (ruling 64) follow whole. `outcome` is the completion summary and each verdict on the current delivery with its whole report, each up to 8,000 characters. `timeline` lists the newest 200 entries by stamp, type, author and title.
 
-(b) A specialist's task anchor (ruling 201) carries the five newest timeline entries clipped at 220 characters; a clipped one names its stamp, and the block counts what it omits, naming the readers to a fresh run that holds them. `read_timeline_entry {occurredAt, taskKey?}` opens one entry whole, of this task or another in the project.
+(b) A specialist's task anchor (ruling 201) carries the five newest timeline entries clipped at 220 characters; a clipped one names its stamp, and the block counts what it omits, naming the readers to a fresh run that holds them. `read_timeline_entry {occurredAt, taskKey?}` opens one entry, up to 40,000 characters and marked `truncated` past them (ruling 72), of this task or another in the project.
 
 (c) Both mount for a specialist holding any collaboration grant (`holdsCollaborationGrant`), for the operator (ruling 117), and for Codex on the gateway's `viberr_board` (ruling 216). Code: `board-read.server.ts`.
 
@@ -1545,11 +1552,11 @@ Every agent holding a collaboration grant has `read_task_attachment {name, taskK
 
 ### 215. One page of any agent read is at most 32,000 bytes
 
-`READ_PAGE_BYTES` (32,000 bytes of UTF-8) bounds one page of every read an agent's run makes, so a page reaches a Codex code-mode tool output whole; it is not keyed on a model. `pageEnd` (`read-page-budget.server.ts`) never splits a surrogate pair and always takes at least one character; offsets stay character offsets. It pages `read_knowledge_doc`, the controller's `read_knowledge_base_doc` (`characters`, `offset`, `nextOffset`; the whole file with no 256 KB cap, because the `version` a replace names hashes the whole file, ruling 212), `read_task_attachment`, `github_read` and the default-branch pager. A paged read says which characters of how many it returned and the offset to read on with, and descriptions say to read and print one page per call.
+`READ_PAGE_BYTES` (32,000 bytes of UTF-8) bounds one page of every read an agent's run makes, so a page reaches a Codex code-mode tool output whole; it is not keyed on a model. `pageEnd` (`read-page-budget.server.ts`) never splits a surrogate pair and always takes at least one character; offsets stay character offsets. It pages `read_knowledge_doc`, the controller's `read_knowledge_base_doc` (`characters`, `offset`, `nextOffset`; the whole file with no 256 KB cap, because the `version` a replace names hashes the whole file, ruling 212), `read_task_attachment` and the default-branch pager, and it cuts one `github_read` answer at a page. A paged read says which characters of how many it returned and the offset to read on with, and descriptions say to read and print one page per call.
 
 ### 216. A Codex specialist gets Viberr's knowledge and board tools from the gateway
 
-A Codex run mounts no in-process Viberr tools, so Viberr's MCP gateway (ruling 191) answers two reserved servers itself (`openOwnSession`): `viberr_knowledge` (`read_knowledge_doc`, `correct_knowledge_doc`), mounted when the run holds any knowledge base (`resolveKnowledgeMcp`), and `viberr_board` (`read_board`, `read_timeline_entry`, `read_task_attachment` and the source readers), mounted when it holds any collaboration grant (`resolveBoardMcp`). Both mount fresh and resumed, act over exactly the run's knowledge bases, project and task (a correction as the run's agent), and share the Claude toolkit's readers, writer, descriptions and refusals. The run gets only the URL and a token that dies with it; the server log records calls without arguments. Without the gateway a Codex run keeps its folder paths and the report-section relay.
+A Codex run mounts no in-process Viberr tools, so Viberr's MCP gateway (ruling 191) answers two reserved servers itself (`openOwnSession`): `viberr_knowledge` (`read_knowledge_doc`, `correct_knowledge_doc`), mounted when the run holds any knowledge base (`resolveKnowledgeMcp`), and `viberr_board` (`read_board`, `read_timeline_entry`, `read_task_attachment`, `read_task_source`, and, where rulings 82 and 194 offer them, `keep_source` and `capture_page`), mounted when it holds any collaboration grant (`resolveBoardMcp`). Both mount fresh and resumed, act over exactly the run's knowledge bases, project and task (a correction as the run's agent), and share the Claude toolkit's readers, writer, descriptions and refusals. The run gets only the URL and a token that dies with it; the server log records calls without arguments. Without the gateway a Codex run keeps its folder paths and the report-section relay.
 
 ### 217. The workspace contract says what a run may read and write outside its working directory
 
@@ -1575,7 +1582,7 @@ A project's token lives only in `github_pats`, sealed, and every project-scoped 
 
 - (a) On Claude the tool-layer denial of `git push`, `gh pr create` and `gh pr merge` (ruling 183) is coverage, not containment. On Codex the boundary is the credential-less agent plus the server-owned delivery gate.
 - (b) `read-github-api` (default off) gives a Claude specialist `github_read`, a GET-only read under its project's `/repos/{owner}/{name}` that the server makes with the project token (`agent-github-read.server.ts`). Codex never gets it, since a subprocess mount would expose the token.
-- (c) The operator and the controller read the default branch through the server (`read_default_branch_file`): one page of whole lines up to `READ_PAGE_BYTES`, continued with `fromLine`.
+- (c) The operator and the controller read the default branch through the server (`read_default_branch_file`, paged as ruling 265 says).
 
 ### 220. Required scopes are `repo` and `pull_request:write`, proven per repository and never by a write
 
@@ -1708,7 +1715,7 @@ The reconciler records `pr.mergeableAt` beside `pr.mergeable`, and every reader 
 
 ### 245. A project member's GitHub approval can be the verdict; a verdict with nothing to bind to is words only
 
-A GitHub approval counts as the approving verdict (`humanVerdictApproval`, `pr-human-approval.server.ts`) only when its `commit_id` is the delivered head, checked when recorded and on every read, and the reviewer's login maps to exactly one enabled project member through `users.github_handle` (its writers are ruling 29). It fails closed with a recorded status (`unlinked_handle`, `ambiguous_handle`, `not_a_member`, `stale_revision`) (the `unlinked_handle` sentence: ruling 29). A gate satisfied this way names the person, the handle and the commit, and never applies to a no-change verification revision. GitHub's own review state is information, not a gate.
+A GitHub approval counts as the approving verdict (`humanVerdictApproval`, `pr-human-approval.server.ts`) only when its `commit_id` is the delivered head, checked when recorded and on every read, and the reviewer's login maps to exactly one enabled project member through `users.github_handle` (its writers are ruling 29). It fails closed with a recorded status: `unlinked_handle` (whose sentence is ruling 29's), `ambiguous_handle`, `not_a_member` or `stale_revision`. A gate satisfied this way names the person, the handle and the commit, and never applies to a no-change verification revision. GitHub's own review state is information, not a gate.
 
 A reviewing agent's verdict binds to nothing, and is recorded in words only, when it judges work that agent made (`reviewSubjectAuthor`) or when nothing on the task has been delivered for it to bind to, an objection included. An approval verifying that a task has nothing for the repository names the task's standing knowledge-base corrections and who made them, and says it is not a review of them when the approving reviewer made them all.
 
@@ -1806,7 +1813,7 @@ Board writes pass `requireVisible`, then the same `requireAction`/`assertProject
 
 ### 267. Knowledge-base and skill writes go by passage and by kind
 
-Store writes are org-admin tools. `edit_skill` replaces one passage of a skill's SKILL.md under `edit_knowledge_base_doc`'s rules (`replacePassage`, ruling 212); the resulting body is judged like every SKILL.md write (ruling 186), and a skill folder or file linking out of the store holds no SKILL.md (`resolveContainedSkillFile`). `save_skill` and `edit_skill` report a body past its budget and `list_skills` carries `chars` and `charsPastBudget`; the controller's own turn reads its skills within `CONTROLLER_SKILL_BUDGET` (ruling 186). `copy_task_file_to_knowledge_base` copies one attachment or kept-delivery file byte for byte as a `kind`: `template` (refused unless its text holds a `[[placeholder]]`), `sample` (stored as `sample-<task key>-<name>`) or `asset`; a taken name needs `replace: true`, and an existing document is never replaced this way. `save_knowledge_base` takes `private`. Proposal entries a document still holds (ruling 210) stay in the context read and `get_project`, and `resolve_kb_proposal` closes one only when a person asks.
+Store writes are org-admin tools. `edit_skill` replaces one passage of a skill's SKILL.md under `edit_knowledge_base_doc`'s rules (`replacePassage`, ruling 212); the resulting body is judged like every SKILL.md write (ruling 186), and a skill folder or file linking out of the store holds no SKILL.md (`resolveContainedSkillFile`). `save_skill` and `edit_skill` report a body past its budget and `list_skills` carries `chars` and `charsPastBudget`; the controller's own turn reads its skills within `CONTROLLER_SKILL_BUDGET` (ruling 186). `copy_task_file_to_knowledge_base` copies one attachment or kept-delivery file byte for byte as a `kind`: `template` (refused unless its text holds a `[[placeholder]]`), `sample` (stored as `sample-<task key>-<name>`) or `asset`; a taken name needs `replace: true`, and an existing document is never replaced this way. `save_knowledge_base` takes `private`. Proposal entries a document holds (ruling 210) stay in the context read and `get_project`, and `resolve_kb_proposal` closes one only when a person asks.
 
 ### 268. What a board delivers decides how the controller builds it
 
@@ -1834,7 +1841,7 @@ An epic is `projects/<slug>/epics/epic-<n>.md`, written only by `epic-writer.ser
 
 ### 273. The controller plans work into epics
 
-The controller's epic tools are `list_epics`, `get_epic`, `create_epic` (its `tasks` puts existing tasks in) and `update_epic` (every field, `addTasks`, `removeTasks`, no delete; `planTasksEpic` checks every key before the fields are written, so a call lands whole or not at all). `list_tasks` names and filters by `epicId` (`none` for no epic), `get_task` names the epic, `create_task` and `update_task` take `epic` (`""` takes a task out), `get_project` summarises the epics, and the board context lists the open ones. An epic records the conversation whose turn created it (`conversationId`), and its page links "Planned in <conversation>" for a viewer who may open that thread. There are no chained goals: nothing writes or reads a goal file, `goalRef`, a goal tool, a Goals panel or a `goal-N link M` wait. Boot converts any goal file it finds into the epic with the goal's number (`convertGoalsToEpics`, `goal-epic-conversion.server.ts`), joining its tasks and respelling their waits by task key, then files the goal away so it converts once; `goal.*` audit rows still read, and nothing writes them.
+The controller's epic tools are `list_epics`, `get_epic`, `create_epic` (its `tasks` puts existing tasks in) and `update_epic` (every field, `addTasks`, `removeTasks`, no delete; `planTasksEpic` checks every key before the fields are written, so a call lands whole or not at all). `list_tasks` names and filters by `epicId` (`none` for no epic), `get_task` names the epic, `create_task` and `update_task` take `epic` (`""` takes a task out), `get_project` summarises the epics, and the board context lists the open ones. An epic records the conversation whose turn created it (`conversationId`), and its page links "Planned in <conversation>" for a viewer who may open that thread. There are no chained goals: no goal tool, Goals panel or `goal-N link M` wait, and nothing writes a goal file or `goalRef`. Boot's `convertGoalsToEpics` (`goal-epic-conversion.server.ts`) is the one reader: it turns any goal file it finds into the epic with the goal's number, joining its tasks (dropping their `goalRef`) and respelling their waits by task key, then files the goal under `goals/converted/` so it converts once. Activity reads `goal.*` audit rows, and nothing writes them.
 
 ### 274. A Done epic's finished tasks archive together
 
@@ -2052,7 +2059,7 @@ These each have one implementation, parameterized where surfaces differ and neve
 - the credential card (`credential-card.tsx`);
 - the bell (`TopBell`), one popover for the topbar, Home and the standalone header.
 
-A plain confirm uses `ConfirmDialog` from `app/ui`. Four dialogs stay hand-written on purpose: repository repair, the New task form, the type-the-name project delete and Home's projection-rebuild confirm. Radiogroups use `RadioSeg`, and glyphs come from `Icon` / `ICON_PATHS`, never a local SVG.
+A plain confirm uses `ConfirmDialog` from `app/ui`. Four dialogs stay hand-written on purpose: the repository Change dialog (`ChangeRepoDialog`), the New task form, the type-the-name project delete and Home's projection-rebuild confirm. Radiogroups use `RadioSeg`, and glyphs come from `Icon` / `ICON_PATHS`, never a local SVG.
 
 Toast, empty-state and error-boundary copy written into the specs is verbatim. That includes board and review wording that deliberately differs.
 
@@ -2172,7 +2179,7 @@ A card's layout never changes with what the task holds, and the card states each
 
 (c) **Saving.** An edit posts only its own property: `set-task-metadata` writes only the fields present, through a fetcher and toast per property. There is no optimistic UI; the trigger reads "Saving…" until the server answers. An unchanged task re-renders none of the panel (`useStableValue`).
 
-(d) **Blocked by.** Entries are `WaitChip`s with removable crosses for editors, and a cross saves at once. A cross that would leave nothing open to wait on asks "Release <key>?" first (ruling 59).
+(d) **Blocked by.** Entries are `WaitChip`s with removable crosses for editors, and a cross saves at once. A cross that would leave nothing open to wait on asks first (ruling 59).
 
 ### 310. Run controls say what will happen and why a run cannot start
 
@@ -2267,7 +2274,7 @@ The controller's dock, composers, transcripts and page, then Home's setup checkl
 - **Where it shows.** Every signed-in surface but `DOCK_HIDDEN_ROUTE_IDS` (ruling 256).
 - **Trigger.** It is named `Controller · <scope>` and carries only the unread dot.
 - **Panel.** The panel (`aria-modal="false"`) has no scrim, focus trap or scroll lock, and an outside press never closes it. Escape closes it, even when pressed on a page control the panel covers.
-- **Small screens.** Under 720 px it is a bottom sheet that can be swiped down to dismiss.
+- **Small screens.** Under 720 px it is a bottom sheet that can be swiped down to dismiss (ruling 285(c)).
 - **Data.** It reloads on `CONTROLLER_UPDATED_EVENT`, not on page revalidation. Its body is a lazy chunk, preloaded on hover or focus.
 - **Empty dock.** The scope sentence sits mid-transcript, with the example list at the transcript's foot, above the composer.
 
@@ -2288,7 +2295,7 @@ Its scope, authority and turns are ruling 256's.
 - **Scrolling.** `useTranscriptFollow` opens a thread at the newest reply's first line. A landing reply scrolls to its first line unless the reader has scrolled up; then `TranscriptJumpButton` offers "New reply", and otherwise "Latest". It sets only the transcript's own `scrollTop`.
 - **Layout.** The transcript is one centred column. The person's messages are bubbles; replies are unframed. Prose breaks long tokens, while code blocks and tables keep their own scrollers.
 - **Screen readers.** A hidden `role="status"` region (`TurnAnnouncer`) says "<name> is working" and "<name> replied: <first sentence>". Working rows are not live regions.
-- **Keyboard.** Both transcripts and the run console are tab stops (`tabIndex={0}`) with an inset focus ring. The outline eraser applies only to `.panel[tabindex="-1"]`.
+- **Keyboard.** Both transcripts and the run console are tab stops (`tabIndex={0}`) with an inset focus ring. The `.panel` outline eraser covers only a script-focused `.panel[tabindex="-1"]`, so these keep the ring.
 - **Names.** People are named by display name, resolved at render. The stored email stays in the prompt.
 
 ### 321. The Controller page is one full-height band under the app header

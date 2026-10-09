@@ -1,5 +1,5 @@
 /**
- * Ruling 22 (F37-37) and ruling 22 (F37-38): what viberr remembers about a
+ * Ruling 22 (F37-37, F37-38): what viberr remembers about a
  * projection that stopped tracking its own files.
  *
  * Viberr's whole claim is that the markdown IS the record and SQLite is a

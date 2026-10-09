@@ -6,17 +6,17 @@ import { z } from "zod";
 import { redactGitOutput } from "~/server/secrets/git-output-redact.server";
 
 /**
- * What this host can run (ruling 40, narrowed by ruling 144).
+ * What this host can run (rulings 40 and 148).
  *
  * G36-2 asked what an agent's shell would actually find here, so the versions
  * of the tools a run reaches for ride `healthSnapshot` — `/resources/health`
  * and the controller's `instance_health` both read them, and a controller can
  * answer "can this deployment build a Go service?" without guessing.
  *
- * The sandbox half is GONE with the sandbox: ruling 144 (owner, 2026-09-12)
- * removed Viberr's use of the Codex CLI's OS sandbox, so there is no longer a
- * confinement to probe, nothing to refuse a run over, and no second question
- * about child processes (ruling 144). What remains is the honest inventory.
+ * There is no sandbox half: Viberr does not use the Codex CLI's OS sandbox
+ * (ruling 144), so there is no confinement to probe, nothing to refuse a run
+ * over, and no second question about child processes. What remains is the
+ * honest inventory.
  *
  * Memoized per process: versions cannot change while the process lives, and
  * each probe spawns a binary. The unit suite never runs them — `setup-env.ts`
@@ -388,7 +388,7 @@ const NPM_REACHABLE: ReadonlySet<keyof Toolchain> = new Set(["pnpm", "yarn"]);
  * to provide, so the two cases must not read alike.
  */
 /**
- * Ruling 204 (pass 37, F37-108): the tools a piece of PROSE plans around that
+ * Ruling 148 (pass 37, F37-108): the tools a piece of PROSE plans around that
  * this host does not have.
  *
  * Word-boundary, case-insensitive, over the labels the probe actually measured
@@ -411,10 +411,9 @@ function absentToolsNamedIn(tc: Toolchain, prose: string): string[] {
 export function shellInventoryPrompt(
   tc: Toolchain,
   /**
-   * Ruling 204: the run's OWN role description, when there is one. Ruling 148
-   * put this measurement into every prompt, and it says what the host lacks —
-   * it did not say "and the role description above plans around three of
-   * them". A contradiction inside one prompt is resolved by the model, and the
+   * Ruling 148: the run's OWN role description, when there is one. The
+   * measurement in every prompt says what the host lacks — it did not say
+   * "and the role description above plans around three of them". A contradiction inside one prompt is resolved by the model, and the
    * persona is the half written with more authority and read first. Live, this
    * instance's Infrastructure Engineer was told it owns "the Docker Compose
    * stack" and that "`make up` is your headline deliverable" while running two
@@ -472,7 +471,7 @@ export function shellInventoryPrompt(
   } else {
     lines.push("", "Every tool this probe knows about is installed.");
   }
-  // Ruling 204: named specifically, because "NOT installed: docker, make" a
+  // Ruling 148: named specifically, because "NOT installed: docker, make" a
   // paragraph below a role description that says the stack is yours is a
   // contradiction the reader has to notice on its own.
   const conflicts = absentToolsNamedIn(tc, persona);

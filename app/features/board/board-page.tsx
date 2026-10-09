@@ -292,8 +292,8 @@ function useRovingStageMenu(active: boolean) {
 }
 
 /**
- * Ruling 306: the trace mark in the card's head — the PR number when a PR
- * exists (the stronger trace; it implies the branch, ruling 306), else the
+ * Ruling 306(d): the trace mark in the card's head — the PR number when a PR
+ * exists (the stronger trace; it implies the branch), else the
  * branch glyph alone with the branch name as its tooltip and accessible name,
  * else nothing. The chip used to print the branch name, which at the board's
  * 218px lanes cut to "shop-6…" and told nobody anything the key beside it had
@@ -326,10 +326,10 @@ function TraceMark({ task }: { task: BoardTask }) {
 }
 
 /**
- * Ruling 306: the card's two seats as one stack at the head's right end — the
- * agent's badge, when an agent carries the task (ruling 306's carrier seat,
- * its profile name now the badge's tooltip and accessible name rather than
- * printed text), then the owner's avatar (ruling 306, unchanged). Nobody
+ * Ruling 306(c): the card's two seats as one stack at the head's right end —
+ * the agent's badge, when an agent carries the task (its profile name is the
+ * badge's tooltip and accessible name rather than printed text), then the
+ * owner's avatar. Nobody
  * carrying the task draws nothing: the ghost owner avatar and a "ready" status
  * already say so, and "no agent" on every Triage card was noise.
  */
@@ -416,9 +416,9 @@ function CardChips({ task }: { task: BoardTask }) {
 }
 
 /** The list row's agent: the badge and the name — the row has the room the
- *  card does not, and ruling 306's name stays printed here. Ruling 306: a
- *  row with no agent keeps the empty seat, so the chips before it hold one
- *  column instead of sliding 7rem right. */
+ *  card does not, so the name stays printed here. A row with no agent keeps
+ *  the empty seat, so the chips before it hold one column instead of sliding
+ *  7rem right (ruling 306). */
 function ListAgent({ task }: { task: BoardTask }) {
   const sp = task.specialist;
   if (!sp) return <span className="list-agent" aria-hidden="true" />;
@@ -1177,6 +1177,7 @@ function NewTaskModal({
     <dialog
       className="modal-card modal-narrow"
       aria-label="New task"
+      data-screen-label="New task modal"
       ref={panelRef}
       // Ruling 76: a screenshot pasted anywhere in the dialog is filed with
       // the task; copied text pasted into a field stays text.

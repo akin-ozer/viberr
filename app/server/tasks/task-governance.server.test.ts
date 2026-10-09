@@ -350,7 +350,7 @@ describe("P3.7 governance & lifecycle fixes", () => {
 describe("transitionStage boundary enforcement", () => {
   it("approval boundary (impl→review): low-role forbidden, maintainer ok", async () => {
     // impl → review as a board declares it an `approval` human gate (the
-    // Standard template's is `auto` since ruling 91; triage → ready is `auto`,
+    // Standard template's is `auto`, ruling 91; triage → ready is `auto`,
     // tested below).
     const store = setupProjectedStore(ctx);
     approveReviewEntry(store);
@@ -3559,14 +3559,14 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
     })!.parsed.goal;
 
   /**
-   * Ruling 64 (owner's call, 2026-09-15) inverted this test's subject.
+   * Ruling 64 (owner's call, 2026-09-15).
    *
-   * Ruling 64 welded a typed directive into the goal "because a person wrote
-   * it". One text box takes both a scope decision and a word to the operator
+   * A typed directive once went into the goal "because a person wrote it".
+   * One text box takes both a scope decision and a word to the operator
    * about its own tooling, so the kind of the answer was unknowable — and live
    * on SHOP-27 a directive that was mostly "call read_board before you offer a
    * create_task option" went into the goal of the orders service, where every
-   * future run on it re-anchors. The line is drawn by CHANNEL now: choosing a
+   * future run on it re-anchors. The line is drawn by CHANNEL: choosing a
    * structured option is a decision and amends the contract; typing free text
    * is conversation and does not.
    */
@@ -3953,10 +3953,10 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
   /**
    * Ruling 67 (pass 37, F37-122): connect it in the direction the work runs.
    *
-   * Ruling 67 let a decision CREATE a task and say what the new task waits on.
-   * A task is usually created to UNBLOCK something, though, so the dependency
-   * points the other way — from the existing work to the new task — and that
-   * direction could not be expressed at all. Live on SHOP-28 the operator wrote
+   * A decision may CREATE a task and say what the new task waits on. A task is
+   * usually created to UNBLOCK something, though, so the dependency points the
+   * other way — from the existing work to the new task — and that direction
+   * once could not be expressed at all. Live on SHOP-28 the operator wrote
    * it into its own packet prose: "add the new amendment key to SHOP-41's
    * waits… only you can add it; I can only set SHOP-28's own." The ordering was
    * settled and recorded, and delivered as a chore in a person's head, with
@@ -4037,17 +4037,17 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
 
   it("ruling 67: when the new task holds the DECIDING task, neither sentence says 'unchanged'", async () => {
     /**
-     * Ruling 67 wrote two sentences saying this task is untouched — the
-     * decision event's own fallback and the note left after the create — and a
-     * comment beside them calling the mutation "a deliberate NO-OP… this option
-     * says something about work that is NOT this task". All true at the time.
+     * Two sentences said this task is untouched — the decision event's own
+     * fallback and the note left after the create — and a comment beside them
+     * called the mutation "a deliberate NO-OP… this option says something about
+     * work that is NOT this task". All true until `newTask.blocks`.
      *
-     * Ruling 67 then added `newTask.blocks`, and nothing keeps the deciding
-     * task off that list — it is the most natural entry on it, because a task
-     * is usually created when the work in front of you cannot proceed without
-     * it. The resolution then writes the new key into this task's own
-     * `blockedBy` seconds after telling the person it was unchanged, and the
-     * board flips it to blocked with two contradicting cards above it.
+     * Nothing keeps the deciding task off `newTask.blocks` — it is the most
+     * natural entry on it, because a task is usually created when the work in
+     * front of you cannot proceed without it. The resolution then writes the
+     * new key into this task's own `blockedBy` seconds after telling the person
+     * it was unchanged, and the board flips it to blocked with two
+     * contradicting cards above it.
      *
      * CANARY: make either sentence unconditional again.
      */
@@ -4104,8 +4104,8 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
   });
 
   it("ruling 67: a create_task that holds nothing here still reads as unchanged", async () => {
-    // The counterweight — ruling 67's sentence was right for its own case and
-    // stays. A fix that hedged every create_task would lose the one fact the
+    // The counterweight — the "unchanged" sentence is right for its own case
+    // and stays. A fix that hedged every create_task would lose the one fact the
     // option exists to convey: the work went somewhere else.
     const store = setupProjectedStore(ctx);
     withTask(
@@ -4370,7 +4370,7 @@ describe("ruling 64: a resolved decision amends the task goal", () => {
 });
 
 /**
- * Ruling 66 (pass 38, F38-8): ruling 66's rule at two more packet arms. A
+ * Ruling 66 (pass 38, F38-8): the hold, at two more packet arms. A
  * retry is a dispatch and a collision ceremony ends in a delivery; both are
  * refused on a held task, and both used to be discovered AFTER the resolution
  * write had cleared the packet.

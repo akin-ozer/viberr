@@ -11,8 +11,8 @@ import type { RunSpec } from "~/server/runtimes/adapter.server";
 
 /**
  * Ruling 69 (live catch, 2026-09-21): the Run-an-agent control with a prompt
- * used to run the agent TWICE — the dispatch, then ruling 69's completion
- * hook redelivering the prompt it had just recorded as the person's own
+ * used to run the agent TWICE — the dispatch, then the completion hook
+ * redelivering the prompt it had just recorded as the person's own
  * `@<agent>` comment, because that comment was written after the run started
  * and so sat inside the "posted after this run started" window. The directive
  * is recorded first now; these cases pin the order and its consequence.
@@ -151,8 +151,8 @@ describe("ruling 69: a prompted manual dispatch runs once", () => {
 /**
  * Ruling 152 (owner, 2026-09-24): a prompted dispatch refused because the agent
  * is already running on the task. The directive is recorded first (ruling 69),
- * so it sits inside the live run's window and ruling 69 delivers it when that
- * run finishes. The person's note used to say "No run started", beside an error
+ * so it sits inside the live run's window and is delivered when that run
+ * finishes. The person's note used to say "No run started", beside an error
  * telling them to wait and start another, which would deliver the words twice.
  */
 describe("ruling 152: a dispatch refused because the agent is running is delivered when it finishes", () => {

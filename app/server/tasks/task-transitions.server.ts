@@ -667,7 +667,7 @@ export async function transitionStage(
   // Ruling 55: a move into the terminal stage can be the last open task of
   // its epic. Fire-and-forget — a task in no epic costs one file read.
   maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
-  // Ruling 55: a move into (or out of) the terminal stage can satisfy a
+  // Ruling 57: a move into (or out of) the terminal stage can satisfy a
   // dependent's wait. Same fire-and-forget posture; the engine converges.
   maybeReleaseDependents(db, ctx, input.projectSlug);
 
@@ -723,7 +723,7 @@ export async function reorderTask(
     beforeKey?: string | null;
     /** Ruling 97 (F21-2): the acceptance disclosure the human acknowledged.
      *  A drop (or a keyboard move) onto the FINAL column is an acceptance — the
-     *  board's own ceremony has fronted it since ruling 97/R18-7 — so the echo
+     *  board's own ceremony fronts it (R18-7) — so the echo
      *  rides through to `transitionStage`, which consults it on the terminal
      *  branch only. A same-stage rank write never reaches a transition at all,
      *  and an ordinary column move is ack-free. Three states, documented on

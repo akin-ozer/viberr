@@ -254,7 +254,7 @@ export function fanOutArrivalText(input: {
 /**
  * Ruling 65: one account window, one decision, for the rest of the window.
  *
- * Ruling 65 answers the siblings that are open when a person decides. A run
+ * The siblings that are open when a person decides are answered then. A run
  * already in flight when the window closed is refused later, at its next
  * model call, and opens its own packet after the decision was made. Live on
  * AWSC-52 at 13:20 a Judge run was refused two minutes after Arda had chosen to

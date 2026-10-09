@@ -33,8 +33,8 @@ export type UnbornCheckoutOutcome =
  * Ruling 227 (F40-12): the operator's checkout of an EMPTY repository is
  * initialized, never handed to a person.
  *
- * Ruling 227 already creates the default branch's first commit, but only when
- * a task branch is prepared, which is a delivering dispatch. The operator runs
+ * `ensureDefaultBranch` also creates the default branch's first commit when a
+ * task branch is prepared, which is a delivering dispatch. The operator runs
  * before any dispatch: live, WEB-1's first operator run cloned `akin-ozer/
  * website`, found an unborn `main`, and opened a packet asking the owner to
  * "push one initial commit (a README)". This is the other path that needs the

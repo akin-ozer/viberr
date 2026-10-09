@@ -48,7 +48,7 @@ export const TASK_RECOMMENDATIONS_ANCHOR = "recommendations";
 export const TASK_TIMELINE_ANCHOR = "timeline";
 
 /** The project Controller page's open proposals (ruling 267), listed inside
- *  its Knowledge base panel since ruling 321. */
+ *  its Knowledge base panel (ruling 321). */
 export const KB_PROPOSALS_ANCHOR = "kb-proposals";
 
 /** One open proposal's entry in that panel. */

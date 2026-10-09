@@ -362,7 +362,7 @@ export function backfillMcpGrantScopes(db: DatabaseSync): string[] {
     filled.push(row.name);
   }
   if (filled.length > 0) {
-    logger.info("recorded the granted scope of MCP sign-ins made before ruling 192", { mcp: filled });
+    logger.info("recorded the granted scope of MCP sign-ins whose public half lacked it", { mcp: filled });
   }
   return filled;
 }

@@ -261,8 +261,8 @@ describe("ruling 218: a record that grows is read to its latest entry on the sub
     // rehearsal the sentence's own words led back to the entry it cited, and
     // the later entry, whose title is about cost, came up only under the
     // feature's name.
-    // What is gone through is the places found, not every later entry: the
-    // entries after ruling 169 are twenty-six pages of a read.
+    // What is gone through is the places found, not every later entry: in the
+    // rehearsal's record the later entries were twenty-six pages of a read.
     expect(editor).toContain(
       "Search the whole kept record, not a cut of it, for the thing that sentence is about, under the name the record gives it and not the sentence's own words, " +
         "which a later entry seldom repeats, and go through every place found in an entry dated after the one cited.",

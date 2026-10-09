@@ -10,16 +10,16 @@ import { defaultTransitionBy } from "~/shared/workflow/transitions";
 import { convertTemplateReviewEntry } from "./review-entry-conversion.server";
 
 /**
- * Ruling 91: the Standard board's move into Review is `auto`. A board created
- * before the ruling carries the template's old approval edge in its
- * project.md, and boot converts it once; an approval a person chose stays.
+ * Ruling 91: the Standard board's move into Review is `auto`. An older board
+ * carries the template's old approval edge in its project.md, and boot
+ * converts it once; an approval a person chose stays.
  */
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-/** The template's In Progress → Review edge as project creation wrote it
- *  before ruling 91. */
+/** The template's In Progress → Review edge as project creation once wrote
+ *  it. */
 const OLD_REVIEW_ENTRY: WorkflowBoundary = {
   from: "impl",
   to: "review",

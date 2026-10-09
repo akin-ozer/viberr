@@ -197,11 +197,11 @@ export type DeliveryOutcome =
        *  sha), or null when git could not name it. */
       headSha: string | null;
       /** Ruling 127: the PR was opened, or the push moved its head. A reuse
-       *  that pushed nothing is `false`, and re-queues nothing (ruling 127). */
+       *  that pushed nothing is `false`, and re-queues nothing. */
       moved: boolean;
       /** Ruling 127: a `delivered` operator run was queued for this outcome
-       *  (full autonomy, moved head). Ruling 127: false for a delivery made by
-       *  a live operator drive — its own lease release decides the follow-up. */
+       *  (full autonomy, moved head). False for a delivery made by a live
+       *  operator drive — its own lease release decides the follow-up. */
       operatorRequeued: boolean;
       /** Ruling 238: where the pushed branch stands against the base, from the
        *  compare the push ran before this returned (or that it could not run
@@ -358,9 +358,9 @@ export async function performDelivery(
   // Every path out after a push goes through the re-compare, the thrown one too.
   let pushedBranch: { branch: string; headSha: string | null } | null = null;
   try {
-    // Ruling 56 (F37-61): a HELD task refuses delivery, for ruling 56's own
-    // reason and against its own live case. Ruling 56 gated every DISPATCH
-    // door after SHOP-2 "pushed a branch cut from a base that predated the
+    // Ruling 56 (F37-61): a HELD task refuses delivery, for the dispatch
+    // gate's own reason and against its own live case. Every DISPATCH door
+    // was gated after SHOP-2 "pushed a branch cut from a base that predated the
     // foundation it waited on" — and publishing that branch to a review PR is
     // this function, which had no `blockedBy` check at all. The operator's
     // turn instruction asserted the gate existed for a pass and a half before
@@ -1076,7 +1076,7 @@ export async function performDelivery(
       );
       return { status: "nothing_to_review", message };
     }
-    // Ruling 227 (F34-4): GitHub ANSWERED. A missing base branch and any other
+    // Ruling 231 (F34-4): GitHub ANSWERED. A missing base branch and any other
     // refusal are named as what they are, never as "unreachable" and never with
     // "fix the credential settings" (nothing is wrong with them).
     if (result.status === "base_branch_missing") {
@@ -1106,7 +1106,7 @@ export async function performDelivery(
        * Ruling 231(b): four statuses shared one remedy, and for the transport one
        * that remedy accuses a configuration that is provably fine.
        *
-       * Ruling 227's own comment twelve lines above states the rule — a GitHub
+       * Ruling 231's own comment twelve lines above states the rule — a GitHub
        * outcome must be "named as what they are, never as 'unreachable' and
        * never with 'fix the credential settings' (nothing is wrong with them)"
        * — and it fixed the `base_branch_missing` arm while leaving the arm that

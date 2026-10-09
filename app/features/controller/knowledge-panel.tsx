@@ -33,8 +33,8 @@ import { useOpResultToast, type ActionResult } from "./op-result";
  * (direct and audited, never a controller turn: an undo is the recorded edit in
  * reverse, with nothing to compose).
  *
- * The proposals agents filed before ruling 210 still stand in their documents
- * until someone closes them, so they are listed under the corrections with
+ * The proposals agents once filed still stand in their documents until
+ * someone closes them (ruling 210(c)), so they are listed under the corrections with
  * ruling 267's Promote and Dismiss, which ask the controller in this
  * conversation, and a Promote all that asks once for the lot.
  */
@@ -94,7 +94,7 @@ export function KnowledgePanel({
   onAsk,
 }: {
   corrections: KbCorrectionsView;
-  /** The proposals filed before ruling 210 that still stand. */
+  /** The filed proposals that still stand in their documents (ruling 210(c)). */
   proposals: KbProposalView[];
   projectSlug: string;
   /** Org admins: an undo, a promote and a dismiss edit an org knowledge base. */

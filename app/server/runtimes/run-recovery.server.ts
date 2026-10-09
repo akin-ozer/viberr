@@ -300,8 +300,9 @@ export function finalizeOrphanedRuns(
   // (db/migrations/0001_baseline.sql), so each row carries exactly these four
   // string fields.
   // (`backend` is NOT NULL too; `credential_user_id` and `started_at` are
-  // nullable — a row written before ruling 137 carries no credential, and a run
-  // that never got a concurrency slot never got a start.)
+  // nullable — a run refused before any credential was looked up carries none
+  // (ruling 137), and a run that never got a concurrency slot never got a
+  // start.)
   const orphans = db
     .prepare(
       `SELECT id, project_slug, task_key, kind, backend, credential_user_id,

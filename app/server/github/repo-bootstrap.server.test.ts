@@ -298,8 +298,8 @@ describe("ensureDefaultBranch (ruling 227)", () => {
 });
 
 /**
- * Ruling 227: ruling 227's repair is for a repository whose default on GitHub
- * is a task branch. A default branch that is not one is the repository's own.
+ * Ruling 227: the repair is for a repository whose default on GitHub is a
+ * task branch. A default branch that is not one is the repository's own.
  * The repair used to run there too: a project written with `main` while
  * GitHub was unreachable, or left on `master` after a rename on GitHub, had
  * that name created at the first commit of the real default branch and made

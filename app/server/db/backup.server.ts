@@ -98,9 +98,9 @@ const BACKED_UP_STORE_DIRS = [
 ] as const;
 
 /**
- * `runtimes/` holds LIVE agent credentials — since ruling 137 each person's own
- * (`users/<userId>/codex-home/accounts/<accountId>/auth.json`, one per account
- * since ruling 138) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
+ * `runtimes/` holds LIVE agent credentials — each person's own (ruling 137),
+ * one per account (`users/<userId>/codex-home/accounts/<accountId>/auth.json`,
+ * ruling 138) — and run transcripts. Opt in with `includeRuntimes` when you want them; the default
  * is out, and the manifest says so rather than leaving an operator to guess
  * whether their artefact contains a credential.
  */

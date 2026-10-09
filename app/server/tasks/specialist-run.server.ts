@@ -146,7 +146,7 @@ import { getMaxRunSpendUsd } from "~/server/settings/instance-settings.server";
  * ONE anchor implementation, not two: `canonicalTaskAnchor` (task-replies) is
  * already the shape ruled correct for the resume path and is prompt-budget
  * clamped on every axis. Imported dynamically, like every reach from this
- * module into the task-action modules (ruling 70).
+ * module into the task-action modules (ruling 13).
  *
  * Best-effort by design: a task whose project file cannot be read still runs —
  * it falls back to the raw stage id, exactly as the resume path does, and only
@@ -165,9 +165,8 @@ async function freshRunAnchor(
       stageName: stageDisplayName(ctx, projectSlug, parsed.frontmatter.stage),
       boardReader,
       // Ruling 60: read at anchor time, so a lease set mid-flight binds the
-      // very next run rather than the one after a restart.
-      // Ruling 60: resolved, so a run is never warned off a file whose
-      // holder has already landed.
+      // very next run rather than the one after a restart, and resolved, so
+      // a run is never warned off a file whose holder has already landed.
       fileLeases: activeFileLeases(projectSlug, ctx.dataRoot ? { dataRoot: ctx.dataRoot } : {}),
       // Ruling 315: the project's gates as Viberr ran them, so a reviewer
       // reads the record instead of re-running the gates to report them.
@@ -341,7 +340,7 @@ export interface StartAgentRunInput {
    */
   withholdVerdict?: boolean;
   /**
-   * Ruling 93 (F39-43): this run puts ruling 93's completeness question, so
+   * Ruling 93 (F39-43): this run puts the completeness question, so
    * the verdict it returns is the reviewer's complete blocking set. Stamped on
    * the engagement with this run's id once the run exists (`Engagement.question`)
    * and read back by the verdict writer, which records the verdict as the
@@ -1242,7 +1241,7 @@ async function dispatchAgentRun(
       input.triggeredByName,
     );
   }
-  // Ruling 204: the persona this run will actually carry, so the shell
+  // Ruling 148: the persona this run will actually carry, so the shell
   // inventory can contradict it by name where the two disagree.
   if (persona.trim()) promptInput.persona = persona;
   const basePrompt = buildAnalyzePrompt(promptInput);
@@ -1371,7 +1370,7 @@ async function dispatchAgentRun(
     try {
       const judged = judgedFilesDelivery(existing.parsed.frontmatter, engagement.profileId);
       // Imported dynamically, like every reach from this module into the
-      // task-action modules (ruling 70).
+      // task-action modules (ruling 13).
       const { changesSinceJudged } = await import("./task-replies.server");
       const changes =
         judged === null
@@ -1479,8 +1478,8 @@ async function dispatchAgentRun(
     actor: auditActor,
     dataRoot: ctx.dataRoot,
   };
-  // Ruling 66: the run REMEMBERS that its verdict channel was withheld, so the
-  // completion path can tell an answer from a silence. Ruling 87 stopped the
+  // Ruling 87: the run REMEMBERS that its verdict channel was withheld, so the
+  // completion path can tell an answer from a silence. Withholding stops the
   // tool; without this the prose fallback manufactures the verdict anyway.
   if (input.withholdVerdict) runInput.verdictWithheld = true;
   // Ruling 84: what this run is judging — read from the same task file the
@@ -2038,7 +2037,7 @@ export function isDispatchHeld(cause: unknown): cause is DispatchHeldError {
  * Ruling 152: the single-flight refusal, typed, naming whose run is live. A
  * dispatch door records a person's directive before the start (ruling 69),
  * so when the live run is the SAME agent's, the directive sits inside that
- * run's window and ruling 69 delivers it when the run finishes. The door says
+ * run's window and is delivered when the run finishes. The door says
  * so instead of "No run started" and "wait, then start another", which a
  * person who obeyed turned into a second delivery of the same words.
  */

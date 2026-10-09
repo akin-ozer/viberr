@@ -158,7 +158,7 @@ const SIGNED_COUNT_RE = /^[+−-]?\d+$/;
 /**
  * One `evidence:` row, less its `- `. A row reads `[<status>] <label> ·
  * <result>`, the result being the last segment (the label may hold the
- * separator itself). A row written before ruling 16 reads
+ * separator itself). A row with no status (ruling 16(b)) reads
  * `<label> · <add> · <del>`: it becomes an `info` row whose result is its two
  * cells, a diff's two counts side by side ("+412 −87") and any other pair
  * with a comma ("102 passed, 0 failed"). Null for a row in neither shape.

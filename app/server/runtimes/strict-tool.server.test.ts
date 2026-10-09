@@ -40,7 +40,7 @@ describe("strictTool (ruling 136)", () => {
     ]);
 
     // The controller's live case: it asked for failed runs, `status` is not a
-    // thing this tool has, and before ruling 136 it got the live listing back
+    // thing this tool has, and without the strict check it got the live listing back
     // as though that were the answer. CANARY: hand the raw shape to the SDK's
     // own `tool()` and this returns "answered".
     const wrong = await client.callTool({

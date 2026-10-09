@@ -136,8 +136,8 @@ export interface ReviewQueueRow {
      *  cannot be merged at all. Same convention as `prRefSchema`: an ABSENT key
      *  means never read, which is NOT "merges cleanly". */
     mergeable?: PrMergeable;
-    /** R17-1 (F17-L12) as amended by ruling 239 (pass 34): the WHOLE drift
-     *  record (authored count + base refresh), so the subline can print the
+    /** Ruling 239 (F17-L12): the WHOLE drift record (authored count + base
+     *  refresh), so the subline can print the
      *  canonical sentence. Absent when the head equals the reviewed revision. */
     revisionDrift?: RevisionDrift;
     /** Ruling 243: the PR head as last read, and the CURRENT unpushed record

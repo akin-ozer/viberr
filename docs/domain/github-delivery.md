@@ -148,9 +148,7 @@ characters; last 8 lines, 600 characters.
   board that names a repository cannot be made while GitHub is unreachable, or before
   the repository exists unless it is made with the project; each refusal ends by saying
   the project can start without one (ruling 224, below). The connection's PAT is
-  bound to the project and proved against the repo. Until ruling 225 the first four
-  created the project with a warning and `defaultBranch: main`, a guess nothing
-  confirmed.
+  bound to the project and proved against the repo.
 - **Any board can start with no repository** (ruling 224). The owner and the repository
   name are given together or not at all, whatever the board delivers. A board that
   delivers software and names none is written with `repo: null`, no connection and no
@@ -250,7 +248,7 @@ characters; last 8 lines, 600 characters.
   was made. Audit `project.repository.created {repo, private}` under the acting person,
   recorded as soon as GitHub is known to have made it.
 - **Changing the repo later** (**Change…** in project settings, `change-repo`,
-  `edit-policy`; ruling 226 renamed it from "repair"): normalizes `owner/name` or a URL
+  `edit-policy`, ruling 226): normalizes `owner/name` or a URL
   and refuses, before anything is read or probed, a name GitHub does not allow, with
   "Enter the repository as owner/name (a pasted GitHub URL works too)." (ruling 225:
   `normalizeRepoInput` holds it to `REPO_SLUG_RE`, the pattern `project.md`'s `repo` is
@@ -314,7 +312,7 @@ characters; last 8 lines, 600 characters.
   and the audit row is `project.default_branch.adopted {repo, from, to}`. Nothing is
   written to GitHub. This is what happens to a project whose default branch was renamed
   on GitHub, to a repository created empty whose first push was a person's own branch,
-  and to a project created before ruling 225 while its probe could not answer. Branch preparation cuts the
+  and to an older project created while its probe could not answer. Branch preparation cuts the
   task branch from the adopted base, the delivery gate lets it through and the pull
   request is opened against it, a checkout that was never committed to and stands on
   the old name is moved onto it at its next refresh (not one holding staged files, or
@@ -355,7 +353,7 @@ Branch name (ruling 228): **allocated once, not derived.** The canonical
 `taskBranchName(key) = key.toLowerCase()` (`VIB-142` → `vib-142`) is taken when it is
 free; when it is not, the task gets `<key>-<4 hex>` instead. "Not free" means a remote ref
 exists **or any pull request was ever opened on that name** — the PR half is the
-load-bearing one, because task keys restart at 1 on a new data root (ruling 231(a)), so
+load-bearing one, because task keys restart at 1 on a new data root (ruling 228), so
 `vib-1` on GitHub can still carry a previous instance's merged PR while no ref exists at
 all.
 
@@ -483,7 +481,7 @@ steps below, with the hold sentence on the timeline (ruling 56).
    change summary and evidence from the live compare, and a footer stating that review
    and merge are human-authorized. A 403 opens a `pull_request:write` scope violation;
    a 2xx whose body fails to decode is salvaged by PR number. The 422 arms are typed
-   (ruling 227): "No commits between" is `nothing_to_review`; "already exists" re-reads
+   (ruling 231): "No commits between" is `nothing_to_review`; "already exists" re-reads
    the head; `field: base, code: invalid` is `base_branch_missing` (the repository has
    no base branch; the timeline names the two remedies: delete the task branch locally
    and let the deliverer re-cut it from the bootstrapped base, or resolve the unrelated
@@ -508,8 +506,8 @@ steps below, with the hold sentence on the timeline (ruling 56).
    `pr.bodyWritten.sha256`: a mismatch is a person's edit, which is never overwritten.
    The timeline says so once per revision (a `github` note by `system:delivery`: the
    description was left as the person wrote it, the revision it was written for, and the
-   revision, commits, files and +/− the PR now carries). A PR with no record (opened
-   before ruling 231(c), or adopted) counts as Viberr's and is rewritten. A `PATCH` that
+   revision, commits, files and +/− the PR now carries). A PR with no record (an older
+   one, or adopted) counts as Viberr's and is rewritten. A `PATCH` that
    fails, or a recorded description GitHub's answer did not include, never fails the
    delivery: a `github` note says which revision the description still describes and
    why, the audit row is `github.pr.body_update_failed` with the same fields plus
@@ -607,7 +605,7 @@ paths overlap this task's (`prPathOverlaps`, ruling 116), the same fact the revi
 |---|---|---|
 | `resolve_remote_collision` packet option | Refused before anything is written while the task waits on other work (ruling 66; the packet stays open). Deletes the stale remote branch first, closes the recorded unowned PR (audit `github.pr.closed_unowned` when Viberr's close went through), re-delivers this task's local work, lifts `readiness` from `blocked`. The ceremony writes ONE `github` event naming the PR's fate in every arm (U36-7): "Branch collision cleared: closed PR #N and deleted branch `b`" when the close answered 200; after a refused close it re-reads the PR and says what GitHub shows — "is closed on GitHub with its head", "still shows open on GitHub. Close it there", or "could not be re-read" — with the refusal quoted. Ruling 233: the ceremony ends with exactly ONE hand-off (the `delivered` re-queue when the re-delivery fired it, else a `packet-resolved` re-queue carrying the outcome in its own `serverOutcome` field); a refusal because the PR on the ref is this task's OWN open PR is no collision: a behind or absent remote gets the delivery that pushes the work and the block lifts, a diverged remote keeps the block and prints `DIVERGED_BRANCH_REMEDY`; every other refusal keeps the block and hands the operator its typed reason. One audit row per ceremony: `github.collision.resolved {outcome, reason, prNumber, delivered, blockLifted}`. | `approve-transition` |
 | `discard_branch` packet option | Deletes the **local**, never-pushed workspace branch; refuses when the branch exists on the remote. Ruling 234: the operator may author it until the revision has LEFT the workspace (`revisionLeftWorkspace`: a PR tracks the branch, an unowned PR stands on the name, or a push stamped `workRevision.pushedAt`); a revision the agent merely reported does not block it, and the refusal names the real reason. A confirmed discard retires the reported revision (`workRevision.kind: discarded`, verdicts kept as history, `validation: none`), says so in the outcome note ("Revision `rev_…` is retired with it") and records `retiredRevisionId` on `task.branch.discarded` (`localSha`, `remoteSha: null`, `basis: local_only`). | `approve-transition` |
-| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 239), stamps `pushedAt`, and re-compares at once through `recompareAfterPush` (rulings 239 and 238: the `github.push` row naming the merge commit, then the pass; a pass that could not run is said on the line: "… could not be compared with `main` again after the push (…), so the count of commits it is behind stays the one from before the push until the next GitHub pass"). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 229) or changes a path another task leases (`lease_held`, ruling 241); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 229); the timeline line says the same fact for a person ("... the operator's next delivery pushes them", ruling 241); `already_current` is reported as done, not a refusal (ruling 129). A conflict or push conflict goes to the task's delivering agent when its engagement is deployed with a repo-write grant (ruling 129, owner decision, narrowing 133(b) and 438): the tool starts that agent's run through `operatorDispatchAgent` with ruling 129's directive (merge `origin/<base>`, or origin's copy of the branch, into the task branch in its own workspace, never a rebase or force-push, resolve the files, run the gates, commit; the operator delivers the result), returns a task past review to the review stage in the same write (`task.transition {via: conflict_handoff}`), and writes one person-facing timeline line ("The operator sent the `package.json` conflict between `web-2` and `main` to Platform Engineer, ..."); while that agent's run on the same conflict is live nothing new is sent. The human `blocked` packet whose options can all execute (ruling 129) is the fallback, and its body says which case it is: no deliverer, undeployed or grant withdrawn ("Resolve the branch yourself" recommended); the deliverer was already sent this same conflict (the same files against the same base commit, or the same origin head refusing the push) and the branch still conflicts (by hand recommended, "Have <deliverer> try the conflict again" second); a `dispatch-agents` policy that only recommends; or a run that could not start. A "Delivering agent" observation names it or "none". An open packet offering `accept_completion` is withdrawn first (ruling 244). The `github.branch_update.operator` audit row records `resolver`, `route` (`deliverer`, `packet`, `in_progress`), `handedTo`, `repeat`, `handoffRefused` and the conflict's `baseSha` or `remoteHeadSha`; the earlier-handoff check reads those rows. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 95: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 241); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 116). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 90). A drive that refreshed the branch and then left the task idle is resumed once (ruling 120). | operator gate; `recommend` is refused outright |
+| `update_branch_from_base` (operator, capability `update-task-branch`) | `updateWorkspaceBranchFromBase` (`update-branch.server.ts`) merges the base into the task branch in the workspace (`--no-ff`, never rebase, never force; the merge and its abort run as the task owner's agent uid, GitHub's base and origin's copy of the branch are fetched with the PAT into the server's stage and fetched from there by the workspace, and the push goes out from the stage — §1, R-seams-1), reads the merge commit and base tip before the push (an unreadable sha rolls back and publishes nothing), pushes, and `recordBranchRefresh` records the refresh in `baseRefreshes` (with `onto`, the head it merged onto, ruling 239), stamps `pushedAt`, and re-compares at once through `recompareAfterPush` (rulings 239 and 238: the `github.push` row naming the merge commit, then the pass; a pass that could not run is said on the line: "… could not be compared with `main` again after the push (…), so the count of commits it is behind stays the one from before the push until the next GitHub pass"). Before fetching it refuses a branch that carries the store layout (`store_layout`, ruling 229) or changes a path another task leases (`lease_held`, ruling 241); nothing is merged or pushed. It reports origin's copy of the task branch beside the base answer (current, behind by N, diverged, absent, unknown) and points a lagging origin at `deliver_for_review` (ruling 241); the timeline line says the same fact for a person ("... the operator's next delivery pushes them", ruling 241); `already_current` is reported as done, not a refusal (ruling 129). A conflict or push conflict goes to the task's delivering agent when its engagement is deployed with a repo-write grant (ruling 129): the tool starts that agent's run through `operatorDispatchAgent` with ruling 129's directive (merge `origin/<base>`, or origin's copy of the branch, into the task branch in its own workspace, never a rebase or force-push, resolve the files, run the gates, commit; the operator delivers the result), returns a task past review to the review stage in the same write (`task.transition {via: conflict_handoff}`), and writes one person-facing timeline line ("The operator sent the `package.json` conflict between `web-2` and `main` to Platform Engineer, ..."); while that agent's run on the same conflict is live nothing new is sent. The human `blocked` packet whose options can all execute (ruling 129) is the fallback, and its body says which case it is: no deliverer, undeployed or grant withdrawn ("Resolve the branch yourself" recommended); the deliverer was already sent this same conflict (the same files against the same base commit, or the same origin head refusing the push) and the branch still conflicts (by hand recommended, "Have <deliverer> try the conflict again" second); a `dispatch-agents` policy that only recommends; or a run that could not start. A "Delivering agent" observation names it or "none". An open packet offering `accept_completion` is withdrawn first (ruling 244). The `github.branch_update.operator` audit row records `resolver`, `route` (`deliverer`, `packet`, `in_progress`), `handedTo`, `repeat`, `handoffRefused` and the conflict's `baseSha` or `remoteHeadSha`; the earlier-handoff check reads those rows. Refused at the acceptance-boundary stage and past it (`acceptanceBoundaryRefusal`, ruling 95: the acceptance ceremony refreshes once) unless the PR is `conflicting` at its current head or the work is still in its review loop (`validation` `failing` or `changed`, ruling 241); the operator snapshot carries the same refusal as `notRefreshableReason` (ruling 116). The redirect option is marked `rework: true` with "The task returns to Review for the re-verdict." when the task stands past the stage its reviewers can run (ruling 90). A drive that refreshed the branch and then left the task idle is resumed once (ruling 120). | operator gate; `recommend` is refused outright |
 | Branch cleanup | `deleteTaskRemoteBranch`, after a successful merge when the `delete-branch-after-merge` guardrail is on (absence means on); on `archive_task` with `deleteBranch: true`; after a no-change acceptance. Refuses the default branch and a branch whose PR is open or accepted. Ruling 233: a CACHED open PR is re-confirmed against GitHub before it can refuse (a pass with the divergence notification and the operator wake suppressed); a PR GitHub reports closed or merged lets the delete proceed on the refreshed file, a PR still open refuses (`own_pr_open`), and every degraded or unexpected reconcile status refuses as `unconfirmed` ("GitHub could not confirm"), never deleting on an unconfirmed state. The archive and empty-branch doors inherit the same check and sentence. Ruling 233: the ref's head is read before the DELETE and recorded (`github.branch.deleted {sha}`, "Deleted branch … Its head was `sha`"); the archive's local cleanup records both heads on `task.branch.discarded {localSha, remoteSha, basis: archive_cleanup}`, and the archive dialog says what origin holds when the reconciler recorded `github.foreignHead` ("origin's `branch` carries commits this task did not author; deleting it removes them too"). Only GitHub's explicit "does not exist" answer counts as `already_gone`; any other refusal of the DELETE (a protected branch, a ruleset) is `github_refused` (ruling 233). | human `userId` required |
 
 ## 5. Revisions, verdicts and acceptance
@@ -624,12 +622,12 @@ paths overlap this task's (`prPathOverlaps`, ruling 116), the same fact the revi
 - **Verdicts** are bound to the review subject (`reviewSubjectId`: the active revision's
   id, or `files:<deliveredAt>` for a deliverable that is not a commit, ruling 84); only
   verdicts on the current subject count, and a verdict binds only to the subject its run
-  was dispatched on (ruling 84). Required reviewers are supporting engagements
+  was dispatched on. Required reviewers are supporting engagements
   with `verdictCapable: true`, plus the project's declared `requiredReviewers`
   ([task-lifecycle.md §8](task-lifecycle.md#8-engagements-dispatch-and-verdicts)). A
   reviewer is checked out at the reviewed revision's head, except that
   `reviewSubjectSha` moves it to the PR head when the drift measured at that head is a
-  base refresh only (ruling 239), and to the end of the refresh chain when no drift was
+  base refresh only, and to the end of the refresh chain when no drift was
   measured at the head being offered (ruling 239); a measured drift outranks the chain.
 - **`validation`** derives from the two: `none`, `failing`, `healthy`, `bypassed`
   (after force-accept), `changed`.
@@ -834,8 +832,8 @@ pass that RECORD appears, not the pass the state changes, because `pr.state: clo
 reaches the file from the workspace reconcile. The closure is carried while the PR stays
 closed and dropped when it is live or merged again. The operator's branch update runs one
 such pass right after its push (ruling 239), so the drift it caused is measured before
-the tool answers, and since ruling 238 every Viberr push that moves a task branch does
-the same before its caller returns (§3 step 5). The reconciler never mints a PR link and never downgrades `merged` or
+the tool answers, and every Viberr push that moves a task branch does the same before
+its caller returns (ruling 238, §3 step 5). The reconciler never mints a PR link and never downgrades `merged` or
 `accepted`.
 
 A pass writes only what changed (DG-3). When the `pr` and `github` caches it builds equal

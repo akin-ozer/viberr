@@ -770,7 +770,7 @@ function stageRefusalSentence(
 }
 
 /**
- * Enforce stage eligibility for a NEW engagement (F1, narrowed by ruling 181):
+ * Enforce stage eligibility for a NEW engagement (F1, ruling 181):
  * reject engaging a profile on a task whose current stage it isn't eligible
  * for. The Agents UI shows "N of M stages" per profile; this makes that
  * promise real where it applies: at `assignSpecialist` and `assignReviewer`.
@@ -846,7 +846,7 @@ export function assertResumeEligible(
   //    an @mention of the same agent resumed its session and spent a paid run.
   //  - ruling 56: the hold. Its comment says "Every dispatch door lands here,
   //    so every one of them refuses" — this one did not land there, which is
-  //    the same hole ruling 56 closed on the delivery path an hour ago.
+  //    the same hole the delivery path had.
   //
   // Both refusals reuse the sentences their own doors use, so a person meets
   // one wording per cause however they reached it.

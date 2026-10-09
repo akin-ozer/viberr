@@ -543,8 +543,8 @@ describe("ruling 274: archiving from the Epics pages", () => {
     expect((await epicFile(epicId))?.timeline[0]?.text).toBe(`Murat Yıldız archived ${first} and ${second}.`);
     // The board's card is archived: the board draws it under Archived only.
     expect((await board(ids.arda)).cards.find((c) => c.key === first)?.archived).toBe(true);
-    // CANARY: leave every archived row out of `progressByEpic` (the `continue`
-    // before ruling 274) and the Done epic counts nothing done.
+    // CANARY: leave every archived row out of `progressByEpic` (a `continue`
+    // there once did) and the Done epic counts nothing done (ruling 274).
     const listed = (await epicsPage(ids.arda)).epics.find((e) => e.id === epicId);
     expect(listed?.progress).toMatchObject({ total: 2, done: 2, archived: 2, archivedDone: 2 });
     // Again: nothing left to archive.

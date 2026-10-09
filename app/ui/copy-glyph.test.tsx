@@ -15,9 +15,9 @@ const glyph = (name: IconName) => {
 };
 
 /**
- * Ruling 284 (extending ruling 284): a glyph that trades with its
- * control's state keeps both marks drawn in one cell, and only `data-copied`
- * changes, so the sheet can cross-fade them. A ternary on the icon name
+ * Ruling 284(b): a glyph that trades with its control's state keeps both
+ * marks drawn in one cell, and only `data-copied` changes, so the sheet can
+ * cross-fade them. A ternary on the icon name
  * swapped them in one frame.
  */
 describe("ruling 284: GlyphSwap keeps both glyphs and flips one attribute", () => {

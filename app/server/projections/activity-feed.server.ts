@@ -319,9 +319,9 @@ const AUDIT_ACTION_KINDS = {
   // P13-D-8: NFR10's fourth category — the refused attempt itself.
   "project.authority.denied": "blockedact",
   // Ruling 273 (F40-28): a goal chain was the automation that started,
-  // stranded and closed a project's work. Ruling 273 turned the chains into
-  // epics and nothing writes these any more; a project's history keeps the
-  // rows it has, and they still read as sentences.
+  // stranded and closed a project's work. Epics replace the chains and nothing
+  // writes these any more; a project's history keeps the rows it has, and they
+  // still read as sentences.
   "goal.created": "change",
   "goal.updated": "change",
   "goal.completed": "audit",
@@ -650,9 +650,9 @@ function auditText(
       if (!bypassed || bypassed.startsWith("no gate")) {
         return `${actor} force-accepted the completion on`;
       }
-      // Rows recorded before ruling 292 carry gate sentences that set their
-      // remedy off with a dash; newer ones end the claim with a period, which
-      // the sentence split below takes care of.
+      // Older rows carry gate sentences that set their remedy off with a dash;
+      // newer ones (ruling 292(c)) end the claim with a period, which the
+      // sentence split below takes care of.
       const reason = bypassed
         .split(/ — /)[0]!
         .split(/(?<=\.)\s/)[0]!

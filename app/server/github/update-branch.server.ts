@@ -89,7 +89,7 @@ const FETCH_TIMEOUT_MS = 300_000;
 const MERGE_TIMEOUT_MS = 60_000;
 
 /**
- * Ruling 229 (pass 34, F34-11): origin's copy of the TASK BRANCH, related
+ * Ruling 241 (pass 34, F34-11): origin's copy of the TASK BRANCH, related
  * to the workspace head from the workspace's own history (the remote ref is
  * fetched, so `merge-base --is-ancestor` has the object). `current`: origin
  * carries the workspace head. `behind`: origin's head is an ancestor of the
@@ -109,7 +109,7 @@ export type UpdateBranchResult =
   /** The branch now carries the base. `commits` is how many base commits it was
    *  missing. Ruling 239: `mergeSha` is the merge commit the refresh created and
    *  `baseSha` the base tip it merged (both read BEFORE the push, so a merge is
-   *  never published unrecorded). Ruling 229: `remoteBefore` is origin's copy
+   *  never published unrecorded). Ruling 241: `remoteBefore` is origin's copy
    *  as it stood before this update and `remote` as the push left it
    *  (`current` by construction: the push published HEAD). Ruling 239: `onto`
    *  is the branch head the merge was made on, its first parent. */
@@ -125,7 +125,7 @@ export type UpdateBranchResult =
       remote: RemoteBranchState;
     }
   /** Idempotent no-op on the BASE: nothing on the base that the branch does not
-   *  have. `remote` still reports origin's copy of the branch (ruling 229):
+   *  have. `remote` still reports origin's copy of the branch (ruling 241):
    *  "already up to date with main" must never pronounce a lagging branch done. */
   | { status: "already_current"; branch: string; base: string; remote: RemoteBranchState }
   /**
@@ -204,7 +204,7 @@ function isMissingRemoteRef(stderr: string): boolean {
 }
 
 /**
- * Ruling 229: fetch origin's copy of the task branch and relate it to the
+ * Ruling 241: fetch origin's copy of the task branch and relate it to the
  * workspace head LOCALLY. `ls-remote` alone cannot answer `behind` vs
  * `diverged` (that needs the remote head OBJECT), and a head pushed from
  * another workspace is exactly the case the answer matters for. R-seams-1:
@@ -402,7 +402,7 @@ export async function updateWorkspaceBranchFromBase(
     }
 
     // Ruling 241: the lease gate, at the same seam and read the same way as
-    // the delivery push's (the BRANCH's files, ruling 60; the resolved list,
+    // the delivery push's (the BRANCH's files and the resolved list,
     // ruling 60). Before the fetch and the merge, like the store-layout
     // check above: a refusal costs no network and leaves nothing to roll back.
     const leases = activeFileLeases(projectSlug, dataRoot ? { dataRoot } : {});
@@ -493,7 +493,7 @@ export async function updateWorkspaceBranchFromBase(
             );
           }
 
-          // 1b. Origin's copy of the TASK branch (ruling 229). A separate fetch:
+          // 1b. Origin's copy of the TASK branch (ruling 241). A separate fetch:
           //    a refspec naming a ref origin does not have fails the whole fetch,
           //    and a never-pushed branch is a normal state here, not a failure.
           const remote = await readRemoteBranchState(

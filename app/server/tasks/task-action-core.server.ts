@@ -64,10 +64,10 @@ export const OPERATOR_REACT_DEPTH_CAP = 4;
 
 /**
  * Ruling 119: the ceiling on react hops since a person last acted, which
- * nothing but a person (or an approve, ruling 119) restarts.
+ * nothing but a person (or an approve) restarts.
  *
  * The depth cap above counts hops that got nowhere, so a reply that moved the
- * task's head resets it (ruling 119). That leaves a chain whose every hop
+ * task's head resets it. That leaves a chain whose every hop
  * commits a new head with no bound at all: the operator re-dispatching a
  * developer that commits each time, with no reviewer to object, would run and
  * bill forever. This one counts EVERY hop, progress or not, and stops the
@@ -395,7 +395,7 @@ export interface AutoInvokeOptions {
   /** R20-1 (F20-5): packet-resolved trigger — the option the human chose (kind,
    *  title, optional note), so the turn instruction states the decision. */
   resolvedOption?: ResolvedPacketOption;
-  /** Ruling 55: dependencies-released trigger — what was waited on. */
+  /** Ruling 57: dependencies-released trigger — what was waited on. */
   dependencyRelease?: DependencyReleasePayload;
   /** Ruling 135: relayed trigger — the task it came from, who sent it and
    *  the text, so the turn instruction carries what arrived. */

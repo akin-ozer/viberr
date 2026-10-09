@@ -21,10 +21,9 @@ import { isTerminalStage, stageName } from "~/shared/workflow/stage-roles";
  * Terminality is derived through `isTerminalStage` over the project's stage
  * list, never a positional "last stage id" guess. A task archived before it
  * was done is `failed`: a wait that can never complete without a person
- * editing the list (ruling 55). One archived at the terminal stage is
- * `done`: archiving filed finished work away, and what waited on it got what
- * it waited for (ruling 55). Every entry names a task (ruling 55 retired the
- * goal-link spelling with the goal chains).
+ * editing the list. One archived at the terminal stage is `done`: archiving
+ * filed finished work away, and what waited on it got what it waited for.
+ * Every entry names a task (ruling 55).
  */
 
 interface TaskStateRow {

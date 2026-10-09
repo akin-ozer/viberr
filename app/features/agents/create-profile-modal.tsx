@@ -375,7 +375,7 @@ function BackendField({
    *
    *  RU-2 used to DISABLE a chip whose backend was not configured, because
    *  "configured" was a deployment fact and a profile pinned to an unconfigured
-   *  runtime could never run for anybody. Since ruling 137 there is no such
+   *  runtime could never run for anybody. Under ruling 137 there is no such
    *  fact: a run bills the TASK OWNER, so whether this profile runs depends on
    *  the person whose task it is dispatched on, not on the person writing the
    *  profile. Keeping the gate on the author's own credential blocked profile
@@ -897,7 +897,7 @@ function CapabilityGrants({
                             UX-19: it was brought along as far as the ROLE and
                             stopped there. A radiogroup promises arrow-key
                             traversal (a hand-rolled helper then; Radix behind
-                            `RadioSeg` since ruling 14), which UXA-7 wired into
+                            `RadioSeg` now, ruling 14), which UXA-7 wired into
                             the twins on the Policy sheet (`HumanAccess`'s role
                             group and `WorkflowRules`' boundary group) and not
                             into this one — so the group announced an

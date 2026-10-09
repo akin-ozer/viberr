@@ -22,8 +22,8 @@ import {
  * Scope (deliberate + honest): only the high-consequence, cleanly command-
  * mappable capabilities are enforced at the tool layer (branch, push, open PR,
  * merge PR). Finer-grained delivery capabilities remain advisory in the run
- * persona. Codex has no denylist channel of its own, and since ruling 183 no
- * OS sandbox: one derived flag still binds there,
+ * persona. Codex has no denylist channel of its own, and no OS sandbox
+ * (ruling 144): one derived flag still binds there,
  * `webSearchWithheldFromDenylist` → `webSearchMode: "disabled"` (P14-RT-06).
  * The write family and the scoped commands are advisory on Codex, where the
  * server-owned delivery gate plus credential-less agents are the boundary —
@@ -311,8 +311,8 @@ export function codexRepoWriteAdvisory(
  *
  * The one derivation, so a SENTENCE about a deployment cannot drift from the
  * gate the run is held to. `deploy_agent` promised "Delivery starts withheld"
- * on every deploy, which stopped being true when ruling 177 made a library
- * deploy COPY the template's grants — so a repo-write template deployed with
+ * on every deploy, which is false because a library deploy COPIES the
+ * template's grants (ruling 177) — so a repo-write template deployed with
  * repo write and the reply said the opposite.
  */
 export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
@@ -322,7 +322,7 @@ export function deliveryWithheld(grants: readonly CapabilityGrant[]): boolean {
 /** The one sentence every surface uses for the Codex posture (see
  *  {@link codexRepoWriteAdvisory}). */
 export const CODEX_REPO_WRITE_ADVISORY_NOTE =
-  "repo-write is withheld, and since ruling 183 Viberr does not OS-confine a Codex run, so on Codex the withholding is advisory: the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
+  "repo-write is withheld, and Viberr does not OS-confine a Codex run, so on Codex the withholding is advisory (ruling 183): the prompt omits every delivery step and the server-owned delivery gate is the real boundary. Run the profile on Claude to have the tool layer refuse them outright";
 
 export interface DeliveryPermissions {
   canBranch: boolean;

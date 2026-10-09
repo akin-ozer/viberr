@@ -41,7 +41,7 @@ export const MCP_CLIENT_INFO = { name: "viberr", version: "1.0.0" };
  * "13 tools discovered" for the Everything server while both live runs
  * enumerated **15** from the same command. The number shown has to be the
  * number a run gets, so the probe declares the same capability set the SDK
- * clients do — and since ruling 191 the gateway's upstream client IS that
+ * clients do — and the gateway's upstream client (ruling 191) IS that
  * client, answering each capability honestly (no roots, elicitation declined,
  * sampling refused with a sentence).
  */

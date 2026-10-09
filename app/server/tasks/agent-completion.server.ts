@@ -4,7 +4,7 @@
  * carries out what follows (the operator's react, the stuck-loop packet, a
  * deferred @mention, the waiting flags). Also here: the holds a run or a person
  * lifts, and `operatorPromptAgent`, the operator's message to an agent. Two
- * calls reach upward and load their module when they run, as ruling 70
+ * calls reach upward and load their module when they run, as ruling 13
  * does: a deferred @mention goes out through `commentToAgent`, and a packet a
  * person already decided is answered through packet resolution.
  */
@@ -321,7 +321,7 @@ export function deliveredWorkEvidence(fm: {
 const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
 
 /**
- * Ruling 262: the longest verdict justification stored on a task, and the
+ * Ruling 88: the longest verdict justification stored on a task, and the
  * sentence that ships when it does not fit.
  *
  * 2,000 characters is a generous paragraph and a short essay, which is the
@@ -381,7 +381,7 @@ export async function recordAgentCompletion(
    *  packet. The caller needs it to decide whether to hand the task back to the
    *  operator — see the escalation arm in `applyAgentCompletionEffects`.
    *  Ruling 119: and whether the verdict BOUND to a subject, which is what makes
-   *  an approval a boundary (ruling 119).
+   *  an approval a boundary.
    *  Ruling 86: and the `deliveredAt` stamp of the delivery this completion
    *  stamped and kept, null when it stamped none. Its pages are not asked to
    *  be pictured here: whether the delivery is files or a revision is known
@@ -596,7 +596,7 @@ export async function recordAgentCompletion(
         // Ruling 84: but a task whose deliverable is a saved FILE does have a
         // subject, and used to fall into that same hole — the verdict was never
         // stored, so `validation` stayed `none`, the rework route ruling 90
-        // licenses stayed shut, and after ruling 81 the required-reviewer gate
+        // licenses stayed shut, and the required-reviewer gate (ruling 81)
         // could never be satisfied either. Live on ax-clone AX-12 that was a
         // dead end: a reviewer returned request-changes on the report, and the
         // record said "**Validation:** none" in the same sentence.
@@ -679,7 +679,7 @@ export async function recordAgentCompletion(
             profileId: reviewerProfileId,
             revisionId: subjectId,
             result: verdict,
-            // Ruling 262: a verdict's justification is a STORED record a
+            // Ruling 88: a verdict's justification is a STORED record a
             // person reads on the task page, and it was a bare `.slice` -
             // the write-side shape ruling 131 closed for a goal. The cut
             // stays (a verdict reason is a paragraph, not a report), and it
@@ -779,7 +779,7 @@ export async function recordAgentCompletion(
         // "… requested changes.") spends the one informative line on nothing.
         // Name the revision the verdict binds to instead — the fact a reader
         // needs next, and the one that makes a stale verdict visible.
-        // Ruling 101: a verdict on the files a result came back in binds to
+        // Ruling 88: a verdict on the files a result came back in binds to
         // them (ruling 84), and the note says so rather than "no delivered
         // revision", which read as a verdict that bound to nothing.
         const onRevision = rev
@@ -936,7 +936,7 @@ export async function recordAgentCompletion(
          * three lines up, precisely BECAUSE there is a verdict.
          *
          * So the protection was exactly inverted: a deliverer's report carries
-         * evidence and is immune, while the verdict report — which ruling 262's
+         * evidence and is immune, while the verdict report — which ruling 88's
          * own marker calls "on this task's timeline, whole" — was the first
          * thing folded away. Live on SHOP-76 three of four rounds of review
          * reasoning were unrecoverable from canonical `task.md` while every
@@ -1741,7 +1741,7 @@ export async function applyAgentCompletionEffects(
   const completionFile =
     readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey))?.parsed ?? null;
   const completionFm = completionFile?.frontmatter ?? null;
-  // Ruling 76: a file a PERSON attached while this run was in flight is in
+  // Ruling 77: a file a PERSON attached while this run was in flight is in
   // the run's mtime window too, and it is theirs: claiming it would name the
   // run as its author and, for a deliverer, move `deliveredAt` onto the
   // person's input. Their note claims the name; the run does not. Ruling 71:
@@ -1892,7 +1892,7 @@ export async function applyAgentCompletionEffects(
   ].join("\n");
   // The corpus covers every place an agent can cite: its own words, every
   // timeline text since the run started (mid-run comments, human directives),
-  // and — ruling 193 — the text of the files this run saved, where a deliverer
+  // and — ruling 78 — the text of the files this run saved, where a deliverer
   // of files cites its evidence.
   const citationCorpus = [
     ownWords,
@@ -2394,7 +2394,7 @@ export async function applyAgentCompletionEffects(
     });
     reprojectTask(db, ctx, input.projectSlug, input.taskKey);
     // R20-3 (F20-4): a model the provider REFUSED for this account is marked
-    // unavailable from this real run's failure — no synthetic probe (ruling 220).
+    // unavailable from this real run's failure — no synthetic probe (ruling 149).
     // A quota/auth/crash failure never matches MODEL_UNSUPPORTED_RE, so only a
     // genuine "model not supported" verdict marks the row.
     if (providerText) {
@@ -2419,7 +2419,7 @@ export async function applyAgentCompletionEffects(
       failure?.kind === "unavailable" ||
       failure?.kind === "overloaded";
     /**
-     * Ruling 63: a backend failure is an ACCOUNT's failure, not this task's.
+     * Ruling 65: a backend failure is an ACCOUNT's failure, not this task's.
      * Quota, auth and a missing credential take out every task running on the
      * same account at the same instant, and each one used to raise its own
      * identical packet. The key is what actually failed — the backend, the kind
@@ -2510,7 +2510,7 @@ export async function applyAgentCompletionEffects(
   if (finished.state === "finished") {
     // R20-3 (F20-4): a model that just RAN to completion is available, whatever
     // a stale unavailability row says. Clearing on a real success IS the
-    // re-probe — no separate mechanism (ruling 220).
+    // re-probe — no separate mechanism (ruling 149).
     const ranModel = getRun(db, finished.id)?.model ?? null;
     if (ranModel) clearModelMark(db, input.backend, ranModel);
     await withdrawSupersededStuckPacket(db, ctx, {

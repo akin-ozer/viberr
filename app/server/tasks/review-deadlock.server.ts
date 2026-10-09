@@ -211,7 +211,7 @@ export interface ReviewDeadlockPacketInput {
   /** The short sha the objection was made on, for the sentence that names it. */
   revisionLabel?: string | null;
   /**
-   * Ruling 93 (F39-43): the run that returned THIS objection put ruling 93's
+   * Ruling 93 (F39-43): the run that returned THIS objection put the
    * completeness question, so the list in it is the reviewer's complete set.
    * Live on ax-clone AX-20, AX-22 and AX-24 the operator folded the question
    * into the review of a fresh rework three times in 25 minutes, and each
@@ -361,18 +361,16 @@ export function buildReviewDeadlockPacket(input: ReviewDeadlockPacketInput): Tas
          * It was false in both directions at once. The note box under a listed
          * option posts `note`, which `resolvePacket` sends to the timeline and
          * to the operator's summon note and never to the goal — it has never
-         * amended the contract, before ruling 64 or after it; 284 only closed
-         * the last route by which any typed words reached a goal. So the card
-         * asked a person for their reasoning on the highest-stakes decision it
-         * raises, promised that reasoning would bind, filed the reasoning in
-         * the timeline, and wrote its own UI instruction into the contract
-         * instead — complete with a bare "(ruling 64)" citation and an
-         * instruction to type in a box no agent reading the goal will ever see.
+         * amended the contract. So the card asked a person for their reasoning
+         * on the highest-stakes decision it raises, promised that reasoning
+         * would bind, filed the reasoning in the timeline, and wrote its own
+         * UI instruction into the contract instead — complete with a bare
+         * "(ruling 64)" citation and an instruction to type in a box no agent
+         * reading the goal will ever see.
          *
          * Whether a person's typed reasoning SHOULD bind the goal is ruling
-         * 64's question and stays answered as 284 answered it. What this fixes
-         * is a promise the product never kept and a decision record that
-         * describes a dialog.
+         * 64's question, and it answers no. What this fixes is a promise the
+         * product never kept and a decision record that describes a dialog.
          */
         d: rereadNow
           ? `Rework once against ${handle}'s latest verdict: it read ${revision} again with ` +

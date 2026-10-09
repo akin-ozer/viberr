@@ -107,8 +107,8 @@ function fakeGit(opts: {
   commitFails?: boolean;
   /** Ruling 229: what `git ls-remote --heads origin <branch>` answers — the
    *  sha origin holds for the branch, `null` for "no such branch", or absent
-   *  for "same as HEAD" (the default: the fixtures below started on a lagging
-   *  remote before ruling 229 existed). */
+   *  for a remote that lags HEAD (`b`×40), the shape the fixtures below start
+   *  on. */
   remoteHead?: string | null;
   /** `ls-remote` fails outright (offline, refused). */
   lsRemoteFails?: boolean;
@@ -1263,8 +1263,8 @@ describe("ruling 229: the store layout never reaches origin", () => {
 /**
  * Ruling 60 (pass 38, F38-7): a lease binds the BRANCH, so a leased path that
  * reached origin before the lease was declared is still refused on the next
- * push — ruling 60's delta read let it through, and the acceptance ceremony
- * (no lease read) merged it ahead of the holder.
+ * push — a read of the push's delta alone once let it through, and the
+ * acceptance ceremony (no lease read) merged it ahead of the holder.
  */
 describe("ruling 60: the lease gate measures the branch from its fork point", () => {
   const REMOTE = "c".repeat(40);

@@ -121,8 +121,8 @@ describe("board action — a non-member never learns the project exists (E2)", (
  *
  * `reorderTask` routes a move into the terminal stage through the full
  * acceptance contract (→ `transitionStage` → `acceptCompletion` — the real,
- * irreversible merge), and the board has fronted it with the shared
- * `AcceptConfirm` ceremony since ruling 97 (R18-7). The POST behind that
+ * irreversible merge), and the board fronts it with the shared
+ * `AcceptConfirm` ceremony (ruling 97, R18-7). The POST behind that
  * ceremony carried nothing back from it: a drag whose confirmation was never
  * rendered — a stale tab, a replayed form, a script — merged to the default
  * branch on an unadorned request. The ordinary column move above (`to: "impl"`,

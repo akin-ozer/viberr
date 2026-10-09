@@ -64,7 +64,7 @@ export function HomeTopBar({
           <span className="mark">V</span>
           <b>Viberr</b>
         </button>
-        {/* Ruling 278: `role="status"` replaced the button's own role, so the
+        {/* Ruling 299: `role="status"` replaced the button's own role, so the
             one control that can restart the stream was announced as a status
             sentence and never as something to press — and a status region is
             atomic, so it re-read the whole label. The sentence moves to an
@@ -609,10 +609,9 @@ export function StoreStrip({
 }
 
 /** Confirm dialog for the full projection rebuild (admin recovery action).
- *  Hand-written, not the shared `ConfirmDialog` ruling 297 moved the other
- *  plain confirms onto. Home loads no other confirm, and the shared one's
- *  chunk would add ~0.5 KB gzip to Home's ruling-11 budget (ruling 297's
- *  2026-09-24 note). */
+ *  Hand-written on purpose, one of ruling 297's exceptions to the shared
+ *  `ConfirmDialog`: Home loads no other confirm, and the shared one's chunk
+ *  would add ~0.5 KB gzip to Home's ruling-11 budget. */
 export function RebuildConfirm({
   onCancel,
   onConfirm,

@@ -9,8 +9,8 @@
  * vanished in one frame, and the close then waited out its fallback timer
  * (measured 2026-09-24 — closed halfway in, opacity went .50 → 0 with no
  * transition; closed after the entrance, the same rule fades 1 → 0). The
- * controller dock pinned too until ruling 285 made its entrance a transition,
- * which a close retargets from where it is with nothing pinned.
+ * controller dock is not pinned: its entrance is a transition (ruling 285(b)),
+ * which a close retargets from where it is.
  *
  * `pinLivePose` holds the element where its entrance has got to: its live
  * opacity and transform written inline and the entrance switched off, then a

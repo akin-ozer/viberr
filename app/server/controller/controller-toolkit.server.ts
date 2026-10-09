@@ -333,8 +333,8 @@ export interface ControllerToolkitDeps {
    *  task tool's `taskKey` defaults to it. */
   taskKey?: string | null;
   /** Ruling 273: the conversation this turn answers in. `create_epic`
-   *  records it on the epic (ruling 273), so the epic's page can link back to
-   *  where it was planned. */
+   *  records it on the epic, so the epic's page can link back to where it
+   *  was planned. */
   conversationId?: string | null;
   /** Ruling 259: the user message this turn answers. A turn that answers the
    *  message a follow-up sent leaves no further step. */
@@ -1001,7 +1001,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
               // path, `conventions.md`, is the live rulings file on this very
               // instance.
               documents: names.filter((name) => isInjectableKbDoc(name)),
-              // Ruling 267: closed to every agent's shell; only granted runs
+              // Ruling 209: closed to every agent's shell; only granted runs
               // read it, through their knowledge tool.
               private: kb.private,
             };
@@ -1204,8 +1204,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             }
             const before = readStoreDoc(target, [args.doc.path]);
             // Ruling 212(a): a whole-document replace names the version it read.
-            // `writeStoreDoc`'s own collision guard (ruling 212) asks whether
-            // the file EXISTS; this asks whether it is still the one you read.
+            // `writeStoreDoc`'s own collision guard asks whether the file
+            // EXISTS; this asks whether it is still the one you read.
             // The controller hit the difference live: correcting one paragraph
             // of the 26 KB rulings document, it re-read first and found that
             // "§9 had grown a whole existence-oracle section I had not
@@ -1359,8 +1359,8 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   // WEB-1 two sat unpromoted while the next packet asked the owner to type the
   // "not binding" build command into Cloudflare. Org-admin gated like every
   // other knowledge-base write, because a proposal lives in an org knowledge
-  // base. Since ruling 210 nothing files a proposal; this closes the ones
-  // documents still hold.
+  // base. Nothing files a proposal any more (ruling 210(c)); this closes the
+  // ones documents still hold.
   add(
     tool(
       "resolve_kb_proposal",
@@ -1520,7 +1520,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "save_skill",
-      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes). To change part of a skill that exists, use edit_skill, which replaces one passage in place (ruling 267). Ruling 267: a run handed its skills as prompt text gets at most 24,000 characters of all its agent's skills together, so keep a skill to how its step is done and put reference material (tables, long rule lists, past findings) in a knowledge base document, which a run reads on demand with no cap; the reply says when this body is past that and by how much, and list_skills carries each skill's size.",
+      "Create or update an org skill (name, one-line summary, SKILL.md body). Org admins only. The reply names the skill's id (what the next save takes) and its grantKey (what a grant takes). To change part of a skill that exists, use edit_skill, which replaces one passage in place (ruling 267). Ruling 186: a run handed its skills as prompt text gets at most 24,000 characters of all its agent's skills together, so keep a skill to how its step is done and put reference material (tables, long rule lists, past findings) in a knowledge base document, which a run reads on demand with no cap; the reply says when this body is past that and by how much, and list_skills carries each skill's size.",
       {
         id: z
           .string()
@@ -1600,7 +1600,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             transport: m.transport,
             target: m.target,
             up: m.up,
-            // Ruling 188 (F37-111): `up` is a CACHED verdict and the row
+            // Ruling 189 (F37-111): `up` is a CACHED verdict and the row
             // carries when it was taken — this read did not. Live, the
             // controller saw `up: false` with the reason "no response in 20s.
             // npx fetches its package on first use, so this is probably still
@@ -1904,7 +1904,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           const saved = await saveGlobalAgentProfile(db, input, actor, {
             dataRoot,
           });
-          // Ruling 264: the reply states the defaults a deploy will take.
+          // Ruling 261: the reply states the defaults a deploy will take.
           const defaults =
             ` Template defaults: ${BACKEND_LABEL[saved.profile.backend]}, ` +
             `model ${saved.profile.model || defaultModelFor(saved.profile.backend)}, ` +
@@ -2339,10 +2339,10 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // Ruling 60: who owns which shared paths until they merge. Read here
           // rather than inferred from prose, which is what every agent was doing.
           //
-          // Ruling 60 (pass 37, F37-85): RESOLVED, like the gates read it.
-          // Ruling 60 made a lease whose holder has finished bind nobody, and
-          // applied that at the push and the canonical anchor — not here, the
-          // read the controller actually uses. So this reported spent leases as
+          // Ruling 60 (F37-85): RESOLVED, like the gates read it. A lease
+          // whose holder has finished binds nobody, here as at the push and
+          // the canonical anchor. This read, the one the controller actually
+          // uses, once handed back every lease, so it reported spent leases as
           // live, and the controller said so out loud: "I cannot tell you from a
           // direct read whether SHOP-11's lease had already self-released when
           // it merged." It could not, because this line handed it the raw list.
@@ -2971,7 +2971,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           return `[absent] \`${args.path}\` does NOT exist on \`${project.defaultBranch}\`.`;
         }
         if (read.kind === "unavailable") {
-          // Ruling 263: a refusal that names no way out is the defect. This one
+          // Ruling 265: a refusal that names no way out is the defect. This one
           // says which branch it could not reach and why, so the answer is
           // never "I read something else instead".
           return (
@@ -2994,7 +2994,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   );
 
   // Ruling 262: the controller reads a timeline entry whole, exactly as the
-  // operator has since ruling 117. Project-scoped and membership gated like
+  // operator does (ruling 117). Project-scoped and membership gated like
   // every other task read here; `read_run_log` is the RUN's log, which is a
   // different thing from what an agent chose to report on the task.
   add(
@@ -3027,7 +3027,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "create_task",
-      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 50: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
+      "Create a task at the project's entry stage (every task passes the triage gate). Contributor or above. `priority: urgent` IS the urgent flag (urgent is derived from priority, never a second input). Ruling 48: `owner` seats a member as owner in the same write that creates the task, BEFORE the first operator run, so that run bills the named owner; omit it to seat yourself. Use set_task_owner afterwards to release a seat; `none` is refused here.",
       {
         projectSlug: z.string().optional(),
         title: z.string(),
@@ -3081,7 +3081,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           if (args.dueDate !== undefined) taskInput.dueDate = args.dueDate.trim() || null;
           if (args.blockedBy?.length) taskInput.blockedBy = args.blockedBy;
           if (args.epic?.trim()) taskInput.epic = args.epic.trim();
-          // Ruling 50: the owner is resolved BEFORE the write and seated in
+          // Ruling 48: the owner is resolved BEFORE the write and seated in
           // it, so the operator's `create` trigger already reads the right
           // principal. The release word the sibling `set_task_owner` accepts is
           // refused by name here rather than falling through to a misleading
@@ -3533,7 +3533,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             if (result.refused === "closed") {
               return `[denied] ${result.refusalReason ?? `${key} is closed`} There is nothing for the operator to coordinate on a closed task.`;
             }
-            // Ruling 310: every OTHER refusal, named rather than fallen
+            // Ruling 152: every OTHER refusal, named rather than fallen
             // through. The two arms above cover the two a manual trigger can
             // produce today; `blocked-by` is refused only for create,
             // transition and scheduled triggers (ruling 115), so it cannot
@@ -3546,10 +3546,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 `${result.refusalReason ?? `the run was refused (${result.refused})`}`
               );
             }
-            // Ruling 310 (F37-105): ruling 152 put R21-9's law on the
-            // SPECIALIST arm and returned above it for the operator, so the
-            // one dispatch door that still sent a human's words off the record
-            // was the operator half of the door ruling 152 had just fixed.
+            // Ruling 152 (F37-105): the operator arm records the person's
+            // directive as the specialist arm does; it was the one dispatch
+            // door that still sent a human's words off the record.
             // Measured by the controller three minutes after the deploy, by
             // counting the task's own comments across two reads: "my directive
             // is nowhere in the +1". The task page's Run-operator control has
@@ -3590,14 +3589,14 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
           // judge the way the operator's `run_agent` does. On AWSC-25 it had
           // to ask the operator to do it for it.
           if (args.noVerdict) runInput.withholdVerdict = true;
-          // Ruling 152 (F37-93), second half: R21-9's law applied to the
-          // dispatch prompt, on the one door that skipped it. Through the
+          // Ruling 152 (F37-93): the dispatch prompt goes on the record, on
+          // the one door that skipped it. Through the
           // controller the words went into the prompt and NOWHERE else: the
           // timeline showed a run appearing for no stated reason, and the
           // person who asked for it could not see what they had asked for. So
           // `@<agent> <prompt>` is written as that person's own comment,
           // addressed to the agent, as the task page and the operator's
-          // `run_agent` write it. BEFORE the start (ruling 69): ruling 69's
+          // `run_agent` write it. BEFORE the start (ruling 69): the
           // redelivery window is "a human comment addressed to this agent,
           // posted after this run started", and this comment used to be
           // written after the start, so every prompted dispatch through the
@@ -3837,9 +3836,9 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
             // next moves.
             checksRead: p.checksRead,
             // Ruling 237 (F38-14): the THIRD case — the read was made and GitHub
-            // refused it. Ruling 237's own note says the controller learned that
-            // this account's Actions were billing-blocked "only from prose an
-            // operator had written"; it was never told the read itself failed.
+            // refused it. The controller learned that this account's Actions
+            // were billing-blocked "only from prose an operator had written";
+            // it was never told the read itself failed.
             checksUnread: p.checksUnread ?? null,
             review: p.review,
             mergeable: p.mergeable,
@@ -4363,7 +4362,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "deploy_agent",
-      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 261: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 264; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
+      "Deploy a global agent template into the project (from list_global_agents). Project admin. remove_agent_deployment takes a deployment off again, the same removal as Delete on the project's Agents page (the Operator is a system profile and is never removable); use it rather than neutering a live deployment's grants, which leaves it selectable and is a workaround, not a removal. A deploy COPIES the template's own capability grants, so whether the profile can write the repo depends on the template: the reply says which, read off what was written. Ruling 261: `model` and `effort` override the template's defaults and are checked by name against the template's primary backend before the write (an unknown tier is refused, never clamped); omit them to keep the template's own model and effort (ruling 261; the backend's default stands in only when the template names none, or names a tier this backend does not offer). The reply states what was stored.",
       {
         projectSlug: z.string().optional(),
         profileId: z.string(),

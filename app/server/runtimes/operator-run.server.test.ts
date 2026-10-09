@@ -901,8 +901,7 @@ describe("Codex structured operator completion", () => {
    * Ruling 130: the plan mirror of `write_completion_packet`. `text` carries
    * the summary, `reason` the summary of the code changes and `screenshots`
    * the images; the offer later in the same plan is filed on the packet the
-   * step before it wrote. Ruling 130: `result` carries the notes and the
-   * result's files.
+   * step before it wrote. `result` carries the notes and the result's files.
    */
   it("ruling 130: a plan writes the completion packet, then offers the task on it", async () => {
     // CANARY: drop the `write_completion_packet` arm from `executeCodexPlan`
@@ -1603,10 +1602,9 @@ describe("operatorPlanToolsFor — the schema mirrors the capability policy (P13
     );
     // Dynamic-dispatch rework: engage_agent + prompt_agent collapsed into ONE
     // run_agent, so the fallback list shrank from 10 to 8; ruling 55 added
-    // `set_dependencies` (in-Viberr, no outside effect), so it was 9; ruling
-    // 210 added `propose_ruling` (ruling 210 renamed it `propose_kb_correction`,
-    // ruling 210 `correct_knowledge_doc`), also in-Viberr and also destroying
-    // nothing a person cannot undo, so it is 10.
+    // `set_dependencies` (in-Viberr, no outside effect), so it was 9;
+    // `correct_knowledge_doc` (ruling 210(a)) is also in-Viberr and also
+    // destroys nothing a person cannot undo, so it is 10.
     // Ruling 61's `lease_files` rides the delivery gate, so it is withheld
     // with delivery and the count stays 10. Ruling 125's two schedule verbs
     // ride a DIRECT dispatch grant, which this operator does not hold, so they
@@ -2207,7 +2205,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
     expect(prompt).toContain("A walk across `auto` stages where nothing needs an agent is one `transition_stage` per stage");
   });
 
-  it("ruling 116: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
+  it("ruling 117: a tool-less operator gets a long report whole, and an honest note when even that is cut", () => {
     // The report block alone: the rest of a Codex prompt names `get_task` in
     // its capability-gap note.
     const report = (prompt: string) => prompt.slice(prompt.indexOf("# Agent report"), prompt.indexOf("# Your decision"));
@@ -2235,7 +2233,7 @@ describe("pr-diverged turn instruction (both backends)", () => {
    * this product recommends for a review deadlock, read the schema, correctly
    * left the field null, and was refused twice -- and the task stranded.
    *
-   * Load-bearing after ruling 93, which makes putting that question the
+   * Load-bearing because ruling 93 makes putting that question the
    * operator's own move at the second objection.
    */
   it("ruling 132: the plan schema and the guidance both say a question_reviewer names its reviewer", () => {
@@ -2266,10 +2264,11 @@ describe("pr-diverged turn instruction (both backends)", () => {
    * Ruling 121 (F39-27): the plan-refused retry QUOTES the refusals.
    *
    * It used to say "The refusals are on the timeline, and each one names what
-   * to do instead — read them and follow them", which is the instruction
-   * ruling 201 retired for agents, one level up. Live on ax-clone AX-4 the
-   * operator got exactly that, planned the same malformed `create_task` option
-   * again, and the board recorded a deliberate hold on a task nobody held.
+   * to do instead — read them and follow them", the pointer an agent is no
+   * longer handed in place of content (ruling 201), one level up. Live on
+   * ax-clone AX-4 the operator got exactly that, planned the same malformed
+   * `create_task` option again, and the board recorded a deliberate hold on a
+   * task nobody held.
    */
   const REFUSED = [
     {
@@ -3015,10 +3014,11 @@ describe("stranded auto-stage resume", () => {
       const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
         .parsed.timeline.find((e) => e.text.includes("did not hold this stage"))?.text;
       expect(note, "no hold note says the operator was stopped").toBeDefined();
-      // The run before the nudge was refused too only after ruling 120's
-      // nudge. CANARY: drop the drive-start `planRefusedNudge` stamp and the
-      // first row loses its first run; say it whatever the nudge and the second
-      // blames a first run whose one step was carried out.
+      // The run before the nudge was refused too only when the nudge was
+      // ruling 120's plan-refused one. CANARY: drop the drive-start
+      // `planRefusedNudge` stamp and the first row loses its first run; say it
+      // whatever the nudge and the second blames a first run whose one step
+      // was carried out.
       expect(note).toContain(`Every action it planned was refused, ${refusedWhen}, so nothing it decided was carried out`);
       expect(note).not.toContain("deliberate hold");
       // …and the remedy no longer sends the reader at the one move that
@@ -3036,7 +3036,7 @@ describe("stranded auto-stage resume", () => {
      * whose every call was refused therefore read at settle as one that tried
      * nothing, and got "the operator held it twice in a row … treated as a
      * deliberate hold … run the operator manually": the two falsehoods and the
-     * remedy ruling 121 took out of the Codex note.
+     * remedy the Codex note no longer carries.
      *
      * A call that THROWS is the same drive: it tried, and nothing it asked for
      * was carried out. The throw reached the model as `strictTool`'s `[error]`
@@ -3046,7 +3046,7 @@ describe("stranded auto-stage resume", () => {
      * copy is back before the turn ends.
      *
      * The calls go through the drive's mounted `viberr` server with a real MCP
-     * client, the way the model makes them (ruling 121's Claude row).
+     * client, the way the model makes them.
      */
     it.each<{
       case: string;
@@ -3883,7 +3883,7 @@ describe("turn doctrine: triage quality gate and scheduled re-runs", () => {
     }
   });
 
-  it("ruling 55: the dependencies-released doctrine names the entries, the base re-read and the moot packet, then continues with the stage rule", () => {
+  it("ruling 57: the dependencies-released doctrine names the entries, the base re-read and the moot packet, then continues with the stage rule", () => {
     // Canary: return "" from `dependenciesInstruction`.
     const atWork = snap({ stage: "impl", stageName: "In Progress", goal: "Ship it.", openPacket: true });
     const prompt = operatorPrompts.buildOperatorTurnPrompt(atWork, "dependencies-released", undefined, undefined, undefined, undefined, undefined, undefined, undefined, {
@@ -4169,7 +4169,7 @@ describe("pending trigger queue", () => {
     store3 = setupTestStore(ctx3);
     seedOperatorProject();
     // A work stage whose way out is an APPROVAL boundary on this board (the
-    // Standard template's is `auto` since ruling 120), so nothing here is
+    // Standard template's is `auto`), so nothing here is
     // "stranded" and the only re-runs are the queued triggers under test.
     writeTask(store3.dataRoot, store3.slug, {
       frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -4460,7 +4460,7 @@ describe("pending trigger queue", () => {
     });
   });
 
-  it("ruling 116: the Codex plan's snapshot never sends it to a tool it cannot call", async () => {
+  it("ruling 117: the Codex plan's snapshot never sends it to a tool it cannot call", async () => {
     // A timeline longer than the six-entry window, so the window note is
     // written, as it was on every ax-clone task by mid-afternoon.
     writeTask(store3.dataRoot, store3.slug, {
@@ -5048,7 +5048,7 @@ describe("runOperator — authority, ordering, orphans", () => {
     // R19-1: an undeployed operator may LOOK at the repository — but through the
     // read-only checkout under its cwd (Read/Grep/Glob), so the in-process MCP
     // floor is the READS, and they still change nothing. Ruling 117 adds
-    // `read_board` to that floor and ruling 117 adds `read_timeline_entry`:
+    // `read_board` and `read_timeline_entry` to that floor:
     // seeing a board it holds no authority over takes nothing away, the task
     // page already shows a person the whole comment that tool returns, and
     // reading is never the thing being withheld.
@@ -5716,7 +5716,7 @@ describe("runOperator — authority, ordering, orphans", () => {
   );
 
   // The MACHINE triggers are never refused: pr-diverged WITHDRAWS a moot
-  // packet (ruling 233 recovery) and agent-reply reacts to a run already in
+  // packet (ruling 232 recovery) and agent-reply reacts to a run already in
   // flight. Canary: refuse every trigger over an open packet (drop the
   // `PACKET_REFUSED_TRIGGERS` scoping) and both rows go red.
   it.each(["pr-diverged", "agent-reply"] as const)(

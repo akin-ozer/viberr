@@ -157,7 +157,7 @@ export async function action({ request, params }: Route.ActionArgs) {
           toStageId: String(formData.get("to") ?? ""),
           beforeKey: beforeRaw || null,
           // Ruling 97 (F21-2): a drop on the FINAL column is an acceptance —
-          // the board's ceremony (ruling 97 / R18-7, the shared `AcceptConfirm`)
+          // the board's ceremony (R18-7, the shared `AcceptConfirm`)
           // has said so on screen for three passes while this POST carried
           // nothing. The key rides on every reorder; `reorderTask` forwards it
           // to `transitionStage`, which consults it on the terminal branch

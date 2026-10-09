@@ -727,7 +727,7 @@ type StrandedNudge = boolean | "idle-stage" | "plan-refused" | "refresh-ended";
  * prepares because ruling 118 stops the acting steps after one that opens a
  * packet. AX-5's operator planned the refresh alone and stopped.
  *
- * Ruling 118: and a walk across `auto` stages. Each of the operator's own
+ * A walk across `auto` stages is one plan too. Each of the operator's own
  * moves ends its drive and the next stage starts another, so AX-1 spent five
  * operator runs walking Design to Review with nothing to do at Build or
  * Verify. The moves chain in one plan, each checked from the stage it runs at.
@@ -796,7 +796,7 @@ function agentReportBlock(
   const suffix = cut
     ? ` (first ${cap.toLocaleString("en-US")} chars; the rest is NOT below)`
     : "";
-  // Ruling 116: the way out is only worth naming to an operator that can take
+  // Ruling 117: the way out is only worth naming to an operator that can take
   // it. One that cannot is told the rest is out of reach, so it neither
   // summarises the cut report as whole nor sends someone to fetch it.
   const more = !cut
@@ -1110,7 +1110,7 @@ function operatorTurnDoctrine(
   if (trigger === "head-unpushed") {
     // Ruling 96 (F37-55): a human pressed Accept and the gate refused because
     // the reviewed revision is not on the PR. Only this operator can push it
-    // (ruling 229: "pushing is never a person's job and never an agent's"), so
+    // (ruling 126: "pushing is never a person's job and never an agent's"), so
     // the refusal is handed here rather than left as a toast in one browser.
     // Live shape: SHOP-2's reviewers approved `ea5f2ff`, PR #13's head was
     // `913ce9d`, and the operator - re-run by the human for exactly this -
@@ -1448,7 +1448,7 @@ function heldDoctrine(snapshot: OperatorTaskSnapshot): string {
   );
 }
 
-/** Ruling 55: the `dependencies-released` turn. */
+/** Ruling 57: the `dependencies-released` turn. */
 function dependenciesInstruction(
   snapshot: OperatorTaskSnapshot,
   release: DependencyReleasePayload | undefined,
@@ -1497,8 +1497,8 @@ const operatorTurnInstruction = (
   // Viberr has already said no to.
   const refused = unansweredRefusalInstruction(args[0]);
   // Ruling 116: what a person decided outranks the stage doctrine too, and it
-  // is the field a window cut used to hide. Ruling 116's collisions ride the
-  // same channel, because this instruction is the one BOTH backends read.
+  // is the field a window cut used to hide. The `collisions` ride the same
+  // channel, because this instruction is the one BOTH backends read.
   const decided = humanDecisionsInstruction(args[0]);
   const colliding = collisionsInstruction(args[0]);
   // Ruling 116: where the branch refresh is refused, said on every trigger,

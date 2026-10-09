@@ -40,7 +40,7 @@ export function ConfirmDialog({
 }: {
   title: string;
   body: ReactNode;
-  /** Ruling 273: a field the decision carries, such as the optional reason a
+  /** Ruling 287: a field the decision carries, such as the optional reason a
    *  knowledge-base correction's undo records. Rendered under the body, so
    *  the consequence is read before anything is typed. */
   children?: ReactNode;

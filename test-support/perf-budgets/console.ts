@@ -19,7 +19,7 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // each acceptance door answers its decision with (`acceptAnswersWith` and
   // `forceAnswersWith`, "Accept completion", 79 bytes), so the accept dialog
   // reads the loader's answer instead of guessing. Raised 13152 to 13173 by
-  // ruling 241: the loader names the open pull requests this merge will
+  // ruling 242: the loader names the open pull requests this merge will
   // likely put in conflict (`"mergeCollisions":[],`, 21 bytes on VIB-142, which
   // shares no path), so the accept dialog can say so before the merge. Raised
   // 13173 to 13395 by ruling 103: the loader ships the completion packet's
@@ -57,7 +57,7 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // agent's window, display lines only. Raised 136574 to 136646 by CON-7:
   // the three groups' `factsAt` (24 bytes each). Raised 136646 to 136725 by
   // ruling 316: the packet render's two answer fields (79 bytes, as above).
-  // Raised 136725 to 136746 by ruling 241: `"mergeCollisions":[],` (21
+  // Raised 136725 to 136746 by ruling 242: `"mergeCollisions":[],` (21
   // bytes, as above). Raised 136746 to 136968 by ruling 103: `completion`
   // (234 bytes, as above, less the same 12). Raised 136968 to 136994 by
   // ruling 16: the two rows' result and mark (26 bytes, as above). Raised
@@ -137,12 +137,12 @@ export const CONSOLE_BUDGETS: PerfBudgetTable = {
   // re-reconciled on identical data; neither renders now (the stable run
   // projection, memoised panels). The 43 left are the page's other panels
   // (54 before the timeline and composer memos of perf/journeys-pass; 51
-  // before ruling 284's memoised GlyphSwap took the run start's and Archive's
-  // glyphs out of the re-render; 49 before ruling 309's Details panel, whose
-  // property rows are memoised on its stabilised values, so an unchanged task
-  // re-renders only the panel's shell and its head glyph; 44 before ruling
-  // 315's PR card, where the branch is the link to its tree and the "Open on
-  // GitHub" button's glyph is gone). Raised to 44 by ruling 13(b): the
+  // before the memoised GlyphSwap (ruling 284) took the run start's and
+  // Archive's glyphs out of the re-render; 49 before the Details panel (ruling
+  // 309), whose property rows are memoised on its stabilised values, so an
+  // unchanged task re-renders only the panel's shell and its head glyph; 44
+  // before the PR card (ruling 315), where the branch is the link to its tree
+  // and the "Open on GitHub" button's glyph is gone). Raised to 44 by ruling 13(b): the
   // TaskMainColumn region, the page's main column as a component of its own,
   // renders once with the page; every panel under it renders as before.
   "console:task-page.renders-per-noop-revalidation": {

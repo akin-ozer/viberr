@@ -80,7 +80,7 @@ const TWO_DIGITS = { minimumIntegerDigits: 2 } as const;
 /** The tens digit of a base-60 field never passes 5. */
 const BASE_60 = { 1: { max: 5 } } as const;
 /**
- * Ruling 321: a clock's field rolls in 300 ms, eased out (the sheet's
+ * Ruling 311: a clock's field rolls in 300 ms, eased out (the sheet's
  * `--ease-out`). number-flow's own roll is a 900 ms spring, and a clock ticks
  * once a second, so its seconds were mid-roll nine tenths of the time: two
  * digits half in view in the cell, read as "03:1" over a clipped glyph (owner's
@@ -216,7 +216,7 @@ function RunGlyph({ run, decorative }: { run: RunView; decorative?: boolean }) {
  * Shared listbox dropdown. Adds Escape-close + arrow-key navigation over the
  * mock (which only had outside-mousedown close).
  *
- * Ruling 313 (F40-34): the trigger is named by its label AND the stream it
+ * Ruling 311 (F40-34): the trigger is named by its label AND the stream it
  * shows ("Agent log stream: Platform Engineer · delivering"), so a screen
  * reader hears which agent's console is open and a voice-control user can
  * say the name on screen (WCAG 2.5.3); a fixed `aria-label` used to replace
@@ -511,8 +511,8 @@ function RunActions({
             : "Show console"}
       </button>
       {canInterrupt && (
-        /* Ruling 278: a stop discards the work in flight, so the trigger
-           wears ruling 278's danger label like the confirm it opens
+        /* Ruling 278(a): a stop discards the work in flight, so the trigger
+           wears the danger label like the confirm it opens
            (`btn danger`) — the neutral/red pair inside `.run-actions` is
            what separates it from the sibling `View logs`. `disabled` here
            is the request in flight (ruling 288), not a validity gate. */
@@ -565,7 +565,7 @@ const RunStripFacts = memo(function RunStripFacts({
     <>
       <div className="run-phase">
         <span className="run-spin" aria-hidden="true" />
-        {/* Ruling 313 (F40-33): the text column is what may shrink, so a
+        {/* Ruling 311 (F40-33): the text column is what may shrink, so a
             long step cuts at the strip's edge with its ellipsis showing
             instead of widening the page on a phone (app.css). */}
         <div className="run-phase-text">
@@ -798,9 +798,9 @@ function SessionIdChip({
     }
   };
   // The id identifies the provider session (claude session_id / codex thread),
-  // stored inside the app's runtime — since ruling 137 in the runtime home of
-  // the person the run billed (`runtimes/users/<id>/{claude,codex}-home` on the
-  // data volume). It IS resumable on your own machine with
+  // stored inside the app's runtime — in the runtime home of the person the
+  // run billed (`runtimes/users/<id>/{claude,codex}-home` on the data volume,
+  // ruling 137). It IS resumable on your own machine with
   // your own subscription — use Export to download an installer that places the
   // transcript where the local CLI expects it and prints `claude --resume` /
   // `codex resume`. (Or continue in-app by @mentioning the agent.)
@@ -1056,7 +1056,7 @@ function ConsoleCode({ block }: { block: ConsoleCodeBlock }) {
   const lines = block.code.split("\n");
   // Ruling 168: AICSS's code block. A head naming what the block holds, its
   // size and a Copy control (the copy mark trading for the check, as every
-  // other copy control does since ruling 284); the lines numbered in a
+  // other copy control does, ruling 284(b)); the lines numbered in a
   // gutter the selection skips.
   return (
     <span className="log-code">

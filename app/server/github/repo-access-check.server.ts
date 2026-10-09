@@ -25,10 +25,10 @@ export type RepoAccessResult =
       remoteDefaultBranch: string | null;
       private: boolean;
       /**
-       * Ruling 227: the repository has no commit at all. Viberr creates the
-       * default branch's first commit itself before the first task branch
-       * (ruling 227's bootstrap), so this is a fact to state, not a failure.
-       * Absent on a result recorded before the ruling.
+       * Ruling 227(a): the repository has no commit at all. Viberr creates
+       * the default branch's first commit itself before the first task
+       * branch, so this is a fact to state, not a failure. Absent on an
+       * older recorded result.
        */
       empty?: boolean;
       /**

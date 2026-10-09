@@ -890,7 +890,7 @@ describe("LiveRoster", () => {
 });
 
 describe("CapabilityMatrixModal", () => {
-  it("renders catalog groups + Operator actions, and closes on Escape (ruling 295)", () => {
+  it("renders catalog groups + Operator actions, and closes on Escape (ruling 287)", () => {
     const onClose = vi.fn();
     const profiles = [
       mkProfile({
@@ -2140,7 +2140,7 @@ describe("AgentsPage failure toast kind (P13-D-10)", () => {
     resources: { skills: [], mcps: [], kb: [] },
   };
 
-  // Ruling 316 (and ruling 286's in-flight rule): the picked row names the
+  // Ruling 326 (and ruling 286's in-flight rule): the picked row names the
   // work while the deploy is in flight, read off the page's own fetcher; the
   // other rows only wait at the busy step.
   it("the picked library row says Adding while its deploy is in flight", async () => {
@@ -3177,7 +3177,7 @@ describe("CreateProfileModal fingerprint (B5)", () => {
 });
 
 /**
- * Ruling 184 (pass 40, the Agents page and the global profile editor). Each
+ * Rulings 184 and 326: the Agents page and the global profile editor. Each
  * case names its finding and the canary that turns it red.
  */
 describe("ruling 184: the Agents page says what the runtime does", () => {

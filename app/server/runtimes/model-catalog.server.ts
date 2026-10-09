@@ -68,7 +68,7 @@ export interface CatalogModel {
   /** Effort levels valid for THIS model (subset of the backend efforts). */
   efforts?: string[];
   /** R20-3 (F20-4): set when the PROVIDER refused this model for this
-   *  deployment's account (learned from a real run's failure, ruling 220). The
+   *  deployment's account (learned from a real run's failure, ruling 149). The
    *  picker disables it and shows the reason; it clears on the next success. */
   unavailable?: { reason: string; markedAt: string };
 }
@@ -243,7 +243,7 @@ const CODEX_CURATED: ModelCatalog = {
   models: CODEX_MODELS,
   efforts: [...CODEX_EFFORTS],
   // Default = the first available model (a changeable starting point): GPT-6.1
-  // Sol since ruling 149, see `CODEX_MODELS`.
+  // Sol (ruling 149), see `CODEX_MODELS`.
   defaultModel: CODEX_MODELS[0]!.value,
   defaultEffort: "medium",
 };
@@ -621,8 +621,8 @@ export function resetModelCatalogCache(): void {
 
 /**
  * The model ids the LIVE catalog last offered for a backend (P13-RT-07).
- * Deliberately ignores the TTL — and, since ruling 137, whose account produced
- * the entry: the TTL governs when to REFETCH, and the owner governs what to
+ * Deliberately ignores the TTL — and whose account produced the entry
+ * (ruling 137): the TTL governs when to REFETCH, and the owner governs what to
  * SHOW; neither governs whether a value the picker already offered (and a
  * profile already stored) is a real model id. On a cold process the cache is
  * empty and validation falls back to the curated aliases + the dated-id shape,

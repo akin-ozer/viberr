@@ -791,7 +791,7 @@ const utilizationOf = (window: CodexRateWindow) =>
  * Ruling 161(b): the window closest to its limit across the account's latest
  * snapshots, one per limit. Null while no snapshot has named a window.
  *
- * Ruling 161(b): and every window beside it, shortest first. The weekly window
+ * And every window beside it, shortest first. The weekly window
  * at 42% hid the five-hour one a controller pacing runs to it needs.
  */
 function codexRateLimitReading(
@@ -1023,7 +1023,7 @@ export function buildResumeScript(
   // run sink's P13-U-1 redaction covers Viberr's `.jsonl` and the console, and
   // this is the sibling channel that bypassed it. One `env`-printing tool call
   // puts the run's credential into the provider transcript verbatim — and
-  // since ruling 137 that is somebody's PERSONAL key, while this bundle is
+  // that is somebody's PERSONAL key (ruling 137), while this bundle is
   // downloadable by any member of the run's project. Scrub before embedding,
   // with the same redactor and the same token patterns ("secrets wherever they
   // came from"). The marker carries no quote or backslash, so the JSONL stays

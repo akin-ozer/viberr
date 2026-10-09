@@ -251,17 +251,18 @@ export function readAttachmentBytes(
   }
 }
 
-/** Ruling 19: the most of a text attachment read at all (then paged, 551). */
+/** Ruling 19: the most of a text attachment read at all (then paged, ruling
+ *  215). */
 const TEXT_READ_MAX_BYTES = 16 * 1024 * 1024;
 /** Ruling 19: the most of a workbook read (uploads stop at 10 MB; an agent's
  *  own export can be larger). */
 const XLSX_READ_MAX_BYTES = 25 * 1024 * 1024;
 
-/** Ruling 193: the most of one saved file read for its citations. */
+/** Ruling 78: the most of one saved file read for its citations. */
 const SAVED_TEXT_MAX_BYTES = 4 * 1024 * 1024;
 
 /**
- * Ruling 193: the text of the files a run saved for people, where a run whose
+ * Ruling 78: the text of the files a run saved for people, where a run whose
  * delivery is files (ruling 128) cites its evidence. On AWSC-1 the findings
  * file named eleven browser snapshots and the report named none, so the prune
  * deleted all eleven and the reviewer rejected the findings for citing files
@@ -295,7 +296,7 @@ export function savedFilesText(
 /**
  * Delete the working artifacts a finished run left behind, KEEPING any whose
  * exact filename the run cited (`citedIn` — reply text, evidence rows, the
- * timeline since the run started, and the files it saved, ruling 193). The persona's contract is "cite the exact
+ * timeline since the run started, and the files it saved, ruling 78). The persona's contract is "cite the exact
  * filename", so a citation is the agent saying "this file is for the humans".
  * Returns the names that survive (the list the producing event should claim)
  * and the names deleted. A file that cannot be deleted stays listed — the
@@ -457,7 +458,7 @@ function attachmentDisposition(name: string, inline: boolean): string {
  * every response, so even an inline kind runs no script and loads no plugin
  * on the app's origin (a browser that will not show a sandboxed PDF inline
  * downloads it, which is acceptable); and `?download=1` asks for the save
- * dialog on an inline kind (ruling 78).
+ * dialog on an inline kind (ruling 317).
  */
 export function servedFileResponse(request: Request, name: string, bytes: Uint8Array): Response {
   const { type, inline } = attachmentContentType(name);
@@ -479,11 +480,11 @@ export function servedFileResponse(request: Request, name: string, bytes: Uint8A
  * The refusals every person's upload meets, before anything is written: an
  * empty or dot-prefixed name the store scanner would then hide, a name that
  * is not one path segment, and anything over {@link MAX_UPLOAD_BYTES}. Ruling
- * 76: any kind is stored; the serving route decides what renders inline. Returns the name as it will be stored: trimmed,
- * and composed (ruling 76), so the name a Mac sends decomposed is stored the
- * way every reader types it. Ruling 76:
- * a task filed with its input checks every file here before its key is
- * allocated, so a refused file costs no key.
+ * 76: any kind is stored; the serving route decides what renders inline.
+ * Returns the name as it will be stored: trimmed, and composed, so the name a
+ * Mac sends decomposed is stored the way every reader types it. A task filed
+ * with its input checks every file here before its key is allocated, so a
+ * refused file costs no key.
  */
 export function checkAttachmentUpload(name: string, byteLength: number): string {
   const cleaned = storedFileName(name.trim());
@@ -829,14 +830,14 @@ function textPage(
 }
 
 /** Ruling 117: the most of a rendered file's text (a workbook's sheets, ruling
- *  117; a PDF's pages, ruling 214) a reader can page through. The whole of it
+ *  79; a PDF's pages, ruling 214) a reader can page through. The whole of it
  *  is rendered and sliced like any text, because the renderer stops at whole
  *  lines and a page cut at its budget would skip the rest of the line it
  *  stopped before. */
 const RENDERED_TEXT_MAX_CHARS = 16_000_000;
 
 /**
- * Ruling 117: the pictures a reader is handed as the picture itself. A person
+ * Ruling 79: the pictures a reader is handed as the picture itself. A person
  * on a board that delivers results often hands over a screenshot (a portal's
  * VM list, a spreadsheet they could not export), and a coordinator that could
  * only read text triaged that task from the file's name. The ceiling is the
@@ -930,7 +931,7 @@ function readCap(ext: string): number {
 /** How much of a file's head the text test reads: git's own window. */
 const BINARY_SNIFF_BYTES = 8_000;
 
-/** Ruling 198: a file whose bytes are not text, named with what a reader
+/** Ruling 79: a file whose bytes are not text, named with what a reader
  *  takes instead of guessed at from its name. */
 function binaryFile(name: string, ext: string, bytes: number, where: string): UnreadableFile {
   return {
@@ -955,9 +956,9 @@ function tooLargeToRead(name: string, ext: string, bytes: number, where: string)
 
 /**
  * Ruling 258: one file for a reader, from bytes already in hand: text as
- * text, a spreadsheet as its sheets in CSV (ruling 117), an image as the image
- * after its own header is checked, and (ruling 198) any other file as text
- * unless its bytes are binary. The task's reader and the controller's
+ * text, a spreadsheet as its sheets in CSV (ruling 79), an image as the image
+ * after its own header is checked, and any other file as text unless its
+ * bytes are binary. The task's reader and the controller's
  * reader of a message's files share it; `where` says where a person opens the
  * file instead ("on the task page", "in the conversation").
  */
@@ -1023,7 +1024,7 @@ function wholeText(name: string, ext: string, bytes: Buffer, where: string): Who
     }
     return { text: text.text, truncated: text.truncated, leftOut: null };
   }
-  // Ruling 198: any other name reads as text unless it names a binary kind
+  // Ruling 79: any other name reads as text unless it names a binary kind
   // or its bytes say otherwise: a NUL in its head (git's own `-text` test,
   // ruling 317's) marks a binary.
   if (
@@ -1118,7 +1119,7 @@ export function findInAttachmentContent(
 
 /**
  * One attachment for a reader, or `null` when this task has no such file:
- * text as text, a spreadsheet as its sheets in CSV (ruling 117), an image as
+ * text as text, a spreadsheet as its sheets in CSV (ruling 79), an image as
  * the image. Throws nothing for anything else: the caller is told what the
  * file IS and that this channel does not carry it.
  */

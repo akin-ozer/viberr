@@ -125,12 +125,10 @@ function PacketDestructiveConfirm({
 /**
  * UX19-9 — an `archive_task` packet option asks first, like its sibling does.
  *
- * Ruling 233 makes this packet the ONLY place in the product that deletes a
- * remote branch ("Remote-branch deletion exists only as that packet
- * resolution"), and ruling 97 (R15-1) / ruling 97 (R18-7) established the
- * standard the rest of this page already meets: a one-way write states what it
- * destroys and offers a way out, at EVERY entry point — never from a generic
- * button. The task page confirmed the *reversible* archive (`ArchiveConfirm`,
+ * This option deletes a remote branch (`deleteTaskRemoteBranch`, ruling 233),
+ * and ruling 97 (R15-1, R18-7) sets the standard the rest of this page already
+ * meets: a one-way write states what it destroys and offers a way out, at
+ * EVERY entry point — never from a generic button. The task page confirmed the *reversible* archive (`ArchiveConfirm`,
  * which enumerates the open decision and the pending recommendations it
  * withdraws) and not the irreversible one, which committed a permanent GitHub
  * branch deletion from a button whose whole promise is "Confirm decision" and
@@ -141,7 +139,7 @@ function PacketDestructiveConfirm({
  * ceremony (accept-confirm.tsx — F31-C8: an earlier revision of this comment
  * named an `AcceptDisclosureProvider` context that never shipped): the shared
  * ceremony exists because FOUR surfaces can reach `acceptCompletion` and were
- * drifting apart (F19-3/F19-7). Ruling 233 gives branch deletion exactly one
+ * drifting apart (F19-3/F19-7). Archiving with branch deletion has exactly one
  * surface — this card — so there is nothing to keep in sync. It still wears the
  * `PacketDestructiveConfirm` shell above; local means "not routed through
  * accept-confirm.tsx", not "its own copy of the ceremony".

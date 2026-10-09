@@ -29,7 +29,7 @@ the ruling and says so.
 | FR4 | Commenting within visible projects; projects members-only (R15-4) | IMPLEMENTED as amended | `routes/project-visibility.server.ts`, `server/auth/require-project.server.ts`; the "non-member comments are labelled" clause is reachable only for historical events and org-admin override comments |
 | FR5 | Project creation self-serve; creator seeded admin | IMPLEMENTED as amended | `routes/_index.tsx`, `features/home/project-create.server.ts` |
 | FR6 | Admins define stages, allowed transitions, approval boundaries | **PARTIAL** | Stages and per-transition boundaries are editable (`features/project-settings/settings-actions.server.ts`, `features/policy/policy-actions.server.ts`); transitions are an auto-wired linear chain in stage order (`shared/workflow/transitions.ts`, P13-D-1); no transitions editor, no arbitrary graph |
-| FR7 | One repository per project; task override struck | IMPLEMENTED as amended | `schemas/project-file.schema.ts` `repo`; `features/github/github-actions.server.ts`; the `change-repo` intent changes which repository the project uses (ruling 226), checked before it is written (ruling 226); a board that delivers results needs none, and `remove-repo` takes one away from a board that does not write it (ruling 226) |
+| FR7 | One repository per project; task override struck | IMPLEMENTED as amended | `schemas/project-file.schema.ts` `repo`; `features/github/github-actions.server.ts`; the `change-repo` intent changes which repository the project uses, checked before it is written; a board that delivers results needs none, and `remove-repo` takes one away from a board that does not write it (ruling 226) |
 | FR8 | Separate human RBAC and agent capability policy per project | **PARTIAL** | Agent policy is per project (`shared/capabilities.ts`, `features/agents/agent-profile-actions.server.ts`); human RBAC is role *assignment* from one fixed matrix, admins cannot redefine what a role may do per project (recorded in decisions.md ruling 26(a), unannotated in FR8) |
 | FR9 | Reusable agent profiles: stages, actions, resources, web reach incl. browser, backend | IMPLEMENTED | `server/org/gagents.server.ts`, `server/files/agent-profile-file.server.ts`, `server/tasks/specialist-browser-mcp.server.ts`, `server/tasks/specialist-mcp.server.ts` |
 | FR10 | File-native store, inspectable, reconciles direct edits | IMPLEMENTED | `server/files/file-store-root.server.ts`, `server/files/file-watch.service.server.ts`, tolerant schemas, `server/files/store-check.server.ts`, `server/projections/rescan.server.ts` |
@@ -39,7 +39,7 @@ the ruling and says so.
 | FR14 | Uniform `engagements[]`; required reviewers; dispatch writes engagements (ruling 51) | IMPLEMENTED as amended | `engagementSchema`, `deliveringEngagement`; required reviewers per review stage in `project.md` `requiredReviewers` (ruling 89), holding any delivered work (ruling 81); retired vocabulary pinned by `features/retired-vocabulary.test.tsx` and `features/copy-ban.test.ts` |
 | FR15 | Agents flag underspecified tasks and request clarification | IMPLEMENTED | operator triage gate (`server/runtimes/operator-prompt.server.ts`), `ask_human` question packets, `quality` events; `flag-underspecified-tasks` is advisory persona text |
 | FR16 | Typed important events + conversation in one chronology | IMPLEMENTED | `TIMELINE_EVENT_TYPES` (11), `features/task-detail/timeline.tsx` |
-| FR17 | Validation outcomes, evidence incl. posted files, change summaries, compressed history | IMPLEMENTED as amended | verdicts, evidence rows, attachments (`server/files/task-attachments.server.ts`, `routes/task-attachment.ts`), `server/tasks/timeline-compaction.server.ts`, `server/tasks/comment-guardrails.server.ts`; people attach files too (ruling 76) and text files open in a code reader (ruling 317) and markdown opens rendered (ruling 317), beyond the PRD's "files an agent posts" (§5 item 14) |
+| FR17 | Validation outcomes, evidence incl. posted files, change summaries, compressed history | IMPLEMENTED as amended | verdicts, evidence rows, attachments (`server/files/task-attachments.server.ts`, `routes/task-attachment.ts`), `server/tasks/timeline-compaction.server.ts`, `server/tasks/comment-guardrails.server.ts`; people attach files too (ruling 76) and text files open in a code reader and markdown opens rendered (ruling 317), beyond the PRD's "files an agent posts" (§5 item 14) |
 | FR18 | Dedicated operator per active task | IMPLEMENTED | `server/runtimes/operator-run.server.ts` (per-task lease, single-flight) |
 | FR19 | Execute profiles via Codex / Claude backends | IMPLEMENTED (judged against ruling 137) | `server/runtimes/runtime-registry.server.ts` (adapters + spawn-env filtering), `server/runtimes/claude-runtime.server.ts`, `server/runtimes/codex-runtime.server.ts`; a run executes on the **credential principal's** own account, resolved by `server/runtimes/run-principal.server.ts` and built by `runCredentialFor` (`server/runtimes/backend-credentials.server.ts`), never a deployment-wide key; every Codex run gets a private `CODEX_HOME` (ruling 145) and runs `danger-full-access` (ruling 144) |
 | FR20 | Operator recommends, triggers work, re-engages supporters | IMPLEMENTED | `RECOMMENDATION_KINDS` (4), `server/tasks/operator-toolkit.server.ts`, `features/task-detail/operator-recommendations.tsx` |
@@ -49,7 +49,7 @@ the ruling and says so.
 | FR24 | Board by stage; cards show stage, agent, waiting, validation | IMPLEMENTED | `features/board/board-page.tsx`, `server/projections/board-query.server.ts`; the card (ruling 306) shows the stage by its lane, the agent as a badge in its avatar stack, the wait in its one status chip, and validation as a problem chip when failing or bypassed |
 | FR25 | Task detail prioritizes state, execution profile, latest packet before timeline | IMPLEMENTED | `features/task-detail/task-detail-page.tsx` (source order head, packet, side column, main; U35-2) |
 | FR26 | Structured blocking/decision packets | IMPLEMENTED | `taskPacketSchema`, `PACKET_OPTION_KINDS` (18), `resolvePacket` (`server/tasks/packet-resolution.server.ts`), `features/task-detail/decision-packet.tsx`; Viberr raises some packets itself (`from: policy-engine`, e.g. a review deadlock, ruling 94) |
-| FR27 | Approve/reject/redirect; Done human by default; verdict gate; Force-accept; full-autonomy acceptance = merge pending; "Completed — no changes" | IMPLEMENTED, all amendments | acceptance paths in `server/tasks/task-acceptance.server.ts`, `operatorAcceptCompletion` (`server/tasks/operator-moves.server.ts`), `server/tasks/no-change-completion.server.ts`, `features/task-detail/accept-confirm.tsx`, `shared/acceptance-disclosure.ts`; the force dialog lists every gate the record will say it bypassed (ruling 98), except what the accept-time no-change probe decides on a task with no PR, and the audit row and the completion event name the same gates (ruling 81); `refresh-and-review` updates a behind branch and re-reviews before acceptance (ruling 97) |
+| FR27 | Approve/reject/redirect; Done human by default; verdict gate; Force-accept; full-autonomy acceptance = merge pending; "Completed — no changes" | IMPLEMENTED, all amendments | acceptance paths in `server/tasks/task-acceptance.server.ts`, `operatorAcceptCompletion` (`server/tasks/operator-moves.server.ts`), `server/tasks/no-change-completion.server.ts`, `features/task-detail/accept-confirm.tsx`, `shared/acceptance-disclosure.ts`; the force dialog lists every gate the record will say it bypassed, except what the accept-time no-change probe decides on a task with no PR, and the audit row and the completion event name the same gates (ruling 98); `refresh-and-review` updates a behind branch and re-reviews before acceptance (ruling 97) |
 | FR28 | Progress review without raw logs | IMPLEMENTED | live phase/step in `features/runtime/runs-panels.tsx`, evidence separation, typed events |
 | FR29 | Authenticate to GitHub, access authorized repos | IMPLEMENTED | sealed PATs (`server/secrets/*`), `server/github/github-client.server.ts`, org connections; PAT-only, no GitHub App |
 | FR30 | Every task executes against its project's repo | IMPLEMENTED | `schemas/project-file.schema.ts`, `server/github/pr-open.server.ts` |
@@ -123,11 +123,11 @@ the ruling and says so.
 9. **Phase 2 list** outrun by shipped work: analytics (`/insights`), audit exports, task
    grouping (epics, which replaced goal chains) and task dependencies, recovery tooling (continuity panel, backup CLI,
    maintenance, transcript retention).
-10. **FR40** records ruling 270 only. Rulings 270 (controller settings at agent-editor
-    parity), 107 (the built-in `viberr_ops` diagnostics MCP), 121 (the dock on every
-    signed-in surface, conversation scopes, the per-turn context read, `update_task`,
-    the recorded surface on user messages), 390 (grant requests) and 448 (unseen replies)
-    are not in it.
+10. **FR40** records only ruling 270's deployment lock. The rest of ruling 270 (controller
+    settings at agent-editor parity), ruling 269 (the built-in `viberr_ops` diagnostics
+    MCP), ruling 256 (the dock on every signed-in surface, conversation scopes, the
+    per-turn context read, `update_task`, the recorded surface on user messages), ruling
+    271 (grant requests) and ruling 257 (unseen replies) are not in it.
 11. **Project classification** says "single-page"; the app is server-rendered with
     hydration.
 12. **The PRD assumes instance-level agent credentials.** FR19 and the phase text read as
@@ -152,7 +152,7 @@ the ruling and says so.
     judged against the ruling.
 16. **FR19/FR21 and NFR8 predate the Codex sandbox removal.** Every Codex run is
     `danger-full-access` and gets a private `CODEX_HOME` (rulings 145, 144); capabilities
-    the Codex runtime cannot enforce are labelled advisory there (rulings 183, 233, 269, 134, 298, 131 and 141(d) began
+    the Codex runtime cannot enforce are labelled advisory there (rulings 183, 184, 134, 298 and 141(d) began
     that labelling).
 17. **Rulings after the last PRD note that extend requirements without contradicting
     them**, recorded here so the PRD's silence is not read as absence: repository

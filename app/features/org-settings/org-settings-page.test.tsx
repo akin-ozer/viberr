@@ -885,7 +885,7 @@ describe("ResourcesPanel", () => {
   });
 
   /**
-   * Ruling 184 (F40-46): live, Design Engineer and Content Writer carried
+   * Ruling 326 (F40-46): live, Design Engineer and Content Writer carried
    * akinozer.com's own `build` stage. The row printed the bare id, and the
    * editor offered only the default workflow's chips, so Content Writer opened
    * with nothing pressed and `build` could be neither seen nor removed while
@@ -893,7 +893,7 @@ describe("ResourcesPanel", () => {
    * project's row, so the stored-ids row holds only what no board has. Canary:
    * drop the `storedOnlyStages` chips.
    */
-  it("ruling 184: a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
+  it("ruling 326: a stored stage the default workflow lacks is named on the row and is a removable chip", async () => {
     const outside: GagentView[] = [
       { ...GAGENTS[1]!, id: "design-engineer", name: "Design Engineer", stages: ["ready", "build"] },
     ];

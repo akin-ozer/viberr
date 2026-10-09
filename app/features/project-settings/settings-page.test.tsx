@@ -1444,8 +1444,8 @@ describe("SettingsPage — the Danger zone is withheld from members who cannot a
 
   // The render gate asks the question archive and delete ask the server. If
   // `edit-policy`'s role set ever changes, the render gate has to follow it —
-  // a role shown the panel and then refused by the server is the pre-ruling
-  // state.
+  // a role shown the panel and then refused by the server is the state this
+  // guards against.
   it("rendering tracks roleCan(edit-policy) for every project role", () => {
     const roles: ProjectRole[] = ["admin", "maintainer", "contributor", "viewer"];
     for (const role of roles) {
@@ -1807,8 +1807,8 @@ describe("FileLeasesPanel (ruling 61)", () => {
       />,
     );
     const panel = container.querySelector('[data-panel="file-leases"]')!;
-    // CANARY: this whole panel is the finding. Before ruling 61 nothing in
-    // app/features or app/routes read a lease at all.
+    // CANARY: this whole panel is the finding (ruling 61): without it nothing
+    // in app/features or app/routes reads a lease at all.
     expect(panel.textContent).toContain("go.mod go.sum");
     expect(panel.textContent).toContain("AX-9");
     expect(panel.textContent).toContain("AX-9 pins the module graph until it merges");

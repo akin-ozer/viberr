@@ -92,7 +92,7 @@ export function forceAcceptReason(
   const isTerminal =
     task.displayReadiness === "accepted" || task.displayReadiness === "merged";
   // Ruling 98: force-accept is an escape hatch, not a standing offer. It stays
-  // visible OFF-BOUNDARY (ruling 98 — a pre-work wedge must be escapable), but a
+  // visible OFF-BOUNDARY (a pre-work wedge must be escapable), but a
   // task with nothing to accept cannot be wedged yet: before this rule every
   // non-terminal task showed an admin "skips the remaining stages and the review
   // gate" in its GitHub card, ten seconds after creation, directly above "No
@@ -177,9 +177,9 @@ export function prCardSignals(
 /**
  * R15-2 safety net (b): with delivery now an operator decision, a human with
  * authority can always ship the branch by hand — offered when no live PR
- * stands (none yet, or the last one closed/merged) and, since ruling 229,
- * whenever the open PR does not carry the delivered revision: the same door
- * pushes the revision to that PR. A DIVERGED remote gets the fact and a
+ * stands (none yet, or the last one closed/merged) and whenever the open PR
+ * does not carry the delivered revision (ruling 229): the same door pushes
+ * the revision to that PR. A DIVERGED remote gets the fact and a
  * disabled control naming the refusal the server would give, never a button
  * that then fails.
  */

@@ -328,7 +328,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(paused.container.querySelector(".home-top-in .pill")).toBeNull();
   });
 
-  it("ruling 278: the sentence is a status line, the retry a real control", () => {
+  it("ruling 299: the sentence is a status line, the retry a real control", () => {
     // The same split the workspace header uses: a `.pill` has no cursor and no
     // hover, so one element that was both sentence and control read as neither.
     // Canary: put `role="status"` on the strip and the sentence is read twice.
@@ -346,7 +346,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(live?.textContent).toBe(PAUSED);
   });
 
-  it("ruling 278: no Retry when there is nothing to reconnect", () => {
+  it("ruling 299: no Retry when there is nothing to reconnect", () => {
     // The prop is optional, and a button that calls nothing is a control that
     // does nothing — the strip still states the fact.
     const { getByText, queryByRole } = renderHome(baseData([card()]), {
@@ -356,7 +356,7 @@ describe("UI-03: a dropped live-update stream is surfaced", () => {
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("ruling 278: the announcer is mounted before the stream drops", () => {
+  it("ruling 299: the announcer is mounted before the stream drops", () => {
     // A live region inserted together with its text is not announced, so the
     // node has to exist (and be empty) while the stream is healthy.
     const { container } = renderHome(baseData([card()]));
@@ -856,8 +856,8 @@ describe("acce-8: the project link is named by what it shows", () => {
 /**
  * Ruling 322: the setup checklist. The first step the viewer can take leads
  * with its sentence and the primary action; every other open step keeps its
- * own action, each going where that thing is done. Ruling 322: the first
- * project waits on nothing, GitHub included.
+ * own action, each going where that thing is done. The first project waits
+ * on nothing, GitHub included.
  */
 describe("ruling 322: the setup checklist", () => {
   const steps: HomePageData["setup"] = [

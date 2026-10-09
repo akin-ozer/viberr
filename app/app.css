@@ -1159,7 +1159,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 
 .seg {
   display: inline-flex;
-  /* Concentric (ruling 276): a 6px segment (ruling 276) + a .125rem inset +
+  /* Concentric (ruling 276): a 6px segment + a .125rem inset +
      the 1px border is 9 against the 8px well, the step .cap-seg and .mini-seg
      take; the old .25rem inset made it 11, so the selected fill read rounder
      than its well. The segments' .5rem block padding keeps the control 37px. */
@@ -1538,7 +1538,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
 .stage-menu-pop {
   z-index: 1000;
   background: var(--surface-float);
-  /* The ring is the edge (ruling 287), as .user-menu. */
+  /* The ring is the edge (ruling 281), as .user-menu. */
   border: 1px solid transparent;
   border-radius: var(--radius-box);
   box-shadow: var(--shadow-ring), var(--shadow-menu);
@@ -2006,7 +2006,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    only attribution (top) and the rec tags (options); everything else is one
    left-aligned column.
    Ruling 312 (AICSS's Approval Card): the card sits on a hairline and a soft
-   shadow at the panel radius and inset (ruling 312), the tone carrier is the head's tile (amber for a
+   shadow at the panel radius and inset, the tone carrier is the head's tile (amber for a
    question, coral for a block) with the kind beside it as the card's title,
    and each option leads with its key, the digit that selects it, where the
    radio stood; the chosen option's key fills. */
@@ -2099,7 +2099,7 @@ button.kbd:hover { border-color: var(--border); color: var(--fg); }
    undivided. */
 :where(.obs + .obs) { border-top: 1px solid var(--hairline); }
 .obs .k { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); padding-top: .125rem; }
-/* Ruling 321: a code observation keeps its own lines. The conflict packet's
+/* Ruling 312: a code observation keeps its own lines. The conflict packet's
    `git` row is git's multi-line output ("Auto-merging a.go" / "CONFLICT (content):
    …"), and without this it ran together into one line, live on ax-clone AX-24. */
 .obs code { font-family: var(--font-mono); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -2853,8 +2853,8 @@ button.ev-result:hover .ev-result-text { text-decoration: underline; text-underl
 .res-chip-note { font-size: .69rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
 
 /* Ruling 326: the operator carries a fourth cell (Autonomy beside Model ·
-   effort), so the row fits its cells instead of a fixed three. Ruling 326:
-   at 13rem the cells land on the resources grid's three tracks above them
+   effort), so the row fits its cells instead of a fixed three. At 13rem the
+   cells land on the resources grid's three tracks above them
    (9rem gave four 186px cells offset from them), and a fourth wraps. */
 .runtime-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--hairline); }
 .rt-cell .lbl { font-size: .69rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); }
@@ -3052,7 +3052,7 @@ dialog[data-closing]::backdrop {
   top: 50%; left: 50%; transform: translate(-50%, -50%);
   width: min(660px, calc(100vw - 2rem)); max-height: 88vh;
   display: flex; flex-direction: column;
-  /* The ring is the edge (ruling 287), as .confirm-card. */
+  /* The ring is the edge (ruling 281), as .confirm-card. */
   background: var(--surface-float); border: 1px solid transparent;
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden; animation: pop-center .18s var(--ease-out);
@@ -3071,7 +3071,7 @@ dialog[data-closing]::backdrop {
   top: 12vh; left: 50%; transform: translate(-50%, 0);
   width: min(620px, calc(100vw - 2rem)); max-height: 70vh;
   display: flex; flex-direction: column;
-  /* The ring is the edge (ruling 287), as .confirm-card. */
+  /* The ring is the edge (ruling 281), as .confirm-card. */
   background: var(--surface-float); border: 1px solid transparent;
   border-radius: var(--radius-panel); box-shadow: var(--shadow-pop);
   overflow: hidden;
@@ -3313,9 +3313,8 @@ dialog[data-closing]::backdrop {
 .cap-advisory > summary::-webkit-details-marker, .cache-more > summary::-webkit-details-marker { display: none; }
 .cap-advisory > summary:hover, .cache-more > summary:hover { color: var(--fg); }
 .cap-advisory > summary > .ico:not(.disc-chev) { width: 13px; height: 13px; flex: none; color: var(--placeholder); }
-/* Every <details> caret is the set's chevron (ruling 282), one rule for the
-   disclosures (this one, the controller's chain head, "About this chain",
-   "waits on", and since ruling 222 a GitHub connection's reach). They drew a 1.5px mitred V in CSS borders beside the set's
+/* Every <details> caret is the set's chevron (ruling 282), one rule for
+   every disclosure. They drew a 1.5px mitred V in CSS borders beside the set's
    round-capped 1.7 glyphs, two at 7px that turned and two at 6px that flipped
    in one frame. Down when folded, up when open, as .own-btn. `.ico` in the
    selector outranks svg.ico's 16px default; `details[open] > summary` turns
@@ -3458,7 +3457,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .guard-name { font-family: var(--font-display); font-weight: 600; font-size: .88rem; display: inline-flex; align-items: center; gap: .5rem; }
 .guard-desc { font-size: .88rem; color: var(--faint); line-height: 1.5; text-wrap: pretty; }
 .guard-ctl { display: inline-flex; align-items: center; gap: .5rem; font-size: .75rem; color: var(--muted); }
-/* Ruling 278: the guardrail threshold field was the only text-like input in
+/* Ruling 289: the guardrail threshold field was the only text-like input in
    the app outside `.field`, so it painted in UA chrome (UA border, UA fill,
    UA radius) next to an `Apply` wearing `.btn`. Same treatment as its twin in
    org settings, which is this same rule now; the rest fill is declared here
@@ -3573,7 +3572,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   position: absolute; top: 2px; left: 2px;
   width: 15px; height: 15px; border-radius: 50%;
   background: var(--surface);
-  /* A contact shadow is black (ruling 281, as .card's under ruling 281).
+  /* A contact shadow is black, as .card's is (ruling 281).
      Mixed from --fg it turned near-white on dark and lit the knob from below;
      in light, 30% black is within a shade of the 30% --fg it replaces. */
   box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
@@ -4309,8 +4308,8 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   background: none; border: 0; padding: 0;
 }
 .home-brand b { font-weight: 600; font-size: 1rem; }
-.home-brand .mark { transition: transform .15s var(--ease-out), box-shadow .15s ease; }
-.home-brand:hover .mark { transform: translateY(-1px); box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 40%); }
+.home-brand .mark { transition: box-shadow .15s ease; }
+.home-brand:hover .mark { box-shadow: inset 0 -7px 0 color-mix(in srgb, var(--blue), transparent 40%); }
 .home-user-wrap { position: relative; }
 .home-user {
   display: inline-flex; align-items: center; gap: .5rem;
@@ -4331,7 +4330,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   width: min(400px, calc(100vw - 2rem));
   z-index: 50;
   background: var(--surface-float);
-  /* The ring is the edge (ruling 287), as .user-menu. */
+  /* The ring is the edge (ruling 281), as .user-menu. */
   border: 1px solid transparent;
   border-radius: var(--radius-box);
   box-shadow: var(--shadow-ring), var(--shadow-menu);
@@ -4419,12 +4418,12 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   background: linear-gradient(180deg, color-mix(in srgb, var(--agent-soft), var(--surface) 30%), color-mix(in srgb, var(--agent-soft), var(--surface) 76%));
   box-shadow: var(--shadow-card);
   padding: 1rem 1rem 1rem;
-  /* Ruling 321: the card lays itself out by its own width (the `runbar`
+  /* Ruling 311: the card lays itself out by its own width (the `runbar`
      queries below), the same in the task page's column and the controller's
      run pane. */
   container: runbar / inline-size;
 }
-/* Ruling 321: the agent's chip takes the next line when the row runs out,
+/* Ruling 311: the agent's chip takes the next line when the row runs out,
    rather than "Live run" breaking over two (measured at 390px). */
 .runbar-head { display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
 .runbar-head h2 { font-size: 1rem; white-space: nowrap; }
@@ -4433,7 +4432,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .live-dot::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2px solid var(--agent); animation: livePulse 1.7s ease-out infinite; }
 @keyframes livePulse { 0% { transform: scale(.45); opacity: .8; } 100% { transform: scale(1.2); opacity: 0; } }
 
-/* Ruling 321: what the run is doing and what can be done about it share the
+/* Ruling 311: what the run is doing and what can be done about it share the
    first row, the figures take the whole second as one strip, and the console
    the third. The body was a wrapping flex row: the phase, four tiles and the
    two buttons wrapped to a line of their own, which left the phase's row empty
@@ -4457,7 +4456,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
   grid-template-rows: auto auto 1fr;
 }
 .run-phase { grid-area: phase; display: flex; align-items: center; gap: .75rem; min-width: 0; }
-/* Ruling 313 (F40-33): the phase's text column is a flex item too, and an
+/* Ruling 311 (F40-33): the phase's text column is a flex item too, and an
    automatic minimum held it at the step's 44ch (317px) inside a 283px phase
    on a phone: the step ran through the strip's border, took its ellipsis with
    it and widened the whole page. With a zero minimum the column shrinks to
@@ -4467,7 +4466,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .run-phase .step { margin-top: .125rem; color: var(--muted); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run-spin { flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid color-mix(in srgb, var(--agent), transparent 70%); border-top-color: var(--agent); animation: runSpin .9s linear infinite; }
 @keyframes runSpin { to { transform: rotate(360deg); } }
-/* Ruling 321: one segmented strip of four equal cells, not four tiles each
+/* Ruling 311: one segmented strip of four equal cells, not four tiles each
    as wide as its word: a divider between cells, the figure a step up from its
    label, and a long model name cut with its ellipsis inside its cell. */
 .run-stats {
@@ -4526,7 +4525,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .rsel-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 60;
   min-width: 300px;
-  /* The ring is the edge (ruling 287), as .user-menu. */
+  /* The ring is the edge (ruling 281), as .user-menu. */
   background: var(--surface-float); border: 1px solid transparent; border-radius: var(--radius-box);
   box-shadow: var(--shadow-ring), var(--shadow-menu);
   padding: .25rem;
@@ -4720,7 +4719,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 .own-menu {
   position: absolute; left: 0; top: calc(100% + 6px); z-index: 60;
   min-width: 258px;
-  /* The ring is the edge (ruling 287), as .user-menu. */
+  /* The ring is the edge (ruling 281), as .user-menu. */
   background: var(--surface-float); border: 1px solid transparent; border-radius: var(--radius-box);
   box-shadow: var(--shadow-ring), var(--shadow-menu);
   padding: .25rem;
@@ -5072,7 +5071,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
      instead of jumping to its place a beat before the sheet arrives and back a
      beat after it leaves (review finding 29). scale(.77) is the 34px the
      layout version used, measured from the 44px resting size. */
-  /* Ruling 321: the arithmetic, since the old offset missed by 39px and
+  /* Ruling 318: the arithmetic, since the old offset missed by 39px and
      parked the button across the sheet header's pop-out and Close buttons.
      The button rests with its centre at 22px (half of 44) above the dock's
      own bottom inset, B = max(20px, safe area); scaled to .77 its half-height
@@ -5096,7 +5095,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
     transform: translate(-8px, min(0px, calc(-1 * (min(80dvh, 640px) - max(20px, env(safe-area-inset-bottom)) + 3px) + var(--sheet-drag, 0px)))) scale(.74);
     transition-duration: .1s;
   }
-  /* Ruling 287 (F24): a dock the per-tab restore reopened was already open,
+  /* Ruling 285 (F24): a dock the per-tab restore reopened was already open,
      so its trigger lands on the perch instead of flying there. Not while
      pressed, so the press still eases on the rule above. It has the closing
      return's weight and comes before it, so a pointer close still carries
@@ -5191,7 +5190,7 @@ details[open] > summary .disc-chev { transform: rotate(-90deg); }
 /* Ruling 320: a link's text is often its URL, one unbreakable run. Live on
    the owner's thread 142 of 228 links ran past the dock's transcript, and the
    whole transcript scrolled sideways to read one. It breaks where it must, as
-   inline code does (ruling 321); a table keeps its own scroller. */
+   inline code does; a table keeps its own scroller. */
 .md-body a { color: var(--blue-pressed); text-decoration: underline; overflow-wrap: anywhere; }
 /* Ruling 320 (live verification 2026-09-25): words joined by slashes are
    one unbreakable run too. "Added/Changed/Deprecated/Removed/Fixed/Security."
@@ -5211,7 +5210,7 @@ a.task-ref, a.kp-ref { white-space: nowrap; }
   padding: .04rem .25rem;
   border-radius: var(--radius-small);
   font-size: .75rem;
-  /* Ruling 321: a 40-character sha or a long path is one unbreakable token,
+  /* Ruling 320: a 40-character sha or a long path is one unbreakable token,
      and on a phone it ran past the column and was clipped (AX-19's timeline and
      the controller's transcript both carry them). Break it only where it must;
      a code BLOCK keeps its own horizontal scroll (`white-space: pre` ignores
@@ -5949,8 +5948,8 @@ body:has(.login-wrap), body:has(.home), body:has(.home-shell) { overflow: auto; 
 .be-opt .agent-glyph { width: 32px; height: 32px; }
 .be-opt .agent-glyph .ico { width: 16px; height: 16px; }
 .be-opt .bnm { display: block; font-weight: 600; font-size: .88rem; }
-/* The picked option's check trades in as the copy glyph's does (ruling 284,
-   ruling 284's icon swap for a 15px glyph): from scale .25 behind a 2px
+/* The picked option's check trades in as the copy glyph's does (ruling
+   284(b)'s icon swap, for a 15px glyph): from scale .25 behind a 2px
    blur over .2s. It grew from .8 with no blur on plain ease, so the same
    check moved one way here and another on a copy control. */
 .be-opt .bcheck { margin-left: auto; display: grid; place-items: center; color: var(--blue-pressed); opacity: 0; transform: scale(.25); filter: blur(2px); transition: opacity .2s var(--ease-out), transform .2s var(--ease-out), filter .2s var(--ease-out); }
@@ -6708,8 +6707,8 @@ a.card:active { transform: scale(.99); }
 .daily-col { position: relative; flex: 1; height: 100%; display: flex; align-items: flex-end; }
 .daily-bar { position: relative; display: block; width: 100%; min-height: 2px; background: var(--blue); border-radius: 3px 3px 0 0; }
 .daily-col:hover .daily-bar { background: var(--blue-pressed); }
-/* An empty day is the bare baseline (ruling 324; ruling 324 drew a grey tick,
-   and a young instance's chart was a row of them). Hovered, it marks itself. */
+/* An empty day is the bare baseline (ruling 324); a grey tick made a young
+   instance's chart a row of them. Hovered, it marks itself. */
 .daily-col[data-empty] .daily-bar { background: transparent; }
 .daily-col[data-empty]:hover .daily-bar { background: var(--border); }
 .daily-tick {
@@ -6927,11 +6926,10 @@ a.card:active { transform: scale(.99); }
      auto` is for the one-line row). */
   .rq-meta { flex: 1 1 auto; max-width: none; justify-content: flex-start; }
   /* home project rows drop the least-load-bearing stat: "· quiet", never the
-     decisions waiting on you (ruling 280; it used to drop that pill) */
+     decisions waiting on you */
   .pj-row .pj-stats .pj-quiet { display: none; }
   /* A notification row leads with its 26px icon, not the queue's 62px key, so
-     its wrapped meta indents under the title, not under the icon (ruling 280;
-     it hung 42px left of the title). */
+     its wrapped meta indents under the title, not under the icon. */
   .ntf-wait .rq-row { row-gap: .375rem; }
   .ntf-wait .rq-row .rq-main { flex-basis: calc(100% - 26px - 1rem); }
   .ntf-wait .rq-row .rq-meta { margin-left: calc(26px + 1rem); padding-top: 0; }
@@ -6948,8 +6946,8 @@ a.card:active { transform: scale(.99); }
      not its rows. On the rows it never scrolled anything: `.live-table`'s
      `overflow: hidden` (it rounds the head band) clipped the Pull request and
      Sync columns inside the frame. The frame now grows with its rows. */
-  .gh-table .live-table { min-width: 30rem; } /* ruling 280: the three-track rows need ~29rem */
-  /* Ruling 280 (h-mobile #11): three tracks, each branch on a line under its
+  .gh-table .live-table { min-width: 30rem; } /* the three-track rows need ~29rem */
+  /* h-mobile #11: three tracks, each branch on a line under its
      task. Four tracks shared 464px of the 34rem table, so branches broke at
      every hyphen and the Sync pill ran past an 820px box's edge. The rows keep
      one set of tracks, so the columns still line up. */
@@ -6969,7 +6967,7 @@ a.card:active { transform: scale(.99); }
      its own height: the transcript its cap below, the console its 320px. */
   .ctl-wrap .ctl-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; flex: none; min-height: 0; }
   /* Ruling 325: the epic page's Details column goes under its main column,
-     the task page's way: side by side panels, then one per row. Ruling 325:
+     the task page's way: side by side panels, then one per row. It takes
      one class more than the base rules, which come later in the sheet; at
      equal specificity they won, and at 375px the main column was 0px wide
      beside a 340px Details column (the `.ctl-wrap .ctl-layout` trap). */
@@ -6988,10 +6986,10 @@ a.card:active { transform: scale(.99); }
      the composer, the goals and the thread list all sat below it. The cap
      leaves room for the head (which wraps to two rows) and the composer. */
   .ctl-wrap .ctl-transcript { max-height: calc(100dvh - 360px); min-height: 260px; }
-  /* Ruling 321: a narrow column cannot afford a frame inside a frame. The
-     transcript panel's padding, the reply card's own padding and its 92% cap
-     left a 234px text column on a 375px phone. Ruling 320 took the reply's
-     frame away at every width, so the panel keeps a reading gutter. */
+  /* A narrow column cannot afford a frame inside a frame. The transcript
+     panel's padding, the reply card's own padding and its 92% cap left a
+     234px text column on a 375px phone. Replies are unframed at every width
+     (ruling 320), so the panel keeps a reading gutter. */
   .ctl-wrap .ctl-transcript { padding: .75rem; }
   /* Ruling 320: the gutter is for messages; the empty state keeps the
      composer's edges, and its padding fits the capped box (48px/32px made it
@@ -7068,7 +7066,7 @@ a.card:active { transform: scale(.99); }
 .log-line.wait.lw-live .lx { color: #c9d1e3; }
 .log-wait { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .375rem; max-width: 100%; }
 /* The orb and the clock share one 20px cell and trade in place as the wait
-   ends (ruling 284, ruling 284's icon swap: scale .25 behind a 2px blur
+   ends (ruling 284(b)'s icon swap: scale .25 behind a 2px blur
    over .2s). React swapped the 20px canvas for the 14px clock in one frame,
    so the tool chip beside it jumped 6px left just as the reader watched it.
    The cell is 20px on every row, live or never, so the chips line up down
@@ -7431,7 +7429,7 @@ a.card:active { transform: scale(.99); }
    describes it. It used to live in a panel a full viewport below, with the
    conversation in between, reached by a button that read as navigation. */
 .runbar-console {
-  /* The whole last row of the body's grid (ruling 321). It was the whole
+  /* The whole last row of the body's grid (ruling 311). It was the whole
      row of a wrapping flex: sized by its content it had been as wide as its
      toolbar, since the log lines are contained (`.console > .log-line` below)
      and add no width, and the terminal stopped two-thirds of the way across
@@ -7683,7 +7681,7 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
   font-family: var(--font-mono); font-size: .75rem; color: var(--muted);
   margin-right: auto; overflow-wrap: anywhere;
 }
-/* Ruling 78: the read-only TEXT viewer in the same popup — yaml/log/txt/md/
+/* Ruling 317: the read-only TEXT viewer in the same popup — yaml/log/txt/md/
    json/csv attachments render as scrollable monospace instead of a raw-file
    tab; the foot gains a Download button (route `?download=1`). */
 .modal-card.lightbox-card.text { width: min(860px, calc(100vw - 2rem)); }
@@ -7718,8 +7716,8 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
    "Schedule", and the button's new width moved the picker under the pointer
    that had just used it (the steer or prompt field before it takes up the
    difference). Each start holds the width of its widest label, measured in
-   Inter 700 at .btn.sm. Since ruling 286 reached the run controls, that is the
-   in-flight "Scheduling…" (117px) on both, wider than "Run operator" (115px)
+   Inter 700 at .btn.sm. The run controls show a request in flight (ruling
+   286), so that is the in-flight "Scheduling…" (117px) on both, wider than "Run operator" (115px)
    and "Schedule" (94px), so one floor serves the two starts, rounded up for a
    pixel of slack: the row no longer shifts on the click either. */
 .op-run > .run-go { min-width: 7.4rem; }
@@ -7936,9 +7934,8 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
   align-self: flex-end;
   background: var(--tint-well);
 }
-/* Ruling 320: a reply is the column's text, not a card inside the
-   transcript's card (ruling 321's frame inside a frame, now at every
-   width); its header says who wrote it. */
+/* Ruling 320: a reply is the column's text at every width, not a card
+   inside the transcript's card; its header says who wrote it. */
 .ctl-msg.from-controller { max-width: none; border: 0; padding: 0; }
 .ctl-msg header {
   display: flex;
@@ -8096,10 +8093,10 @@ a.ctl-file:hover { border-color: color-mix(in srgb, var(--fg), transparent 75%);
 .ctl-correction-evidence > summary:hover { color: var(--fg); }
 /* U39-10: ruling 137's sentence as a note over the composer's box. */
 .ctl-unavailable { margin-bottom: .375rem; }
-/* Ruling 273: the reason a confirm records (an undo's), under its
+/* Ruling 287: the reason a confirm records (an undo's), under its
    consequence. */
 .confirm-reason { margin-top: 1rem; }
-/* Ruling 321: a touch screen has no key to name. */
+/* Ruling 319: a touch screen has no key to name. */
 @media (pointer: coarse) {
   .kbd-hint { display: none; }
   /* The task composer's send keeps the end its hidden hint pushed it to. */
@@ -8191,8 +8188,8 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 }
 /* The control step (ruling 283); .94 was under the .95 floor. */
 .dock-fab:active { transform: scale(.96); }
-/* O39-d: a controller reply the viewer has not seen, and since ruling 291 the
-   button's only dot. Still, where the working row's dot pulses: it is news
+/* O39-d: a controller reply the viewer has not seen, the button's only dot
+   (ruling 291(c)). Still, where the working row's dot pulses: it is news
    waiting, not work going on. */
 .unseen-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--blue); flex: none; }
 .dock-fab .unseen-dot { position: absolute; top: 1px; right: 1px; box-shadow: 0 0 0 2px var(--bg); }
@@ -8236,7 +8233,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
   transform: translateY(6px) scale(.98);
   transition-duration: .12s;
 }
-/* Ruling 287 (F24): a panel the per-tab restore reopened was already open,
+/* Ruling 285 (F24): a panel the per-tab restore reopened was already open,
    so it appears in place instead of replaying its entrance. Heavier than
    every `.dock-panel` rule at every width and preference, so it wins in any
    order. Not while closing: the same panel's later close still animates. */
@@ -8476,7 +8473,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    space and push Download / Open original into the middle of the row. */
 .lightbox-card .lightbox-foot .modal-close { margin-left: 0; }
 
-/* ---------- appended: ruling 278, the fields that painted in UA chrome ---------- */
+/* ---------- appended: ruling 289, the fields that painted in UA chrome ---------- */
 /* The guardrail threshold field's states; the resting box is declared with the
    rule itself, above. `.45` is the step `select:disabled` already uses. */
 .guard-ctl input[type="number"]:focus {
@@ -8513,14 +8510,13 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .guard-ctl input[type="number"][aria-invalid="true"] { border-color: var(--coral-dark); }
 
 /* ---------- appended: ruling 278, the error box's sentence on dark ---------- */
-/* Ruling 278 keeps `--coral-*` as the ERROR pair, and ruling 278 says how a
-   tinted box reads on dark: the sentence in the default foreground, the tone
-   carried by the icon, the border and the fill. The two were decided in the
-   same pass, so the error boxes take the same split — a whole paragraph of
-   salmon prose on a red wash was the other half of the problem 148(d) named.
+/* Errors keep the `--coral-*` pair, and on dark a tinted box prints its
+   sentence in the default foreground, the tone carried by the icon, the
+   border and the fill (ruling 278(b)). A whole paragraph of salmon prose on a
+   red wash was the problem.
    Light is untouched: `--coral-dark` there is GitHub's near-black red, which is
    already body-weight ink. `.rsrc-err` (the MCP probe's own output) has no
-   icon; its border and fill stay coral. Ruling 278, owner, 2026-09-06. */
+   icon; its border and fill stay coral. */
 :root[data-theme="dark"] .login-err,
 :root[data-theme="dark"] .form-err,
 :root[data-theme="dark"] .rsrc-main .rsrc-err { color: var(--fg); }
@@ -8531,12 +8527,12 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 /* The acceptance/packet consequence row (R17-1) carries no icon, so the
    uppercase kicker is its tone carrier the way the glyph is on `.cred-warn`:
    the VALUE goes to the default foreground on dark, `.obs.warn .k` stays
-   `--coral-dark`. Ruling 278, owner, 2026-09-06. */
+   `--coral-dark`. */
 :root[data-theme="dark"] .obs.warn > span:last-child { color: var(--fg); }
 
 /* ---------- appended: ruling 278, the board notice that is not a fault ---------- */
-/* Ruling 278 extends 148(d)'s amber pair to a box that reports attention
-   rather than a fault. `.board-orphans` is one box carrying four tones: the
+/* A box that reports attention rather than a fault takes the amber pair
+   (ruling 278(b)). `.board-orphans` is one box carrying four tones: the
    archived-filter caption and the "no stages yet" empty state are not faults —
    they are attention, which is GitHub's amber pair — while the unstaged-task
    and repository boxes stay on the error pair. The sentence is `--fg` in both
@@ -8648,7 +8644,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .lease-row .guard-ctl select { min-width: 7rem; }
 
 /* ---------- appended: ruling 317, the attachment code reader ---------- */
-/* The read-only text viewer (ruling 78) grew a line-number gutter and Shiki
+/* The read-only text viewer (ruling 317) grew a line-number gutter and Shiki
    tokens. Each line is a block with the number absolutely placed in its
    padding, so a wrapped continuation sits under the code, not under the
    number; the gutter is unselectable so a copy takes only code. Token
@@ -8723,7 +8719,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
    as a 5×4 grid of swatches on the shared menu surface. */
 .stg-color-wrap { position: relative; display: inline-flex; }
 /* The button is a 24px target (WCAG 2.5.8; the e2e axe sweep refused the
-   14px one under ruling 306's first run) and paints the 14px dot inside it. */
+   14px one under ruling 279's first run) and paints the 14px dot inside it. */
 .stg-swatch {
   position: relative; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
   background: transparent; cursor: pointer;
@@ -8999,7 +8995,7 @@ body[data-rail-open="true"] .dock { visibility: hidden; transition: none; }
 .conn-reach-note { margin: .375rem 0 0; }
 
 /* ---------- appended: ruling 315, project gates ---------- */
-/* The PR card's gate record is its first status row (ruling 315's section);
+/* The PR card's gate record is its first status row (ruling 315(b));
    the gate table is ruling 313's, below. A gate row on Settings is a lease
    row whose command field takes the room, set in the code face because it
    is a command. */
@@ -9816,7 +9812,7 @@ a.pr-branch:hover { background: var(--tint-hover); }
 .cmp-sep { color: var(--placeholder); }
 .cmp-over { color: var(--faint); }
 /* Ruling 103: the result's files, each a row of the attachments list: its
-   kind on the file tile's label (ruling 315), its name, and under it what
+   kind on the file tile's label (ruling 317), its name, and under it what
    Operator says the file is. A note (what to weigh, what was assumed, what is
    missing) reads as the summary does, under its own kicker. The paths a
    merged change touched fold after a few lines. */

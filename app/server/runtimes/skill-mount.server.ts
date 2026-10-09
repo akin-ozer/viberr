@@ -98,8 +98,8 @@ const SKILL_PLUGINS_DIR = ".viberr-plugins";
  * index. (A run whose task is to edit the repo's own `.claude` cannot deliver
  * those edits — the intended governance posture, not a bug.)
  *
- * Since ruling 185 nothing of Viberr's lives in this directory, so the strip
- * is whole: every entry goes, on every call.
+ * Nothing of Viberr's lives in this directory (ruling 185), so the strip is
+ * whole: every entry goes, on every call.
  *
  * Pass 40 review (R-seams-1): the two git reads run as the task's person
  * (`git`), never as the server — the checkout is agent-writable. A caller

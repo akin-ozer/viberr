@@ -508,7 +508,7 @@ describe("recordBackendLogin", () => {
   });
 });
 
-// ------------------------------------------------ several accounts (507)
+// ------------------------------------------ several accounts (ruling 138)
 
 describe("switching accounts (ruling 138)", () => {
   it("makes another account the one runs bill, with no vendor process and no file moved", () => {
@@ -755,9 +755,9 @@ describe("disconnectBackendAccount", () => {
   });
 });
 
-// ------------------------------------------- an account from before 507
+// ----------------------------------------------- a legacy_home account
 
-describe("an account connected before ruling 138 (legacy_home)", () => {
+describe("a legacy_home account, its sign-in in the backend home (ruling 138(b))", () => {
   /** The row the boot rebuild carries forward: its sign-in sits in the
    *  backend home itself, where the one-account build had the vendor write. */
   function legacySignIn(backend: RealBackend): SignedInAccount {

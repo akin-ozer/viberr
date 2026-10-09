@@ -16,7 +16,7 @@ import { toError } from "~/shared/errors";
  * ONE honesty rule.
  *
  * BUDGET (P14-KM-03, then C2/pass-16). Knowledge bases were budgeted from F9
- * until ruling 205 replaced their injected text with an index; skills first got
+ * until they reached a run as an index (ruling 205); skills first got
  * a cap in P14-KM-03 — but a PER-SKILL one, applied fresh on every per-skill
  * read inside the caller's loop. N skills × 24 k is unbounded, which is
  * precisely the failure the KB budget existed to prevent, so

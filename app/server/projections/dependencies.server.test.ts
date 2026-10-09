@@ -21,9 +21,8 @@ import {
 import { candidateRefusal } from "~/shared/dependency-candidates";
 
 /**
- * Ruling 55 (pass 34): every `blockedBy` entry resolves at READ time from the
- * projections, a task key to its own state. Ruling 55 retired the second
- * spelling, a goal link, with the goal chains.
+ * Ruling 55 (pass 34): every `blockedBy` entry names a task and resolves at
+ * READ time from the projections to that task's own state.
  *
  * Canary: map an archived task to `open` and the dead cases below fail.
  */

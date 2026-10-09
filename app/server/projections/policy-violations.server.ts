@@ -78,11 +78,10 @@ export function countOpenPolicyViolations(
   db: DatabaseSync,
   projectSlug: string,
 ): number {
-  // Ruling 221(b) (F39-13): an ADVISORY scope is not a violation, and this badge
-  // is the third surface to learn it. Ruling 237 settled that `checks:read` is
-  // not required and that keeping its record is still worth it; ruling 221(b)
-  // made the timeline event and the credential card say so from one list. The
-  // row stayed `open` either way, so this count kept rendering it in
+  // Ruling 221(b) (F39-13): an ADVISORY scope is not a violation. `checks:read`
+  // is required by nothing and its record is still kept; the timeline event,
+  // the credential card and this badge read the same list. The row stays
+  // `open` either way, so this count used to render it in
   // `.count.violations` — bold `--danger` on the Settings row — and on the live
   // ax-clone board every one of the four it counted was `checks:read`. A red
   // number pointing at a page where nothing can be done about it.

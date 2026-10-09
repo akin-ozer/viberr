@@ -324,7 +324,7 @@ describe("compactTimelineEvents — who may be compacted (B-FD9)", () => {
   });
 
   /**
-   * Ruling 88. `clipVerdictReason` (ruling 262) stores 2,000 characters of a
+   * Ruling 88. `clipVerdictReason` stores 2,000 characters of a
    * reviewer's justification and appends "Its full report is on this task's
    * timeline, whole." Compaction then folded exactly that comment away.
    *

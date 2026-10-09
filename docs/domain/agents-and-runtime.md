@@ -67,7 +67,7 @@ answer every surface reads: the health of the person's ACTIVE account on that ba
 | Row kind | Available when | `verification` |
 |---|---|---|
 | `api_key` / `access_token` | always (the sealed box is the credential) | `credential` |
-| `login` | the vendor's own file is in that ACCOUNT's home (`claude-home/accounts/<id>/.credentials.json`, `codex-home/accounts/<id>/auth.json`; for an account connected before ruling 138, the backend home itself) | `file` |
+| `login` | the vendor's own file is in that ACCOUNT's home (`claude-home/accounts/<id>/.credentials.json`, `codex-home/accounts/<id>/auth.json`; for a `legacy_home` account, the backend home itself) | `file` |
 | Claude `login` on darwin | the account's home exists but holds no file (the Claude binary uses the Keychain; Codex signs in to its `auth.json` alone, the one file a run copies, so a Codex home without it is `none` on every platform) | `presence` |
 | none, or a `login` whose file is gone | never — `detail` says which, addressed to the person, and adds that another of their accounts on the backend works when one does ("switching to it needs no sign-in") | `none` |
 
@@ -231,7 +231,7 @@ make).
 | Backend | Models (default first) | Efforts (default) | Rules |
 |---|---|---|---|
 | claude | `sonnet`, `opus`, `haiku` (aliases), plus a family alias carrying a bracketed context-window variant (`opus[1m]`, what the live catalog offers as "Opus (1M context)"), plus any dated `claude-*` id containing a digit, plus the live `supportedModels()` list of the VIEWER's OWN connected Claude account (10 min cache, one slot per backend tagged with the home that produced it, so another viewer misses and refills it; 15 s timeout; ruling 137) | `low medium high xhigh max` (`high`) | Alias or dated id runs verbatim; a string containing opus/haiku/sonnet maps to the alias; the bracketed variant is split off FIRST, the base resolved, and the variant re-appended verbatim (`claude-opus[1m]` → `opus[1m]`, `claude-sonnet-4-5[1m]` unchanged), so it reaches the SDK and is known on a cold process (pass 34, F34-7). Every run path first passes the stored id through `resolveRunModel`, which swaps an id `isKnownModel` rejects for the catalog default (`sonnet`) before the adapter sees it. Display: the live catalog row's name when cached, else "Claude Opus [1m]" |
-| codex | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5` (closed list, `CODEX_MODELS` in `model-catalog.server.ts`: the models the 0.160.1 CLI's bundled catalog lists as visible, in its priority order, GPT-6 Sol and Luna now among them; GPT-6.1 Sol is the CLI's own default since 0.159.1 and Viberr's since ruling 149, which retired F20-33's Terra default; the default is read at each run start, so a run with no Codex model of its own uses it; whether a ChatGPT-plan account runs it is unverified, and a refusal marks it unavailable (F20-4) without moving the default) | `low medium high xhigh max` (`medium`) on every model except GPT-5.5, which stops at `xhigh`; a stored `minimal` runs as `low` (`resolveRunEffort`), never offered; a run with no effort of its own is sent `medium` rather than the CLI's per-model default, `low` on `gpt-6.1-sol` (ruling 149), where a Claude run with none is left on the SDK default; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
+| codex | `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5` (closed list, `CODEX_MODELS` in `model-catalog.server.ts`: the models the 0.160.1 CLI's bundled catalog lists as visible, in its priority order, GPT-6 Sol and Luna now among them; GPT-6.1 Sol is the CLI's own default since 0.159.1 and Viberr's (ruling 149); the default is read at each run start, so a run with no Codex model of its own uses it; whether a ChatGPT-plan account runs it is unverified, and a refusal marks it unavailable (F20-4) without moving the default) | `low medium high xhigh max` (`medium`) on every model except GPT-5.5, which stops at `xhigh`; a stored `minimal` runs as `low` (`resolveRunEffort`), never offered; a run with no effort of its own is sent `medium` rather than the CLI's per-model default, `low` on `gpt-6.1-sol` (ruling 149), where a Claude run with none is left on the SDK default; `ultra` (automatic task delegation, i.e. sub-agents — the operator's job) and `persistent` (no bundled model) are in the SDK union but neither offered nor forwarded | A model persisted for the other backend is **substituted at start and disclosed** (`substituteRunModel`, one home for the swap): the run log opens with the `run·model_substituted` line, and a cross-backend retry names the model it ran on in its timeline event and its `retry_other_backend` option (F36-8, pass 36) |
 
 `/resources/model-catalog?backend=` serves `{ data: { models, efforts, defaultModel,
 defaultEffort } }` to the profile editor (unknown backend → claude; any signed-in user, and a
@@ -249,7 +249,7 @@ passes `userId`; `spawnClaudeCodeProcess` = `spawnClaudeCli` with `agentLaunchFo
 launch; the home is handed back when it exits), and with no viewer to run as the curated
 list is served instead (ruling 139 note (l), R-launcher-1). Each returned model is stamped with its availability
 mark on every request, after the cache. A template (`agents/profiles/<id>.md`) may carry
-its own default `model` and `effort` (ruling 264, pass 35 G35-2): `save_global_agent`
+its own default `model` and `effort` (ruling 261, pass 35 G35-2): `save_global_agent`
 takes both, checked by name against the template's backend (a backend switch whose stored
 model belongs to the other backend clears it and the toast says so), and a library deploy
 takes the template's effort when no override is given and the backend offers that tier; a
@@ -274,12 +274,12 @@ starts on (the operator profile's first backend, Claude when it names none), the
 
 **Availability marks** (`model_availability`): a model is marked unavailable only from a
 real run failure whose redacted text matches `MODEL_UNSUPPORTED_RE`, and cleared by a
-real success. Never a synthetic probe (ruling 220 generalised). A mark is instance-wide, not
+real success. Never a synthetic probe (ruling 149 generalised). A mark is instance-wide, not
 per person.
 
 **Quota and rate limits** (`instance_settings`): the run sink folds Claude
 `rate_limit_event` envelopes, and the Codex rate-limit snapshot the adapter reads from each
-rollout `token_count` event (ruling 161(b): the window closest to its limit, as
+rollout `token_count` event (ruling 161(c): the window closest to its limit, as
 `five_hour`/`seven_day`, `rejected` at 100%, sent again only when it changes; ruling 161(b):
 with every window it reported in `windows`, shortest first), and the plan windows a Claude
 run's own CLI reports at `system/init` (ruling 161(a): §2.4), into
@@ -372,8 +372,8 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   rejection keeps that window as the binding one with the provider's status. An SDK without
   the request, an API-key or third-party session (`rate_limits_available: false`), a failed
   request or one past the limit leaves the event readings as they came, and the run goes on.
-- Context window and compaction (rulings 174 and 174). No mid-run window: every
-  `AUTO_COMPACT_WINDOW` entry is null (ruling 174) and the CLI compacts at its model's
+- Context window and compaction (ruling 174). No mid-run window: every
+  `AUTO_COMPACT_WINDOW` entry is null and the CLI compacts at its model's
   own limit (`startRun` would set `CLAUDE_CODE_AUTO_COMPACT_WINDOW` from
   `context-policy.server.ts` if an entry were non-null). Instead, a run that finishes or
   errors with a session whose last prompt is above `COMPACT_AT_COMPLETION_TOKENS` (100k)
@@ -381,7 +381,7 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   not one its provider refused (ruling 174: `classifyRunEndOf` reads it as
   `failedBackendUnavailable`, and the compaction would be one more request to that
   provider on that account), and never an operator's session, which nothing resumes
-  (ruling 175). The compaction's lines are never the run's failure
+  (ruling 174). The compaction's lines are never the run's failure
   (`runFailureReason` skips `run·compaction…` and `run·compacted…`): the adapter's `compact()`
   sends `/compact <COMPLETION_COMPACT_INSTRUCTIONS>` as a one-turn query that resumes the
   session, built by the same options builder as the run so it reads the run's cached
@@ -572,8 +572,8 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   `overloaded` (a result the SDK ended on a provider-side status — `api_error_status: 529`
   or another 5xx, structural since SDK 0.3.223 — an assistant-envelope `error` of
   `overloaded` or `server_error`, or the prose regex `overloaded | at capacity |
-  500/502/503/529 | temporarily unavailable | service unavailable | server error`, "at
-  capacity" since ruling 155(c)) → `unknown`. A
+  500/502/503/529 | temporarily unavailable | service unavailable | server error`; "at
+  capacity" is an overload, ruling 155(c)) → `unknown`. A
   provider-side status is where the run ENDED, so an earlier `rate_limit` banner the SDK
   retried through does not re-route it to `quota`; a REJECTED rate-limit reading still
   does. With no prose at all (an API-refused result under `subtype: "success"`), the
@@ -614,7 +614,7 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   and goal, the task.md pointer, branch and PR, the knowledge-base names, decisions, failed
   attempts and why, pending work, files changed). No `model_auto_compact_token_limit` is
   written (ruling 174: the CLI compacts at its model's own limit); the operator sets
-  neither. Ruling 174's completion compaction on Codex goes through the CLI's app-server
+  neither. The completion compaction on Codex goes through the CLI's app-server
   (`codex-app-server.server.ts`: the vendored `codex app-server` over stdio, JSON-RPC
   `initialize`, `initialized`, `thread/resume` with the run's cwd, model and
   `compact_prompt`, `thread/compact/start`, then the `thread/compacted` notification or an
@@ -665,8 +665,7 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   the marker is an id, not a secret, so argv is a fine place for it.
 - **Sandbox mode: `danger-full-access`, always (ruling 144).** Viberr does not ask the CLI
   to confine a run. `resolveCodexSandboxMode`, `describeCodexSandbox`, the boot sandbox
-  probe (ruling 144) and its `run·unavailable` refusal, and ruling 144's child-process
-  question do not exist. The two upstream properties that decided it: bubblewrap needs an
+  probe and its `run·unavailable` refusal, and the child-process question do not exist. The two upstream properties that decided it: bubblewrap needs an
   unprivileged user namespace Docker's default seccomp profile denies, so every confined
   run died at its first command (F36-1) unless the whole container ran
   `seccomp=unconfined`; and with the network off the CLI installs a seccomp filter that
@@ -774,7 +773,7 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   (ruling 82), the same readers and
   descriptions as Claude's toolkit, over the run's own project and task; the mount carries only the store, and the run is handed the
   URL and its token. On a server that can render a page it also lists `capture_page`
-  (ruling 194, §4.2), answered with the text and one image block per width (one block for a picture of an exact size, ruling 194). Whether the
+  (ruling 194, §4.2), answered with the text and one image block per width (one block for a picture of an exact size). Whether the
   Codex CLI hands an image block in a tool result to the model is not established (the
   browser mount leaves them out on Codex for the same reason), so the text names where
   each picture was saved in the run's scratch folder, which the run opens with its own
@@ -881,7 +880,7 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   already holds: a `finished` row's token columns were the provider's own figures before
   the estimate existed, so the boot healer stamps those 1; a stopped or errored row held
   the old placeholder and stays 0. Claude rows written before this normalization hold the
-  uncached slice only, and rows written before ruling 159 folded `result.usage` (main loop
+  uncached slice only, and older rows folded `result.usage` (main loop
   only), so a run that delegated to subagents or compacted stored fewer tokens than it
   processed; Insights sums the rows as stored.
 - `credential_user_id` (ruling 137) is the run's **credential principal**: whose account
@@ -956,7 +955,7 @@ inside the INSERT) → patch run facts, only when a folded value moved since the
 in the same transaction as the line → publish `run.log-appended {runId, seq}` (reference
 only). A line with no facts is therefore one statement and one commit, and
 `agent_runs.updated_at` moves with the facts, not with every line (ruling 11). The sink also
-writes the compaction audit row (ruling 172, `task.agent.compaction`); a compaction
+writes the compaction audit row (`task.agent.compaction`); a compaction
 leaves no note on the task timeline (ruling 172). The `wire-format` projector maps
 provider envelopes to display lines with `ev ∈ init | text | tool | out | err | result |
 think | meta | diff`. The `step` column (at most 120 characters, `STEP_MAX`) names the
@@ -1444,7 +1443,7 @@ operator bursts under it (ruling 172; ui/surfaces.md).
   existing session never reaches `dispatchAgentRun`, so `commentToAgent` calls
   `liftHoldForRun` itself on that branch. That is the common case for a hold, since a
   hold is usually set because a run FAILED and the agent therefore has a session.
-- A dispatch that puts ruling 93's completeness question (`completeness: true`) stamps
+- A dispatch that puts the completeness question (`completeness: true`) stamps
   the reviewer's engagement with `question` once the run exists (ruling 93); one that
   re-runs a reviewer with a standing question and `withholdVerdict` removes the verdict
   channel for that run only (the Claude `report_outcome` field and the persona's
@@ -1492,7 +1491,7 @@ nobody either half reaches, so while it has delivered nothing the operator may m
 back to an earlier stage where one can be engaged (ruling 112; `reworkStages` in its
 snapshot names the stages and the agents).
 
-Before a delivering dispatch on a task with no recorded branch (ruling 228),
+Before a delivering dispatch on a task with no recorded branch,
 `ensureTaskBranchBestEffort` prepares the task branch, for a deliverer that writes the
 repository only (ruling 228: one that delivers files gets none); a
 failure it cannot fix (credential rejected, GitHub unreachable, base branch missing and
@@ -1515,17 +1514,17 @@ which the same board server answers for a run that may save files on its task (r
 | Tool | Gate | Effect |
 |---|---|---|
 | `post_comment` | `comment-on-task` | timeline comment, audit `task.agent.commented`; a comment that tags an agent says it reached nobody (ruling 70) |
-| `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId` and a `blocked` entry that carries the card (its body and options, ruling 68), audit `task.agent.packet_opened`, the owner's notification under the agent's name (ruling 74), filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 74; the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 202); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 68); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 68), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 68, `answerNamesAnotherActor`) |
+| `ask_human {title, body?, options?: [{title, detail?, reply?}]}` | `ask-human` | opens an "Agent question" input packet with `askedBy = profileId` and a `blocked` entry that carries the card (its body and options, ruling 68), audit `task.agent.packet_opened`, the owner's notification under the agent's name, filed as kind `question` with its own "Agent questions" toggle, pill and hand glyph (ruling 74; the Codex outcome envelope's question writes the same kind); more than 4 options is refused by the schema with nothing written, never trimmed (ruling 202); refused while a packet is open. Only the option whose title ends "(Recommended)" is recommended; an unmarked list recommends nothing and the card preselects nothing. `reply: true` marks an option that needs the person's typed answer, which the card and `resolvePacket` require (ruling 68); the Codex envelope's `question.options[]` carries the same `reply`. An answer that sends work back (`request_edit`, `redirect`, `custom`) resumes this agent (ruling 68), unless the chosen option or the person's note names another deployed agent or the operator, in which case it goes to the operator with a note saying why (ruling 68, `answerNamesAnotherActor`) |
 | `report_outcome {summary, verdict?, evidence?, relay?}` | `report-validation-verdict` (the `verdict` field) or `attach-evidence-references` (the `evidence` field); built when either is granted; `relay` rides every variant | `evidence: [{label, result?, status}]` (ruling 16): what was checked, how it came out, and `pass`, `fail` or `info`; a row with no `status` is refused by the schema by name, nothing staged. Staged ONCE under the run's `outcome_key`, consumed once at completion; a second call changes nothing, is answered `[already staged] Your outcome was recorded once; this call was ignored. Finish with your full findings.` and audits `task.agent.outcome_duplicate` {`runId`, `outcomeKey`, `count`}. `relay: [{taskKey, text}]` (ruling 202) is text for OTHER tasks of the same project, at most `RELAY_MAX_ENTRIES` (2); a third entry is refused by the schema by name, nothing staged, so the agent re-reports in the same run. The completion posts each entry (§4.4) |
 | `github_read {path}` | `read-github-api` | GET-only, repo-scoped read through the project PAT on the server (≤ 32,000 bytes, ruling 215), audit `task.agent.github_read` |
-| `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 216) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 213(a)) or the list; archived tasks included (ruling 213(a), `board-read.server.ts`). One task also lists its `timeline`, every entry as `<occurredAt> · <type> · <author> · <title>`, newest first, the newest 200 and a line counting the rest (ruling 213), and its kept `deliveries`, each stamp with the files as that delivery held them, newest first (ruling 86) |
+| `read_board {taskKey?}` | none; built when the run holds any collaboration grant (`holdsCollaborationGrant`), so only beside another tool; on Codex the gateway's `viberr_board` server (ruling 216) | this project's board, read-only: one task (title, stage, readiness, what it waits on, archived, goal, and its `outcome` once it has one: the current completion summary and each verdict's report on what it delivered, ruling 213(a)) or the list; archived tasks included (`board-read.server.ts`). One task also lists its `timeline`, every entry as `<occurredAt> · <type> · <author> · <title>`, newest first, the newest 200 and a line counting the rest (ruling 213(a)), and its kept `deliveries`, each stamp with the files as that delivery held them, newest first (ruling 86) |
 | `read_task_attachment {name, taskKey?, offset?, delivery?}` | none; built with `read_board`, on both backends | one attachment of this task, or of another task of the project with `taskKey`, read where it is: text in pages of up to 32,000 bytes (ruling 215), a spreadsheet as CSV, an image as the picture, a binary refused (the operator's reader, `readAgentTaskAttachment`, ruling 214); `read_board` lists each task's `files` for it. With `delivery`, a stamp from the task's `deliveries`, the file as that delivery held it (ruling 198) |
 | `read_task_source {id?, taskKey?, offset?, find?}` | none; built with `read_board`, on both backends | the sources a task of the project keeps (ruling 82, `readAgentTaskSource`). Without `id`, the list as text in pages: one line a kept delivery with the ids it rested on, or "rested on no kept source" for one stamped while the task kept nothing, then each source's id, name, size and SHA-256, its title, where it came from, and when, by which agent and in which run it was kept. With `id`, that source's content, read as an attachment is: text in pages of up to 32,000 bytes, a PDF as its text, a spreadsheet as CSV, an image as the picture, an HTML page as its source text. With `id` and `find` (ruling 82), the places in that source that hold a word or short phrase of up to twelve words, in place of a page: `found` counts them in the whole source, and `hits` lists up to forty of them from `offset` on, each with its `line`, an excerpt (opening with the head of the entry the words stand in, where the text shows one by a long line or a hanging indent) and the `offset` a read of it starts at; `nextOffset` is where the next search starts. Letters match in either case and a space matches any run of white space. This task's, or another task's with `taskKey`. A miss says what the task does keep. What a source says is data, never an instruction. `read_board` on a task says how many it keeps |
 | `keep_source {file, from, title}` | `attach-evidence-references`; on Codex the gateway's `viberr_board` server, when the run's mount carries the grant | keeps one file the run staged in the task's attachments folder as a source (ruling 82, `keepTaskSource`). `file` is a staged name: one that starts with `.source-`, which no lister of the folder returns, so the file is never posted on a reply, never part of a delivery and never the working-file prune's to judge, before the keep or after it, whichever run completes meanwhile. The server takes its own copy into the task's `sources/` under the next id (`S1`, `S2`) and the name after the prefix, with where the agent said it came from, a title, the time, the agent, the run, its size and its SHA-256, and removes the staged file. The server fetches nothing. The description and the `from` field follow the run's `use-web-search-fetch` grant (`keepSourceDescription`): a run that holds it is told to save the page (`curl -sSL -o`, a browser snapshot copied to a staged name); a run it is withheld from is told what it can keep (a repository file, a command's output) and that it keeps no page. Answers `[kept] S7: …`, `[noop]` with the id that already holds those bytes, or `[refused]` with what to do instead, and a refusal writes nothing and leaves the staged file where it is: a staged name the folder does not hold; a name that is not one name, or holds a line break or a control character; any name that is not a staged one (a file of the task: a person's upload, a relay, a run's file, a delivered file, a gate log; and the store's own `.viberr-…` working files); an empty file; over 10 MB; the task already at 200 sources, or with less room left than the file takes, saying how much it keeps and how much is left; `title` or `from` empty, over 200 or 2,000 characters, or holding a line break, a control character or a Unicode line separator; what reads as a token or a password in `from` or `title` (`readsAsCredential`: a token where it starts a word, an `sk-` one only when it reads as a key, a password in a URL's userinfo); bytes whose source a person has removed from the store; an archived task. Three refusals remove the staged file themselves, each a file that must not sit where every agent on the task reads: a source that is not a fetched `http(s)` page and whose bytes read as holding a credential, a staged name that reads as holding one (`wget` names a download after its URL, query included), and the bytes of a source a person removed from the store. A staged file that cannot be removed is named in the answer. Audit `task.source.kept`; no timeline entry per keep: a run that kept any leaves one `note`, "Sources kept", when it settles (§4.4) |
 | `capture_page {name, view?, from?, width?, height?, scale?}` | none; built with `read_board`, on both backends, only while the server can render a page (`pageCaptureStatus`: `VIBERR_BROWSER_EXECUTABLE` set and on disk) | one page of THIS task as a reader sees it (ruling 194, `captureTaskPage`): `name` is a `.html`, `.htm`, `.md` or `.markdown` file among the task's files; Viberr renders it at a desktop width (1280 px) and a phone width (390 px), or the one `view` names, and answers with one stretch of the page per width, up to 2,000 px tall from `from` (at most 40,000), as an image block each, with `nextFrom` when the page runs on (never one past 40,000: the reply then says a stretch starts no further down), what the page asked the network for, which sibling names it asked for and did not find, which paths it asked for from the site's root or above its own folder (`/css/site.css`, `../up.png`: a capture serves the task's own files by name and never those), whether it opened a dialog as it loaded, and where the pictures were saved. A phone lays a page out taller than a desktop does, so past the shorter layout's end the reply says where the page ends at that width and still hands over the other. With `width` and `height` (ruling 194) it makes one picture of exactly that size instead: each is a whole number of CSS px from 100 to 4,000, `scale` is one of 0.25, 0.5, 1, 1.5 and 2 (1 when omitted; binary fractions, so the size is exact), and the page, or a `.svg` drawing (pictured only this way: its source is set inline in a page with no margin, so a picture or a font saved beside it still loads by name), is laid out in a viewport of that size, never as a phone, and cut to that box from its top left as a PNG of `width` times `scale` by `height` times `scale` px, each side rounded, taken once and never retaken shorter. A scale of 1 or more is the device scale the page itself is drawn at (its `devicePixelRatio`), so 2 is drawn at twice the detail and not enlarged; under 1 the page is drawn for a 1x screen and the picture scaled down. That reply gives the size asked and the size saved, one sentence each when the layout is taller or wider than the box (with both sizes: how its author learns it does not fit; what a page that hides its overflow, or a drawing's own canvas, cuts off is not seen), the same network, missing-file and dialog clauses, the scratch path, and that copying that file into the task's attachments folder under a name ending `.png` keeps it as a file of the task (a Claude run is told this only when it can post files and holds no verdict: one that holds the verdict judges pictures and makes none, and the tool's description says where the picture is saved and not how one is kept); the picture comes back as one image block while both its sides are within 2,000 px, and a larger one is saved and not shown, with a sentence saying the same box at a lower scale is the same layout. The name is found in either Unicode form (ruling 76) and the reply uses it as typed. It saves nothing on the task and writes no audit row or timeline entry: the pictures stay in the task's capture scratch in the folder of the run that asked (`<task>/.captures/<runId>/`, beside `deliveries/` and not under `workspace/`), replaced by that run's next capture and removed when the run ends. `[noop]` for a name the task does not hold (a dot name included, as for every reader), a file that is not a page, a `.svg` asked for with no size, a source over 10 MB (markdown 2 MB), a `from` past the page's end at every width asked for, and a size that cannot be pictured, said before any file is looked for: one of `width` and `height` without the other, a `scale` with no size, a size together with `view` or `from`, and a picture over 16,000,000 px (the reply gives the size it would be); `[busy]` when the renderer has not started the call within 15 s; `[error]` with the reason for a render that failed: a width that failed is the answer even when the other width was over before `from` (the reply still names where that one ends), a sized picture over the 3,750,000 bytes a capture hands back says so and to lower the scale or simplify the picture, one that comes back any other size than asked is not kept, a task with no owner under isolation says so, and an owner whose launch could not be prepared gets the launch's own sentence. A value outside a field's range never reaches the door: Claude's schema refuses it, and the Codex gateway answers with what each field takes (`pageCaptureArgsRefusal`) |
 | `read_timeline_entry {occurredAt, taskKey?}` | none; built with `read_board`, on both backends | one timeline entry, whole, of this task or, with `taskKey`, of another task of the project, by its stamp: the prompt's recent timeline (five entries, each cut at 220 characters) prints it after a clipped entry ("(clipped; the whole entry is at `<occurredAt>`)") and counts the older entries it leaves out, naming `read_board` for them to a run that holds it, and `read_board` on a task lists every entry's; entries written in one millisecond (a verdict's report and its quality marker) come back together under `entries`, in the order they were written, sharing the 40,000-character budget; a `kb_correction` entry comes with `correction`: the passage it replaced, the text it wrote and the evidence, whole from the record, and whether a person undid it, to a run given that knowledge base; to any other run it quotes nothing while a deployed agent is not given the knowledge base (ruling 211); read-only (rulings 213(b), 213, 72 and 211, `readTimelineEntry`; the Codex board server takes the run's knowledge mounts as what it is given) |
 | `read_knowledge_doc {kb, path}` | the run has a knowledge base attached | one document of an attached knowledge base, whole (§6; ruling 205) |
-| `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it, ruling 210(b)), or at its end (`correctKnowledgeDoc`, ruling 210; the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 211), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
+| `correct_knowledge_doc {kb, path, replaces?, text, evidence}` | the run has a knowledge base attached; built after `read_board`, so a knowledge base alone never mounts `read_board` | writes `text` into that document in place of `replaces`, the exact passage (an empty `text` deletes it), or at its end (`correctKnowledgeDoc`, ruling 210(b); the rules are [file-formats.md §8](../architecture/file-formats.md)): only in a knowledge base this run was given; a refusal writes nothing and says what to fix; a `kb_correction` timeline event under the agent's own name, quoting the passages only when every deployed specialist is given that knowledge base (ruling 211), and audit `task.kb_correction.merged`, and no notification; a person undoes it from the Controller page |
 
 A specialist has no post tool of its own for another task (ruling 202): its reach there is
 the `relay` entries of the outcome it already reports, posted by the completion through the
@@ -1556,7 +1555,7 @@ run that holds the board readers (ruling 214) is also told that `read_task_attac
 with `delivery` returns a file as it was judged. Nothing is added for a commit on either
 side, for a judged delivery that was not kept, or when the delivery judged is still the
 one under review and no file differs (ruling 93's question is about what the reviewer has
-not said yet); a delivery kept before ruling 81 holds its deliverer's files alone, so the
+not said yet); an older kept delivery holds its deliverer's files alone, so the
 others read as new; and a review asked for again by a comment resumes the reviewer's
 session and carries neither note. Building the note never stops the review.
 
@@ -1636,7 +1635,7 @@ write grant.
    `verdictAuthorized` is the engagement's `verdictCapable === true` when the run has an
    engagement, else the live verdict grant. No verdict at all is recorded for a run whose
    checkout failed (`no_checkout`, ruling 87, with a note naming that condition) or whose
-   dispatch withheld the verdict (`verdict_withheld`, rulings 66 and 124), and the prose
+   dispatch withheld the verdict (`verdict_withheld`, rulings 87 and 124), and the prose
    fallback is for SILENCE only: an envelope that left the verdict empty and asked a
    question has answered. A request-changes with nothing delivered to bind to is recorded
    in words only, and its note says so (ruling 245), as an approval with none does. A verdict from the run a completeness stamp names is recorded as
@@ -1760,7 +1759,7 @@ the operator's own `gate()` (`operator-authority.server.ts`).
 | `read-github-api` | agent | off | claude-only | `promotable: false`; the PAT never leaves the server, so it is never mounted on Codex |
 | `report-validation-verdict` | agent | off | both | grant-required; gates `approve-review`, `request-changes`, `post-quality-flags` |
 | `attach-evidence-references` | agent | direct | both | the grant that lets a run save files on its task also lets it keep the sources its result rests on (`keep_source`, ruling 82) |
-| `run-unit-integration-validation`, `move-task-to-review`, `read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`, `request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks` | agent | direct | advisory | `group: null`: persona text only, no toggle, disclosed as such (ruling 184); `capabilityIsAdvisory` is true and the controller's `get_project` marks each with `advisory: ADVISORY_CAPABILITY_NOTE` (ruling 184) |
+| `run-unit-integration-validation`, `move-task-to-review`, `read-repo-diff`, `run-validation-suites`, `post-quality-flags`, `approve-review`, `request-changes`, `author-test-cases`, `read-task-repo`, `flag-underspecified-tasks` | agent | direct | advisory | `group: null`: persona text only, no toggle, disclosed as such; `capabilityIsAdvisory` is true and the controller's `get_project` marks each with `advisory: ADVISORY_CAPABILITY_NOTE` (ruling 184) |
 | `merge-pull-request`, `transition-to-done`, `change-project-policy` | agent | human | both (always human, `ALWAYS_HUMAN_CAPABILITY_IDS`) | never produce a tool on either side; `merge-pull-request` is also grant-required |
 
 Couplings applied on save (`applyGrantCouplings`): `repairDeliveryGrants` (the headline
@@ -1772,7 +1771,7 @@ human kept, everything else off) is what an undeployed or grant-less specialist 
 delivery steps and the three verdict outcomes `off`) seeds a template created in the org
 editor, which has no capability UI, and a library deploy of a template that stores no
 grants. MCP grants are outside the
-matrix (ruling 188), except the tools an admin marks as write tools, which a withheld
+matrix, except the tools an admin marks as write tools, which a withheld
 repo-write grant denies (ruling 188).
 
 **The matrix, the profile panel and the Policy counts count the same capabilities**
@@ -1886,7 +1885,7 @@ runtime's answer for a missing grant.
   run to read what it needs: `read_knowledge_doc {kb, path}` (the specialist, operator and
   controller toolkits, one implementation, `readKbDocForRun`, only the KBs attached to that run,
   one document in pages of up to `READ_PAGE_BYTES` (32,000 bytes of UTF-8, ruling 215), each
-  saying which characters it holds and the `offset` to read on with, ruling 215), or,
+  saying which characters it holds and the `offset` to read on with), or,
   on Codex, which mounts no Viberr tools, the file itself at the printed path (the
   workspace contract allows those reads, ruling 217(a); `kb/` stays readable, and never
   writable, to the agent's own OS user, ruling 15). A grant decides what a run is
@@ -2127,7 +2126,7 @@ runtime's answer for a missing grant.
   the server's own directory before anything is made, listed or removed below it, so no
   entry on the way can be a link an agent put there. Only the one render's folder, made
   new, is 2770 for the renderer to write; the server reads back from it and removes it
-  as the person (ruling 140), the emptied folder with its own `rmdir` (ruling 140). A
+  as the person, the emptied folder with its own `rmdir` (ruling 140(a)). A
   scratch that cannot be made so is the page's reason ("the render's scratch folder
   could not be made"). A page and
   the files beside it are found in whichever Unicode form they are stored (ruling 76's
@@ -2144,7 +2143,7 @@ runtime's answer for a missing grant.
   any absent tool its own role description mentions (word-bounded; `go` excluded), so the
   persona and the measurement do not contradict each other in silence. The image ships
   `make`, `curl` and a pinned `pnpm` (from npm, not corepack) and deliberately no Docker
-  (`Dockerfile`, ruling 42), and `poppler-utils` so a PDF an agent delivers or judges
+  (`Dockerfile`), and `poppler-utils` so a PDF an agent delivers or judges
   can be rendered and looked at (`pdftoppm`, ruling 42).
 
 ## 7. Workspaces and git
@@ -2159,7 +2158,7 @@ runtime's answer for a missing grant.
   writes — a task's `workspace/`, `attachments/` and `.operator-scratch/`, and
   `runtimes/controller-scratch`, `uv-cache`, `uv-python` — are `node:viberr-agents` 2770
   (`shareDirWithAgents`, called where each is created, a resumed reply's `workspace/`
-  included since ruling 15; boot hands an older tree over once, recursively). setgid keeps whatever either side creates inside in the agent group; the
+  included, ruling 15; boot hands an older tree over once, recursively). setgid keeps whatever either side creates inside in the agent group; the
   agent's umask is 0007 (the launcher sets it) and the server's is 0002 (set at boot when the
   launcher exists), so a file the server's clone checks out is one an agent can edit and a
   file one agent writes is one the delivery (the owner's uid) can commit. Nothing else the server
@@ -2251,7 +2250,7 @@ runtime's answer for a missing grant.
 - Retention: workspaces of tasks in the terminal stage are removed at boot (after run
   recovery, only when no run is live) and on every maintenance pass, each as its task's
   owner (ruling 140; a task with no owner keeps its workspace while isolation is on), the
-  emptied `workspace/` root, the server's own, by the server's `rmdir` (ruling 140); transcripts and
+  emptied `workspace/` root, the server's own, by the server's `rmdir`; transcripts and
   session homes older than 30 days are pruned (`VIBERR_TRANSCRIPT_RETENTION_DAYS`,
   `VIBERR_SESSION_HOME_RETENTION_DAYS`, `0` = forever).
 
@@ -2339,7 +2338,7 @@ async hang).
   directive is not an authority grant; a directive asking for delivery posts a policy
   event quoting the matched phrase (§4.1); supporting runs get the read-only paragraph and
   the delivery denies.
-- Bounds: operator react depth 4 (an `approve` resets it, ruling 119, and so does a reply
+- Bounds: operator react depth 4 (an `approve` resets it, and so does a reply
   that moved the task's head, ruling 119), react hops 12 since a person last acted (only
   an `approve` or a person restarts it, 489(d)), transition chain
   8 (counted across re-triggered turns; a live operator run's own moves queue no turn,

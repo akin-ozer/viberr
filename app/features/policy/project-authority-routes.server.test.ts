@@ -375,8 +375,8 @@ describe("every project-scoped route carries a membership gate", () => {
     "project.task.tsx",
     "project.tsx",
   ];
-  /** Every project route: since ruling 11 (BOARD-6) the board serves its own
-   *  columns instead of the layout serving them. */
+  /** Every project route: the board serves its own columns instead of the
+   *  layout serving them (ruling 11, BOARD-6). */
   const EXPECTED_LOADER_ROUTES = EXPECTED_PROJECT_ROUTES;
 
   /** Ruling 11 (BOARD-6): the layout and the board read the project through

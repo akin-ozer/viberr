@@ -168,7 +168,7 @@ export function runInputRows(
    * Ruling 167: WHICH kind of run this is, because two of these rows describe
    * an absence, and the same absence means different things.
    *
-   * Ruling 167 gave the operator and the controller this disclosure, and both
+   * The operator and the controller make this disclosure too, and both
    * legitimately record `cwd: null` and `anchor: null` — neither has a checkout
    * and neither is handed a canonical task block. The two stand-in sentences
    * here were written when every caller was a specialist, so they then said

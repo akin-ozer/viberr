@@ -136,8 +136,8 @@ export function writeProject(
 }
 
 /**
- * The Standard board with a person approving the move into Review: the
- * template before ruling 91, and a strict board still. For a suite whose
+ * The Standard board with a person approving the move into Review, as a
+ * strict board has it (ruling 91). For a suite whose
  * contract needs an `approval` boundary to cross, or a work stage the operator
  * does not leave on its own (so the settle-time backstop stays quiet there).
  */
