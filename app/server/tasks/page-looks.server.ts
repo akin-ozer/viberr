@@ -121,6 +121,36 @@ export function recordRunLooks(db: DatabaseSync, runId: string | null | undefine
   }
 }
 
+/**
+ * The runs whose looks an approval from `runId` rests on: itself, and the
+ * earlier runs of the session it continued, while they judged the same
+ * subject on the same task and no compaction came between. A resumed review
+ * still holds the pictures its earlier turns were shown; one told what it had
+ * not opened opens only that, and held to its own run's list it would never
+ * be seen to have looked at the whole. A compaction replaces what a session
+ * was shown with a summary of it, so nothing before one counts.
+ */
+export function looksRunIds(db: DatabaseSync, runId: string): string[] {
+  const run = getRun(db, runId);
+  if (!run?.session_id) return [runId];
+  // SAFETY: the SELECT list is `id` (TEXT NOT NULL), `review_subject`
+  // (nullable TEXT) and `compactions` (INTEGER NOT NULL) of `agent_runs`.
+  const session = db
+    .prepare(
+      `SELECT id, review_subject, compactions FROM agent_runs
+        WHERE session_id = ? AND project_slug = ? AND task_key = ? ORDER BY created_at, rowid`,
+    )
+    .all(run.session_id, run.project_slug, run.task_key) as { id: string; review_subject: string | null; compactions: number }[];
+  let ids: string[] = [];
+  for (const row of session) {
+    // Another subject, or a compaction: what was seen before does not carry.
+    if (row.review_subject !== run.review_subject || row.compactions > 0) ids = [];
+    ids.push(row.id);
+    if (row.id === runId) break;
+  }
+  return ids.includes(runId) ? ids : [runId];
+}
+
 /** One look a task keeps: the stretches of one page on the web. */
 export interface KeptLook {
   url: string;

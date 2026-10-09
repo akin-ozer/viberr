@@ -176,6 +176,7 @@ import { recordedPageCaptures } from "~/shared/page-capture";
 import {
   PAGE_LOOKS_NOTE_TITLE,
   looksFromRunLog,
+  looksRunIds,
   pageLooksOwed,
   pageLooksRefusalNote,
   runLooks,
@@ -2099,12 +2100,14 @@ export async function applyAgentCompletionEffects(
       try {
         const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, completionFile);
         if (owed) {
-          const looks = [
-            ...runLooks(db, finished.id),
+          // The session's looks, not only this run's: a resumed review still
+          // holds the pictures its earlier turns on this subject were shown.
+          const looks = looksRunIds(db, finished.id).flatMap((runId) => [
+            ...runLooks(db, runId),
             ...(input.backend === "claude"
-              ? looksFromRunLog(db, ctx, { projectSlug: input.projectSlug, taskKey: input.taskKey, runId: finished.id })
+              ? looksFromRunLog(db, ctx, { projectSlug: input.projectSlug, taskKey: input.taskKey, runId })
               : []),
-          ];
+          ]);
           unlooked = unmetPageLooks(owed, looks);
         }
       } catch (error) {

@@ -1668,7 +1668,11 @@ write grant.
    `capture_page` handed it, each picture Viberr kept of the delivery that it opened with
    `read_task_attachment`, each kept source it opened as an image with `read_task_source`,
    and, for a Claude run, each of those it opened with its own file reader, read from its
-   log (`looksFromRunLog`). A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
+   log (`looksFromRunLog`). The looks that count are the session's (`looksRunIds`): this
+   run's, and those of the earlier runs of the session it continued on the same task and
+   subject, back to the last compaction. A resumed review told what it had not opened
+   opens only that, and still holds the pictures of its earlier turns; a compacted one
+   holds a summary of them. A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
    look, and a kept picture counts only for the delivery it is of. When something owed was
    not looked at, the verdict is not recorded and nothing binds: a `note` titled "Approval
    not recorded" names each page, width and picture the run did not open, says the review

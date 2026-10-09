@@ -299,7 +299,7 @@ let runSeq = 0;
 async function finishedRunWith(
   text: string,
   reviewSubject?: string | null,
-  { verdictWithheld = false } = {},
+  { verdictWithheld = false, session = "" }: { verdictWithheld?: boolean; session?: string } = {},
 ): Promise<string> {
   runSeq += 1;
   queueFakeRun({
@@ -309,7 +309,8 @@ async function finishedRunWith(
       { t: "", ev: "result", tag: "result", text: "done" },
     ],
     occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-    sessionId: `t-${runSeq}`,
+    // A session of its own, unless the case has this run continue one.
+    sessionId: session || `t-${runSeq}`,
   });
   const input: Parameters<typeof startRun>[1] = {
     projectSlug: store.slug,
@@ -1184,6 +1185,38 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const approved = await finishedRunWith("Verdict: approve. Every claim has its source.", SUBJECT);
       await complete(approved, { role: "Review & validation" });
       expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("counts what a resumed review was shown in its earlier turns on the same delivery, and nothing a compaction has since replaced", async () => {
+      // A review told what it had not opened opens only that. Held to its own
+      // run's list, the resumed turn's approval is refused for the width it
+      // was shown a turn earlier, and the review can never be seen to have
+      // looked at the whole. CANARY: read only the completing run's looks.
+      writeDeliveredPageTask(["index.html"]);
+      const first = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-1" });
+      recordRunLooks(store.db, first, [stretch("desktop", 0, 1400, true)]);
+      await complete(first, { role: "Review & validation" });
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the phone width (390 px)");
+      expect(refusal()).not.toContain("desktop");
+
+      const resumed = await finishedRunWith("Verdict: approve. Looked at the phone width too.", SUBJECT, { session: "review-1" });
+      recordRunLooks(store.db, resumed, [stretch("phone", 0, 1900, true)]);
+      await complete(resumed, { role: "Review & validation" });
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+      // A session that was compacted holds a summary of what it was shown,
+      // not the pictures: only what it looked at since counts. CANARY: carry
+      // looks across a compaction and this approval binds.
+      writeDeliveredPageTask(["index.html"]);
+      const before = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
+      recordRunLooks(store.db, before, [stretch("desktop", 0, 1400, true)]);
+      const after = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
+      patchRun(store.db, after, { compactions: 1 });
+      recordRunLooks(store.db, after, [stretch("phone", 0, 1900, true)]);
+      await complete(after, { role: "Review & validation" });
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
     });
 
     it("owes every picture of a look the task keeps, and names the ones a run did not open", async () => {
