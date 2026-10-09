@@ -691,7 +691,7 @@ kept copy and never the files as they are now (a verdict binds to the kept copy)
 the task owner's agent user with no network, and is one job at a time for the whole
 instance (`page-capture.server.ts`): a newer delivery of a task replaces one still
 waiting, and a delivery that lands while an older one is being pictured gets no record,
-note or picture from the older render. The completion waits up to 45 s for it before the
+note or picture from the older render. The completion waits up to 120 s for it before the
 operator reacts, so the operator and the reviewers it dispatches start with the pictures
 there; a slower render finishes in the background. A page that cannot be pictured says why
 in the note and in the record, and the delivery stands without it; the note names
@@ -708,6 +708,42 @@ nothing is said on the task. Only the picture of a page the task holds, or one t
 names, is Viberr's own (`pageCapturesAmong`): an agent's own file that merely ends
 `.capture-desktop.png` is claimed by its run, kept with the delivery and offered as a
 screenshot like any other.
+
+**A pictured page is measured (ruling 328).** The render that pictures an HTML page also
+measures it, so that what a person accepts a page on is a figure and not an agent's word.
+At each width it runs the accessibility checks (axe-core's WCAG 2.2 A and AA rules) and
+counts the kinds of fault, the elements each is on and the lowest contrast; presses Tab
+through the page and counts the controls it reaches, the ones it never reaches and the
+ones that look the same holding focus as at rest; and loads the page again with reduced
+motion asked for and counts what still animates or plays. Once, it adds up the bytes of
+the page and every file it loads, and loads it on a slow phone line to time it. The
+figures are kept on the page's entry of `pageCaptures` (`measured`,
+[file-formats.md](../architecture/file-formats.md)), the "Page captures" note says them
+in sentences with the first elements of each fault, and the completion packet hands the
+operator one line a page. The note also sets the page beside the lightest and the fastest
+page the board has had accepted (`acceptedPageFigures`: the measured pages of the
+project's Done tasks) and says when it is heavier or slower, with both figures: a board's
+pages only get lighter and faster, and the reviewer reads a page that is not as a finding.
+Nothing here refuses a delivery, and a page that cannot be measured says why. A markdown
+file is not measured: Viberr sets it in its own type. An agent takes the same figures of a
+page on its task with `measure_page` before it delivers.
+
+**An approval of a page binds only from a run that looked (ruling 329).** A files
+delivery that holds an HTML page is judged from pictures, so a reviewer's `approve` is
+recorded only when its run was shown the whole of each page at both widths and every
+picture of a look the task keeps (ruling 327, below). A run that read the source, or the
+deliverer's report, and approved leaves a note titled "Approval not recorded" that names
+what it did not open; validation is unchanged and the review runs again. The reviewer is
+told what its approval owes before it starts. A `request_changes` owes no look.
+
+**A task keeps how a page on the web looked (ruling 327).** Work made to look like a page
+on the web is made to, and judged against, pictures of that page kept on the task:
+`keep_page_look` pictures the address once, whole, at 1280 px and 390 px, with its first
+screen at three moments while it moves and a note of what the renderer read of its motion,
+and keeps all of it as sources under one date. The address reads differently by the next
+review and a description is its writer's reading, so neither is what a result is held to.
+A later task of the same work takes the look over (`from`) and is held to the same
+pictures.
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned

@@ -125,8 +125,18 @@ own pieces:
   hold the size and format the destination takes pictures in and where the person's
   earlier covers are.
 - A result that states facts keeps its sources (`keep_source`, ruling 82), and a result
-  that is a page is pictured at a desktop and a phone width before it is accepted
+  that is a page is pictured at 1280 px and 390 px before it is accepted
   (`capture_page`, ruling 86).
+- Work a person looks at is planned on what Viberr does for it (ruling 268, the guide's
+  "Work a person looks at"): a page a task delivers as files is pictured and measured
+  (rulings 86 and 328), a reviewer's approval of it counts only from a run that looked
+  (ruling 329), and work made to look like a page on the web names the address in its goal
+  and keeps that look (`keep_page_look`, ruling 327). The controller writes no procedure of
+  its own for any of it into a board's rulings: no other widths, no browser steps, no
+  description of the reference. A page nobody named a repository for is delivered as files
+  on a board without one, since the pages inside a pull request are not pictured, and a
+  page is one task: a task has a price, so an outcome is split only where a person accepts
+  the pieces separately or they can be made at once.
 
 A results board needs no repository (ruling 224). The controller says what the board
 delivers when it creates it (`create_project`'s `delivers`), and a results board is

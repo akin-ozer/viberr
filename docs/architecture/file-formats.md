@@ -512,11 +512,31 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
           name: post.html.capture-phone.png     # in all, are named with `error` "a
           cut: true               # delivery is pictured up to 8 pages". Written by the
       error: null                 # server alone, once the render of a stamped files
-    - file: notes.md              # delivery finishes; the latest delivery only. A reader
-      shots: []                   # pairs a picture with a file only while this stamp is
-      error: the render ran past 25 seconds   # the task's own. A malformed record reads
-                                  # as absent (no picture is drawn; the next delivery's
-                                  # render rewrites it)
+      measured:                   # delivery finishes; the latest delivery only. A reader
+        weightBytes: 412380       # pairs a picture with a file only while this stamp is
+        files: 9                  # the task's own. A malformed record reads as absent
+        loadMs: 1840              # (no picture is drawn; the next delivery's render
+        line: "150 ms latency, 1.6 Mbit/s down"  # rewrites it). `measured` (ruling 328)
+        views:                    # is on an HTML page that was measured as it was
+          - view: desktop         # pictured: the bytes of the page and every file it
+            faultKinds: 1         # loaded and how many files, its load time on the slow
+            faultElements: 3      # line `line` names (null when it was not timed), and
+            worstContrast: 3.1    # per width how many kinds of accessibility fault the
+            controls: 14          # checks found (null when they did not run) on how
+            unreached: 0          # many elements, the lowest contrast among them, how
+            unmarked: 2           # many controls the page has, how many Tab never
+            stillMoving: 0        # reaches, how many look the same holding focus, and
+          - view: phone           # how many things still move with reduced motion
+            faultKinds: 0         # asked for. The sentences that name each element are
+            faultElements: 0      # in the delivery's "Page captures" note
+            worstContrast: null
+            controls: 12
+            unreached: 0
+            unmarked: 2
+            stillMoving: 0
+    - file: notes.md
+      shots: []
+      error: the render ran past 25 seconds
 completionPacket:                 # optional; ruling 17 — what Operator hands over at
   subject: rev_9f2c               # the acceptance boundary, bound like a verdict to the
   headSha: a91f7c2e…              # review subject it describes (the workRevision.id, or
@@ -1223,6 +1243,7 @@ A `source` line is one kept source:
 | `by` | The agent: `backend`, `profileId`, `roleHint` |
 | `runId` | The run that called `keep_source`, or `null` when the caller could not name it |
 | `bytes`, `sha256` | The size and the SHA-256 of the bytes file |
+| `look` | Optional (ruling 327): set on a source that is part of the look of a page on the web, as `keep_page_look` pictured it. `url` and `at` are the address and when it was pictured, shared by every source of one look. `part` is `stretch` (a stretch of the page: `view`, `desktop` or `phone`, with `from`, `to` and `pageHeight` in px), `frame` (the first screen while it moved: `view` and `moment`, the ms since it came into view) or `note` (the markdown note of where each picture is and what moved; `view` is `null`). A line whose `look` does not parse is read as a source with none |
 
 A `delivery` line records the ids of the sources the task held when a files delivery was
 stamped (`recordDeliverySources`, written with the kept delivery of ruling 86). A task
