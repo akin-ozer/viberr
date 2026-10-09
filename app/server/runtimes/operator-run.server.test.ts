@@ -13,7 +13,7 @@ import { recordNoRepositoryRuling } from "~/server/org/repository-ruling.server"
 import { planRefusalOf, resolveOperatorAuthority } from "~/server/tasks/operator-authority.server";
 import { writeTaskAttachment } from "~/server/files/task-attachments.server";
 import {
-  updateTaskFile, readTaskFile } from "~/server/files/task-writer.server";
+  updateTaskFile, readTaskFile, resolveTaskFilePath } from "~/server/files/task-writer.server";
 import type {
   AgentDeployment,
   AgentDeploymentDefinition,
@@ -2992,18 +2992,44 @@ describe("stranded auto-stage resume", () => {
     });
 
     /**
-     * Ruling 121 on Claude (ruling 121). A Claude drive's governed tools answer
-     * each refusal to the model in-run, and no timeline note narrates it, so
+     * Ruling 121 on Claude. A Claude drive's governed tools answer each refusal
+     * to the model in-run, and no timeline note narrates it, so
      * `planWhollyRefused` (ruling 120, a Codex plan's) is never set. A nudge
      * whose every call was refused therefore read at settle as one that tried
      * nothing, and got "the operator held it twice in a row … treated as a
      * deliberate hold … run the operator manually": the two falsehoods and the
      * remedy ruling 121 took out of the Codex note.
      *
+     * A call that THROWS is the same drive: it tried, and nothing it asked for
+     * was carried out. The throw reached the model as `strictTool`'s `[error]`
+     * reply (ruling 136) with nothing kept on the drive, so a nudge whose one
+     * call threw read as a deliberate hold too. The second row is that shape: a
+     * person's editor truncates task.md under the nudge's comment, and the good
+     * copy is back before the turn ends.
+     *
      * The calls go through the drive's mounted `viberr` server with a real MCP
      * client, the way the model makes them (ruling 121's Claude row).
      */
-    it("ruling 121 on Claude: a nudge refused every time was stopped, and the note quotes the refusals", async () => {
+    it.each<{
+      case: string;
+      nudgeCall: { name: string; args: Record<string, string> };
+      editorTruncates: boolean;
+      answered: RegExp;
+    }>([
+      {
+        case: "a nudge refused every time was stopped, and the note quotes the refusals",
+        // The nudge tries the same move and is refused the same way.
+        nudgeCall: { name: "transition_stage", args: { toStageId: "done" } },
+        editorTruncates: false,
+        answered: /^\[denied\] Accepting completion is not permitted/,
+      },
+      {
+        case: "a nudge whose one call threw was stopped too, and the note quotes what it failed with",
+        nudgeCall: { name: "post_comment", args: { text: "Holding at triage until the goal names its acceptance criteria." } },
+        editorTruncates: true,
+        answered: /^\[error\] VIB-1's file can't be read as a task file/,
+      },
+    ])("ruling 121 on Claude: $case", async ({ nudgeCall, editorTruncates, answered }) => {
       reconfigureProject(store2, {
         agents: [codexOperator(OPERATOR_POLICY, { backends: ["claude"], model: defaultModelFor("claude") })],
       });
@@ -3042,8 +3068,13 @@ describe("stranded auto-stage resume", () => {
       });
       expect(adapter2.pending!.spec.prompt).toContain("your previous run ended with this auto-advance stage idle");
       expect(adapter2.pending!.spec.prompt).not.toContain("EVERY action your previous run planned was refused");
-      // The nudge tries the same move and is refused the same way.
-      expect(await callOnDrive("transition_stage", { toStageId: "done" })).toBe(refusal);
+      const taskPath = resolveTaskFilePath({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot });
+      const goodCopy = readFileSync(taskPath, "utf8");
+      // An editor's truncated write: the frontmatter without its closing fence.
+      if (editorTruncates) writeFileSync(taskPath, goodCopy.slice(0, goodCopy.indexOf("\n---\n", 4) + 1));
+      const reply = await callOnDrive(nudgeCall.name, nudgeCall.args);
+      if (editorTruncates) writeFileSync(taskPath, goodCopy);
+      expect(reply).toMatch(answered);
       adapter2.finish(store2, "Still not mine to do.", "finished");
       await eventually(() => {
         const parsed = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!.parsed;
@@ -3053,17 +3084,18 @@ describe("stranded auto-stage resume", () => {
         expect(parsed.frontmatter.waiting).toBe("human");
       });
       // CANARY: drop the Claude record (`noteRefusedCall` in the toolkit's
-      // `resultText`) and this note calls the refused nudge a deliberate hold
-      // and sends the reader to run the operator manually.
+      // `resultText`) and the first row's note calls the refused nudge a
+      // deliberate hold and sends the reader to run the operator manually;
+      // drop `resultText`'s catch and the second row's does.
       const note = readTaskFile({ projectSlug: store2.slug, taskKey: "VIB-1", dataRoot: store2.dataRoot })!
         .parsed.timeline.find((e) => e.text.includes("Coordination is paused"))?.text;
       expect(note, "no hold note").toBeDefined();
       expect(note).not.toContain("deliberate hold");
       expect(note).not.toContain("run the operator manually");
       expect(note).toContain("the operator did not hold this stage; it was stopped");
-      // It quotes the refusal the call was answered with, which nothing else on
-      // the timeline does, and points at no refusal note.
-      expect(note).toContain(`- \`transition_stage\`: ${refusal.replace(/^\[denied\] /, "")}`);
+      // It quotes what the call was answered with, which nothing else on the
+      // timeline does, and points at no refusal note.
+      expect(note).toContain(`- \`${nudgeCall.name}\`: ${reply.replace(/^\[\w+\] /, "")}`);
       expect(note).not.toContain("refusal notes are directly above");
       expect(note).toContain("take the action yourself");
     });

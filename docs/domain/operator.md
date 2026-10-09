@@ -268,7 +268,11 @@ drive whose governed calls were refused (`planRefusalOf`, the predicate the plan
 asks, kept on the drive by `noteRefusedCall` from the toolkit's reply): its tools answered
 each refusal to the model in the run and no timeline note narrates them, so the hold note
 quotes the refused calls itself, one "- `tool`: message" line each, and says nothing of
-the drive before the nudge (ruling 121). A Claude drive's refusals arm no nudge of their
+the drive before the nudge (ruling 121). A governed call that throws is refused too: the
+toolkit's reply takes the action rather than its result, keeps the throw on the drive
+through the same `noteRefusedCall`, in the words it failed with (an `AppError`'s own, else
+that it failed unexpectedly), and lets it go on to `strictTool`, which answers the model
+(ruling 136). A Claude drive's refusals arm no nudge of their
 own: ruling 120's plan-refused nudge pays for refusals that arrive after a Codex turn has
 ended, where nobody reads them, and a Claude drive read its refusals and ended its turn.
 The nudge chain shares `OPERATOR_TRANSITION_CHAIN_CAP`; at the cap a note says the

@@ -21,6 +21,7 @@ import {
 // Ruling 136: every tool on this server refuses arguments it does not
 // declare, instead of silently dropping them and answering anyway.
 import { imageResult, strictTool as tool, textResult } from "~/server/runtimes/strict-tool.server";
+import { AppError } from "~/server/errors/app-error.server";
 import type { TaskMutationContext } from "./task-mutation.server";
 import {
   deliverGate,
@@ -337,10 +338,29 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
   /** The reply every governed tool answers with; the reads answer through
    *  `textResult`. Ruling 121: it is a Claude drive's one funnel, as `record`
    *  is a Codex plan's, so it stamps the drive's `carriedOutAction` through the
-   *  predicate `record` asks (ruling 121). Ruling 121: it also keeps each call
-   *  Viberr refused. A Codex plan's refusals are narrated on the timeline and
-   *  a Claude drive's are not, so the settle's hold note quotes these. */
-  const resultText = (toolName: string, r: OperatorActionResult) => {
+   *  predicate `record` asks, and it keeps each call Viberr refused. A Codex
+   *  plan's refusals are narrated on the timeline and a Claude drive's are
+   *  not, so the settle's hold note quotes these. It takes the action itself,
+   *  not its result, because a call that THROWS is refused too (ruling 121):
+   *  it is kept the same way, in the words it failed with, and the throw goes
+   *  on to `strictTool`, which answers the model (ruling 136). Without that a
+   *  nudge whose one call threw was recorded as a deliberate hold. */
+  const resultText = async (toolName: string, action: Promise<OperatorActionResult>) => {
+    let r: OperatorActionResult;
+    try {
+      r = await action;
+    } catch (error) {
+      // `noop`: the call did not run. The authority/state split it picks
+      // between is read only by a Codex plan's narration.
+      noteRefusedCall(ctx, toolName, {
+        outcome: "noop",
+        message:
+          error instanceof AppError
+            ? error.userMessage
+            : "It failed unexpectedly and returned no answer; the details are in the server log.",
+      });
+      throw error;
+    }
     noteCarriedOutAction(ctx, r);
     noteRefusedCall(ctx, toolName, r);
     return textResult(`[${r.outcome}] ${r.message}`);
@@ -645,7 +665,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "post_comment",
-            await operatorPostComment(db, ctx, { ...base, text: prose(args.text) }, authority),
+            operatorPostComment(db, ctx, { ...base, text: prose(args.text) }, authority),
           ),
       ),
       "post_comment",
@@ -670,7 +690,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args: { taskKey: string; text: string; files?: string[] }) =>
           resultText(
             "relay_to_task",
-            await operatorRelayToTask(
+            operatorRelayToTask(
               db,
               ctx,
               { ...base, toTaskKey: args.taskKey, text: prose(args.text), files: args.files ?? [] },
@@ -707,7 +727,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.text) input.text = prose(args.text);
           return resultText(
             "take_from_task",
-            await operatorTakeFromTask(db, ctx, input, authority),
+            operatorTakeFromTask(db, ctx, input, authority),
           );
         },
       ),
@@ -727,7 +747,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) => {
           const input: SetGoalInput = { ...base, goal: prose(args.goal) };
           if (args.reason) input.reason = prose(args.reason);
-          return resultText("set_goal", await operatorSetGoal(db, ctx, input, authority));
+          return resultText("set_goal", operatorSetGoal(db, ctx, input, authority));
         },
       ),
       "set_goal",
@@ -750,7 +770,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             epicId: args.epicId.trim() || null,
           };
           if (args.reason) input.reason = prose(args.reason);
-          return resultText("set_epic", await operatorSetEpic(db, ctx, input, authority));
+          return resultText("set_epic", operatorSetEpic(db, ctx, input, authority));
         },
       ),
       "set_epic",
@@ -779,7 +799,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "flag_context_conflict",
-            await operatorFlagContextConflict(
+            operatorFlagContextConflict(
               db,
               ctx,
               {
@@ -836,7 +856,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "correct_knowledge_doc",
-            await operatorCorrectKnowledgeDoc(
+            operatorCorrectKnowledgeDoc(
               db,
               ctx,
               {
@@ -870,7 +890,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "edit_comment",
-            await operatorEditComment(
+            operatorEditComment(
               db,
               ctx,
               {
@@ -1071,7 +1091,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           // a body the model left empty, and on either backend.
           return resultText(
             "open_decision_packet",
-            await operatorOpenPacketDisclosed(
+            operatorOpenPacketDisclosed(
               db,
               ctx,
               input,
@@ -1106,7 +1126,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.reason) input.reason = prose(args.reason);
           return resultText(
             "set_dependencies",
-            await operatorSetDependencies(db, ctx, input, authority),
+            operatorSetDependencies(db, ctx, input, authority),
           );
         },
       ),
@@ -1137,7 +1157,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
             if (args.repository) ask.repository = args.repository;
             return resultText(
               "ask_for_repository",
-              await operatorAskForRepository(db, ctx, ask, authority, (packet) =>
+              operatorAskForRepository(db, ctx, ask, authority, (packet) =>
                 operatorOpenPacketDisclosed(db, ctx, packet, authority, consultedProfileIds),
               ),
             );
@@ -1158,7 +1178,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "resolve_decision_packet",
-            await operatorResolvePacket(
+            operatorResolvePacket(
               db,
               ctx,
               { ...base, reason: prose(args.reason) },
@@ -1217,11 +1237,15 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.reason) input.reason = prose(args.reason);
           if (args.completeness) input.completeness = true;
           if (args.noVerdict) input.noVerdict = true;
-          const result = await operatorDispatchAgent(db, ctx, input, authority);
-          // R20-9: remember the consultation so a packet opened later in THIS
-          // run discloses it without the model having to remember.
-          noteConsultedProfile(consultedProfileIds, args.profileId, result.outcome);
-          return resultText("run_agent", result);
+          return resultText(
+            "run_agent",
+            operatorDispatchAgent(db, ctx, input, authority).then((result) => {
+              // R20-9: remember the consultation so a packet opened later in
+              // THIS run discloses it without the model having to remember.
+              noteConsultedProfile(consultedProfileIds, args.profileId, result.outcome);
+              return result;
+            }),
+          );
         },
       ),
       "run_agent",
@@ -1261,7 +1285,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.prompt) input.prompt = prose(args.prompt);
           return resultText(
             "schedule_task_action",
-            await operatorScheduleRun(db, ctx, input, authority),
+            operatorScheduleRun(db, ctx, input, authority),
           );
         },
       ),
@@ -1277,7 +1301,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args: { scheduleId: string }) =>
           resultText(
             "cancel_task_schedule",
-            await operatorCancelSchedule(
+            operatorCancelSchedule(
               db,
               ctx,
               { ...base, scheduleId: args.scheduleId },
@@ -1308,7 +1332,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.reason) input.reason = prose(args.reason);
           return resultText(
             "deliver_for_review",
-            await operatorDeliverForReview(db, ctx, input, authority),
+            operatorDeliverForReview(db, ctx, input, authority),
           );
         },
       ),
@@ -1331,7 +1355,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async (args) =>
           resultText(
             "lease_files",
-            await operatorLeaseFiles(
+            operatorLeaseFiles(
               db,
               ctx,
               { ...base, paths: args.paths.map((p) => prose(p)), reason: prose(args.reason) },
@@ -1355,7 +1379,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         async () =>
           resultText(
             "update_branch_from_base",
-            await operatorUpdateBranchFromBase(db, ctx, base, authority),
+            operatorUpdateBranchFromBase(db, ctx, base, authority),
           ),
       ),
       "update_branch_from_base",
@@ -1376,7 +1400,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           if (args.reason) input.reason = prose(args.reason);
           return resultText(
             "transition_stage",
-            await operatorTransitionStage(db, ctx, input, authority),
+            operatorTransitionStage(db, ctx, input, authority),
           );
         },
       ),
@@ -1460,7 +1484,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
           }
           return resultText(
             "write_completion_packet",
-            await operatorWriteCompletionPacket(db, ctx, input, authority),
+            operatorWriteCompletionPacket(db, ctx, input, authority),
           );
         },
       ),
@@ -1472,7 +1496,7 @@ export function buildOperatorToolkit(deps: ToolkitDeps): OperatorToolkit {
         "Accept the task's completion. Under FULL autonomy this moves the task to Done and records the review PR as accepted, merge pending. You do NOT merge it yourself and a merge does not happen when you accept, whether or not GitHub is reachable (a real merge is a human-only action). A human merges the accepted PR afterward; never tell anyone the PR was merged. Under supervised autonomy it posts an actionable 'accept completion → move to Done' recommendation card for a maintainer to apply; the maintainer's acceptance is what merges the review PR when GitHub is reachable, otherwise it is left 'merge pending'. Only call this once the work has reached the review boundary and the review is clean. A task with NOTHING to deliver (get_task `noChanges: true`, no branch, no PR) is accepted the same way and completes with no changes: nothing is merged, and the server re-checks the remote branch state before closing. Never call deliver_for_review for such a task, and never open a decision packet asking a human how to close it out. A pull request the acceptance gate would refuse cannot be recommended for acceptance: while get_task shows `notAcceptableReason`, this tool refuses with that sentence; call `update_branch_from_base`, which routes the conflict (ruling 129), or deliver the unpushed revision instead. It also refuses while your open decision offers a `create_task` whose new task waits on this one (ruling 130): accepting would withdraw that decision unanswered, so wait for a person to answer it. And it refuses until `write_completion_packet` has described the work under review (ruling 130): write the packet first, then call this.",
         {},
         async () =>
-          resultText("accept_completion", await operatorAcceptCompletion(db, ctx, base, authority)),
+          resultText("accept_completion", operatorAcceptCompletion(db, ctx, base, authority)),
       ),
       "accept_completion",
     );
