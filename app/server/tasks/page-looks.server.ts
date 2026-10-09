@@ -24,6 +24,7 @@ import {
   viewOfCaptureName,
   type PageCaptureViewId,
 } from "~/shared/page-capture";
+import { measuredLine } from "~/shared/page-measure";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 
@@ -149,6 +150,9 @@ export interface PageLooksOwed {
   /** Its pages: the HTML files the deliverer saved, as the kept delivery holds them. */
   pages: string[];
   looks: KeptLook[];
+  /** Ruling 328: what Viberr measured of those pages as it pictured this
+   *  delivery, one line a page; empty while the render has not finished. */
+  measured: { file: string; line: string }[];
 }
 
 /** The names a folder holds; none when it cannot be listed. */
@@ -183,7 +187,11 @@ export function pageLooksOwed(
   const pages = held.filter((name) => own.has(name) && pageKindOf(name) === "html").sort();
   const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources);
   if (pages.length === 0 && looks.length === 0) return null;
-  return { taskKey, deliveredAt: fm.deliveredAt, pages, looks };
+  const record = fm.pageCaptures?.deliveredAt === fm.deliveredAt ? fm.pageCaptures : null;
+  const measured = (record?.pages ?? []).flatMap((page) =>
+    page.measured && pages.includes(page.file) ? [{ file: page.file, line: measuredLine(page.measured) }] : [],
+  );
+  return { taskKey, deliveredAt: fm.deliveredAt, pages, looks, measured };
 }
 
 const same = (a: string, b: string): boolean => a.normalize("NFC") === b.normalize("NFC");
@@ -285,7 +293,11 @@ export function pageLooksNote(owed: PageLooksOwed): string {
     (owed.looks.length > 0
       ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it."
       : "") +
-    " An approval from a run that did not look is not recorded, and the review runs again. A `request_changes` owes no look."
+    " An approval from a run that did not look is not recorded, and the review runs again. A `request_changes` owes no look." +
+    (owed.measured.length > 0
+      ? ` What Viberr measured as it pictured this delivery: ${owed.measured.map((page) => `${code(page.file)}: ${page.line}`).join(" ")} ` +
+        "The delivery's \"Page captures\" note names each element (`read_timeline_entry`), and a fault it found is a finding until a delivery measures without it."
+      : "")
   );
 }
 
