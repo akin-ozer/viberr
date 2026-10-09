@@ -1985,10 +1985,41 @@ export async function applyAgentCompletionEffects(
     // past a verdict that did not exist. The operator caught it, said so on the
     // task, and could not withdraw a packet the policy engine had raised.
     const readNothing = thisRunRow?.no_checkout === 1;
+    /**
+     * Ruling 87: a run told NOT to judge records no verdict, neither from its
+     * envelope nor from the prose fallback below.
+     *
+     * The withholding took the verdict TOOL away on the deadlock question and
+     * stopped there, which closed nothing: `verdictAuthorized` reads the
+     * ENGAGEMENT snapshot (correctly — a required reviewer whose live grant was
+     * removed must still be able to record), so the prose fallback ran anyway
+     * and manufactured the verdict the tool had just been taken away to
+     * prevent. The Codex envelope is the same hole by another door: its schema
+     * is static and requires `verdict`, so a withheld Codex run can fill it, and
+     * recorded it binds to the same revision and fights another round
+     * (ruling 92), which is the loop the question exists to break.
+     *
+     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
+     * verdict under its name 70 milliseconds later: "No verdict recorded — the
+     * directive said not to... I deliberately skipped `report_outcome` rather
+     * than omitting it. (Note: last turn the system appears to have derived a
+     * `request_changes` entry from my comment anyway; I can't control that, but
+     * nothing new was authored by me.)" The person answered the same deadlock
+     * packet three times for one question.
+     */
+    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
     // Verdict: envelope first; a verdict-AUTHORIZED agent with no envelope falls
     // back to the prose classifier (G4). The regex NEVER runs without authority
     // (R1 — a developer's "tests pass" can't flip validation).
-    let verdict = verdictAuthorized && !readNothing ? (outcome?.verdict ?? null) : null;
+    let verdict =
+      verdictAuthorized && !readNothing && !verdictSilenced ? (outcome?.verdict ?? null) : null;
+    if (verdictAuthorized && verdictSilenced && outcome?.verdict) {
+      logger.info("withheld-verdict run emitted a verdict; discarded", {
+        taskKey: input.taskKey,
+        runId: finished.id,
+        verdict: outcome.verdict,
+      });
+    }
     if (!verdictAuthorized && outcome?.verdict) {
       // B-5 (pass 24): a Codex agent CAN fill the `verdict` field of its outcome
       // envelope even without the `report-validation-verdict` grant — the JSON
@@ -2020,26 +2051,9 @@ export async function applyAgentCompletionEffects(
     // converts "here is what I need before I can judge" into a judgement. The
     // no-verdict NOTE below already reads a question as "a legitimate no-verdict
     // outcome" (pass 24, C-4) — the classifier is its sibling and never learned
-    // it, which is this pass's most-found defect shape.
-    /**
-     * Ruling 66: a run told NOT to judge did not fall silent, so there is
-     * nothing here for the fallback to repair.
-     *
-     * Ruling 87 withheld the verdict TOOL on the deadlock question and stopped
-     * there, which closed nothing: `verdictAuthorized` reads the ENGAGEMENT
-     * snapshot (correctly — a required reviewer whose live grant was removed
-     * must still be able to record), so the prose fallback ran anyway and
-     * manufactured the verdict the tool had just been taken away to prevent.
-     *
-     * Live on SHOP-68 the reviewer said so in words, and viberr wrote the
-     * verdict under its name 70 milliseconds later: "No verdict recorded — the
-     * directive said not to... I deliberately skipped `report_outcome` rather
-     * than omitting it. (Note: last turn the system appears to have derived a
-     * `request_changes` entry from my comment anyway; I can't control that, but
-     * nothing new was authored by me.)" The person answered the same deadlock
-     * packet three times for one question.
-     */
-    const verdictSilenced = getRun(db, finished.id)?.verdict_withheld === 1;
+    // it, which is this pass's most-found defect shape. A run told NOT to judge
+    // (`verdictSilenced`, ruling 87) did not fall silent either, so there is
+    // nothing here for the fallback to repair.
     if (!verdict && verdictAuthorized && !readNothing && !outcome?.question && !verdictSilenced) {
       verdict = classifyReviewerVerdict(replyText);
       if (verdict) {

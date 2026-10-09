@@ -796,8 +796,8 @@ card until one of the person's runs has made a model call (ruling 161(b)). A rea
   `verdict_withheld` are persisted for the completion pipeline because boot recovery must
   re-supply them after a restart: the staged outcome, who dispatched the run (its cc-tag),
   that the run's checkout failed so it records no verdict (ruling 87), and that the
-  dispatch withheld the verdict channel so no prose fallback may manufacture one
-  (rulings 87, 66). `review_subject` is what the run was dispatched to judge (ruling
+  dispatch withheld the verdict channel so it records none either, from its envelope or
+  the prose fallback (rulings 87, 66). `review_subject` is what the run was dispatched to judge (ruling
   153): its verdict binds only if the task still has that subject when it completes.
 - **The prompt-cache record** (ruling 172) is folded by the sink from the provider's own
   figures: `cache_write_tokens` sums every call's cache write (Claude
@@ -1431,10 +1431,10 @@ operator bursts under it (ruling 172; ui/surfaces.md).
 - A dispatch that puts ruling 93's completeness question (`completeness: true`) stamps
   the reviewer's engagement with `question` once the run exists (ruling 93); one that
   re-runs a reviewer with a standing question and `withholdVerdict` removes the verdict
-  channel on both backends for that run only (the Claude `report_outcome` field, the Codex
-  envelope schema and the persona's collaboration notes) and records `verdict_withheld`
-  on the run, so the completion's prose fallback cannot manufacture one either (rulings
-  87, 66). The operator withholds it the same way with `run_agent`'s `noVerdict` (the
+  channel for that run only (the Claude `report_outcome` field and the persona's
+  collaboration notes; the Codex envelope schema is static and keeps its `verdict` key)
+  and records `verdict_withheld` on the run, so completion records no verdict from it,
+  neither the envelope's nor the prose fallback's (rulings 87, 66). The operator withholds it the same way with `run_agent`'s `noVerdict` (the
   Codex plan's `noVerdict` field, and a recommendation card's), for any run it tells not to
   judge (ruling 124). The engagement stays `verdictCapable`. A delivering run, fresh or resumed,
   gets no verdict channel at all, whatever its profile grants, and completion discards a

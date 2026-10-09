@@ -278,8 +278,9 @@ registers for key rotation: `github_pats.encrypted_token`, `org_mcp_servers.cred
   gets a provider figure, so its 0 is permanent.
 - `no_checkout` is 1 when the run's workspace checkout could not be provisioned; the verdict
   path (envelope and prose fallback) is closed for such a run. `verdict_withheld` is 1 when
-  the run was dispatched with its verdict channel withheld, so a reply without an envelope
-  verdict is an answer and the prose fallback does not manufacture one. `review_subject`
+  the run was dispatched with its verdict channel withheld, and closes the same path: a
+  verdict its Codex envelope fills anyway is discarded, and a reply without one is an answer
+  the prose fallback does not turn into one. `review_subject`
   (ruling 153) is the task's review subject when the run was dispatched (`reviewSubjectId`,
   or `none` when nothing had been delivered); the run's verdict binds only if the task still
   has it at completion. NULL on the operator's and the controller's runs and on rows from

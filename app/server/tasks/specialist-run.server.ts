@@ -834,10 +834,11 @@ async function dispatchAgentRun(
    *
    * `review-deadlock.server.ts`'s own header names this construction as the one
    * ruling 56 refused: "a request in a prompt, with nothing that notices when
-   * the model does something else". One variable feeds both backends here — the
-   * Claude toolkit's `report_outcome` field, the Codex envelope's schema, and
-   * the persona's collaboration notes — so withholding it once withholds it
-   * everywhere, and the prompt stops promising what the tools contradict.
+   * the model does something else". One variable feeds the Claude toolkit's
+   * `report_outcome` field and the persona's collaboration notes, so the prompt
+   * stops promising what the tools contradict. The Codex envelope's schema is
+   * static and keeps its `verdict` key whenever the envelope is mounted, so the
+   * run also records `verdict_withheld` and completion takes no verdict from it.
    *
    * Ruling 200: nor is the deliverer offered it. The deliverer mints and
    * everyone else judges (ruling 84), so a verdict from the run that makes the

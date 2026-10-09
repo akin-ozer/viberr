@@ -3311,6 +3311,46 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     });
 
     /**
+     * Ruling 87: a run dispatched with its verdict withheld records none, from
+     * its envelope either. Claude's `report_outcome` drops the field for such a
+     * run, but the Codex outcome schema is static and requires `verdict`, so a
+     * Codex reviewer answering the deadlock question (ruling 94) can still fill
+     * it. Recorded, that verdict binds to the same revision and fights another
+     * round (ruling 92): the loop the withholding exists to break.
+     */
+    it("ruling 87: a withheld run's Codex envelope verdict is not recorded and fights no round", async () => {
+      writeReviewTask();
+      await review(blocks(1));
+      await review(blocks(2));
+      expect(roundsOnTheRevision()).toBe(2);
+      const envelope = JSON.stringify({
+        summary: "Everything I would still block on: objection number 3.",
+        verdict: "request_changes",
+        question: null,
+        evidence: null,
+        relay: null,
+      });
+      const asCodex = { ...reviewerInput("reviewer"), backend: "codex" as const };
+
+      rework();
+      const asked = await finishedRunWith(envelope, undefined, { verdictWithheld: true });
+      await complete(asked, asCodex);
+      // CANARY: take the envelope verdict without reading `verdict_withheld`
+      // and this is round 3 with a deadlock packet raised, the reviewer's real
+      // findings replaced by an answer to a question that forbade a verdict.
+      expect(roundsOnTheRevision()).toBe(2);
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toContain("objection number 2");
+      expect(taskFile().parsed.packet).toBeNull();
+
+      // The same envelope from a run asked to judge is a verdict, and a round.
+      rework();
+      const judged = await finishedRunWith(envelope);
+      await complete(judged, asCodex);
+      expect(roundsOnTheRevision()).toBe(3);
+      expect(taskFile().parsed.packet?.title).toContain("requested changes 3 times running");
+    });
+
+    /**
      * Ruling 63. The note on a decision packet was sliced to 2,000 characters
      * in `project.task.tsx` before the request reached the server — no
      * `maxLength` on the box, no counter, no marker on the record, no error,
