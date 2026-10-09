@@ -717,8 +717,10 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   activity, Owner and Repo are Details' rows, so the side column's property panels and the
   PR card's two facts share one value line. Each value is led by its mark in a 16px column:
   the stage's dot; who owes the next move in the board card's marks (the hand for a human
-  or a goal edit, the clock for a schedule, the ring for a queued run, the live pulse for
-  agent work, the ban for other work, whose keys never break at their hyphen); the activity
+  or a goal edit, the clock for a schedule, the ring for a queued run, whose title says why
+  it waits from its row: the step a held run carries, else the concurrent-run cap (ruling
+  166), the live pulse for agent work, the ban for other work, whose keys never break at
+  their hyphen); the activity
   pulse; the owner's avatar; the GitHub mark, the repository in the code face. The values
   read at one size and weight, the tone on the mark alone. An empty value is the quiet line
   ("Nothing", "Nothing on the timeline yet", "Unowned"), and "Assign me" the invitation, a

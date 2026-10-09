@@ -1012,8 +1012,9 @@ over, whatever it answered, and the finished row carries the phase "Compacting c
 with the step "after the run ended" for the same stretch. A run that resumes that session
 meanwhile (a comment or an answer to that agent) is parked by `admitRun` in its lane's
 queue, whatever the cap says: its row is `queued` with the step "waiting for the summary
-of its last run" (`SESSION_SETTLING_STEP`, which the console's footer prints), the drain
-passes it over, and when the compaction is over it takes its turn under the cap like any
+of its last run" (`SESSION_SETTLING_STEP`, which the console's footer and the title of the
+task page's "Agent queued" print, ruling 166), the drain passes it over, and when the
+compaction is over it takes its turn under the cap like any
 other, unless it was stopped while it waited. Its start is noted on the task as a wait for
 the summary, not for a slot. `resumeRun` does not read ruling 173's verdict for a session
 that is settling. The run's gateway token, skill plugin and temporary directory go when
@@ -1222,9 +1223,11 @@ retry at all. The task page's own controls answer from the loader's `runPrincipa
 owner's per-backend health), so a disabled Run names the person, never a deployment
 credential.
 
-A run parked behind the concurrency cap reads "agent queued", not "agent working" (ruling
-44). Telemetry tags are collapsed by `log-noise.ts`, and the console shows the redacted
-`run·inputs` line (seq 0) so a human can see exactly what the agent was given. Every
+A run parked behind the concurrency cap, or held while its session is compacted, reads
+"agent queued", not "agent working" (ruling 44); the task page's title on it says which,
+from the row's step (ruling 166). Telemetry tags are collapsed by `log-noise.ts`, and the
+console shows the redacted `run·inputs` line (seq 0) so a human can see exactly what the
+agent was given. Every
 runtime writes it (`recordRunInputs`, `run-inputs.server.ts`; ruling 167): a
 fresh specialist run, an @mention resume (with the `directive` and its author), every
 operator drive and every controller turn, each built from the resolution the prompt was

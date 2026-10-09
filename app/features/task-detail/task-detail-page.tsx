@@ -429,6 +429,7 @@ export function TaskDetailPage({
         />
         <CurrentStatePanel
           task={task}
+          runtime={runtime}
           stage={stage}
           meId={me.id}
           myRole={myRole}
