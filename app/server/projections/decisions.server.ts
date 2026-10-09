@@ -84,7 +84,7 @@ type OpenDecisionRow = {
   stage: string;
   owner_user_id: string | null;
   has_packet: number;
-  /** The open packet's `cause` (ruling 63), or null. */
+  /** The open packet's `cause` (ruling 65), or null. */
   packet_cause: string | null;
   recommendation_count: number;
 };

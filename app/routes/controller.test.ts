@@ -8,7 +8,7 @@ import { routeArgs, setupAppTest, type AppTestContext } from "../../test-support
  *
  * The Live-run strip's Interrupt (confirmed on the page) posts the open
  * conversation and the working run's id; the route hands them to
- * `interruptControllerTurn`, which carries the ruling-247 scope to the engine.
+ * `interruptControllerTurn`, which carries the ruling-251 scope to the engine.
  * The engine's authority (owner or org admin) answers a stranger with the
  * not-found shape, which `appErrorResponse` turns into a toast-shaped result
  * rather than a thrown response.
@@ -182,7 +182,7 @@ describe.each<Surface>(["instance", "project"])("ruling 251: steering and the qu
 });
 
 /**
- * Ruling 278: the rail's Delete posts `delete-conversation` with the thread the
+ * Ruling 250: the rail's Delete posts `delete-conversation` with the thread the
  * page has open. Deleting another thread answers a toast; deleting the open one
  * answers a redirect to where a bare visit lands, replacing the history entry
  * that named it, since its URL now answers 404. Canary: drop the `open` branch

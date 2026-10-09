@@ -422,7 +422,7 @@ const BASELINE_COLUMNS: readonly {
       // honest value for a row written before viberr recorded the fact — 0 says
       // "nothing here says this run was checkout-less", which is exactly true.
       { name: "no_checkout", ddl: "no_checkout INTEGER NOT NULL DEFAULT 0" },
-      // Ruling 66: 0 is the TRUTH for every historical row — no run before
+      // Ruling 87: 0 is the TRUTH for every historical row — no run before
       // this column existed had its verdict channel withheld, because nothing
       // could withhold it — so this needs no backfill.
       {
@@ -813,7 +813,7 @@ const indexListSchema = z.array(z.object({ origin: z.string() }).loose());
  *    (person, backend), so nothing changes for a run;
  *  - each is marked `legacy_home = 1`: its vendor sign-in was written into the
  *    person's backend home itself, and it stays there — Viberr never moves a
- *    vendor's credential file (ruling 137). Accounts connected from now on get
+ *    vendor's credential file (ruling 138). Accounts connected from now on get
  *    a home of their own.
  *
  * A root that predates the table altogether gets it created from the same DDL.

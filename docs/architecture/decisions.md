@@ -511,7 +511,8 @@ first previews and lists every problem. It then re-plans from the bytes and runs
 creation's steps, and the importer becomes admin.
 
 (c) An import overwrites nothing and runs nothing. An identical resource is reused, and a
-differing one defaults to an imported copy under a free name. MCP servers are registered
+differing one defaults to an imported copy under a free name; the dialog can instead use this
+instance's resource ("Use this instance's"), and the board's grants then name it. MCP servers are registered
 unchecked (`registerMcpServer`): nothing is spawned or called until an admin tests them. The
 import is recorded as `project.created` with `template: "imported"`.
 
@@ -1479,7 +1480,6 @@ A reviewer's `request_changes` is the complete list for the revision: it sweeps 
 - The measured shell inventory, persona mentions of absent tools included, is ruling 148's.
 - The tool manifest lists each tool by its mounted name `mcp__<server>__<name>` (`mountedToolName`), the spelling ToolSearch `select:` takes.
 - A knowledge base's index prints size classes, never byte counts (ruling 169).
-- `read_store_doc` answers an unknown knowledge-base id by pointing at `list_knowledge_bases`, and a file miss by pointing at `read_default_branch_file` and `read_pull_request`.
 
 ## Knowledge bases
 
@@ -1545,7 +1545,7 @@ Every agent holding a collaboration grant has `read_task_attachment {name, taskK
 
 ### 215. One page of any agent read is at most 32,000 bytes
 
-`READ_PAGE_BYTES` (32,000 bytes of UTF-8) bounds one page of every read an agent's run makes, so a page reaches a Codex code-mode tool output whole; it is not keyed on a model. `pageEnd` (`read-page-budget.server.ts`) never splits a surrogate pair and always takes at least one character; offsets stay character offsets. It pages `read_knowledge_doc`, the controller's `read_knowledge_base_doc` (`characters`, `offset`, `nextOffset`), `read_task_attachment`, `github_read` and the default-branch pager. A paged read says which characters of how many it returned and the offset to read on with, and descriptions say to read and print one page per call.
+`READ_PAGE_BYTES` (32,000 bytes of UTF-8) bounds one page of every read an agent's run makes, so a page reaches a Codex code-mode tool output whole; it is not keyed on a model. `pageEnd` (`read-page-budget.server.ts`) never splits a surrogate pair and always takes at least one character; offsets stay character offsets. It pages `read_knowledge_doc`, the controller's `read_knowledge_base_doc` (`characters`, `offset`, `nextOffset`; the whole file with no 256 KB cap, because the `version` a replace names hashes the whole file, ruling 212), `read_task_attachment`, `github_read` and the default-branch pager. A paged read says which characters of how many it returned and the offset to read on with, and descriptions say to read and print one page per call.
 
 ### 216. A Codex specialist gets Viberr's knowledge and board tools from the gateway
 
@@ -2172,7 +2172,7 @@ A card's layout never changes with what the task holds, and the card states each
 
 (c) **Saving.** An edit posts only its own property: `set-task-metadata` writes only the fields present, through a fetcher and toast per property. There is no optimistic UI; the trigger reads "Saving…" until the server answers. An unchanged task re-renders none of the panel (`useStableValue`).
 
-(d) **Blocked by.** Entries are `WaitChip`s with removable crosses for editors, and a cross saves at once. A cross that would leave nothing open to wait on asks "Release <key>?" first, because emptying the wait releases the task (ruling 55).
+(d) **Blocked by.** Entries are `WaitChip`s with removable crosses for editors, and a cross saves at once. A cross that would leave nothing open to wait on asks "Release <key>?" first (ruling 59).
 
 ### 310. Run controls say what will happen and why a run cannot start
 

@@ -248,7 +248,7 @@ export const VIEW_WITHOUT_POLICY: CapabilityMode = "direct";
  * R20-3 / F20-4: per-backend "the provider refused this model for this account"
  * marks (from the `model_availability` table), keyed by model id. Absent ⇒ the
  * view claims nothing about availability (a mark is earned only from a real run
- * failure — ruling 220). Optional so the actions/test callers that read only
+ * failure — ruling 149). Optional so the actions/test callers that read only
  * kind/backend/model can skip the DB read entirely.
  */
 export type ModelMarks = Partial<
@@ -285,7 +285,7 @@ function identityOverride(
     [def.icon, template.icon],
     [list(def.backends), list(template.backends)],
     [def.model, template.model],
-    // Ruling 264 (pass 35): a template may declare `effort` now, and the
+    // Ruling 261 (pass 35): a template may declare `effort` now, and the
     // library deploy copies it, so a stored tier equal to the template's is not
     // an override; one the template never named still is.
     [def.effort, template.effort],
@@ -543,7 +543,7 @@ export function effectiveProfileView(
   // R20-3 / F20-4: the model a run would actually resolve to is flagged when a
   // REAL run against it was refused by the provider for this account
   // (model_availability). The badge names the provider's own redacted sentence;
-  // an absent mark claims nothing (unknown-but-offered, ruling 220).
+  // an absent mark claims nothing (unknown-but-offered, ruling 149).
   const modelUnavailable = modelMarks?.[primaryBackend]?.get(runModel);
   // Operator only: default autonomy (supervised unless the deployment sets it) —
   // the ceiling `capabilitiesToActionLabels` applies to "Accept completion into
@@ -569,7 +569,7 @@ export function effectiveProfileView(
     model,
     modelLabel,
     modelKnown,
-    // Ruling 264: a definition-less deployment (the seeded rows) resolves the
+    // Ruling 261: a definition-less deployment (the seeded rows) resolves the
     // template live, its default effort included.
     effort: def?.effort ?? template?.effort ?? "",
     // Ruling 176: the operator's scope line is fixed like its name.
@@ -626,7 +626,7 @@ export function effectiveProfileView(
     fingerprint: deploymentFingerprint(deployment),
   };
   // The key is set ONLY when a real run earned the mark: an absent
-  // `modelUnavailable` claims nothing about availability (ruling 220), so it must
+  // `modelUnavailable` claims nothing about availability (ruling 149), so it must
   // stay off the view rather than ride along as an explicit `undefined`.
   if (modelUnavailable) view.modelUnavailable = modelUnavailable;
   return view;

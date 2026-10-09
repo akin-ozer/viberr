@@ -701,7 +701,7 @@ const NO_TASK_LIST: DependencyCandidatesView = { ok: false, reason: "No task lis
  *  Ruling 309: for an editor each entry's chip carries the Owner row's remove
  *  cross, which saves the wait without it at once, and the trigger is the plus
  *  after the chips. A cross that leaves nothing still open is the release
- *  (ruling 55), so that one asks first, as the Owner row's does. */
+ *  (ruling 59), so that one asks first, as the Owner row's does. */
 const WaitRow = memo(function WaitRow({
   taskKey,
   candidatesUrl,
@@ -857,7 +857,7 @@ function WaitEditor({
     if (candidatesUrl) void loadRead(candidatesUrl);
   }, [loadRead, candidatesUrl]);
   // The writer refuses the whole list while it holds an entry that can never
-  // complete (ruling 58), so the editor says so before Save does.
+  // complete (ruling 59), so the editor says so before Save does.
   const dead = draft.filter((e) => isDeadDependencyState(e.state)).map((e) => e.label);
   const [Picker, setPicker] = useState(() => loadedPicker);
   const [chunkFailed, setChunkFailed] = useState(false);

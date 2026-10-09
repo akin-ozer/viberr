@@ -25,7 +25,7 @@ import {
  * The load-bearing line is the ruling-247 guard. A controller conversation turn
  * is a real `agent_runs` row that streams through the same sink, but it carries
  * `project_slug = ''` and `task_key = <conversation id>` — "a scope no task
- * query matches" (ruling 249). An empty slug is not a harmless one:
+ * query matches" (ruling 251). An empty slug is not a harmless one:
  * `routeMatchesConnection` only skips project routing when `projectSlug` is
  * *undefined*, so `""` is a live route that every `projects`-scoped connection
  * (the Home firehose, on every signed-in user's landing page) matches
@@ -35,7 +35,7 @@ import {
  * controller has its own owner-routed `controller.updated` reference instead.
  *
  * Until this file existed, nothing in the suite imported the module: the guard
- * could be deleted and every gate stayed green (ruling 27).
+ * could be deleted and every gate stayed green (ruling 8).
  */
 
 beforeEach(() => resetSseBrokerForTests());

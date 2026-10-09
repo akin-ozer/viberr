@@ -103,7 +103,7 @@ export interface AgentProfileView {
    *  substitutes the default and the UI flags it. */
   modelKnown: boolean;
   /** R20-3 / F20-4: set when the model a run would resolve to was refused by the
-   *  provider for this account (learned from a real run's failure — ruling 220).
+   *  provider for this account (learned from a real run's failure — ruling 149).
    *  The card disables/flags it with the provider's own redacted sentence;
    *  absent = unknown-but-offered, never "proven available". */
   modelUnavailable?: { reason: string; markedAt: string };
@@ -243,7 +243,7 @@ export function deploymentStatusKind(
   status: string,
 ): "agent" | "input" | "info" | "neutral" {
   if (status === "working" || status === "coordinating") return "agent";
-  // Ruling 280: an open packet is a decision waiting on a person, which is
+  // Ruling 277: an open packet is a decision waiting on a person, which is
   // blue everywhere; amber is an agent's question.
   if (status === "packet open" || status === "waiting on human") return "info";
   return "neutral";

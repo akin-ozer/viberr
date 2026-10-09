@@ -144,7 +144,7 @@ export function AttachmentsPanel({
           </div>
         )}
         {files.map((a) => (
-          // Ruling 78 (+ addendum): a plain click opens the in-app card for
+          // Ruling 317 (+ addendum): a plain click opens the in-app card for
           // EVERY kind — text files render read-only, anything else shows a
           // no-preview note; both carry the Download button.
           <a

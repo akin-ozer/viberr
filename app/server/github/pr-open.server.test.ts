@@ -579,7 +579,7 @@ describe("openTaskPr", () => {
       status: "refused",
       quote: "base is invalid",
     },
-  ])("ruling 227: $name", async ({ body, status, quote }) => {
+  ])("ruling 231: $name", async ({ body, status, quote }) => {
     const store = setupWithBranch();
     const gh = fakeGithubFetch({
       [`GET ${REPO_PATH}/pulls`]: { body: [] },
@@ -591,7 +591,7 @@ describe("openTaskPr", () => {
     expect(fm.pr).toBeNull();
   });
 
-  it("ruling 227: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
+  it("ruling 231: a 422 with `field: base, code: invalid` is `base_branch_missing`, never `network_unavailable`", async () => {
     // Canary: remove `field`/`code` from `ghValidationBodySchema` and this
     // reads `refused` (the residual), not the typed base outcome.
     const store = setupWithBranch();

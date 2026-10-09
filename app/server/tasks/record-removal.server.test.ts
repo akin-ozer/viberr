@@ -89,7 +89,7 @@ describe("removeTaskAttachment (ruling 80)", () => {
     expect(row!.details).toEqual({ name: "golden-files.md", bytes: 3000, reason: "the answer key" });
   });
 
-  it("ruling 76: removes a file named in either Unicode form, and its claims in both", async () => {
+  it("ruling 80: removes a file named in either Unicode form, and its claims in both", async () => {
     // CANARY: take the claim off by its bytes and an entry that named the
     // file in the other form keeps a tile that opens nothing.
     const composed = "Çözüm Anahtarı.md";
@@ -115,7 +115,7 @@ describe("removeTaskAttachment (ruling 80)", () => {
     expect(older!.attachments ?? []).toEqual([]);
   });
 
-  it.skipIf(diskFoldsUnicodeForms)("ruling 76: removing one of two files that differ only in Unicode form keeps the other's claims", async () => {
+  it.skipIf(diskFoldsUnicodeForms)("ruling 80: removing one of two files that differ only in Unicode form keeps the other's claims", async () => {
     // A folder can hold both: a person's upload stored decomposed before
     // names were composed, and a file a run's shell wrote under the composed
     // name. They are two files on the disk this runs on in production.

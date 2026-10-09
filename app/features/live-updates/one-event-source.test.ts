@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  */
 const root = process.cwd();
 
-describe("one module opens an EventSource (ruling 11)", () => {
+describe("one module opens an EventSource (ruling 25)", () => {
   it("finds exactly one non-test module under app/ that calls `new EventSource(`", () => {
     const openers = readdirSync(path.join(root, "app"), { recursive: true })
       .map(String)

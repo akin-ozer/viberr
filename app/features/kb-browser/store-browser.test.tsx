@@ -403,7 +403,7 @@ describe("StoreBrowser document editor", () => {
     expect(notes.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("ruling 278: the file name rides the shared .field chrome, and the raw text the card's (ruling 317)", () => {
+  it("ruling 289: the file name rides the shared .field chrome, and the raw text the card's (ruling 317)", () => {
     // Canary: unwrap the name and it paints in UA chrome inside a card whose
     // every other control wears the sheet's — the class this closes. Drop
     // `.doc-src` and the raw text does too, with no ring on the card around it.

@@ -51,7 +51,7 @@ const SETTINGS_TABS: { id: OrgSettingsTab; label: string; icon: IconName }[] = [
   // Ruling 32: a board's workflow out as a file, and a file in as a new
   // board. Beside Agent resources: an import brings some in.
   { id: "boards", label: "Import & export", icon: "board" },
-  // Ruling 247: only org admins modify the controller itself (profile,
+  // Ruling 270: only org admins modify the controller itself (profile,
   // resources, prompt) — this is that surface.
   { id: "controller", label: "Controller", icon: "cpu" },
 ];

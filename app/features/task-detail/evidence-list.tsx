@@ -45,7 +45,7 @@ function evidenceTally(rows: readonly EvidenceRowRender[]): string | null {
  * told to "cite the exact filename" when a file backs a claim; when a token
  * (backticks, quotes and trailing punctuation stripped) matches a file the
  * task has, it opens in the in-app card on a plain click (owner request
- * 2026-08-21, widened by the ruling-78 addendum to every kind), and modified
+ * 2026-08-21, widened by the ruling-317 addendum to every kind), and modified
  * clicks keep the raw-file tab. Ruling 313: a span in backticks is code, as
  * it is in the event's text. Nothing else is guessed at.
  */

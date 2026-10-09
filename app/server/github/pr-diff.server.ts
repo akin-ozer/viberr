@@ -39,7 +39,7 @@ const PER_PAGE = 100;
 /**
  * Total patch bytes one reply may carry, measured AS THE REPLY CARRIES THEM.
  *
- * Ruling 269 (pass 37, F37-98): the first version of this counted raw patch
+ * Ruling 265 (pass 37, F37-98): the first version of this counted raw patch
  * characters against 120 KB, and the reply is JSON — every newline in a diff
  * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way out.
  * The controller called this on PR #32 (4 files) and the protection never
@@ -127,7 +127,7 @@ export async function readPullRequestDiff(
   opts: GithubContextOptions & {
     path?: string;
     maxPatchBytes?: number;
-    /** Ruling 269: list the changed files WITHOUT their hunks. A caller that
+    /** Ruling 265: list the changed files WITHOUT their hunks. A caller that
      *  wants one file's diff needs the file list first, and asking for every
      *  patch to obtain it is the call most likely to be too big — the loop the
      *  controller hit. This makes the first call always safe. */

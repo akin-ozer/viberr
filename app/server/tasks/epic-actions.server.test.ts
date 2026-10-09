@@ -10,7 +10,7 @@ import type { TaskActionContext, TaskActionDeps } from "./task-action-core.serve
 import type { TaskActor } from "./task-mutation.server";
 
 /**
- * Ruling 17–(d): the epic actions, end to end against the real store.
+ * Ruling 272–(d): the epic actions, end to end against the real store.
  * `createEpic` and `updateEpic` change what an epic is (`manage-epics`);
  * `setTasksEpic` is the one writer of a task's `epic` after creation
  * (`edit-task-meta`), and `createTask` can make a task in one. Every move
@@ -207,7 +207,7 @@ async function settled(epicId: string): Promise<void> {
 const NOT_AN_EPIC = (id: string) =>
   `${id} is not an epic in this project. An epic is named like epic-3; list_epics or the Epics page names them.`;
 
-describe("ruling 17: createEpic", () => {
+describe("ruling 272: createEpic", () => {
   it("defaults to planned, the default colour for its id and no lead or dates, opens its history with who made it, and records epic.created", async () => {
     // CANARY: default `status` to "in_progress" instead of "planned" in
     // createEpic.
@@ -388,7 +388,7 @@ describe("ruling 17: createEpic", () => {
   });
 });
 
-describe("ruling 17: updateEpic", () => {
+describe("ruling 272: updateEpic", () => {
   it("changes every field in one edit, told in one history sentence and one epic.updated row", async () => {
     // CANARY: write one history line per changed field in updateEpic instead
     // of joining the clauses into one sentence.

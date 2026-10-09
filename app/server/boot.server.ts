@@ -970,7 +970,7 @@ export async function bootServer(): Promise<void> {
   // "Update status" button. Idempotent start; the timer is unref'd.
   startGithubReconcilePoller(db);
 
-  // Ruling 55: release every held task whose wait was satisfied while the
+  // Ruling 57: release every held task whose wait was satisfied while the
   // process was down, then sweep on a one-minute interval (the goal runner's
   // tick, kept when ruling 273 retired the chains); and give any conversation
   // whose turn a restart orphaned an honest "interrupted" note instead of

@@ -116,7 +116,7 @@ export interface ControllerToolGuards {
    *  same not-visible shape. Org admins pass via the audited override. */
   requireVisible: (slug: string, what: string) => void;
   /** Wrap a handler: AppError → [denied]/[error] text the model relays. A
-   *  handler answers in text, or (ruling 117) in text and a picture. */
+   *  handler answers in text, or (ruling 79) in text and a picture. */
   run: (
     fn: () => Promise<string | ControllerToolText> | string | ControllerToolText,
   ) => () => Promise<ControllerToolText>;

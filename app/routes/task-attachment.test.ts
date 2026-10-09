@@ -127,7 +127,7 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect(res.headers.get("content-disposition")).toContain("attachment");
   });
 
-  it("ruling 78: a yml serves as inert text/plain inline (the viewer fetches it)", async () => {
+  it("ruling 76: a yml serves as inert text/plain inline (the viewer fetches it)", async () => {
     const res = await get(ardaId, "page-snap.yml");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/plain");
@@ -135,7 +135,7 @@ describe("GET /projects/:slug/tasks/:key/attachments/:file (R19-19)", () => {
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
-  it("ruling 78: ?download=1 forces the save dialog on an inline type", async () => {
+  it("ruling 317: ?download=1 forces the save dialog on an inline type", async () => {
     const res = await get(ardaId, "page-snap.yml", "?download=1");
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toContain("attachment");

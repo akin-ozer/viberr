@@ -1,7 +1,7 @@
 import { inflateRawSync } from "node:zlib";
 
 /**
- * Ruling 117: a spreadsheet read back as text, each sheet as CSV.
+ * Ruling 79: a spreadsheet read back as text, each sheet as CSV.
  *
  * The inventories people hand a board that delivers results are spreadsheets
  * far more often than anything else (an RVTools export, an Azure Migrate

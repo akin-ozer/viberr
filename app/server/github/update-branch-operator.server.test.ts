@@ -86,7 +86,7 @@ function fakeGit(
   opts: {
     conflict?: boolean;
     behind?: number;
-    /** Ruling 229: origin's copy of the branch (default current). */
+    /** Ruling 241: origin's copy of the branch (default current). */
     remote?: "current" | "behind" | "diverged" | "absent";
     ahead?: number;
     /** Ruling 129: the push is refused non-fast-forward (a `push_conflict`). */
@@ -254,7 +254,7 @@ describe("operatorUpdateBranchFromBase — the decision half (N19-9)", () => {
     // undefined, so the settle cannot tell a drive that stopped halfway.
     expect(await run(fakeGit({ behind: 2 }))).toBe(true);
     expect(await run(fakeGit({ behind: 0 }))).toBe(true);
-    // Ruling 229's arm: the workspace is current and origin lags it.
+    // Ruling 241's arm: the workspace is current and origin lags it.
     expect(await run(fakeGit({ behind: 0, remote: "behind" }))).toBe(true);
     expect(await run(fakeGit({ conflict: true }))).toBeUndefined();
   });
@@ -503,7 +503,7 @@ describe("the operator persona teaches the branch update", () => {
     path.join(REPO_ROOT, "app/server/seed/assets/operator.definition.md"),
     "utf8",
   );
-  // Ruling 9 moved the live store into the named volume `viberr-data`; the
+  // Ruling 38 moved the live store into the named volume `viberr-data`; the
   // host's `./docker-data` is at most the pre-move fallback copy, so it is no
   // longer compared here. The store copy is upgraded at boot from this asset
   // by its shipped hash (`PRIOR_SHIPPED_HASHES`, default-assets.server.ts).
@@ -531,7 +531,7 @@ describe("the operator persona teaches the branch update", () => {
     expect(seed).toMatch(/direct it to merge `origin\/<base>` into the task branch in its own workspace/);
   });
 
-  it("ruling 229: says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
+  it("ruling 241: says the tool reports origin's copy and that the push is `deliver_for_review`'s job", () => {
     // Canary: revert the seed sentence.
     expect(seed).toMatch(/It also reports whether origin carries the workspace head/);
     expect(seed).toMatch(/When it says the remote copy is behind, call `deliver_for_review` to push it; do not ask a person to push\./);
@@ -582,13 +582,13 @@ describe("the operator persona teaches the branch update", () => {
 });
 
 /**
- * Ruling 229: `update_branch_from_base` reports origin's copy of the task
+ * Ruling 241: `update_branch_from_base` reports origin's copy of the task
  * branch and points at `deliver_for_review` when origin lags; the record is as
  * idempotent as the tool (one timeline line across two identical calls, an
  * audit row per call). Canary: revert the `already_current` arm (no remote
  * sentence); append the line unconditionally.
  */
-describe("ruling 229: the remote report", () => {
+describe("ruling 241: the remote report", () => {
   const REPO_PATH = "/repos/akin-ozer/viberr";
   it("names a lagging origin, points at deliver_for_review, and writes ONE timeline line across two calls", async () => {
     const first = await act(fakeGit({ behind: 0, remote: "behind", ahead: 2 }).exec);

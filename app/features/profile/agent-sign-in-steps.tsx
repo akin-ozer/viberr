@@ -16,7 +16,7 @@ import type { ProfileBackend } from "./profile-query.server";
 
 type StepState = "pending" | "current" | "done";
 
-/** WHICH button just copied (ruling 161). */
+/** WHICH button just copied (ruling 137). */
 type Copied = "link" | "code" | null;
 
 function StepMark({ n, state }: { n: number; state: StepState }) {
@@ -77,7 +77,7 @@ export function SignInSteps({
   const [refused, setRefused] = useState(0);
   // Ruling 284: the box shakes once per refusal, not on each mount.
   const refusalShake = useRefusalShake(refused);
-  // Ruling 161: WHICH button just copied, not merely that one did. Step 1 now
+  // Ruling 137: WHICH button just copied, not merely that one did. Step 1 now
   // has a copy-link button and step 2 (on codex) still has the copy-code one,
   // inside the same component — one boolean made both read "Copied" at once,
   // and the later reset would have blanked the other's confirmation early.
@@ -197,7 +197,7 @@ function OpenLinkStep({
                 Open sign-in page
                 <Icon name="ext" className="ico-end" />
               </a>
-              {/* Ruling 161 (owner's ask): the LINK, copyable. Opening it
+              {/* Ruling 137 (owner's ask): the LINK, copyable. Opening it
                   here only works when the browser reading this page is the
                   one holding the vendor session, and often it is not: the
                   instance runs on a server, a person is on a second

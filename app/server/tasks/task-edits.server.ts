@@ -108,10 +108,10 @@ export interface CreateTaskInput {
    *  allocated so a refusal burns no key; the task is born held
    *  (`waiting: "none"`, readiness floored at `blocked` by derivation). */
   blockedBy?: readonly string[];
-  /** Ruling 50: the member to seat as owner at creation, checked by the
+  /** Ruling 48: the member to seat as owner at creation, checked by the
    *  same rule as a hand-off (`requireOwnable`) and written in the SAME
    *  task.md write, before the operator's `create` trigger. Absent: the
-   *  creator is seated (ruling 137). */
+   *  creator is seated (ruling 48). */
   ownerUserId?: string | null;
   /** Ruling 76: the files the person filed the task with (an inventory, a
    *  screenshot, a spreadsheet). Checked before the key is allocated and
@@ -178,7 +178,7 @@ export async function createTask(
   // beside the other pre-allocation checks, and used verbatim below.
   const dueDate = normalizeCreateDueDate(input.dueDate);
 
-  // Ruling 50: a named owner is checked BEFORE the key is allocated, by
+  // Ruling 48: a named owner is checked BEFORE the key is allocated, by
   // the hand-off rule. The creator is the implicit first owner, so naming
   // themselves records the creator seat; an operator-authorized creation has
   // no person to seat and keeps its null seat.
@@ -243,7 +243,7 @@ export async function createTask(
     // an "Assign me" ceremony standing between a person and their own work. An
     // OPERATOR-created task keeps a null seat: the operator is not a person and
     // has no account to bill; a human has to take that one.
-    // Ruling 50: a named owner is seated in this same write, before the
+    // Ruling 48: a named owner is seated in this same write, before the
     // operator's `create` trigger reads the file, so the first triage run
     // bills the named owner and is refused honestly when they have no
     // credential, instead of running once on the creator's account.
@@ -283,7 +283,7 @@ export async function createTask(
     goal: input.goal?.trim() || DEFAULT_GOAL,
   };
   // The same `assign` event a take through `setOwner` writes, so the timeline
-  // reads the same however the seat was filled (ruling 137).
+  // reads the same however the seat was filled (ruling 48).
   // Ruling 72: ONE creation is one instant. Every event this write puts on the
   // timeline carries the frontmatter's own `now`, so the file's order is the
   // deliberate arrangement and not a race between two `new Date()` calls.
@@ -637,7 +637,7 @@ export async function attachTaskFile(
             "Agents on this task read it from the task's attachments.",
           toAgent: false,
           evidence: null,
-          // Ruling 76: the note claims the file for the person, so the panel says
+          // Ruling 77: the note claims the file for the person, so the panel says
           // who added it and a run in flight is never credited with it.
           attachments: [written.name],
         });
@@ -697,7 +697,7 @@ export async function removeTaskAttachment(
     throw missing();
   }
   const reason = input.reason?.trim() || null;
-  // Ruling 76: a claim is this file's when it names it as the store finds it,
+  // Ruling 80: a claim is this file's when it names it as the store finds it,
   // in either Unicode form, so no tile is left that opens nothing. A folder
   // that holds both forms as two files keeps the other one's claims.
   const stored = path.basename(abs);

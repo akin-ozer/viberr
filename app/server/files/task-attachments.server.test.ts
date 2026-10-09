@@ -499,11 +499,11 @@ describe("ruling 77: a file put down for someone else", () => {
 });
 
 /**
- * Ruling 198: a reader takes a file by its bytes, not its name. Any file whose
+ * Ruling 79: a reader takes a file by its bytes, not its name. Any file whose
  * head holds no NUL byte (git's own `-text` test) reads as text, and a binary
  * one is named, with what the reader takes instead.
  */
-describe("ruling 198: readTaskAttachment reads any text file", () => {
+describe("ruling 79: readTaskAttachment reads any text file", () => {
   it("reads a text file of any name, and names a binary one rather than guessing", () => {
     // CANARY: gate the text read on `READABLE_TEXT_EXTENSIONS` again and the
     // `.tf` is refused as an unknown kind.

@@ -104,7 +104,7 @@ describe("readPullRequestDiff — the hunks, bounded, and honest about what it c
   });
 
   /**
-   * Ruling 269 (pass 37, F37-98). The first version budgeted RAW patch
+   * Ruling 265 (pass 37, F37-98). The first version budgeted RAW patch
    * characters against 120 KB. The reply is JSON, where every newline in a diff
    * becomes `\n` and every quote `\"`, so a hunk roughly doubles on the way
    * out. Live, PR #32's four files came back as 83,196 bytes with

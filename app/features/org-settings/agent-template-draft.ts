@@ -69,7 +69,7 @@ export function useStageEligibility(
   const [selStages, setSelStages] = useState<string[]>(
     initial ? initial.stages : defaultStage ? [defaultStage] : [],
   );
-  // Ruling 184: held from the open, so a chip pressed off stays on screen
+  // Ruling 326: held from the open, so a chip pressed off stays on screen
   // to be pressed back on.
   const [storedOnlyStages] = useState<string[]>(() =>
     storedOnlyStagesOf(initial, workStages, projectStages),

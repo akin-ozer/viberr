@@ -293,7 +293,7 @@ export interface ResolvedProvider {
 }
 
 /**
- * The provider as the running app sees it (ruling 44: the app row wins).
+ * The provider as the running app sees it (ruling 28: the app row wins).
  *
  * An app row that is present but disabled resolves to NO credentials even when
  * the env carries a pair — a switch that says off must mean off.

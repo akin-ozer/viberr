@@ -743,7 +743,7 @@ async function rewriteWaits(db: DatabaseSync, state: ProjectConversion, scan: Ta
         : ` It waits on ${next.join(", ")}; Viberr releases it when every entry is done.`;
     } else if (dead) {
       // A wait that can never complete is a person's to settle (ruling
-      // 55), and so is this one: nothing is left to hold the task, and
+      // 57), and so is this one: nothing is left to hold the task, and
       // nothing it waited on will ever happen.
       clearDependencies(parsed);
       if (fm.waiting === "none" && !fm.archived) fm.waiting = "human";

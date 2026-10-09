@@ -13,7 +13,7 @@ import { Icon, type IconName } from "~/ui/icon";
  * third is deliberately a DO rather than an ask — the dock's own composer says
  * "or tell it what to do here", and nothing demonstrated that half.
  *
- * Ruling 321: one module for both composers. The dock offered these and the
+ * Ruling 319: one module for both composers. The dock offered these and the
  * full controller page, the surface a person opens on purpose to start
  * something, offered a paragraph and an empty box.
  *

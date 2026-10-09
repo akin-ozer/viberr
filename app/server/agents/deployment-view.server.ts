@@ -40,7 +40,7 @@ export interface TemplateProfile {
   icon: string;
   backends: ("codex" | "claude")[];
   model: string;
-  /** Ruling 264 (pass 35): the template's default effort tier, undefined when
+  /** Ruling 261 (pass 35): the template's default effort tier, undefined when
    *  the file names none (the backend default applies at deploy). */
   effort: string | undefined;
   scope: string;

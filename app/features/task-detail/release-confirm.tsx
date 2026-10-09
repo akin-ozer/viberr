@@ -13,7 +13,7 @@ import type { OwnerAction, TaskMemberView } from "./execution-profile";
  * + hand-off-instead chips (candidates INCLUDE me here, me-first — clicking
  * my own chip performs a take-over instead of releasing to nobody).
  *
- * Port additions per ruling 295: rendered as a native <dialog> via useDialog,
+ * Port additions per ruling 287: rendered as a native <dialog> via useDialog,
  * which provides Escape + backdrop-click close, focus handling, and scroll
  * lock. Identity comparisons by user id (ruling 26(a)).
  */

@@ -185,7 +185,7 @@ export async function setTaskArchived(
         : { stage: existing.parsed.frontmatter.stage },
   });
 
-  // Ruling 55: a dependent waiting on THIS task can never be released by
+  // Ruling 57: a dependent waiting on THIS task can never be released by
   // it now. Noted once on each dependent (and its watchers told) BEFORE the
   // archive returns, so the person who archived sees the consequence at once.
   if (input.archived) {
@@ -204,7 +204,7 @@ export async function setTaskArchived(
   if (input.archived && !isTerminalStage(existing.parsed.frontmatter.stage, project.stages)) {
     maybeNoteEpicComplete(db, ctx, input.projectSlug, input.taskKey);
   }
-  // Ruling 55: a restore can satisfy a dependent's wait again.
+  // Ruling 57: a restore can satisfy a dependent's wait again.
   maybeReleaseDependents(db, ctx, input.projectSlug);
 
   return {

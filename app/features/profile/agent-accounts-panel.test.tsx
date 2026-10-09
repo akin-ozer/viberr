@@ -801,7 +801,7 @@ describe("the usage-window reset renders at the precision it has", () => {
  * session, and often it is not; until now the only way to move the URL was to
  * right-click an anchor whose href is a 300-character OAuth redirect.
  */
-describe("ruling 161: copy the sign-in link", () => {
+describe("ruling 137: copy the sign-in link", () => {
   const CONNECTED_CLAUDE = {
     ...connectedHealth("claude"),
     verifiedAt: "2026-09-15T09:00:00.000Z",

@@ -394,7 +394,7 @@ describe("deleteTaskRemoteBranch (archive_task + deleteBranch)", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
-    // Ruling 234: the fake answers no ref read, so the pre-delete head is null.
+    // Ruling 233: the fake answers no ref read, so the pre-delete head is null.
     expect(result).toEqual({ status: "deleted", branch: BRANCH, remoteSha: null });
     expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
 
@@ -579,7 +579,7 @@ describe("ruling 233: the delete re-confirms a cached open PR", () => {
       actor,
       { dataRoot: store.dataRoot, fetchImpl: fake.fetchImpl },
     );
-    // Ruling 234: the fake answers no ref read, so the pre-delete head is null.
+    // Ruling 233: the fake answers no ref read, so the pre-delete head is null.
     expect(result).toEqual({ status: "deleted", branch: BRANCH, remoteSha: null });
     expect(fake.callsTo(`DELETE ${REPO_PATH}/git/refs/heads/${BRANCH}`)).toHaveLength(1);
     const fm = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-301", dataRoot: store.dataRoot })!.parsed.frontmatter;

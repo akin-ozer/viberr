@@ -897,7 +897,7 @@ describe("PAT revalidation cooldown (P13-D-33)", () => {
  * beside the required-scope verdicts, so the credential card can say a token
  * without `workflow` cannot push `.github/workflows/*` and delivery can refuse
  * such a push BEFORE GitHub is asked. Advisory only: `workflow` stays optional
- * (ruling 220) and a token without it is still `valid`.
+ * (ruling 221) and a token without it is still `valid`.
  *
  * Canary: drop the `headerScopes` assignment in `validatePatToken` (leave the
  * base's `null`) and the first case fails.

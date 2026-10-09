@@ -128,7 +128,7 @@ describe("GET /resources/controller", () => {
   });
 
   /**
-   * Ruling 11, test audit L14-29. The open dock loads this through a
+   * Ruling 256, test audit L14-29. The open dock loads this through a
    * root-owned fetcher, and `requireAuth` answered a missing session with a
    * login redirect whose returnTo was this route and the scope's query: a
    * stale tab's open went to /login and, once signed in, to a page of raw
@@ -246,7 +246,7 @@ describe("POST /resources/controller", () => {
   });
 
   /**
-   * Ruling 11, test audit L14-29. The dock's send is a fetcher submit, and
+   * Ruling 256, test audit L14-29. The dock's send is a fetcher submit, and
    * `requireAuth` answered a missing session with a login redirect naming this
    * route, so signing in again opened a page of raw JSON. No session, or a
    * forced password reset pending, answers 401 with the sentence the dock

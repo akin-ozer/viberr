@@ -10,7 +10,7 @@ import { freshestContent, writeAndRemember } from "./write-cache.server";
 /**
  * The stale-read shield that every canonical file writer (task.md, project.md,
  * epics/*.md) reads through. Nothing imported it before pass 33, so the guard
- * could be deleted and every gate would stay green — ruling 27: a ruling whose
+ * could be deleted and every gate would stay green — ruling 8: a ruling whose
  * guard cannot go red gets reverted in silence.
  *
  * What it really promises is narrow, and these tests hold it to exactly that:

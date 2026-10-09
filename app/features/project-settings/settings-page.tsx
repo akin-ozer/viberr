@@ -2362,7 +2362,7 @@ body="Tasks are then delivered as the files their agents save on them. The proje
           the project's token fingerprint, its scope verdicts and its
           re-attach/remove controls. Every one of those actions gates on
           `grant-github-scope` server-side (this route's action), so the card is
-          WITHDRAWN below that tier rather than rendered read-only — ruling 95's
+          WITHDRAWN below that tier rather than rendered read-only — ruling 27's
           precedent, and byte-for-byte what /projects/:slug/github already does
           with the same component. The /github page fixed this in pass 19 and
           Settings did not, so a project Viewer read the masked tail here. The

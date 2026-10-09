@@ -77,7 +77,7 @@ export function DockPanelBody({
   files,
   onFiles,
 }: DockPanelBodyProps) {
-  // Ruling 321: the send handler takes ⌘ OR Ctrl, so the hint names the key
+  // Ruling 319: the send handler takes ⌘ OR Ctrl, so the hint names the key
   // this keyboard has (UI-55; the page's composer shares the rule).
   const sendHint = useModifierHint("↵");
   const queueHint = useModifierHint("⇧↵");

@@ -97,7 +97,7 @@ describe("resource rows: the probe in flight", () => {
   });
 });
 
-describe("resource rows: a private knowledge base (ruling 267)", () => {
+describe("resource rows: a private knowledge base (ruling 209)", () => {
   it("says who reads a private one, and keeps the live-folder line for an open one", () => {
     // CANARY: drop the `kb.private` branch and the private row reads like an
     // open one, which every agent's shell can read.

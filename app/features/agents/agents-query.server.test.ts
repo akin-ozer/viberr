@@ -572,13 +572,13 @@ describe("OBS-7: a project-forked global profile is labeled as customized", () =
   });
 
   /**
-   * Ruling 264 (pass 35, G35-2): the template's default `effort` is not a
+   * Ruling 261 (pass 35, G35-2): the template's default `effort` is not a
    * display nicety. `effectiveProfileView(...).effort` flows through
    * `toResolved` into a run's `runInput.effort`, and the seeded roster rows
    * carry no `definition`, so a template default decides what those runs spend.
    * Canary: revert the view to `def?.effort ?? ""`.
    */
-  it("ruling 264: a definition-less deployment takes the template's effort; a definition's own wins", () => {
+  it("ruling 261: a definition-less deployment takes the template's effort; a definition's own wins", () => {
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const file = join(dataRoot, "agents", "profiles", "developer.md");

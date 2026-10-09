@@ -336,7 +336,7 @@ describe("canonicalTaskAnchor", () => {
     // timeline entries"; it was past the five this block shows, and nothing
     // said there were more. CANARY: drop the line and the window reads as the
     // whole history again; name the tools for every run and one that cannot
-    // call them is sent nowhere (ruling 116).
+    // call them is sent nowhere (ruling 213).
     const timeline = Array.from({ length: 7 }, (_, i) => ({
       occurredAt: `2026-09-30T01:0${6 - i}:00.000Z`,
       type: "comment" as const,

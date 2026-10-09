@@ -156,10 +156,10 @@ describe("authenticate (better-auth session)", () => {
 });
 
 /**
- * Ruling 21 (FL-8 / SRV-7): React Router hands every loader of one request
+ * Ruling 11 (FL-8 / SRV-7): React Router hands every loader of one request
  * the same Request, so the session is resolved once per Request — for reads.
  */
-describe("one session resolution per Request (ruling 21)", () => {
+describe("one session resolution per Request (ruling 11)", () => {
   let app: Awaited<ReturnType<typeof setupAppTest>>;
   afterEach(() => app?.cleanup());
 

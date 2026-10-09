@@ -44,7 +44,7 @@ export function defaultStageOf(workStages: StageDef[]): string | undefined {
 }
 
 /**
- * Ruling 184: a stored stage the chips do not offer (a project's own
+ * Ruling 326: a stored stage the chips do not offer (a project's own
  * `build`, carried into the template) had no chip, so it could be neither
  * seen nor removed and every save kept it. Ruling 326: a stage a live
  * project's board has is offered in that project's row, so this is only what

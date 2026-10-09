@@ -79,7 +79,7 @@ describe("/resources/controller-unseen (O39-d)", () => {
   });
 
   /**
-   * Ruling 11, test audit L14-29. The dock loads this through a root-owned
+   * Ruling 256, test audit L14-29. The dock loads this through a root-owned
    * fetcher on every page it mounts on, on each `controller.updated` and every
    * 5 s while a turn works. `requireAuth` answered a missing session with a
    * login redirect naming THIS route as the returnTo, and a fetcher follows a

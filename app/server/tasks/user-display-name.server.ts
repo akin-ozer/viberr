@@ -14,7 +14,7 @@ const userNameRowSchema = z.object({ name: z.string() });
  * `specialist-run.server.ts` need it, and specialist-run takes values only
  * from the task-mutation substrate, never statically from a task-action module
  * (those load specialist-run when they run), so the two stay out of a module
- * cycle (ruling 70).
+ * cycle (ruling 13).
  *
  * Returns the id when no such user exists, so a caller can tell "resolved" from
  * "unknown" by comparing against the id it passed. `users.name` is NOT NULL, so

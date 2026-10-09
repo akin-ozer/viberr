@@ -10,7 +10,7 @@ import { saveGlobalAgentProfile } from "~/server/org/gagents.server";
 import { deployAgentProfileFromLibrary } from "./agent-profile-actions.server";
 
 /**
- * Ruling 264 (pass 35, G35-2): a template carries a default `effort`, and a
+ * Ruling 261 (pass 35, G35-2): a template carries a default `effort`, and a
  * library deploy takes it when no override is given (an override still wins;
  * a tier the backend does not offer falls back to the backend default).
  */
@@ -18,7 +18,7 @@ import { deployAgentProfileFromLibrary } from "./agent-profile-actions.server";
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
 
-describe("deployAgentProfileFromLibrary takes the template's effort (ruling 264)", () => {
+describe("deployAgentProfileFromLibrary takes the template's effort (ruling 261)", () => {
   it("writes the template's effort to project.md when no override is given", async () => {
     const store = setupTestStore(ctx);
     seedDefaultAgentAssets(store.dataRoot);

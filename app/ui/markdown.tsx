@@ -248,7 +248,7 @@ function safeDecodeName(rest: string): string | null {
 
 /** Click-handler factory for an attachment (the task page passes the lightbox
  *  factory — attachment-lightbox.tsx — whose shape this is). Every kind opens
- *  the card (ruling 78 + addendum): images the lightbox, viewable text files
+ *  the card (ruling 317 + addendum): images the lightbox, viewable text files
  *  the read-only viewer, anything else a no-preview note with Download. */
 type AttachmentOpenFactory = (att: {
   name: string;
@@ -413,7 +413,7 @@ function componentsFor(
       // lightbox <button> (a <button> inside this <a> is nested-interactive).
       // The link is the interactive element.
       const repaired = repairAttachmentHref(href, attachments, base);
-      // Ruling 78 (+ addendum): a link to a task attachment opens the in-app
+      // Ruling 317 (+ addendum): a link to a task attachment opens the in-app
       // card on a plain click, whatever the kind. Only a CLEAN single-segment
       // suffix of the base is intercepted — an author-written URL carrying a
       // query, fragment, nested path, or malformed percent-escape would derive

@@ -128,7 +128,7 @@ function flat(text: string): string {
 /**
  * Ruling 213(a), amended: the verdict's whole report. A verdict stores the first
  * 2,000 characters of its justification and a line saying the whole report is
- * on the task's timeline (ruling 262), which a reader on another task cannot
+ * on the task's timeline (ruling 88), which a reader on another task cannot
  * open; live on AWSC-8 the researcher read AWSC-7's verdict to character 2,000
  * of 5,382 and asked Arda to paste the rest. The report is the agent's "Review
  * verdict" comment (ruling 88), the newest at or before the verdict's stamp,

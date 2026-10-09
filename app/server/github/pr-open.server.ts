@@ -323,11 +323,11 @@ export type OpenTaskPrResult =
    *  must not arrive here — a task whose PR already exists has not "produced no
    *  change", and the delivery path acts on this by flagging the task `noChanges`. */
   | { status: "nothing_to_review"; message: string }
-  /** Ruling 227: GitHub refused the PR because the BASE branch does not exist
+  /** Ruling 231: GitHub refused the PR because the BASE branch does not exist
    *  (422 `field: base, code: invalid`). The repository has no default branch
    *  to open the pull request against; never a network failure. */
   | { status: "base_branch_missing"; base: string; message: string }
-  /** Ruling 227: GitHub ANSWERED and refused, for a reason this reader does
+  /** Ruling 231: GitHub ANSWERED and refused, for a reason this reader does
    *  not map (any other 422, a decode failure, an unmapped HTTP status). The
    *  message quotes GitHub; it was not the network. */
   | { status: "refused"; message: string }
@@ -399,7 +399,7 @@ const ghValidationBodySchema = z
       .array(
         z.object({
           message: z.string().catch(""),
-          // Ruling 227: GitHub's structured refusal row. A missing base branch
+          // Ruling 231: GitHub's structured refusal row. A missing base branch
           // answers `{resource: "PullRequest", field: "base", code: "invalid"}`
           // with NO message, which is why the prose sniff below could never
           // name it and the residual called it a network failure.
@@ -810,7 +810,7 @@ export async function openTaskPr(
       const raced = await prAlreadyOnHead();
       if (raced) return raced;
     }
-    // Ruling 227 (F34-4): the base branch does not exist. GitHub sends the
+    // Ruling 231 (F34-4): the base branch does not exist. GitHub sends the
     // structured row with no message, so only the fields can say it.
     if (rows.some((row) => row.field === "base" && row.code === "invalid")) {
       return {
@@ -821,7 +821,7 @@ export async function openTaskPr(
     }
     return { status: "refused", message: detail };
   }
-  // Ruling 227: GitHub answered with a status nothing above maps. That is a
+  // Ruling 231: GitHub answered with a status nothing above maps. That is a
   // REFUSAL that quotes GitHub, never "unreachable" (a body this reader could
   // not decode took the salvage path above).
   return {

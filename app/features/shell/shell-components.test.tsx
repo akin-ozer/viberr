@@ -307,7 +307,7 @@ describe("Topbar: UI-03 paused chip + UI-55 shortcut hint", () => {
     expect(queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
-  it("ruling 278: the announcer is mounted before the stream drops", () => {
+  it("ruling 299: the announcer is mounted before the stream drops", () => {
     // A live region inserted together with its text is the one case screen
     // readers skip, so the region has to exist (and be empty) while the stream
     // is healthy, and only its TEXT may change.

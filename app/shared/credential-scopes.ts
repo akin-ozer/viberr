@@ -10,7 +10,7 @@
  * The distinction is not cosmetic. Live in pass 39, one minute apart, viberr
  * told its owner both of these about one fact: the task record said
  * "**Policy violation:** active PAT is missing `checks:read`" under the coral
- * shield, and the credential card said "All required scopes proven". Ruling 237
+ * shield, and the credential card said "All required scopes proven". Ruling 221
  * had already settled it — merging never needed `checks:read` — but only the
  * card had learned.
  */

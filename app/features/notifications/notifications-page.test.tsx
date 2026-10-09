@@ -504,7 +504,7 @@ describe("NotificationsPage", () => {
 });
 
 /**
- * Rulings 55 / 50 (pass 34): the two new kinds get their own glyph and
+ * Rulings 57 / 50 (pass 34): the two new kinds get their own glyph and
  * palette. Asserted EXPLICITLY because `ntfMeta` has a catch-all (`alert` +
  * `act-policy`) and would degrade silently — an ownership hand-off rendered as
  * a policy violation is the exact wrong reading.

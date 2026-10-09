@@ -18,7 +18,7 @@ import type { JsonValue } from "~/features/runtime/runtime-types";
  * `viberr_ops.read_run_log` diagnostic), and `get_github_state` was the one
  * tool of the 38 in `viberr_controller` with no test anywhere. Nothing in the
  * suite called the two predicates by name, so their guards could be deleted
- * and every gate would stay green — ruling 27: "an owner ruling whose guard
+ * and every gate would stay green — ruling 8: "an owner ruling whose guard
  * cannot go red is a ruling that gets reverted in silence."
  *
  * What they guarantee:
@@ -117,7 +117,7 @@ beforeAll(async () => {
   );
   upsertRun(app.db, {
     id: CONTROLLER_RUN,
-    // Ruling 247's controller scope: no project, `task_key` = conversation id.
+    // Ruling 251's controller scope: no project, `task_key` = conversation id.
     projectSlug: "",
     taskKey: conversationId,
     threadId: "thread_acc_controller",

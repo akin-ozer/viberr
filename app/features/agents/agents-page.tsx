@@ -707,7 +707,7 @@ const META_DOT = "\u00a0· ";
  * no code path copied a template into a project's roster, so the org editor
  * offered a lifecycle it could not finish.
  *
- * Ruling 316: a row is the profile as Settings → Global agent profiles shows
+ * Ruling 326: a row is the profile as Settings → Global agent profiles shows
  * it, with its add on the right. It borrowed the deployments row instead, whose
  * 84px label column holds "delivering" and not a role: "IMPLEMENTATION" ran on
  * under the description, the name sat in the faint key voice beside a bold
@@ -756,7 +756,7 @@ function LibraryPicker({
         </span>
         <div className="mh-main">
           <h2>Add from library</h2>
-          {/* Ruling 316: one sentence. The footer said the copy part again
+          {/* Ruling 326: one sentence. The footer said the copy part again
               ("the global profile stays the source"), beside a Close the
               head's ✕ already is, so the footer went. */}
           <div className="mh-sub">

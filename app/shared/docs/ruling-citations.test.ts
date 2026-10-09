@@ -24,7 +24,8 @@ const ROOT = path.resolve(HERE, "..", "..", "..");
 const DOC_REL = "docs/architecture/decisions.md";
 
 /** Directories that hold no citations of ours: dependencies, build output,
- *  local data and vendored code. */
+ *  local data, agent worktrees (`.claude/worktrees/`, other checkouts of the
+ *  tree) and vendored code. */
 const SKIP_DIRS = new Set([
   ".git",
   "node_modules",
@@ -36,6 +37,7 @@ const SKIP_DIRS = new Set([
   "test-results",
   ".react-router",
   ".agents",
+  "worktrees",
   "anti-slop",
   "humanizer",
 ]);
@@ -53,12 +55,13 @@ function textFiles(dir: string, out: string[]): string[] {
 
 /** A citation: the keyword, then one number or a list of them ("rulings 12,
  *  40 and 41", "ruling 7(b)", "ruling-12"), possibly wrapped onto a comment's
- *  next line. A date ("ruling 2026-08-20") is not a citation. */
+ *  next line. A date ("ruling 2026-08-20") is not a citation, and neither is a
+ *  name that only contains the word ("core-rulings-2"). */
 const GAP = String.raw`(?:[ \t]*\n[ \t]*(?:\*(?!/)|//|#|--)?[ \t]*|[ \t]+)`;
 const ITEM = String.raw`\d{1,3}(?!\d)(?!-\d)(?!\.\d)(?:\([a-z]{1,4}\))*`;
 const SEP = String.raw`(?:${GAP}?(?:,${GAP}(?:and|or)|,|and|or|&|\+|/|–)${GAP}?(?:[Rr]ulings?${GAP})?)`;
 const CITATION = new RegExp(
-  String.raw`\b[Rr]ulings?(?:${GAP}|-)(${ITEM}(?:${SEP}${ITEM})*)`,
+  String.raw`(?<![\w-])[Rr]ulings?(?:${GAP}|-)(${ITEM}(?:${SEP}${ITEM})*)`,
   "g",
 );
 

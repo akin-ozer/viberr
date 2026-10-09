@@ -19,7 +19,7 @@ import { serverGitEnv } from "./git-clone-auth.server";
  * Pass 40 review, R-seams-1: **the server never executes git with an
  * agent-writable repository as its working repository under its own uid.**
  *
- * Ruling 196 runs every agent as its person's own OS user and shares each
+ * Ruling 139 runs every agent as its person's own OS user and shares each
  * task's `workspace/` with the agent group (`node:viberr-agents` 2770), so an
  * agent can write any checkout's `.git`: a hook, `core.fsmonitor`, a filter
  * driver, a credential helper, `url.<x>.insteadOf`. The server then ran its own

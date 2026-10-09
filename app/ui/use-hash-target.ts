@@ -4,7 +4,7 @@ import { hashTarget } from "~/shared/page-anchors";
 import { useHydrated } from "./local-time";
 
 /**
- * Ruling 273, shared by ruling 302: bring `target` to the top of the nearest
+ * Ruling 321, shared by ruling 302: bring `target` to the top of the nearest
  * box that scrolls it (the rail on a desktop, the page column on a phone), and
  * focus it without scrolling again. `scrollIntoView` would move every
  * scrolling ancestor, the document included, which the shell never lets a

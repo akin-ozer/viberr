@@ -801,7 +801,7 @@ function fullPageHref(current: ControllerDockView | null, context: DockContext):
 
 function DockShell({ context }: { context: DockContext }) {
   const csrf = useCsrfToken();
-  // Ruling 11: a failed load answers null (the route's `clientLoader`), read
+  // Ruling 256: a failed load answers null (the route's `clientLoader`), read
   // like the time before the first answer. Ruling 13(b): the two fetchers
   // come first, so their effects keep running ahead of the restore's.
   const view = useFetcher<DockPayload | null>({ key: "controller-dock" });

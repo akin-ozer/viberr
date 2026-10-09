@@ -31,7 +31,7 @@ import { NEW_CONVERSATION_PARAM } from "./conversation-param";
  * Ruling 256 — the controller dock's view.
  *
  * Two promises live in this module, and nothing in the suite imported it until
- * pass 33 (ruling 27: a guard that cannot go red is a ruling that gets
+ * pass 33 (ruling 8: a guard that cannot go red is a ruling that gets
  * reverted in silence).
  *
  * ONE, the scope binding. A conversation belongs to exactly one place — the

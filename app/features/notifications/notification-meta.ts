@@ -50,7 +50,7 @@ export function ntfMeta(n: {
   // Ruling 272: an epic's membership or status moved — forward motion, on the
   // transition palette, with the stacked glyph the Epics rail item wears.
   if (n.kind === "epic") return { icon: "epic", cls: "act-transition" };
-  // Ruling 55: a released wait is forward motion — the transition palette
+  // Ruling 57: a released wait is forward motion — the transition palette
   // with the lock glyph the board's wait chip wears.
   if (n.kind === "dependency") return { icon: "lock", cls: "act-transition" };
   // Ruling 50: a seat change is about a person — the user glyph on the

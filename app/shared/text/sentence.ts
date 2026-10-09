@@ -16,7 +16,7 @@ export function endSentence(text: string): string {
 /**
  * The indefinite article before `word`, by its first letter: "an Estimate
  * Judge run", never "a Estimate Judge run" (AWSC-66's schedule note, ruling
- * 174). Agent and profile names are what it is for.
+ * 53). Agent and profile names are what it is for.
  *
  * Pure, client-safe, no imports.
  */

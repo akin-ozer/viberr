@@ -38,7 +38,7 @@ import {
  * shows them (R15-12): each line with the profiles that hold it and the mode
  * it is stored at, and no cell colour.
  *
- * Ruling 295 additions over the mock: rendered as a native <dialog> via
+ * Ruling 287 additions over the mock: rendered as a native <dialog> via
  * useDialog, which provides Escape close, backdrop-click close, and focus
  * management (markup otherwise unchanged).
  */

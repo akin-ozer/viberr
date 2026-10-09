@@ -1117,7 +1117,7 @@ function DocumentCard({
         )}
       </div>
       {!doc.existing && (
-        /* Ruling 278: the name is a typing control in the sheet's own field
+        /* Ruling 289: the name is a typing control in the sheet's own field
            chrome, with its visible label, laid out as the card's first row. */
         <div className="field doc-name">
           <label className="flabel" htmlFor="fm-doc-name">

@@ -26,7 +26,7 @@ export function isRepositoryOptionKind(kind: PacketOptionKind): boolean {
 const CAUSE_PREFIX = "repository:";
 
 /**
- * The cause every repository question on one board carries (ruling 63's
+ * The cause every repository question on one board carries (ruling 65's
  * field). The question is about the board, so answering it on one task
  * answers it on each task that asked.
  */

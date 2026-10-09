@@ -6,7 +6,7 @@ import {
 import { PROFILE_NTF, mergeNotifPrefs, notifCategoryForKind } from "./notification-prefs";
 
 /**
- * Rulings 55 and 50 (pass 34): the two new notification kinds route through
+ * Rulings 57 and 50 (pass 34): the two new notification kinds route through
  * their own categories, with their own toggles, defaulting ON like every other.
  *
  * Canary: map `dependency` to `controller` (or `ownership` to `packets`) in

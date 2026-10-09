@@ -57,7 +57,7 @@ export const shouldRevalidate = dockResourceShouldRevalidate;
  * project the viewer can still open are listed, so every link leads somewhere.
  */
 export async function loader({ request }: Route.LoaderArgs) {
-  // Ruling 11 (test audit L14-29): a 401, never `requireAuth`'s login
+  // Ruling 256 (test audit L14-29): a 401, never `requireAuth`'s login
   // redirect, which named THIS route as the returnTo. The dock loads it on
   // every page, on each `controller.updated` and every 5 s while a turn works,
   // all through a root-owned fetcher, and a fetcher follows a redirect as a
@@ -114,7 +114,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 }
 
 /**
- * Ruling 11: a failed load is the dock's, never the page's. React Router
+ * Ruling 256: a failed load is the dock's, never the page's. React Router
  * sends a fetcher's failure to the error boundary of the route that owns the
  * fetcher, and root owns the dock's, so a restart, a 5xx or a dead network
  * under a `controller.updated` or the working poll replaced the whole page

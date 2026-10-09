@@ -347,7 +347,7 @@ describe("per-run Codex homes (ruling 145)", () => {
     expect(() => codexRunHomeDir(shared, "../escape")).toThrow();
     expect(() => prepareCodexRunHome(shared, "")).toThrow();
     expect(codexRunHomeDir(shared, "run_ok-1")).toBe(path.join(shared, "runs", "run_ok-1"));
-    // Ruling 138: the compaction's own fork has a path-safe id beside the run's.
+    // Ruling 145: the compaction's own fork has a path-safe id beside the run's.
     expect(codexRunHomeDir(shared, codexCompactionHomeId("run_ok-1"))).toBe(
       path.join(shared, "runs", "run_ok-1-compaction"),
     );
@@ -377,7 +377,7 @@ describe("per-run Codex homes (ruling 145)", () => {
     expect(readFileSync(path.join(shared, "auth.json"), "utf8")).toBe('{"tokens":"legacy-account"}');
   });
 
-  it("never hands back a copy the CLI did not refresh over one another run refreshed (ruling 138)", () => {
+  it("never hands back a copy the CLI did not refresh over one another run refreshed (ruling 145)", () => {
     // Two runs of one account: A refreshes (the provider rotates the refresh
     // token) and settles first; B's copy is still the seed when it settles.
     // Comparing B's copy with the account's file would call it "changed" and

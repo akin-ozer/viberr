@@ -324,7 +324,7 @@ export function CeremonyVerdictRow({
             GitHub approval rather than an agent verdict. The pill goes
             green either way, so name the person and the commit they
             approved — a gate a human satisfied cannot pass silently
-            (ruling 220). */}
+            (ruling 245). */}
         {verdictSatisfiedBy && (
           <span className="fine"> · {verdictSatisfiedBy}</span>
         )}

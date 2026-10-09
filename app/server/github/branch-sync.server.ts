@@ -80,7 +80,7 @@ function taskBranchCandidate(taskKey: string, attempt: number): string {
  *
  * "Taken" is a REF **or any pull request ever opened on the name** (owner,
  * 2026-09-03). The PR half is the load-bearing one: task keys restart at 1 on a
- * new data root (ruling 231(a)), so `vib-1` on GitHub can still carry a previous
+ * new data root (ruling 228), so `vib-1` on GitHub can still carry a previous
  * instance's merged PR while no ref exists at all — which is exactly the state
  * that used to raise a branch collision, stop the operator and demand a human
  * decision for a delivery that then succeeded on the first press (pass 33,

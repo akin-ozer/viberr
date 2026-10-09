@@ -130,7 +130,7 @@ test("a click on the trigger while the dock closes turns it back open", async ({
   // The entrance has finished.
   await expect.poll(() => panel.evaluate((el) => el.getAnimations({ subtree: false }).length)).toBe(0);
 
-  // Ruling 287 (F20): close, and click again before the exit ends. Both clicks
+  // Ruling 285 (F20): close, and click again before the exit ends. Both clicks
   // run in the page two frames apart, so the test's own round trips add
   // nothing. The exit is stretched to 1s on the panel's inline style (it beats
   // the .12s closing rule, and the closing effect reads it, so its fallback

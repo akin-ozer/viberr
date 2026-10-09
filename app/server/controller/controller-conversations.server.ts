@@ -774,7 +774,7 @@ export function retractMessage(
  *
  * Released, not deleted: the transcript is the record of what somebody asked
  * and what the controller did, and this product does not destroy records
- * (ruling 233's posture, and an epic's: a done or cancelled epic stays
+ * (ruling 249's posture, and an epic's: a done or cancelled epic stays
  * readable, ruling 272). The conversation becomes instance-scoped, which is a real
  * scope, and carries a message saying why so its author is not left wondering
  * where the board went. Ruling 250 lets a PERSON delete a conversation (its

@@ -32,7 +32,7 @@ export const NOTIFICATION_KINDS = [
   // reply is never a row: it reaches its open surfaces through the
   // owner-routed `controller.updated` revalidation.
   "controller",
-  // Ruling 55 (pass 34): the work a task waited on reached Done and the task
+  // Ruling 57 (pass 34): the work a task waited on reached Done and the task
   // was released, or a dependency can never complete (its task was archived).
   "dependency",
   // Ruling 50 (pass 34): the reader's owner seat on a task changed hands — a

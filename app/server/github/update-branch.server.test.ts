@@ -59,7 +59,7 @@ function bindPat() {
   setProjectCredential(store.db, { projectSlug: store.slug, patId: pat.id }, SYS);
 }
 
-/** Ruling 229: what origin's copy of the task branch looks like. */
+/** Ruling 241: what origin's copy of the task branch looks like. */
 type FakeRemote =
   | { kind: "current" }
   | { kind: "behind"; ahead: number }
@@ -252,7 +252,7 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
     expect(flat).not.toMatch(/rebase/);
     expect(flat).not.toMatch(/--force|-f\b/);
     // The PUSH refspec is never forced. (The FETCH of origin's copy of the
-    // branch, ruling 229, force-updates the local tracking ref with a `+`,
+    // branch, ruling 241, force-updates the local tracking ref with a `+`,
     // which touches nothing on the remote.)
     for (const push of git.calls.filter((c) => c.includes("push"))) {
       expect(push.join(" ")).not.toMatch(/\+refs\/heads\/vib-1/);
@@ -396,12 +396,12 @@ describe("updateWorkspaceBranchFromBase (N19-9)", () => {
 });
 
 /**
- * Ruling 229 (pass 34, F34-11): the update reports origin's copy of the
+ * Ruling 241 (pass 34, F34-11): the update reports origin's copy of the
  * TASK branch beside its base answer, derived locally from the fetched remote
  * ref. Canary: drop the branch fetch (`readRemoteBranchState` returns
  * `unknown`) and every state below reads `unknown`.
  */
-describe("ruling 229: origin's copy of the task branch", () => {
+describe("ruling 241: origin's copy of the task branch", () => {
   it("`already_current` carries `behind` with the count when origin lags the workspace", async () => {
     bindPat();
     const git = fakeGit({ behind: 0, remote: { kind: "behind", ahead: 2 } });

@@ -59,7 +59,7 @@ const ANCHOR_EVENT_MAX_CHARS = 220;
 const ANCHOR_EVENT_COUNT = 5;
 /**
  * Ruling 201 (F39-19): how much of a standing verdict's reason the anchor
- * carries. Generous on purpose — ruling 262 already clips a stored reason at
+ * carries. Generous on purpose — ruling 88 already clips a stored reason at
  * 2,000 characters, so this is the WHOLE of what viberr kept, and it is the one
  * thing a rework run cannot proceed without.
  */
@@ -444,7 +444,7 @@ export function filesSavedByOtherAgents(
  * those would make the subject move under the verdict and stale it on the way
  * in. Same division `workRevision` already draws: the deliverer mints, everyone
  * else judges. A person's upload never reaches here: its note claims its name,
- * and a run's window leaves out what a person claimed (ruling 76).
+ * and a run's window leaves out what a person claimed (ruling 77).
  *
  * Ruling 87: and only a run DISPATCHED to deliver. A review run whose profile
  * was handed delivery while it worked still saved evidence for a review, and

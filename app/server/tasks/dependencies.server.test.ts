@@ -359,7 +359,7 @@ describe("ruling 122: a failed auto-invocation names its cause and claims nothin
   });
 });
 
-/** Ruling 55: the release engine. */
+/** Ruling 57: the release engine. */
 describe("the release engine", () => {
   /**
    * L02-1 (test audit, 2026-09-27): the goal runner was the one caller that

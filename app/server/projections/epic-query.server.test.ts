@@ -32,7 +32,7 @@ import {
 } from "./rebuilder.server";
 
 /**
- * Ruling 17/(b): the epic read models. An epic's row is its file
+ * Ruling 272/(b): the epic read models. An epic's row is its file
  * (`epic_projections`, written by the rebuilder); its PROGRESS is counted from
  * the task rows whose `epic_id` names it, at read time, never stored, with
  * archived tasks counted apart and left out of the total.

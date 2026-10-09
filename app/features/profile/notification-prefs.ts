@@ -26,7 +26,7 @@ const NOTIF_PREF_CATEGORIES = [
   // `controller` category, whose only writer was the chained-goal progress
   // note that epics retired.
   "epics",
-  // Ruling 55: a task this person owns or supervises was released from (or
+  // Ruling 57: a task this person owns or supervises was released from (or
   // stranded on) the work it waited for.
   "dependencies",
   // Ruling 50: this person's owner seat on a task changed hands.
@@ -88,7 +88,7 @@ export function notifCategoryForKind(kind: NotificationKind): NotifPrefCategory 
 }
 
 /** The routing categories — PROFILE_NTF (the rows of profile.jsx;
- *  `dependencies` per ruling 55, `ownership` per ruling 50, `questions` per
+ *  `dependencies` per ruling 57, `ownership` per ruling 50, `questions` per
  *  ruling 74 and `epics` per ruling 272).
  *
  *  Ruling 74 (F40-48): each description names what its kind's writers
@@ -193,7 +193,7 @@ const storedNotifPrefsSchema = z.object({
   // that category carried the goal-chain notes epics replaced
   // (`mergeNotifPrefs`).
   epics: storedChannelPrefsSchema,
-  // Rulings 55 / 50 (pass 34): same posture — absent reads ON.
+  // Rulings 57 / 50 (pass 34): same posture — absent reads ON.
   dependencies: storedChannelPrefsSchema,
   ownership: storedChannelPrefsSchema,
 });

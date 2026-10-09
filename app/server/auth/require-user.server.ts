@@ -65,7 +65,7 @@ interface AuthResolution {
 }
 
 /**
- * Ruling 21 (FL-8 / SRV-7): the session is resolved ONCE per request. React
+ * Ruling 11 (FL-8 / SRV-7): the session is resolved ONCE per request. React
  * Router hands every loader of one request the same Request object (single
  * fetch runs root, the layout and the leaf with it: react-router router.js
  * `loadRouteData`), and a resource route's guards pass theirs along

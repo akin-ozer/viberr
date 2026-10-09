@@ -33,7 +33,7 @@ import {
  *   2. `rolesForAction`'s REFUSAL path — the throw on an action id the table
  *      does not know.
  *
- * Ruling 27 states the standard this file is built to: "an owner ruling whose
+ * Ruling 8 states the standard this file is built to: "an owner ruling whose
  * guard cannot go red is a ruling that gets reverted in silence." Every role
  * tier here IS an owner ruling.
  */
@@ -279,7 +279,7 @@ describe("the matrix is a policy decision, pinned by hand", () => {
  * file-formats.md went stale (N19-3). Edit `RBAC_DEFINITIONS`; this makes the
  * doc a mechanical follow-up rather than a thing to remember.
  */
-describe("the domain docs render the SAME matrix (ruling 27: the guard must be able to go red)", () => {
+describe("the domain docs render the SAME matrix (ruling 8: the guard must be able to go red)", () => {
   it("docs/domain/auth-and-rbac.md §3 matches ACTION_ROLES exactly", () => {
     expect(docMatrix("docs/domain/auth-and-rbac.md")).toEqual(codeMatrix());
   });

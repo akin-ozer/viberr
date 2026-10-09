@@ -11,7 +11,7 @@ import { kbDirsOf, kbLegacyOf } from "./kb-grants";
 import { useOrgAction } from "./use-org-action";
 
 /**
- * Ruling 247: the org-admin surface that modifies the CONTROLLER ITSELF —
+ * Ruling 270: the org-admin surface that modifies the CONTROLLER ITSELF —
  * its model, its resource grants (skills, knowledge bases, MCP servers) and
  * its instructions. This page is admin-gated as a whole; talking TO the
  * controller is a different thing entirely and lives at /controller, open to

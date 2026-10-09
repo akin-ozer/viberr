@@ -221,7 +221,7 @@ describe("resources/model-catalog", () => {
       const body: ModelCatalogBody = await res.json();
       const sol = body.data.models.find((m) => m.value === "gpt-5.6-sol");
       expect(sol?.unavailable?.reason).toContain("not supported");
-      // An unmarked model carries no mark (unknown-but-offered, ruling 220).
+      // An unmarked model carries no mark (unknown-but-offered, ruling 149).
       expect(
         body.data.models.find((m) => m.value === "gpt-5.6-terra")?.unavailable,
       ).toBeUndefined();

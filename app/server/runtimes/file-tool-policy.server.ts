@@ -7,7 +7,7 @@ import { capabilityById } from "~/shared/capabilities";
  * Ruling 217(d): a run that posts files keeps its file tools, and they write only
  * where its posting goes.
  *
- * Ruling 183 gives every run whose profile holds `attach-evidence-references`
+ * Ruling 78 gives every run whose profile holds `attach-evidence-references`
  * the task's attachments folder, and ruling 128 lets an agent that makes a
  * result deliver it there without a repo-write grant. The write posture never
  * met either: a withheld `execute-code-or-write-repo` removes Edit, MultiEdit

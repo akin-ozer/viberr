@@ -16,7 +16,7 @@ import { insertUser } from "./user-store.server";
  *
  * Until pass 33 nothing in the suite imported it: `assertCsrf` could have been
  * deleted from the preamble and every gate would have stayed green while every
- * action in the app became forgeable. Ruling 27 — "an owner ruling whose guard
+ * action in the app became forgeable. Ruling 8 — "an owner ruling whose guard
  * cannot go red is a ruling that gets reverted in silence" — is exactly this
  * shape, so these cases drive the real function with real better-auth session
  * cookies and real request headers rather than re-stating its body.

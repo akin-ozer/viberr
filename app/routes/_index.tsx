@@ -197,7 +197,7 @@ export async function action({ request }: Route.ActionArgs) {
         owner: String(formData.get("owner") ?? ""),
         repoName: String(formData.get("repoName") ?? ""),
         // P13-AP-04: the "Lightweight · 3 stages" preset was deleted (owner
-        // ruling 2) — the Standard 5-stage board is the only template, so
+        // ruling 47) — the Standard 5-stage board is the only template, so
         // there is no `template` field to read.
         policy:
           formData.get("policy") === "strict"

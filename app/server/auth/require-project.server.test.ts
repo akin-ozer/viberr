@@ -30,7 +30,7 @@ import { writeProject } from "../../../test-support/test-store";
  * answer, the positional (not substring) slug echo, the archived-read
  * exemption, and the audit rows that keep the real reason after the client has
  * been told nothing — could be deleted with every gate staying green. Ruling
- * 27: "an owner ruling whose guard cannot go red is a ruling that gets
+ * 8: "an owner ruling whose guard cannot go red is a ruling that gets
  * reverted in silence."
  *
  * These cases drive the guard DIRECTLY with real signed requests, because a

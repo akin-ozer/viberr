@@ -157,7 +157,7 @@ function RepositoryPanel({
           project's token fingerprint, its scope verdicts and its re-attach/remove
           controls. Server-side, every one of those actions gates on
           `grant-github-scope` (routes/project.github.tsx), so the card is
-          WITHDRAWN below that tier rather than rendered read-only — ruling 95's
+          WITHDRAWN below that tier rather than rendered read-only — ruling 27's
           precedent: a withdrawn affordance is honest, a disabled one invites a
           support question. What stays is the Connection row above, which is the
           only credential fact a reader of the board legitimately needs ("can
