@@ -633,7 +633,7 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
   add(
     tool(
       "read_store_doc",
-      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"]. Ruling 269: a read returns one page of at most 32,000 bytes; `truncated` is true while more follows, `nextOffset` is the `offset` that reads on, and `characters` is the document's length.",
+      "Read one text document out of a knowledge base or skill folder in the org store. Org admins only, like the store browser itself. Give the resource kind and id, then the file path as its segments, e.g. [\"notes\", \"api.md\"]. Ruling 269: a read returns one page of at most 32,000 bytes, and the pages run to the end of the file however long it is; `truncated` is true while more follows, `nextOffset` is the `offset` that reads on, and `characters` is the document's length.",
       {
         kind: z.enum(["kb", "skill"]).describe("Which store the document lives in."),
         id: z.string().describe("The knowledge base or skill id."),
@@ -656,7 +656,11 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
               : `No skill has the id ${args.id}; list_skills names them.`,
           );
         }
-        const doc = readStoreDoc(target, args.path);
+        // Ruling 269: read the whole file, past `readStoreDoc`'s 256 KB cap. A
+        // replace names a version hashed from the whole file (ruling 212(a)),
+        // so pages that stopped at the cap with no page after them let a
+        // caller that read every page delete the tail it never saw.
+        const doc = readStoreDoc(target, args.path, Number.POSITIVE_INFINITY);
         if (!doc) {
           // Ruling 260 (F37-75): say what this reader IS, not that the file
           // "no longer exists" — which claims it once did, and sent the
@@ -687,16 +691,15 @@ export function buildControllerOpsMcp(deps: ControllerOpsDeps): ControllerOpsMcp
         const more = end < doc.text.length;
         auditRead("read_store_doc", `${target.kind}/${target.id}`, {
           path: args.path.join("/"),
-          truncated: doc.truncated || more,
+          truncated: more,
         });
         const page: StoreDocPage = {
           resource: { kind: target.kind, id: target.id, name: target.name },
           path: args.path,
           // Reported, never hidden: a clipped document that reads as complete
           // is how a model states a half-read file as fact. True while a page
-          // follows this one, and on the last page of a document longer than
-          // this reader takes.
-          truncated: doc.truncated || more,
+          // follows this one.
+          truncated: more,
           characters: doc.text.length,
           text: doc.text.slice(start, end),
         };

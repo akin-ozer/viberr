@@ -46,8 +46,11 @@ const MAX_PAGE = 250;
 const WORDY_RUN = "run_ops_wordy";
 const WORDY_LINES = 60;
 const WORDY_TEXT = "w".repeat(2_000);
-/** `readStoreDoc`'s own per-read ceiling: the most of a document it takes. */
+/** `readStoreDoc`'s default ceiling, the most of a document the editor opens;
+ *  `read_store_doc` must page past it (ruling 269). */
 const READ_DOC_BYTES = 256 * 1024;
+/** The long fixture document: longer than that ceiling. */
+const LONG_DOC = "x".repeat(READ_DOC_BYTES) + "\n## Tail\n".padEnd(4_096, "t");
 /** Ruling 269: one page of a store document, in bytes (`READ_PAGE_BYTES`). */
 const READ_PAGE = 32_000;
 
@@ -181,15 +184,7 @@ beforeAll(async () => {
   );
   // A document that really is longer than one read: `truncated` has to be a
   // measurement, not a constant nobody can tell apart from the honest answer.
-  writeStoreDoc(
-    app.db,
-    target,
-    [],
-    "ops-long.md",
-    "x".repeat(READ_DOC_BYTES + 4_096),
-    storeActor,
-    { overwrite: true },
-  );
+  writeStoreDoc(app.db, target, [], "ops-long.md", LONG_DOC, storeActor, { overwrite: true });
 });
 afterAll(() => app.cleanup());
 
@@ -989,26 +984,43 @@ describe("read_store_doc: org admins only, like the store browser", () => {
     // and says so. Without this arm `truncated` could be the constant `false`
     // and read identically, which is how a model states half a file as the
     // whole of it.
-    // CANARY: return the document whole and this reply is 256 KB, which no
+    // CANARY: return the document whole and this reply is 260 KB, which no
     // turn receives: the document cannot be read at all.
     const doc = { kind: "kb", id: kbId, path: ["ops-long.md"] };
     const read = (offset: number) => call(ids.orgAdmin, "read_store_doc", { ...doc, offset });
     const first = parsed(STORE_DOC_REPLY, await call(ids.orgAdmin, "read_store_doc", doc));
     expect(first.text).toBe("x".repeat(READ_PAGE));
-    expect(first).toMatchObject({ truncated: true, characters: READ_DOC_BYTES, nextOffset: READ_PAGE });
+    expect(first).toMatchObject({ truncated: true, characters: LONG_DOC.length, nextOffset: READ_PAGE });
     expect(first).not.toHaveProperty("offset");
     // CANARY: start every page at 0 and the second read is the first again.
     const second = parsed(STORE_DOC_REPLY, await read(first.nextOffset!));
     expect(second).toMatchObject({ offset: READ_PAGE, nextOffset: 2 * READ_PAGE, truncated: true });
-    // The last page of a document longer than the reader takes still says it
-    // was cut, and offers no page after it.
-    const last = parsed(STORE_DOC_REPLY, await read(READ_DOC_BYTES - 100));
-    expect(last.text).toBe("x".repeat(100));
-    expect(last.truncated).toBe(true);
-    expect(last).not.toHaveProperty("nextOffset");
-    expect(await read(READ_DOC_BYTES)).toBe(
-      "[error] `ops-long.md` reads as 262,144 characters; offset 262,144 is past its end.",
+    expect(await read(LONG_DOC.length)).toBe(
+      "[error] `ops-long.md` reads as 266,240 characters; offset 266,240 is past its end.",
     );
+  });
+
+  it("ruling 269: pages a document past 256 KB to its end, so a replace never drops a tail it did not read", async () => {
+    // A replace names a version hashed from the whole file (ruling 212(a)), so
+    // the pages must reach the whole file too. Pages that stopped at the store
+    // reader's 256 KB cap ended with no `nextOffset`, and a caller that read
+    // every page and sent the document back deleted the tail under a version
+    // that matched.
+    // CANARY: read through `readStoreDoc`'s default cap again and the joined
+    // pages stop at 262,144 characters, without the tail.
+    const doc = { kind: "kb", id: kbId, path: ["ops-long.md"] };
+    const pages: string[] = [];
+    let offset: number | undefined = 0;
+    let last: z.infer<typeof STORE_DOC_REPLY> | undefined;
+    while (offset !== undefined && pages.length < 20) {
+      last = parsed(STORE_DOC_REPLY, await call(ids.orgAdmin, "read_store_doc", { ...doc, offset }));
+      expect(last.characters).toBe(LONG_DOC.length);
+      pages.push(last.text);
+      offset = last.nextOffset;
+    }
+    expect(pages.join("")).toBe(LONG_DOC);
+    // The last page says nothing follows, because nothing does.
+    expect(last?.truncated).toBe(false);
   });
 
   it("says so when the target or the file is gone", async () => {
