@@ -67,6 +67,7 @@ import {
   forceAcceptCompletion,
 } from "./task-acceptance.server";
 import { releaseOwner, releaseTasksOwnedBy, setOwner } from "./task-ownership.server";
+import { setTaskArchived } from "./task-archive.server";
 import { createTask, DEFAULT_GOAL, updateTaskGoal } from "./task-edits.server";
 import { postAgentReplyComment, specialistReplyDirective } from "./task-replies.server";
 import type { TaskActionDeps } from "./task-action-core.server";
@@ -2978,67 +2979,104 @@ describe("F21-2 / ruling 97: the server-side acceptance disclosure", () => {
     expect(task(store).timeline.filter((e) => e.type === "completion")).toHaveLength(1);
   });
 
-  it("ruling 154: accepting a task interrupts its live runs, notes them and audits the cause", async () => {
-    // F36-5 live: HLC-9 was force-accepted while its developer was building;
-    // the run finished later and re-invoked the operator on the shipped task.
-    // Canary: delete the `interruptLiveRunsOnClosure` call after
-    // `applyAcceptanceWrite` — the run row stays `running`, no note, no row.
-    const store = setupProjectedStore(ctx);
-    writeTask(store.dataRoot, store.slug, {
-      frontmatter: baseTaskFrontmatter("VIB-1", {
-        stage: "review",
-        waiting: "agent",
-        ownerUserId: store.users.arda.id,
-        engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
-        branch: "vib-1-work",
-        workRevision: workRev("rev_1"),
-        validation: "changed",
-        pr: { number: 8, state: "review", title: "[VIB-1] work" },
-      }),
-    });
-    rebuildAll(store.db, { dataRoot: store.dataRoot });
-    upsertRun(store.db, {
-      id: "run_live_dev",
-      taskKey: "VIB-1",
-      projectSlug: store.slug,
-      threadId: "th-live-dev",
-      role: "Implementation",
-      kind: "primary",
-      backend: "codex",
-      agentProfileId: "developer",
-      agentName: "Server Developer",
-      model: "gpt-5.6-luna",
-      sdk: "codex-sdk",
-      state: "running",
-      startedAt: new Date().toISOString(),
-    });
-    await forceAcceptCompletion(
-      store.db,
-      { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
-      actorOf(store.users.arda),
-      { dataRoot: store.dataRoot },
-    );
-    expect(task(store).frontmatter.stage).toBe("done");
-    // SAFETY: the SELECT names two `agent_runs` columns (`state` TEXT NOT NULL,
-    // `interrupted_by` TEXT NULL per 0001_baseline) and the id was inserted above.
-    const row = store.db
-      .prepare(`SELECT state, interrupted_by FROM agent_runs WHERE id = ?`)
-      .get("run_live_dev") as { state: string; interrupted_by: string | null };
-    expect(row.state).toBe("interrupted");
-    expect(row.interrupted_by).toBe(store.users.arda.id);
-    const note = task(store).timeline.find(
-      (e) => e.type === "note" && e.title === "Interrupted by acceptance",
-    )!;
-    expect(note).toBeDefined();
-    expect(note.text).toContain("run_live_dev");
-    expect(note.text).toMatch(/force-accepted/);
-    const rows = listAuditEvents(store.db, { action: "task.acceptance.interrupted_runs" });
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.details).toMatchObject({ cause: "force-accept", runIds: ["run_live_dev"] });
-    const runRows = listAuditEvents(store.db, { action: "runtime.run.interrupted" });
-    expect(runRows).toHaveLength(1);
-    expect(runRows[0]!.details).toMatchObject({ reason: "task-closed", cause: "force-accept" });
-  });
+  /** Ruling 154: the closures past the plain Accept (whose note
+   *  `acceptance-doors.server.test.ts` owns), each with the note's title and
+   *  the verb its body uses for that cause. */
+  const closures: [
+    "force-accept" | "archive",
+    string,
+    string,
+    (store: TestStore) => Promise<void>,
+  ][] = [
+    [
+      "force-accept",
+      "Interrupted by force-accept",
+      "force-accepted",
+      async (store) => {
+        await forceAcceptCompletion(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", ack: live(store) },
+          actorOf(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      },
+    ],
+    [
+      "archive",
+      "Interrupted by archiving",
+      "archived",
+      async (store) => {
+        await setTaskArchived(
+          store.db,
+          { projectSlug: store.slug, taskKey: "VIB-1", archived: true },
+          actorOf(store.users.arda),
+          { dataRoot: store.dataRoot },
+        );
+      },
+    ],
+  ];
+
+  it.each(closures)(
+    "ruling 154: closing by %s interrupts the task's live runs, notes them under that cause and audits it",
+    async (cause, title, verb, close) => {
+      // F36-5 live: HLC-9 was force-accepted while its developer was building;
+      // the run finished later and re-invoked the operator on the shipped task.
+      // CANARY: delete the `interruptLiveRunsOnClosure` call after the closing
+      // write: the run row stays `running`, no note, no row.
+      // CANARY: title the note "Interrupted by acceptance" whatever the cause
+      // and an archived task's history says a person accepted it.
+      const store = setupProjectedStore(ctx);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          waiting: "agent",
+          ownerUserId: store.users.arda.id,
+          engagements: [DEV_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+          branch: "vib-1-work",
+          workRevision: workRev("rev_1"),
+          validation: "changed",
+          pr: { number: 8, state: "review", title: "[VIB-1] work" },
+        }),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot });
+      upsertRun(store.db, {
+        id: "run_live_dev",
+        taskKey: "VIB-1",
+        projectSlug: store.slug,
+        threadId: "th-live-dev",
+        role: "Implementation",
+        kind: "primary",
+        backend: "codex",
+        agentProfileId: "developer",
+        agentName: "Server Developer",
+        model: "gpt-5.6-luna",
+        sdk: "codex-sdk",
+        state: "running",
+        startedAt: new Date().toISOString(),
+      });
+      await close(store);
+      // SAFETY: the SELECT names two `agent_runs` columns (`state` TEXT NOT NULL,
+      // `interrupted_by` TEXT NULL per 0001_baseline) and the id was inserted above.
+      const row = store.db
+        .prepare(`SELECT state, interrupted_by FROM agent_runs WHERE id = ?`)
+        .get("run_live_dev") as { state: string; interrupted_by: string | null };
+      expect(row.state).toBe("interrupted");
+      expect(row.interrupted_by).toBe(store.users.arda.id);
+      const notes = task(store).timeline.filter(
+        (e) => e.type === "note" && e.title?.startsWith("Interrupted by") === true,
+      );
+      expect(notes.map((e) => e.title)).toEqual([title]);
+      expect(notes[0]!.text).toContain(
+        `\`run_live_dev\` (Server Developer) was still live when VIB-1 was ${verb};`,
+      );
+      const rows = listAuditEvents(store.db, { action: "task.acceptance.interrupted_runs" });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.details).toMatchObject({ cause, runIds: ["run_live_dev"] });
+      const runRows = listAuditEvents(store.db, { action: "runtime.run.interrupted" });
+      expect(runRows).toHaveLength(1);
+      expect(runRows[0]!.details).toMatchObject({ reason: "task-closed", cause });
+    },
+  );
 
   it("U36-9 (pass 36): the completion event names the board's terminal stage, not a literal Done", async () => {
     // Live: "HLC-10 transitioned to **Done**" on a board whose last stage is

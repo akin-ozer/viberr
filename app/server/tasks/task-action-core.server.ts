@@ -618,11 +618,12 @@ export function projectRepoFor(
 
 /**
  * Ruling 154 (pass 36, F36-5): a task that closes ends its live runs. Called
- * after the closing write (acceptance, force-accept) so the runs are stopped
- * on a task that IS closed; the interrupt itself is the run-service's, audited
- * under the system actor with the cause and the person. Writes ONE policy note
- * naming every run it stopped and one audit row for the task; nothing when no
- * run was live. Best-effort: a failure here never masks the acceptance.
+ * after the closing write (acceptance, force-accept, archive) so the runs are
+ * stopped on a task that IS closed; the interrupt itself is the run-service's,
+ * audited under the system actor with the cause and the person. Writes ONE
+ * policy note, titled for the cause, naming every run it stopped and one audit
+ * row for the task; nothing when no run was live. Best-effort: a failure here
+ * never masks the closure.
  */
 export async function interruptLiveRunsOnClosure(
   db: DatabaseSync,
@@ -650,18 +651,18 @@ export async function interruptLiveRunsOnClosure(
       }
     }
     if (stopped.length === 0) return [];
-    const verb =
-      closure.cause === "archive"
-        ? "archived"
-        : closure.cause === "force-accept"
-          ? "force-accepted"
-          : "accepted";
+    // Ruling 166: the title and the body both name the closure that happened.
+    const { title, verb } = {
+      accept: { title: "Interrupted by acceptance", verb: "accepted" },
+      "force-accept": { title: "Interrupted by force-accept", verb: "force-accepted" },
+      archive: { title: "Interrupted by archiving", verb: "archived" },
+    }[closure.cause];
     const list = stopped.map((r) => `\`${r.id}\` (${r.label})`).join(", ");
     await appendTimelineEvent(taskRef(ctx, projectSlug, taskKey), {
       occurredAt: new Date().toISOString(),
       type: "note",
       actor: { kind: "system", systemId: "policy-engine" },
-      title: "Interrupted by acceptance",
+      title,
       text:
         `**Closed task:** ${stopped.length === 1 ? "the run" : `${stopped.length} runs`} ${list} ` +
         `${stopped.length === 1 ? "was" : "were"} still live when ${taskKey} was ${verb}; ` +

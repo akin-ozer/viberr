@@ -1101,7 +1101,8 @@ them.
    already carries its base, when the refresh conflicts, or when no verdict stands.
    Ruling 154: the acceptance (plain or forced) and an archive end the task's
    live runs through the run-service's closure interrupt (`interruptRunOnClosure`), note
-   them once on the timeline ("Interrupted by acceptance", every run named) and audit
+   them once on the timeline under the closure's own title ("Interrupted by acceptance",
+   "Interrupted by force-accept" or "Interrupted by archiving", every run named) and audit
    `task.acceptance.interrupted_runs`; a closed task refuses every coordination door
    afterwards (`taskClosure` / `closureRefusal`, `task-closure.server.ts`), and a run
    that finishes after the closure records its report with a "Completed after the task
