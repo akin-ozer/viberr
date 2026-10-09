@@ -711,6 +711,12 @@ CREATE TABLE "agent_runs" (
   -- backend's own tiers. NULL when nothing was set and the vendor's default
   -- applied (a Claude run with no effort), and on rows from before the column.
   effort TEXT,
+  -- Ruling 329: what the run was shown, as a JSON list written by the readers
+  -- that hand a run a picture: each stretch of a task page it looked at (its
+  -- width, where it starts and ends, whether the page ends there) and each
+  -- kept source it opened as an image. An approval of a page binds only from
+  -- a run whose list covers the page. NULL on a run that looked at nothing.
+  looked_json TEXT,
   session_id TEXT,
   sdk TEXT NOT NULL DEFAULT '',
   state TEXT NOT NULL CHECK (state IN

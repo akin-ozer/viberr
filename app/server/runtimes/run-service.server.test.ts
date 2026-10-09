@@ -404,12 +404,14 @@ describe("run-service lifecycle", () => {
   // Claude run that was left on the SDK's default.
   it("keeps on the run's row the effort its backend was given (ruling 153)", async () => {
     captureSpecs();
-    const start = (threadId: string, backend: "claude" | "codex", model: string, effort?: string) =>
-      startTestRun(store.db, {
+    const start = (threadId: string, backend: "claude" | "codex", model: string, effort?: string) => {
+      const input: Parameters<typeof startTestRun>[1] = {
         projectSlug: store.slug, taskKey: "VIB-1", threadId, role: "R", kind: "primary",
         backend, model, prompt: "go", dataRoot: store.dataRoot,
-        ...(effort === undefined ? {} : { effort }),
-      });
+      };
+      if (effort !== undefined) input.effort = effort;
+      return startTestRun(store.db, input);
+    };
 
     const asked = await start("e1", "claude", "sonnet", "xhigh");
     await settle();

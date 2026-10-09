@@ -100,6 +100,29 @@ export interface SourceKeeper {
   roleHint: string | null;
 }
 
+/**
+ * Ruling 327: what a source is of a look, the pictures Viberr took of one
+ * page on the web. The sources of one look share `url` and `at`.
+ */
+export interface SourceLook {
+  /** The address that was pictured. */
+  url: string;
+  /** When it was pictured. */
+  at: string;
+  /** A stretch of the page at one width, a frame of its first screen while
+   *  it moved, or the note of what moved. */
+  part: "stretch" | "frame" | "note";
+  /** The width a picture was taken at; null on the note. */
+  view: "desktop" | "phone" | null;
+  /** A stretch: where on the page it starts and ends, and the page's whole
+   *  height at that width, in px. */
+  from?: number | undefined;
+  to?: number | undefined;
+  pageHeight?: number | undefined;
+  /** A frame: how many ms after the screen came into view. */
+  moment?: number | undefined;
+}
+
 /** One kept source: its record in the index. */
 export interface TaskSource {
   /** `S1`, `S2` and so on: stable, and never given to another source. */
@@ -116,6 +139,8 @@ export interface TaskSource {
   runId: string | null;
   bytes: number;
   sha256: string;
+  /** Ruling 327: set on a source that is part of a look. */
+  look?: SourceLook | undefined;
 }
 
 /** The sources a task held when one of its deliveries was stamped. */
@@ -142,6 +167,18 @@ const sourceLineSchema = z.object({
   runId: z.string().nullable(),
   bytes: z.number().int().min(0),
   sha256: z.string(),
+  look: z
+    .object({
+      url: z.string(),
+      at: z.string(),
+      part: z.enum(["stretch", "frame", "note"]),
+      view: z.enum(["desktop", "phone"]).nullable(),
+      from: z.number().int().min(0).optional(),
+      to: z.number().int().min(0).optional(),
+      pageHeight: z.number().int().min(0).optional(),
+      moment: z.number().min(0).optional(),
+    })
+    .optional(),
 });
 
 const deliveryLineSchema = z.object({
@@ -225,6 +262,8 @@ export interface SourceToKeep {
   from: string;
   by: SourceKeeper;
   runId: string | null;
+  /** Ruling 327: what the source is of a look, when Viberr pictured it. */
+  look?: SourceLook | undefined;
 }
 
 /** A keep's answer: the new source; the one that already holds these bytes;
@@ -304,6 +343,7 @@ export function writeTaskSource(
     bytes: input.data.length,
     sha256,
   };
+  if (input.look) kept.look = input.look;
   // Created, never opened: a name that already stands fails the open.
   const fd = openSync(
     abs,

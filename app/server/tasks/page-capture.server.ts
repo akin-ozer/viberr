@@ -75,6 +75,7 @@ import {
   type PageKind,
 } from "~/shared/page-capture";
 import { noSuchAttachment } from "./board-read.server";
+import { recordRunLooks } from "./page-looks.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -1570,6 +1571,25 @@ async function capturePage(
     );
   }
   logger.info("a page was captured for a run", { projectSlug, taskKey, file: name, views: page.shots.length });
+  // Ruling 329: a stretch handed to the run is a look at that page, at that
+  // width, over those px. A box is a picture of a size somebody chose and no
+  // reader's width, so it is not one.
+  if (!box) {
+    recordRunLooks(
+      db,
+      ask.runId,
+      page.shots.map((shot) => ({
+        kind: "page",
+        task: taskKey,
+        file: stored,
+        view: shot.view,
+        from: shot.from,
+        to: shot.from + shot.height,
+        end: !shot.cut,
+        delivery: null,
+      })),
+    );
+  }
   const paths = LIST_AND.format(page.shots.map((shot) => code(shot.path)));
   const kept =
     runFolder(ask.runId) !== null

@@ -33,14 +33,16 @@ import type { Engagement, WorkRevision } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { keepDelivery, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
+import { writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
-import { getRun } from "~/server/runtimes/run-store.server";
+import { getRun, insertRunLine } from "~/server/runtimes/run-store.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
-import { readAgentTaskAttachment } from "./board-read.server";
+import { readAgentTaskAttachment, readAgentTaskSource } from "./board-read.server";
+import { looksFromRunLog, runLooks } from "./page-looks.server";
 import {
   captureTaskPage,
   removeRunPageCaptures,
@@ -1383,6 +1385,97 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(unnamed.text).toMatch(
       /Saved at `\S+\/\.captures\/no\.run\/cap_\S+\/out\/1-desktop\.png` and `\S+\/out\/1-phone\.png`: scratch, and the next capture on this task replaces it\.$/,
     );
+  });
+
+  it("ruling 329: every reader that hands a run a picture writes down what it showed, and a picture of a size, a text read and a read by no run write nothing", async () => {
+    // What an approval of a page rests on is this list. CANARY: drop
+    // `recordRunLooks` from `capture_page`, from the attachment reader or from
+    // the source reader and the matching entry below is missing.
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    await keptDelivery("VIB-1", STAMP, { "post.html": "<p>fake-height:3000</p>", "notes.txt": "plain" });
+    const deps = (runId: string | null) => ({ db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug, runId });
+    await withBrowser("", async () => {
+      await picture("VIB-1", STAMP);
+      const runId = await liveRun("editor");
+      // A source that is a picture: the phone picture's own bytes.
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "reference-phone.png",
+          data: readFileSync(path.join(attachments(), "post.html.capture-phone.png")),
+          title: "The reference at the phone width",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "writer", roleHint: "Writer" },
+          runId: null,
+        },
+        store.dataRoot,
+      );
+      // Two stretches of the page at the desktop width: its top, then its end.
+      await ask("post.html", { runId, view: "desktop" });
+      await ask("post.html", { runId, view: "desktop", from: 2000 });
+      // The picture Viberr kept of the delivery at the phone width.
+      expect("image" in readAgentTaskAttachment(deps(runId), "VIB-1", "post.html.capture-phone.png")).toBe(true);
+      // The kept source, opened as an image.
+      expect("image" in readAgentTaskSource(deps(runId), "VIB-1", "S1")).toBe(true);
+      // None of these is a look: a picture of a size somebody chose, a file
+      // read as text, the list of sources, and a picture handed to no run.
+      await ask("post.html", { runId, width: 600, height: 400 });
+      readAgentTaskAttachment(deps(runId), "VIB-1", "notes.txt");
+      readAgentTaskSource(deps(runId), "VIB-1", undefined);
+      readAgentTaskAttachment(deps(null), "VIB-1", "post.html.capture-desktop.png");
+      expect(runLooks(store.db, runId)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 2000, end: false, delivery: null },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 2000, to: 3000, end: true, delivery: null },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "source", task: "VIB-1", id: "S1" },
+      ]);
+
+      // A Claude run that opens the kept pictures with its own file reader has
+      // looked too: its log holds the read and the image it was handed.
+      // CANARY: count a read whose result is an error, or text, as a look.
+      const reader = await liveRun("proofreader");
+      type Handed =
+        | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
+        | { type: "text"; text: string };
+      type Block =
+        | { type: "tool_use"; id: string; name: "Read"; input: { file_path: string } }
+        | { type: "tool_result"; tool_use_id: string; is_error: boolean; content: Handed[] };
+      interface Envelope {
+        type: "assistant" | "user";
+        message: { content: Block[] };
+      }
+      const line = (seq: number, envelope: Envelope) =>
+        insertRunLine(store.db, {
+          runId: reader,
+          seq,
+          occurredAt: new Date().toISOString(),
+          raw: JSON.stringify(envelope),
+          display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+        });
+      const read = (id: string, file: string): Envelope => ({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id, name: "Read", input: { file_path: file } }] },
+      });
+      const handed = (id: string, content: Handed[], isError = false): Envelope => ({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: id, is_error: isError, content }] },
+      });
+      const image: Handed[] = [{ type: "image", source: { type: "base64", media_type: "image/png", data: "" } }];
+      const sources = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "sources");
+      line(100, read("t1", path.join(attachments(), "post.html.capture-desktop.png")));
+      line(101, handed("t1", image));
+      line(102, read("t2", path.join(sources, "S1.png")));
+      line(103, handed("t2", image));
+      line(104, read("t3", path.join(attachments(), "post.html.capture-phone.png")));
+      line(105, handed("t3", [{ type: "text", text: "File does not exist." }], true));
+      line(106, read("t4", path.join(attachments(), "notes.txt")));
+      line(107, handed("t4", [{ type: "text", text: "plain" }]));
+      expect(looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: reader })).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "source", task: "VIB-1", id: "S1" },
+      ]);
+    });
   });
 
   it("makes, shares and removes nothing through a link where a render's scratch would go, and says the scratch could not be made", async () => {

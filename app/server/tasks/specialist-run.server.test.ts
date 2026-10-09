@@ -2240,6 +2240,102 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(await review(LATER)).toContain("Unchanged: `cover.png`, `post.md`. An unchanged file is the file you judged");
   });
 
+  it("ruling 329: a run that may approve a delivered page is told what its approval owes a look at, on both backends", async () => {
+    // The rule is said before the review starts, so no reviewer learns it
+    // from a verdict that did not bind. CANARY: drop the note from the
+    // collaboration notes, or say it to a delivery that holds no page.
+    const { updateTaskFile } = await import("~/server/files/task-writer.server");
+    const { writeTaskAttachment } = await import("~/server/files/task-attachments.server");
+    const { writeTaskSource } = await import("~/server/files/task-sources.server");
+    const DELIVERED = "2026-10-09T22:40:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    for (const name of ["index.html", "styles.css", "notes.md"]) {
+      writeTaskAttachment(store.slug, "VIB-1", name, new TextEncoder().encode(name), store.dataRoot);
+    }
+    const stretch = (view: "desktop" | "phone", n: number) =>
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: `${view}-${n}.png`,
+          data: Buffer.from(`${view} ${n}`),
+          title: `${view} ${n}`,
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view, from: 0, to: 2000, pageHeight: 2000 },
+        },
+        store.dataRoot,
+      );
+    const prompt = async (profileId: string, files: string[], delivers = false) => {
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.workRevision = null;
+        parsed.frontmatter.deliveredAt = DELIVERED;
+        parsed.frontmatter.verdicts = [];
+        parsed.frontmatter.engagements = [
+          { profileId: "dev", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          { profileId: "critic", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
+        ];
+        parsed.timeline = [
+          {
+            occurredAt: DELIVERED,
+            type: "comment" as const,
+            actor: { kind: "agent" as const, backend: "claude" as const, profileId: "dev", roleHint: "Implementation" },
+            title: null,
+            text: "Saved on the task.",
+            toAgent: false,
+            evidence: null,
+            attachments: files,
+          },
+        ];
+      });
+      const run: Parameters<typeof startAgentRun>[1] = { projectSlug: store.slug, taskKey: "VIB-1", profileId };
+      if (delivers) run.delivers = true;
+      await startAgentRun(store.db, run, actorOf(store.users.arda), { dataRoot: store.dataRoot });
+      return specs.at(-1)!.prompt;
+    };
+    const PAGE =
+      "- An approval here binds only from a run that looked. Before you approve, look at `index.html`, whole, at the desktop width (1280 px) and at the phone width (390 px)";
+    const LOOK = ", and at every picture of https://example.com/ as this task kept it on 2026-10-09 (S1 to S3). ";
+    for (const backend of ["claude", "codex"] as const) {
+      const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
+      writeProject(store.dataRoot, {
+        ...file.parsed.frontmatter,
+        repo: null,
+        agents: ["dev", "critic"].map((profileId) => ({
+          profileId,
+          capabilities:
+            profileId === "critic" ? [{ capabilityId: "report-validation-verdict", mode: "direct" as const }] : [],
+          extras: [],
+          definition: {
+            kind: "specialist" as const,
+            name: profileId,
+            role: "reviewer",
+            backends: [backend],
+            model: backend === "codex" ? "gpt-5-codex" : "claude-sonnet-4-5",
+          },
+        })),
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // A page and no look kept: the page alone.
+      const page = await prompt("critic", ["index.html", "styles.css"]);
+      expect(page, backend).toContain(`${PAGE}. A page is looked at with \`capture_page\``);
+      expect(page, backend).not.toContain("kept pictures section by section");
+      // Prose and its notes: an approval there owes no look, and none is asked.
+      expect(await prompt("critic", ["notes.md"]), backend).not.toContain("binds only from a run that looked");
+    }
+    // With a look kept on the task, every stretch of it is owed too, and the
+    // page is judged against those pictures.
+    stretch("desktop", 1);
+    stretch("desktop", 2);
+    stretch("phone", 1);
+    const withLook = await prompt("critic", ["index.html"]);
+    expect(withLook).toContain(`${PAGE}${LOOK}`);
+    expect(withLook).toContain("never the address as it reads today and never anyone's description of it");
+    // The run that delivers judges nothing, and is told nothing about approving.
+    expect(await prompt("dev", ["index.html"], true)).not.toContain("binds only from a run that looked");
+  });
+
   it("ruling 201: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {
     // A task can hold hundreds of files and a name can be as long as its
     // maker liked. Only the unchanged list is counted: a changed, new or

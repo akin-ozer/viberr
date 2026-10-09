@@ -407,6 +407,8 @@ function readContext(input: BoardCallContext) {
     ctx: input.mount.dataRoot ? { dataRoot: input.mount.dataRoot } : {},
     projectSlug: input.projectSlug,
     readerKbs: input.readerKbs,
+    // Ruling 329: a picture this run is handed is a look of its own.
+    runId: input.runId,
   };
 }
 

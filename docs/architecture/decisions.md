@@ -1,7 +1,7 @@
 # Binding decisions
 
 The owner's binding decisions for Viberr, stated as they hold today: the conventions every
-change follows, then 326 numbered rulings grouped by topic. Code comments, tests,
+change follows, then 328 numbered rulings grouped by topic. Code comments, tests,
 agent prompts and the other pages cite a ruling as "ruling N". The reference pages listed
 in [`../README.md`](../README.md) describe how the system works; a ruling records what was
 decided, so a change that would break one is re-ruled first, never made silently.
@@ -30,9 +30,9 @@ Commits and pull requests older than this numbering cite the earlier one, which
 - **Tasks** (44–83)
   - [Task lifecycle, holds and file leases](#task-lifecycle-holds-and-file-leases): 44–61
   - [Decisions, conversation and notifications](#decisions-conversation-and-notifications): 62–75
-  - [Attachments, sources and the cost record](#attachments-sources-and-the-cost-record): 76–83
+  - [Attachments, sources and the cost record](#attachments-sources-and-the-cost-record): 76–83, 327
 - **Review and acceptance** (84–105)
-  - [Deliveries, verdicts and reviewers](#deliveries-verdicts-and-reviewers): 84–91
+  - [Deliveries, verdicts and reviewers](#deliveries-verdicts-and-reviewers): 84–91, 329
   - [Review deadlock](#review-deadlock): 92–94
   - [Acceptance](#acceptance): 95–105
 - **The operator** (106–136)
@@ -858,6 +858,10 @@ Each task keeps sources under `projects/<slug>/tasks/<KEY>/sources/`, readable b
 
 `whatItTook` (`app/server/tasks/what-it-took.server.ts`) is derived on read from the task's `agent_runs` rows and file, never stored: runs (started rows, the operator's included) and agent minutes over ended runs, with cut, running and queued runs counted apart; cost as the sum of reported dollars, null and never zero when none was reported, unreported runs counted by backend; asked rounds (decision entries by a person or the controller, plus one for an open packet that does not offer acceptance); sent back (quality notes titled exactly "Changes requested", `VERDICT_NOTE_TITLE.changesRequested`, plus a person's backward stage moves); and wall-time spans with agent and person-wait minutes. Every project member sees it on the completion card's "What it took" row; the operator snapshot and the controller's `get_task` carry the whole figure, `list_tasks` a line per task with `withWhatItTook: true`; specialists get nothing. A failed read leaves it out and never fails the task read.
 
+### 327. A task keeps how a page on the web looked
+
+A result made to look like a page on the web is judged against pictures of that page kept on the task, never against the address as it reads on the day of the review and never against anyone's description of it. A source may be part of a look (`look` on its line of the sources index, `SourceLook` in `app/server/files/task-sources.server.ts`): the address, when it was pictured, and what the source is of it, a stretch of the page at the desktop width (1280 px) or the phone width (390 px) with where it starts and ends, a frame of its first screen while it moved, or the note of what moved. The sources of one look share its address and its date, are listed and opened like any other source (ruling 82), from this task or another in the project, and are what a reviewer's approval owes a look at (ruling 329).
+
 ## Deliveries, verdicts and reviewers
 
 What a review judges, which runs deliver and which judge, how a verdict is recorded, who must review, and where a task goes when its work changes after a verdict.
@@ -888,6 +892,7 @@ Whether a run may record a verdict is decided per run (`collab` in `app/server/t
 - A run dispatched with `withholdVerdict` (the deadlock question, `run_agent`'s `noVerdict`) gets no verdict field or prompt line on Claude, and `agent_runs.verdict_withheld` makes completion record no verdict from it: a verdict its Codex envelope fills anyway (the schema is static) is discarded, and the prose fallback does not run; its answer gets no "re-run the review" note unless it had no checkout. The engagement is untouched: the reviewer stays verdict-capable and required.
 - A run whose workspace could not be provisioned records no verdict (`agent_runs.no_checkout`), and its note names the missing checkout.
 - The prose classifier is a fallback for silence only, never for a run that asked a question.
+- An `approve` of a delivered page is recorded only from a run that looked at it (ruling 329).
 
 ### 88. A reviewer's newest verdict replaces its last, and points at a whole report
 
@@ -908,6 +913,14 @@ The return is automatic, with a `transition` event and a `task.transition` row, 
 ### 91. On the Standard template the operator moves work into Review, and acceptance is the person's gate
 
 `GOVERNED_TEMPLATE` (`app/shared/workflow/templates.ts`) declares In Progress → Review `auto`, by "Operator, when the work is ready for review" (`TEMPLATE_REVIEW_ENTRY_BY`): the operator moves a task into Review itself under either autonomy, and Review → Done stays `human` and locked. A board that declares the move `approval` still gets a card (ruling 111), and project creation's strict policy preset makes it `approval`. At boot `convertTemplateReviewEntry` turns that edge `auto` on a non-strict board where it is an `approval` in project creation's own wording, audited `project.policy.boundary_changed`; an approval a person chose is untouched. `transitionStage` quotes the operator's reason under its `transition` event. The card and nudge around this move are ruling 126's.
+
+### 329. An approval of a page binds only from a run that looked at it
+
+A files delivery that holds a page is judged from pictures, and an `approve` is recorded only from a run that was shown them. Every reader that hands a run a picture writes down what it showed on the run's row (`agent_runs.looked_json`, `recordRunLooks` in `app/server/tasks/page-looks.server.ts`): each stretch `capture_page` returns (the page, the width, where it starts and ends, whether the page ends there), a picture Viberr kept of the delivery opened with `read_task_attachment`, and a kept source opened as an image with `read_task_source`. A Claude run that opens a kept picture or a kept source with its own file reader has looked too, read from its log (`looksFromRunLog`).
+
+At completion, an `approve` on a files delivery is checked against what it owes (`pageLooksOwed`, `unmetPageLooks`): each HTML page the task's deliverer saved, as the kept delivery holds it, seen from its top to its end with no gap at the desktop width and at the phone width; and every stretch of every look the task keeps (ruling 327). A picture taller than a stretch (`PAGE_LOOK_MAX_PX`, 2,000 px) is not a look: a model is handed it shrunk until its words cannot be read, so a kept picture of a long page does not stand in for reading the page in stretches. A kept picture counts only for the delivery it is of. When something owed was not opened the verdict is not recorded, nothing binds, and a note titled "Approval not recorded" names each thing the run did not open and says the review runs again; a check that cannot be made is answered the same way. A `request_changes` owes no look. Markdown owes none either: Viberr sets it as an article in its own type, so a board that delivers prose reads its notes as text.
+
+A run that may approve is told what its approval owes before it starts (`pageLooksNote`, in the collaboration notes on both backends), so the rule is never learned from a verdict that did not bind. A delivery that is a revision owes nothing here: its pages are not pictured (ruling 86).
 
 ## Review deadlock
 

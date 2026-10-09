@@ -98,6 +98,9 @@ export type AgentRunRow = {
    *  column existed. What a setting cost is read from here, never from the
    *  deployment as it stands later. */
   effort: string | null;
+  /** Ruling 329: what the run was shown, as the JSON list `page-looks.server.ts`
+   *  writes and reads. Null on a run that looked at nothing. */
+  looked_json: string | null;
   /** Ruling 87 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
    *  not read the work judges nothing — the completion pipeline closes the
@@ -404,6 +407,9 @@ export interface RunPatch {
   compactions?: number;
   /** Ruling 172: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
+  /** Ruling 329: see `AgentRunRow.looked_json`. Written whole each time a
+   *  reader hands the run a picture. */
+  lookedJson?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -441,6 +447,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     lastPromptTokens: ["last_prompt_tokens", patch.lastPromptTokens],
     compactions: ["compactions", patch.compactions],
     credentialKind: ["credential_kind", patch.credentialKind],
+    lookedJson: ["looked_json", patch.lookedJson],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

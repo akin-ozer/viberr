@@ -27,6 +27,7 @@ import { listProjectTasks } from "~/server/projections/board-query.server";
 import { pageEnd, READ_PAGE_BYTES } from "~/server/runtimes/read-page-budget.server";
 import { completionPacketText, currentCompletionPacket } from "./completion-packet.server";
 import { readCorrectionOfEntry, type CorrectionReading } from "./kb-correction-actions.server";
+import { keptPictureLook, recordRunLooks } from "./page-looks.server";
 import type { TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -67,6 +68,9 @@ export interface BoardReadContext {
   /** Ruling 211: the knowledge bases the reader is given, "all" for a
    *  person's controller; a correction to one of them reads whole. */
   readerKbs?: readonly string[] | "all";
+  /** Ruling 329: the run that reads, when one does. A picture it is handed is
+   *  written down as a look of that run's. */
+  runId?: string | null;
 }
 
 /**
@@ -350,6 +354,12 @@ export function readAgentTaskAttachment(
   if (!read) return { text: noSuchAttachment(deps, key, name) };
   if ("unreadable" in read) return { text: `[noop] ${read.unreadable}` };
   if (read.kind === "image") {
+    // Ruling 329: one of the pictures Viberr kept of the task's delivery, as
+    // the folder holds it now, is a look at that page.
+    if (deps.runId && !delivery) {
+      const look = keptPictureLook(deps.ctx, deps.projectSlug, key, read.name);
+      if (look) recordRunLooks(deps.db, deps.runId, [look]);
+    }
     return { header: attachmentImageHeader(key, read), image: { data: read.data, mimeType: read.mimeType } };
   }
   const { kind: _text, ...body } = read;
@@ -416,6 +426,8 @@ export function readAgentTaskSource(
   const { source, content } = read;
   if ("unreadable" in content) return { text: `[noop] ${content.unreadable}` };
   if (content.kind === "image") {
+    // Ruling 329: a kept source opened as a picture is a look at it.
+    recordRunLooks(deps.db, deps.runId, [{ kind: "source", task: key, id: source.id }]);
     const kb = Math.max(1, Math.round(content.bytes / 1024));
     return {
       header:

@@ -1392,6 +1392,26 @@ async function dispatchAgentRun(
       });
     }
   }
+  // Ruling 329: a run that may approve is told, before it starts, what an
+  // approval of this delivery owes a look at, so the rule is never learned
+  // from a verdict that did not bind. Advice, like the note above: nothing in
+  // building it may stop the review.
+  if (realBackend && collab.verdict) {
+    try {
+      // Imported dynamically, like every reach from this module into the
+      // task-action modules (ruling 13).
+      const { pageLooksNote, pageLooksOwed } = await import("./page-looks.server");
+      const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, existing.parsed);
+      if (owed) collabNotes.push(pageLooksNote(owed));
+    } catch (error) {
+      logger.warn("the note on what an approval owes a look at could not be built", {
+        projectSlug: input.projectSlug,
+        taskKey: input.taskKey,
+        profileId: engagement.profileId,
+        err: toError(error),
+      });
+    }
+  }
   // Ruling 210 (F40-53): a knowledge-base line this run proves wrong has a
   // channel now, and the run is told which. Claude files it with the tool the
   // KB grant mounts, and Codex with the same tool on the gateway's knowledge

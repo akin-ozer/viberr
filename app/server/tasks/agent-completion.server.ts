@@ -173,6 +173,14 @@ import {
   requestDeliveryCaptures,
 } from "./page-capture.server";
 import { recordedPageCaptures } from "~/shared/page-capture";
+import {
+  PAGE_LOOKS_NOTE_TITLE,
+  looksFromRunLog,
+  pageLooksOwed,
+  pageLooksRefusalNote,
+  runLooks,
+  unmetPageLooks,
+} from "./page-looks.server";
 
 /**
  * The agent's most-recent reply comment text on a task, or null when it has
@@ -2080,6 +2088,42 @@ export async function applyAgentCompletionEffects(
         );
       }
     }
+    // Ruling 329: an approval of a page binds only from a run that looked at
+    // it. What the run was shown is on its row (the readers wrote it down as
+    // they handed it each picture), and for a Claude run in its log, where
+    // its own file reader opened one of the kept pictures. A check that cannot
+    // be made is an approval that cannot be shown to rest on a look, so it is
+    // not recorded either, and the note says so.
+    let unlooked: string[] = [];
+    if (verdict === "approve" && completionFile) {
+      try {
+        const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, completionFile);
+        if (owed) {
+          const looks = [
+            ...runLooks(db, finished.id),
+            ...(input.backend === "claude"
+              ? looksFromRunLog(db, ctx, { projectSlug: input.projectSlug, taskKey: input.taskKey, runId: finished.id })
+              : []),
+          ];
+          unlooked = unmetPageLooks(owed, looks);
+        }
+      } catch (error) {
+        logger.error("what a reviewing run looked at could not be read", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          err: toError(error),
+        });
+        unlooked = ["what it judged (Viberr could not read what this run was shown)"];
+      }
+      if (unlooked.length > 0) {
+        logger.info("an approval was not recorded: the run did not look at what it judged", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          unlooked,
+        });
+        verdict = null;
+      }
+    }
     // P11-26: question authority deliberately uses the LIVE ask grant, not the
     // engage-time snapshot the verdict path uses. The snapshot exists ONLY for
     // verdicts, where a live-grant read would let a removed grant leave a task
@@ -2176,7 +2220,22 @@ export async function applyAgentCompletionEffects(
     const noteText = readNothing
       ? "This review run had no checkout of the repository, so it read nothing and recorded no verdict. Validation is unchanged and acceptance stays gated. The workspace failure is on the server, not on the agent: fix that first, then run the review again."
       : "The reviewer finished without a readable verdict, so validation is unchanged and acceptance stays gated. Re-run the review or record a verdict manually.";
-    if (
+    if (unlooked.length > 0) {
+      // Ruling 329: the run did state a verdict, so the note says why it does
+      // not stand, wherever the task is and whoever asked for the review.
+      try {
+        await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
+          title: PAGE_LOOKS_NOTE_TITLE,
+          text: pageLooksRefusalNote(deployedName ?? agentRoleDisplay(actorRef), unlooked),
+        });
+      } catch (noteError) {
+        logger.error("could not write the note on an approval that did not bind", {
+          taskKey: input.taskKey,
+          runId: finished.id,
+          err: toError(noteError),
+        });
+      }
+    } else if (
       verdictAuthorized &&
       !verdict &&
       (!question || readNothing) &&

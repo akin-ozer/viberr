@@ -868,7 +868,8 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const read = readAgentTaskAttachment(
-              { db, ctx, projectSlug },
+              // Ruling 329: a picture this run is handed is a look of its own.
+              { db, ctx, projectSlug, runId: runIdForOutcomeKey(db, outcomeKey) },
               args.taskKey?.trim() || taskKey,
               args.name,
               args.offset ?? 0,
@@ -896,7 +897,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const read = readAgentTaskSource(
-              { db, ctx, projectSlug },
+              { db, ctx, projectSlug, runId: runIdForOutcomeKey(db, outcomeKey) },
               args.taskKey?.trim() || taskKey,
               args.id,
               args.offset ?? 0,
