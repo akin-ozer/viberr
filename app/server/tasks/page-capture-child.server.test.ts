@@ -44,6 +44,42 @@ const motionSchema = z.strictObject({
   onScroll: z.number(),
   hover: z.array(z.strictObject({ what: z.string(), changes: z.array(z.string()), durationMs: z.number().nullable() })),
 });
+/** How a page measures: on every page of a measured job. */
+const measuredSchema = z.strictObject({
+  views: z.array(
+    z.strictObject({
+      view: z.string(),
+      faults: z.strictObject({
+        ran: z.boolean(),
+        why: z.string().nullable(),
+        kinds: z.array(
+          z.strictObject({
+            id: z.string(),
+            impact: z.string().nullable(),
+            help: z.string(),
+            count: z.number(),
+            first: z.array(z.string()),
+          }),
+        ),
+        worstContrast: z.strictObject({ ratio: z.number(), text: z.string() }).nullable(),
+      }),
+      keyboard: z.strictObject({
+        controls: z.number(),
+        stops: z.number(),
+        unreached: z.array(z.string()),
+        unmarked: z.array(z.string()),
+      }),
+      reduced: z.strictObject({
+        runningCount: z.number(),
+        running: z.array(z.strictObject({ name: z.string(), target: z.string(), loops: z.boolean() })),
+        videosPlaying: z.number(),
+      }),
+    }),
+  ),
+  weight: z.strictObject({ bytes: z.number(), files: z.number() }),
+  loadMs: z.number().nullable(),
+  line: z.string(),
+});
 const reportSchema = z.object({
   pages: z.array(
     z.object({
@@ -58,6 +94,7 @@ const reportSchema = z.object({
       missing: z.array(z.string()),
       error: z.string().nullable(),
       motion: motionSchema.optional(),
+      measured: measuredSchema.optional(),
     }),
   ),
 });
@@ -115,6 +152,10 @@ interface Bench {
     mode?: string;
     pageTimeoutMs?: number;
     maxBytes?: number;
+    /** Measure each page too. */
+    measure?: boolean;
+    /** The accessibility engine's script, by its path. */
+    axe?: string;
   }): Promise<Report>;
 }
 
@@ -146,6 +187,8 @@ function bench(files: Record<string, string>): Bench {
         views: input.views ?? [DESKTOP, PHONE],
         pageTimeoutMs: input.pageTimeoutMs ?? 20_000,
         maxBytes: input.maxBytes ?? 3_750_000,
+        measure: input.measure,
+        axe: input.axe,
       };
       return new Promise((resolve, reject) => {
         // The job goes in on the child's standard input, as the server
@@ -1129,3 +1172,216 @@ describe("a page on the web, pictured by the renderer child (ruling 327)", () =>
     expect(acted.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-docs-a.png"]);
   });
 });
+
+describe("a measured page, read by the renderer child (ruling 328)", () => {
+  /** A stand-in for axe-core's script. The stand-in browser answers the
+   *  engine's findings only once a script holding these words was run in the
+   *  page, as a real page has no `axe` until the real script was. */
+  function engineIn(b: Bench): string {
+    const file = path.join(path.dirname(b.root), "axe.min.js");
+    writeFileSync(file, "/* fake-engine */ window.axe = {};");
+    return file;
+  }
+  const measuredOf = (report: Report) => report.pages[0]!.measured!;
+
+  it("runs the accessibility engine the job names in a page and reports its findings by kind, the gravest first, with the lowest contrast it found failing", async () => {
+    const faint = "A line so faint it is hard to read, and long enough that a report must cut it at eighty characters";
+    const findings = [
+      ...Array.from({ length: 19 }, (_, at) => ({ id: `rule-${at}`, impact: "minor", help: `Rule ${at}`, count: 1, nodes: [{ target: `#n${at}` }] })),
+      {
+        id: "color-contrast",
+        impact: "serious",
+        help: "Elements must meet minimum color contrast ratio thresholds",
+        count: 3,
+        nodes: [
+          { target: ".soft", ratio: 2.32, text: "Soft" },
+          { target: ".faint", ratio: 1.6, text: faint },
+          { target: ".near", ratio: 4.1, text: "Nearly there" },
+        ],
+      },
+      {
+        id: "image-alt",
+        impact: "critical",
+        help: "Images must have alternative text",
+        count: 5,
+        nodes: ["a", "b", "c", "d"].map((name) => ({ target: `img[src$="${name}.png"]` })),
+      },
+    ];
+    const b = bench({ "page.html": `<p>fake-axe:${JSON.stringify(findings)}</p>`, "throws.html": '<p>fake-axe-throws:"axe gave up"</p>' });
+    const report = await b.run({ pages: ["page.html", "throws.html"], views: [DESKTOP], measure: true, axe: engineIn(b) });
+    expect(report.pages[0]).toMatchObject({ error: null });
+    const { faults } = measuredOf(report).views[0]!;
+    expect(faults).toMatchObject({ ran: true, why: null });
+    // Twenty kinds at most, the gravest first, so the cap never drops the
+    // worst of them; three places each. CANARY: hand on the engine's own
+    // order and its first twenty and the two that matter most, which the
+    // engine lists last here, are the two that are cut.
+    expect(faults.kinds).toHaveLength(20);
+    expect(faults.kinds.slice(0, 3)).toEqual([
+      {
+        id: "image-alt",
+        impact: "critical",
+        help: "Images must have alternative text",
+        count: 5,
+        first: ['img[src$="a.png"]', 'img[src$="b.png"]', 'img[src$="c.png"]'],
+      },
+      {
+        id: "color-contrast",
+        impact: "serious",
+        help: "Elements must meet minimum color contrast ratio thresholds",
+        count: 3,
+        first: [".soft", ".faint", ".near"],
+      },
+      { id: "rule-0", impact: "minor", help: "Rule 0", count: 1, first: ["#n0"] },
+    ]);
+    // The lowest ratio among the contrast finding's own places, and the
+    // words it is on. CANARY: take the first place's and this is 2.32.
+    expect(faults.worstContrast).toEqual({ ratio: 1.6, text: faint.slice(0, 80) });
+
+    // An engine that throws in a page is said not to have run there, and
+    // costs the page nothing. CANARY: let its failure reject the page's work
+    // (`measureView`) and the page carries "axe gave up" as its own error.
+    const [, thrown] = report.pages;
+    expect(thrown).toMatchObject({ file: "throws.html", error: null });
+    expect(thrown!.shots).toHaveLength(1);
+    expect(thrown!.measured!.views[0]!.faults).toEqual({ ran: false, why: "Error: axe gave up", kinds: [], worstContrast: null });
+
+    // The engine is the job's to name: with none named, or one that is not
+    // there to read, the check is said not to have run. CANARY: ask for the
+    // findings without running the engine's script in the page first and the
+    // run above says the same of an engine that was named and is there.
+    const none = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
+    expect(none.pages[0]).toMatchObject({ error: null });
+    expect(measuredOf(none).views[0]!.faults).toEqual({ ran: false, why: "no accessibility engine is installed", kinds: [], worstContrast: null });
+    const unread = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true, axe: path.join(b.root, "no-such-engine.js") });
+    expect(measuredOf(unread).views[0]!.faults).toEqual({
+      ran: false,
+      why: "the accessibility engine could not be read",
+      kinds: [],
+      worstContrast: null,
+    });
+  });
+
+  it("walks a page with real presses of Tab and says which of the controls a keyboard should reach it never reached, and which took focus with no change of look", async () => {
+    const b = bench({
+      "page.html": [
+        '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Pricing"],["input","Email"],["a","Legal"]]</p>',
+        // Tab stops on four of the five, and two of those do not show it.
+        "<p>fake-tab-order:[0,1,2,3]</p>",
+        "<p>fake-unmarked:[1,3]</p>",
+      ].join("\n"),
+      "many.html": [
+        `<p>fake-controls:${JSON.stringify(Array.from({ length: 100 }, (_, at) => ["a", `Link ${at}`]))}</p>`,
+        `<p>fake-tab-order:${JSON.stringify(Array.from({ length: 100 }, (_, at) => at))}</p>`,
+      ].join("\n"),
+    });
+    const report = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
+    expect(report.pages[0]).toMatchObject({ error: null });
+    expect(measuredOf(report).views[0]!.keyboard).toEqual({
+      controls: 5,
+      stops: 4,
+      unreached: ['a "Legal"'],
+      unmarked: ['button "Menu"', 'input "Email"'],
+    });
+    // Real key events: four stops, and the press that takes focus off the
+    // page, where the walk ends. CANARY: move focus from a script and
+    // `:focus-visible` never holds, so every control would look unmarked;
+    // here the stand-in's focus would not move at all.
+    const tabs = b.browser.inputs().filter((input) => input.type === "rawKeyDown");
+    expect(tabs).toHaveLength(5);
+    expect(tabs[0]).toEqual({ method: "Input.dispatchKeyEvent", type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    // The controls are noted, with their look at rest, before the page is
+    // walked: the walk is what a reader does next. CANARY: note them after
+    // the walk and these two change places.
+    const measuring = b.browser.asks().slice(1).map((asked) => asked.ask);
+    expect(measuring.slice(0, 2)).toEqual(["controls", "walk"]);
+
+    // Eighty presses at most. A walk that was cut there has not been round
+    // the page, so it names nothing as never reached: twenty of these links
+    // would be, and every one of them can be. CANARY: list what the cut walk
+    // did not get to and `unreached` names six links a keyboard reaches.
+    const many = await b.run({ pages: ["many.html"], views: [DESKTOP], measure: true });
+    expect(measuredOf(many).views[0]!.keyboard).toEqual({ controls: 100, stops: 80, unreached: [], unmarked: [] });
+  });
+
+  it("measures a page only once every view of it is pictured, on loads of its own: what still runs with reduced motion asked for, what one load of it weighs, and how long it takes to load on a slow line", async () => {
+    const reduced = [
+      { name: "spin", target: "div.loader", durationMs: 1200, loops: true },
+      // Over in under a fifth of a second: not what reduced motion is for.
+      { name: "opacity", target: "a.link", durationMs: 150, loops: false },
+      { name: "slide", target: "div.hero", durationMs: 600, loops: false },
+      // Driven by the scroll: it has no length in time.
+      { name: "grow", target: "div.bar", durationMs: null, loops: false },
+    ];
+    const page = [
+      '<img src="chart.png"><img src="gone.png">',
+      `<p>fake-animations:${JSON.stringify([...reduced, { name: "pulse", target: "i.dot", durationMs: 900, loops: true }])}</p>`,
+      `<p>fake-animations-reduced:${JSON.stringify(reduced)}</p>`,
+      '<p>fake-videos:[{"autoplay":true,"loop":true,"playing":true,"width":640,"height":360},{"autoplay":false,"loop":false,"playing":false,"width":320,"height":180}]</p>',
+      "<p>fake-load-ms:2345</p>",
+    ].join("\n");
+    const b = bench({ "page.html": page, "chart.png": "a picture" });
+    // The page opens an alert at every load: two while it is pictured.
+    const report = await b.run({ pages: ["page.html"], measure: true, mode: "dialog:page.html" });
+    expect(report.pages[0]).toMatchObject({ error: null, dialogs: 2, missing: ["gone.png"] });
+    expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png", "1-phone.png"]);
+    const measured = measuredOf(report);
+    // With reduced motion asked for, a second after the load: what loops or
+    // lasts. CANARY: hand on everything that runs and the count is 4.
+    expect(measured.views.map((view) => view.reduced)).toEqual(
+      Array.from({ length: 2 }, () => ({
+        runningCount: 2,
+        running: [
+          { name: "spin", target: "div.loader", loops: true },
+          { name: "slide", target: "div.hero", loops: false },
+        ],
+        videosPlaying: 1,
+      })),
+    );
+    // One load of the page: the page and the one file it was served.
+    // CANARY: count every load of the job and this is eight times as much.
+    expect(measured.weight).toEqual({ bytes: Buffer.byteLength(page) + 9, files: 2 });
+    // The stand-in reports this time only on a held line with the cache off.
+    // CANARY: load it again as it is and `loadMs` is 1.
+    expect(measured).toMatchObject({ loadMs: 2345, line: "1.6 Mbit/s down, 150 ms" });
+    // A measured page says what moves on it too.
+    expect(report.pages[0]!.motion).toMatchObject({ runningCount: 5 });
+
+    // Every picture first, then the loads a reading makes: each view again
+    // to be measured and once more with reduced motion, one for what moves
+    // (at the desktop's width), and last the slow one, at the phone's.
+    // CANARY: measure a view on the load that pictured it and the phone's
+    // picture waits on the desktop's measuring.
+    expect(b.browser.pages().map((loaded) => [loaded.metrics.width, loaded.reducedMotion])).toEqual([
+      [1280, "no-preference"],
+      [390, "no-preference"],
+      [1280, "no-preference"],
+      [1280, "reduce"],
+      [390, "no-preference"],
+      [390, "reduce"],
+      [1280, "no-preference"],
+      [390, "no-preference"],
+    ]);
+    // The line is held for that last load only, and let go after it.
+    expect(b.browser.emulations().filter((set) => set.method.startsWith("Network."))).toEqual([
+      { method: "Network.setCacheDisabled", cacheDisabled: true },
+      { method: "Network.emulateNetworkConditions", offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750 },
+      { method: "Network.emulateNetworkConditions", offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 },
+      { method: "Network.setCacheDisabled", cacheDisabled: false },
+    ]);
+  });
+
+  it("leaves `loadMs` out when the slow load does not finish in what is left of the page's time, and the page's pictures stand", async () => {
+    // The stand-in never finishes this page's load once the line is held.
+    const b = bench({ "page.html": "<p>fake-slow-line:never</p>" });
+    // CANARY: wait for that load as for any other and the page's own limit
+    // ends it: "the render ran past 6 seconds", for a page that was pictured.
+    const report = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true, pageTimeoutMs: 6_000 });
+    expect(report.pages[0]).toMatchObject({ error: null });
+    expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png"]);
+    expect(measuredOf(report)).toMatchObject({ loadMs: null, line: "1.6 Mbit/s down, 150 ms" });
+    // What was measured before it stands too.
+    expect(measuredOf(report).views[0]!.faults).toMatchObject({ ran: false, why: "no accessibility engine is installed" });
+  });
+});
+

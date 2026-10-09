@@ -77,6 +77,13 @@ import { z } from "zod";
  *    measured job): once every view is pictured, on a load of its own, what
  *    is running a second after the load, what animates in as the page is
  *    scrolled, a bar that stays, and what changes under the pointer.
+ *  - **Measures it** (ruling 328, a job with `measure`, task pages only):
+ *    at each view that is a stretch, what the accessibility engine the job
+ *    names finds, how a keyboard gets round it, and what still moves with
+ *    reduced motion asked for; and once for the page, what one load of it
+ *    weighs and how long it takes on a slow line. All of it after the last
+ *    picture, in what is left of the page's time: a page that cannot be
+ *    measured is still a pictured page.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -289,6 +296,61 @@ interface Motion {
   hover: Array<{ what: string; changes: string[]; durationMs: number | null }>;
 }
 
+/** What the accessibility engine found in a page at one width. */
+interface Faults {
+  /** False when the job named no engine or it could not run; `why` says. */
+  ran: boolean;
+  why: string | null;
+  /** One entry per kind of fault, the gravest first: how many places have
+   *  it, and the first of them as the engine's own selector. */
+  kinds: Array<{ id: string; impact: string | null; help: string; count: number; first: string[] }>;
+  /** The lowest contrast it found failing, and the words it is on. */
+  worstContrast: { ratio: number; text: string } | null;
+}
+
+/** How a keyboard gets round a page at one width. */
+interface Keyboard {
+  /** The visible controls a keyboard should reach. */
+  controls: number;
+  /** How many Tab stopped on. */
+  stops: number;
+  /** Controls Tab never reached, each as `tag "its words"`. */
+  unreached: string[];
+  /** Stops whose look did not change when they took focus. */
+  unmarked: string[];
+}
+
+/** What still moves at one width with reduced motion asked for: what loops
+ *  or lasts, a second after the load. */
+interface Reduced {
+  runningCount: number;
+  running: Array<{ name: string; target: string; loops: boolean }>;
+  videosPlaying: number;
+}
+
+interface MeasuredView {
+  view: string;
+  faults: Faults;
+  keyboard: Keyboard;
+  reduced: Reduced;
+}
+
+/** How a page measures (ruling 328): on every page of a measured job, never
+ *  on a page on the web. Whatever could not be measured says so (`ran:
+ *  false`, zeros, null) and costs the page's pictures nothing. */
+interface Measured {
+  /** One entry per view that is a stretch of the page. */
+  views: MeasuredView[];
+  /** What the page server served for one load of the page: the page and
+   *  every file it asked for and got. */
+  weight: { bytes: number; files: number };
+  /** The load event at a phone's width on `SLOW_LINE`, in ms; null when the
+   *  load did not finish in what was left of the page's time. */
+  loadMs: number | null;
+  /** How that line reads. */
+  line: string;
+}
+
 /** One page as the report states it. */
 interface PageReport {
   file: string;
@@ -307,6 +369,7 @@ interface PageReport {
   missing: string[];
   error: string | null;
   motion?: Motion;
+  measured?: Measured;
 }
 
 /** A markdown source past this is not set as a page. */
@@ -357,6 +420,26 @@ const ON_SCROLL_SCREENS = 40;
 const ON_SCROLL_STOP_MS = 250;
 /** How far down a page is sent to see what stays at the top of the screen. */
 const STICKY_SCROLL_PX = 600;
+/** How much of what a page measures a report names: kinds of fault and the
+ *  places of each, the controls a keyboard missed or left unmarked, what
+ *  still runs under reduced motion. */
+const FAULT_KINDS_MAX = 20;
+const FAULT_FIRST_MAX = 3;
+const KEYBOARD_NAMES_MAX = 6;
+const REDUCED_RUNNING_MAX = 6;
+/** The standards a page is checked against: WCAG 2.2, levels A and AA. */
+const FAULT_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
+/** The engine's words for how grave a fault is, the gravest first. */
+const FAULT_IMPACTS = ["critical", "serious", "moderate", "minor"];
+/** The most presses of Tab a keyboard walk makes. */
+const TAB_PRESSES_MAX = 80;
+/** Under reduced motion, an animation that lasts longer than this or never
+ *  ends is still motion; a shorter one is a change of state. */
+const LASTING_MS = 200;
+/** The line a page's load is timed on, in the browser's own terms (ms, and
+ *  bytes a second each way), and how a report says it. */
+const SLOW_LINE = { latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750 };
+const SLOW_LINE_READS = "1.6 Mbit/s down, 150 ms";
 /** What no one step of reading a page may run past, so that a slow one leaves
  *  time for the rest, and how much of a page's time is kept back for ending
  *  its browser and writing the report. */
@@ -557,7 +640,15 @@ interface PageServer {
    *  asked for and not served. */
   begin(setPage: string | null): void;
   missing(): string[];
+  /** What it has served since `begin`: how many answers that carried a file
+   *  or the set page, and their bytes. */
+  served(): Weight;
   close(): Promise<void>;
+}
+
+interface Weight {
+  bytes: number;
+  files: number;
 }
 
 const listenAddressSchema = z.looseObject({ port: z.number().int().positive() });
@@ -567,6 +658,10 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
   const prefix = `/${token}/`;
   let setPage: string | null = null;
   let missing = new Set<string>();
+  let served: Weight = { bytes: 0, files: 0 };
+  const serve = (bytes: number): void => {
+    served = { bytes: served.bytes + bytes, files: served.files + 1 };
+  };
 
   const refuse = (res: ServerResponse): void => {
     res.writeHead(404, { ...PAGE_HEADERS, "content-type": "text/plain; charset=utf-8" });
@@ -599,6 +694,7 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
     }
     if (name === SET_PAGE_NAME && setPage !== null) {
       res.writeHead(200, { ...PAGE_HEADERS, "content-type": "text/html; charset=utf-8" });
+      if (req.method !== "HEAD") serve(Buffer.byteLength(setPage));
       res.end(req.method === "HEAD" ? undefined : setPage);
       return;
     }
@@ -618,6 +714,7 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
       res.end();
       return;
     }
+    serve(file.size);
     createReadStream("", { fd: file.fd, autoClose: true })
       .on("error", () => res.destroy())
       .pipe(res);
@@ -636,8 +733,10 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
         begin(next) {
           setPage = next;
           missing = new Set();
+          served = { bytes: 0, files: 0 };
         },
         missing: () => [...missing].slice(0, REPORT_LIST_MAX),
+        served: () => served,
         close: () =>
           new Promise((done) => {
             server.closeAllConnections();
@@ -972,14 +1071,141 @@ function findExpression(what: string): string {
   );
 }
 
-/** What holds keyboard focus: nothing while it is on the page itself. */
+/**
+ * How a control looks to someone looking for where focus is: its outline, its
+ * shadow, and the colours and underline a page changes instead of one. The
+ * control's own, its two pseudo-elements' and its parent's, because a ring is
+ * as often drawn by a `::after` or by the box around the control
+ * (`:focus-within`) as by the control itself.
+ */
+const FOCUS_LOOK_SOURCE = `
+  const FOCUS_LOOK = ["outline-style", "outline-width", "outline-color", "box-shadow", "border-color", "background-color", "color", "text-decoration-line"];
+  const focusLook = (el) => {
+    const read = (of, pseudo) => {
+      const style = getComputedStyle(of, pseudo);
+      return FOCUS_LOOK.map((name) => style.getPropertyValue(name)).join("|");
+    };
+    return [read(el), read(el, "::before"), read(el, "::after"), el.parentElement ? read(el.parentElement) : ""].join("||");
+  };
+`;
+
+/**
+ * Note every visible control a keyboard should reach, with its look at rest,
+ * for the walk that follows (`FOCUS_EXPRESSION`). A control is a link with an
+ * address, a button, a form field, a `summary`, or anything given a tab
+ * index. Not one that is disabled, and not one its page took out of the tab
+ * order on purpose (a negative tab index, every radio of a group but the one
+ * Tab stops on): those are reached another way, and would be named as never
+ * reached.
+ */
+const CONTROLS_EXPRESSION = inPage(
+  "controls",
+  {},
+  `${FOCUS_LOOK_SOURCE}
+  const reach = (el) => {
+    if (el.disabled || !visible(el)) return false;
+    const index = el.getAttribute("tabindex");
+    if (index !== null && Number.parseInt(index, 10) < 0) return false;
+    if (tagOf(el) === "input" && el.type === "radio" && el.name) {
+      const group = Array.from(document.querySelectorAll('input[type="radio"]')).filter((radio) => radio.name === el.name && radio.form === el.form);
+      return (group.find((radio) => radio.checked) || group[0]) === el;
+    }
+    return true;
+  };
+  const all = Array.from(document.querySelectorAll("a[href], button, input, select, textarea, summary, [tabindex]")).filter(reach);
+  window[KEPT] = { controls: all, looks: all.map(focusLook), moving: all.map((el) => el.getAnimations().length), stops: [] };
+  return JSON.stringify({ count: all.length, names: all.slice(0, 400).map((el) => tagOf(el) + ' "' + words(el).slice(0, 60) + '"') });
+`,
+);
+
+/**
+ * What holds keyboard focus: nothing while it is on the page itself. On a
+ * page whose controls were noted it also says which of them this is, which
+ * stop of the walk (the first time it is met), and whether its look differs
+ * from its look at rest. A transition that focus started counts as a change:
+ * read this soon, its values are still the ones at rest.
+ */
 const FOCUS_EXPRESSION = inPage(
   "focus",
   {},
-  `
+  `${FOCUS_LOOK_SOURCE}
   const el = document.activeElement;
   if (!el || el === document.body || el === document.documentElement) return JSON.stringify({ on: null });
-  return JSON.stringify({ on: { name: kind(el) + ' "' + words(el).slice(0, ${ACT_NAME_MAX}) + '"' } });
+  const kept = window[KEPT];
+  let control = -1;
+  let stop = -1;
+  let marked = null;
+  if (kept && kept.controls) {
+    control = kept.controls.indexOf(el);
+    stop = kept.stops.indexOf(el);
+    if (stop < 0) stop = kept.stops.push(el) - 1;
+    if (control >= 0) marked = focusLook(el) !== kept.looks[control] || el.getAnimations().length > kept.moving[control];
+  }
+  return JSON.stringify({
+    on: {
+      name: kind(el) + ' "' + words(el).slice(0, ${ACT_NAME_MAX}) + '"',
+      tag: tagOf(el) + ' "' + words(el).slice(0, 60) + '"',
+      control,
+      stop,
+      marked,
+    },
+  });
+`,
+);
+
+/** What marks the accessibility engine's own script when it is run in the
+ *  page: the script defines `window.axe` and is the job's to name. */
+const ENGINE_MARK = "/* viberr:engine {} */\n";
+
+/**
+ * Run the engine over the page as it rests, with nothing holding focus, and
+ * answer with its findings cut down to what a report carries: each kind, how
+ * many places have it, and the first of them. Every place of the contrast
+ * finding is kept, with the ratio the engine measured and the words it is on.
+ */
+const FAULTS_EXPRESSION = inPage(
+  "faults",
+  {},
+  `
+  if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
+  jump(0);
+  const results = await window.axe.run(document, {
+    runOnly: { type: "tag", values: ${JSON.stringify(FAULT_TAGS)} },
+    resultTypes: ["violations"],
+    elementRef: true,
+  });
+  const violations = results.violations.slice(0, 100).map((violation) => ({
+    id: flat(violation.id),
+    impact: violation.impact ? flat(violation.impact) : null,
+    help: flat(violation.help),
+    count: violation.nodes.length,
+    nodes: violation.nodes.slice(0, violation.id === "color-contrast" ? 200 : ${FAULT_FIRST_MAX}).map((node) => {
+      let ratio = null;
+      for (const check of node.any || []) {
+        if (check.id === "color-contrast" && check.data && Number.isFinite(check.data.contrastRatio)) ratio = check.data.contrastRatio;
+      }
+      return {
+        target: flat((node.target || []).flat().join(" ")),
+        ratio,
+        text: node.element ? flat(node.element.innerText || node.element.textContent).slice(0, ${NAME_MAX}) : "",
+      };
+    }),
+  }));
+  return JSON.stringify({ violations });
+`,
+);
+
+/** When the page's load event ended, in ms from the start of its navigation. */
+const LOAD_TIME_EXPRESSION = inPage(
+  "load-time",
+  {},
+  `
+  for (let tries = 0; tries < 10; tries += 1) {
+    const [entry] = performance.getEntriesByType("navigation");
+    if (entry && entry.loadEventEnd > 0) return JSON.stringify({ ms: entry.loadEventEnd });
+    await pause(50);
+  }
+  return JSON.stringify({ ms: null });
 `,
 );
 
@@ -1208,7 +1434,31 @@ const foundSchema = z.object({
   names: z.array(z.string()).optional(),
   more: z.boolean().optional(),
 });
-const focusSchema = z.object({ on: z.object({ name: z.string() }).nullable() });
+const focusSchema = z.object({
+  on: z
+    .object({
+      name: z.string(),
+      tag: z.string(),
+      /** Which of the noted controls it is; -1 when it is none of them. */
+      control: z.number().int(),
+      /** Which stop of the walk; -1 when no walk is under way. */
+      stop: z.number().int(),
+      marked: z.boolean().nullable(),
+    })
+    .nullable(),
+});
+const controlsSchema = z.object({ count: z.number().int().nonnegative(), names: z.array(z.string()) });
+const faultsSchema = z.object({
+  violations: z.array(
+    z.object({
+      id: z.string(),
+      impact: z.string().nullable(),
+      help: z.string(),
+      count: z.number().int().nonnegative(),
+      nodes: z.array(z.object({ target: z.string(), ratio: z.number().nullable().optional(), text: z.string().optional() })),
+    }),
+  ),
+});
 const screenSchema = z.object({ x: z.number(), y: z.number(), href: z.string() });
 
 /** The most screens a whole page is walked. A page that grows as it is
@@ -2003,9 +2253,198 @@ function asRunning(told: z.infer<typeof runningSchema>): Running {
   };
 }
 
+/** The accessibility engine's script as the job named it: its source, or
+ *  why there is none to run. */
+interface Engine {
+  source: string | null;
+  why: string;
+}
+
+function readEngine(file: string | undefined): Engine {
+  if (file === undefined) return { source: null, why: "no accessibility engine is installed" };
+  try {
+    return { source: readFileSync(file, "utf8"), why: "" };
+  } catch {
+    return { source: null, why: "the accessibility engine could not be read" };
+  }
+}
+
+/** A check that did not run, and why. */
+function notRun(why: string): Faults {
+  return { ran: false, why: clip(why, SENTENCE_MAX), kinds: [], worstContrast: null };
+}
+
+/**
+ * The engine's findings in the page as it stands. Its script is run in the
+ * page first (it is the page's `window.axe` from then on), then asked for
+ * what breaks the standards in `FAULT_TAGS`. The kinds come back the gravest
+ * first, then the most widespread, so the cap never drops the worst of them.
+ * Rejects with the reason when the engine cannot run, which `measureView`
+ * reports and the page does not pay for.
+ */
+async function readFaults(study: Study, engine: Engine): Promise<Faults> {
+  const { source } = engine;
+  if (source === null) return notRun(engine.why);
+  await study.budget.within(async () => {
+    const run = evaluatedSchema.parse(
+      await study.ctx.browser.send("Runtime.evaluate", { expression: `${ENGINE_MARK}${source}` }, study.ctx.sessionId),
+    );
+    if (run.exceptionDetails) throw new Error("the accessibility engine's script threw in the page");
+  });
+  const found = await askWithin(study, FAULTS_EXPRESSION, faultsSchema);
+  const grave = (impact: string | null): number => {
+    const at = impact === null ? -1 : FAULT_IMPACTS.indexOf(impact);
+    return at < 0 ? FAULT_IMPACTS.length : at;
+  };
+  let worst: Faults["worstContrast"] = null;
+  for (const node of found.violations.filter((violation) => violation.id === "color-contrast").flatMap((violation) => violation.nodes)) {
+    const ratio = node.ratio ?? null;
+    if (ratio !== null && (worst === null || ratio < worst.ratio)) worst = { ratio, text: clip(node.text ?? "", NAME_MAX) };
+  }
+  return {
+    ran: true,
+    why: null,
+    kinds: found.violations
+      .toSorted((a, b) => grave(a.impact) - grave(b.impact) || b.count - a.count)
+      .slice(0, FAULT_KINDS_MAX)
+      .map((violation) => ({
+        id: clip(violation.id, NAME_MAX),
+        impact: violation.impact === null ? null : clip(violation.impact, NAME_MAX),
+        help: clip(violation.help, SENTENCE_MAX),
+        count: violation.count,
+        first: violation.nodes.slice(0, FAULT_FIRST_MAX).map((node) => clip(node.target, SENTENCE_MAX)),
+      })),
+    worstContrast: worst,
+  };
+}
+
+/**
+ * Walk the page with the keyboard: Tab, with real key events so that
+ * `:focus-visible` holds, until focus comes back to the first stop, leaves
+ * the page, or `TAB_PRESSES_MAX` presses. A stop that looks as it did at rest
+ * is unmarked. A control of `noted` that focus never came to is unreached,
+ * and only a walk that went all the way round can say so: one that was cut
+ * at the last press names none, since what it did not get to may well be
+ * reachable.
+ */
+async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>): Promise<Keyboard> {
+  const stops = new Set<number>();
+  const reached = new Set<number>();
+  const unmarked: string[] = [];
+  let round = false;
+  for (let press = 0; press < TAB_PRESSES_MAX && !round; press += 1) {
+    await study.budget.within(() => pressTab(study.ctx));
+    const focus = (await askWithin(study, FOCUS_EXPRESSION, focusSchema)).on;
+    if (!focus || (focus.stop === 0 && stops.size > 0)) {
+      round = true;
+    } else if (!stops.has(focus.stop)) {
+      stops.add(focus.stop);
+      if (focus.control >= 0) reached.add(focus.control);
+      if (focus.marked === false && unmarked.length < KEYBOARD_NAMES_MAX) unmarked.push(clip(focus.tag, NAME_MAX));
+    }
+  }
+  const missed = round ? noted.names.filter((_, control) => !reached.has(control)) : [];
+  return {
+    controls: noted.count,
+    stops: stops.size,
+    unreached: missed.slice(0, KEYBOARD_NAMES_MAX).map((name) => clip(name, NAME_MAX)),
+    unmarked,
+  };
+}
+
+/** What still runs at a view with reduced motion asked for, a second after a
+ *  load of its own. A page that honours the preference has nothing here. */
+async function readReduced(study: Study, view: JobView): Promise<Reduced> {
+  try {
+    const loadedAt = await study.budget.within(() => openView(study.ctx, { ...view, reduce: true }, 1));
+    await waitWithin(study, loadedAt + SETTLE_MS - Date.now());
+    const moving = await askWithin(study, ANIMATIONS_EXPRESSION, animationsSchema);
+    const lasting = moving.running.map(asRunning).filter((running) => running.loops || (running.durationMs ?? 0) > LASTING_MS);
+    return {
+      runningCount: lasting.length,
+      running: lasting.slice(0, REDUCED_RUNNING_MAX).map(({ name, target, loops }) => ({ name, target, loops })),
+      videosPlaying: moving.videos.filter((video) => video.playing).length,
+    };
+  } catch {
+    return { runningCount: 0, running: [], videosPlaying: 0 };
+  }
+}
+
+/** A view as the report states it before it is measured, and when it could
+ *  not be. */
+function unmeasured(view: JobView): MeasuredView {
+  return {
+    view: view.id,
+    faults: notRun("the page's time ran out before it was measured"),
+    keyboard: { controls: 0, stops: 0, unreached: [], unmarked: [] },
+    reduced: { runningCount: 0, running: [], videosPlaying: 0 },
+  };
+}
+
+/**
+ * Ruling 328: measure the page at one view, on a load of its own that is
+ * taken as the pictured one was: opened, its controls noted before anything
+ * moves, then walked. The keyboard goes round it first and the engine runs
+ * last, since nothing else is asked of that load after it: an engine that is
+ * cut off for time is still at work in the page. What still moves under
+ * reduced motion is read on one more load. Never rejects: whatever part
+ * fails is reported as not measured, with the engine's reason when it was
+ * the engine.
+ */
+async function measureView(study: Study, view: JobView, engine: Engine): Promise<MeasuredView> {
+  const measured = unmeasured(view);
+  try {
+    await study.budget.within(() => openView(study.ctx, view, 1));
+    const noted = await part(askWithin(study, CONTROLS_EXPRESSION, controlsSchema), null);
+    await study.budget.within(() => walkPage(study.ctx, view));
+    if (noted) measured.keyboard = await part(readKeyboard(study, noted), measured.keyboard);
+    measured.faults = await readFaults(study, engine);
+  } catch (caught) {
+    // Measuring never fails a page: the reason is the report's to carry.
+    measured.faults = notRun(caught instanceof Error ? caught.message : String(caught));
+  }
+  measured.reduced = await readReduced(study, view);
+  return measured;
+}
+
+/**
+ * How long the page takes to load on `SLOW_LINE`, with nothing cached: the
+ * end of its load event, as the page's own navigation entry has it. The load
+ * may use all that is left of the page's time, and one that does not finish
+ * in it leaves null, so this is the last thing asked of a page's browser.
+ * The line and the cache are put back whatever happened, and not waited on:
+ * a browser still loading may not answer.
+ */
+async function readLoadMs(study: Study, view: JobView): Promise<number | null> {
+  const { browser, sessionId } = study.ctx;
+  try {
+    await study.budget.within(async () => {
+      await browser.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+      await browser.send("Network.emulateNetworkConditions", { offline: false, ...SLOW_LINE }, sessionId);
+    });
+    await study.budget.within(() => openView(study.ctx, atRest(view), 1), Infinity);
+    const { ms } = await askWithin(study, LOAD_TIME_EXPRESSION, z.object({ ms: z.number().nullable() }));
+    return ms === null ? null : Math.max(0, Math.round(ms));
+  } catch {
+    return null;
+  } finally {
+    browser
+      .send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }, sessionId)
+      .catch(() => {});
+    browser.send("Network.setCacheDisabled", { cacheDisabled: false }, sessionId).catch(() => {});
+  }
+}
+
+/** A view that is a stretch of the page, one or several: the views a page is
+ *  measured at. */
+function isStretch(view: JobView): boolean {
+  return !view.box && !view.act && view.moving !== true;
+}
+
 /** What is read of a page once it is pictured: null where it was not. */
 interface Readings {
   motion: Motion | null;
+  measured: Measured | null;
 }
 
 /** The view a page's motion is read at: the first that is not a phone's,
@@ -2022,7 +2461,7 @@ const sessionSchema = z.looseObject({ sessionId: z.string() });
 
 /** Picture one page at every view in a browser of its own, inside the page's
  *  time limit. Never rejects. */
-async function picturePage(job: Job, server: PageServer, page: JobPage, index: number): Promise<PageReport> {
+async function picturePage(job: Job, server: PageServer, engine: Engine, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
   const pictures: Pictures = { shots: [], ended: [], acts: [] };
   const { shots, ended, acts } = pictures;
@@ -2032,7 +2471,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   // page server (asked, missing) is not its to report.
   const web = page.kind === "web";
   const traffic = { last: 0 };
-  const read: Readings = { motion: null };
+  const read: Readings = { motion: null, measured: null };
   /** What the page's pictures asked of the network and of the page server,
    *  and the dialogs they met. Fixed once the last picture is taken: the
    *  loads a reading makes after that are not the page's own. */
@@ -2046,6 +2485,7 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
   const report = (error: string | null): PageReport => {
     const said: PageReport = { file: page.file, shots, ended, acts, ...(settled ?? pictured()), error };
     if (read.motion) said.motion = read.motion;
+    if (read.measured) said.measured = read.measured;
     return said;
   };
 
@@ -2138,19 +2578,36 @@ async function picturePage(job: Job, server: PageServer, page: JobPage, index: n
       await browser.send("Page.enable", {}, sessionId);
       await browser.send("Network.enable", {}, sessionId);
       await browser.send("Audits.enable", {}, sessionId);
+      // Ruling 328: a task page of a measured job is measured at each view
+      // that is a stretch of it, and weighed on the first of those loads.
+      const stretches = job.measure === true && !web ? job.views.filter(isStretch) : null;
+      let weight: Weight = { bytes: 0, files: 0 };
       for (const view of job.views) {
         const files = pictureNames(view).map((name) => `${index + 1}-${name}.png`);
         const [first = ""] = files;
+        const before = server.served();
         if (view.act) await pictureAct(ctx, view, view.act, first);
         else if (view.moving === true) await pictureMoving(ctx, view, files);
         else await pictureView(ctx, view, files);
+        if (view === stretches?.[0]) {
+          const after = server.served();
+          weight = { bytes: after.bytes - before.bytes, files: after.files - before.files };
+        }
       }
       settled = pictured();
       // Every picture is taken. What is read of the page beyond them has
       // what is left of its time, and costs it nothing when that runs out.
       const study: Study = { ctx, budget: new Budget(startedAt + job.pageTimeoutMs - CLOSING_MS) };
+      if (stretches) {
+        const measured: Measured = { views: stretches.map(unmeasured), weight, loadMs: null, line: SLOW_LINE_READS };
+        read.measured = measured;
+        for (const [at, view] of stretches.entries()) measured.views[at] = await measureView(study, view, engine);
+      }
       const moves = web || job.measure === true ? motionView(job.views) : null;
       if (moves) read.motion = await readMotion(study, moves);
+      // Last, since a load that does not finish leaves the browser at it.
+      const slow = stretches?.find((view) => view.mobile) ?? stretches?.[0];
+      if (read.measured && slow) read.measured.loadMs = await readLoadMs(study, slow);
     } finally {
       stop();
     }
@@ -2217,9 +2674,10 @@ async function main(): Promise<number> {
   process.on("SIGTERM", stopped);
   process.on("SIGINT", stopped);
   const server = await startPageServer(job.root, job.names);
+  const engine = readEngine(job.measure === true ? job.axe : undefined);
   try {
     for (const [index, page] of job.pages.entries()) {
-      pages.push(await picturePage(job, server, page, index));
+      pages.push(await picturePage(job, server, engine, page, index));
       writeReport();
     }
   } finally {
