@@ -1524,7 +1524,7 @@ function walkExpression(view: JobView): string {
 })()`;
 }
 
-const navigateResultSchema = z.looseObject({ errorText: z.string().optional() });
+const navigateResultSchema = z.looseObject({ frameId: z.string().optional(), errorText: z.string().optional() });
 const walkResultSchema = z.looseObject({
   result: z.looseObject({ value: z.string().optional().catch(undefined) }).optional(),
 });
@@ -1544,6 +1544,13 @@ const layoutSchema = z.looseObject({
 });
 const screenshotSchema = z.looseObject({ data: z.string() });
 const requestEventSchema = z.looseObject({ request: z.looseObject({ url: z.string() }) });
+/** A response as the browser reports one: what kind of thing was answered,
+ *  the frame it is for, and the status. */
+const documentEventSchema = z.looseObject({
+  type: z.string(),
+  frameId: z.string(),
+  response: z.looseObject({ status: z.number() }),
+});
 /** A request the page's own policy stopped before it left: the browser
  *  reports it as an issue, and only some of them as a request. */
 const blockedEventSchema = z.looseObject({
@@ -1602,8 +1609,9 @@ interface ViewContext {
    *  page server's for a task page, and for a page on the web wherever its
    *  address led. */
   site: string;
-  /** When the page last asked the network for anything. */
-  traffic: { last: number };
+  /** When the page last asked the network for anything, and the status each
+   *  frame's document was last answered with, by the frame's id. */
+  traffic: { last: number; documents: Map<string, number> };
   out: string;
   maxBytes: number;
   pictures: Pictures;
@@ -1745,9 +1753,16 @@ async function openView(ctx: ViewContext, view: JobView, deviceScaleFactor: numb
     sessionId,
   );
   const loaded = nextLoad(browser, sessionId);
+  ctx.traffic.documents.clear();
   const navigated = navigateResultSchema.parse(await browser.send("Page.navigate", { url: ctx.url }, sessionId));
   if (navigated.errorText) throw new Error(`the page did not load (${navigated.errorText})`);
   await loaded;
+  // Ruling 327: an address that answers with an error serves its error page,
+  // and a picture of that is no look of the page that was asked for: a site
+  // that turns a browser away with 403, a page that is gone. The status is
+  // the one the frame this navigation loaded was answered with.
+  const status = ctx.traffic.documents.get(navigated.frameId ?? "") ?? 0;
+  if (ctx.web && status >= 400) throw new Error(`the address answered ${status}, so there is no page there to picture`);
   const loadedAt = Date.now();
   if (ctx.web && settle) await networkQuiet(ctx, loadedAt);
   return loadedAt;
@@ -2504,7 +2519,7 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
   // the page server, so what a task page reports of the network and of the
   // page server (asked, missing) is not its to report.
   const web = page.kind === "web";
-  const traffic = { last: 0 };
+  const traffic = { last: 0, documents: new Map<string, number>() };
   const read: Readings = { motion: null, measured: null };
   /** What the page's pictures asked of the network and of the page server,
    *  and the dialogs they met. Fixed once the last picture is taken: the
@@ -2579,6 +2594,9 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
         traffic.last = Date.now();
         const event = requestEventSchema.safeParse(params);
         if (event.success) noteRequest(asked, event.data.request.url, server.origin);
+      } else if (method === "Network.responseReceived") {
+        const event = documentEventSchema.safeParse(params);
+        if (event.success && event.data.type === "Document") traffic.documents.set(event.data.frameId, event.data.response.status);
       } else if (method === "Audits.issueAdded") {
         const event = blockedEventSchema.safeParse(params);
         if (event.success) {

@@ -305,6 +305,12 @@ async function navigate(message) {
   moved = null;
   lateLeft = declared("trickle", 0);
   evidence("pages.jsonl", { url, status: main.status, headers: main.headers, html, metrics: { ...metrics }, resources, reducedMotion });
+  // The document's own answer, as a browser reports every response.
+  send({
+    method: "Network.responseReceived",
+    sessionId: message.sessionId,
+    params: { type: "Document", frameId: "F1", response: { url, status: main.status } },
+  });
   send({ id: message.id, sessionId: message.sessionId, result: { frameId: "F1" } });
   loadedAt = Date.now();
   send({ method: "Page.loadEventFired", sessionId: message.sessionId, params: { timestamp: 1 } });

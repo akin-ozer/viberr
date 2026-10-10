@@ -1132,6 +1132,23 @@ describe("a page on the web, pictured by the renderer child (ruling 327)", () =>
     expect(b.browser.pages()).toHaveLength(4);
   });
 
+  it("does not picture a page on the web whose address answers with an error: its error page is no look of the page that was asked for", async () => {
+    // A site that turns a headless browser away answers 403 with a page of
+    // its own, and a page that is gone answers 404 with another. Pictured,
+    // either would be kept as the look a result is made to.
+    // CANARY: picture whatever the address serves and the report holds two
+    // pictures of "not found" and no error.
+    const reference = await site({ "/": "<p>the page</p>" });
+    const b = bench({});
+    const report = await b.run({ pages: [], web: [{ file: "gone", url: `${reference.origin}/no-such-page` }], views: [DESKTOP, PHONE] });
+    expect(report.pages[0]).toMatchObject({ file: "gone", shots: [], error: "the address answered 404, so there is no page there to picture" });
+    expect(b.browser.shots()).toEqual([]);
+    // A task page is served by Viberr's own page server and is not a page on
+    // the web: what it is answered with is the page server's business.
+    const page = await b.run({ pages: [], web: [{ file: "there", url: `${reference.origin}/` }], views: [DESKTOP] });
+    expect(page.pages[0]).toMatchObject({ error: null });
+  });
+
   it("says in the browser's own words when a page on the web does not load, refuses one that ends up off the web, and holds a press to the site the page is on", async () => {
     const reference = await site({
       // A site may send its visitor on to another address of the web.
