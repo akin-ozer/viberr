@@ -63,7 +63,7 @@ const measuredSchema = z.strictObject({
         ),
         /** How many kinds the engine found: `kinds` is the first twenty. */
         kindsCount: z.number(),
-        /** How many elements those kinds are on, all of them. */
+        /** In how many places those kinds are, every kind's added up. */
         elementsCount: z.number(),
         worstContrast: z.strictObject({ ratio: z.number(), text: z.string() }).nullable(),
       }),
@@ -1306,9 +1306,9 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // lists and a page with twenty-one kinds of fault reads as one with
     // twenty.
     expect(faults.kindsCount).toBe(21);
-    // And on how many elements, over every kind: nineteen of one each, the
+    // And in how many places, over every kind: nineteen of one each, the
     // contrast's three and the picture's five. CANARY: add up the kinds the
-    // report lists and the twenty-first kind's element is left out of a
+    // report lists and the twenty-first kind's place is left out of a
     // number that stands beside "21 kinds".
     expect(faults.elementsCount).toBe(27);
     expect(faults.kinds.slice(0, 3)).toEqual([
@@ -1497,7 +1497,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(many!.presses).toBe(80);
   });
 
-  it("goes on through whatever keeps focus for more than one press, and says a walk was cut only when a control is left that it never came to", async () => {
+  it("goes on through a part that may hold stops of its own for as long as it keeps focus, and says a walk was cut only when a control is left that it never came to", async () => {
     const [held, full, edge, wrap] = await walked({
       // A date field is three stops and one element, a frame holds stops of
       // its own, and a card's own buttons stand before and after the button

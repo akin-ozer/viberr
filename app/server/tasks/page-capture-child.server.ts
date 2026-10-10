@@ -343,9 +343,10 @@ interface Faults {
   /** How many kinds it found in all: `kinds` holds the first
    *  `FAULT_KINDS_MAX` of them. */
   kindsCount: number;
-  /** How many elements those kinds are on, every kind's count added up: a
+  /** In how many places those kinds are, every kind's count added up: a
    *  number that goes with `kindsCount`, where the counts `kinds` carries
-   *  are those of the kinds it lists. */
+   *  are those of the kinds it lists. Places and not elements: an element
+   *  with two kinds of fault is counted under each. */
   elementsCount: number;
   /** The lowest contrast it found failing, and the words it is on. */
   worstContrast: { ratio: number; text: string } | null;
@@ -1644,7 +1645,7 @@ const faultsSchema = z.object({
       nodes: z.array(z.object({ target: z.string(), ratio: z.number().nullable().optional(), text: z.string().optional() })),
     }),
   ),
-  /** How many kinds the engine found, and on how many elements in all: the
+  /** How many kinds the engine found, and in how many places in all: the
    *  page hands over the first hundred kinds. */
   kinds: z.number().int().nonnegative(),
   elements: z.number().int().nonnegative(),
@@ -2523,7 +2524,7 @@ function notRun(why: string): Faults {
  * page first (it is the page's `window.axe` from then on), then asked for
  * what breaks the standards in `FAULT_TAGS`. The kinds come back the gravest
  * first, then the most widespread, so the cap never drops the worst of them,
- * with how many there are in all and on how many elements.
+ * with how many there are in all and in how many places.
  * Rejects with the reason when the engine cannot run, which `measureView`
  * reports and the page does not pay for.
  */

@@ -1074,9 +1074,9 @@ if (command === "verify-measured") {
       `${view.faults.kindsCount} of ${view.faults.kinds.length}`,
     );
     check(
-      view.faults.elementsCount === view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0) && view.faults.elementsCount >= 3,
-      "and on how many elements: the two pictures, the faint line and whatever else it lists",
-      `${view.faults.elementsCount} over ${JSON.stringify(view.faults.kinds.map((kind) => kind.count))}`,
+      view.faults.kindsCount === 2 && view.faults.elementsCount === 3,
+      "and in how many places: two kinds in three, the two pictures and the faint line",
+      `${view.faults.kindsCount} kinds in ${view.faults.elementsCount} places, listed ${JSON.stringify(view.faults.kinds.map((kind) => kind.count))}`,
     );
     check(view.keyboard.ran === true && view.keyboard.cut === false, "the keyboard walk was made, all the way round", JSON.stringify(view.keyboard));
     check(
