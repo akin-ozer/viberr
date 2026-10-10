@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
-import { createServer, type Server } from "node:http";
+import { createServer, request, type Server } from "node:http";
 import path from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { writeFakeBrowser, type FakeBrowser } from "../../../test-support/fake-browser";
 import { createTempDirs } from "../../../test-support/temp-dirs";
@@ -177,6 +177,10 @@ interface Bench {
     measure?: boolean;
     /** The accessibility engine's script, by its path. */
     axe?: string;
+    /** The files are a built site: a tree served from its root. */
+    site?: boolean;
+    /** The files the page server may serve, when the job lists them. */
+    names?: string[];
   }): Promise<Report>;
 }
 
@@ -186,7 +190,11 @@ function bench(files: Record<string, string>): Bench {
   const root = path.join(dir, "files");
   const out = path.join(dir, "out");
   mkdirSync(root);
-  for (const [name, text] of Object.entries(files)) writeFileSync(path.join(root, name), text);
+  for (const [name, text] of Object.entries(files)) {
+    // A name with a folder in it is a file of a tree.
+    mkdirSync(path.dirname(path.join(root, name)), { recursive: true });
+    writeFileSync(path.join(root, name), text);
+  }
   const browser = writeFakeBrowser(path.join(dir, "browser"));
   return {
     root,
@@ -210,6 +218,8 @@ function bench(files: Record<string, string>): Bench {
         maxBytes: input.maxBytes ?? 3_750_000,
         measure: input.measure,
         axe: input.axe,
+        site: input.site,
+        names: input.names,
       };
       return new Promise((resolve, reject) => {
         // The job goes in on the child's standard input, as the server
@@ -1014,7 +1024,9 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args.height)).toEqual([800, 844, 800, 844, 800, 1688, 800, 844]);
   });
 
-  it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
+  it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[]; site?: boolean }>([
+    // A built site's pages are its HTML files.
+    { what: "a page of a site that is no HTML page", pages: ["page.html", "notes.md"], views: [DESKTOP], site: true },
     // A view is one kind of picture: a box, a whole page, an act or a moving
     // screen.
     { what: "a view that is a box and a whole page at once", views: [{ ...box(1200, 630, 1), whole: true }] },
@@ -1043,16 +1055,236 @@ describe("the page capture's renderer child (ruling 194)", () => {
       web: [{ file: "site", url: "http://127.0.0.1:9/" }],
       views: [box(1200, 630, 1)],
     },
-  ])("refuses a job that asks for $what", async ({ pages, web, views }) => {
-    const b = bench({ "page.html": "<p>one line</p>" });
+  ])("refuses a job that asks for $what", async ({ pages, web, views, site }) => {
+    const b = bench({ "page.html": "<p>one line</p>", "notes.md": "# Notes" });
     // CANARY: drop the job schema's check of what its views and pages are
     // together (`jobFaults`) and each of these jobs is pictured or opened:
     // the first as a plain stretch, the fourth twice into `1-desktop.png`.
-    await expect(b.run({ pages: pages ?? ["page.html"], web, views })).rejects.toThrow(
+    await expect(b.run({ pages: pages ?? ["page.html"], web, views, site })).rejects.toThrow(
       "the child ended with 2: usage: page-capture-child.server.ts < job.json",
     );
     // Refused whole, before any browser is started.
     expect(b.browser.launches()).toEqual([]);
+  });
+});
+
+describe("a page of a built site, pictured by the renderer child (ruling 194)", () => {
+  /** A small built site: a home page, a guide in a folder of its own, a
+   *  stylesheet both name from the site's root, and pictures beside them. */
+  const built = {
+    "index.html": '<link rel="stylesheet" href="/assets/site.css"><img src="logo.png"><p>home</p>',
+    "guide/index.html":
+      '<link rel="stylesheet" href="/assets/site.css"><link rel="icon" href="/favicon.ico"><img src="../logo.png"><img src="shot.png">' +
+      '<script src="/gone.js"></script><img src="/fonts/x.woff2"><p>the guide</p>',
+    "assets/site.css": "body { color: green }",
+    "logo.png": "a logo",
+    "guide/shot.png": "a screenshot",
+  };
+  const bytes = (text: string) => Buffer.byteLength(text);
+
+  /** The host name and port a job's browser was let through to, from the
+   *  flags it was started with: the page server's own. */
+  function serverOf(b: Bench): string {
+    const flag = b.browser.launches()[0]!.argv.find((arg) => arg.startsWith("--proxy-bypass-list="))!;
+    return flag.slice(flag.lastIndexOf(";") + 1);
+  }
+
+  /** Ask a page server for a path exactly as written, as any process on the
+   *  machine could, and resolve with the status it answers, followed by
+   *  where it sends the caller on to when it does. `host` is the name it is
+   *  asked under: the browser's own unless another is given. */
+  function ask(server: string, asked: string, host = server): Promise<number | string> {
+    return new Promise((resolve, reject) => {
+      const port = Number(server.slice(server.lastIndexOf(":") + 1));
+      request({ host: "127.0.0.1", port, path: asked, method: "GET", headers: { host } }, (res) => {
+        res.resume();
+        resolve(res.headers.location === undefined ? (res.statusCode ?? 0) : `${res.statusCode} ${res.headers.location}`);
+      })
+        .on("error", reject)
+        .end();
+    });
+  }
+
+  it("serves a built site from its root: a page's files by a path from the root and by one beside it, under a host name nobody else on the machine can guess", async () => {
+    const b = bench(built);
+    const report = await b.run({ pages: ["index.html", "guide/index.html"], views: [DESKTOP], site: true });
+    // A page is named in the report as it was asked. What a page asked for
+    // and was not served is said as a path from the site's root, the icon
+    // included when the page itself names it. CANARY: serve the tree as the
+    // flat folder of a task and the stylesheet both pages name from the root
+    // is refused, and both are pictured unstyled.
+    expect(report.pages.map((page) => [page.file, page.error, page.missing])).toEqual([
+      ["index.html", null, []],
+      ["guide/index.html", null, ["/favicon.ico", "/gone.js", "/fonts/x.woff2"]],
+    ]);
+    const [home, guide] = b.browser.pages();
+    expect(home!.resources).toEqual([
+      { src: "/assets/site.css", status: 200, bytes: bytes(built["assets/site.css"]) },
+      { src: "logo.png", status: 200, bytes: bytes(built["logo.png"]) },
+    ]);
+    expect(guide!.resources).toEqual([
+      { src: "/assets/site.css", status: 200, bytes: bytes(built["assets/site.css"]) },
+      { src: "/favicon.ico", status: 404, bytes: 10 },
+      { src: "../logo.png", status: 200, bytes: bytes(built["logo.png"]) },
+      { src: "shot.png", status: 200, bytes: bytes(built["guide/shot.png"]) },
+      { src: "/gone.js", status: 404, bytes: 10 },
+      { src: "/fonts/x.woff2", status: 404, bytes: 10 },
+    ]);
+    // The page is opened at its own path, with no token before it: a path
+    // from the root has to mean the site's root. The token is the host's
+    // name instead, which the browser takes for this machine by itself.
+    const address = new URL(guide!.url);
+    expect(address.pathname).toBe("/guide/index.html");
+    expect(address.hostname).toMatch(/^[0-9a-f]{16}\.localhost$/);
+    expect(guide!.headers["content-security-policy"]).toBe("default-src 'self' data: blob: 'unsafe-inline' 'unsafe-eval'");
+    // Only that name is let through the closed proxy: the bare address of
+    // this machine, the page server's port included, is as closed as any.
+    for (const launch of b.browser.launches()) {
+      expect(launch.argv).toContain("--proxy-server=http://127.0.0.1:9");
+      expect(launch.argv).toContain(`--proxy-bypass-list=<-loopback>;${address.host}`);
+    }
+  });
+
+  it("answers a folder's path with its index page, and pictures a page of a site as a box of an exact size too", async () => {
+    const b = bench(built);
+    const report = await b.run({ pages: ["guide/"], views: [box(1200, 630, 1)], site: true });
+    expect(report.pages[0]).toMatchObject({ file: "guide/", error: null });
+    expect(report.pages[0]!.shots.map((shot) => [shot.file, shot.width, shot.height])).toEqual([["1-desktop.png", 1200, 630]]);
+    const [served] = b.browser.pages();
+    // CANARY: answer only a path that names a file and the folder's own
+    // path is "not there to render".
+    expect(new URL(served!.url).pathname).toBe("/guide/");
+    expect(served!.html).toContain("<p>the guide</p>");
+    // What the page names beside itself is beside the folder's path.
+    expect(served!.resources.find((resource) => resource.src === "shot.png")).toMatchObject({ status: 200 });
+  });
+
+  it("serves no path a segment of which is not a plain name, none through a link, and nothing to a caller that does not know its name", async () => {
+    const b = bench({ ...built, ".env": "SECRET=1", "assets/.keep": "", "secret.txt": "beside the assets" });
+    const outside = path.join(path.dirname(b.root), "outside");
+    mkdirSync(outside);
+    writeFileSync(path.join(outside, "site.css"), "a file outside the site");
+    // A folder of the site that is a link, and a file of it that is one.
+    symlinkSync(outside, path.join(b.root, "linked"));
+    symlinkSync(path.join(b.root, "assets", "site.css"), path.join(b.root, "alias.css"));
+    symlinkSync(path.join(b.root, "index.html"), path.join(b.root, "linked.html"));
+
+    // The page's load is held, so the page server can be asked while it is up.
+    const running = b.run({ pages: ["index.html", "linked.html", ".env", "linked/site.css"], views: [DESKTOP], site: true, mode: "hold" });
+    await vi.waitFor(() => expect(b.browser.launches()).toHaveLength(1), { timeout: 15_000 });
+    const server = serverOf(b);
+    expect(await ask(server, "/assets/site.css")).toBe(200);
+    // The browser's own request for the icon, on a page that names none (the
+    // home page is all that was served so far). CANARY: say every request
+    // for it and it stands first in the list below, of a page that never
+    // asked for it.
+    expect(await ask(server, "/favicon.ico")).toBe(404);
+    // A folder asked for without its slash is sent on to the path with it,
+    // as a host of static files sends it, so what its page names beside
+    // itself is found beside it. CANARY: answer "not found" there and a
+    // press on a link written `/guide` is pictured as a page that is gone.
+    expect(await ask(server, "/guide?from=home")).toBe("301 /guide/?from=home");
+    expect(await ask(server, "/guide/")).toBe(200);
+    // A folder with no page of its own is nothing to be sent on to.
+    expect(await ask(server, "/assets")).toBe(404);
+    // CANARY: join the path onto the root and open it and every one of
+    // these is answered: the file beside the assets by `..`, the dot names,
+    // the file outside the site through the folder that is a link.
+    const refused = [
+      "/assets/../secret.txt",
+      "/assets/%2e%2e/secret.txt",
+      "/./index.html",
+      "/.env",
+      "/assets/.keep",
+      "//index.html",
+      "/assets//site.css",
+      "/assets%5Csite.css",
+      "/assets%2Fsite.css",
+      "/index.html%00",
+      "/linked/site.css",
+      "/alias.css",
+    ];
+    for (const asked of refused) expect([asked, await ask(server, asked)]).toEqual([asked, 404]);
+    // Asked under the machine's bare address, a file of the site is not
+    // there: the host's name is what a caller has to know. CANARY: answer
+    // whoever reaches the port and any process on the machine reads the site.
+    const bare = `127.0.0.1${server.slice(server.lastIndexOf(":"))}`;
+    expect(await ask(server, "/index.html", bare)).toBe(404);
+    expect(await ask(server, "/nothing.png", bare)).toBe(404);
+    b.browser.release();
+
+    const report = await running;
+    // Each is said as it was written, once; a path whose escapes hide a
+    // slash or a NUL is said with them, so it reads as what was asked. Not
+    // the icon nobody named, and nothing a stranger asked for.
+    expect(report.pages[0]).toMatchObject({
+      file: "index.html",
+      error: null,
+      missing: [
+        "/assets",
+        "/assets/../secret.txt",
+        "/./index.html",
+        "/.env",
+        "/assets/.keep",
+        "//index.html",
+        "/assets//site.css",
+        "/assets\\site.css",
+        "/assets%2Fsite.css",
+        "/index.html%00",
+        "/linked/site.css",
+        "/alias.css",
+      ],
+    });
+    // A page that is a link, a dot name, or under a folder that is a link
+    // is not pictured at all.
+    expect(report.pages.slice(1).map((page) => [page.file, page.shots, page.error])).toEqual([
+      ["linked.html", [], "the file is not there to render"],
+      [".env", [], "the file is not there to render"],
+      ["linked/site.css", [], "the file is not there to render"],
+    ]);
+  });
+
+  it("serves only the files a job lists, each by the name it is stored under in whichever Unicode form", async () => {
+    const stored = (name: string) => name.normalize("NFD");
+    const b = bench({
+      "listed.html":
+        `<link rel="stylesheet" href="/assets/site.css"><link rel="stylesheet" href="/assets/extra.css">` +
+        `<img src="${"/café/menü.png".normalize("NFC")}"><img src="/draft/index.html">`,
+      "assets/site.css": built["assets/site.css"],
+      "assets/extra.css": "a file the job does not list",
+      [`${stored("café")}/${stored("menü.png")}`]: "the menu",
+      "draft/index.html": "<p>a page the job does not list</p>",
+    });
+    // The listing is of the names as they are stored, byte for byte.
+    const names = ["listed.html", "assets/site.css", `${stored("café")}/${stored("menü.png")}`];
+    const report = await b.run({ pages: ["listed.html", "draft/index.html"], views: [DESKTOP], site: true, names });
+    // CANARY: serve whatever the tree holds and the two files the job left
+    // out are answered. Look a name up as it is written alone and the
+    // picture a page names in the composed form is not found in a listing
+    // that holds the decomposed one, folder and file alike.
+    expect(b.browser.pages()[0]!.resources).toEqual([
+      { src: "/assets/site.css", status: 200, bytes: bytes(built["assets/site.css"]) },
+      { src: "/assets/extra.css", status: 404, bytes: 10 },
+      { src: "/café/menü.png".normalize("NFC"), status: 200, bytes: bytes("the menu") },
+      { src: "/draft/index.html", status: 404, bytes: 10 },
+    ]);
+    expect(report.pages.map((page) => [page.file, page.error, page.missing])).toEqual([
+      ["listed.html", null, ["/assets/extra.css", "/draft/index.html"]],
+      ["draft/index.html", "the file is not there to render", []],
+    ]);
+  });
+
+  it("weighs a measured page of a site by the files its own load was served", async () => {
+    const b = bench(built);
+    const report = await b.run({ pages: ["index.html"], views: [DESKTOP], site: true, measure: true });
+    expect(report.pages[0]).toMatchObject({ file: "index.html", error: null });
+    // The page, its stylesheet from the root and the picture beside it.
+    // CANARY: count only what is served under a task's token and a site's
+    // page weighs nothing.
+    expect(report.pages[0]!.measured!.weight).toEqual({
+      bytes: bytes(built["index.html"]) + bytes(built["assets/site.css"]) + bytes(built["logo.png"]),
+      files: 3,
+    });
   });
 });
 
