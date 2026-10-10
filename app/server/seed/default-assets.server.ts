@@ -709,8 +709,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // manual had a review say what differs from a kept look, section by
     // section, and an approval say why each difference it leaves is no
     // finding; and before a placeholder where content belongs, a word a
-    // reader cannot read, or content made up for a picture of the product
-    // was a finding.
+    // reader cannot read, content made up for a picture of the product, a
+    // drawn screen the product does not have, a stock picture, or a
+    // person's live data they did not give for it was a finding.
     "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4",
     // Ruling 86 (2026-10-10): before the manual said that where the
     // project's gates build the site the pages judged are the ones the gates
