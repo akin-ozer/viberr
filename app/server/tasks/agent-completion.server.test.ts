@@ -26,7 +26,7 @@ import {
 } from "~/server/files/task-writer.server";
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
+import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
 import { SOURCE_STAGING_PREFIX, readTaskSources, writeTaskSource } from "~/server/files/task-sources.server";
@@ -1280,6 +1280,66 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       await complete(blind, { role: "Review & validation" });
       expect(approvals()).toEqual([["reviewer", "approve"]]);
       expect(refusal()).toBeUndefined();
+    });
+
+    it("counts a kept picture a Claude review opened with its own file reader, read from its log", async () => {
+      // `Read` hands a model a picture as the board's own readers do, and a
+      // reviewer that works in its folder opens the kept pictures by path.
+      // CANARY: count only what the board's readers wrote down and that
+      // review is refused for every picture it looked at.
+      writeDeliveredPageTask(["notes.md"]);
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "desktop-1.png",
+          data: Buffer.from("the reference"),
+          title: "The reference at 1280 px",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 2000 },
+        },
+        store.dataRoot,
+      );
+      const unread = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unread);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("picture S1 of https://example.com/ as it was kept on 2026-10-09");
+      // The note names the one tool that opens what is owed, and no other.
+      expect(refusal()).toContain("A look the task keeps is opened picture by picture with `read_task_source`.");
+      expect(refusal()).not.toContain("capture_page");
+
+      const reader = await finishedRunWith("Verdict: approve. Opened the kept picture.", SUBJECT);
+      const kept = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "sources", "S1.png");
+      const line = (seq: number, raw: string) =>
+        insertRunLine(store.db, {
+          runId: reader,
+          seq,
+          occurredAt: new Date().toISOString(),
+          raw,
+          display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+        });
+      line(100, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: kept } }] } }));
+      line(
+        101,
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              {
+                tool_use_id: "t1",
+                type: "tool_result",
+                // A picture's worth of bytes after the head of the line, which
+                // is all the completion takes out of the store.
+                content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(200_000) } }],
+              },
+            ],
+          },
+        }),
+      );
+      await review(reader);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
     });
 
     it("owes every picture of a look the task keeps, and names the ones a run did not open", async () => {
