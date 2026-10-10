@@ -100,10 +100,10 @@ const reportSchema = z.object({
       ended: z.array(z.object({ view: z.string(), pageHeight: z.number() })),
       /** One per view that carried an act: what it did, or why it could not. */
       acts: z.array(z.object({ view: z.string(), done: z.string().nullable(), error: z.string().nullable() })),
-      /** On a page that does not scroll as pages do: the largest part that
-       *  scrolls inside it, which no picture of the page shows, and the first
-       *  view it was found at; null on any other page. */
-      scrollsInside: z.strictObject({ view: z.string(), what: z.string(), height: z.number() }).nullable(),
+      /** On a page that scrolls inside itself: at each view where it does,
+       *  the part that scrolls, which no picture of the page shows; null on
+       *  any other page. */
+      scrollsInside: z.array(z.strictObject({ view: z.string(), what: z.string(), height: z.number() })).nullable(),
       dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
@@ -966,7 +966,7 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
   });
 
-  it("says when a page scrolls inside itself, which no picture of it shows: only of a page that does not scroll as pages do, and at the first width where that is so", async () => {
+  it("says when a page scrolls inside itself, which no picture of it shows: only of a page that does not scroll as pages do, and at every width where that is so", async () => {
     const shell = `main.${"app-shell-".repeat(10)}`;
     const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4 })}</p>`;
     const b = bench({
@@ -993,31 +993,32 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // screen. Look at one width only and the page that is a shell on a phone
     // alone says nothing. Take a page a few px taller than its screen for
     // one that scrolls as pages do and the snug shell is not found at the
-    // desktop's width, where it is one.
+    // desktop's width, where it is one. Stop at the first width that finds
+    // it and a page that is a shell at both is said to be one at the desktop
+    // alone, so its phone picture reads as the whole of the page.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
-      ["app.html", null, found("desktop")],
+      ["app.html", null, [found("desktop"), found("phone")]],
       ["log.html", null, null],
-      ["narrow.html", null, found("phone")],
-      ["snug.html", null, found("desktop")],
+      ["narrow.html", null, [found("phone")]],
+      ["snug.html", null, [found("desktop"), found("phone")]],
     ]);
     // Nothing of what is inside is pictured: the page is its one screen.
     expect(report.pages[0]!.shots.map((shot) => [shot.view, shot.height, shot.contentHeight, shot.cut])).toEqual([
       ["desktop", 800, 800, false],
       ["phone", 844, 844, false],
     ]);
-    // Looked for on a view's own load, after its walk and before its
-    // picture, with that screen's height, and no more once it is found: the
-    // first page at the desktop, the second never, the third at the phone,
-    // the fourth at the desktop.
+    // Looked for on each view's own load, after its walk and before its
+    // picture, with that screen's height: the first page at both widths, the
+    // second at neither, the third at the phone, the fourth at both.
     expect(b.browser.asks().map((asked) => asked.ask)).toEqual(
       [
-        ["walk", "inner", "walk"],
+        ["walk", "inner", "walk", "inner"],
         ["walk", "walk"],
         ["walk", "walk", "inner"],
-        ["walk", "inner", "walk"],
+        ["walk", "inner", "walk", "inner"],
       ].flat(),
     );
-    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual([{ height: 800 }, { height: 844 }, { height: 800 }]);
+    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args.height)).toEqual([800, 844, 844, 800, 844]);
   });
 
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([

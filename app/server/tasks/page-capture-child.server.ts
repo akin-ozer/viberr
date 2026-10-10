@@ -86,10 +86,11 @@ import { z } from "zod";
  *    measured is still a pictured page.
  *  - **Says when a page scrolls inside itself.** A page fixed to its screen
  *    with its content in a box that scrolls is pictured as the one screen it
- *    lays out as. The report names the largest such box, how much it holds
- *    and the view it was found at, so a picture of one screen is not read as
- *    the whole page. A page that scrolls as pages do is pictured whole, and
- *    nothing is said of a box that scrolls somewhere in it.
+ *    lays out as. The report names the largest such box and how much it
+ *    holds, at each view where the page is such a one, so a picture of one
+ *    screen is not read as the whole page. A page that scrolls as pages do
+ *    is pictured whole, and nothing is said of a box that scrolls somewhere
+ *    in it.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -292,8 +293,8 @@ interface Act {
  * somewhere in it: its pictures are the whole of it.
  */
 interface ScrollsInside {
-  /** The view it was found at: the first that is a stretch of the page or
-   *  the whole of it, a phone's included, at which the page is such a one. */
+  /** The view it holds at: one that is a stretch of the page or the whole
+   *  of it, a phone's included. */
   view: string;
   /** The part, as `tag.firstClass` or `tag#id`. */
   what: string;
@@ -414,10 +415,12 @@ interface PageReport {
   /** One entry per view that carried an act. */
   acts: Act[];
   /** On a page that does not scroll as pages do: the largest part that
-   *  scrolls inside it with more than a screen of it out of sight, and the
-   *  first view it was found at. Null on any other page, and when the page
-   *  did not load to be read. */
-  scrollsInside: ScrollsInside | null;
+   *  scrolls inside it with more than a screen of it out of sight, at each
+   *  view where that holds, in the order of the views. Null when it holds
+   *  at none, and when the page did not load to be read. Only a view that
+   *  is a stretch of the page or the whole of it is asked: one of an exact
+   *  size, one with an act and a moving one never are. */
+  scrollsInside: ScrollsInside[] | null;
   /** How many script dialogs the page opened, each dismissed. */
   dialogs: number;
   /** Hosts the page asked the network for, and how many addresses in all. */
@@ -1726,8 +1729,8 @@ interface Pictures {
   /** The views with nothing at `from`: no picture, and no failure either. */
   ended: Ended[];
   acts: Act[];
-  /** What scrolls inside the page, from the first view that found it. */
-  scrollsInside: ScrollsInside | null;
+  /** What scrolls inside the page, at each view that found it. */
+  scrollsInside: ScrollsInside[];
 }
 
 interface ViewContext {
@@ -1914,18 +1917,19 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
  * more than the screen's, to within `OWN_SCROLL_SLACK_PX`, and a part of it
  * scrolls with more than a screen out of sight. A page taller than that
  * scrolls as pages do and is not asked: its pictures are the whole of it,
- * whatever scrolls in a box somewhere in it. Looked for on the view's own
- * load, once the page is laid out and before it is pictured, and no more
- * once a view has found it. What the page answers is the page's to say and
+ * whatever scrolls in a box somewhere in it. Looked for on each view's own
+ * load, once the page is laid out and before it is pictured: a page can be
+ * such a one at one width and not at another, and each picture is read by
+ * what its own view says. What the page answers is the page's to say and
  * never the page's to fail on: a page that throws under it is one where
  * nothing was found.
  */
 async function noteInside(ctx: ViewContext, view: JobView, size: PageSize): Promise<void> {
-  if (ctx.pictures.scrollsInside || size.contentHeight > view.height + OWN_SCROLL_SLACK_PX) return;
+  if (size.contentHeight > view.height + OWN_SCROLL_SLACK_PX) return;
   const { scale } = size;
   try {
     const { inside } = await askPage(ctx, innerExpression({ width: view.width / scale, height: view.height / scale }), insideSchema);
-    if (inside) ctx.pictures.scrollsInside = { view: view.id, what: clip(inside.what, NAME_MAX), height: Math.round(inside.height * scale) };
+    if (inside) ctx.pictures.scrollsInside.push({ view: view.id, what: clip(inside.what, NAME_MAX), height: Math.round(inside.height * scale) });
   } catch (caught) {
     if (!ctx.browser.alive) throw caught;
   }
@@ -2742,7 +2746,7 @@ const sessionSchema = z.looseObject({ sessionId: z.string() });
  *  is left of that time. Never rejects. */
 async function picturePage(job: Job, server: PageServer, engine: Engine, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
-  const pictures: Pictures = { shots: [], ended: [], acts: [], scrollsInside: null };
+  const pictures: Pictures = { shots: [], ended: [], acts: [], scrollsInside: [] };
   const { shots, ended, acts } = pictures;
   const dialogs = { count: 0 };
   // Ruling 327: a page on the web is opened at its own address, never through
@@ -2767,7 +2771,7 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
       shots,
       ended,
       acts,
-      scrollsInside: pictures.scrollsInside,
+      scrollsInside: pictures.scrollsInside.length > 0 ? pictures.scrollsInside : null,
       ...(settled ?? pictured()),
       error,
     };

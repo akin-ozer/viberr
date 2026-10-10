@@ -1113,9 +1113,11 @@ if (command === "verify-inside") {
     "a page fixed to its screen, its content in a part that scrolls, is pictured as the one screen it lays out as",
     `${inside.error} ${desktop?.width}x${desktop?.height} ${JSON.stringify(shot(inside, "desktop"))}`,
   );
+  // What a page says of each view where it scrolls inside itself, as text.
+  const said = (page) => (page.scrollsInside ?? []).map((at) => `${at.view} ${at.what} ${at.height}`).join(", ");
   check(
-    inside.scrollsInside?.view === "desktop" && inside.scrollsInside?.what === "main.app" && inside.scrollsInside?.height === 4100,
-    "and the report says at which width that is, what scrolls inside it and how much that holds: five screens and a strip no picture shows, and not the six the strip only hides",
+    said(inside) === "desktop main.app 4100, phone main.app 4100",
+    "and the report says so of each width, with what scrolls inside it and how much that holds: five screens and a strip no picture shows, and not the six the strip only hides",
     JSON.stringify(inside.scrollsInside),
   );
   check(
@@ -1125,8 +1127,8 @@ if (command === "verify-inside") {
   );
   check(picture("2-desktop.png")?.height === 2400 && shot(folded, "desktop")?.cut === false, "and that page is pictured whole, its three screens", `${picture("2-desktop.png")?.height}`);
   check(
-    shell.error === null && shell.scrollsInside?.view === "desktop" && shell.scrollsInside?.what === "body" && shell.scrollsInside?.height === 4000 && picture("3-desktop.png")?.height === 800,
-    "a body that scrolls by itself, under a root with an overflow of its own, is said to scroll inside a page of one screen",
+    shell.error === null && said(shell) === "desktop body 4000, phone body 4000" && picture("3-desktop.png")?.height === 800,
+    "a body that scrolls by itself, under a root with an overflow of its own, is said to scroll inside a page of one screen, at both widths",
     `${shell.error} ${JSON.stringify(shell.scrollsInside)} ${picture("3-desktop.png")?.height}`,
   );
   // A long page on the desktop, pictured whole there, and a shell on the
@@ -1138,8 +1140,8 @@ if (command === "verify-inside") {
     `${narrow.error} ${picture("4-desktop.png")?.height} ${JSON.stringify(shot(narrow, "phone"))}`,
   );
   check(
-    narrow.scrollsInside?.view === "phone" && narrow.scrollsInside?.what === "main.app" && narrow.scrollsInside?.height === 4000,
-    "and is said to scroll inside at the phone's width, the first at which it does, though the body's own margin makes it 16 px taller than the screen there",
+    said(narrow) === "phone main.app 4000",
+    "and is said to scroll inside at the phone's width alone, though the body's own margin makes it 16 px taller than the screen there",
     JSON.stringify(narrow.scrollsInside),
   );
   done();
