@@ -497,7 +497,10 @@ const REDUCED_RUNNING_MAX = 6;
 const FAULT_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 /** The engine's words for how grave a fault is, the gravest first. */
 const FAULT_IMPACTS = ["critical", "serious", "moderate", "minor"];
-/** The most presses of Tab a keyboard walk makes, and an act. */
+/** The presses of Tab a keyboard walk has to come round in, and the most an
+ *  act asks for. A walk makes one more only when its last took focus off
+ *  the page or back to where it had been, to see whether it has just come
+ *  round. */
 const TAB_PRESSES_MAX = 80;
 /** Under reduced motion, an animation that lasts longer than this or never
  *  ends is still motion; a shorter one is a change of state. */
