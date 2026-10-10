@@ -520,7 +520,8 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
                                   # `revisionId` names that revision, `deliveredAt` is
                                   # when it was minted, a page's `file` is its path in
                                   # the site (`guide/index.html`) and its pictures are
-                                  # named with `--` for the slashes.
+                                  # named with `--` for the slashes and the revision's
+                                  # short sha (`guide--index.html.9f2c41a.capture-…`).
   pages:                          # the render finished. One entry per delivered page
     - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
       shots:                      # view (desktop | phone), the picture's name in the

@@ -2037,13 +2037,18 @@ export function requestDeliveryCaptures(
 
 /**
  * The name a picture of a built page is kept under in the attachments store,
- * which holds no slash: the page's path with `--` where its folders part
- * (`controller/index.html` is pictured as
- * `controller--index.html.capture-desktop.png`). The record pairs each
- * picture with its page; no reader takes the page back out of this name.
+ * which holds no slash: the page's path with `--` where its folders part,
+ * then the first seven of the revision's sha (`controller/index.html` at
+ * `9f2c41a` is pictured as
+ * `controller--index.html.9f2c41a.capture-desktop.png`). A revision's
+ * pictures are named for that revision, so the next one's never take their
+ * place under a name a note or a completion packet already shows, and no
+ * file a run saved on the task shares a name with the page they picture. The
+ * record pairs each picture with its page; no reader takes the page back out
+ * of this name.
  */
-export function builtPictureName(file: string, view: PageCaptureViewId): string {
-  return pageCaptureName(file.replaceAll("/", "--"), view);
+export function builtPictureName(file: string, view: PageCaptureViewId, sha: string): string {
+  return pageCaptureName(`${file.replaceAll("/", "--")}.${sha.slice(0, 7)}`, view);
 }
 
 export interface RevisionCaptureInput {
@@ -2163,7 +2168,13 @@ async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input
       let error = page.error;
       for (const shot of page.shots) {
         try {
-          const saved = writeTaskAttachment(projectSlug, taskKey, builtPictureName(page.file, shot.view), shot.bytes, ctx.dataRoot);
+          const saved = writeTaskAttachment(
+            projectSlug,
+            taskKey,
+            builtPictureName(page.file, shot.view, revision.headSha),
+            shot.bytes,
+            ctx.dataRoot,
+          );
           written.push(saved.name);
           shots.push({ view: shot.view, name: saved.name, cut: shot.cut });
         } catch (caught) {
@@ -2654,7 +2665,9 @@ function findAskedFile(
     }
   } else if (!judged && folder) {
     // Anyone who judges no delivery is shown the site as the task's
-    // checkout holds it built now: the deliverer's own work in progress.
+    // delivering checkout holds it built now: the work as it stands, as the
+    // task's files are on a board with no repository. A supporting run's
+    // own checkout is not read: what it builds there is nobody's delivery.
     const checkout = taskCloneDir(ctx, projectSlug, taskKey);
     const root = taskDir(projectSlug, taskKey, ctx.dataRoot);
     const within = checkout === null ? null : path.relative(root, path.join(checkout, folder)).split(path.sep).join("/");
@@ -2666,8 +2679,8 @@ function findAskedFile(
         return { stored: one, abs: path.join(dir, one), size, judged, delivered: false, site: { dir, kept: false, folder } };
       }
       notInSite =
-        `[noop] ${code(name)} is not a page in \`${folder}/\` of the task's checkout, the folder this project's gates build its pages into, ` +
-        `and not a file on ${taskKey}. Build the pages there as the gates do, then ask for one by its path in the site (\`index.html\`, or \`about/\` for \`about/index.html\`).`;
+        `[noop] ${code(name)} is not a page in \`${folder}/\` of the task's delivering checkout, the folder this project's gates build its pages into, ` +
+        `and not a file on ${taskKey}. The agent that delivers builds the pages there as the gates do; a page is then asked for by its path in the site (\`index.html\`, or \`about/\` for \`about/index.html\`).`;
     }
   }
   // Ruling 76: found in either Unicode form, and rendered under the spelling
@@ -2730,7 +2743,7 @@ function shownToAJudge(found: FoundFile, since: readonly string[]): string {
   if (found.site && !found.site.kept) {
     // Ruling 86: said to whoever builds, so that what a review is shown is
     // no surprise: the gates build the revision, not this folder.
-    return ` This is \`${found.site.folder}/${found.stored}\` as the task's checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.`;
+    return ` This is \`${found.site.folder}/${found.stored}\` as the task's delivering checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.`;
   }
   if (!judged) return "";
   if (judged.revision) {

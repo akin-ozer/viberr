@@ -96,10 +96,10 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * names none, and it opens one before it writes how a page looks.
  */
 export const PAGE_PICTURES_PACKET_SENTENCE =
-  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures. On a task delivered as files they show beside the page on the result, so never name one of those as a screenshot. On a task delivered as a revision they are the pages the project's gates built of it and show nowhere by themselves: they are among `completionPacket.screenshotCandidates`, so name the ones a person should see. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured. A page's `measured` line is what Viberr measured as it pictured it (its weight, its load time, and what the accessibility, keyboard and reduced-motion checks found at each width): say what it found in the summary, in its figures, and never that a page passes a check the line does not show.";
+  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures. On a task delivered as files they show beside the page on the result, so never name one of those as a screenshot. On a task delivered as a revision they are the pages the project's gates built of it, and no result card shows them: name the ones a person should see among the `screenshots`. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured. A page's `measured` line is what Viberr measured as it pictured it (its weight, its load time, and what the accessibility, keyboard and reduced-motion checks found at each width): say what it found in the summary, in its figures, and never that a page passes a check the line does not show.";
 /** The same, in the space a plan field's description has. */
 export const PAGE_PICTURES_PLAN_SENTENCE =
-  "Never one of Viberr's own pictures of a page of a files delivery (`completionPacket.pageCaptures`): those show beside the page without being named. Its pictures of the pages a revision's gates built show nowhere by themselves and are named like any screenshot.";
+  "Never one of Viberr's own pictures of a page of a files delivery (`completionPacket.pageCaptures`): those show beside the page without being named. Its pictures of the pages a revision's gates built are on no result card, and are named like any screenshot.";
 
 /** The slice of the frontmatter the packet binds to. */
 type PacketState = Pick<TaskFrontmatter, "workRevision" | "deliveredAt" | "completionPacket">;
@@ -162,11 +162,8 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
  *  Viberr's own picture of a page on the task (`pagePictures`), which shows
  *  beside that page. A screenshot an agent named like one is offered, and so
  *  are Viberr's pictures of the pages a revision's gates built. */
-function screenshotCandidates(
-  entries: readonly TaskAttachmentEntry[],
-  pagePictures: ReadonlySet<string>,
-): string[] {
-  return entries.filter((e) => IMAGE_RE.test(e.name) && !pagePictures.has(e.name)).map((e) => e.name);
+function screenshotCandidates(entries: readonly TaskAttachmentEntry[], files: TaskFiles): string[] {
+  return entries.filter((e) => IMAGE_RE.test(e.name) && !heldBack(files, e.name)).map((e) => e.name);
 }
 
 type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | undefined };
@@ -181,7 +178,7 @@ type StoreRef = { projectSlug: string; taskKey: string; dataRoot?: string | unde
  */
 function resultFileCandidates(fm: PacketState, ref: StoreRef, files: TaskFiles): string[] {
   if (!deliveredAsFiles(fm)) return [];
-  const onTask = files.names.filter((name) => !isBrowserWorkingArtifact(name) && !files.pagePictures.has(name));
+  const onTask = files.names.filter((name) => !isBrowserWorkingArtifact(name) && !heldBack(files, name));
   const kept = listKeptDeliveries(ref.projectSlug, ref.taskKey, ref.dataRoot).find(
     (d) => d.deliveredAt === fm.deliveredAt,
   );
@@ -231,17 +228,38 @@ export function sourcesRestedOn(
  *  pictures of the pages among them (ruling 86). */
 interface TaskFiles {
   names: string[];
+  /** Viberr's pictures that show beside a result file: the pages of a files
+   *  delivery. Never a result file or a screenshot to pick. */
   pagePictures: Set<string>;
+  /** Viberr's pictures the record on file names for a delivery that is not
+   *  the one under review (an earlier revision whose gates the next one did
+   *  not pass, a files delivery before the task took a repository): of
+   *  nothing a packet describes. */
+  stalePictures: Set<string>;
 }
 
-function taskFiles(ref: StoreRef, fm: Pick<TaskFrontmatter, "pageCaptures">): TaskFiles {
+/** A name a packet may not show: beside its page already, or of an earlier
+ *  delivery. */
+function heldBack(files: TaskFiles, name: string): boolean {
+  return files.pagePictures.has(name) || files.stalePictures.has(name);
+}
+
+function taskFiles(
+  ref: StoreRef,
+  fm: Pick<TaskFrontmatter, "pageCaptures" | "workRevision" | "deliveredAt">,
+): TaskFiles {
   const names = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot);
-  // Ruling 86: the pictures of the pages a revision's gates built show
-  // nowhere by themselves (its result is a pull request, with no file to put
-  // a picture beside), so they are the packet's to show and are not held
-  // back as a files delivery's are.
-  const beside = capturesRevision(fm.pageCaptures) === null ? recordedPageCaptures(fm.pageCaptures) : [];
-  return { names, pagePictures: pageCapturesAmong(names, beside) };
+  const recorded = recordedPageCaptures(fm.pageCaptures);
+  const revisionId = capturesRevision(fm.pageCaptures);
+  if (deliveredAsFiles(fm) && revisionId === null) {
+    return { names, pagePictures: pageCapturesAmong(names, recorded), stalePictures: new Set() };
+  }
+  // Ruling 86: the result of a revision is a pull request, with no file to
+  // put a picture beside. The pictures of the pages its gates built are the
+  // packet's to show, and only those of the revision under review: the
+  // record's own names say whose they are.
+  const current = revisionId !== null && revisionId === activeWorkRevision(fm.workRevision)?.id;
+  return { names, pagePictures: new Set(), stalePictures: new Set(current ? [] : recorded) };
 }
 
 /** How many candidate names a refusal or the snapshot lists. */
@@ -340,7 +358,7 @@ export function completionPacketFact(
   const files = taskFiles(input, fm);
   const candidates = screenshotCandidates(
     listTaskAttachments(input.projectSlug, input.taskKey, input.dataRoot),
-    files.pagePictures,
+    files,
   ).slice(0, 20);
   const resultFiles = resultFileCandidates(fm, input, files);
   const size = deliveredAsFiles(fm)
@@ -492,17 +510,18 @@ export async function writeCompletionPacket(
   const asFiles = deliveredAsFiles(fm);
   const files: CompletionPacket["files"] = [];
   const namedFiles = new Set<string>();
-  // Ruling 86: Viberr's own picture of a page on the task is neither a
-  // result file nor a screenshot to pick: it shows beside its page. One named
-  // is left out, and the reply says so.
+  // Ruling 86: Viberr's own picture of a page of a files delivery is neither
+  // a result file nor a screenshot to pick: it shows beside its page. Its
+  // picture of an earlier delivery's page is of nothing this packet
+  // describes. One named is left out, and the reply says why.
   const onTask = taskFiles({ projectSlug, taskKey, dataRoot: ctx.dataRoot }, fm);
-  const capturesLeftOut: { name: string; from: "files" | "screenshots" }[] = [];
+  const capturesLeftOut: { name: string; from: "files" | "screenshots"; stale: boolean }[] = [];
   for (const file of input.files ?? []) {
     const name = file.name.trim();
     if (name === "" || namedFiles.has(name)) continue;
     namedFiles.add(name);
-    if (onTask.pagePictures.has(name)) {
-      capturesLeftOut.push({ name, from: "files" });
+    if (heldBack(onTask, name)) {
+      capturesLeftOut.push({ name, from: "files", stale: onTask.stalePictures.has(name) });
       continue;
     }
     files.push({ name, caption: captionOf(file.caption) });
@@ -557,8 +576,8 @@ export async function writeCompletionPacket(
     const name = shot.name.trim();
     if (name === "" || seen.has(name)) continue;
     seen.add(name);
-    if (onTask.pagePictures.has(name)) {
-      capturesLeftOut.push({ name, from: "screenshots" });
+    if (heldBack(onTask, name)) {
+      capturesLeftOut.push({ name, from: "screenshots", stale: onTask.stalePictures.has(name) });
       continue;
     }
     screenshots.push({ name, caption: captionOf(shot.caption) });
@@ -575,10 +594,7 @@ export async function writeCompletionPacket(
     .filter((s) => !taskAttachmentExists(projectSlug, taskKey, s.name, ctx.dataRoot))
     .map((s) => s.name);
   if (notImages.length > 0 || missing.length > 0) {
-    const candidates = screenshotCandidates(
-      listTaskAttachments(projectSlug, taskKey, ctx.dataRoot),
-      onTask.pagePictures,
-    );
+    const candidates = screenshotCandidates(listTaskAttachments(projectSlug, taskKey, ctx.dataRoot), onTask);
     const problems = [
       notImages.length > 0
         ? `${notImages.map((n) => `\`${n}\``).join(", ")} ${notImages.length === 1 ? "is not an image" : "are not images"} (png, jpg, webp or gif)`
@@ -648,10 +664,11 @@ export async function writeCompletionPacket(
     ? " `files` was left out: this task's pull request holds its files."
     : "";
   const captures = capturesLeftOut
-    .map(
-      ({ name, from }) =>
-        ` \`${name}\` is Viberr's own picture of \`${pageOfCaptureName(name)}\` and shows beside it, ` +
-        `so it was left out of \`${from}\`.`,
+    .map(({ name, from, stale }) =>
+      stale
+        ? ` \`${name}\` is Viberr's picture of a page of an earlier delivery, not of ${what}, so it was left out of \`${from}\`.`
+        : ` \`${name}\` is Viberr's own picture of \`${pageOfCaptureName(name)}\` and shows beside it, ` +
+          `so it was left out of \`${from}\`.`,
     )
     .join("");
   return {

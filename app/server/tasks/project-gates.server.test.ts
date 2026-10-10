@@ -731,9 +731,12 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       // the operator with no picture on the task yet.
       const record = task().frontmatter.pageCaptures;
       expect(record).toMatchObject({ revisionId: "rev_1", deliveredAt: "2026-09-25T09:00:00.000Z" });
+      // Named for the revision, so the next one's pictures never take their
+      // place under a name a note or a packet already shows.
+      const sha = revisionSha.slice(0, 7);
       expect(record!.pages.map((page) => [page.file, page.shots.map((shot) => shot.name), page.error])).toEqual([
-        ["index.html", ["index.html.capture-desktop.png", "index.html.capture-phone.png"], null],
-        ["guide/index.html", ["guide--index.html.capture-desktop.png", "guide--index.html.capture-phone.png"], null],
+        ["index.html", [`index.html.${sha}.capture-desktop.png`, `index.html.${sha}.capture-phone.png`], null],
+        ["guide/index.html", [`guide--index.html.${sha}.capture-desktop.png`, `guide--index.html.${sha}.capture-phone.png`], null],
       ]);
       // Ruling 328: measured as it was pictured.
       expect(record!.pages.every((page) => "measured" in page)).toBe(true);
@@ -742,11 +745,12 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     const [note] = captureNotes();
     expect(note!.text).toContain("Viberr rendered `index.html` and `guide/index.html` as a reader sees them");
     expect(note!.text).toContain(`They are the pages of \`${revisionSha.slice(0, 7)}\` as the project's gates built it, and the pictures are attached.`);
+    const sha = revisionSha.slice(0, 7);
     expect(note!.attachments).toEqual([
-      "index.html.capture-desktop.png",
-      "index.html.capture-phone.png",
-      "guide--index.html.capture-desktop.png",
-      "guide--index.html.capture-phone.png",
+      `index.html.${sha}.capture-desktop.png`,
+      `index.html.${sha}.capture-phone.png`,
+      `guide--index.html.${sha}.capture-desktop.png`,
+      `guide--index.html.${sha}.capture-phone.png`,
     ]);
     // The pictures are Viberr's own: no run in flight is credited with them.
     expect(attachmentNamesSince(store.slug, "VIB-1", "2000-01-01T00:00:00.000Z", store.dataRoot).filter((name) => name.endsWith(".png"))).toEqual(

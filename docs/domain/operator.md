@@ -680,7 +680,8 @@ Details that matter:
   `pageCaptures`, and a `note` saying what to do). The packet carries no figure of what the task
   took: Viberr prints the runs, agent time, cost, questions and send-backs beside it
   from the record (ruling 83), as it prints the verdicts and the change. Ruling 316: `pageCaptures` lists,
-  for the files delivery under review, each page of the record (`file`), the pictures'
+  for the delivery under review (a files delivery, or the build the project's gates made
+  of a revision, ruling 86), each page of the record (`file`), the pictures'
   names among the attachments (`pictures`), why a page has none (`problem`, which for
   a page past the 8 a delivery is pictured for says so) and, for an HTML page that was
   measured as it was pictured, one line of what was measured (`measured`, ruling 328: its
@@ -688,12 +689,16 @@ Details that matter:
   the note tells the operator to report in its figures and never as a check passed; it is empty when the delivery
   holds no page, when the server names no browser, while the render has not finished,
   and when the record on file pictures an earlier delivery. A page it does not list was
-  not pictured (a person's own upload never is). The card shows those pictures beside
-  each result file that is a page without the operator naming them, so neither candidate
-  list offers one, and a capture named under `files` or `screenshots` is left out with a
-  sentence naming the page it pictures. Viberr's own picture is the one of a page the
-  task holds, or one the record names: an agent's own screenshot that only ends
-  `.capture-desktop.png` is offered and accepted like any other image.
+  not pictured (a person's own upload never is). On a task delivered as files the card
+  shows those pictures beside each result file that is a page without the operator naming
+  them, so neither candidate list offers one, and a capture named under `files` or
+  `screenshots` is left out with a sentence naming the page it pictures; there Viberr's
+  own picture is the one of a page the task holds, or one the record names, and an
+  agent's own screenshot that only ends `.capture-desktop.png` is offered and accepted
+  like any other image. On a task delivered as a revision no result card shows a picture,
+  so the pictures of the pages its gates built are offered as screenshots like any image;
+  the ones the record names for an earlier delivery are of nothing under review, are not
+  offered, and are left out with a sentence saying so when named.
 - **Delivery.** Its description says it never serves a task whose deliverable is a
   result, which is delivered on the task (ruling 128, §4). `deliver_for_review` runs
   `performDelivery`, with NO cached-state short-circuit (ruling 229): rework on a task whose PR is already open is pushed to

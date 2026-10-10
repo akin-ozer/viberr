@@ -1,3 +1,4 @@
+import { CAPTURE_PAGE_FIELDS, MEASURE_PAGE_FIELDS } from "~/server/mcp-proxy/board-tool.server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext } from "../../../test-support/test-db";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -1790,6 +1791,16 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       // which holds none of its pages.
       expect(capture.description).toContain("`name` is a page of the built site by its path from the site's root");
       expect(capture.description).toContain("the page as the gates built that revision and Viberr kept it, never a build of your own");
+      // Whose checkout anyone else is shown: a supporting run has one of its
+      // own, and what it builds there is not shown.
+      expect(capture.description).toContain("the page as the task's delivering checkout holds it built now");
+      const measure = toolkitTools(grants, "oc_capture").measure_page!;
+      expect(measure.description).toContain(
+        "the gates' own build of the revision when you are asked for a verdict on it, the task's delivering checkout as it stands built for anyone else",
+      );
+      // The field a model fills carries the same, on both tools.
+      expect(CAPTURE_PAGE_FIELDS.name).toContain("a page's path in the built site (`index.html`, `about/`)");
+      expect(MEASURE_PAGE_FIELDS.name).toContain("a page's path in the built site (`index.html`, `about/`)");
       // A run that makes pictures is told: it can post files and holds no
       // verdict. CANARY: pass `keeps: true` from the handler whatever the run
       // holds, and a reviewer is one copy away from replacing the file under

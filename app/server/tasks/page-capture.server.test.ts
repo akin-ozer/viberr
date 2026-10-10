@@ -47,7 +47,7 @@ import { getRun, insertRunLine } from "~/server/runtimes/run-store.server";
 import { COMPACTION_LINE_TAG } from "~/server/runtimes/wire-format.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment, readAgentTaskSource } from "./board-read.server";
-import { completionPacketFact } from "./completion-packet.server";
+import { completionPacketFact, writeCompletionPacket } from "./completion-packet.server";
 import { looksFromRunLog, pageLooksNote, pageLooksOwed, runLooks } from "./page-looks.server";
 import {
   captureTaskPage,
@@ -2396,8 +2396,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       const writer = await liveRun("writer");
       // Nothing is built in the checkout yet, and the answer says what to do.
       expect((await ask("index.html", { runId: writer })).text).toBe(
-        "[noop] `index.html` is not a page in `dist/` of the task's checkout, the folder this project's gates build its pages into, and not a file on VIB-1. " +
-          "Build the pages there as the gates do, then ask for one by its path in the site (`index.html`, or `about/` for `about/index.html`).",
+        "[noop] `index.html` is not a page in `dist/` of the task's delivering checkout, the folder this project's gates build its pages into, and not a file on VIB-1. " +
+          "The agent that delivers builds the pages there as the gates do; a page is then asked for by its path in the site (`index.html`, or `about/` for `about/index.html`).",
       );
       put(path.join(checkout(), "dist"), {
         "index.html": '<link rel="stylesheet" href="/assets/site.css"><h1>home, reworked</h1>',
@@ -2407,7 +2407,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         const mine = await ask(named, { runId: writer, view: "desktop" });
         expect(mine.text, named).toMatch(/^\[done\] /);
         expect(mine.text, named).toContain(
-          "This is `dist/index.html` as the task's checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.",
+          "This is `dist/index.html` as the task's delivering checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.",
         );
         // CANARY: answer everyone from the kept build and the maker looks
         // at the page it delivered last, never at the one it is working on.
@@ -2424,7 +2424,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         { projectSlug: store.slug, taskKey: "VIB-1", name: "index.html", runId: writer },
       );
       expect(measured).toMatch(/^\[done\] `index\.html` measured/);
-      expect(measured).toContain("Nothing was saved. This is `dist/index.html` as the task's checkout holds it now.");
+      expect(measured).toContain("Nothing was saved. This is `dist/index.html` as the task's delivering checkout holds it now.");
 
       // The checkout is the agents' to write. A page behind a link there is
       // no page of the site, whether the link is the file or a folder.
@@ -2435,7 +2435,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       const loads = fake.pages().length;
       for (const named of ["leak.html", "linked/secret.html"]) {
         expect((await ask(named, { runId: writer })).text, named).toMatch(
-          /^\[noop\] `[^`]+` is not a page in `dist\/` of the task's checkout/,
+          /^\[noop\] `[^`]+` is not a page in `dist\/` of the task's delivering checkout/,
         );
       }
       // CANARY: ask the disk with `statSync` whether the path is a file and
@@ -2524,11 +2524,11 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     await withBrowser("", async () => {
       const editor = await liveRun("editor");
       expect((await ask("index.html", { runId: editor })).text).toMatch(
-        /^\[noop\] `index\.html` is not a page in `dist\/` of the task's checkout/,
+        /^\[noop\] `index\.html` is not a page in `dist\/` of the task's delivering checkout/,
       );
       put(path.join(checkout(), "dist"), { "index.html": "<h1>the default branch, built</h1>" });
       expect((await ask("index.html", { runId: editor, view: "desktop" })).text).toContain(
-        "This is `dist/index.html` as the task's checkout holds it now.",
+        "This is `dist/index.html` as the task's delivering checkout holds it now.",
       );
       expect(lastLook(editor)).toMatchObject({ file: "index.html", delivery: null });
       await stopRun(editor);
@@ -2551,8 +2551,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "index.html",
         shots: [
-          { view: "desktop", name: "index.html.capture-desktop.png", cut: false },
-          { view: "phone", name: "index.html.capture-phone.png", cut: false },
+          { view: "desktop", name: "index.html.9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "index.html.9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2560,8 +2560,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "guide/index.html",
         shots: [
-          { view: "desktop", name: "guide--index.html.capture-desktop.png", cut: false },
-          { view: "phone", name: "guide--index.html.capture-phone.png", cut: false },
+          { view: "desktop", name: "guide--index.html.9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "guide--index.html.9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2585,9 +2585,16 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     // Nothing shows a revision's pictures by themselves, so they are the
     // packet's to show. CANARY: hold them back as a files delivery's are and
     // the person who accepts the page is shown no picture Viberr made of it.
-    expect(fact.screenshotCandidates).toEqual(
-      expect.arrayContaining(["index.html.capture-desktop.png", "guide--index.html.capture-phone.png"]),
-    );
+    const pictures = record.pages.flatMap((page) => page.shots.map((shot) => shot.name));
+    expect(fact.screenshotCandidates).toEqual(expect.arrayContaining(pictures));
+    // A file of the page's own name on the task (a mock a run saved) takes
+    // none of them away: a built page's picture is named for its revision.
+    // CANARY: name it as a files delivery's picture is named and it is held
+    // back as "Viberr's own picture of `index.html`", which on a revision
+    // shows beside nothing.
+    saveFiles("VIB-1", { "index.html": "<p>a mock beside the work</p>" });
+    expect(completionPacketFact(frontmatter(), ref()).screenshotCandidates).toEqual(expect.arrayContaining(pictures));
+    unlinkSync(path.join(attachments(), "index.html"));
     // And what an approval owes carries the figures a reviewer is told first.
     expect(owed()!.measured.map((line) => line.file)).toEqual(["index.html", "guide/index.html"]);
 
@@ -2599,10 +2606,47 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     expect(frontmatter().pageCaptures).toEqual(record);
     expect(onTask()).toEqual(record.pages.flatMap((page) => page.shots.map((shot) => shot.name)).sort());
 
-    // A newer revision takes the record down with its pictures.
+    // The packet shows the pictures of the revision under review...
+    const shown = await writeCompletionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        summary: "The page is built.",
+        screenshots: [{ name: pictures[0]!, caption: "The home page at 1280 px, as the gates built it." }],
+      },
+    );
+    expect(shown.written).toBe(true);
+    expect(shown.message).not.toContain("left out");
+    expect(frontmatter().completionPacket!.screenshots.map((shot) => shot.name)).toEqual([pictures[0]]);
+
+    // ...and never those of an earlier one. A rework whose gates have not
+    // passed leaves the last record and its pictures on the task, of nothing
+    // under review. CANARY: offer whatever a revision's record names and the
+    // packet for the new revision shows the old one's page as its result.
     await updateTaskFile(ref(), (parsed) => {
       parsed.frontmatter.workRevision = { ...REVISION, id: "rev_2", headSha: "8".repeat(40) };
     });
+    const stale = completionPacketFact(frontmatter(), ref());
+    expect(stale.pageCaptures).toEqual([]);
+    expect(stale.screenshotCandidates.filter((name) => pictures.includes(name))).toEqual([]);
+    const refused = await writeCompletionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        summary: "The rework is built.",
+        screenshots: [{ name: pictures[0]!, caption: "The home page." }],
+      },
+    );
+    expect(refused.message).toContain(
+      ` \`${pictures[0]}\` is Viberr's picture of a page of an earlier delivery, not of revision \`8888888\`, so it was left out of \`screenshots\`.`,
+    );
+    expect(frontmatter().completionPacket!.screenshots).toEqual([]);
+
+    // A newer revision takes the record down with its pictures.
     await withBrowser("", () => picture("VIB-1", frontmatter().deliveredAt!));
     expect(frontmatter().pageCaptures).toBeUndefined();
     expect(onTask()).toEqual([]);

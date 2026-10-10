@@ -437,8 +437,8 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // to show, in its definition and where the tool is described.
     const operator = readFileSync(path.join(dataRoot, "agents", "definitions", "operator.md"), "utf8").replace(/\s+/g, " ");
     const revisions =
-      "On a task delivered as a revision they are the pages the project's gates built of it and show nowhere by themselves: " +
-      "they are among `completionPacket.screenshotCandidates`, so name the ones a person should see.";
+      "On a task delivered as a revision they are the pages the project's gates built of it, and no result card shows them: " +
+      "name the ones a person should see among the `screenshots`.";
     expect(operator).toContain(revisions);
     expect(PAGE_PICTURES_PACKET_SENTENCE).toContain(revisions);
     expect(shippedCopyIsUnedited("agents/definitions/operator.md", "db773c4586a50c81b59d3224b0361158fc6dcb9181ad97344bb5e520b39723c3", {})).toBe(true);
