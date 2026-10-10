@@ -67,10 +67,12 @@ export function capturesRevision(record: PageCaptures | null | undefined): strin
 
 const gateRunRecordSchema = z.looseObject({ gateRunId: z.string().min(1) });
 
-/** Ruling 86: the gate run whose kept build a record pictures (`gateRunId`),
- *  or null for a files delivery's record. One revision can be built more
- *  than once (a folder corrected on the gate, a person's "Run gates"), and
- *  this says which build the pictures are of. */
+/** Ruling 86: the gate run a revision's record was made for (`gateRunId`):
+ *  the run whose kept build it pictures, or whose build held no page or
+ *  could not be kept. Null for a files delivery's record, and for a
+ *  revision's record made before records named their run. One revision can
+ *  be built more than once (a folder corrected on the gate, a person's "Run
+ *  gates"), and this says which run the record is of. */
 export function capturesGateRun(record: PageCaptures | null | undefined): string | null {
   const read = gateRunRecordSchema.safeParse(record);
   return read.success ? read.data.gateRunId : null;

@@ -521,7 +521,8 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
                                   # Or of the build the gates made of a revision: then
                                   # `revisionId` names that revision and `gateRunId` the
-                                  # gate run that kept the build, `deliveredAt` is
+                                  # gate run the record was made for (the one that
+                                  # kept the build, or could not), `deliveredAt` is
                                   # when it was minted, a page's `file` is its path in
                                   # the site (`guide/index.html`) and its pictures are
                                   # named with `--` for the slashes, then `.at-` and the

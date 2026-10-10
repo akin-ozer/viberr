@@ -742,6 +742,17 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       expect(record!.pages.every((page) => "measured" in page)).toBe(true);
     });
     await whenProjectGatesIdle();
+    // The record names the run it was made for, so a restart after this
+    // pictures nothing again. CANARY: have the gate job name anything but
+    // its own run on the record and every boot renders and notes once more.
+    expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, async () => {
+      const launches = fake.launches().length;
+      await recoverProjectGates(store.db, store.dataRoot);
+      await whenProjectGatesIdle();
+      expect(fake.launches()).toHaveLength(launches);
+    });
+    expect(captureNotes()).toHaveLength(1);
     const [note] = captureNotes();
     expect(note!.text).toContain("Viberr rendered `index.html` and `guide/index.html` as a reader sees them");
     expect(note!.text).toContain(`They are the pages of \`${revisionSha.slice(0, 7)}\` as the project's gates built it, and the pictures are attached.`);
@@ -858,6 +869,21 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       expect(task().frontmatter.pageCaptures!.pages.map((page) => page.file)).toEqual(["index.html", "guide/index.html"]);
       expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
       expect(captureNotes()).toHaveLength(2);
+    });
+
+    // A record from before records named their run is of its revision, and
+    // is left as it is: the first boot onto an instance that holds one
+    // pictures nothing over it. CANARY: ask whenever the record names no
+    // run and that boot takes the pictures down, renders again and writes a
+    // second note on every task under review.
+    const before = task().frontmatter.pageCaptures!;
+    const { gateRunId: _made, ...unnamed } = before;
+    writeDeliveredTask({ gateRun: run(), pageCaptures: unnamed });
+    await withBrowser(async () => {
+      const launches = fake.launches().length;
+      await boot();
+      expect(fake.launches()).toHaveLength(launches);
+      expect(task().frontmatter.pageCaptures).toEqual(unnamed);
     });
 
     // A render of an earlier run's build can end after the next run has: its

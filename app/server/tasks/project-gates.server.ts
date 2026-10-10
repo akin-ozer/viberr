@@ -13,7 +13,7 @@ import {
 import { GATE_DEFAULT_TIMEOUT_SECONDS, type ProjectGate } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
-import { capturesGateRun } from "./page-measured.server";
+import { capturesGateRun, capturesRevision } from "./page-measured.server";
 import {
   resolveStoreSegment,
   taskAttachmentsDir,
@@ -500,11 +500,15 @@ function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFr
   const folder = builtFolderOf(run);
   if (run.status !== "finished" || folder === null || gateSubject(fm)?.id !== run.revisionId) return;
   // The record is written for every build the ask reached, a page or none,
-  // and names the run whose build it is of. One of another run on the same
+  // and names the run it was made for. One made for another run on the same
   // revision (a folder since corrected on the gate, a keep that failed and
   // was run again, a render that outlasted the next run) leaves this run's
-  // build still to picture. By the run's id, never by the clock.
-  if (capturesGateRun(fm.pageCaptures) === run.id) return;
+  // build still to picture. By the run's id, never by the clock. A record
+  // from before records named their run is taken for its revision's: it
+  // was made for the run that stood then, and is not pictured over.
+  const recordRun = capturesGateRun(fm.pageCaptures);
+  if (recordRun === run.id) return;
+  if (recordRun === null && capturesRevision(fm.pageCaptures) === run.revisionId) return;
   const project = readProjectFile(
     ref.dataRoot ? { projectSlug: ref.projectSlug, dataRoot: ref.dataRoot } : { projectSlug: ref.projectSlug },
   )?.parsed.frontmatter;

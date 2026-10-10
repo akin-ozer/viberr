@@ -2061,7 +2061,8 @@ export interface RevisionCaptureInput {
   taskKey: string;
   /** The `workRevision.id` whose build was kept. */
   revisionId: string;
-  /** The gate run that kept it: what the record says its pictures are of. */
+  /** The gate run the ask is made for, which the record then names: the
+   *  one that kept the build, or could not. */
   gateRunId: string;
   /** The folder of the checkout the project's gates build the pages into. */
   folder: string;
