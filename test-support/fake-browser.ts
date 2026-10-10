@@ -46,11 +46,17 @@ import { z } from "zod";
  *    key-down of Tab moves focus one stop along it, off the page after the
  *    last, and round again): a control by its place among them, and
  *    `["div","A list"]` for something that takes focus and is no control of
- *    the page's. `fake-tab-trap:1` sends focus from the last stop back to
- *    the one at that place of the order, for ever, as a keyboard trap does.
- *    `fake-unmarked:[1]` are the stops whose look does not change when they
- *    take focus. `fake-keyboard-throws:"why"` makes the page throw when a
- *    keyboard walk asks what holds focus.
+ *    the page's. The same entry again is the same element: next to itself it
+ *    is one that keeps focus for more than one press, as a date field does.
+ *    `fake-tab-trap:1` sends focus from the last stop back to the one at
+ *    that place of the order, for ever, as a keyboard trap does (and as a
+ *    browser that never sends focus off the page does, with `0`).
+ *    `fake-tab-from:2` is the place focus is on when the page is loaded, as
+ *    with `autofocus`: a walk that puts focus back at the top starts from
+ *    nothing again, unless `fake-tab-held:true` says the page keeps focus
+ *    for itself. `fake-unmarked:[1]` are the stops whose look does not
+ *    change when they take focus. `fake-keyboard-throws:"why"` makes the
+ *    page throw when a keyboard walk asks what holds focus.
  *  - `fake-axe:[...]`: what the accessibility engine finds, answered only
  *    once the engine's script was run in the page (a script that holds the
  *    text `fake-engine`, or axe-core's own, by its banner, which is the one
@@ -306,8 +312,9 @@ async function navigate(message) {
     resources.push({ src, status: answer.status, bytes: answer.body.length });
   }
   page = { url, html };
-  // A new document: nothing holds focus, nothing was noted, run or scrolled.
-  focus = -1;
+  // A new document: nothing was noted, run or scrolled, and nothing holds
+  // focus unless the page takes it as it loads.
+  focus = declared("tab-from", -1);
   noted = false;
   engine = false;
   scrollY = 0;
@@ -363,6 +370,11 @@ function evaluate(message) {
     case "controls":
       noted = true;
       return say({ count: told("controls", []).length, names: told("controls", []).map(([tag, words]) => tag + ' "' + words + '"') });
+    case "start":
+      // Nothing holds focus and Tab starts at the top, unless the page keeps
+      // focus for itself.
+      if (!told("tab-held", false)) focus = -1;
+      return say({});
     case "focus": {
       // A page that breaks under a keyboard walk: one whose controls were noted.
       if (noted && told("keyboard-throws", null)) return thrown("Error: " + told("keyboard-throws", null));

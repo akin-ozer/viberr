@@ -341,9 +341,10 @@ interface Keyboard {
   /** False when the walk could not be made or did not finish: the rest is
    *  then zero and empty, and says nothing of the page. */
   ran: boolean;
-  /** True when the walk stopped at its last press before it came round, so
-   *  what Tab never reaches is not known: `unreached` is then empty and its
-   *  count zero, and neither says the page has none. */
+  /** True when the walk used its last press with a control still not come
+   *  to and without having been round, so what Tab never reaches is not
+   *  known: `unreached` is then empty and its count zero, and neither says
+   *  the page has none. Never true of a walk that came to every control. */
   cut: boolean;
   /** The visible controls a keyboard should reach. */
   controls: number;
@@ -1145,14 +1146,21 @@ const FOCUS_LOOK_SOURCE = `
  * index. Not one that is disabled or in a part of the page made `inert`, and
  * not one its page took out of the tab order on purpose (a negative tab
  * index, every radio of a group but the one Tab stops on): those are reached
- * another way or by nobody, and would be named as never reached.
+ * another way or by nobody, and would be named as never reached. Disabled is
+ * what the browser itself says is (`:disabled`): a field in a set of fields
+ * that is switched off has no `disabled` of its own.
+ *
+ * What the page focused as it loaded is blurred first, so that the look
+ * noted of it is its look at rest: a field with `autofocus` would otherwise
+ * be noted with its focus ring on, and look the same when Tab came to it.
  */
 const CONTROLS_EXPRESSION = inPage(
   "controls",
   {},
   `${FOCUS_LOOK_SOURCE}
+  if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
   const reach = (el) => {
-    if (el.disabled || el.closest("[inert]") || !visible(el)) return false;
+    if (el.matches(":disabled") || el.closest("[inert]") || !visible(el)) return false;
     const index = el.getAttribute("tabindex");
     if (index !== null && Number.parseInt(index, 10) < 0) return false;
     if (tagOf(el) === "input" && el.type === "radio" && el.name) {
@@ -1200,6 +1208,41 @@ const FOCUS_EXPRESSION = inPage(
       marked,
     },
   });
+`,
+);
+
+/**
+ * Put the page back to where a keyboard walk starts: nothing focused, and Tab
+ * starting at the top of the document.
+ *
+ * Blurring what holds focus is not enough: the browser goes on from where
+ * focus last was, so Tab would still begin below a field with `autofocus`.
+ * Neither is a caret set at the start of the document. What moves the place
+ * Tab starts from is focus itself, so the body is made focusable for the
+ * moment, focused, blurred, and left as it was: Tab then goes to the first
+ * stop in the document, whatever its tab index. Measured on Chrome 153 and
+ * Debian Chromium 154 on pages that open with focus on a field, on a
+ * heading, in a frame and in a shadow tree, and on one whose script had
+ * focused a field and blurred it again. A page that takes focus back, and
+ * one under a modal dialog, stay as they are: `readKeyboard` does not count
+ * on where a walk begins.
+ */
+const START_EXPRESSION = inPage(
+  "start",
+  {},
+  `
+  const held = document.activeElement;
+  if (held && held !== document.body && held.blur) held.blur();
+  const body = document.body;
+  if (body) {
+    const had = body.getAttribute("tabindex");
+    body.setAttribute("tabindex", "-1");
+    body.focus({ preventScroll: true });
+    body.blur();
+    if (had === null) body.removeAttribute("tabindex");
+    else body.setAttribute("tabindex", had);
+  }
+  return JSON.stringify({});
 `,
 );
 
@@ -2473,42 +2516,86 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
 
 /**
  * Walk the page with the keyboard: Tab, with real key events so that
- * `:focus-visible` holds, until focus leaves the page, comes to a stop it has
- * been on, or `TAB_PRESSES_MAX` presses.
+ * `:focus-visible` holds, until it has come to every control, has been round,
+ * or has made `TAB_PRESSES_MAX` presses.
  *
- * A stop met again ends the walk as focus leaving the page does: from there
- * Tab only goes where it has been. That is the first stop on a page that
- * sends focus round, and it is any other on a page that traps the keyboard,
- * where the controls past the trap are the ones to name. Measured on a real
- * trap (Chrome 153 and Debian Chromium 154): Tab went from its last button
- * back to its first for as many presses as were made, and never to the links
- * after it.
+ * What a press can show, each measured on Chrome 153 and Debian Chromium 154:
+ *
+ *  - The same element as at the press before. That is one stop still being
+ *    crossed, and the walk goes on. A date field is four stops and one
+ *    element, a frame or a part with a shadow tree holds stops of its own
+ *    while the document names only the frame or the part, and a field that
+ *    keeps the key for itself looks the same, so nothing is concluded from
+ *    it.
+ *  - An element the walk was on earlier. That alone is not a walk gone
+ *    round: a card whose own buttons stand before and after the link set
+ *    into it holds focus, hands it to the link, and holds it again.
+ *  - A step it has taken before, from one place to the same next one. From
+ *    there Tab only goes where it has been, so the walk has been round all
+ *    it can reach. That is the first step again on a page whose order comes
+ *    round, and a step inside the trap on a page that traps the keyboard,
+ *    where the controls past the trap are the ones to name.
+ *  - Nothing: focus left the page. The next press shows where Tab comes back
+ *    in. Back on the walk's first stop is its first step again. Nothing
+ *    twice running is Tab going nowhere from the page itself, so there is no
+ *    stop left to find. Leaving the page is by itself no proof that the walk
+ *    has seen it all: the browser in the image sometimes sends focus from
+ *    the last stop straight to the first and never off the page, and a walk
+ *    does not always begin at the start of the order (a page can take focus
+ *    back from `START_EXPRESSION`, and on a page with positive tab indexes
+ *    the first stop in the document is not the first in the order).
  *
  * What is counted is the page's own controls, the ones `noted`: a stop that
  * is none of them (a box that scrolls, a frame, something editable) is where
  * focus was, not a control Tab reached, so the stops are never more than the
- * controls. A stop that looks as it did at rest is unmarked. A control focus
- * never came to is unreached, and only a walk that went all the way round
- * can say so: one cut at the last press says it was cut, and names and
- * counts none, since what it did not get to may well be reachable. Both
- * lists are the first few; the counts are of all.
+ * controls. A control is counted, and its look judged, the first time focus
+ * comes to it. One that looks as it did at rest is unmarked. One that focus
+ * never came to is unreached, and only a walk that has been round can say
+ * so. A walk that came to every control has nothing left to find and ends
+ * there, at whatever press. One that used its last press with a control
+ * still not come to says it was cut, and names and counts none, since what
+ * it did not get to may well be reachable. When that last press took focus
+ * off the page, or back to where the walk had been, one more is made: it
+ * shows whether the walk has just come round. Both lists are the first few;
+ * the counts are of all.
  */
 async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>): Promise<Keyboard> {
-  const met = new Set<number>();
   const reached = new Set<number>();
+  const steps = new Set<string>();
   const unmarked: string[] = [];
-  let round = false;
-  for (let press = 0; press < TAB_PRESSES_MAX && !round; press += 1) {
+  const been = new Set<number>();
+  // The stop focus is on, null while it is on nothing of the page's, and
+  // whether the last press took it there from somewhere else: off the page,
+  // or back to a stop the walk had been on.
+  let at: number | null = null;
+  let back = false;
+  let round = noted.count === 0;
+  let presses = 0;
+  if (!round) await askWithin(study, START_EXPRESSION, z.object({}));
+  while (!round && (presses < TAB_PRESSES_MAX || (presses === TAB_PRESSES_MAX && back))) {
+    presses += 1;
     await study.budget.within(() => pressTab(study.ctx));
     const focus = (await askWithin(study, FOCUS_EXPRESSION, focusSchema)).on;
-    if (!focus || met.has(focus.stop)) {
+    const place = focus ? focus.stop : null;
+    if (place === at) {
+      // The first press may start anywhere, so nothing then is no finding.
+      round = place === null && presses > 1;
+      back = false;
+      continue;
+    }
+    const step = `${String(at)}>${String(place)}`;
+    back = place === null || been.has(place);
+    if (place !== null) been.add(place);
+    at = place;
+    if (steps.has(step)) {
       round = true;
       continue;
     }
-    met.add(focus.stop);
-    if (focus.control < 0) continue;
+    steps.add(step);
+    if (!focus || focus.control < 0 || reached.has(focus.control)) continue;
     reached.add(focus.control);
     if (focus.marked === false) unmarked.push(clip(focus.tag, NAME_MAX));
+    round = reached.size === noted.count;
   }
   const unreached = round ? noted.names.filter((_, control) => !reached.has(control)) : [];
   return {

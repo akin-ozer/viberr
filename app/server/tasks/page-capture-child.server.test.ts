@@ -66,7 +66,7 @@ const measuredSchema = z.strictObject({
       keyboard: z.strictObject({
         /** False when the walk could not be made or did not finish. */
         ran: z.boolean(),
-        /** The walk stopped at its last press before it came round. */
+        /** The walk used its last press with a control still not come to. */
         cut: z.boolean(),
         controls: z.number(),
         /** How many of those controls Tab stopped on. */
@@ -1337,38 +1337,63 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // in a real process that waits two seconds of the clock by itself.
   }, 60_000);
 
+  /** So many links, and their places among a page's controls. */
+  const links = (count: number) => Array.from({ length: count }, (_, at) => ["a", `Link ${at}`]);
+  const places = (count: number) => Array.from({ length: count }, (_, at) => at);
+  /** A page as the stand-in reads it: one declaration a line. */
+  const declares = (...lines: string[]) => lines.map((line) => `<p>${line}</p>`).join("\n");
+
+  /**
+   * The keyboard walk of each page, at the desktop's width: every page in a
+   * renderer and a browser of its own, all at the same time. A measured page
+   * waits two seconds of the clock by itself, so six of them one after the
+   * other are a test of thirteen. Resolves, in the order given, with each
+   * page's walk, how many times Tab went down on it, and its bench.
+   */
+  function walked(pages: Record<string, string>) {
+    return Promise.all(
+      Object.entries(pages).map(async ([file, text]) => {
+        const b = bench({ [file]: text });
+        const report = await b.run({ pages: [file], views: [DESKTOP], measure: true });
+        expect(report.pages[0]).toMatchObject({ file, error: null });
+        const presses = b.browser.inputs().filter((input) => input.type === "rawKeyDown").length;
+        return { walk: measuredOf(report).views[0]!.keyboard, presses, b };
+      }),
+    );
+  }
+  /** A walk that ran, came round and found nothing to say. */
+  const clean = { ran: true, cut: false, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 };
+
   it("walks a page with real presses of Tab and says which of the controls a keyboard should reach it never reached, and which took focus with no change of look", async () => {
-    const links = (count: number) => Array.from({ length: count }, (_, at) => ["a", `Link ${at}`]);
-    const places = (count: number) => Array.from({ length: count }, (_, at) => at);
-    const b = bench({
-      "page.html": [
-        '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Pricing"],["input","Email"],["a","Legal"]]</p>',
-        // Tab stops on four of the five, two of which do not show it, and on
-        // two things that are no control of the page's: a skip link that is
-        // only there with focus, a list that scrolls.
-        '<p>fake-tab-order:[["a","Skip to content"],0,1,["div","A list that scrolls"],2,3]</p>',
-        "<p>fake-unmarked:[1,3]</p>",
-      ].join("\n"),
+    const [page, wide, trap, none, many] = await walked({
+      // Tab stops on four of the five, two of which do not show it, and on
+      // two things that are no control of the page's: a skip link that is
+      // only there with focus, a list that scrolls.
+      "page.html": declares(
+        'fake-controls:[["a","Docs"],["button","Menu"],["a","Pricing"],["input","Email"],["a","Legal"]]',
+        'fake-tab-order:[["a","Skip to content"],0,1,["div","A list that scrolls"],2,3]',
+        "fake-unmarked:[1,3]",
+      ),
       // Twenty controls: Tab goes round the first twelve, seven of which do
       // not show it.
-      "wide.html": [
-        `<p>fake-controls:${JSON.stringify(links(20))}</p>`,
-        `<p>fake-tab-order:${JSON.stringify(places(12))}</p>`,
-        `<p>fake-unmarked:${JSON.stringify(places(7))}</p>`,
-      ].join("\n"),
+      "wide.html": declares(
+        `fake-controls:${JSON.stringify(links(20))}`,
+        `fake-tab-order:${JSON.stringify(places(12))}`,
+        `fake-unmarked:${JSON.stringify(places(7))}`,
+      ),
       // A keyboard trap: from "Close" focus goes back to "Open", for ever.
-      "trap.html": [
-        '<p>fake-controls:[["a","Start"],["button","Open"],["button","Close"],["a","After"],["a","Further on"]]</p>',
-        "<p>fake-tab-order:[0,1,2]</p>",
-        "<p>fake-tab-trap:1</p>",
-      ].join("\n"),
-      "many.html": [`<p>fake-controls:${JSON.stringify(links(100))}</p>`, `<p>fake-tab-order:${JSON.stringify(places(100))}</p>`].join("\n"),
+      "trap.html": declares(
+        'fake-controls:[["a","Start"],["button","Open"],["button","Close"],["a","After"],["a","Further on"]]',
+        "fake-tab-order:[0,1,2]",
+        "fake-tab-trap:1",
+      ),
+      // A control and no stop anywhere for Tab.
+      "none.html": declares('fake-controls:[["a","Out of reach"]]'),
+      "many.html": declares(`fake-controls:${JSON.stringify(links(100))}`, `fake-tab-order:${JSON.stringify(places(100))}`),
     });
-    const report = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
-    expect(report.pages[0]).toMatchObject({ error: null });
-    // CANARY: count every element that took focus as a stop and Tab is said
-    // to have stopped on 6 of the page's 5 controls.
-    expect(measuredOf(report).views[0]!.keyboard).toEqual({
+    // CANARY: count a stop that is no control of the page's and Tab is said
+    // to have stopped on all five, "Legal" among them, which it never did.
+    expect(page!.walk).toEqual({
       ran: true,
       cut: false,
       controls: 5,
@@ -1378,26 +1403,25 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       unmarked: ['button "Menu"', 'input "Email"'],
       unmarkedCount: 2,
     });
-    // Real key events: six stops, and the press that takes focus off the
-    // page, where the walk ends. CANARY: move focus from a script and
-    // `:focus-visible` never holds, so every control would look unmarked;
-    // here the stand-in's focus would not move at all.
-    const tabs = b.browser.inputs().filter((input) => input.type === "rawKeyDown");
-    expect(tabs).toHaveLength(7);
-    expect(tabs[0]).toEqual({ method: "Input.dispatchKeyEvent", type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
+    // Real key events: six stops, the press that takes focus off the page,
+    // and one more, which finds Tab back on its first stop. Only then has the
+    // walk been round and can say that it never came to "Legal". CANARY: move
+    // focus from a script and `:focus-visible` never holds, so every control
+    // would look unmarked; here the stand-in's focus would not move at all.
+    expect(page!.presses).toBe(8);
+    expect(page!.b.browser.inputs()[0]).toEqual({ method: "Input.dispatchKeyEvent", type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     // The controls are noted, with their look at rest, before the page is
     // walked: the walk is what a reader does next. CANARY: note them after
-    // the walk and these two change places.
-    const measuring = b.browser.asks().slice(2).map((asked) => asked.ask);
-    expect(measuring.slice(0, 2)).toEqual(["controls", "walk"]);
+    // the walk and these two change places. Focus is put back at the top of
+    // the page last, with the first press next. (The two before these are
+    // the picture's.)
+    const measuring = page!.b.browser.asks().slice(2);
+    expect(measuring.slice(0, 4).map((asked) => asked.ask)).toEqual(["controls", "walk", "start", "focus"]);
 
-    const taken = b.browser.inputs().length;
-    const others = await b.run({ pages: ["wide.html", "trap.html", "many.html"], views: [DESKTOP], measure: true });
-    const [wide, trap, many] = others.pages.map((page) => page.measured!.views[0]!.keyboard);
     // Six names at most of each, and how many there are in all. CANARY:
     // count what the lists hold and eight controls nobody can tab to are
     // said to be six.
-    expect(wide).toEqual({
+    expect(wide!.walk).toEqual({
       ran: true,
       cut: false,
       controls: 20,
@@ -1407,39 +1431,105 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       unmarked: places(6).map((at) => `a "Link ${at}"`),
       unmarkedCount: 7,
     });
-    // A stop met again is a walk that has been round all it can reach: what
-    // lies past a trap is named, and the walk does not go on to its last
-    // press. CANARY: end a walk only off the page or back at its first stop
-    // and the trap is pressed through eighty times and reported as cut, with
-    // nothing said of the two links past it.
-    expect(trap).toEqual({
-      ran: true,
-      cut: false,
-      controls: 5,
-      stops: 3,
-      unreached: ['a "After"', 'a "Further on"'],
-      unreachedCount: 2,
-      unmarked: [],
-      unmarkedCount: 0,
-    });
+    // Twelve stops, off the page, and back on the first.
+    expect(wide!.presses).toBe(14);
+    // A step Tab has taken before, from one stop to the same next one, is a
+    // walk that has been round all it can reach: what lies past a trap is
+    // named, and the walk does not go on to its last press. CANARY: take no
+    // such step for the end of a walk and the trap is pressed through eighty
+    // times and reported as cut, with nothing said of the two links past it.
+    expect(trap!.walk).toEqual({ ...clean, controls: 5, stops: 3, unreached: ['a "After"', 'a "Further on"'], unreachedCount: 2 });
+    expect(trap!.presses).toBe(5);
+    // Tab from the page itself that leaves focus on the page itself has no
+    // stop to find. CANARY: press on while focus stays off the page and this
+    // is eighty presses and a walk said to be cut.
+    expect(none!.walk).toEqual({ ...clean, controls: 1, stops: 0, unreached: ['a "Out of reach"'], unreachedCount: 1 });
+    expect(none!.presses).toBe(2);
     // Eighty presses at most. A walk that was cut there has not been round
     // the page, and says so: twenty of these links were never reached and
     // every one of them can be, so it names none and counts none. CANARY:
     // say `cut` of no walk and this one reads as a walk all the way round a
     // page of a hundred controls that reached eighty. List what the cut walk
     // did not get to and `unreached` names six links a keyboard reaches.
-    expect(many).toEqual({
-      ran: true,
-      cut: true,
-      controls: 100,
-      stops: 80,
-      unreached: [],
-      unreachedCount: 0,
-      unmarked: [],
-      unmarkedCount: 0,
+    expect(many!.walk).toEqual({ ...clean, cut: true, controls: 100, stops: 80 });
+    expect(many!.presses).toBe(80);
+  });
+
+  it("goes on through whatever keeps focus for more than one press, and says a walk was cut only when a control is left that it never came to", async () => {
+    const [held, full, edge, wrap] = await walked({
+      // A date field is three stops and one element, a frame holds stops of
+      // its own, and a card's own buttons stand before and after the button
+      // set into it: focus is on the card, on the button, on the card again.
+      "held.html": declares(
+        'fake-controls:[["a","Home"],["input","Date of birth"],["a","Terms"],["button","Send"],["a","Privacy"]]',
+        'fake-tab-order:[0,1,1,1,["iframe","A map"],["iframe","A map"],2,["x-card","Card"],3,["x-card","Card"],4]',
+        "fake-unmarked:[1]",
+      ),
+      // Exactly as many controls as there are presses, every one a stop.
+      "full.html": declares(`fake-controls:${JSON.stringify(links(80))}`, `fake-tab-order:${JSON.stringify(places(80))}`),
+      // One fewer stop: the last press takes focus off the page with a
+      // control still not come to. Or straight back to the first stop, on a
+      // browser that never sends focus off the page: the one in the image
+      // does that, now and then.
+      "edge.html": declares(`fake-controls:${JSON.stringify(links(80))}`, `fake-tab-order:${JSON.stringify(places(79))}`),
+      "wrap.html": declares(`fake-controls:${JSON.stringify(links(80))}`, `fake-tab-order:${JSON.stringify(places(79))}`, "fake-tab-trap:0"),
     });
-    // Thirteen presses round the first page, four into the trap, eighty.
-    expect(b.browser.inputs().slice(taken).filter((input) => input.type === "rawKeyDown")).toHaveLength(13 + 4 + 80);
+    // The same element at the next press is one stop still being crossed:
+    // the walk goes on, and counts it once. CANARY: take a stop met again
+    // for a walk that has come round and the three controls after the date
+    // field are named as never reached, which Tab reaches every one of. Take
+    // only a stop met again after another for it and "Privacy" is, since
+    // focus comes back to the card. Count a control at each press it holds
+    // focus and the date field is listed three times over.
+    expect(held!.walk).toEqual({ ...clean, controls: 5, stops: 5, unmarked: ['input "Date of birth"'], unmarkedCount: 1 });
+    // To the last control, and no further.
+    expect(held!.presses).toBe(11);
+    // A walk that has come to every control has nothing left to find, at
+    // whatever press. CANARY: say `cut` of every walk that used its last
+    // press and a page whose eighty controls Tab reaches every one of is
+    // said to hold some that are not known.
+    expect(full!.walk).toEqual({ ...clean, controls: 80, stops: 80 });
+    expect(full!.presses).toBe(80);
+    // The last press took focus off the page, or back to a stop the walk had
+    // been on: one more is made, only to see whether Tab then takes a step
+    // it took before, and it does, so the walk has been round. CANARY: stop
+    // at the eightieth whatever it did and both walks are cut, with nothing
+    // said of the one link Tab never reaches. Make the one more only when
+    // the eightieth left the page and the second walk still is.
+    const round = { ...clean, controls: 80, stops: 79, unreached: ['a "Link 79"'], unreachedCount: 1 };
+    expect(edge!.walk).toEqual(round);
+    expect(wrap!.walk).toEqual(round);
+    expect([edge!.presses, wrap!.presses]).toEqual([81, 81]);
+  });
+
+  it("starts a walk at the top of the page with nothing focused, wherever the page put focus as it loaded, and goes round one that takes focus back", async () => {
+    const [far, kept] = await walked({
+      // A hundred links, the ninety-first of which holds focus when the page
+      // is loaded, as a field with `autofocus` does. Three near the end do
+      // not show focus.
+      "far.html": declares(
+        `fake-controls:${JSON.stringify(links(100))}`,
+        `fake-tab-order:${JSON.stringify(places(100))}`,
+        "fake-tab-from:90",
+        "fake-unmarked:[94,95,96]",
+      ),
+      // A page that keeps focus where it put it, as one under a dialog does:
+      // the walk begins below its third control.
+      "kept.html": declares(`fake-controls:${JSON.stringify(links(5))}`, "fake-tab-order:[0,1,2,3,4]", "fake-tab-from:2", "fake-tab-held:true"),
+    });
+    // Eighty presses from the top are the first eighty links. CANARY: leave
+    // focus where the page put it and the walk begins at the ninety-second:
+    // it meets the three that do not show focus, and its eighty presses stop
+    // on seventy-nine controls.
+    expect(far!.walk).toEqual({ ...clean, cut: true, controls: 100, stops: 80 });
+    // Focus leaving the page is no proof that a walk has seen it all: this
+    // one began part way down, so it goes on, comes back in at the top and
+    // reaches the three above where it began. CANARY: take the first time
+    // focus leaves the page for the end of a walk and those three are named
+    // as never reached.
+    expect(kept!.walk).toEqual({ ...clean, controls: 5, stops: 5 });
+    // Two below, off the page, three above.
+    expect(kept!.presses).toBe(6);
   });
 
   it("measures a page only once every view of it is pictured, on loads of its own: what still runs with reduced motion asked for, what one load of it weighs, and how long it takes to load on a slow line", async () => {
