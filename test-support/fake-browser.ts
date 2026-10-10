@@ -521,6 +521,9 @@ function handle(message) {
           width: declared("width", metrics.width) / scale,
           height: declared("height", metrics.height) / scale,
         },
+        // The screen as the page is laid out for it: wider and taller than
+        // the phone's own when the phone shrinks the page.
+        cssLayoutViewport: { clientWidth: metrics.width / scale, clientHeight: metrics.height / scale },
         cssVisualViewport: { scale },
       });
     }

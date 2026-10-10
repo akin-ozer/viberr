@@ -981,8 +981,8 @@ describe("the page capture's renderer child (ruling 194)", () => {
       // A long page with three such parts in it, of which this is the one
       // that hides the most.
       "long.html": `<p>fake-height:3000</p><p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4, box: 640.4, count: 3 })}</p>`,
-      // One at a phone's width alone.
-      "narrow.html": `<p>fake-height:3000 fake-inner-under:600</p>${part}`,
+      // One at a phone's width alone, on a page the phone shrinks to half.
+      "narrow.html": `<p>fake-height:3000 fake-inner-under:600 fake-scale:0.5</p>${part}`,
       // A page with no such part.
       "plain.html": "<p>fake-height:3000</p>",
     });
@@ -996,7 +996,10 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // to have it at the desktop alone. Ask only a page no taller than its
     // screen and the long page says nothing of the part its pictures show
     // 640 px of. Name the one part and not how many there are and a page
-    // with three reads as one whose other two hide nothing.
+    // with three reads as one whose other two hide nothing. The sizes are
+    // the page's own, as it is laid out: scale them to the picture and the
+    // part on the page a phone shrinks is said to hold 2,600 px in a box of
+    // 320, which is true of no layout.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
       ["app.html", null, [found("desktop"), found("phone")]],
       ["long.html", null, [found("desktop", 3), found("phone", 3)]],
@@ -1004,12 +1007,11 @@ describe("the page capture's renderer child (ruling 194)", () => {
       ["plain.html", null, null],
     ]);
     // Asked on each view's own load, after its walk and before its picture,
-    // with that screen's height: which part it is, if any, is the page's
-    // own layout to say.
+    // with how tall the browser lays the screen out there, which is twice
+    // the phone's 844 px on the page it shrinks to half: which part it is,
+    // if any, is the page's own layout to say.
     expect(b.browser.asks().map((asked) => asked.ask)).toEqual(Array.from({ length: 8 }, () => ["walk", "inner"]).flat());
-    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual(
-      Array.from({ length: 4 }, () => [{ height: 800 }, { height: 844 }]).flat(),
-    );
+    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args.height)).toEqual([800, 844, 800, 844, 800, 1688, 800, 844]);
   });
 
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([

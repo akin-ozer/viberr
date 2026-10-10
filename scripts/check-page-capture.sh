@@ -64,7 +64,9 @@
 #     log in a box on a long page), the report names the one that hides the
 #     most at each width, with how much it holds, how tall its own box is
 #     and how many such parts there are, and not a part that only hides what
-#     does not fit or a body whose overflow is the window's;
+#     does not fit, a body whose overflow is the window's, or the body of a
+#     page with no doctype, which is as tall as the page; it is found past
+#     five thousand elements;
 #   - any agent uid reads the picture the renderer saved, so a run of another
 #     person than the task's owner can copy it onto the task;
 #   - the renderer reads its pages from a folder it can only pass through, the
@@ -640,6 +642,27 @@ ${screens(5)}</body></html>`,
 <style>html,body{height:100%;margin:0;overflow:hidden}body{display:flex}aside.rail{width:30%;overflow-y:auto}main.article{flex:1;overflow-y:auto}</style></head><body>
 <aside class="rail"><div style="height:6000px"></div></aside><main class="article"><div class="note" style="height:100px;overflow:auto"><div style="height:400px"></div></div><div style="height:3900px"></div></main></body></html>`,
   );
+  // A page with no doctype, so laid out in the browser's quirks mode, whose
+  // root and `body` hide what overflows them sideways: 5,000 px of page that
+  // the window scrolls. Its `body` is as tall as what it holds and scrolls
+  // nowhere, though in that mode it reports the window's height as its own
+  // inner height.
+  writeFileSync(
+    path.join(dir, "quirks.html"),
+    `<html lang="en"><head><meta charset="utf-8"><title>A page with no doctype</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{overflow-x:hidden;margin:0}</style></head><body><div style="height:5000px;background:rgb(0,128,0)"></div></body></html>`,
+  );
+  // Two small boxes that scroll, then 5,200 elements, then a box 200 px
+  // tall that holds 9,000: the one that hides the most is far down the
+  // document's elements.
+  writeFileSync(
+    path.join(dir, "crowd.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A crowded page</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0}div.small,div.big{overflow:auto}div.small{height:100px}div.big{height:200px}</style></head><body>
+<div class="small"><div style="height:2000px"></div></div><div class="small"><div style="height:3000px"></div></div>
+<p>${"<i></i>".repeat(5200)}</p>
+<div class="big"><div style="height:9000px"></div></div></body></html>`,
+  );
   // A long page on a wide screen that is an app in a shell on a narrow one.
   // Its `body` keeps the margin browsers give it, so the shell is 16 px
   // taller than the phone's screen: a page that scrolls by its own margin
@@ -823,7 +846,7 @@ if (command === "job-inside") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "inside", {
-      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html", "panes.html"].map((file) => ({
+      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html", "panes.html", "quirks.html", "crowd.html"].map((file) => ({
         file,
         kind: "html",
       })),
@@ -1213,12 +1236,12 @@ if (command === "verify-walks") {
 if (command === "verify-inside") {
   const [work] = args;
   const { check, pages, picture, done } = outcomeOf(work, "inside");
-  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below, panes] = pages;
+  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below, panes, quirks, crowd] = pages;
   const shot = (page, view) => page.shots.find((entry) => entry.view === view);
   const desktop = picture("1-desktop.png");
   check(
-    pages.length === 10 && pages.every((page) => page.error === null),
-    "ten pages are pictured at both widths",
+    pages.length === 12 && pages.every((page) => page.error === null),
+    "twelve pages are pictured at both widths",
     pages.map((page) => `${page.file}: ${page.error}`).join(", "),
   );
   check(
@@ -1275,6 +1298,16 @@ if (command === "verify-inside") {
     panes,
     "desktop aside.rail 6000 800 2, phone aside.rail 6000 844 2",
     "a shell with two panes that each scroll names the rail, which hides the more, and says there are two such parts: the note that scrolls by less than a screen is none",
+  );
+  check(
+    quirks.scrollsInside === null && shot(quirks, "desktop")?.contentHeight === 5000,
+    "a page with no doctype that the window scrolls has no part that scrolls inside it: its body is as tall as what it holds",
+    `${JSON.stringify(quirks.scrollsInside)} ${JSON.stringify(shot(quirks, "desktop"))}`,
+  );
+  says(
+    crowd,
+    "desktop div.big 9000 200 3, phone div.big 9000 200 3",
+    "the part that hides the most is found past five thousand elements, and all three such parts are counted",
   );
   done();
 }
@@ -1593,7 +1626,7 @@ further walks "measured six pages a keyboard walk has to get right"
 "$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
 
 # --- a page that scrolls inside itself ---------------------------------------------
-further inside "pictured ten pages with a part that scrolls inside them"
+further inside "pictured twelve pages and found the parts that scroll inside them"
 "$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------

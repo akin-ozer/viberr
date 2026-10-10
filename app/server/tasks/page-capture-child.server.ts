@@ -89,9 +89,10 @@ import { z } from "zod";
  *    own box is in no picture. Where a part holds more than a screen out of
  *    sight, the report names the one that hides the most, how much it
  *    holds, how tall its own box is and how many such parts there are, at
- *    each view. It does not judge what kind of page that makes it, or say
- *    how much of the part a picture shows: a shell fixed to its screen and
- *    a long page with a log in a box of its own are said the same way.
+ *    each view, in the page's own px as it is laid out. It does not judge
+ *    what kind of page that makes it, or say how much of the part a picture
+ *    shows: a shell fixed to its screen and a long page with a log in a box
+ *    of its own are said the same way.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -300,9 +301,10 @@ interface ScrollsInside {
   view: string;
   /** The part that hides the most, as `tag.firstClass` or `tag#id`. */
   what: string;
-  /** How tall what it holds is, in the picture's px. */
+  /** How tall what it holds is, in the page's own px as it is laid out: no
+   *  phone's shrink, zoom or transform is in it. */
   height: number;
-  /** How tall its own box is, in the picture's px. */
+  /** How tall its own box is, borders included, in the same px. */
   box: number;
   /** How many parts hide more than a screen at this view, this one among
    *  them: the others are named nowhere. */
@@ -1498,29 +1500,40 @@ function stickyExpression(screen: ScreenSize): string {
 /**
  * The part of the page that scrolls inside it and hides the most, of those
  * that hide more than one screen: how much it holds, how tall its own box
- * is, and how many such parts there are. A part scrolls when its own
- * `overflow-y` is `auto` or `scroll`:
- * one that only hides what does not fit (a folded panel, a clamped
- * paragraph) is nothing a reader can scroll. The `body` whose overflow the
- * browser hands to the window, which it does under a plain root element, is
- * no part of the page: it is the window that scrolls then, and the pictures
- * follow it. Nothing is concluded about the page from where the part is or
- * how large: three lanes side by side, a shell under a header with more page
- * below it and a log in a box on a long page each hold what no picture
- * shows, and are said the same way.
+ * is, and how many such parts there are.
+ *
+ * What a part hides is what it holds less its own laid-out box
+ * (`offsetHeight`), so a part as tall as what it holds hides nothing. Its
+ * inner height is no measure of that: the `body` of a page with no doctype
+ * answers with the window's height there while it is as tall as the page
+ * and scrolls nowhere (measured on Chrome 153 and Debian Chromium 154). A
+ * part scrolls when its own `overflow-y` is `auto` or `scroll`: one that
+ * only hides what does not fit (a folded panel, a clamped paragraph) is
+ * nothing a reader can scroll. The `body` whose overflow the browser hands
+ * to the window, which it does under a plain root element, is no part of the
+ * page: it is the window that scrolls then, and the pictures follow it.
+ *
+ * Every element is asked its two heights, which costs no reading of its
+ * style, and only one that hides more than a screen is looked at further:
+ * a page of many thousand elements is read to its last. `height` is how
+ * tall the browser lays the screen out, in the page's own px, and every
+ * number answered is in those px too. Nothing is concluded about the page
+ * from where the part is or how large: three lanes side by side, a shell
+ * under a header with more page below it and a log in a box on a long page
+ * each hold what no picture shows, and are said the same way.
  */
-function innerExpression(screen: ScreenSize): string {
+function innerExpression(height: number): string {
   return inPage(
     "inner",
-    { height: screen.height },
+    { height },
     `
   const handed = getComputedStyle(document.documentElement).overflowY === "visible";
   let most = null;
   let hides = 0;
   let count = 0;
-  for (const el of Array.from(document.querySelectorAll("body, body *")).slice(0, 5000)) {
-    const hidden = el.scrollHeight - el.clientHeight;
-    if (hidden <= args.height) continue;
+  for (const el of document.querySelectorAll("body, body *")) {
+    const hidden = el.scrollHeight - el.offsetHeight;
+    if (!(hidden > args.height)) continue;
     const flow = getComputedStyle(el).overflowY;
     if ((flow !== "auto" && flow !== "scroll") || (el === document.body && handed) || !visible(el)) continue;
     count += 1;
@@ -1528,7 +1541,7 @@ function innerExpression(screen: ScreenSize): string {
     most = el;
     hides = hidden;
   }
-  return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight, box: most.clientHeight, count } : null });
+  return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight, box: most.offsetHeight, count } : null });
 `,
   );
 }
@@ -1715,6 +1728,9 @@ const evaluatedSchema = z.looseObject({
 });
 const layoutSchema = z.looseObject({
   cssContentSize: z.looseObject({ width: z.number(), height: z.number() }),
+  /** The screen as the page is laid out for it, in the page's own px: taller
+   *  than the phone's own when the phone shrinks the page. */
+  cssLayoutViewport: z.looseObject({ clientHeight: z.number().positive() }),
   /** `scale` is how far a phone shrinks a page laid out wider than its
    *  screen (a page that sets no viewport is laid out 980 px wide). */
   cssVisualViewport: z.looseObject({ scale: z.number().positive() }),
@@ -1958,20 +1974,20 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
  * hides more than a screen (`innerExpression`). Asked on each view's own
  * load, once the page is laid out and before it is pictured: a page can have
  * such a part at one width and not at another, and each picture is read by
- * what its own view says. What the page answers is the page's to say and
- * never the page's to fail on: a page that throws under it is one where
- * nothing was found.
+ * what its own view says. The sizes are handed on as the page is laid out,
+ * in its own px, with nothing of the picture's scale in them. What the page
+ * answers is the page's to say and never the page's to fail on: a page that
+ * throws under it is one where nothing was found.
  */
-async function noteInside(ctx: ViewContext, view: JobView, size: PageSize): Promise<void> {
-  const { scale } = size;
+async function noteInside(ctx: ViewContext, view: JobView, layout: Layout): Promise<void> {
   try {
-    const { inside } = await askPage(ctx, innerExpression({ width: view.width / scale, height: view.height / scale }), insideSchema);
+    const { inside } = await askPage(ctx, innerExpression(layout.cssLayoutViewport.clientHeight), insideSchema);
     if (!inside) return;
     ctx.pictures.scrollsInside.push({
       view: view.id,
       what: clip(inside.what, NAME_MAX),
-      height: Math.round(inside.height * scale),
-      box: Math.round(inside.box * scale),
+      height: Math.round(inside.height),
+      box: Math.round(inside.box),
       count: inside.count,
     });
   } catch (caught) {
@@ -2142,8 +2158,9 @@ async function pictureView(ctx: ViewContext, view: JobView, files: readonly stri
     ctx.pictures.shots.push(await pictureBox(ctx, view, view.box.scale, first));
     return;
   }
-  const size = pageSize(await loadView(ctx, view, 1), view);
-  await noteInside(ctx, view, size);
+  const layout = await loadView(ctx, view, 1);
+  await noteInside(ctx, view, layout);
+  const size = pageSize(layout, view);
   if (view.from >= size.pageHeight) {
     ctx.pictures.ended.push({ view: view.id, pageHeight: size.pageHeight });
     return;
