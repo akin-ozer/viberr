@@ -966,59 +966,56 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
   });
 
-  it("says when a page scrolls inside itself, which no picture of it shows: only of a page that does not scroll as pages do, and at every width where that is so", async () => {
+  it("asks a page at every width whether it scrolls inside itself, which no picture of it shows, and says so of each width where it does", async () => {
     const shell = `main.${"app-shell-".repeat(10)}`;
     const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4 })}</p>`;
     const b = bench({
       // A page fixed to the screen whose content scrolls in a part of it: one
       // screen of page, as a browser lays it out and as the stand-in does.
       "app.html": part,
-      // A long page that keeps a log in a box of its own.
-      "log.html": `<p>fake-height:3000</p>${part}`,
-      // 830 px of page: more than a desktop's 800, and no more than the 844
-      // of a phone, where it is a shell.
-      "narrow.html": `<p>fake-height:830</p>${part}`,
-      // A shell 16 px taller than its screen, as a body's own margin above
-      // and below a part one screen tall makes it.
-      "snug.html": `<p>fake-height:816</p>${part}`,
+      // The same under a header 56 px tall: a document taller than its
+      // screen, which scrolls by its header and no more.
+      "header.html": `<p>fake-height:856</p>${part}`,
+      // A shell on a phone alone.
+      "narrow.html": `<p>fake-height:3000 fake-inner-under:600</p>${part}`,
+      // A page that scrolls as pages do: its own script finds no such part.
+      "plain.html": "<p>fake-height:3000</p>",
     });
-    const report = await b.run({ pages: ["app.html", "log.html", "narrow.html", "snug.html"], views: [DESKTOP, PHONE] });
+    const report = await b.run({ pages: ["app.html", "header.html", "narrow.html", "plain.html"], views: [DESKTOP, PHONE] });
     const found = (view: string) => ({ view, what: shell.slice(0, 80), height: 5200 });
     // CANARY: say nothing of it and a page pictured as the one screen it
     // lays out as reads as the whole of a page that has five more out of
     // sight. The part's name is the page author's, so it is cut at eighty
     // characters like any other, and its height is a whole number of px.
-    // Say it of every page that holds such a part and the long page, whose
-    // pictures are the whole of it, is said to be pictured as its first
-    // screen. Look at one width only and the page that is a shell on a phone
-    // alone says nothing. Take a page a few px taller than its screen for
-    // one that scrolls as pages do and the snug shell is not found at the
-    // desktop's width, where it is one. Stop at the first width that finds
-    // it and a page that is a shell at both is said to be one at the desktop
-    // alone, so its phone picture reads as the whole of the page.
+    // Stop at the first width that finds it and a page that is a shell at
+    // both is said to be one at the desktop alone, so its phone picture
+    // reads as the whole of the page. Ask only a page no taller than its
+    // screen and the shell under a header says nothing at all.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
       ["app.html", null, [found("desktop"), found("phone")]],
-      ["log.html", null, null],
+      ["header.html", null, [found("desktop"), found("phone")]],
       ["narrow.html", null, [found("phone")]],
-      ["snug.html", null, [found("desktop"), found("phone")]],
+      ["plain.html", null, null],
     ]);
     // Nothing of what is inside is pictured: the page is its one screen.
     expect(report.pages[0]!.shots.map((shot) => [shot.view, shot.height, shot.contentHeight, shot.cut])).toEqual([
       ["desktop", 800, 800, false],
       ["phone", 844, 844, false],
     ]);
-    // Looked for on each view's own load, after its walk and before its
-    // picture, with that screen's height: the first page at both widths, the
-    // second at neither, the third at the phone, the fourth at both.
-    expect(b.browser.asks().map((asked) => asked.ask)).toEqual(
-      [
-        ["walk", "inner", "walk", "inner"],
-        ["walk", "walk"],
-        ["walk", "walk", "inner"],
-        ["walk", "inner", "walk", "inner"],
-      ].flat(),
-    );
-    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args.height)).toEqual([800, 844, 844, 800, 844]);
+    // Asked on each view's own load, after its walk and before its picture,
+    // with that screen's size and how tall the document is there: which
+    // part it is, if any, is the page's own layout to say.
+    expect(b.browser.asks().map((asked) => asked.ask)).toEqual(Array.from({ length: 8 }, () => ["walk", "inner"]).flat());
+    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual([
+      { width: 1280, height: 800, page: 800 },
+      { width: 390, height: 844, page: 844 },
+      { width: 1280, height: 800, page: 856 },
+      { width: 390, height: 844, page: 856 },
+      { width: 1280, height: 800, page: 3000 },
+      { width: 390, height: 844, page: 3000 },
+      { width: 1280, height: 800, page: 3000 },
+      { width: 390, height: 844, page: 3000 },
+    ]);
   });
 
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([

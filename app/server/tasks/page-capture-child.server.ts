@@ -84,13 +84,13 @@ import { z } from "zod";
  *    weighs and how long it takes on a slow line. All of it after the last
  *    picture, in what is left of the page's time: a page that cannot be
  *    measured is still a pictured page.
- *  - **Says when a page scrolls inside itself.** A page fixed to its screen
- *    with its content in a box that scrolls is pictured as the one screen it
- *    lays out as. The report names the largest such box and how much it
- *    holds, at each view where the page is such a one, so a picture of one
- *    screen is not read as the whole page. A page that scrolls as pages do
- *    is pictured whole, and nothing is said of a box that scrolls somewhere
- *    in it.
+ *  - **Says when a page scrolls inside itself.** A page most of whose first
+ *    screen is one part that scrolls, holding more than the page itself
+ *    scrolls by, is pictured as it lays out. The report names that part and
+ *    how much it holds, at each view where the page is such a one, so a
+ *    picture of one screen is not read as the whole page. A page that
+ *    scrolls as pages do is pictured whole, and nothing is said of a box
+ *    that scrolls somewhere in it.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -285,12 +285,13 @@ interface Act {
 }
 
 /**
- * A page that scrolls inside itself: one whose own height is its screen's,
- * with its content in a part that scrolls. It is pictured as the one screen
- * it lays out as, and what the part holds past its own height is in no
- * picture. The report says so, and nothing here tries to picture it. A page
- * that scrolls as pages do is not such a page, whatever scrolls in a box
- * somewhere in it: its pictures are the whole of it.
+ * A page that scrolls inside itself: most of its first screen is one part
+ * that scrolls, and that part holds more out of sight than the page itself
+ * scrolls by. The page is pictured as it lays out, and what the part holds
+ * past its own height is in no picture. The report says so, and nothing
+ * here tries to picture it. A page that scrolls as pages do is not such a
+ * page, whatever scrolls in a box somewhere in it: its pictures are the
+ * whole of it.
  */
 interface ScrollsInside {
   /** The view it holds at: one that is a stretch of the page or the whole
@@ -414,12 +415,11 @@ interface PageReport {
   ended: Ended[];
   /** One entry per view that carried an act. */
   acts: Act[];
-  /** On a page that does not scroll as pages do: the largest part that
-   *  scrolls inside it with more than a screen of it out of sight, at each
-   *  view where that holds, in the order of the views. Null when it holds
-   *  at none, and when the page did not load to be read. Only a view that
-   *  is a stretch of the page or the whole of it is asked: one of an exact
-   *  size, one with an act and a moving one never are. */
+  /** On a page that scrolls inside itself: the part that does, at each
+   *  view where the page is such a one, in the order of the views. Null
+   *  when it is one at none, and when the page did not load to be read.
+   *  Only a view that is a stretch of the page or the whole of it is asked:
+   *  one of an exact size, one with an act and a moving one never are. */
   scrollsInside: ScrollsInside[] | null;
   /** How many script dialogs the page opened, each dismissed. */
   dialogs: number;
@@ -482,11 +482,6 @@ const ON_SCROLL_SCREENS = 40;
 const ON_SCROLL_STOP_MS = 250;
 /** How far down a page is sent to see what stays at the top of the screen. */
 const STICKY_SCROLL_PX = 600;
-/** How far a page may run past its screen and still be one that does not
- *  scroll as pages do: a part one screen tall under a `body` with the margin
- *  browsers give it makes a document 16 px taller than the screen (measured
- *  on Chrome 153 and Debian Chromium 154). */
-const OWN_SCROLL_SLACK_PX = 16;
 /** How much of what a page measures a report names: kinds of fault and the
  *  places of each, the controls a keyboard missed or left unmarked, what
  *  still runs under reduced motion. */
@@ -1469,30 +1464,47 @@ function stickyExpression(screen: ScreenSize): string {
 }
 
 /**
- * The largest part of the page that scrolls inside it with more than a screen
- * of what it holds out of sight, asked of a page that does not scroll as
- * pages do. A part scrolls when its own `overflow-y` is `auto` or `scroll`:
- * one that only hides what does not fit (a folded panel, a clamped paragraph)
- * is nothing a reader can scroll. The `body` is such a part when it scrolls
- * by itself, which it does under a root element with an overflow of its own.
- * Under a plain root the browser hands the body's overflow to the window, and
- * the page is then one that scrolls as pages do and is never asked. Measured
- * on Chrome 153 and Debian Chromium 154: a `body` of one screen with
- * `overflow: auto` under a plain root made a document several screens tall
- * that the window scrolled; under a root with `overflow: hidden` the document
- * was one screen and the same `body` scrolled inside it.
+ * The part of the page that scrolls inside it, when the page is one that
+ * scrolls inside itself: a part that
+ *
+ *  - scrolls (its own `overflow-y` is `auto` or `scroll`: one that only hides
+ *    what does not fit, a folded panel or a clamped paragraph, is nothing a
+ *    reader can scroll) and is not the `body` whose overflow the browser
+ *    hands to the window, which it does under a plain root element;
+ *  - holds more than one screen out of sight;
+ *  - holds more out of sight than the document itself scrolls by, so a long
+ *    page that scrolls as pages do is never said to scroll inside a part of
+ *    it, while a shell under a header, which scrolls by its header, is;
+ *  - covers at least half of the page's first screen, so a log in a box of
+ *    its own, a code block or a long text field is not it.
+ *
+ * The largest of those, by what it holds. `screen` is the first screen and
+ * `page` how tall the document is, in the page's own px. Measured on Chrome
+ * 153 and Debian Chromium 154: a `main` one screen tall under a 56 px header
+ * made a document of 856 px and held 24,000; a `body` of half a screen with
+ * `overflow: auto` under a plain root held more than its document scrolled,
+ * and it was the window that scrolled.
  */
-function innerExpression(screen: ScreenSize): string {
+function innerExpression(screen: ScreenSize, page: number): string {
   return inPage(
     "inner",
-    { height: screen.height },
+    { width: screen.width, height: screen.height, page },
     `
+  const own = Math.max(0, args.page - args.height);
+  const handed = getComputedStyle(document.documentElement).overflowY === "visible";
   let most = null;
   for (const el of Array.from(document.querySelectorAll("body, body *")).slice(0, 5000)) {
-    if (el.scrollHeight - el.clientHeight <= args.height) continue;
+    const hidden = el.scrollHeight - el.clientHeight;
+    if (hidden <= args.height || hidden <= own) continue;
     if (most && el.scrollHeight <= most.scrollHeight) continue;
     const flow = getComputedStyle(el).overflowY;
-    if ((flow !== "auto" && flow !== "scroll") || !visible(el)) continue;
+    if ((flow !== "auto" && flow !== "scroll") || (el === document.body && handed) || !visible(el)) continue;
+    const box = el.getBoundingClientRect();
+    const left = box.left + window.scrollX;
+    const top = box.top + window.scrollY;
+    const wide = Math.min(left + box.width, args.width) - Math.max(left, 0);
+    const high = Math.min(top + box.height, args.height) - Math.max(top, 0);
+    if (wide <= 0 || high <= 0 || wide * high * 2 < args.width * args.height) continue;
     most = el;
   }
   return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight } : null });
@@ -1913,22 +1925,18 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
 }
 
 /**
- * Say when the page scrolls inside itself at this view: its own height is no
- * more than the screen's, to within `OWN_SCROLL_SLACK_PX`, and a part of it
- * scrolls with more than a screen out of sight. A page taller than that
- * scrolls as pages do and is not asked: its pictures are the whole of it,
- * whatever scrolls in a box somewhere in it. Looked for on each view's own
- * load, once the page is laid out and before it is pictured: a page can be
- * such a one at one width and not at another, and each picture is read by
- * what its own view says. What the page answers is the page's to say and
- * never the page's to fail on: a page that throws under it is one where
- * nothing was found.
+ * Say when the page scrolls inside itself at this view (`innerExpression` has
+ * what makes it one). Asked on each view's own load, once the page is laid
+ * out and before it is pictured: a page can be such a one at one width and
+ * not at another, and each picture is read by what its own view says. What
+ * the page answers is the page's to say and never the page's to fail on: a
+ * page that throws under it is one where nothing was found.
  */
 async function noteInside(ctx: ViewContext, view: JobView, size: PageSize): Promise<void> {
-  if (size.contentHeight > view.height + OWN_SCROLL_SLACK_PX) return;
   const { scale } = size;
+  const screen = { width: view.width / scale, height: view.height / scale };
   try {
-    const { inside } = await askPage(ctx, innerExpression({ width: view.width / scale, height: view.height / scale }), insideSchema);
+    const { inside } = await askPage(ctx, innerExpression(screen, size.contentHeight / scale), insideSchema);
     if (inside) ctx.pictures.scrollsInside.push({ view: view.id, what: clip(inside.what, NAME_MAX), height: Math.round(inside.height * scale) });
   } catch (caught) {
     if (!ctx.browser.alive) throw caught;
