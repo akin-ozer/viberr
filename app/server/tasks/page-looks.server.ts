@@ -310,8 +310,11 @@ export interface BuildPending {
  */
 function buildPending(parsed: ParsedTaskFile, revisionId: string): BuildPending | null {
   const run = parsed.frontmatter.gateRun;
+  // A delivery and a new revision queue the gates as they are written, so a
+  // revision with no run of its own is one nobody asked the gates for: not
+  // on its way, and a person's "Run gates" is what builds it.
   if (!run || run.revisionId !== revisionId) {
-    return { why: "the project's gates have not run on this revision yet, and its pages are what they build", building: true };
+    return { why: "the project's gates have not run on this revision, and its pages are what they build", building: false };
   }
   if (run.status === "queued" || run.status === "running") {
     return { why: "the project's gates are still building this revision's pages", building: true };

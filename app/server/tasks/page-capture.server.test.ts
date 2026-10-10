@@ -2457,8 +2457,11 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       await updateTaskFile(ref(), (parsed) => {
         delete parsed.frontmatter.gateRun;
       });
+      // Nobody asked the gates for this revision: nothing is on its way, so
+      // the answer is not "call again".
       expect((await ask("index.html", { runId: editor })).text).toBe(
-        "[busy] `index.html` cannot be shown yet: the project's gates have not run on this revision yet, and its pages are what they build. Call again in a moment.",
+        "[noop] `index.html` cannot be shown: the project's gates have not run on this revision, and its pages are what they build. " +
+          "A review can say so; the pages are shown once the gates pass.",
       );
       expect(fake.launches()).toEqual([]);
       expect(runLooks(store.db, editor)).toEqual([]);
