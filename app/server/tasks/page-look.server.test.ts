@@ -439,7 +439,9 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       const answer = await keep({ url: "https://look.example/" });
       // A page that scrolls inside one of its elements: said in the answer
       // and in the note, under what moved, in the page's own name for it.
-      expect(answer).toContain("The page scrolls inside `div#S2` (5,200 px) at 1280 px and not as a page, so the pictures at that width are of its first screen only.");
+      expect(answer).toContain(
+        "The page scrolls inside `div#S2` (5,200 px) at 1280 px and inside `div#S2` (5,200 px) at 390 px, and not as a page, so the pictures at those widths are of its first screen only.",
+      );
       const whole = sourcesOf("VIB-1");
       const pictures = whole.length - 1;
 

@@ -1271,7 +1271,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways. " +
         // A picture of a page that scrolls inside one of its elements shows
         // one screen of it, and said nothing: it read as a whole short page.
-        "`zapp.html` scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and not as a page, so its pictures and what was measured of it there are of its first screen only.",
+        "`zapp.html` scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and inside `main.app` (5,200 px) at the phone width (390 px), and not as a page, so its pictures and what was measured of it are of its first screen only.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1282,6 +1282,14 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // An agent that looks at it is told the same.
     expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
       "It scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and not as a page, so its pictures and what was measured of it there are of its first screen only.",
+    );
+    // At both widths it says so of both: a phone's one screen is not "the
+    // whole page" because the desktop's was the first to be asked. CANARY:
+    // carry the first width alone and the phone's picture reads as a whole
+    // short page beside a sentence about the desktop.
+    expect((await withBrowser("", () => ask("zapp.html"))).text).toContain(
+      "It scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and inside `main.app` (5,200 px) at the phone width (390 px), " +
+        "and not as a page, so its pictures and what was measured of it are of its first screen only.",
     );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(

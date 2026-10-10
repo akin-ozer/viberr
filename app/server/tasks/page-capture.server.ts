@@ -1226,9 +1226,10 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
 /** Said of a page whose content scrolls inside one of its elements: at which
  *  widths, and what a picture and a figure of it then cover there. */
 function scrollsInsideRemark(inside: readonly ScrollsInside[]): string {
-  const where = LIST_AND.format(inside.map((entry) => `\`${entry.what}\` (${px(entry.height)} px) ${atWidth(entry.view)}`));
-  const there = inside.length < PAGE_CAPTURE_VIEWS.length ? " there" : "";
-  return `scrolls inside ${where} and not as a page, so its pictures and what was measured of it${there} are of its first screen only.`;
+  const where = inside.map((entry) => `inside \`${entry.what}\` (${px(entry.height)} px) ${atWidth(entry.view)}`).join(" and ");
+  // At both widths nothing of it is a whole page; at one, the other is.
+  const [comma, there] = inside.length < PAGE_CAPTURE_VIEWS.length ? ["", " there"] : [",", ""];
+  return `scrolls ${where}${comma} and not as a page, so its pictures and what was measured of it${there} are of its first screen only.`;
 }
 
 /** Ruling 328: what was measured of one pictured page, for the note. */

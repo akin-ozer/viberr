@@ -244,8 +244,9 @@ function lookNote(address: string, at: string, pictures: readonly LookPicture[],
 /** Said of a look of a page that scrolls inside one of its elements, at one
  *  width or at both. */
 function firstScreenOnly(inside: readonly ScrollsInside[]): string {
-  const where = LIST_AND.format(inside.map((entry) => `\`${entry.what}\` (${px(entry.height)} px) at ${pageCaptureView(entry.view).width} px`));
-  return `The page scrolls inside ${where} and not as a page, so the pictures at ${inside.length === 1 ? "that width" : "those widths"} are of its first screen only.`;
+  const where = inside.map((entry) => `inside \`${entry.what}\` (${px(entry.height)} px) at ${pageCaptureView(entry.view).width} px`).join(" and ");
+  const [comma, widths] = inside.length === 1 ? ["", "that width"] : [",", "those widths"];
+  return `The page scrolls ${where}${comma} and not as a page, so the pictures at ${widths} are of its first screen only.`;
 }
 
 /** The file name a picture of the look is kept under. */
