@@ -7,6 +7,7 @@ import { PAGE_CAPTURE_MAX_PAGES } from "~/shared/page-capture";
 import { taskDir } from "./file-store-root.server";
 import {
   KEPT_BUILD_FILE_MAX_BYTES,
+  KEPT_BUILD_MAX_FILES,
   builtPagesAmong,
   keepBuild,
   keptBuildDir,
@@ -103,6 +104,19 @@ describe("a revision's built pages are kept as a tree (ruling 86)", () => {
     expect(result.leftOut).toBe(1);
     expect(keptBuildFiles(kept("rev_1"))).not.toContain("film.html");
     expect(result.files).toBe(3);
+  });
+
+  it("keeps no more files than a build holds, and counts the rest", async () => {
+    const many: Record<string, string> = {};
+    for (let i = 0; i < KEPT_BUILD_MAX_FILES; i += 1) many[`pages/p${String(i).padStart(4, "0")}.html`] = "";
+    put(built, many);
+    // The three the fixture holds, and the folder's files up to the limit.
+    const result = await keep("rev_1");
+    // CANARY: drop the count from `keepBuild` and a repository's whole
+    // output is copied onto the task with every revision.
+    expect(result.files).toBe(KEPT_BUILD_MAX_FILES);
+    expect(result.leftOut).toBe(3);
+    expect(keptBuildFiles(kept("rev_1"))).toHaveLength(KEPT_BUILD_MAX_FILES);
   });
 
   it("replaces the build kept for the same revision, and keeps only the two newest revisions' builds", async () => {

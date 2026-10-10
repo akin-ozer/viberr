@@ -3125,6 +3125,11 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
   if (!where) return Promise.resolve(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name));
   if ("said" in where) return Promise.resolve(where.said);
   const size = where.size;
+  if (where.site && pageKindOf(where.stored) !== "html") {
+    return Promise.resolve(
+      `[noop] ${code(name)} is a file of the built site and not a page of it. measure_page measures a site's .html pages.`,
+    );
+  }
   if (pageKindOf(where.stored) !== "html") {
     return Promise.resolve(
       `[noop] ${code(name)} is not a page somebody laid out. measure_page measures an .html or .htm file; ` +

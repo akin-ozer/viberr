@@ -8,16 +8,25 @@ import {
   type GateRun,
   type ParsedTaskFile,
   type TaskFileEvent,
+  type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
 import { GATE_DEFAULT_TIMEOUT_SECONDS, type ProjectGate } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
+import { capturesRevision } from "./page-measured.server";
 import {
   resolveStoreSegment,
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import { keepBuild, projectPagesDir, type KeptBuild } from "~/server/files/kept-builds.server";
+import {
+  builtPagesAmong,
+  keepBuild,
+  keptBuildDir,
+  keptBuildFiles,
+  projectPagesDir,
+  type KeptBuild,
+} from "~/server/files/kept-builds.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -455,7 +464,9 @@ export async function recoverProjectGates(db: DatabaseSync, dataRoot?: string): 
   let requeued = 0;
   for (const row of rows) {
     const ref = refOf({ projectSlug: row.project_slug, taskKey: row.task_key, dataRoot });
-    const run = readTaskFile(ref)?.parsed.frontmatter.gateRun;
+    const fm = readTaskFile(ref)?.parsed.frontmatter;
+    const run = fm?.gateRun;
+    if (fm && run) picturesOwedAfterRestart(db, ref, fm, run);
     if (!run || (run.status !== "queued" && run.status !== "running") || live.has(run.id)) continue;
     try {
       const result = await requestProjectGates(
@@ -472,6 +483,33 @@ export async function recoverProjectGates(db: DatabaseSync, dataRoot?: string): 
     }
   }
   return requeued;
+}
+
+/**
+ * Ruling 86: a run that finished and kept its revision's build, on a task
+ * that keeps no picture of that build, was cut off between the two (the
+ * render is asked for after the finishing write, and a restart drops the
+ * queue). The build is on disk, so the pictures are asked for again. Only
+ * for a build that holds a page: one that holds none was said once.
+ */
+function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFrontmatter, run: GateRun): void {
+  const folder = builtFolderOf(run);
+  if (run.status !== "finished" || folder === null || gateSubject(fm)?.id !== run.revisionId) return;
+  if (capturesRevision(fm.pageCaptures) === run.revisionId) return;
+  const kept = keptBuildFiles(keptBuildDir(ref.projectSlug, ref.taskKey, run.revisionId, ref.dataRoot));
+  if (builtPagesAmong(kept).pages.length === 0) return;
+  const asked = import("./page-capture.server").then(({ requestRevisionCaptures }) =>
+    requestRevisionCaptures(db, ref.dataRoot ? { dataRoot: ref.dataRoot } : {}, {
+      projectSlug: ref.projectSlug,
+      taskKey: ref.taskKey,
+      revisionId: run.revisionId,
+      folder,
+      kept: true,
+      leftOut: 0,
+    }),
+  );
+  handoffs.add(asked);
+  void asked.finally(() => handoffs.delete(asked));
 }
 
 // ------------------------------------------------------------ running

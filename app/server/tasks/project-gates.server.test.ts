@@ -778,6 +778,34 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(task().frontmatter.pageCaptures).toBeUndefined();
   });
 
+  it("pictures a kept build again at boot when a restart cut the pictures off, and says nothing twice", async () => {
+    // The render is asked for after the gate run's finishing write, and a
+    // restart drops the queue: the build was on disk, the run read finished,
+    // and nothing ever pictured it.
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    setGates([{ name: "build", command: BUILD, pages: "dist" }]);
+    writeDeliveredTask();
+    // The gates ran and kept the build on a server that pictured nothing.
+    await gateOnce();
+    expect(built()).toContain("index.html");
+    expect(task().frontmatter.pageCaptures).toBeUndefined();
+
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, async () => {
+      // CANARY: leave a finished run alone at boot, as before, and the
+      // task keeps no picture and no figure until a person runs the gates.
+      expect(await recoverProjectGates(store.db, store.dataRoot)).toBe(0);
+      await whenProjectGatesIdle();
+      expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1" });
+      expect(captureNotes()).toHaveLength(1);
+      // A build that is pictured is left alone at the next boot.
+      const launches = fake.launches().length;
+      await recoverProjectGates(store.db, store.dataRoot);
+      await whenProjectGatesIdle();
+      expect(fake.launches()).toHaveLength(launches);
+      expect(captureNotes()).toHaveLength(1);
+    });
+  });
+
   it("runs the gates again on a revision that passed before a gate named the folder, and only once", async () => {
     setGates([{ name: "build", command: BUILD }]);
     writeDeliveredTask();

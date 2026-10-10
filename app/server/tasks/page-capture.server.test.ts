@@ -2373,6 +2373,14 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         { projectSlug: store.slug, taskKey: "VIB-1", name: "guide/", runId: editor },
       );
       expect(measured).toMatch(/^\[done\] `guide\/` measured as Viberr measures a delivered page/);
+      // A file of the site that is no page is said to be that, by both tools.
+      expect(
+        await measureTaskPage(
+          store.db,
+          { dataRoot: store.dataRoot },
+          { projectSlug: store.slug, taskKey: "VIB-1", name: "assets/site.css", runId: editor },
+        ),
+      ).toBe("[noop] `assets/site.css` is a file of the built site and not a page of it. measure_page measures a site's .html pages.");
       expect(measured).toContain("Nothing was saved. This is the page as the project's gates built revision `9999999` and Viberr kept it");
       await stopRun(editor);
     });
