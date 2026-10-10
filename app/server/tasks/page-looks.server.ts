@@ -17,6 +17,7 @@ import { logger } from "~/server/logging/logger.server";
 import { getRun, patchRun } from "~/server/runtimes/run-store.server";
 import { toError } from "~/shared/errors";
 import {
+  PAGE_CAPTURE_MAX_FROM,
   PAGE_CAPTURE_VIEWS,
   pageCaptureView,
   pageKindOf,
@@ -269,7 +270,10 @@ export function unmetPageLooks(owed: PageLooksOwed, looks: readonly RunLook[]): 
           look.to - look.from <= PAGE_LOOK_MAX_PX,
       );
       const seen = seenTo(mine);
-      if (seen.whole) continue;
+      // A stretch starts no further down than `PAGE_CAPTURE_MAX_FROM`, so a
+      // run that read a page to there has seen all of it that can be shown,
+      // and is never owed a look nothing can give it.
+      if (seen.whole || seen.to > PAGE_CAPTURE_MAX_FROM) continue;
       unmet.push(
         seen.to === 0
           ? `${code(page)} at the ${view.id} width (${view.width} px)`

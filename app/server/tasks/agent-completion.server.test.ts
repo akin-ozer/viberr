@@ -1159,6 +1159,19 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(refusal()).not.toContain("desktop");
     });
 
+    it("holds a run to no more of a page than the tool can show: read to the last place a stretch may start, it has looked", async () => {
+      // `capture_page` starts no stretch past 40,000 px. A page longer than
+      // that never reports its end, and an approval of it could never bind.
+      // CANARY: require the page's end whatever its length and the task waits
+      // for a review nothing can complete.
+      writeDeliveredPageTask(["index.html"]);
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      const down = (view: "desktop" | "phone") => Array.from({ length: 21 }, (_, at) => stretch(view, at * 2000, at * 2000 + 2000, false));
+      recordRunLooks(store.db, runId, [...down("desktop"), ...down("phone")]);
+      await complete(runId, { role: "Review & validation" });
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
     it("does not count a picture taller than a stretch, which a model is handed too small to read", async () => {
       // CANARY: drop the `PAGE_LOOK_MAX_PX` bound and one tall kept picture a
       // width passes for a look at a page five screens long.
