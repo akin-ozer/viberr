@@ -1348,7 +1348,8 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       })),
     );
     // One load of the page: the page and the one file it was served.
-    // CANARY: count every load of the job and this is eight times as much.
+    // CANARY: read the page server's count once the views are measured, and
+    // not around the one load, and this is six loads' worth.
     expect(measured.weight).toEqual({ bytes: Buffer.byteLength(page) + 9, files: 2 });
     // The stand-in reports this time only on a held line with the cache off.
     // CANARY: load it again as it is and `loadMs` is 1.
