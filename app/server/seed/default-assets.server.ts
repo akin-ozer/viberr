@@ -391,6 +391,10 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 86 (2026-10-10): before the completion-packet paragraph said
+    // that Viberr's pictures of the pages a revision's gates built show
+    // nowhere by themselves and are the packet's to show.
+    "db773c4586a50c81b59d3224b0361158fc6dcb9181ad97344bb5e520b39723c3",
     // The rulings compaction (2026-10-09): before the ruling numbers this
     // text cites were renumbered.
     "80902e9e0c68445221b0f642705bc0805aa34f709ac6f3caa2e19cf4c7471f20",

@@ -2571,6 +2571,12 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       ["index.html", 2, true],
       ["guide/index.html", 2, true],
     ]);
+    // Nothing shows a revision's pictures by themselves, so they are the
+    // packet's to show. CANARY: hold them back as a files delivery's are and
+    // the person who accepts the page is shown no picture Viberr made of it.
+    expect(fact.screenshotCandidates).toEqual(
+      expect.arrayContaining(["index.html.capture-desktop.png", "guide--index.html.capture-phone.png"]),
+    );
     // And what an approval owes carries the figures a reviewer is told first.
     expect(owed()!.measured.map((line) => line.file)).toEqual(["index.html", "guide/index.html"]);
 

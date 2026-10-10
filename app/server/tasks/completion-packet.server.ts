@@ -96,10 +96,10 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * names none, and it opens one before it writes how a page looks.
  */
 export const PAGE_PICTURES_PACKET_SENTENCE =
-  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures, which show beside it on the result, so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured. A page's `measured` line is what Viberr measured as it pictured it (its weight, its load time, and what the accessibility, keyboard and reduced-motion checks found at each width): say what it found in the summary, in its figures, and never that a page passes a check the line does not show.";
+  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures. On a task delivered as files they show beside the page on the result, so never name one of those as a screenshot. On a task delivered as a revision they are the pages the project's gates built of it and show nowhere by themselves: they are among `completionPacket.screenshotCandidates`, so name the ones a person should see. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured. A page's `measured` line is what Viberr measured as it pictured it (its weight, its load time, and what the accessibility, keyboard and reduced-motion checks found at each width): say what it found in the summary, in its figures, and never that a page passes a check the line does not show.";
 /** The same, in the space a plan field's description has. */
 export const PAGE_PICTURES_PLAN_SENTENCE =
-  "Never one of Viberr's own pictures of a result page (`completionPacket.pageCaptures`): those show beside the page without being named.";
+  "Never one of Viberr's own pictures of a page of a files delivery (`completionPacket.pageCaptures`): those show beside the page without being named. Its pictures of the pages a revision's gates built show nowhere by themselves and are named like any screenshot.";
 
 /** The slice of the frontmatter the packet binds to. */
 type PacketState = Pick<TaskFrontmatter, "workRevision" | "deliveredAt" | "completionPacket">;
@@ -160,7 +160,8 @@ export function completionPacketRefusal(fm: PacketState, taskKey: string): strin
 
 /** The image attachments a packet may show, newest first. Ruling 86: never
  *  Viberr's own picture of a page on the task (`pagePictures`), which shows
- *  beside that page. A screenshot an agent named like one is offered. */
+ *  beside that page. A screenshot an agent named like one is offered, and so
+ *  are Viberr's pictures of the pages a revision's gates built. */
 function screenshotCandidates(
   entries: readonly TaskAttachmentEntry[],
   pagePictures: ReadonlySet<string>,
@@ -235,7 +236,12 @@ interface TaskFiles {
 
 function taskFiles(ref: StoreRef, fm: Pick<TaskFrontmatter, "pageCaptures">): TaskFiles {
   const names = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot);
-  return { names, pagePictures: pageCapturesAmong(names, recordedPageCaptures(fm.pageCaptures)) };
+  // Ruling 86: the pictures of the pages a revision's gates built show
+  // nowhere by themselves (its result is a pull request, with no file to put
+  // a picture beside), so they are the packet's to show and are not held
+  // back as a files delivery's are.
+  const beside = capturesRevision(fm.pageCaptures) === null ? recordedPageCaptures(fm.pageCaptures) : [];
+  return { names, pagePictures: pageCapturesAmong(names, beside) };
 }
 
 /** How many candidate names a refusal or the snapshot lists. */

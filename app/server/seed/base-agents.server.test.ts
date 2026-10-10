@@ -1,3 +1,4 @@
+import { PAGE_PICTURES_PACKET_SENTENCE } from "~/server/tasks/completion-packet.server";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -430,6 +431,17 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(reviewer).toContain("never judge the look from a build of your own");
     expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5cb078e4c8b33d04cd2f6fc2f7a9d75c131722b180d1c7684b43744cf6064856", {})).toBe(true);
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "b72b5f22a49af310d470db6afa0d48c69b5866460edeefeae5bd8adb83bed825", {})).toBe(true);
+    // The operator was told every picture Viberr makes shows beside its page
+    // on the result, which a pull request's result never does: the person
+    // accepting a site saw none. It is told a revision's are the packet's
+    // to show, in its definition and where the tool is described.
+    const operator = readFileSync(path.join(dataRoot, "agents", "definitions", "operator.md"), "utf8").replace(/\s+/g, " ");
+    const revisions =
+      "On a task delivered as a revision they are the pages the project's gates built of it and show nowhere by themselves: " +
+      "they are among `completionPacket.screenshotCandidates`, so name the ones a person should see.";
+    expect(operator).toContain(revisions);
+    expect(PAGE_PICTURES_PACKET_SENTENCE).toContain(revisions);
+    expect(shippedCopyIsUnedited("agents/definitions/operator.md", "db773c4586a50c81b59d3224b0361158fc6dcb9181ad97344bb5e520b39723c3", {})).toBe(true);
   });
 });
 
