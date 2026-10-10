@@ -697,9 +697,17 @@ there; a slower render finishes in the background. A page that cannot be picture
 in the note and in the record, and the delivery stands without it; the note names
 `capture_page` only for a page that tool can still show (it shares the renderer, the
 owner it runs as and the source's size limit with this render). A delivery that is a
-revision is not pictured, whatever files its run saved beside the commit: its pages live
-in the pull request, and the pictures and record of an earlier files delivery are taken
-down. On a board with a repository a first delivery is stamped before the reconcile mints
+revision is never pictured from the files its run saved beside the commit, and the
+pictures and record of an earlier files delivery are taken down. Its pages are what the
+project's gates build of it (ruling 86): where a gate names the folder it builds the
+site into (`pages`), the gate job keeps that folder of each revision every gate exited 0
+on (`tasks/<KEY>/builds/<revisionId>/`, `kept-builds.server.ts`), and the same render
+pictures and measures the build's pages (its HTML files, `index.html` first, up to 8)
+onto the task, the record bound to the revision (`pageCaptures.revisionId`). The
+delivering run's completion waits up to 300 s for the gates and those pictures before
+the operator goes on. A build that left no page in the folder is said in a note. Where
+no gate names a folder a revision is not pictured, and its pages live in the pull
+request. On a board with a repository a first delivery is stamped before the reconcile mints
 its revision, so the completion asks for the pictures only after the reconcile
 (`applyAgentCompletionEffects`), and the render puts its pictures, record and note down
 inside the task file's lock, only while the task still names that delivery and it is

@@ -34,6 +34,11 @@ ${VIBERR_DATA_ROOT}/
                                              own pictures of the delivered pages,
                                              `<file>.capture-desktop.png` and
                                              `<file>.capture-phone.png` (ruling 86)
+  projects/<slug>/tasks/<KEY>/builds/<revisionId>/ ← the pages a delivered revision builds, as
+                                             the project's gates built them: the folder a gate
+                                             names (`pages`), kept once every gate exited 0
+                                             (a record, not projected; ruling 86). A tree;
+                                             the two newest revisions' builds
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/ ← each files delivery as it was delivered,
                                              copied when `deliveredAt` is stamped, the stamp's
                                              colons as dashes (a record, not projected; ruling 86):
@@ -226,12 +231,18 @@ gates:                            # ruling 17: the commands VIBERR runs on every
                                   # (not `[]`) when the project declares none; at most
                                   # 10; `timeoutSeconds` 1..3600, 600 when absent. Set
                                   # on Settings → Gates or by set_project_gates
-                                  # (edit-policy).
+                                  # (edit-policy). `pages` (ruling 86), on one gate at
+                                  # most: the folder of the checkout that gate builds
+                                  # the site's pages into, a plain path inside it.
+                                  # Viberr keeps that folder of each revision the
+                                  # gates pass on, and pictures, measures and shows a
+                                  # reviewer its pages.
   - name: install
     command: pnpm install --frozen-lockfile
   - name: build
     command: pnpm build
     timeoutSeconds: 900
+    pages: dist
 ---
 
 Project description prose (markdown body).
@@ -499,9 +510,17 @@ gateRun:                          # optional; ruling 17 — the project's gates 
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
+  pages: dist                     # ruling 86: the folder this run kept the revision's
+                                  # build from; absent when it kept none (no gate named
+                                  # one, or a gate did not exit 0)
 pageCaptures:                     # optional; ruling 86 — Viberr's own pictures of the
   deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
+                                  # Or of the build the gates made of a revision: then
+                                  # `revisionId` names that revision, `deliveredAt` is
+                                  # when it was minted, a page's `file` is its path in
+                                  # the site (`guide/index.html`) and its pictures are
+                                  # named with `--` for the slashes.
   pages:                          # the render finished. One entry per delivered page
     - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
       shots:                      # view (desktop | phone), the picture's name in the
