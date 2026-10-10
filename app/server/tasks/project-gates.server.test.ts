@@ -666,6 +666,10 @@ describe("as the task owner's agent uid (ruling 139)", () => {
   });
 });
 
+/** The limit of a case that waits on several real renders (each a child
+ *  process and the stand-in browser) on a loaded machine. */
+const REAL_RENDERS_MS = 90_000;
+
 describe("ruling 86: the pages a delivered revision builds are kept as the gates built them", () => {
   /** A build: two pages, and the revision's own work beside them. */
   const BUILD =
@@ -717,7 +721,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(run().pages).toBeUndefined();
   });
 
-  it("pictures and measures the kept build onto the task, and a waiter is let go only when the pictures are there", async () => {
+  it("pictures and measures the kept build onto the task, and a waiter is let go only when the pictures are there", { timeout: REAL_RENDERS_MS }, async () => {
     const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
     setGates([{ name: "build", command: BUILD, pages: "dist" }]);
     writeDeliveredTask();
@@ -742,6 +746,17 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       expect(record!.pages.every((page) => "measured" in page)).toBe(true);
     });
     await whenProjectGatesIdle();
+    // The record names the run it was made for, so a restart after this
+    // pictures nothing again. CANARY: have the gate job name anything but
+    // its own run on the record and every boot renders and notes once more.
+    expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, async () => {
+      const launches = fake.launches().length;
+      await recoverProjectGates(store.db, store.dataRoot);
+      await whenProjectGatesIdle();
+      expect(fake.launches()).toHaveLength(launches);
+    });
+    expect(captureNotes()).toHaveLength(1);
     const [note] = captureNotes();
     expect(note!.text).toContain("Viberr rendered `index.html` and `guide/index.html` as a reader sees them");
     expect(note!.text).toContain(`They are the pages of \`${revisionSha.slice(0, 7)}\` as the project's gates built it, and the pictures are attached.`);
@@ -784,7 +799,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1", pages: [] });
   });
 
-  it("pictures a kept build again at boot when a restart cut the pictures off, and says nothing twice", async () => {
+  it("pictures a kept build again at boot when a restart cut the pictures off, and says nothing twice", { timeout: REAL_RENDERS_MS }, async () => {
     // The render is asked for after the gate run's finishing write, and a
     // restart drops the queue: the build was on disk, the run read finished,
     // and nothing ever pictured it.
@@ -820,7 +835,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     });
   });
 
-  it("at boot, says once that a kept build held no page, and pictures nothing on a closed task or where no gate names the folder now", async () => {
+  it("at boot, says once that a kept build held no page, and pictures nothing on a closed task or where no gate names the folder now", { timeout: REAL_RENDERS_MS }, async () => {
     const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
     const withBrowser = <T>(run: () => Promise<T>) =>
       withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, run);
@@ -856,7 +871,52 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       // corrected build is never pictured until a person runs the gates.
       await boot();
       expect(task().frontmatter.pageCaptures!.pages.map((page) => page.file)).toEqual(["index.html", "guide/index.html"]);
+      expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
       expect(captureNotes()).toHaveLength(2);
+    });
+
+    // A record from before records named their run is of its revision, and
+    // is left as it is: the first boot onto an instance that holds one
+    // pictures nothing over it. CANARY: ask whenever the record names no
+    // run and that boot takes the pictures down, renders again and writes a
+    // second note on every task under review.
+    const before = task().frontmatter.pageCaptures!;
+    const { gateRunId: _made, ...unnamed } = before;
+    writeDeliveredTask({ gateRun: run(), pageCaptures: unnamed });
+    await withBrowser(async () => {
+      const launches = fake.launches().length;
+      await boot();
+      expect(fake.launches()).toHaveLength(launches);
+      expect(task().frontmatter.pageCaptures).toEqual(unnamed);
+    });
+
+    // Only a record of this run's revision stands for it. One that names no
+    // run and is of an earlier revision hides nothing. CANARY: leave any
+    // record that names no run alone and this build is never pictured.
+    writeDeliveredTask({ gateRun: run(), pageCaptures: { ...unnamed, revisionId: "rev_0" } });
+    await withBrowser(async () => {
+      await boot();
+      expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1", gateRunId: run().id });
+    });
+
+    // A render of an earlier run's build can end after the next run has: its
+    // record is newer than this run and of the same revision, and still not
+    // of this run's build. CANARY: tell the two apart by the clock and the
+    // build this run kept is never pictured.
+    writeDeliveredTask({
+      gateRun: run(),
+      pageCaptures: {
+        deliveredAt: "2026-09-25T09:00:00.000Z",
+        at: "2099-01-01T00:00:00.000Z",
+        pages: [],
+        revisionId: "rev_1",
+        gateRunId: "gate_of_an_earlier_run",
+      },
+    });
+    await withBrowser(async () => {
+      await boot();
+      expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
+      expect(task().frontmatter.pageCaptures!.pages).toHaveLength(2);
     });
 
     // A task that is closed is nobody's to picture: every other asker
