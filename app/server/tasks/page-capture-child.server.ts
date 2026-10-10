@@ -1535,8 +1535,14 @@ function stickyExpression(screen: ScreenSize): string {
  * part scrolls when its own `overflow-y` is `auto` or `scroll`: one that
  * only hides what does not fit (a folded panel, a clamped paragraph) is
  * nothing a reader can scroll. The `body` whose overflow the browser hands
- * to the window, which it does under a plain root element, is no part of the
- * page: it is the window that scrolls then, and the pictures follow it.
+ * to the window is no part of the page: it is the window that scrolls then,
+ * and the pictures follow it. The browser does that only under a root whose
+ * own overflow is `visible` both ways, and only when neither the root nor
+ * the `body` has any containment (a `contain`, a `container-type`, a
+ * `content-visibility`). Measured on Chrome 153 and Debian Chromium 154: a
+ * `body` one screen tall with `overflow-y: auto` scrolled by itself under a
+ * root with `overflow-x: clip`, whose overflow-y still reads `visible`, and
+ * when it was a container for its own queries.
  *
  * Every element is asked its two heights, which costs no reading of its
  * style, and only one that hides more than a screen is looked at further:
@@ -1552,7 +1558,9 @@ function innerExpression(height: number): string {
     "inner",
     { height },
     `
-  const handed = getComputedStyle(document.documentElement).overflowY === "visible";
+  const root = getComputedStyle(document.documentElement);
+  const free = (style) => (style.contain || "none") === "none" && (style.containerType || "normal") === "normal" && (style.contentVisibility || "visible") === "visible";
+  const handed = root.overflowX === "visible" && root.overflowY === "visible" && free(root) && Boolean(document.body) && free(getComputedStyle(document.body));
   let most = null;
   let hides = 0;
   let count = 0;

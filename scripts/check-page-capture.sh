@@ -682,6 +682,20 @@ ${screens(5)}</body></html>`,
 <p>${"<i></i>".repeat(5200)}</p>
 <div class="big"><div style="height:9000px"></div></div></body></html>`,
   );
+  // Two pages whose `body` scrolls by itself, five screens of it, under a
+  // root whose overflow-y says nothing: one whose root clips sideways, and
+  // one whose `body` is a container for its own queries. Neither hands its
+  // overflow to the window.
+  for (const [name, css] of [
+    ["clip-root.html", "html{overflow-x:clip}body{height:100vh;margin:0;overflow-y:auto}"],
+    ["contained.html", "body{container-type:inline-size;height:100vh;margin:0;overflow-y:auto}"],
+  ]) {
+    writeFileSync(
+      path.join(dir, name),
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A body that scrolls</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>${css}</style></head><body>${screens(5)}</body></html>`,
+    );
+  }
   // A long page on a wide screen that is an app in a shell on a narrow one.
   // Its `body` keeps the margin browsers give it, so the shell is 16 px
   // taller than the phone's screen: a page that scrolls by its own margin
@@ -868,7 +882,7 @@ if (command === "job-inside") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "inside", {
-      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html", "panes.html", "quirks.html", "crowd.html"].map((file) => ({
+      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html", "panes.html", "quirks.html", "crowd.html", "clip-root.html", "contained.html"].map((file) => ({
         file,
         kind: "html",
       })),
@@ -1280,12 +1294,12 @@ if (command === "verify-walks") {
 if (command === "verify-inside") {
   const [work] = args;
   const { check, pages, picture, done } = outcomeOf(work, "inside");
-  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below, panes, quirks, crowd] = pages;
+  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below, panes, quirks, crowd, clipRoot, contained] = pages;
   const shot = (page, view) => page.shots.find((entry) => entry.view === view);
   const desktop = picture("1-desktop.png");
   check(
-    pages.length === 12 && pages.every((page) => page.error === null),
-    "twelve pages are pictured at both widths",
+    pages.length === 14 && pages.every((page) => page.error === null),
+    "fourteen pages are pictured at both widths",
     pages.map((page) => `${page.file}: ${page.error}`).join(", "),
   );
   check(
@@ -1352,6 +1366,13 @@ if (command === "verify-inside") {
     crowd,
     "desktop div.big 9000 220 3, phone div.big 9000 220 3",
     "the part that hides the most is found past five thousand elements, all three such parts are counted, and its box is the 200 px it is tall and its border",
+  );
+  says(clipRoot, "desktop body 4000 800 1, phone body 4000 844 1", "a body that scrolls by itself under a root that clips sideways is a part that scrolls: its overflow is not the window's");
+  says(contained, "desktop body 4000 800 1, phone body 4000 844 1", "and so is a body that is a container for its own queries");
+  check(
+    picture("13-desktop.png")?.height === 800 && picture("14-desktop.png")?.height === 800,
+    "and each of those two pages is pictured as its one screen",
+    `${picture("13-desktop.png")?.height} ${picture("14-desktop.png")?.height}`,
   );
   done();
 }
@@ -1670,7 +1691,7 @@ further walks "measured six pages a keyboard walk has to get right"
 "$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
 
 # --- a page that scrolls inside itself ---------------------------------------------
-further inside "pictured twelve pages and found the parts that scroll inside them"
+further inside "pictured fourteen pages and found the parts that scroll inside them"
 "$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
