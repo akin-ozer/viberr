@@ -724,7 +724,19 @@ export function createRunSink(
           });
         }
       }
-      if (stats.compactions > compactions) compactions = stats.compactions;
+      if (stats.compactions > compactions) {
+        compactions = stats.compactions;
+        // Ruling 329: a compaction learned of here happened somewhere in the
+        // run, and nothing says before or after which look. Everything the
+        // run was shown is taken as summarised, which errs toward a review
+        // that looks again and never toward an approval on pictures it no
+        // longer holds.
+        try {
+          patchRun(db, spec.runId, { lookedJson: null });
+        } catch (error) {
+          logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+        }
+      }
       // The run's real first REQUEST: a Codex turn total (the streamed fact)
       // sums every call of the turn, so its "first call" read a whole turn's
       // cache hits. The rollout's first `token_count` is one request, and the

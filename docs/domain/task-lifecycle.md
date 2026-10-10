@@ -734,14 +734,18 @@ recorded only when its run was shown the whole of each page at both widths and e
 picture of a look the task keeps (ruling 327, below). A run that read the source, or the
 deliverer's report, and approved leaves a note titled "Approval not recorded" that names
 what it did not open; validation is unchanged and the review runs again. The reviewer is
-told what its approval owes before it starts. A `request_changes` owes no look.
+told what its approval owes before it starts, and is shown the delivery as Viberr kept
+it, with what was saved on the task since beside it, whatever a stopped rework left in
+the task's folder. A `request_changes` owes no look.
 
 **A task keeps how a page on the web looked (ruling 327).** Work made to look like a page
 on the web is made to, and judged against, pictures of that page kept on the task:
 `keep_page_look` pictures the address once, whole, at 1280 px and 390 px, with its first
 screen at three moments while it moves and a note of what the renderer read of its motion,
-and keeps all of it as sources under one date. The address reads differently by the next
-review and a description is its writer's reading, so neither is what a result is held to.
+and keeps all of it as sources under one date. The note closes the look and lists its
+pictures: pictures a keep that failed left with no note are no look, and the next ask
+takes them up. The address reads differently by the next review and a description is its
+writer's reading, so neither is what a result is held to.
 A later task of the same work takes the look over (`from`) and is held to the same
 pictures.
 

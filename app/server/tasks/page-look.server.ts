@@ -12,13 +12,13 @@ import {
   resolveTaskSource,
   sourcesRoomRefusal,
   writeTaskSource,
-  type SourceLook,
+  type LookPicture,
   type TaskSource,
 } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { readsAsCredential } from "~/server/secrets/git-output-redact.server";
 import { PAGE_CAPTURE_VIEWS, pageCaptureView } from "~/shared/page-capture";
-import { aboutMs, pictureWebPage, type PageMotion, type WebPagePicture } from "./page-capture.server";
+import { aboutMs, pictureWebPage, type PageMotion, type ScrollsInside, type WebPagePicture } from "./page-capture.server";
 import { idRange, keptLooks, type KeptLook } from "./page-looks.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -38,6 +38,11 @@ import { taskRef, type TaskMutationContext } from "./task-mutation.server";
  * one kept. A task takes over the look another task of the project keeps
  * (`from`), byte for byte and under its date, so the pages of one piece of
  * work are judged against one look and not against one each.
+ *
+ * A look is its note (`SourceLook`): written last, it lists every picture the
+ * look is made of, by the source each is kept under. Pictures a keep that
+ * failed part way left behind are sources of no look, and the next keep of
+ * the address takes them up by their bytes and closes with its own note.
  */
 
 /** The tool's name, on either backend. */
@@ -162,73 +167,84 @@ function motionLines(motion: PageMotion | null): string[] {
   return lines;
 }
 
-/** One kept picture of the look, with the record it was kept under. */
-interface KeptPicture {
-  source: TaskSource;
-  picture: WebPagePicture;
-}
-
-/** A stretch whose bytes the task already keeps: the page looks the same
- *  there as in the source named, and a task keeps no bytes twice (ruling 82). */
-interface RepeatedStretch {
-  picture: WebPagePicture;
-  same: string;
+/**
+ * One width's stretches among a look's pictures: each source once, and the
+ * stretches that look the same, to the byte, as one before them (a task
+ * keeps no bytes twice, ruling 82, so they are kept once and said).
+ */
+function stretchesAt(pictures: readonly LookPicture[], view: LookPicture["view"]) {
+  const seen = new Set<string>();
+  const kept: LookPicture[] = [];
+  const repeats: LookPicture[] = [];
+  for (const picture of pictures) {
+    if (picture.part === "stretch" && picture.view === view) (seen.has(picture.id) ? repeats : kept).push(picture);
+    seen.add(picture.id);
+  }
+  return { kept, repeats };
 }
 
 /** What one width's stretches come to, as the note and the answer say it. */
-function stretchesSentence(stretches: readonly KeptPicture[], repeats: readonly RepeatedStretch[]): string {
-  const last = [...stretches.map((entry) => entry.picture), ...repeats.map((entry) => entry.picture)].reduce((a, b) => (b.to > a.to ? b : a));
-  const pictures = stretches.length === 1 ? "1 picture" : `${stretches.length} pictures`;
+function stretchesSentence(kept: readonly LookPicture[], repeats: readonly LookPicture[]): string {
+  const last = [...kept, ...repeats].reduce((a, b) => ((b.to ?? 0) > (a.to ?? 0) ? b : a));
+  const pictures = kept.length === 1 ? "1 picture" : `${kept.length} pictures`;
   const once =
     repeats.length === 0
       ? ""
       : ` ${repeats.length === 1 ? "1 more stretch looks" : `${repeats.length} more stretches look`} the same as one of them and ${repeats.length === 1 ? "is" : "are"} kept once.`;
   return last.cut
-    ? `the first ${px(last.to)} px of a page ${px(last.pageHeight)} px long, in ${pictures}. The page runs on below them.${once}`
-    : `the whole page (${px(last.pageHeight)} px) in ${pictures}.${once}`;
+    ? `the first ${px(last.to ?? 0)} px of a page ${px(last.pageHeight ?? 0)} px long, in ${pictures}. The page runs on below them.${once}`
+    : `the whole page (${px(last.pageHeight ?? 0)} px) in ${pictures}.${once}`;
 }
 
-/** The note that closes a look: where its pictures are and what moved. */
-function lookNote(
-  address: string,
-  at: string,
-  kept: readonly KeptPicture[],
-  repeats: readonly RepeatedStretch[],
-  motion: PageMotion | null,
-  scrollsInside: { what: string; height: number } | null,
-): string {
-  const lines = [`# How ${address} looked on ${at.slice(0, 10)}`, "", `Pictured by Viberr at ${at}, at the two widths a delivered page is pictured at.`, ""];
-  for (const view of PAGE_CAPTURE_VIEWS) {
-    const stretches = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "stretch");
-    if (stretches.length === 0) continue;
-    const same = repeats.filter((entry) => entry.picture.view === view.id);
-    lines.push(`- ${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ${stretchesSentence(stretches, same)}`);
-    for (const entry of stretches) {
-      lines.push(`  - ${entry.source.id}: ${px(entry.picture.from)} to ${px(entry.picture.to)} px.`);
-    }
-    for (const repeat of same) {
-      lines.push(`  - ${px(repeat.picture.from)} to ${px(repeat.picture.to)} px: the same as ${repeat.same}, to the byte.`);
-    }
-    const frames = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "frame");
-    if (frames.length > 0) {
-      lines.push(
-        `- Its first screen while it loaded: ${idRange(frames.map((entry) => entry.source.id))}, about ` +
-          `${LIST_AND.format(frames.map((entry) => `${px(aboutMs(entry.picture.moment ?? 0))} ms`))} after it came into view. ` +
-          (frames.length === 1 ? "The moments pictured did not differ, so one is kept." : "What differs between them is what moved."),
-      );
-    }
-  }
-  if (scrollsInside) lines.push(`- ${firstScreenOnly(scrollsInside)}`);
-  lines.push("", WHAT_MOVED_HEADING, "", ...motionLines(motion), "");
+/** Where a look's note stops listing its pictures and starts on what moved. */
+const WHAT_MOVED_HEADING = "## What moved, as measured at the desktop width";
+
+/**
+ * The second half of a look's note: what the renderer read of the page's
+ * motion. It holds the page's own names and no id of a source, so a task
+ * that takes the look over keeps it word for word.
+ */
+function whatMoved(motion: PageMotion | null, scrollsInside: ScrollsInside | null): string {
+  const lines = [WHAT_MOVED_HEADING, "", ...motionLines(motion), ""];
+  if (scrollsInside) lines.push(firstScreenOnly(scrollsInside), "");
   lines.push(
     "The pictures show the page at rest and its first screen at a few moments. What a visitor's own pointer or scrolling does beyond the lines above is not in them.",
   );
   return `${lines.join("\n")}\n`;
 }
 
+/**
+ * The note that closes a look: where its pictures are, written from the list
+ * the look's record keeps (so a task that takes the look over writes it again
+ * with its own ids, and no id is ever changed inside a sentence), then what
+ * moved.
+ */
+function lookNote(address: string, at: string, pictures: readonly LookPicture[], moved: string): string {
+  const lines = [`# How ${address} looked on ${at.slice(0, 10)}`, "", `Pictured by Viberr at ${at}, at the two widths a delivered page is pictured at.`, ""];
+  for (const view of PAGE_CAPTURE_VIEWS) {
+    const { kept, repeats } = stretchesAt(pictures, view.id);
+    if (kept.length === 0) continue;
+    lines.push(`- ${view.label}: ${idRange(kept.map((picture) => picture.id))}, ${stretchesSentence(kept, repeats)}`);
+    for (const picture of kept) lines.push(`  - ${picture.id}: ${px(picture.from ?? 0)} to ${px(picture.to ?? 0)} px.`);
+    for (const repeat of repeats) {
+      lines.push(`  - ${px(repeat.from ?? 0)} to ${px(repeat.to ?? 0)} px: the same as ${repeat.id}, to the byte.`);
+    }
+    const frames = pictures.filter((picture) => picture.part === "frame" && picture.view === view.id);
+    if (frames.length > 0) {
+      lines.push(
+        `- Its first screen while it loaded: ${idRange(frames.map((picture) => picture.id))}, about ` +
+          `${LIST_AND.format(frames.map((picture) => `${px(aboutMs(picture.moment ?? 0))} ms`))} after it came into view. ` +
+          (frames.length === 1 ? "The moments pictured did not differ, so one is kept." : "What differs between them is what moved."),
+      );
+    }
+  }
+  return `${lines.join("\n")}\n\n${moved}`;
+}
+
 /** Said of a look of a page that scrolls inside one of its elements. */
-function firstScreenOnly(inside: { what: string; height: number }): string {
-  return `The page scrolls inside \`${inside.what}\` (${px(inside.height)} px) and not as a page, so these pictures are of its first screen only.`;
+function firstScreenOnly(inside: ScrollsInside): string {
+  const where = inside.view ? ` at ${pageCaptureView(inside.view).width} px` : "";
+  return `The page scrolls inside \`${inside.what}\` (${px(inside.height)} px)${where} and not as a page, so the pictures at that width are of its first screen only.`;
 }
 
 /** The file name a picture of the look is kept under. */
@@ -270,26 +286,15 @@ function auditKept(
 const HOW_TO_READ =
   "Open each picture with `read_task_source`: none is shown here. From now on this look is what the result is made to and judged against: the address will read differently later, and nobody describes it from memory.";
 
-/** Where a look's note stops listing its pictures and starts on what moved. */
-const WHAT_MOVED_HEADING = "## What moved, as measured at the desktop width";
-
-/**
- * A look's note with the ids of the task it was written on changed for the
- * ids its sources were kept under here. Only where the note lists its
- * pictures: its heading holds the address and the lines under "What moved"
- * hold the page's own names, and an `S3` in either is not an id.
- */
-function noteForThisTask(text: string, ids: ReadonlyMap<string, string>): string {
-  const cut = text.indexOf(WHAT_MOVED_HEADING);
-  const [heading = "", ...listed] = (cut < 0 ? text : text.slice(0, cut)).split("\n");
-  const renamed = listed.join("\n").replace(/\bS[1-9]\d{0,5}\b/g, (id) => ids.get(id) ?? id);
-  return `${heading}\n${renamed}${cut < 0 ? "" : text.slice(cut)}`;
-}
+/** "S1 to S9": the sources a look's pictures are kept under, each once. */
+const pictureIds = (pictures: readonly LookPicture[]): string[] => [...new Set(pictures.map((picture) => picture.id))];
 
 /**
  * Take over the looks task `from` keeps: the pictures byte for byte, under
- * their date, and each look's note with this task's own ids in it. Checked
- * whole before anything is copied, so a look arrives entire or not at all.
+ * their date, and each look's note written again with this task's own ids.
+ * Checked whole before anything is copied, so a look arrives entire or not at
+ * all; a take-over that was cut off is finished by asking again, since a
+ * picture already here is taken up by its bytes and the note closes the look.
  */
 function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLookInput, from: string): string {
   const { projectSlug, taskKey, actorRef } = input;
@@ -298,47 +303,58 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
   if (!readTaskFile(taskRef(ctx, projectSlug, from))) {
     return refused(`There is no task ${from} in this project; \`read_board\` lists its tasks.`);
   }
-  const theirs = readTaskSources(projectSlug, from, ctx.dataRoot).sources.filter((source) => source.look);
+  const theirSources = readTaskSources(projectSlug, from, ctx.dataRoot).sources;
+  const theirs = keptLooks(theirSources);
   if (theirs.length === 0) return refused(`${from} keeps no look of a page.`);
   const mine = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
-  const clash = theirs.find((source) => mine.some((kept) => kept.look?.url === source.look!.url && kept.look.at !== source.look!.at));
+  const standing = keptLooks(mine);
+  const clash = theirs.find((look) => standing.some((kept) => kept.url === look.url && kept.at !== look.at));
   if (clash) {
     return refused(
-      `${taskKey} already keeps a look of ${clash.look!.url} from another day, and a result is judged against one look of an address.`,
+      `${taskKey} already keeps a look of ${clash.url} from another day, and a result is judged against one look of an address.`,
     );
+  }
+  const named = (look: KeptLook): string => `${look.url} as it was pictured on ${look.at.slice(0, 10)}`;
+  const toAdopt = theirs.filter((look) => !standing.some((kept) => kept.url === look.url));
+  if (toAdopt.length === 0) {
+    return `[noop] ${taskKey} already keeps what ${from} keeps of ${LIST_AND.format(theirs.map(named))}. \`read_task_source\` lists it.`;
   }
   // Read first, so what is missing or does not fit is said before a picture
   // is written: a look arrives whole.
-  const held = new Set(mine.map((kept) => kept.sha256));
-  const toCopy: { source: TaskSource; data: Buffer }[] = [];
-  for (const source of theirs) {
-    const resolved = resolveTaskSource(projectSlug, from, source.id, ctx.dataRoot);
-    if (!resolved || !existsSync(resolved.abs)) {
-      return refused(`${from} no longer holds ${source.id} of its look (the picture was taken out of the store), so the look is not whole.`);
+  const record = new Map(theirSources.map((source) => [source.id, source]));
+  const bytes = new Map<string, Buffer>();
+  for (const look of toAdopt) {
+    for (const id of [...pictureIds(look.pictures), look.note]) {
+      if (bytes.has(id)) continue;
+      const resolved = resolveTaskSource(projectSlug, from, id, ctx.dataRoot);
+      if (!resolved || !existsSync(resolved.abs)) {
+        return refused(`${from} no longer holds ${id} of its look (it was taken out of the store), so the look is not whole.`);
+      }
+      bytes.set(id, readFileSync(resolved.abs));
     }
-    toCopy.push({ source, data: readFileSync(resolved.abs) });
   }
-  const looks = [...new Set(theirs.map((source) => `${source.look!.url} as it was pictured on ${source.look!.at.slice(0, 10)}`))];
-  const already = `[noop] ${taskKey} already keeps what ${from} keeps of ${LIST_AND.format(looks)}. \`read_task_source\` lists it.`;
-  // A picture is new here by its bytes; a note is rewritten with this task's
-  // ids, so it is new while no picture of its look is here yet.
-  const fresh = toCopy.filter((entry) => entry.source.look!.part !== "note" && !held.has(entry.source.sha256));
-  if (fresh.length === 0) return already;
-  const notes = toCopy.filter((entry) => entry.source.look!.part === "note");
+  // Counted as it will be written: a picture this task already keeps, by its
+  // bytes, is kept once, and each note is written new.
+  const held = new Set(mine.map((kept) => kept.sha256));
+  const pictures = pictureIds(toAdopt.flatMap((look) => look.pictures));
+  const fresh = pictures.filter((id) => !held.has(record.get(id)?.sha256 ?? ""));
   const room = sourcesRoomRefusal(
     projectSlug,
     taskKey,
-    fresh.length + notes.length,
-    [...fresh, ...notes].reduce((sum, entry) => sum + entry.data.length, 0),
+    fresh.length + toAdopt.length,
+    fresh.reduce((sum, id) => sum + (bytes.get(id)?.length ?? 0), 0) +
+      toAdopt.reduce((sum, look) => sum + (bytes.get(look.note)?.length ?? 0) + NOTE_SLACK_BYTES, 0),
     ctx.dataRoot,
   );
   if (room) return refused(room);
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
-  const adopted: string[] = [];
-  // The pictures first, so each note can name them by the ids they have here.
-  const ids = new Map<string, string>();
-  const keep = (source: TaskSource, data: Buffer): void => {
-    const written = writeTaskSource(
+  const written: string[] = [];
+  /** The id each of their sources is kept under here. */
+  const here = new Map<string, string>();
+  const keep = (theirId: string, data: Buffer, look: TaskSource["look"]): string | null => {
+    const source = record.get(theirId);
+    if (!source) return null;
+    const kept = writeTaskSource(
       projectSlug,
       taskKey,
       {
@@ -348,28 +364,47 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
         from: `${source.from} (kept on ${from} as ${source.id})`.slice(0, 2_000),
         by,
         runId: input.runId,
-        look: source.look,
+        look,
       },
       ctx.dataRoot,
     );
-    if ("kept" in written) {
-      adopted.push(written.kept.id);
-      ids.set(source.id, written.kept.id);
-    } else if ("already" in written) {
-      ids.set(source.id, written.already.id);
-    }
+    if ("removed" in kept) return null;
+    if ("kept" in kept) written.push(kept.kept.id);
+    return "kept" in kept ? kept.kept.id : kept.already.id;
   };
-  for (const entry of toCopy) if (entry.source.look!.part !== "note") keep(entry.source, entry.data);
-  for (const entry of toCopy) {
-    if (entry.source.look!.part === "note") keep(entry.source, Buffer.from(noteForThisTask(entry.data.toString("utf8"), ids)));
+  const notWhole = (what: string): string =>
+    `[error] ${what} could not be kept on ${taskKey} (a person took the same bytes out of its store), so the look was not taken over. ` +
+    (written.length > 0 ? `The pictures written before that (${idRange(written)}) stay as sources and are no look.` : "Nothing was kept.");
+  for (const id of pictures) {
+    const theirLook = record.get(id)?.look;
+    const kept = keep(id, bytes.get(id) ?? Buffer.alloc(0), theirLook && { url: theirLook.url, at: theirLook.at, part: theirLook.part, view: theirLook.view });
+    if (kept === null) return notWhole(`${id} of ${from}`);
+    here.set(id, kept);
   }
-  const first = theirs[0]!.look!;
-  auditKept(db, input, { url: first.url, at: first.at, sources: adopted, from });
-  return (
-    `[kept] ${taskKey} now keeps ${LIST_AND.format(looks)}, taken over from ${from}: the pictures byte for byte, as ${idRange(adopted)}. ` +
-    HOW_TO_READ
-  );
+  const taken: string[] = [];
+  for (const look of toAdopt) {
+    const listed = look.pictures.map((picture) => ({ ...picture, id: here.get(picture.id) ?? picture.id }));
+    const theirNote = (bytes.get(look.note) ?? Buffer.alloc(0)).toString("utf8");
+    const cut = theirNote.indexOf(WHAT_MOVED_HEADING);
+    const note = keep(look.note, Buffer.from(lookNote(look.url, look.at, listed, cut < 0 ? "" : theirNote.slice(cut))), {
+      url: look.url,
+      at: look.at,
+      part: "note",
+      view: null,
+      pictures: listed,
+    });
+    // The note is what makes the pictures a look: one that was not written
+    // new leaves none.
+    if (note === null || written.at(-1) !== note) return notWhole(`The note of ${named(look)}`);
+    taken.push(`${named(look)} (${idRange(pictureIds(listed))}, with its note ${note})`);
+  }
+  const first = toAdopt[0]!;
+  auditKept(db, input, { url: first.url, at: first.at, sources: written, from });
+  return `[kept] ${taskKey} now keeps ${LIST_AND.format(taken)}, taken over from ${from}: the pictures byte for byte. ${HOW_TO_READ}`;
 }
+
+/** What a note may grow by when it is written again with another task's ids. */
+const NOTE_SLACK_BYTES = 512;
 
 /** The answer to an ask for an address the task already keeps a look of. */
 function alreadyKept(taskKey: string, standing: KeptLook): string {
@@ -441,17 +476,21 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   if (room) return `[error] ${room} Nothing was kept of ${url}.`;
   const at = new Date().toISOString();
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
-  const kept: KeptPicture[] = [];
-  const repeats: RepeatedStretch[] = [];
+  /** The look's pictures, each with the source it is kept under. */
+  const pictures: LookPicture[] = [];
+  /** The sources this keep wrote. */
+  const written: string[] = [];
+  const notKept = (why: string): string =>
+    `[error] ${why} The look of ${url} was not kept. ` +
+    (written.length > 0
+      ? `The pictures written before that (${idRange(written)}) stay as sources and are no look: ask again and they are taken up, not kept twice.`
+      : "Nothing was kept.");
   try {
+    const listed = new Set<string>();
     for (const [index, picture] of answer.pictures.entries()) {
       const n = ordinalAmong(answer.pictures, index);
       const of = answer.pictures.filter((other) => other.view === picture.view && other.kind === picture.kind).length;
-      const look: SourceLook =
-        picture.kind === "frame"
-          ? { url, at, part: "frame", view: picture.view, moment: picture.moment ?? 0 }
-          : { url, at, part: "stretch", view: picture.view, from: picture.from, to: picture.to, pageHeight: picture.pageHeight };
-      const written = writeTaskSource(
+      const kept = writeTaskSource(
         projectSlug,
         taskKey,
         {
@@ -461,57 +500,68 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
           from: `${url}, pictured by Viberr at ${pageCaptureView(picture.view).width} px on ${at.slice(0, 10)}`,
           by,
           runId: input.runId,
-          look,
+          look: { url, at, part: picture.kind, view: picture.view },
         },
         ctx.dataRoot,
       );
-      // A frame whose bytes are already kept is a moment at which nothing had
-      // moved: the picture it equals stands for both. A stretch whose bytes
-      // are is a part of the page that looks the same as another, and is
-      // said, so the pictures kept still account for the whole page.
-      if ("kept" in written) kept.push({ source: written.kept, picture });
-      else if ("already" in written && picture.kind === "stretch") repeats.push({ picture, same: written.already.id });
+      if ("removed" in kept) {
+        return notKept(`A person took one of this page's pictures (${kept.removed.id}) out of ${taskKey}'s store, and the same bytes are not kept again.`);
+      }
+      // Bytes the task already keeps are this look's picture under the id
+      // they have: what an earlier keep that failed left behind, or a part of
+      // the page that looks the same as another, which the note says.
+      const source = "kept" in kept ? kept.kept : kept.already;
+      if ("kept" in kept) written.push(source.id);
+      if (picture.kind === "stretch") {
+        pictures.push({
+          id: source.id,
+          part: "stretch",
+          view: picture.view,
+          from: picture.from,
+          to: picture.to,
+          pageHeight: picture.pageHeight,
+          cut: picture.cut,
+        });
+        // A frame equal to a picture already listed is a moment at which
+        // nothing had moved: the picture it equals stands for both.
+      } else if (!listed.has(source.id)) {
+        pictures.push({ id: source.id, part: "frame", view: picture.view, moment: picture.moment ?? 0 });
+      }
+      listed.add(source.id);
     }
     const note = writeTaskSource(
       projectSlug,
       taskKey,
       {
         name: `${host}-what-moved.md`,
-        data: Buffer.from(lookNote(url, at, kept, repeats, answer.motion, answer.scrollsInside)),
+        data: Buffer.from(lookNote(url, at, pictures, whatMoved(answer.motion, answer.scrollsInside))),
         title: `${host}: where its pictures are, and what moved on it`,
         from: `${url}, read by Viberr's renderer on ${at.slice(0, 10)}`,
         by,
         runId: input.runId,
-        look: { url, at, part: "note", view: null },
+        look: { url, at, part: "note", view: null, pictures },
       },
       ctx.dataRoot,
     );
-    const ids = kept.map((entry) => entry.source.id);
-    const noteId = "kept" in note ? note.kept.id : null;
-    auditKept(db, input, { url, at, sources: noteId ? [...ids, noteId] : ids, from: null });
+    // The note is what makes the pictures a look.
+    if (!("kept" in note)) return notKept("The note that closes the look could not be written.");
+    written.push(note.kept.id);
+    auditKept(db, input, { url, at, sources: written, from: null });
     const parts = [`[kept] How ${url} looked on ${at.slice(0, 10)} is kept on ${taskKey}.`];
     for (const view of PAGE_CAPTURE_VIEWS) {
-      const stretches = kept.filter((entry) => entry.picture.view === view.id && entry.picture.kind === "stretch");
-      if (stretches.length === 0) continue;
-      const same = repeats.filter((entry) => entry.picture.view === view.id);
-      parts.push(`${view.label}: ${idRange(stretches.map((entry) => entry.source.id))}, ${stretchesSentence(stretches, same)}`);
+      const { kept, repeats } = stretchesAt(pictures, view.id);
+      if (kept.length === 0) continue;
+      parts.push(`${view.label}: ${idRange(kept.map((entry) => entry.id))}, ${stretchesSentence(kept, repeats)}`);
     }
-    const frames = kept.filter((entry) => entry.picture.kind === "frame");
-    if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.source.id))}.`);
+    const frames = pictures.filter((entry) => entry.part === "frame");
+    if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.id))}.`);
     if (answer.scrollsInside) parts.push(firstScreenOnly(answer.scrollsInside));
-    if (noteId) parts.push(`Where each picture is and what moved on the page, as measured: ${noteId}.`);
+    parts.push(`Where each picture is and what moved on the page, as measured: ${note.kept.id}.`);
     parts.push(HOW_TO_READ);
     return parts.join(" ");
   } catch (error) {
-    // The task keeps as much as it may: the store's own sentence, and what
-    // was kept before it stands and is named.
-    if (isAppError(error) && error.code === ERROR_CODES.VALIDATION_FAILED) {
-      const ids = kept.map((entry) => entry.source.id);
-      return (
-        `[error] ${error.userMessage} ` +
-        (ids.length > 0 ? `Kept before that: ${idRange(ids)}, which is part of the look and not all of it.` : "Nothing was kept.")
-      );
-    }
+    // The store's own sentence for a task that has no room left.
+    if (isAppError(error) && error.code === ERROR_CODES.VALIDATION_FAILED) return notKept(error.userMessage);
     throw error;
   }
 }

@@ -100,9 +100,32 @@ export interface SourceKeeper {
   roleHint: string | null;
 }
 
+/** Ruling 327: one picture of a look, as the look's note lists it. */
+export interface LookPicture {
+  /** The source that holds the picture. Two stretches that look the same to
+   *  the byte share one, since a task keeps no bytes twice (ruling 82). */
+  id: string;
+  part: "stretch" | "frame";
+  view: "desktop" | "phone";
+  /** A stretch: where on the page it starts and ends, the page's whole height
+   *  at that width, in px, and whether the page runs on below it. */
+  from?: number | undefined;
+  to?: number | undefined;
+  pageHeight?: number | undefined;
+  cut?: boolean | undefined;
+  /** A frame: how many ms after the screen came into view. */
+  moment?: number | undefined;
+}
+
 /**
  * Ruling 327: what a source is of a look, the pictures Viberr took of one
- * page on the web. The sources of one look share `url` and `at`.
+ * page on the web.
+ *
+ * A look is its note. The note is written last and lists every picture the
+ * look is made of (`pictures`), so pictures a failed keep left with no note
+ * are plain sources of no look, and a picture whose bytes the task already
+ * kept (by an earlier attempt, or as another look's) is one of this look's
+ * all the same.
  */
 export interface SourceLook {
   /** The address that was pictured. */
@@ -114,13 +137,8 @@ export interface SourceLook {
   part: "stretch" | "frame" | "note";
   /** The width a picture was taken at; null on the note. */
   view: "desktop" | "phone" | null;
-  /** A stretch: where on the page it starts and ends, and the page's whole
-   *  height at that width, in px. */
-  from?: number | undefined;
-  to?: number | undefined;
-  pageHeight?: number | undefined;
-  /** A frame: how many ms after the screen came into view. */
-  moment?: number | undefined;
+  /** On the note: the look's pictures, in the order they were taken. */
+  pictures?: LookPicture[] | undefined;
 }
 
 /** One kept source: its record in the index. */
@@ -173,10 +191,20 @@ const sourceLineSchema = z.object({
       at: z.string(),
       part: z.enum(["stretch", "frame", "note"]),
       view: z.enum(["desktop", "phone"]).nullable(),
-      from: z.number().int().min(0).optional(),
-      to: z.number().int().min(0).optional(),
-      pageHeight: z.number().int().min(0).optional(),
-      moment: z.number().min(0).optional(),
+      pictures: z
+        .array(
+          z.object({
+            id: z.string().regex(SOURCE_ID_RE),
+            part: z.enum(["stretch", "frame"]),
+            view: z.enum(["desktop", "phone"]),
+            from: z.number().int().min(0).optional(),
+            to: z.number().int().min(0).optional(),
+            pageHeight: z.number().int().min(0).optional(),
+            cut: z.boolean().optional(),
+            moment: z.number().min(0).optional(),
+          }),
+        )
+        .optional(),
     })
     .optional()
     // A look that does not read leaves the line what it otherwise is: a

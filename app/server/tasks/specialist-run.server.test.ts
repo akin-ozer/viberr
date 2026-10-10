@@ -2263,7 +2263,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
           from: "https://example.com/",
           by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
           runId: null,
-          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view, from: 0, to: 2000, pageHeight: 2000 },
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view },
         },
         store.dataRoot,
       );
@@ -2342,7 +2342,17 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         from: "https://example.com/",
         by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
         runId: null,
-        look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
+        look: {
+          url: "https://example.com/",
+          at: "2026-10-09T22:00:00.000Z",
+          part: "note",
+          view: null,
+          pictures: [
+            { id: "S1", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 3000, cut: true },
+            { id: "S2", part: "stretch", view: "desktop", from: 2000, to: 3000, pageHeight: 3000, cut: false },
+            { id: "S3", part: "stretch", view: "phone", from: 0, to: 2000, pageHeight: 2000, cut: false },
+          ],
+        },
       },
       store.dataRoot,
     );

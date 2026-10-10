@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { listAuditEvents } from "../../../test-support/audit-log";
@@ -9,6 +10,7 @@ import { writeFakeBrowser, type FakeBrowser } from "../../../test-support/fake-b
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { baseTaskFrontmatter, setupTestStore, writeTask, type TestStore } from "../../../test-support/test-store";
 import type { FileActorRef } from "~/schemas/task-file.schema";
+import { taskDir } from "~/server/files/file-store-root.server";
 import { readTaskSources, resolveTaskSource, writeTaskSource } from "~/server/files/task-sources.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
@@ -80,6 +82,18 @@ const keep = (input: { taskKey?: string; url?: string; from?: string; actorRef?:
 const lookAudits = () => listAuditEvents(store.db, { action: "task.page_look.kept" });
 const sha256Of = (key: string, id: string) =>
   createHash("sha256").update(readFileSync(resolveTaskSource(store.slug, key, id, store.dataRoot)!.abs)).digest("hex");
+const textOf = (key: string, id: string) => readFileSync(resolveTaskSource(store.slug, key, id, store.dataRoot)!.abs, "utf8");
+/** The note of the one look `key` keeps, as its record lists the pictures. */
+const noteOf = (key: string) => sourcesOf(key).find((source) => source.look?.part === "note")!;
+
+/** Cut a task's sources back to its first `kept` lines, bytes and all: what a
+ *  keep that failed there left behind. */
+function cutSourcesTo(key: string, kept: number): void {
+  const dir = path.join(taskDir(store.slug, key, store.dataRoot), "sources");
+  const lines = readFileSync(path.join(dir, "index.jsonl"), "utf8").trimEnd().split("\n");
+  for (const line of lines.slice(kept)) unlinkSync(path.join(dir, z.object({ file: z.string() }).parse(JSON.parse(line)).file));
+  writeFileSync(path.join(dir, "index.jsonl"), `${lines.slice(0, kept).join("\n")}\n`);
+}
 
 /** The reference: longer than two stretches at the desktop width, with
  *  something of each kind of motion the renderer reads. */
@@ -113,8 +127,12 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // The whole page at each width, in stretches a model reads, with no gap
       // between them. CANARY: ask the renderer for a stretch and not the
       // whole page and each width keeps its first 2,000 px.
+      // The look is what its note lists: each picture by the source it is
+      // kept under, with where on the page it is.
+      const listed = noteOf("VIB-1").look!.pictures!;
       const stretches = (view: string) =>
-        kept.flatMap((source) => (source.look?.part === "stretch" && source.look.view === view ? [[source.look.from, source.look.to, source.look.pageHeight]] : []));
+        listed.flatMap((picture) => (picture.part === "stretch" && picture.view === view ? [[picture.from, picture.to, picture.pageHeight]] : []));
+      expect(listed.map((picture) => picture.id)).toEqual(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"]);
       expect(stretches("desktop")).toEqual([
         [0, 2000, 4500],
         [2000, 4000, 4500],
@@ -154,9 +172,21 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       expect(answer).toContain(`Where each picture is and what moved on the page, as measured: ${notes[0]!.id}.`);
       // What a reviewer's approval owes a look at (ruling 329) is this look.
       expect(keptLooks(kept)).toEqual([
-        { url: "https://look.example/S3-series", at, stretches: expect.arrayContaining([{ id: "S1", view: "desktop" }]) },
+        {
+          url: "https://look.example/S3-series",
+          at,
+          note: notes[0]!.id,
+          stretches: [
+            { id: "S1", view: "desktop" },
+            { id: "S2", view: "desktop" },
+            { id: "S3", view: "desktop" },
+            { id: "S5", view: "phone" },
+            { id: "S6", view: "phone" },
+            { id: "S7", view: "phone" },
+          ],
+          pictures: listed,
+        },
       ]);
-      expect(keptLooks(kept)[0]!.stretches).toHaveLength(6);
 
       // Opened with the network open, at its own address and at both widths.
       // CANARY: render it as a task page and the browser starts behind the
@@ -188,7 +218,7 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       );
       const taken = await keep({ taskKey: "VIB-2", from: "VIB-1" });
       expect(taken).toContain(
-        `[kept] VIB-2 now keeps https://look.example/S3-series as it was pictured on ${day}, taken over from VIB-1: the pictures byte for byte, as S2 to S${kept.length + 1}.`,
+        `[kept] VIB-2 now keeps https://look.example/S3-series as it was pictured on ${day} (S2 to S9, with its note S10), taken over from VIB-1: the pictures byte for byte.`,
       );
       const theirs = sourcesOf("VIB-2").filter((source) => source.look);
       const pictures = (sources: typeof kept) => sources.filter((source) => source.look!.part !== "note").map((source) => [source.look, source.sha256]);
@@ -206,6 +236,12 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // holds an `S3` that is no id. CANARY: rename every such token and the
       // heading sends its reader to .../S4-series.
       expect(text.split("\n")[0]).toBe(`# How https://look.example/S3-series looked on ${day}`);
+      // What moved is the page's own and holds no id: word for word.
+      const moved = (whole: string) => whole.slice(whole.indexOf("## What moved"));
+      expect(moved(text)).toBe(moved(note));
+      expect(moved(text)).toContain("- A video 960 by 540 px plays by itself and loops.");
+      // And the look VIB-2 now keeps is the same pictures under its own ids.
+      expect(keptLooks(sourcesOf("VIB-2"))[0]!.stretches.map((stretch) => stretch.id)).toEqual(["S2", "S3", "S4", "S6", "S7", "S8"]);
       expect(fake.launches()).toHaveLength(launches);
       // Taken twice, it is already there.
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[noop] VIB-2 already keeps what VIB-1 keeps of");
@@ -233,7 +269,25 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       const answer = await keep({ url: "https://look.example/long" });
       const kept = sourcesOf("VIB-1");
       const desktop = kept.filter((source) => source.look?.part === "stretch" && source.look.view === "desktop");
-      expect(desktop.map((source) => source.look!.from)).toEqual([0, 2000, 4000, 6000, 8000, 10000, 12000, 14000, 16000, 18000]);
+      expect(desktop.map((source) => source.id)).toEqual(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10"]);
+      // The look lists all twelve stretches of the width, the two that repeat
+      // under the source that holds their bytes, and owes each source once.
+      const listed = kept.at(-1)!.look!.pictures!.filter((picture) => picture.part === "stretch" && picture.view === "desktop");
+      expect(listed.map((picture) => [picture.id, picture.from])).toEqual([
+        ["S1", 0],
+        ["S2", 2000],
+        ["S3", 4000],
+        ["S4", 6000],
+        ["S5", 8000],
+        ["S6", 10000],
+        ["S7", 12000],
+        ["S8", 14000],
+        ["S9", 16000],
+        ["S10", 18000],
+        ["S1", 20000],
+        ["S2", 22000],
+      ]);
+      expect(keptLooks(kept)[0]!.stretches.filter((stretch) => stretch.view === "desktop")).toHaveLength(10);
       const note = readFileSync(resolveTaskSource(store.slug, "VIB-1", kept.at(-1)!.id, store.dataRoot)!.abs, "utf8");
       expect(note).toContain(
         "- Desktop, 1280 px wide: S1 to S10, the first 24,000 px of a page 25,000 px long, in 10 pictures. The page runs on below them. " +
@@ -278,11 +332,118 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       await keep({ url: "https://look.example/" });
       unlinkSync(resolveTaskSource(store.slug, "VIB-1", "S2", store.dataRoot)!.abs);
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toBe(
-        "[noop] VIB-1 no longer holds S2 of its look (the picture was taken out of the store), so the look is not whole. Nothing was kept.",
+        "[noop] VIB-1 no longer holds S2 of its look (it was taken out of the store), so the look is not whole. Nothing was kept.",
       );
       expect(sourcesOf("VIB-2")).toEqual([]);
     });
   }, REAL_LOOK_MS);
+
+  it("takes up the pictures a keep that failed left behind, so the look it closes is whole at both widths", { timeout: REAL_LOOK_MS }, async () => {
+    // A keep that fails after the desktop pictures (a full disk, a restart)
+    // leaves them with no note. The store answers the same bytes with the
+    // source that holds them, and a look made only of what a keep wrote new
+    // was the phone width alone: an approval owed no desktop picture of the
+    // reference, and the reply said "[kept]".
+    // CANARY: list in the note only the sources this keep wrote.
+    const reference = await site({ "/": "<p>fake-height:4500</p>" });
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
+      await keep({ url: "https://look.example/" });
+      // S1 to S3 and the frame S4 stand; the phone pictures and the note never landed.
+      cutSourcesTo("VIB-1", 4);
+      // Pictures with no note are no look, and do not answer for one.
+      expect(keptLooks(sourcesOf("VIB-1"))).toEqual([]);
+      const launches = fake.launches().length;
+      const again = await keep({ url: "https://look.example/" });
+      expect(fake.launches().length).toBeGreaterThan(launches);
+      expect(again).toContain("Desktop, 1280 px wide: S1 to S3, the whole page (4,500 px) in 3 pictures.");
+      expect(again).toContain("Phone, 390 px wide: S5 to S7, the whole page (4,500 px) in 3 pictures.");
+      const look = keptLooks(sourcesOf("VIB-1"))[0]!;
+      expect(look.stretches.map((stretch) => `${stretch.id} ${stretch.view}`)).toEqual([
+        "S1 desktop",
+        "S2 desktop",
+        "S3 desktop",
+        "S5 phone",
+        "S6 phone",
+        "S7 phone",
+      ]);
+      expect(textOf("VIB-1", look.note)).toContain("- Desktop, 1280 px wide: S1 to S3, the whole page (4,500 px) in 3 pictures.\n  - S1: 0 to 2,000 px.");
+
+      // Every picture landed and the note did not: the next ask writes the
+      // note alone, and the one after is answered with the look kept.
+      // CANARY: count a look by its picture lines' own date and this task
+      // renders the address again at every ask, a note each time.
+      cutSourcesTo("VIB-1", 8);
+      expect(keptLooks(sourcesOf("VIB-1"))).toEqual([]);
+      expect(await keep({ url: "https://look.example/" })).toContain("[kept] How https://look.example/ looked on");
+      expect(sourcesOf("VIB-1")).toHaveLength(9);
+      expect(keptLooks(sourcesOf("VIB-1"))[0]!.stretches).toHaveLength(6);
+      const settled = fake.launches().length;
+      expect(await keep({ url: "https://look.example/" })).toContain("[noop] VIB-1 already keeps how https://look.example/ looked on");
+      expect(fake.launches()).toHaveLength(settled);
+    });
+  });
+
+  it("takes over only a look that was kept whole, finishes a take-over that was cut off, and is not stopped by what a failed keep left", { timeout: REAL_LOOK_MS }, async () => {
+    const reference = await site({ "/": '<p>fake-inner:{"what":"div#S2","height":5200}</p>' });
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
+      const answer = await keep({ url: "https://look.example/" });
+      // A page that scrolls inside one of its elements: said in the answer
+      // and in the note, under what moved, in the page's own name for it.
+      expect(answer).toContain("The page scrolls inside `div#S2` (5,200 px) at 1280 px and not as a page, so the pictures at that width are of its first screen only.");
+      const whole = sourcesOf("VIB-1");
+      const pictures = whole.length - 1;
+
+      // VIB-2 holds what a failed keep of the same address left on another
+      // day, and one picture of VIB-1's look already (kept there by its
+      // bytes, as its first source). Neither is a look of its own.
+      // CANARY: read a clash off every source that carries a look and VIB-2
+      // is refused "already keeps a look ... from another day" for good.
+      const second = readFileSync(resolveTaskSource(store.slug, "VIB-1", "S2", store.dataRoot)!.abs);
+      const by = { backend: "claude", profileId: "developer", roleHint: "Developer" };
+      writeTaskSource(
+        store.slug,
+        "VIB-2",
+        { name: "left.png", data: second, title: "Left by a keep that failed", from: "https://look.example/", by, runId: null, look: { url: "https://look.example/", at: "2026-01-01T00:00:00.000Z", part: "frame", view: "desktop" } },
+        store.dataRoot,
+      );
+      expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[kept] VIB-2 now keeps https://look.example/ as it was pictured on");
+      const taken = keptLooks(sourcesOf("VIB-2"))[0]!;
+      // Every id in the note is the one the picture has here, one at a time:
+      // VIB-1's S2 is VIB-2's S1. CANARY: rename a range by its two ends and
+      // the note sends its reader to sources between them that are no part
+      // of the look.
+      const theirs = keptLooks(whole)[0]!;
+      const here = new Map(theirs.pictures.map((picture, at) => [picture.id, taken.pictures[at]!.id]));
+      expect(here.get("S2")).toBe("S1");
+      expect(new Set(here.values()).size).toBe(here.size);
+      for (const [theirId, mine] of here) expect(sha256Of("VIB-2", mine)).toBe(sha256Of("VIB-1", theirId));
+      // The page's own name for the element it scrolls inside holds an `S2`
+      // that is no id. CANARY: rename ids in the note's text and VIB-2's note
+      // names an element the page does not have.
+      expect(textOf("VIB-2", taken.note)).toContain("The page scrolls inside `div#S2` (5,200 px)");
+
+      // A take-over cut off before its note: every picture is there and the
+      // look is not. Asked again, it is finished. CANARY: answer "already
+      // keeps" once no picture is new and the note is never written.
+      cutSourcesTo("VIB-2", sourcesOf("VIB-2").length - 1);
+      expect(keptLooks(sourcesOf("VIB-2"))).toEqual([]);
+      expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[kept] VIB-2 now keeps https://look.example/");
+      expect(keptLooks(sourcesOf("VIB-2"))[0]!.pictures.map((picture) => picture.id)).toEqual(taken.pictures.map((picture) => picture.id));
+      expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[noop] VIB-2 already keeps what VIB-1 keeps of");
+
+      // And pictures with no note on the other task are nothing to take over.
+      // CANARY: copy every source that carries a look and VIB-2 is told it
+      // "now keeps" what nobody owes a look at.
+      cutSourcesTo("VIB-1", pictures);
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl", ownerUserId: store.users.arda.id, title: "Another page" }),
+        goal: "Another page of the same work.",
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      expect(await keep({ taskKey: "VIB-3", from: "VIB-1" })).toBe("[noop] VIB-1 keeps no look of a page. Nothing was kept.");
+      expect(sourcesOf("VIB-3")).toEqual([]);
+    });
+  });
 
   it("keeps nothing of a look that was pictured only in part", async () => {
     // The browser ends when the page is loaded at the phone's width: the

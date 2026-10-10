@@ -1,19 +1,15 @@
 import {
-  closeSync,
   constants as fsConstants,
   existsSync,
-  fstatSync,
   mkdirSync,
-  openSync,
-  readSync,
   readdirSync,
   rmSync,
   rmdirSync,
   statSync,
   unlinkSync,
-  writeSync,
   type Dirent,
 } from "node:fs";
+import { open, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -26,7 +22,7 @@ import {
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { getEnv } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { resolveStoredSegment, storedFileName, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { keepDelivery, keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
@@ -78,7 +74,7 @@ import {
 import { loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
-import { deliveredCopyFor, PAGE_HTML_MAX_BYTES, recordRunLooks } from "./page-looks.server";
+import { judgedDelivery, PAGE_HTML_MAX_BYTES, recordRunLooks, type JudgedDelivery } from "./page-looks.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -448,6 +444,14 @@ interface RenderedAct {
   error: string | null;
 }
 
+/** The element a page scrolls inside when the page itself does not scroll,
+ *  and the width that was first seen at. */
+export interface ScrollsInside {
+  view?: PageCaptureViewId | undefined;
+  what: string;
+  height: number;
+}
+
 interface RenderedPage {
   file: string;
   shots: RenderedShot[];
@@ -459,7 +463,7 @@ interface RenderedPage {
   measured: PageMeasured | null;
   /** The element the page scrolls inside, when it scrolls there and not as a
    *  page: a picture and a figure are then of its first screen only. */
-  scrollsInside: { what: string; height: number } | null;
+  scrollsInside: ScrollsInside | null;
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
   /** How many script dialogs the page opened, each dismissed. */
@@ -498,6 +502,8 @@ interface Render {
   scratch: string | null;
   /** Names of the delivery left out of what the renderer could load. */
   notCarried: ReadonlySet<string>;
+  /** Names served from the task's folder beside a kept delivery (ruling 329). */
+  since: readonly string[];
 }
 
 const reportShotSchema = z.looseObject({
@@ -627,7 +633,12 @@ const reportSchema = z.looseObject({
       motion: motionSchema.optional().catch(undefined),
       measured: measuredSchema.optional().catch(undefined),
       scrollsInside: z
-        .looseObject({ what: reportWords, height: z.number().nonnegative() })
+        .looseObject({
+          /** The width it was seen at: the first where it holds. */
+          view: z.enum(["desktop", "phone"]).optional().catch(undefined),
+          what: reportWords,
+          height: z.number().nonnegative(),
+        })
         .nullable()
         .optional()
         .catch(undefined),
@@ -688,8 +699,10 @@ interface RenderRequest {
   renderer: Renderer;
   launch: AgentLaunch | null;
   /** The folder the pages are served from: the attachments themselves, or a
-   *  kept delivery, whose files are first copied where the person can read. */
-  source: { kind: "attachments" } | { kind: "kept"; dir: string } | { kind: "web" };
+   *  kept delivery, whose files are first copied where the person can read.
+   *  `since` (a judge's own ask, ruling 329) puts beside them the files the
+   *  task's folder holds under names the delivery does not. */
+  source: { kind: "attachments" } | { kind: "kept"; dir: string; since?: boolean } | { kind: "web" };
   pages: PageInput[];
   views: ChildView[];
   /** The run that asked, whose scratch this is until it ends; null for a
@@ -713,44 +726,57 @@ function accessibilityEngine(): string | null {
 }
 
 /** One file's carry: its size, that it is past what a capture carries, or
- *  null when the kept delivery holds no regular file of that name. */
+ *  null when the folder holds no regular file of that name. */
 type CarriedFile = { bytes: number } | { tooLarge: true } | null;
 
 /**
- * Copy one kept file for the renderer, by descriptor at both ends: the source
+ * Copy one file for the renderer, by descriptor at both ends: the source
  * opened without following a link, the copy made new (never over an entry and
  * never through one, ruling 19's rule for a write), readable by its group
- * and writable by the server alone.
+ * and writable by the server alone. Off the server's loop: a judge's every
+ * ask carries its delivery, and a copy that held the loop would hold every
+ * other request with it.
  */
-function carryFile(source: string, copy: string, room: number): CarriedFile {
-  let from: number;
+async function carryFile(source: string, copy: string, room: number): Promise<CarriedFile> {
+  let from: Awaited<ReturnType<typeof open>>;
   try {
-    from = openSync(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+    from = await open(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
   } catch {
     return null;
   }
   try {
-    const stat = fstatSync(from);
+    const stat = await from.stat();
     if (!stat.isFile()) return null;
     if (stat.size > room) return { tooLarge: true };
-    const to = openSync(
+    const to = await open(
       copy,
       fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
       0o640,
     );
+    let bytes = 0;
     try {
       const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(CARRY_CHUNK_BYTES, stat.size)));
       for (;;) {
-        const read = readSync(from, buffer, 0, buffer.length, null);
-        if (read === 0) break;
-        for (let written = 0; written < read; ) written += writeSync(to, buffer, written, read - written);
+        const { bytesRead } = await from.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) break;
+        bytes += bytesRead;
+        // A file an agent can write may grow under the copy: the room it was
+        // measured against is the room it gets.
+        if (bytes > room) break;
+        for (let written = 0; written < bytesRead; ) {
+          written += (await to.write(buffer, written, bytesRead - written)).bytesWritten;
+        }
       }
     } finally {
-      closeSync(to);
+      await to.close();
     }
-    return { bytes: stat.size };
+    if (bytes > room) {
+      await unlink(copy);
+      return { tooLarge: true };
+    }
+    return { bytes };
   } finally {
-    closeSync(from);
+    await from.close();
   }
 }
 
@@ -761,6 +787,20 @@ interface Carried {
   names: string[];
   /** The names left out: more than a capture carries. */
   notCarried: Set<string>;
+  /** The names carried from the task's folder: saved there since the
+   *  delivery, under names it does not hold. */
+  since: string[];
+}
+
+/** The regular files of a folder, by name; none when it cannot be listed. */
+function filesOf(dir: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
 }
 
 /**
@@ -771,38 +811,58 @@ interface Carried {
  * through and reads; it lists nothing and writes nothing there. The pages
  * first, then the rest by name, within the limits.
  *
+ * `since` names the task's folder for a judge's ask (ruling 329): the files
+ * it holds under names the delivery does not are carried last, as they stand.
+ * A new name moves no delivery (ruling 85), so a picture a supporting agent
+ * saved after the piece was delivered is on the task and not in the kept
+ * copy, and the piece is judged with it. A name the delivery does hold is
+ * always the delivery's own bytes.
+ *
  * Throws when a folder or a file cannot be made so. Nothing is copied into a
  * folder that is not the server's own (ruling 140), and a file the renderer
  * could not read would be pictured as missing from the delivery.
  */
-function carryDelivery(from: string, into: string, pages: readonly PageInput[]): Carried {
+async function carryDelivery(from: string, into: string, pages: readonly PageInput[], since: string | null): Promise<Carried> {
   passThroughDirForAgents(path.dirname(into));
   passThroughDirForAgents(into);
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(from, { withFileTypes: true });
-  } catch {
-    entries = [];
-  }
-  const own = pageCapturesAmong(entries.map((entry) => entry.name));
+  const kept = filesOf(from);
+  const own = pageCapturesAmong(kept);
   const first = new Set(pages.map((page) => page.file));
-  const wanted = entries
-    .filter((entry) => entry.isFile() && !own.has(entry.name))
-    .map((entry) => entry.name)
-    .sort((a, b) => Number(first.has(b)) - Number(first.has(a)) || (a < b ? -1 : a > b ? 1 : 0));
-  const carried: Carried = { names: [], notCarried: new Set() };
+  const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+  const wanted = kept
+    .filter((name) => !own.has(name))
+    .sort(byName)
+    .map((name) => ({ name, dir: from, since: false }));
+  if (since) {
+    // By the name as the store composes it (ruling 76): one file under two
+    // Unicode forms of its name is the delivery's, not a later one. A dot
+    // name is no file of the task to any reader, and Viberr's own pictures
+    // of a page are no part of it.
+    const delivered = new Set(kept.map(storedFileName));
+    const onTask = filesOf(since);
+    const pictures = pageCapturesAmong(onTask);
+    for (const name of onTask.sort(byName)) {
+      if (name.startsWith(".") || pictures.has(name) || delivered.has(storedFileName(name))) continue;
+      wanted.push({ name, dir: since, since: true });
+    }
+  }
+  // The pages asked for go first, so the limits never leave out the one file
+  // the render is of. The sort keeps the order of everything else.
+  wanted.sort((a, b) => Number(first.has(b.name)) - Number(first.has(a.name)));
+  const carried: Carried = { names: [], notCarried: new Set(), since: [] };
   let total = 0;
-  for (const name of wanted) {
-    const copy = path.join(into, name);
+  for (const entry of wanted) {
+    const copy = path.join(into, entry.name);
     const room = Math.min(CARRIED_FILE_MAX_BYTES, CARRIED_TOTAL_MAX_BYTES - total);
-    const file = carryFile(path.join(from, name), copy, room);
+    const file = await carryFile(path.join(entry.dir, entry.name), copy, room);
     if (!file) continue;
     if ("tooLarge" in file) {
-      carried.notCarried.add(name);
+      carried.notCarried.add(entry.name);
       continue;
     }
     shareFileForAgentsToRead(copy);
-    carried.names.push(name);
+    carried.names.push(entry.name);
+    if (entry.since) carried.since.push(entry.name);
     total += file.bytes;
   }
   return carried;
@@ -899,6 +959,7 @@ async function render(request: RenderRequest): Promise<Render> {
   if (request.source.kind === "web") job.root = scratch;
   const inputRoot = path.join(task, TASK_CAPTURE_INPUT_DIR);
   let notCarried = new Set<string>();
+  let since: string[] = [];
   const timeoutMs = JOB_BASE_MS + pageTimeoutMs * pages.length;
   let outcome: Awaited<ReturnType<typeof runPersonCommand>>;
   try {
@@ -907,9 +968,15 @@ async function render(request: RenderRequest): Promise<Render> {
       removeCaptureInput(inputRoot);
       job.root = path.join(inputRoot, captureId);
       try {
-        const carried = carryDelivery(request.source.dir, job.root, pages);
+        const carried = await carryDelivery(
+          request.source.dir,
+          job.root,
+          pages,
+          request.source.since ? taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot) : null,
+        );
         job.names = carried.names;
         notCarried = carried.notCarried;
+        since = carried.since;
       } catch (error) {
         // The reason a task shows is free of deployment paths; the log has them.
         logger.warn("a delivery's files could not be handed to the page renderer", {
@@ -1032,7 +1099,7 @@ async function render(request: RenderRequest): Promise<Render> {
       error: shots.length === 0 && error === null && acts.every((act) => act.error === null) ? unreported : error,
     };
   });
-  return { pages: rendered, scratch, notCarried };
+  return { pages: rendered, scratch, notCarried, since };
 }
 
 /** How much of an act's failure a reply prints: it lists the controls a page
@@ -1139,8 +1206,9 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
 
 /** Said of a page whose content scrolls inside one of its elements: what a
  *  picture and a figure of it then cover. */
-function scrollsInsideRemark(inside: { what: string; height: number }): string {
-  return `scrolls inside \`${inside.what}\` (${px(inside.height)} px) and not as a page, so its pictures and what was measured of it are of its first screen only.`;
+function scrollsInsideRemark(inside: ScrollsInside): string {
+  const where = inside.view ? ` ${atWidth(inside.view)}` : "";
+  return `scrolls inside \`${inside.what}\` (${px(inside.height)} px)${where} and not as a page, so its pictures and what was measured of it there are of its first screen only.`;
 }
 
 /** Ruling 328: what was measured of one pictured page, for the note. */
@@ -1543,7 +1611,7 @@ async function captureDelivery(
   /** The renderer is there and has somebody to run as: what `capture_page`
    *  needs too, so the note offers it only then. */
   let toolCanRender = false;
-  let rendered: Render = { pages: [], scratch: null, notCarried: new Set() };
+  let rendered: Render = { pages: [], scratch: null, notCarried: new Set(), since: [] };
   try {
     if (!("browser" in found)) throw new Error(found.reason ?? "this server has no browser to render with");
     launch = taskOwnerLaunch(db, fm.ownerUserId, ctx.dataRoot, NO_OWNER);
@@ -1597,6 +1665,7 @@ async function captureDelivery(
         pages: renders.flatMap((one) => one.pages),
         scratch: renders.at(-1)?.scratch ?? null,
         notCarried: new Set(renders.flatMap((one) => [...one.notCarried])),
+        since: [],
       };
     }
   } catch (error) {
@@ -1606,6 +1675,7 @@ async function captureDelivery(
       pages: toRender.map((page) => unpictured(page.file, reason)),
       scratch: null,
       notCarried: new Set(),
+      since: [],
     };
   }
   const byFile = new Map(rendered.pages.map((page) => [page.file, page]));
@@ -1881,22 +1951,33 @@ function endedClause(end: EndedView): string {
   return `at ${px(end.pageHeight)} px at the ${view.id} width (${view.width} px)`;
 }
 
+/** A render of the task's own folder carries nothing, so leaves nothing out. */
+const NONE_LEFT_OUT: ReadonlySet<string> = new Set();
+
 /** What a page did as it loaded, in a reply's words: the dialog it opened,
- *  and what it asked for and did not get. */
-function loadRemarks(page: RenderedPage): string[] {
+ *  and what it asked for and did not get. `notCarried` is what a render of a
+ *  kept delivery left out, so a file too large to carry is not said to be
+ *  missing from the task. */
+function loadRemarks(page: RenderedPage, notCarried: ReadonlySet<string> = NONE_LEFT_OUT): string[] {
   const parts: string[] = [];
   if (page.scrollsInside) parts.push(`It ${scrollsInsideRemark(page.scrollsInside)}`);
   if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
   const asks: string[] = [];
   const asked = askedClause(page);
   if (asked) asks.push(`${asked}, which a capture never loads`);
-  for (const clause of missingClauses(page, new Set())) asks.push(`for ${clause}`);
+  for (const clause of missingClauses(page, notCarried)) asks.push(`for ${clause}`);
   if (asks.length > 0) parts.push(`It asked ${asks.join(", and ")}.`);
   if (page.error) parts.push(`Not every picture was made: ${page.error}.`);
   return parts;
 }
 
-function captureReplyText(name: string, page: RenderedPage, from: number, scratchNote: string): string {
+function captureReplyText(
+  name: string,
+  page: RenderedPage,
+  from: number,
+  scratchNote: string,
+  notCarried: ReadonlySet<string>,
+): string {
   const parts = [`[done] ${code(name)} as a reader sees it.`];
   for (const view of PAGE_CAPTURE_VIEWS) {
     const shot = page.shots.find((s) => s.view === view.id);
@@ -1910,7 +1991,7 @@ function captureReplyText(name: string, page: RenderedPage, from: number, scratc
     const width = widthRemark(shot, "it");
     if (width) parts.push(width);
   }
-  parts.push(...loadRemarks(page), scratchNote);
+  parts.push(...loadRemarks(page, notCarried), scratchNote);
   return parts.join(" ");
 }
 
@@ -1929,7 +2010,13 @@ const REDUCED = " with reduced motion asked for";
  * stands, or why it did nothing, in the renderer's own words (which name the
  * controls the page does have, so the next call can name one).
  */
-function actReplyText(name: string, page: RenderedPage, reduce: boolean, scratchNote: string): string {
+function actReplyText(
+  name: string,
+  page: RenderedPage,
+  reduce: boolean,
+  scratchNote: string,
+  notCarried: ReadonlySet<string>,
+): string {
   const pictured = page.shots.length > 0;
   const parts = [
     pictured
@@ -1941,7 +2028,7 @@ function actReplyText(name: string, page: RenderedPage, reduce: boolean, scratch
     if (act.error) parts.push(`${where.charAt(0).toUpperCase()}${where.slice(1)}: ${act.error}.`);
     else if (act.done) parts.push(`${where.charAt(0).toUpperCase()}${where.slice(1)}: ${act.done}.`);
   }
-  parts.push(...loadRemarks(page));
+  parts.push(...loadRemarks(page, notCarried));
   if (pictured) parts.push(scratchNote);
   return parts.join(" ");
 }
@@ -1951,7 +2038,14 @@ function actReplyText(name: string, page: RenderedPage, reduce: boolean, scratch
 export const aboutMs = (ms: number): number => Math.round(ms / 50) * 50;
 
 /** Ruling 194: the reply to a page pictured while it moves. */
-function movingReplyText(name: string, page: RenderedPage, from: number, reduce: boolean, scratchNote: string): string {
+function movingReplyText(
+  name: string,
+  page: RenderedPage,
+  from: number,
+  reduce: boolean,
+  scratchNote: string,
+  notCarried: ReadonlySet<string>,
+): string {
   const parts = [
     `[done] ${code(name)} while it moves${reduce ? REDUCED : ""}: the screen at ${px(from)} px, pictured more than once as the page ${from === 0 ? "loaded" : "was scrolled there"}. ` +
       "What differs between two pictures of one width is what moved.",
@@ -1962,7 +2056,7 @@ function movingReplyText(name: string, page: RenderedPage, from: number, reduce:
     const moments = frames.map((shot) => `${px(aboutMs(shot.moment ?? 0))} ms`);
     parts.push(`${view.label}: ${frames.length === 1 ? "1 picture" : `${frames.length} pictures`}, about ${LIST_AND.format(moments)} after it came into view.`);
   }
-  parts.push(...loadRemarks(page), scratchNote);
+  parts.push(...loadRemarks(page, notCarried), scratchNote);
   return parts.join(" ");
 }
 
@@ -1997,6 +2091,7 @@ function boxReplyText(
   scratchNote: string,
   keeps: boolean,
   shown: boolean,
+  notCarried: ReadonlySet<string>,
 ): string {
   const parts: string[] = [];
   for (const shot of page.shots) {
@@ -2017,19 +2112,116 @@ function boxReplyText(
       );
     }
   }
-  parts.push(...loadRemarks(page));
+  parts.push(...loadRemarks(page, notCarried));
   if (!shown) parts.push(NOT_SHOWN);
   parts.push(scratchNote);
   if (keeps) parts.push(KEEP_PICTURE);
   return parts.join(" ");
 }
 
+/** A file the door has found for a run, and where its bytes are read from. */
+interface FoundFile {
+  /** The name the folder holds it under (ruling 76): what the renderer opens. */
+  stored: string;
+  size: number;
+  /** Ruling 329: the delivery the asking run judges, or null when it judges
+   *  none and is shown the task's files as they stand. */
+  judged: JudgedDelivery | null;
+  /** The file is one that delivery's kept copy holds. */
+  delivered: boolean;
+}
+
+/** A regular file's size, or null when `file` is none. */
+function fileSize(file: () => string): number | null {
+  try {
+    const stat = statSync(file());
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The file a run asks for by `name`, or null when the task has none.
+ *
+ * A run that judges a delivery (ruling 329) is answered from the delivery's
+ * kept copy first: the page it is to look at is the one that was delivered,
+ * whatever a stopped rework has since renamed, removed or grown in the task's
+ * folder. A name the delivery does not hold is a file saved on the task since,
+ * found there like anyone's.
+ */
+function findAskedFile(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  ask: { projectSlug: string; taskKey: string; name: string; runId: string | null },
+): FoundFile | null {
+  const { projectSlug, taskKey, name } = ask;
+  // A dot name is no file of the task to any reader, this one included: the
+  // renderer's own page server answers none.
+  if (name.startsWith(".")) return null;
+  const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+  const judged = task ? judgedDelivery(db, ctx, ask, task.parsed) : null;
+  const keptDir = judged?.dir ?? null;
+  if (keptDir) {
+    let kept = "";
+    const size = fileSize(() => (kept = resolveStoredSegment(keptDir, name)));
+    if (size !== null) return { stored: path.basename(kept), size, judged, delivered: true };
+  }
+  // Ruling 76: found in either Unicode form, and rendered under the spelling
+  // the folder holds, which is the one the renderer can open.
+  let onTask = "";
+  const size = fileSize(() => (onTask = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot)));
+  return size === null ? null : { stored: path.basename(onTask), size, judged, delivered: false };
+}
+
+/** Where a found file is rendered from: a judge's from the delivery as kept,
+ *  with what was saved on the task since beside it. */
+function sourceOf(found: FoundFile): RenderRequest["source"] {
+  return found.judged?.dir ? { kind: "kept", dir: found.judged.dir, since: true } : { kind: "attachments" };
+}
+
+/** The delivery a look at a found file is of (ruling 329): the one its run
+ *  judges, when the file was read from that delivery's kept copy, or from the
+ *  task's folder because no copy of it is held. Null for anyone else's look,
+ *  which is of the files as they stand and counts for no approval. */
+function deliveryLookedAt(found: FoundFile): string | null {
+  if (!found.judged) return null;
+  return found.delivered || found.judged.dir === null ? found.judged.deliveredAt : null;
+}
+
+const SINCE_NAMED_MAX = 4;
+
+/**
+ * What a judge is told it was shown (ruling 329), so a page that reads
+ * differently in the task's folder is no surprise, and a file that was not
+ * part of the delivery is not taken for one; "" for anyone else.
+ */
+function shownToAJudge(found: FoundFile, since: readonly string[]): string {
+  const { judged } = found;
+  if (!judged) return "";
+  if (!judged.dir) {
+    return ` Viberr holds no kept copy of the delivery of ${judged.deliveredAt}, so this is the task's files as they stand now.`;
+  }
+  const beside = since.filter((name) => name !== found.stored);
+  const more = beside.length - SINCE_NAMED_MAX;
+  const later =
+    beside.length === 0
+      ? ""
+      : ` Saved on the task since, and shown as ${beside.length === 1 ? "it stands" : "they stand"}: ` +
+        `${LIST_AND.format(beside.slice(0, SINCE_NAMED_MAX).map(code))}${more > 0 ? `, and ${px(more)} more` : ""}.`;
+  return (
+    (found.delivered
+      ? ` This is the delivery of ${judged.deliveredAt} as Viberr kept it, not the task's files as they stand now.`
+      : ` This file was saved on the task after the delivery of ${judged.deliveredAt}, so it is shown as it stands now, beside that delivery as Viberr kept it.`) +
+    later
+  );
+}
+
 /** A page the door has found on the task and may render. */
 interface AskedPage {
   /** The name as the agent typed it, which the reply uses. */
   name: string;
-  /** The name the folder holds it under (ruling 76): what the renderer opens. */
-  stored: string;
+  found: FoundFile;
   kind: PictureKind;
   /** The exact size asked for, or null for the page in stretches. */
   box: PictureBox | null;
@@ -2043,7 +2235,9 @@ async function capturePage(
   found: Renderer,
 ): Promise<PageCaptureReply> {
   const { projectSlug, taskKey } = ask;
-  const { name, stored, kind, box } = asked;
+  const { name, kind, box } = asked;
+  const where = asked.found;
+  const stored = where.stored;
   const file = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   if (!file) return said(`[noop] ${code(name)} is not a page on ${taskKey}.`);
   const owner = file.parsed.frontmatter.ownerUserId;
@@ -2079,9 +2273,6 @@ async function capturePage(
         if (reduce) asked.reduce = true;
         return asked;
       });
-  // Ruling 329: a run that judges is shown the delivery as it was kept, not
-  // the task's files as a rework or an upload may since have left them.
-  const delivered = deliveredCopyFor(db, ctx, { projectSlug, taskKey, runId: ask.runId, name: stored }, file.parsed);
   let rendered: Render;
   try {
     rendered = await render({
@@ -2091,7 +2282,9 @@ async function capturePage(
       taskKey,
       renderer: found,
       launch,
-      source: delivered?.dir ? { kind: "kept", dir: delivered.dir } : { kind: "attachments" },
+      // Ruling 329: a run that judges is shown the delivery as it was kept,
+      // not the task's files as a rework or an upload may since have left them.
+      source: sourceOf(where),
       pages: [{ file: stored, kind }],
       views,
       runId: ask.runId,
@@ -2114,7 +2307,7 @@ async function capturePage(
   }
   // An act that found nothing to act on is an answer, not a failed render.
   if (page && act && page.shots.length === 0 && page.error === null && page.acts.length > 0) {
-    return said(actReplyText(name, page, reduce, ""));
+    return said(actReplyText(name, page, reduce, "", rendered.notCarried));
   }
   if (!page || page.shots.length === 0) {
     // A width that failed is the answer, whatever another width ended at.
@@ -2134,10 +2327,7 @@ async function capturePage(
   // reader's width, and a state, a moving screen or the page with reduced
   // motion is not the page as it loads for every reader, so none is one.
   if (!box && !act && !ask.moving && !reduce) {
-    // The look is of the delivery when the run was shown the delivery: its
-    // kept copy, or the task's files where no copy could be kept. Anyone
-    // else's look is of the files as they stand, and counts for no approval.
-    const delivery = delivered?.deliveredAt ?? null;
+    const delivery = deliveryLookedAt(where);
     recordRunLooks(
       db,
       ask.runId,
@@ -2162,20 +2352,17 @@ async function capturePage(
   // author asked for, up to 8,000 px a side: past 2,000 it is saved and not
   // handed back, and the reply says to look at a lower scale.
   const shown = !box || page.shots.every(shownToTheRun);
-  // A run that judges is told what it was shown, so a page that reads
-  // differently in the task's folder is no surprise.
-  const asDelivered = delivered?.dir
-    ? ` This is the delivery of ${delivered.deliveredAt} as Viberr kept it, not the task's files as they stand now.`
-    : "";
+  const left = rendered.notCarried;
   return {
     text:
       (box
-        ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown)
+        ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown, left)
         : act
-          ? actReplyText(name, page, reduce, kept)
+          ? actReplyText(name, page, reduce, kept, left)
           : ask.moving
-            ? movingReplyText(name, page, from, reduce, kept)
-            : captureReplyText(name, page, from, kept) + (reduce ? ` Rendered${REDUCED}.` : "")) + asDelivered,
+            ? movingReplyText(name, page, from, reduce, kept, left)
+            : captureReplyText(name, page, from, kept, left) + (reduce ? ` Rendered${REDUCED}.` : "")) +
+      shownToAJudge(where, rendered.since),
     images: shown ? page.shots.map((shot) => ({ data: shot.bytes.toString("base64"), mimeType: "image/png" })) : [],
   };
 }
@@ -2295,28 +2482,12 @@ export function captureTaskPage(
   if (box && "text" in box) return Promise.resolve(box);
   const badState = stateRefusal(ask, name, box);
   if (badState) return Promise.resolve(badState);
-  let size: number | null = null;
-  let stored = name;
-  // A dot name is no file of the task to any reader, this one included: the
-  // renderer's own page server answers none.
-  if (!name.startsWith(".")) {
-    try {
-      const resolved = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot);
-      const stat = statSync(resolved);
-      if (stat.isFile()) {
-        size = stat.size;
-        // Ruling 76: found in either Unicode form, and rendered under the
-        // spelling the folder holds, which is the one the renderer can open.
-        stored = path.basename(resolved);
-      }
-    } catch {
-      size = null;
-    }
-  }
-  if (size === null) {
+  const file = findAskedFile(db, ctx, { projectSlug, taskKey, name, runId: ask.runId });
+  if (!file) {
     // The reader's own sentence.
     return Promise.resolve(said(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name)));
   }
+  const size = file.size;
   const kind = pictureKindOf(name);
   if (!kind) {
     return Promise.resolve(
@@ -2340,7 +2511,7 @@ export function captureTaskPage(
       ),
     );
   }
-  const asked: AskedPage = { name, stored, kind, box };
+  const asked: AskedPage = { name, found: file, kind, box };
   return new Promise((resolve) => {
     const job: QueuedJob = {
       kind: "tool",
@@ -2392,21 +2563,10 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
   if (!("browser" in found)) return Promise.resolve("[error] This server has no browser to render a page with.");
   const { projectSlug, taskKey } = ask;
   const name = ask.name.trim();
-  let stored: string | null = null;
-  let size = 0;
-  if (!name.startsWith(".")) {
-    try {
-      const resolved = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot);
-      const stat = statSync(resolved);
-      if (stat.isFile()) {
-        stored = path.basename(resolved);
-        size = stat.size;
-      }
-    } catch {
-      stored = null;
-    }
-  }
-  if (stored === null) return Promise.resolve(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name));
+  // A run that judges measures what was delivered, as it looks at it.
+  const where = findAskedFile(db, ctx, { projectSlug, taskKey, name, runId: ask.runId });
+  if (!where) return Promise.resolve(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name));
+  const size = where.size;
   if (pageKindOf(name) !== "html") {
     return Promise.resolve(
       `[noop] ${code(name)} is not a page somebody laid out. measure_page measures an .html or .htm file; ` +
@@ -2418,12 +2578,10 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
       `[noop] ${code(name)} is ${(size / 1024 / 1024).toFixed(0)} MB; measure_page measures a page of up to ${SOURCE_MAX_BYTES.html / 1024 / 1024} MB.`,
     );
   }
-  const file = stored;
+  const file = where.stored;
   const measure = async (): Promise<string> => {
     const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     if (!task) return `[noop] ${code(name)} is not a page on ${taskKey}.`;
-    // A run that judges measures what was delivered, as it looks at it.
-    const delivered = deliveredCopyFor(db, ctx, { projectSlug, taskKey, runId: ask.runId, name: file }, task.parsed);
     let launch: AgentLaunch | null;
     try {
       launch = taskOwnerLaunch(db, task.parsed.frontmatter.ownerUserId, ctx.dataRoot, NO_OWNER);
@@ -2445,7 +2603,7 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
         taskKey,
         renderer: found,
         launch,
-        source: delivered?.dir ? { kind: "kept", dir: delivered.dir } : { kind: "attachments" },
+        source: sourceOf(where),
         pages: [{ file, kind: "html" }],
         // The delivery's own views, so the page is walked as far and weighs
         // what it will weigh when it is delivered. Not in the run's folder:
@@ -2470,11 +2628,11 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
       `[done] ${code(name)} measured as Viberr measures a delivered page, at the desktop width (1280 px) and the phone width (390 px).`,
       ...measuredSentences(page.measured),
       ...page.shots.flatMap((shot) => widthRemark(shot, "it") ?? []),
-      ...loadRemarks(page),
+      ...loadRemarks(page, rendered.notCarried),
       ...(against ? [against] : []),
-      delivered?.dir
-        ? `Nothing was saved: these are the figures of the delivery of ${delivered.deliveredAt} as Viberr kept it.`
-        : "Nothing was saved: these are the figures as the file stands now.",
+      // A judge is told which bytes the figures are of; anyone else measures
+      // the file as it stands.
+      `Nothing was saved${where.judged ? "." : ": these are the figures as the file stands now."}${shownToAJudge(where, rendered.since)}`,
     ].join(" ");
   };
   return new Promise((resolve) => {
@@ -2537,7 +2695,7 @@ export type WebPageAnswer =
       motion: PageMotion | null;
       /** The element the page scrolls inside, when it does not scroll as a
        *  page: its pictures are then of its first screen only. */
-      scrollsInside: { what: string; height: number } | null;
+      scrollsInside: ScrollsInside | null;
     }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
   | { refused: string }

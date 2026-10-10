@@ -1,10 +1,12 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   symlinkSync,
   truncateSync,
   unlinkSync,
@@ -31,7 +33,7 @@ import {
 import { reconfigureProject } from "../../../test-support/projected-store";
 import type { Engagement, WorkRevision } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
-import { keepDelivery, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
 import { writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
@@ -40,6 +42,7 @@ import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "~/server/runtimes/
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun, insertRunLine } from "~/server/runtimes/run-store.server";
+import { COMPACTION_LINE_TAG } from "~/server/runtimes/wire-format.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment, readAgentTaskSource } from "./board-read.server";
 import { completionPacketFact } from "./completion-packet.server";
@@ -77,6 +80,9 @@ const WRITER: Engagement = {
   delivers: true,
   verdictCapable: false,
 };
+/** A reviewer that may record a verdict, and a supporting agent that may not. */
+const EDITOR: Engagement = { profileId: "editor", backend: "claude", role: "Editor", delivers: false, verdictCapable: true };
+const PROOFREADER: Engagement = { profileId: "proofreader", backend: "claude", role: "Proofreader", delivers: false, verdictCapable: false };
 
 /** A board that delivers files: no repository (unless the case names one),
  *  one deliverer, and (when the case is about the react) an operator. */
@@ -297,8 +303,9 @@ async function finishedRunSaving(files: Record<string, string>, sized: Sized = {
   return started.runId;
 }
 
-/** A reviewer's run that is still going. */
-async function liveRun(profileId: string): Promise<string> {
+/** A reviewer's run that is still going; `verdictWithheld` for one asked a
+ *  question with no verdict to give (ruling 87). */
+async function liveRun(profileId: string, verdictWithheld = false): Promise<string> {
   runSeq += 1;
   queueFakeRun({
     lines: [{ t: "", ev: "text", tag: "assistant", text: "looking" }],
@@ -311,6 +318,7 @@ async function liveRun(profileId: string): Promise<string> {
     kind: "reviewer",
     role: "Reviewer",
     agentProfileId: profileId,
+    verdictWithheld,
     credentialUserId: store.users.arda.id,
     backend: "claude",
     model: "sonnet",
@@ -536,7 +544,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
       ["notes.md", null],
     ]);
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    expect(pageLooksNote(pageLooksOwed({ dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed, true)!)).toContain(
+    expect(pageLooksNote(pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed, true)!)).toContain(
       `What Viberr measured as it pictured this delivery: \`index.html\`: ${line} The delivery's "Page captures" note names each element`,
     );
 
@@ -591,13 +599,37 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // line the operator and the reviewer are handed.
     // CANARY: keep zeros for a check that did not run and a page nobody
     // measured is recorded as one with nothing wrong.
-    await deliver({ "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>' });
-    const kept = frontmatter().pageCaptures!.pages.find((page) => page.file === "throws.html")!;
-    expect(kept.measured).toMatchObject({
+    // A page with more kinds of fault than a report lists, and one whose
+    // accessibility engine gave up.
+    const kinds = Array.from({ length: 21 }, (_, at) => ({
+      id: `rule-${at + 1}`,
+      impact: "serious",
+      help: `Rule ${at + 1}`,
+      count: 1,
+      nodes: [{ target: `#n${at + 1}` }],
+    }));
+    await deliver({
+      "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>',
+      "faulty.html": `<p>fake-axe:${JSON.stringify(kinds)}</p>`,
+      "unchecked.html": '<p>fake-axe-throws:"axe gave up"</p>',
+    });
+    const recorded = (file: string) => frontmatter().pageCaptures!.pages.find((page) => page.file === file)!.measured;
+    expect(recorded("throws.html")).toMatchObject({
       views: [
         { view: "desktop", controls: null, unreached: null, unmarked: null, stillMoving: 0, faultKinds: 0, faultElements: 0 },
         { view: "phone", controls: null, unreached: null, unmarked: null },
       ],
+    });
+    // CANARY: count the kinds a report lists and a page with twenty-one
+    // kinds of fault is recorded, and said, to have twenty.
+    expect(recorded("faulty.html")).toMatchObject({ views: [{ view: "desktop", faultKinds: 21 }, { view: "phone", faultKinds: 21 }] });
+    expect(timeline().find((entry) => entry.title === "Page captures")!.text).toContain(
+      "At 1280 px the accessibility checks (axe, WCAG 2.2 AA) found 21 kinds of fault, the first 20 of them: `rule-1` on 1 (Rule 1; first: `#n1`);",
+    );
+    // CANARY: keep zeros for an engine that did not run and the page is
+    // recorded as one the checks found nothing on.
+    expect(recorded("unchecked.html")).toMatchObject({
+      views: [{ view: "desktop", faultKinds: null, faultElements: null }, { view: "phone", faultKinds: null, faultElements: null }],
     });
     const line = completionPacketFact(frontmatter(), { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }).pageCaptures.find(
       (page) => page.file === "throws.html",
@@ -1238,7 +1270,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways. " +
         // A picture of a page that scrolls inside one of its elements shows
         // one screen of it, and said nothing: it read as a whole short page.
-        "`zapp.html` scrolls inside `main.app` (5,200 px) and not as a page, so its pictures and what was measured of it are of its first screen only.",
+        "`zapp.html` scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and not as a page, so its pictures and what was measured of it there are of its first screen only.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1248,7 +1280,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // An agent that looks at it is told the same.
     expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
-      "It scrolls inside `main.app` (5,200 px) and not as a page, so its pictures and what was measured of it are of its first screen only.",
+      "It scrolls inside `main.app` (5,200 px) at the desktop width (1280 px) and not as a page, so its pictures and what was measured of it there are of its first screen only.",
     );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
@@ -1673,9 +1705,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // the source reader and the matching entry below is missing.
     const STAMP = "2026-10-09T22:40:00.000Z";
     await keptDelivery("VIB-1", STAMP, { "post.html": "<p>fake-height:3000</p>", "notes.txt": "plain" });
-    // The editor judges this task; the proofreader below only reads beside it.
+    // The editor judges this task; the proofreader below only reads beside
+    // it, engaged with no verdict to give.
     await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
-      parsed.frontmatter.engagements = [WRITER, { profileId: "editor", backend: "claude", role: "Editor", delivers: false, verdictCapable: true }];
+      parsed.frontmatter.engagements = [WRITER, EDITOR, PROOFREADER];
     });
     const deps = (runId: string | null) => ({ db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug, runId });
     await withBrowser("", async () => {
@@ -1724,6 +1757,23 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(runLooks(store.db, second)).toEqual([
         { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
       ]);
+      // The task's folder holds each kept picture under a name any run that
+      // posts files can save over. One opened there is a look only while it
+      // is the picture Viberr kept; out of the delivery's own copy it always
+      // is. CANARY: take the picture's height from the folder's file and the
+      // run is credited a whole page for whatever bytes stand there.
+      const phonePicture = path.join(attachments(), "post.html.capture-phone.png");
+      const asKept = readFileSync(phonePicture);
+      copyFileSync(path.join(attachments(), "post.html.capture-desktop.png"), phonePicture);
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png")).toBe(true);
+      expect(runLooks(store.db, second)).toHaveLength(1);
+      unlinkSync(phonePicture);
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png", 0, STAMP)).toBe(true);
+      expect(runLooks(store.db, second)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+      ]);
+      writeFileSync(phonePicture, asKept);
       // A file changed on the task since the delivery (a rework that was
       // stopped, an upload). The run that judges is still shown what was
       // delivered, and told so; a run that only reads beside it is shown the
@@ -1765,13 +1815,13 @@ describe("a delivered page is pictured (ruling 86)", () => {
         type: "assistant" | "user";
         message: { content: Block[] };
       }
-      const line = (seq: number, envelope: Envelope) =>
+      const line = (seq: number, envelope: Envelope | { type: "system"; subtype: string }, tag = "tool_use") =>
         insertRunLine(store.db, {
           runId: reader,
           seq,
           occurredAt: new Date().toISOString(),
           raw: JSON.stringify(envelope),
-          display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+          display: { t: "00:00:00", ev: "tool", tag, text: "" },
         });
       const read = (id: string, file: string): Envelope => ({
         type: "assistant",
@@ -1791,10 +1841,153 @@ describe("a delivered page is pictured (ruling 86)", () => {
       line(105, handed("t3", [{ type: "text", text: "File does not exist." }], true));
       line(106, read("t4", path.join(attachments(), "notes.txt")));
       line(107, handed("t4", [{ type: "text", text: "plain" }]));
-      expect(looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: reader })).toEqual([
+      const fromLog = () =>
+        looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: reader });
+      const opened = [
         { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 3000, end: true, delivery: STAMP },
         { kind: "source", task: "VIB-1", id: "S1" },
-      ]);
+      ];
+      expect(fromLog()).toEqual(opened);
+      // A line that only holds the words of a compaction is none: a reviewer
+      // on a repository that names them (this one) greps or quotes them.
+      // CANARY: find the line by its text and every read above is dropped,
+      // so the note names pictures the run opened.
+      line(108, read("t5", path.join(attachments(), "compact_boundary.md")));
+      line(109, handed("t5", [{ type: "text", text: '{"type":"system","subtype":"compact_boundary"}' }]));
+      expect(fromLog()).toEqual(opened);
+      // The compaction itself: what the run was handed before it is a
+      // summary now, and only what it opens after counts. CANARY: read the
+      // whole log whatever was compacted.
+      line(110, { type: "system", subtype: "compact_boundary" }, COMPACTION_LINE_TAG);
+      expect(fromLog()).toEqual([]);
+      line(111, read("t6", path.join(sources, "S1.png")));
+      line(112, handed("t6", image));
+      expect(fromLog()).toEqual([{ kind: "source", task: "VIB-1", id: "S1" }]);
+      // A picture opened before the delivery's own render finished was the
+      // picture of an earlier delivery under the same name. CANARY: drop
+      // `openedAt` and a look at the last delivery's picture counts for this.
+      await stopRun(reader);
+      const early = await liveRun("proofreader");
+      insertRunLine(store.db, {
+        runId: early,
+        seq: 100,
+        occurredAt: "2026-10-09T22:40:01.000Z",
+        raw: JSON.stringify(read("t1", path.join(attachments(), "post.html.capture-desktop.png"))),
+        display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+      });
+      insertRunLine(store.db, {
+        runId: early,
+        seq: 101,
+        occurredAt: "2026-10-09T22:40:02.000Z",
+        raw: JSON.stringify(handed("t1", image)),
+        display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+      });
+      expect(looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: early })).toEqual([]);
+    });
+  });
+
+  it("ruling 329: a run that judges is shown the delivery as kept, with what was saved beside it since, whatever became of the page in the task's folder", { timeout: REAL_RENDERS_MS }, async () => {
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    await keptDelivery("VIB-1", STAMP, {
+      "post.html": '<p>the piece</p><img src="cover.png"><img src="film.bin"><p>fake-height:3000</p>',
+      "film.bin": "a film",
+    });
+    const keptDir = keptDeliveryDir(store.slug, "VIB-1", STAMP, store.dataRoot)!;
+    // Past what a capture carries (25 MB a file), and sparse.
+    truncateSync(path.join(keptDir, "film.bin"), 26 * 1024 * 1024);
+    const CRITIC: Engagement = { ...EDITOR, profileId: "critic", role: "Critic" };
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, EDITOR, CRITIC, PROOFREADER];
+      parsed.timeline.unshift({
+        occurredAt: STAMP,
+        type: "comment",
+        actor: { kind: "agent", backend: "claude", profileId: "writer", roleHint: "Writer" },
+        title: null,
+        text: "The piece is saved on the task.",
+        toAgent: false,
+        evidence: null,
+        attachments: ["post.html", "film.bin"],
+      });
+    });
+    const lastLook = (runId: string) => runLooks(store.db, runId).at(-1);
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      // A picture saved after the piece was delivered, under a new name,
+      // moves no delivery (ruling 85): it is on the task and not in the kept
+      // copy. Rendered from the kept copy alone, the judge was handed the
+      // piece with a broken picture and told the picture was "not among this
+      // task's files". CANARY: carry the kept copy and nothing beside it.
+      saveFiles("VIB-1", { "cover.png": "the cover", "notes-for-the-editor.md": "beside" });
+      const first = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(first.text).toContain("[done] `post.html` as a reader sees it.");
+      expect(first.text).not.toContain("`cover.png`, which");
+      // A file past what a capture carries is said as that, not as missing.
+      // CANARY: drop what the carry left out from the reply's remarks.
+      expect(first.text).toContain("It asked for `film.bin`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).");
+      expect(first.text).not.toContain("not among this task's files");
+      expect(first.text).toContain(
+        `This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now. ` +
+          "Saved on the task since, and shown as they stand: `cover.png` and `notes-for-the-editor.md`.",
+      );
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+
+      // A stopped rework took the page off the task, then left one too large
+      // to render under its name. The delivery is what it was, and so is
+      // what the judge is shown. CANARY: look for the page in the task's
+      // folder first and an approval owes a look no tool can give.
+      unlinkSync(path.join(attachments(), "post.html"));
+      expect((await ask("post.html", { runId: editor, view: "phone" })).text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      expect(fake.pages().at(-1)!.html).toContain("<p>the piece</p>");
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "phone", delivery: STAMP });
+      saveFiles("VIB-1", {}, { "post.html": 11 * 1024 * 1024 });
+      expect((await ask("post.html", { runId: editor, view: "phone", from: 2000 })).text).toContain("the end of the page");
+      const owed = pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", readTaskFile(ref)!.parsed, true);
+      expect(owed?.pages).toEqual(["post.html"]);
+      // And it is measured as delivered.
+      const measured = await measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name: "post.html", runId: editor });
+      expect(measured).toContain("[done] `post.html` measured as Viberr measures a delivered page");
+      expect(measured).toContain("It asked for `film.bin`, which a capture does not carry");
+      expect(measured).toContain(`Nothing was saved. This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now.`);
+      // A file saved since is the judge's to look at too, and is no page of
+      // the delivery.
+      saveFiles("VIB-1", { "cover.html": "<p>the cover's drawing</p>" });
+      const drawing = await ask("cover.html", { runId: editor, view: "desktop" });
+      expect(drawing.text).toContain(`This file was saved on the task after the delivery of ${STAMP}, so it is shown as it stands now, beside that delivery as Viberr kept it.`);
+      expect(lastLook(editor)).toMatchObject({ file: "cover.html", delivery: null });
+
+      // Anyone who does not judge works on the files as they stand: a
+      // supporting agent, and a reviewer asked with its verdict withheld.
+      const proofreader = await liveRun("proofreader");
+      expect((await ask("post.html", { runId: proofreader })).text).toContain("is 11 MB; capture_page renders a page of up to 10 MB");
+      const asked = await liveRun("critic", true);
+      expect((await ask("post.html", { runId: asked })).text).toContain("is 11 MB; capture_page renders a page of up to 10 MB");
+
+      // The completion lets a run dispatched to review record its verdict
+      // after its engagement was handed delivery or taken off the task
+      // (ruling 87), so such a run is still shown the delivery. CANARY: read
+      // "judges" off the engagement as it stands and its approval is refused
+      // for pages it was shown.
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.engagements = [{ ...WRITER, delivers: false }, { ...EDITOR, delivers: true }];
+      });
+      await ask("post.html", { runId: editor, view: "desktop" });
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.engagements = [WRITER];
+      });
+      await ask("post.html", { runId: editor, view: "desktop" });
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+
+      // No copy of the delivery is held (the copy failed): the task's files
+      // are all anyone can be shown, the judge is told so, and its look is
+      // of the delivery, or an approval could never bind.
+      saveFiles("VIB-1", { "post.html": "<p>as it stands</p>" });
+      rmSync(keptDir, { recursive: true });
+      const uncopied = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(uncopied.text).toContain(`Viberr holds no kept copy of the delivery of ${STAMP}, so this is the task's files as they stand now.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>as it stands</p>");
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", delivery: STAMP });
     });
   });
 

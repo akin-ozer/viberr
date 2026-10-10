@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -27,7 +27,7 @@ import {
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
-import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
 import { SOURCE_STAGING_PREFIX, readTaskSources, writeTaskSource } from "~/server/files/task-sources.server";
 import { insertUser } from "~/server/auth/user-store.server";
@@ -1295,6 +1295,69 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(refusal()).toBeUndefined();
     });
 
+    it("reads the pages it owes from the delivery as it was kept, whatever a stopped rework left in the task's folder", async () => {
+      // A rework that was stopped took the page off the task, or left one too
+      // large to render under its name. The delivery is what it was, a judge
+      // is shown it from the kept copy, and the approval owes that look.
+      // CANARY: read the pages off the task's folder and this approval binds
+      // with no look at a page that was delivered and can be shown.
+      writeDeliveredPageTask(["index.html", "about.html"]);
+      keepDelivery(store.slug, "VIB-1", savedAt, ["index.html", "about.html"], store.dataRoot);
+      const folder = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+      unlinkSync(path.join(folder, "index.html"));
+      truncateSync(path.join(folder, "about.html"), 11 * 1024 * 1024);
+      const unseen = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unseen);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`about.html` at the desktop width (1280 px); `about.html` at the phone width (390 px); `index.html` at the desktop width (1280 px)");
+
+      // And a page the kept copy holds past the size a capture renders is
+      // owed by nobody, whatever the folder holds under its name.
+      writeDeliveredPageTask(["index.html"]);
+      truncateSync(path.join(keptDeliveryDir(store.slug, "VIB-1", savedAt, store.dataRoot)!, "index.html"), 11 * 1024 * 1024);
+      unlinkSync(path.join(keptDeliveryDir(store.slug, "VIB-1", savedAt, store.dataRoot)!, "about.html"));
+      const unshowable = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unshowable);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("still owes the page an agent delivered once delivery is handed to another", async () => {
+      // Delivery handed on leaves the page what it was, and the new deliverer
+      // has saved nothing yet. CANARY: count the files of today's deliverer
+      // alone and the page is owed by nobody until it is saved again, so an
+      // approval binds with no look.
+      writeDeliveredPageTask(["index.html"]);
+      runRow("run_dev_delivered", { agentProfileId: "dev", state: "finished", backend: "claude", model: "sonnet", sdk: "Claude Agent SDK" });
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          ownerUserId: store.users.arda.id,
+          engagements: [{ ...DEV_DELIVERS_ENGAGEMENT, delivers: false }, { ...DEV_DELIVERS_ENGAGEMENT, profileId: "dev2" }, REVIEWER_ENGAGEMENT],
+          workRevision: null,
+          deliveredAt: savedAt,
+          validation: "changed",
+        }),
+        goal: "A page for the launch.",
+        timeline: [
+          {
+            occurredAt: savedAt,
+            type: "comment",
+            actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Implementation" },
+            title: null,
+            text: "The page is saved on the task.",
+            toAgent: false,
+            evidence: null,
+            attachments: ["index.html"],
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(runId);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
+    });
+
     it("counts a kept picture a Claude review opened with its own file reader, read from its log", async () => {
       // `Read` hands a model a picture as the board's own readers do, and a
       // reviewer that works in its folder opens the kept pictures by path.
@@ -1311,7 +1374,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           from: "https://example.com/",
           by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
           runId: null,
-          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 2000 },
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view: "desktop" },
         },
         store.dataRoot,
       );
@@ -1325,7 +1388,13 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           from: "https://example.com/",
           by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
           runId: null,
-          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
+          look: {
+            url: "https://example.com/",
+            at: "2026-10-09T22:00:00.000Z",
+            part: "note",
+            view: null,
+            pictures: [{ id: "S1", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 2000, cut: false }],
+          },
         },
         store.dataRoot,
       );
@@ -1374,14 +1443,11 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // the look's stretches from `unmetPageLooks` and a run that never
       // opened the reference approves.
       writeDeliveredPageTask(["index.html"]);
-      const look = (view: "desktop" | "phone", from: number, to: number) => ({
+      const look = (view: "desktop" | "phone") => ({
         url: "https://example.com/",
         at: "2026-10-09T22:00:00.000Z",
         part: "stretch" as const,
         view,
-        from,
-        to,
-        pageHeight: 3000,
       });
       const keep = (name: string, body: string, part: ReturnType<typeof look>) =>
         writeTaskSource(
@@ -1398,9 +1464,9 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           },
           store.dataRoot,
         );
-      keep("desktop-1.png", "d1", look("desktop", 0, 2000));
-      keep("desktop-2.png", "d2", look("desktop", 2000, 3000));
-      keep("phone-1.png", "p1", look("phone", 0, 2000));
+      keep("desktop-1.png", "d1", look("desktop"));
+      keep("desktop-2.png", "d2", look("desktop"));
+      keep("phone-1.png", "p1", look("phone"));
       // Pictures with no note are a keep that was cut off: no look, and
       // nothing an approval owes. CANARY: owe every stretch among the
       // sources and a failed keep holds every later review to its leavings.
@@ -1420,7 +1486,21 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           from: "https://example.com/",
           by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
           runId: null,
-          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
+          // The note lists the look's pictures: the two stretches of the
+          // desktop width, and the phone's twice, since the second stretch
+          // there looked the same as the first and is kept once.
+          look: {
+            url: "https://example.com/",
+            at: "2026-10-09T22:00:00.000Z",
+            part: "note",
+            view: null,
+            pictures: [
+              { id: "S1", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 3000, cut: true },
+              { id: "S2", part: "stretch", view: "desktop", from: 2000, to: 3000, pageHeight: 3000, cut: false },
+              { id: "S3", part: "stretch", view: "phone", from: 0, to: 2000, pageHeight: 4000, cut: true },
+              { id: "S3", part: "stretch", view: "phone", from: 2000, to: 4000, pageHeight: 4000, cut: false },
+            ],
+          },
         },
         store.dataRoot,
       );

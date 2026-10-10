@@ -307,6 +307,10 @@ const claudeDiagnostics = z
   })
   .catch(() => ({ cache_miss_reason: null }));
 
+/** The tag a run's log line carries when the CLI replaced the context with a
+ *  summary there (ruling 172): how a later reader finds that line (ruling 329). */
+export const COMPACTION_LINE_TAG = "system·compact_boundary";
+
 /** Ruling 172: a `compact_boundary`'s metadata — what the CLI compacted. */
 const claudeCompactMetadata = z
   .object({
@@ -770,7 +774,7 @@ function projectClaude(
           display: {
             t,
             ev: "meta",
-            tag: "system·compact_boundary",
+            tag: COMPACTION_LINE_TAG,
             text: `context compacted (${trigger})${sizes}`,
           },
           facts: { compaction: { trigger, preTokens: pre, postTokens: post } },

@@ -14,7 +14,7 @@ import {
   parseQuotaResetAt,
 } from "./backend-quota.server";
 import { createLineRedactor, createRunSink } from "./run-sink.server";
-import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server";
+import { listRunLines, patchRun, rawLogPath, upsertRun, getRun } from "./run-store.server";
 
 /**
  * P13-U-1: output-side secret redaction at the sink.
@@ -1226,6 +1226,52 @@ describe("ruling 172: the sink folds the prompt-cache record", () => {
     expect(rowOf("run_codex_turn").last_prompt_tokens).toBe(22_600);
     // A fold without a first call leaves the recorded one alone.
     expect(rowOf("run_codex_turn").first_call_prompt_tokens).toBe(14_000);
+  });
+
+  it("ruling 329: a compaction empties the list of what the run was shown, whether the stream carried it or the rollout told of it", () => {
+    // An approval rests on the pictures its session still holds, and a
+    // compaction replaces them with a summary. CANARY: drop the patch that
+    // clears `looked_json` from the stream's arm, or from the rollout's, and
+    // the list outlives the compaction on that backend.
+    const shown = JSON.stringify([{ kind: "source", task: "VIB-1", id: "S1" }]);
+    const looked = (runId: string) => getRun(store.db, runId)?.looked_json ?? null;
+    const streamed = sinkFor("run_looked");
+    patchRun(store.db, "run_looked", { lookedJson: shown });
+    streamed.line({
+      raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+      display: { t: "00:00:00", ev: "meta", tag: "system·compact_boundary", text: "context compacted (auto)" },
+      facts: { compaction: { trigger: "auto", preTokens: 150_000, postTokens: 12_000 } },
+      occurredAt: new Date().toISOString(),
+    });
+    expect(looked("run_looked")).toBeNull();
+
+    // A Codex compaction is known only once the CLI has exited, and nothing
+    // says before or after which look it fell: all of them go.
+    upsertRun(store.db, {
+      id: "run_looked_rollout",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "looked-rollout",
+      role: "reviewer",
+      kind: "reviewer",
+      backend: "codex",
+      model: "gpt-5.6-terra",
+      sdk: "Codex SDK",
+      agentName: "Reviewer",
+      agentProfileId: "reviewer",
+      state: "running",
+    });
+    const told = createRunSink(store.db, { ...spec("run_looked_rollout"), backend: "codex", taskKey: "VIB-3" });
+    patchRun(store.db, "run_looked_rollout", { lookedJson: shown });
+    told.foldRolloutStats({ peakPromptTokens: 9_000, lastPromptTokens: 9_000, compactions: 0 });
+    expect(looked("run_looked_rollout")).toBe(shown);
+    told.foldRolloutStats({
+      peakPromptTokens: 177_960,
+      lastPromptTokens: 26_700,
+      compactions: 1,
+      compactionEvents: [{ preTokens: 177_960, postTokens: 19_509 }],
+    });
+    expect(looked("run_looked_rollout")).toBeNull();
   });
 
   it("a compaction the rollout reports and the stream never carried is audited at finalize", async () => {

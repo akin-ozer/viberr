@@ -2101,7 +2101,7 @@ export async function applyAgentCompletionEffects(
     let owedLooks: PageLooksOwed | null = null;
     if (verdict === "approve" && completionFile) {
       try {
-        const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, completionFile, pageCaptureStatus().available);
+        const owed = pageLooksOwed(db, ctx, input.projectSlug, input.taskKey, completionFile, pageCaptureStatus().available);
         owedLooks = owed;
         if (owed) {
           // The session's looks, not only this run's: a resumed review still

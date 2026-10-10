@@ -3,7 +3,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import { deliveredAsFiles, type ParsedTaskFile } from "~/schemas/task-file.schema";
-import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { resolveStoredSegment, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
@@ -11,10 +11,16 @@ import {
   readAttachmentBytes,
   resolveTaskAttachment,
 } from "~/server/files/task-attachments.server";
-import { readTaskSources, resolveTaskSource, type TaskSource } from "~/server/files/task-sources.server";
+import {
+  readTaskSources,
+  resolveTaskSource,
+  type LookPicture,
+  type TaskSource,
+} from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { getRun, patchRun } from "~/server/runtimes/run-store.server";
+import { COMPACTION_LINE_TAG } from "~/server/runtimes/wire-format.server";
 import { toError } from "~/shared/errors";
 import {
   PAGE_CAPTURE_MAX_FROM,
@@ -27,7 +33,7 @@ import {
 } from "~/shared/page-capture";
 import { measuredLine, measuredOf } from "./page-measured.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
-import { deliverersOwnFileNames } from "./task-replies.server";
+import { filesClaimedBy } from "./task-replies.server";
 
 /**
  * Ruling 329: **an approval of a page binds only from a run that looked at it.**
@@ -45,11 +51,12 @@ import { deliverersOwnFileNames } from "./task-replies.server";
  * ({@link pageLooksOwed}):
  *
  *  - **each page of the delivery, whole, at both widths.** The pages are the
- *    HTML files the task's deliverer saved, as the kept delivery holds them. A
- *    page counts as seen at a width when the pictures the run was shown there
- *    run from its top to its end with no gap. A picture taller than a stretch
- *    (`PAGE_LOOK_MAX_PX`) is not a look: a model is handed it shrunk until its
- *    words cannot be read, which is how a kept picture of a long page looks.
+ *    HTML files an agent saved while it was the task's deliverer, as the kept
+ *    delivery holds them. A page counts as seen at a width when the pictures
+ *    the run was shown there run from its top to its end with no gap. A
+ *    picture taller than a stretch (`PAGE_LOOK_MAX_PX`) is not a look: a model
+ *    is handed it shrunk until its words cannot be read, which is how a kept
+ *    picture of a long page looks.
  *  - **every stretch of every look the task keeps** (ruling 327: a page on the
  *    web as Viberr pictured it, which is what the result is judged against).
  *
@@ -159,30 +166,46 @@ export function looksRunIds(db: DatabaseSync, runId: string): string[] {
   return [runId];
 }
 
-/** One look a task keeps: the stretches of one page on the web. */
+/** One look a task keeps: the pictures of one page on the web. */
 export interface KeptLook {
   url: string;
   at: string;
+  /** The source that is its note. */
+  note: string;
+  /** Its stretches, each source once: what a judge opens to have seen it. */
   stretches: { id: string; view: PageCaptureViewId }[];
+  /** Every picture of it as its note lists them, a repeated stretch included. */
+  pictures: LookPicture[];
 }
 
-/** The looks among a task's sources (ruling 327), oldest first. A look whose
- *  keep was cut off (a write that failed part way) has pictures and no note:
- *  it is no look, is owed by nobody and does not stand in the way of a new one. */
+/**
+ * The looks among a task's sources (ruling 327), oldest first. A look is its
+ * note, which is written last and lists the look's pictures: pictures a keep
+ * left with no note (a write that failed part way) are sources of no look,
+ * are owed by nobody and do not stand in the way of a new one. A task keeps
+ * one look of an address, the first one kept.
+ */
 export function keptLooks(sources: readonly TaskSource[]): KeptLook[] {
+  const kept = new Set(sources.map((source) => source.id));
   const looks = new Map<string, KeptLook>();
-  const noted = new Set<string>();
   for (const source of sources) {
     const look = source.look;
-    if (!look) continue;
-    const key = `${look.at}\n${look.url}`;
-    const kept = looks.get(key) ?? { url: look.url, at: look.at, stretches: [] };
-    if (look.part === "stretch" && look.view) kept.stretches.push({ id: source.id, view: look.view });
-    // The note is written last, so it is what says a look was kept whole.
-    if (look.part === "note") noted.add(key);
-    looks.set(key, kept);
+    if (look?.part !== "note" || !look.pictures || looks.has(look.url)) continue;
+    const pictures = look.pictures.filter((picture) => kept.has(picture.id));
+    const stretches = new Map<string, PageCaptureViewId>();
+    for (const picture of pictures) {
+      if (picture.part === "stretch" && !stretches.has(picture.id)) stretches.set(picture.id, picture.view);
+    }
+    if (stretches.size === 0) continue;
+    looks.set(look.url, {
+      url: look.url,
+      at: look.at,
+      note: source.id,
+      stretches: [...stretches].map(([id, view]) => ({ id, view })),
+      pictures,
+    });
   }
-  return [...looks.entries()].flatMap(([key, look]) => (noted.has(key) && look.stretches.length > 0 ? [look] : []));
+  return [...looks.values()];
 }
 
 /** What an approval of a task's delivery owes a look at. */
@@ -222,18 +245,43 @@ function within(file: string, bytes: number): boolean {
 }
 
 /**
+ * The agents whose files are the task's pages: its deliverer, and every agent
+ * a run of the task was dispatched to deliver as. Delivery handed to another
+ * agent leaves a page what it was, and the new deliverer has saved nothing
+ * yet: counted by today's deliverer alone, such a page would be owed by
+ * nobody until it was saved again.
+ */
+function deliverersOf(db: DatabaseSync, projectSlug: string, taskKey: string, parsed: ParsedTaskFile): Set<string> {
+  const profiles = new Set(parsed.frontmatter.engagements.filter((entry) => entry.delivers).map((entry) => entry.profileId));
+  // SAFETY: the SELECT list is the single column `agent_profile_id`, nullable
+  // TEXT on `agent_runs`, and the WHERE clause leaves the nulls out.
+  const delivered = db
+    .prepare(
+      `SELECT DISTINCT agent_profile_id FROM agent_runs
+        WHERE project_slug = ? AND task_key = ? AND kind = 'primary' AND agent_profile_id IS NOT NULL`,
+    )
+    .all(projectSlug, taskKey) as { agent_profile_id: string }[];
+  for (const row of delivered) profiles.add(row.agent_profile_id);
+  return profiles;
+}
+
+/**
  * What an approval of this task's delivery owes a look at, or null when it
  * owes none: the delivery is a revision or nothing was delivered, and the
- * task keeps no look; or it is files with no page of the deliverer's among
+ * task keeps no look; or it is files with no page of a deliverer's among
  * them and no look.
  *
- * Nothing is owed that no tool can show, or the approval could never bind:
- * with no browser on the server (`canShowPages` false) no page is pictured
- * for anyone; a page past the size `capture_page` renders is not rendered;
- * and a kept picture whose bytes a person took out of the store is not there
- * to open.
+ * The pages are read from the delivery's kept copy, which is what a judge is
+ * shown ({@link judgedDelivery}): what a stopped rework, an upload or a
+ * removal has since done to the task's folder changes neither what is owed
+ * nor what can be shown. Nothing is owed that no tool can show, or the
+ * approval could never bind: with no browser on the server (`canShowPages`
+ * false) no page is pictured for anyone, a page past the size `capture_page`
+ * renders is not rendered, and a kept picture whose bytes a person took out
+ * of the store is not there to open.
  */
 export function pageLooksOwed(
+  db: DatabaseSync,
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
@@ -242,16 +290,17 @@ export function pageLooksOwed(
 ): PageLooksOwed | null {
   const fm = parsed.frontmatter;
   if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
-  const own = deliverersOwnFileNames(fm, parsed.timeline);
+  const own = filesClaimedBy(parsed.timeline, deliverersOf(db, projectSlug, taskKey, parsed));
   const keptDir = keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot);
   const kept = listed(keptDir);
-  // A delivery whose copy could not be kept (ruling 86) is still the files on
-  // the task: the pages are read from there.
-  const attachments = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
-  const dir = kept.length > 0 && keptDir ? keptDir : attachments;
-  const held = kept.length > 0 ? kept : listed(attachments);
+  // A delivery whose copy could not be kept (ruling 86) is the files on the
+  // task: the pages are read from there, as a judge is shown them from there.
+  const dir = kept.length > 0 && keptDir ? keptDir : taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+  const held = kept.length > 0 ? kept : listed(dir);
   const pages = canShowPages
-    ? held.filter((name) => own.has(name) && pageKindOf(name) === "html" && within(path.join(dir, name), PAGE_HTML_MAX_BYTES)).sort()
+    ? held
+        .filter((name) => own.has(name) && pageKindOf(name) === "html" && within(path.join(dir, name), PAGE_HTML_MAX_BYTES))
+        .sort()
     : [];
   const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources)
     .map((look) => ({
@@ -271,38 +320,49 @@ export function pageLooksOwed(
   return { taskKey, deliveredAt: fm.deliveredAt, pages, looks, measured };
 }
 
+/** The files delivery a run judges, as the run is shown it. */
+export interface JudgedDelivery {
+  deliveredAt: string;
+  /** Its kept copy, or null when Viberr holds none (ruling 86: the copy
+   *  failed): the task's files as they stand are then all anyone can be
+   *  shown, and what a look is of. */
+  dir: string | null;
+  /** The names the kept copy holds. */
+  names: string[];
+}
+
 /**
- * The kept copy of the task's delivery a run is shown `name` from, or null
- * when the run is shown the task's files as they stand.
+ * The delivery run `runId` judges on this task, or null when it judges none
+ * and is shown the task's files as they stand.
  *
  * A run that judges looks at what was delivered: the delivery's own kept
- * copy, which no rework, upload or other agent's save changes after the
- * stamp, so its look is of the delivery by construction and never of bytes
- * that arrived since (a rework that was stopped, a picture a person added
- * beside the page). Everyone else, the deliverer above all, looks at the
- * files they are working on. A run judges when it is not the deliverer's,
- * its verdict was not withheld at dispatch, and its engagement on the task
- * may record one.
+ * copy, which no stopped rework, upload or other agent's save changes after
+ * the stamp, so its look is of the delivery by construction. Everyone else,
+ * the deliverer above all, looks at the files they are working on.
+ *
+ * A run judges by the completion's own rule for a verdict (`verdictAuthorized`,
+ * ruling 87): dispatched to review and not to deliver, with no verdict
+ * withheld, on an engagement that holds one. Where the engagement was taken
+ * off the task under the run, the completion lets the agent's grant decide;
+ * such a run is shown the delivery here, so its looks count wherever its
+ * verdict does.
  */
-export function deliveredCopyFor(
+export function judgedDelivery(
   db: DatabaseSync,
   ctx: TaskMutationContext,
-  input: { projectSlug: string; taskKey: string; runId: string | null; name: string },
+  input: { projectSlug: string; taskKey: string; runId: string | null },
   parsed: ParsedTaskFile,
-): { dir: string | null; deliveredAt: string } | null {
+): JudgedDelivery | null {
   const fm = parsed.frontmatter;
   if (!input.runId || !fm.deliveredAt || !deliveredAsFiles(fm)) return null;
   const run = getRun(db, input.runId);
-  if (!run || run.kind === "primary" || run.verdict_withheld === 1) return null;
+  if (!run || run.kind !== "reviewer" || run.verdict_withheld === 1) return null;
+  if (run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) return null;
   const engagement = fm.engagements.find((entry) => entry.profileId === run.agent_profile_id);
-  if (!engagement || engagement.delivers || engagement.verdictCapable !== true) return null;
+  if (engagement && engagement.verdictCapable !== true) return null;
   const dir = keptDeliveryDir(input.projectSlug, input.taskKey, fm.deliveredAt, ctx.dataRoot);
-  const kept = listed(dir);
-  // A delivery whose copy could not be kept (ruling 86) is the files on the
-  // task: they are what a judge is shown, and what its look is of.
-  if (!dir || kept.length === 0) return { dir: null, deliveredAt: fm.deliveredAt };
-  // A name the delivery does not hold is no page of it.
-  return kept.some((name) => same(name, input.name)) ? { dir, deliveredAt: fm.deliveredAt } : null;
+  const names = listed(dir);
+  return { deliveredAt: fm.deliveredAt, dir: dir && names.length > 0 ? dir : null, names };
 }
 
 const same = (a: string, b: string): boolean => a.normalize("NFC") === b.normalize("NFC");
@@ -452,11 +512,25 @@ const envelopeSchema = z.looseObject({
  *  what kind of block it opens with all stand before the picture's bytes. */
 const RESULT_HEAD_CHARS = 2_000;
 
+/** A picture's bytes, or null when `file` holds none a reader takes. */
+function pictureBytes(file: () => string): Buffer | null {
+  try {
+    const read = readAttachmentBytes(file(), IMAGE_READ_MAX_BYTES);
+    return read && "bytes" in read ? read.bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The look a run takes when it opens one of the pictures Viberr kept of a
  * delivery (`<page>.capture-<view>.png`, ruling 86), or null when `name` is
  * not one the task's record names: how tall it is by its own header, whether
  * the page ends inside it by the record's `cut`, and which delivery it is of.
+ *
+ * The picture is the one in the delivery's kept copy. The task's folder holds
+ * it under the same name, where any run that posts files can save over it:
+ * one opened there counts only while the folder holds the kept bytes.
  */
 export function keptPictureLook(
   ctx: TaskMutationContext,
@@ -479,13 +553,14 @@ export function keptPictureLook(
   // is that delivery's, and no look at this one.
   if (!record || !shot || (delivery !== undefined && delivery !== record.deliveredAt)) return null;
   if (openedAt !== undefined && openedAt < record.at) return null;
-  let height: number | null = null;
-  try {
-    const read = readAttachmentBytes(resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot), IMAGE_READ_MAX_BYTES);
-    height = read && "bytes" in read ? (imageHeader(read.bytes)?.height ?? null) : null;
-  } catch {
-    height = null;
+  const keptDir = keptDeliveryDir(projectSlug, taskKey, record.deliveredAt, ctx.dataRoot);
+  const kept = keptDir ? pictureBytes(() => resolveStoredSegment(keptDir, name)) : null;
+  if (!kept) return null;
+  if (delivery === undefined) {
+    const onTask = pictureBytes(() => resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot));
+    if (!onTask?.equals(kept)) return null;
   }
+  const height = imageHeader(kept)?.height ?? null;
   if (height === null) return null;
   return {
     kind: "page",
@@ -516,11 +591,16 @@ export function looksFromRunLog(
   // whole.
   const asked = new Map<string, string>();
   // Only what the run was handed since its context was last replaced by a
-  // summary: the lines after its last compaction's.
+  // summary: the lines after its last compaction's. That line is found by
+  // the tag the run's sink gave it, the same parse that empties the run's
+  // list, never by its text: a line that quotes the words is no compaction.
   // SAFETY: one aggregate of the INTEGER column `seq`; null when no line matches.
   const boundary = db
-    .prepare(`SELECT MAX(seq) AS seq FROM run_log_lines WHERE run_id = ? AND raw_json LIKE '%compact_boundary%'`)
-    .get(input.runId) as { seq: number | null } | undefined;
+    .prepare(
+      `SELECT MAX(seq) AS seq FROM run_log_lines
+        WHERE run_id = ? AND CASE WHEN json_valid(display_json) THEN json_extract(display_json, '$.tag') END = ?`,
+    )
+    .get(input.runId, COMPACTION_LINE_TAG) as { seq: number | null } | undefined;
   const since = boundary?.seq ?? -1;
   // SAFETY: the SELECT list is the single column `raw_json`, which
   // `run_log_lines` declares TEXT NOT NULL in 0001_baseline.
