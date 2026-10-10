@@ -298,6 +298,41 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
     });
   });
 
+  it("asks for room for the look as it will be written, before a picture is kept: all of it fits or none is written", { timeout: REAL_LOOK_MS }, async () => {
+    // A long page whose last stretches look the same as its first: twelve
+    // stretches a width of which ten are kept, two frames and the note, 23
+    // sources in all. A task holds 200.
+    const reference = await site({ "/long": "<p>fake-height:25000</p>" });
+    const fill = (count: number) => {
+      for (let n = 0; n < count; n += 1) {
+        writeTaskSource(
+          store.slug,
+          "VIB-1",
+          { name: `note-${n}.md`, data: Buffer.from(`note ${n} of ${count}`), title: `Note ${n}`, from: "the brief", by: { backend: "claude", profileId: "developer", roleHint: "Developer" }, runId: null },
+          store.dataRoot,
+        );
+      }
+    };
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
+      fill(178);
+      // One source short. CANARY: let the store refuse the first picture
+      // that does not fit and the task keeps twenty-two pictures of a look
+      // with no note, for good.
+      expect(await keep({ url: "https://look.example/long" })).toBe(
+        "[error] VIB-1 keeps 178 of the 200 sources a task holds, and this needs 23 more. Nothing was kept of https://look.example/long.",
+      );
+      expect(sourcesOf("VIB-1")).toHaveLength(178);
+    });
+    // Room for exactly what is written. CANARY: count every picture the
+    // render returned, the four that repeat included, and a look that fits
+    // is refused.
+    cutSourcesTo("VIB-1", 177);
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
+      expect(await keep({ url: "https://look.example/long" })).toContain("[kept] How https://look.example/long looked on");
+      expect(sourcesOf("VIB-1")).toHaveLength(200);
+    });
+  });
+
   it.each([
     ["a file on disk", { url: "file:///etc/passwd" }, "A look is of a page a browser opens over `http` or `https`."],
     ["this machine by name", { url: "http://localhost:5173/board" }, "A look is of a page on the web, and this address is this machine's or a private network's. A page among the task's files is looked at with `capture_page`."],

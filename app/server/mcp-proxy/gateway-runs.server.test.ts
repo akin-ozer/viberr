@@ -874,6 +874,10 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
         height: { type: "integer", minimum: 100, maximum: 4000 },
         scale: { type: "number", enum: [0.25, 0.5, 1, 1.5, 2] },
       });
+      // And that it takes nothing else, as its door holds it to above.
+      // CANARY: list the schema open and a model is never told that a key it
+      // invents is refused, only the refusal after it sent one.
+      expect(listed?.inputSchema.additionalProperties).toBe(false);
       for (const size of [{ width: 99, height: 630 }, { width: 1200, height: 4001 }, { width: 1200.5, height: 630 }, { width: 1200, height: 630, scale: 2.5 }, { width: 1200, height: 630, scale: 0.7 }]) {
         const outside = await client.callTool({ name: "capture_page", arguments: { name: "post.html", ...size } });
         expect(outside.isError).toBe(true);

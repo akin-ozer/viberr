@@ -1162,6 +1162,21 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("`index.html` at the phone width (390 px) below 2,000 px, where the page runs on");
       expect(refusal()).not.toContain("desktop");
+
+      // A page whose end was seen inside what the run read from its top has
+      // been seen whole, whatever a taller stretch of another capture says
+      // (a page that loads a little longer the second time). CANARY: take
+      // the end only from the stretch that reaches furthest down and this
+      // review is told the page "runs on" below a place it ends above.
+      writeDeliveredPageTask(["index.html"]);
+      const twice = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, twice, [
+        stretch("desktop", 0, 2000, false),
+        stretch("desktop", 0, 1900, true),
+        stretch("phone", 0, 1900, true),
+      ]);
+      await review(twice);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
     });
 
     it("holds a run to no more of a page than the tool can show: read to the last place a stretch may start, it has looked", async () => {
