@@ -402,11 +402,34 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(guide).toContain("**Work made to look like something keeps that look** (ruling 327)");
     expect(guide).toContain("Never describe the reference in a goal or in the rulings");
     expect(guide).toContain("**A page nobody named a repository for is delivered as files.**");
-    expect(guide).toContain("Viberr does not open the pages inside a pull request");
+    // Ruling 86: a board that ships pull requests is planned on the same
+    // pictures, through the folder a gate names.
+    expect(guide).toContain("**On a board that ships pull requests, the site is what its gates build.**");
+    expect(guide).toContain("its `pages` folder (`set_project_gates`)");
+    expect(guide).toContain("Without it nothing above holds a page there.");
+    expect(guide).not.toContain("Viberr does not open the pages inside a pull request");
     expect(guide).toContain("**A task has a price**: a making run, a review of every delivery and an operator turn at each hand-off.");
     expect(guide).toContain("What one agent makes and one review judges as a whole is one task: a page is one");
     for (const tool of [PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, KEEP_PAGE_LOOK_TOOL]) expect(guide).toContain(`\`${tool.name}\``);
     expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "e9766677fe0e282ae0662b4ccc2ee69e90ebca9e1115703b6baf8a7b9ae55480", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "1237c0afcc06838ace073a279c3828a87df97f79200560eb061d9a031fb29e3c", {})).toBe(true);
+  });
+
+  it("ruling 86: tells whoever makes and whoever judges a site that the pages are the ones the project's gates build", () => {
+    // On the first board that shipped a site through pull requests the
+    // Developer and the Reviewer each looked at a build of their own, and
+    // nothing said the gates' build was the one judged.
+    // CANARY: drop either sentence, or either outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    expect(developer).toContain("a page is asked for by its path in the built site (`index.html`, or `about/` for `about/index.html`)");
+    expect(developer).toContain("A review is shown the pages as the gates build your delivered revision, never your own build");
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    expect(reviewer).toContain("the pages are the ones the gates built of the delivered revision, which Viberr kept");
+    expect(reviewer).toContain("never judge the look from a build of your own");
+    expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5cb078e4c8b33d04cd2f6fc2f7a9d75c131722b180d1c7684b43744cf6064856", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "b72b5f22a49af310d470db6afa0d48c69b5866460edeefeae5bd8adb83bed825", {})).toBe(true);
   });
 });
 

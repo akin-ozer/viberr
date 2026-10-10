@@ -1969,7 +1969,7 @@ describe("ProjectGatesPanel (ruling 104)", () => {
   it("saves the whole list in order, an empty timeout meaning the default", () => {
     // CANARY: have the Save button send `draft` untrimmed, or drop the
     // timeout conversion in gatesOfDraft.
-    const saved: { name: string; command: string; timeoutSeconds: number | null }[][] = [];
+    const saved: { name: string; command: string; timeoutSeconds: number | null; pages: string | null }[][] = [];
     const { getByLabelText, getByText, getByRole } = render(
       <ProjectGatesPanel
         gates={[{ name: "install", command: "pnpm install" }]}
@@ -1986,13 +1986,43 @@ describe("ProjectGatesPanel (ruling 104)", () => {
     fireEvent.click(getByRole("button", { name: "Save" }));
     expect(saved).toEqual([
       [
-        { name: "install", command: "pnpm install", timeoutSeconds: null },
-        { name: "build", command: "pnpm build", timeoutSeconds: 900 },
+        { name: "install", command: "pnpm install", timeoutSeconds: null, pages: null },
+        { name: "build", command: "pnpm build", timeoutSeconds: 900, pages: null },
       ],
     ]);
     fireEvent.click(getByRole("button", { name: "Remove gate 1 (install)" }));
     fireEvent.click(getByRole("button", { name: "Save" }));
-    expect(saved[1]).toEqual([{ name: "build", command: "pnpm build", timeoutSeconds: 900 }]);
+    expect(saved[1]).toEqual([{ name: "build", command: "pnpm build", timeoutSeconds: 900, pages: null }]);
+  });
+
+  it("ruling 86: carries the folder a gate builds the site's pages into through every save, and shows it", () => {
+    // The controller names the folder (`set_project_gates`). CANARY: leave
+    // `pages` out of the draft and a person who saves a timeout here takes
+    // the folder off the gate: the board's pages go unpictured again.
+    const saved: { name: string; pages: string | null }[][] = [];
+    const gates = [
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", pages: "dist" },
+    ];
+    const { container, getByLabelText, getByRole } = render(
+      <ProjectGatesPanel gates={gates} canManage busy={false} onSave={(g) => saved.push(g)} />,
+    );
+    expect(container.querySelector<HTMLInputElement>('[aria-label="Gate 2 pages folder"]')!.value).toBe("dist");
+    fireEvent.change(getByLabelText("Gate 1 timeout in seconds"), { target: { value: "120" } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(saved[0]!.map((gate) => [gate.name, gate.pages])).toEqual([
+      ["install", null],
+      ["build", "dist"],
+    ]);
+    fireEvent.change(getByLabelText("Gate 2 pages folder"), { target: { value: " site/out " } });
+    fireEvent.click(getByRole("button", { name: "Save" }));
+    expect(saved[1]!.map((gate) => gate.pages)).toEqual([null, "site/out"]);
+    cleanup();
+
+    const readOnly = render(<ProjectGatesPanel gates={gates} canManage={false} busy={false} onSave={() => {}} />);
+    const rows = Array.from(readOnly.container.querySelectorAll(".guard-row")).map((row) => row.textContent);
+    expect(rows[0]).not.toContain("builds pages into");
+    expect(rows[1]).toContain("builds pages into dist/");
   });
 });
 

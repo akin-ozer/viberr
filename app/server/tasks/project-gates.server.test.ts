@@ -21,10 +21,13 @@ import {
 } from "../../../test-support/test-store";
 import { listAuditEvents } from "../../../test-support/audit-log";
 import { deployDeliveryOperator } from "../../../test-support/delivery-operator";
+import { withEnv } from "../../../test-support/env";
+import { writeFakeBrowser } from "../../../test-support/fake-browser";
 import { flush } from "../../../test-support/polling";
 import type { ProjectGate } from "~/schemas/project-file.schema";
 import type { Engagement, GateRun, TaskFrontmatter } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { keptBuildDir, keptBuildFiles } from "~/server/files/kept-builds.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { attachmentNamesSince } from "~/server/files/task-attachments.server";
@@ -36,6 +39,7 @@ import {
 } from "~/server/runtimes/agent-isolation.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import {
+  builtPagesSettled,
   recoverProjectGates,
   requestProjectGates,
   whenProjectGatesIdle,
@@ -659,5 +663,146 @@ describe("as the task owner's agent uid (ruling 139)", () => {
     await gateOnce();
     expect(run()).toMatchObject({ status: "error", results: [] });
     expect(run().error).toContain("no owner to run them as");
+  });
+});
+
+describe("ruling 86: the pages a delivered revision builds are kept as the gates built them", () => {
+  /** A build: two pages, and the revision's own work beside them. */
+  const BUILD =
+    "mkdir -p dist/guide && printf '<h1>home</h1>' > dist/index.html && " +
+    "printf '<p>the guide</p>' > dist/guide/index.html && cp work.txt dist/work.txt";
+  const buildDir = () => keptBuildDir(store.slug, "VIB-1", "rev_1", store.dataRoot)!;
+  const built = () => keptBuildFiles(buildDir());
+  const ask = (reason: "delivery" | "gates-changed" = "delivery") =>
+    requestProjectGates(store.db, { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, { reason });
+  const captureNotes = () => task().timeline.filter((event) => event.title === "Page captures");
+
+  it("keeps the folder a gate names, built from the delivered revision, once every gate has exited 0", async () => {
+    // On the first board that shipped a site through pull requests the
+    // reviewer judged a build of its own and nobody pictured the page: the
+    // revision's pages existed only in a checkout that was removed.
+    setGates([
+      { name: "build", command: BUILD, pages: "dist" },
+      { name: "check", command: "test -f dist/index.html" },
+    ]);
+    writeDeliveredTask();
+
+    await gateOnce();
+
+    expect(run().results.map((r) => r.exitCode)).toEqual([0, 0]);
+    // CANARY: drop the `keepBuild` call from `runGateJob` and the checkout is
+    // removed with the only copy of the revision's pages in it.
+    expect(built()).toEqual(["guide/index.html", "index.html", "work.txt"]);
+    // The revision's own work: not what the delivering checkout holds now.
+    // CANARY: keep the folder from the delivering checkout and this reads
+    // "work after the delivery".
+    expect(readFileSync(path.join(buildDir(), "work.txt"), "utf8")).toBe("the delivered work\n");
+    expect(run().pages).toBe("dist");
+    expect(readdirSync(path.join(path.dirname(workspaceDir()), ".gates"))).toEqual([]);
+    // No browser is named on this server: nothing is pictured, and the build
+    // stands for a reviewer to be shown.
+    expect(task().frontmatter.pageCaptures).toBeUndefined();
+  });
+
+  it("keeps nothing of a revision whose gates did not all pass", async () => {
+    setGates([
+      { name: "build", command: BUILD, pages: "dist" },
+      { name: "lint", command: "exit 1" },
+    ]);
+    writeDeliveredTask();
+    await gateOnce();
+    // CANARY: keep the build whatever the gates' exit codes and a page that
+    // failed its checks is pictured and shown as the revision's.
+    expect(built()).toEqual([]);
+    expect(run().pages).toBeUndefined();
+  });
+
+  it("pictures and measures the kept build onto the task, and a waiter is let go only when the pictures are there", async () => {
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    setGates([{ name: "build", command: BUILD, pages: "dist" }]);
+    writeDeliveredTask();
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, async () => {
+      // Nothing of the task's is under way: at once.
+      await builtPagesSettled({ projectSlug: store.slug, taskKey: "VIB-1" });
+      expect((await ask()).status).toBe("queued");
+      await builtPagesSettled({ projectSlug: store.slug, taskKey: "VIB-1" });
+      // CANARY: settle the task when its gate job ends, before the render
+      // the job asked for, and the delivering run's completion goes on to
+      // the operator with no picture on the task yet.
+      const record = task().frontmatter.pageCaptures;
+      expect(record).toMatchObject({ revisionId: "rev_1", deliveredAt: "2026-09-25T09:00:00.000Z" });
+      expect(record!.pages.map((page) => [page.file, page.shots.map((shot) => shot.name), page.error])).toEqual([
+        ["index.html", ["index.html.capture-desktop.png", "index.html.capture-phone.png"], null],
+        ["guide/index.html", ["guide--index.html.capture-desktop.png", "guide--index.html.capture-phone.png"], null],
+      ]);
+      // Ruling 328: measured as it was pictured.
+      expect(record!.pages.every((page) => "measured" in page)).toBe(true);
+    });
+    await whenProjectGatesIdle();
+    const [note] = captureNotes();
+    expect(note!.text).toContain("Viberr rendered `index.html` and `guide/index.html` as a reader sees them");
+    expect(note!.text).toContain(`They are the pages of \`${revisionSha.slice(0, 7)}\` as the project's gates built it, and the pictures are attached.`);
+    expect(note!.attachments).toEqual([
+      "index.html.capture-desktop.png",
+      "index.html.capture-phone.png",
+      "guide--index.html.capture-desktop.png",
+      "guide--index.html.capture-phone.png",
+    ]);
+    // The pictures are Viberr's own: no run in flight is credited with them.
+    expect(attachmentNamesSince(store.slug, "VIB-1", "2000-01-01T00:00:00.000Z", store.dataRoot).filter((name) => name.endsWith(".png"))).toEqual(
+      expect.arrayContaining(note!.attachments!),
+    );
+    const audit = listAuditEvents(store.db, { action: "task.pages.captured" });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.details).toMatchObject({ revisionId: "rev_1", pages: 2, captured: 2, failed: [] });
+    // The files handed to the renderer are gone again.
+    expect(existsSync(path.join(taskDir(store.slug, "VIB-1", store.dataRoot), ".capture-input"))).toBe(false);
+  });
+
+  it("says on the task that the gates passed and left no page in the folder a gate names", async () => {
+    // A folder misnamed on the gate looks exactly like a site with no page:
+    // nothing is pictured, a review is shown nothing, and nobody is told.
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    setGates([{ name: "build", command: BUILD, pages: "public" }]);
+    writeDeliveredTask();
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, async () => {
+      await gateOnce();
+    });
+    // CANARY: return from `captureRevision` without a note when the build
+    // holds no page.
+    expect(captureNotes().map((note) => note.text)).toEqual([
+      `The project's gates passed on \`${revisionSha.slice(0, 7)}\` and left no page in \`public/\`, the folder a gate names for the pages they build. ` +
+        "Nothing was pictured or measured, and a review of this revision is shown no page of it.",
+    ]);
+    expect(fake.launches()).toEqual([]);
+    expect(task().frontmatter.pageCaptures).toBeUndefined();
+  });
+
+  it("runs the gates again on a revision that passed before a gate named the folder, and only once", async () => {
+    setGates([{ name: "build", command: BUILD }]);
+    writeDeliveredTask();
+    await gateOnce();
+    expect(built()).toEqual([]);
+    expect((await ask("gates-changed")).status).toBe("current");
+
+    // The same commands, and now the folder: the revision owes a build.
+    setGates([{ name: "build", command: BUILD, pages: "dist" }]);
+    // CANARY: drop `owesBuild` from `requestProjectGates` and a board that
+    // names its folder after a delivery keeps no build of that delivery.
+    expect((await ask("gates-changed")).status).toBe("queued");
+    await whenProjectGatesIdle();
+    expect(built()).toContain("index.html");
+    expect((await ask("gates-changed")).status).toBe("current");
+
+    // Another folder is another build. One the gates leave empty is kept as
+    // nothing once, and not built for ever.
+    setGates([{ name: "build", command: BUILD, pages: "public" }]);
+    expect((await ask("gates-changed")).status).toBe("queued");
+    await whenProjectGatesIdle();
+    expect(run().pages).toBe("public");
+    expect(built()).toEqual([]);
+    // CANARY: decide by whether a build is on disk and this asks again each
+    // time, on every open task, for as long as the folder holds nothing.
+    expect((await ask("gates-changed")).status).toBe("current");
   });
 });

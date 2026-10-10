@@ -5121,6 +5121,37 @@ describe("set_project_gates (ruling 104)", () => {
     expect(row?.kind).toBe("change");
     expect(row?.text).toContain("(via the controller) set the project's gates to **install**, **build**.");
   });
+
+  it("ruling 86: names the folder a gate builds the site's pages into, and says what Viberr then does with it", async () => {
+    // The first board that shipped a site through pull requests had no way
+    // to say where its pages were built, so nothing pictured them.
+    // CANARY: drop `pages` from the tool's schema and the call is refused as
+    // an unknown key; drop it from the writer and the list is saved bare.
+    const reply = await call(ids.projectAdmin, "set_project_gates", {
+      gates: [
+        { name: "install", command: "npm ci" },
+        { name: "build", command: "npm run build", pages: "dist" },
+      ],
+    });
+    expect(reply).toContain(
+      "[done] Gates saved: install, build. Viberr runs them on every delivered revision, and pictures the pages they build into dist/",
+    );
+    expect(await gatesInFile()).toEqual([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", pages: "dist" },
+    ]);
+    // SAFETY: `get_project` answers `json(...)` of an object literal that
+    // always carries `gates`; compared structurally below.
+    const project = JSON.parse(await call(ids.projectAdmin, "get_project")) as { gates: unknown };
+    expect(project.gates).toEqual([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", pages: "dist" },
+    ]);
+    expect(
+      await call(ids.projectAdmin, "set_project_gates", { gates: [{ name: "build", command: "npm run build", pages: "../out" }] }),
+    ).toContain('[error] Gate "build": a pages folder is a path inside the checkout in plain names');
+    await call(ids.projectAdmin, "set_project_gates", { gates: [] });
+  });
 });
 
 /**

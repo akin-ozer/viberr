@@ -915,4 +915,59 @@ describe("set-project-gates (ruling 17)", () => {
     // A project that declares none carries no key at all.
     expect(projectMd()).not.toContain("gates:");
   });
+
+  it("ruling 86: a gate names the folder it builds the site's pages into, one for the project, a plain path inside the checkout", async () => {
+    const save = async (gates: object[]) =>
+      actionOutcome(await postAction(ids.arda, { intent: "set-project-gates", gates: JSON.stringify(gates) }));
+    const saved = await save([
+      { name: "install", command: "npm ci", pages: null },
+      { name: "build", command: "npm run build", pages: " dist/ " },
+    ]);
+    expect(saved.toast).toContain(
+      "Gates saved: install, build. Viberr runs them on every delivered revision, and pictures the pages they build into dist/",
+    );
+    // CANARY: drop `row.pages = folder` from validateProjectGates and a save
+    // from Settings, or the controller's call, writes the list without it:
+    // the board's pages are pictured, measured and shown by nobody again.
+    expect((await runLoader(ids.arda)).view.gates).toEqual([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", pages: "dist" },
+    ]);
+    // The audit says which gate names the folder (found by what it says:
+    // the suite's earlier saves are in the same log).
+    const audited = listAuditEvents(app.db, { action: "project.gates.updated" }).map((row) => JSON.stringify(row.details));
+    expect(audited.some((details) => details.includes('"name":"install"') && details.includes('"pages":null') && details.includes('"pages":"dist"'))).toBe(true);
+
+    // The folder alone is a change. CANARY: leave it out of the comparison
+    // in setProjectGates and naming it on a saved list answers "unchanged".
+    const moved = await save([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build", pages: "site/out" },
+    ]);
+    expect(moved.toast).toContain("pictures the pages they build into site/out/");
+    const dropped = await save([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build" },
+    ]);
+    expect(dropped.toast).toContain("Gates saved: install, build. Viberr runs them on every delivered revision");
+    expect(dropped.toast).not.toContain("pictures the pages");
+    expect((await runLoader(ids.arda)).view.gates).toEqual([
+      { name: "install", command: "npm ci" },
+      { name: "build", command: "npm run build" },
+    ]);
+
+    // Never a path that leaves the checkout or names a tool's own folder.
+    for (const pages of ["../out", "/var/www", ".git", "a/../b", "a\\b"]) {
+      const refused = await save([{ name: "build", command: "npm run build", pages }]);
+      expect(refused.status, pages).toBe(400);
+      expect(refused.error, pages).toContain('Gate "build": a pages folder is a path inside the checkout in plain names');
+    }
+    const two = await save([
+      { name: "site", command: "npm run build", pages: "dist" },
+      { name: "docs", command: "npm run docs", pages: "docs-out" },
+    ]);
+    expect(two.status).toBe(400);
+    expect(two.error).toContain('Gate "docs": another gate already names the folder the pages are built into');
+    await save([]);
+  });
 });

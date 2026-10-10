@@ -40,6 +40,7 @@ import { AppError } from "~/server/errors/app-error.server";
 import { assertProjectAction } from "~/server/auth/project-authority.server";
 import type { RbacAction } from "~/shared/rbac";
 import { projectDir } from "~/server/files/file-store-root.server";
+import { PAGES_DIR_MAX_CHARS, plainPagesDir, projectPagesDir } from "~/server/files/kept-builds.server";
 import {
   readProjectFile,
   updateProjectFile,
@@ -669,6 +670,9 @@ export interface ProjectGateInput {
   name: string;
   command: string;
   timeoutSeconds?: number | null | undefined;
+  /** Ruling 86: the folder of the checkout this gate builds the project's
+   *  pages into, or none. */
+  pages?: string | null | undefined;
 }
 
 /**
@@ -681,6 +685,7 @@ const projectGatesFieldSchema = z.array(
     name: z.string(),
     command: z.string(),
     timeoutSeconds: z.number().nullable().optional(),
+    pages: z.string().nullable().optional(),
   }),
 );
 
@@ -739,6 +744,24 @@ export function validateProjectGates(gates: readonly ProjectGateInput[]): Projec
       }
       if (timeout !== GATE_DEFAULT_TIMEOUT_SECONDS) row.timeoutSeconds = timeout;
     }
+    // Ruling 86: the folder this gate builds the pages into. One for the
+    // project: a reader of the built site is shown one tree.
+    const pages = gate.pages?.trim() ?? "";
+    if (pages !== "") {
+      const folder = plainPagesDir(pages);
+      if (folder === null) {
+        throw AppError.validation(
+          `${which}: a pages folder is a path inside the checkout in plain names, like "dist" or "site/build", ` +
+            `of at most ${PAGES_DIR_MAX_CHARS} characters. Nothing was written.`,
+        );
+      }
+      if (out.some((earlier) => projectPagesDir([earlier]) !== null)) {
+        throw AppError.validation(
+          `${which}: another gate already names the folder the pages are built into, and a project's pages are one site. Nothing was written.`,
+        );
+      }
+      row.pages = folder;
+    }
     out.push(row);
   }
   return out;
@@ -762,7 +785,9 @@ export async function setProjectGates(
   requireProjectAction(db, ctx, "edit-policy", input.projectSlug, actor, "change project policy");
   const gates = validateProjectGates(input.gates);
   const key = (list: readonly ProjectGate[]) =>
-    JSON.stringify(list.map((g) => [g.name, g.command, g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS]));
+    JSON.stringify(
+      list.map((g) => [g.name, g.command, g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS, projectPagesDir([g])]),
+    );
   let changed = false;
   await updateProjectFile(projectRef(ctx, input.projectSlug), (parsed) => {
     changed = key(parsed.frontmatter.gates ?? []) !== key(gates);
@@ -792,15 +817,18 @@ export async function setProjectGates(
         name: g.name,
         command: g.command,
         timeoutSeconds: g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS,
+        pages: projectPagesDir([g]),
       })),
     },
   });
   const { requestGatesForOpenTasks } = await import("~/server/tasks/project-gates.server");
   const queued = gates.length === 0 ? 0 : await requestGatesForOpenTasks(db, input.projectSlug, ctx.dataRoot);
+  const folder = projectPagesDir(gates);
   const toast =
     gates.length === 0
       ? "Gates cleared: acceptance no longer waits on them"
       : `Gates saved: ${named}. Viberr runs them on every delivered revision` +
+        (folder ? `, and pictures the pages they build into ${folder}/` : "") +
         (queued > 0 ? `, and queued them on ${countLabel(queued, "open task")}` : "");
   return { toast, gates, changed: true, queued };
 }

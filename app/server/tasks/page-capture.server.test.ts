@@ -32,8 +32,9 @@ import {
   type TestStore,
 } from "../../../test-support/test-store";
 import { reconfigureProject } from "../../../test-support/projected-store";
-import type { Engagement, WorkRevision } from "~/schemas/task-file.schema";
+import type { Engagement, GateRun, WorkRevision } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { keepBuild, keptBuildDir } from "~/server/files/kept-builds.server";
 import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
 import { writeTaskSource } from "~/server/files/task-sources.server";
@@ -53,6 +54,7 @@ import {
   measureTaskPage,
   removeRunPageCaptures,
   requestDeliveryCaptures,
+  requestRevisionCaptures,
 } from "./page-capture.server";
 import { attachTaskFile } from "./task-edits.server";
 
@@ -2191,5 +2193,347 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(seen()).toEqual(before);
     expect(readdirSync(path.join(scratchRoot(), "no.run"))).toEqual([expect.stringMatching(/^cap_/)]);
     await stopRun(run);
+  });
+});
+
+describe("ruling 86: a revision's pages are the ones the project's gates built", () => {
+  // On the first board that shipped a site through pull requests nothing
+  // Viberr does for a page held: the revision's pages were pictured and
+  // measured by nobody, `capture_page` could show neither a checkout nor a
+  // built tree, and the reviewer approved from a build of its own.
+  const REVISION: WorkRevision = {
+    id: "rev_1",
+    headSha: "9".repeat(40),
+    treeSha: null,
+    branch: "vib-1-work",
+    createdAt: "2026-10-10T09:00:00.000Z",
+    sourceProfileId: "writer",
+  };
+  const ref = () => ({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+  const checkout = () => path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr");
+  const gateRun = (status: GateRun["status"], exitCode = 0): GateRun => ({
+    id: "gate_1",
+    revisionId: "rev_1",
+    headSha: REVISION.headSha,
+    status,
+    reason: "delivery",
+    requestedAt: "2026-10-10T09:00:01.000Z",
+    startedAt: null,
+    finishedAt: null,
+    error: null,
+    results:
+      status === "finished"
+        ? [{ name: "build", command: "npm run build", exitCode, timedOut: false, wallMs: 10, log: null }]
+        : [],
+  });
+  /** A board that ships pull requests and says where its gates build the
+   *  site, with VIB-1 delivered as a revision the gates ran on. */
+  function revisionBoard(run: GateRun | null = gateRun("finished"), revision: WorkRevision = REVISION): void {
+    deployBoard({ repo: "akin-ozer/viberr" });
+    reconfigureProject(store, { gates: [{ name: "build", command: "npm run build", pages: "dist" }] });
+    const delivered: Parameters<typeof writeDeliveringTask>[0] = {
+      stage: "review",
+      engagements: [WRITER, EDITOR, PROOFREADER],
+      workRevision: revision,
+      deliveredAt: "2026-10-10T09:00:00.000Z",
+    };
+    if (run) delivered.gateRun = run;
+    writeDeliveringTask(delivered);
+  }
+  const put = (dir: string, files: Record<string, string>): void => {
+    for (const [name, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+      writeFileSync(path.join(dir, name), text);
+    }
+  };
+  const SITE = {
+    "index.html": '<link rel="stylesheet" href="/assets/site.css"><h1>home</h1>',
+    "assets/site.css": "h1 { color: teal }",
+    "guide/index.html": '<link rel="stylesheet" href="../assets/site.css"><p>the guide</p>',
+  };
+  /** What the gates built of the revision, kept the way the gate job keeps it. */
+  async function keptBuild(files: Record<string, string> = SITE): Promise<void> {
+    const gate = ctx.makeTempDir("viberr-gate-checkout-");
+    put(path.join(gate, "dist"), files);
+    await keepBuild(store.slug, "VIB-1", "rev_1", gate, "dist", store.dataRoot);
+  }
+  const buildDir = () => keptBuildDir(store.slug, "VIB-1", "rev_1", store.dataRoot)!;
+  const owed = () =>
+    pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", readTaskFile(ref())!.parsed, true);
+  const lastLook = (runId: string) => runLooks(store.db, runId).at(-1);
+  const servedAll = () => fake.pages().at(-1)!.resources.map((resource) => resource.status);
+
+  it("shows a run that judges the revision the pages as the gates built them, by their path in the site, and credits each look to the revision", async () => {
+    revisionBoard();
+    await keptBuild();
+    // The task's checkout has moved on since: an edit nobody delivered.
+    put(path.join(checkout(), "dist"), { "index.html": "<h1>home, half reworked</h1>" });
+    saveFiles("VIB-1", { "mock.html": "<p>a sketch beside the work</p>" });
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      const home = await ask("index.html", { runId: editor, view: "desktop" });
+      expect(home.text).toMatch(/^\[done\] `index\.html` as a reader sees it\./);
+      expect(home.text).toContain(
+        "This is the page as the project's gates built revision `9999999` and Viberr kept it, not the task's checkout as it stands now.",
+      );
+      // CANARY: answer a run that judges from the task's checkout, as anyone
+      // else is answered, and the review is of "home, half reworked".
+      expect(fake.pages().at(-1)!.html).toBe(SITE["index.html"]);
+      // The stylesheet it names from the site's root is the site's own file.
+      expect(servedAll()).toEqual([200]);
+      expect(home.text).not.toContain("asked for");
+      // CANARY: credit the look to no delivery (or to the files stamp) and an
+      // approval of the revision can never be shown to rest on it.
+      expect(lastLook(editor)).toMatchObject({ kind: "page", file: "index.html", view: "desktop", delivery: "rev_1" });
+
+      // A folder's path is its page, written from the site's root or from
+      // the checkout's.
+      for (const named of ["guide/", "/guide/index.html", "dist/guide/"]) {
+        const guide = await ask(named, { runId: editor, view: "phone" });
+        expect(guide.text, named).toContain("as a reader sees it.");
+        expect(fake.pages().at(-1)!.html, named).toBe(SITE["guide/index.html"]);
+        expect(servedAll(), named).toEqual([200]);
+        expect(lastLook(editor), named).toMatchObject({ file: "guide/index.html", view: "phone", delivery: "rev_1" });
+      }
+
+      // What the build does not hold is said, with what it does.
+      expect((await ask("pricing.html", { runId: editor })).text).toBe(
+        "[noop] `pricing.html` is not a page of the build Viberr kept of revision `9999999`, and not a file on VIB-1. " +
+          "It holds `index.html` and `guide/index.html`. Ask for a page by its path in the site.",
+      );
+      expect((await ask("assets/site.css", { runId: editor })).text).toBe(
+        "[noop] `assets/site.css` is a file of the built site and not a page of it. capture_page shows a site's .html pages.",
+      );
+      // A file of the task that is no part of the build is shown as that,
+      // and a look at it is of no delivery.
+      const mock = await ask("mock.html", { runId: editor, view: "desktop" });
+      expect(mock.text).toContain(
+        "This file is not in the build Viberr kept of revision `9999999`, so it is shown as it stands on the task now, and a look at it is of no delivery.",
+      );
+      expect(lastLook(editor)).toMatchObject({ file: "mock.html", delivery: null });
+
+      // The figures are taken of the same bytes.
+      const measured = await measureTaskPage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", name: "guide/", runId: editor },
+      );
+      expect(measured).toMatch(/^\[done\] `guide\/` measured as Viberr measures a delivered page/);
+      expect(measured).toContain("Nothing was saved. This is the page as the project's gates built revision `9999999` and Viberr kept it");
+      await stopRun(editor);
+    });
+    // The build's files were handed to the renderer in a folder of the
+    // server's own, which is gone again.
+    expect(existsSync(inputRoot())).toBe(false);
+  });
+
+  it("shows anyone who judges no delivery the site as the task's checkout holds it built, where it stands and never through a link", { timeout: REAL_RENDERS_MS }, async () => {
+    revisionBoard();
+    await keptBuild();
+    await withBrowser("", async () => {
+      const writer = await liveRun("writer");
+      // Nothing is built in the checkout yet, and the answer says what to do.
+      expect((await ask("index.html", { runId: writer })).text).toBe(
+        "[noop] `index.html` is not a page in `dist/` of the task's checkout, the folder this project's gates build its pages into, and not a file on VIB-1. " +
+          "Build the pages there as the gates do, then ask for one by its path in the site (`index.html`, or `about/` for `about/index.html`).",
+      );
+      put(path.join(checkout(), "dist"), {
+        "index.html": '<link rel="stylesheet" href="/assets/site.css"><h1>home, reworked</h1>',
+        "assets/site.css": "h1 { color: crimson }",
+      });
+      for (const named of ["index.html", "dist/index.html", "/"]) {
+        const mine = await ask(named, { runId: writer, view: "desktop" });
+        expect(mine.text, named).toMatch(/^\[done\] /);
+        expect(mine.text, named).toContain(
+          "This is `dist/index.html` as the task's checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.",
+        );
+        // CANARY: answer everyone from the kept build and the maker looks
+        // at the page it delivered last, never at the one it is working on.
+        expect(fake.pages().at(-1)!.html, named).toContain("home, reworked");
+        expect(servedAll(), named).toEqual([200]);
+        // Its look is of the work as it stands: of no delivery.
+        expect(lastLook(writer), named).toMatchObject({ file: "index.html", delivery: null });
+      }
+      // Served where it stands: nothing of the checkout was copied.
+      expect(existsSync(inputRoot())).toBe(false);
+      const measured = await measureTaskPage(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", name: "index.html", runId: writer },
+      );
+      expect(measured).toMatch(/^\[done\] `index\.html` measured/);
+      expect(measured).toContain("Nothing was saved. This is `dist/index.html` as the task's checkout holds it now.");
+
+      // The checkout is the agents' to write. A page behind a link there is
+      // no page of the site, whether the link is the file or a folder.
+      const elsewhere = ctx.makeTempDir("viberr-elsewhere-");
+      writeFileSync(path.join(elsewhere, "secret.html"), "<p>not the site's</p>");
+      symlinkSync(path.join(elsewhere, "secret.html"), path.join(checkout(), "dist", "leak.html"));
+      symlinkSync(elsewhere, path.join(checkout(), "dist", "linked"));
+      const loads = fake.pages().length;
+      for (const named of ["leak.html", "linked/secret.html"]) {
+        expect((await ask(named, { runId: writer })).text, named).toMatch(
+          /^\[noop\] `[^`]+` is not a page in `dist\/` of the task's checkout/,
+        );
+      }
+      // CANARY: ask the disk with `statSync` whether the path is a file and
+      // both are rendered, as the server sees them.
+      expect(fake.pages().length).toBe(loads);
+      await stopRun(writer);
+    });
+  });
+
+  it("tells a run that judges a revision whose pages are not built why there is nothing to show, and never shows it another build", async () => {
+    revisionBoard(gateRun("running"));
+    put(path.join(checkout(), "dist"), { "index.html": "<h1>the maker's own build</h1>" });
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      // CANARY: fall back to the task's checkout while the gates run and the
+      // review is of a build the gates never made.
+      expect((await ask("index.html", { runId: editor })).text).toBe(
+        "[busy] `index.html` cannot be shown yet: the project's gates are still building this revision's pages. Call again in a moment.",
+      );
+      await updateTaskFile(ref(), (parsed) => {
+        parsed.frontmatter.gateRun = gateRun("finished", 1);
+      });
+      expect((await ask("index.html", { runId: editor })).text).toBe(
+        "[noop] `index.html` cannot be shown: the project's gates did not pass on this revision, so its pages were not built. " +
+          "A review can say so; the pages are shown once the gates pass.",
+      );
+      await updateTaskFile(ref(), (parsed) => {
+        delete parsed.frontmatter.gateRun;
+      });
+      expect((await ask("index.html", { runId: editor })).text).toBe(
+        "[busy] `index.html` cannot be shown yet: the project's gates have not run on this revision yet, and its pages are what they build. Call again in a moment.",
+      );
+      expect(fake.launches()).toEqual([]);
+      expect(runLooks(store.db, editor)).toEqual([]);
+      await stopRun(editor);
+    });
+  });
+
+  it("an approval of a revision owes a look at each page the gates built, owes them before they are built, and owes nothing no tool can show", async () => {
+    revisionBoard();
+    // The gates passed and kept no page: there is nothing to show.
+    expect(owed()).toBeNull();
+    await keptBuild();
+    // CANARY: answer null for every revision, as before, and an approval of
+    // a site binds from a run that opened none of its pages.
+    expect(owed()).toMatchObject({
+      taskKey: "VIB-1",
+      deliveredAt: "rev_1",
+      pages: ["index.html", "guide/index.html"],
+      pending: null,
+      looks: [],
+    });
+    expect(pageLooksNote(owed()!)).toContain("`index.html` and `guide/index.html`");
+
+    // While the gates have still to build them, the pages are owed all the
+    // same: a verdict never binds on pages nobody was shown.
+    rmSync(buildDir(), { recursive: true });
+    await updateTaskFile(ref(), (parsed) => {
+      parsed.frontmatter.gateRun = gateRun("queued");
+    });
+    // CANARY: owe nothing while no build is kept and a review that finishes
+    // before the gates do approves unseen.
+    expect(owed()).toMatchObject({ pages: [], pending: "the project's gates are still building this revision's pages" });
+    expect(pageLooksNote(owed()!)).toContain(
+      "the pages of this revision as the project's gates build them (the project's gates are still building this revision's pages; `capture_page` shows them once they are built)",
+    );
+
+    // With no browser on the server no page is shown to anyone.
+    expect(pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", readTaskFile(ref())!.parsed, false)).toBeNull();
+    // A project that names no folder builds no page Viberr knows of.
+    reconfigureProject(store, { gates: [{ name: "build", command: "npm run build" }] });
+    expect(owed()).toBeNull();
+  });
+
+  it("owes no page of a revision that is the default branch as it stands, which no gate runs on", async () => {
+    // A task with nothing to deliver is judged on a verification revision:
+    // the gates never run on it, so "not built yet" would hold for ever.
+    revisionBoard(null, { ...REVISION, kind: "verified", branch: null });
+    // CANARY: drop the gate-subject check and its approval can never bind.
+    expect(owed()).toBeNull();
+    // Its reviewer judges no delivery, so it is shown what anyone is: the
+    // site as the task's checkout holds it built, once it is.
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      expect((await ask("index.html", { runId: editor })).text).toMatch(
+        /^\[noop\] `index\.html` is not a page in `dist\/` of the task's checkout/,
+      );
+      put(path.join(checkout(), "dist"), { "index.html": "<h1>the default branch, built</h1>" });
+      expect((await ask("index.html", { runId: editor, view: "desktop" })).text).toContain(
+        "This is `dist/index.html` as the task's checkout holds it now.",
+      );
+      expect(lastLook(editor)).toMatchObject({ file: "index.html", delivery: null });
+      await stopRun(editor);
+    });
+  });
+
+  it("pictures and measures the kept build under names the store takes, says what a page asked for that the site does not hold, and lists the pages for the packet", { timeout: REAL_RENDERS_MS }, async () => {
+    revisionBoard();
+    await keptBuild({ ...SITE, "guide/index.html": '<link rel="stylesheet" href="/assets/gone.css"><p>the guide</p>' });
+    const pictured = () =>
+      requestRevisionCaptures(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", folder: "dist", kept: true, leftOut: 2 },
+      );
+    await withBrowser("", pictured);
+    const record = frontmatter().pageCaptures!;
+    expect(record).toMatchObject({ revisionId: "rev_1", deliveredAt: REVISION.createdAt });
+    expect(record.pages).toEqual([
+      {
+        file: "index.html",
+        shots: [
+          { view: "desktop", name: "index.html.capture-desktop.png", cut: false },
+          { view: "phone", name: "index.html.capture-phone.png", cut: false },
+        ],
+        error: null,
+        ...MEASURED,
+      },
+      {
+        file: "guide/index.html",
+        shots: [
+          { view: "desktop", name: "guide--index.html.capture-desktop.png", cut: false },
+          { view: "phone", name: "guide--index.html.capture-phone.png", cut: false },
+        ],
+        error: null,
+        ...MEASURED,
+      },
+    ]);
+    const note = captureNote()!;
+    expect(ofThePictures(note.text)).toBe(
+      "Viberr rendered `index.html` and `guide/index.html` as a reader sees them, at a desktop width (1,280 px) and a phone width (390 px). " +
+        "They are the pages of `9999999` as the project's gates built it, and the pictures are attached. " +
+        "2 built files were past what a kept build holds and left out. " +
+        // CANARY: word a site's missing file as a flat folder's and this says
+        // "a path from the site's root ... which a capture does not serve".
+        "`guide/index.html` asked for `/assets/gone.css`, which the built site does not hold.",
+    );
+    // The operator reads the same pages, with what was measured of each.
+    const fact = completionPacketFact(frontmatter(), ref());
+    expect(fact.pageCaptures.map((page) => [page.file, page.pictures.length, page.measured !== null])).toEqual([
+      ["index.html", 2, true],
+      ["guide/index.html", 2, true],
+    ]);
+    // And what an approval owes carries the figures a reviewer is told first.
+    expect(owed()!.measured.map((line) => line.file)).toEqual(["index.html", "guide/index.html"]);
+
+    // A files delivery's own capture job leaves the revision's record be:
+    // a completion on a board with a repository asks for one whenever the
+    // task keeps a record. CANARY: let `captureDelivery` take down every
+    // record it finds on a revision.
+    await withBrowser("", () => picture("VIB-1", frontmatter().deliveredAt!));
+    expect(frontmatter().pageCaptures).toEqual(record);
+    expect(onTask()).toEqual(record.pages.flatMap((page) => page.shots.map((shot) => shot.name)).sort());
+
+    // A newer revision takes the record down with its pictures.
+    await updateTaskFile(ref(), (parsed) => {
+      parsed.frontmatter.workRevision = { ...REVISION, id: "rev_2", headSha: "8".repeat(40) };
+    });
+    await withBrowser("", () => picture("VIB-1", frontmatter().deliveredAt!));
+    expect(frontmatter().pageCaptures).toBeUndefined();
+    expect(onTask()).toEqual([]);
   });
 });

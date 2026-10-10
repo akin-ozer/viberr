@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { z } from "zod";
 import type { DatabaseSync } from "node:sqlite";
 import {
   normalizeEvidenceRows,
@@ -16,6 +17,7 @@ import {
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
+import { keepBuild, projectPagesDir, type KeptBuild } from "~/server/files/kept-builds.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -98,6 +100,14 @@ import type { TaskActionDeps } from "./task-action-core.server";
  *    (`gates-failed`) to dispatch the rework.
  */
 
+/** Ruling 86: the folder a finished run kept its revision's pages from
+ *  (`pages` on the run, which the task file's schema keeps and does not
+ *  declare), or null when it kept none. */
+function builtFolderOf(run: GateRun): string | null {
+  const read = z.looseObject({ pages: z.string() }).safeParse(run);
+  return read.success ? read.data.pages : null;
+}
+
 /** Why a run was asked for; recorded on the run, display only. */
 export type GateRunReason = "delivery" | "revision" | "person" | "gates-changed" | "restart";
 
@@ -143,14 +153,75 @@ let draining: Promise<void> | null = null;
 /** Operator hand-offs a failing run made; never awaited by the queue. */
 const handoffs = new Set<Promise<void>>();
 
+/**
+ * Ruling 86: the tasks with a gate run queued or running here, or with the
+ * pictures of the pages that run built still being made, each with a promise
+ * that resolves when both are over. What the delivering run's completion
+ * waits on ({@link builtPagesSettled}), so the operator and the reviewers it
+ * dispatches start with the pages there.
+ */
+const building = new Map<string, { settled: Promise<void>; settle: () => void; jobs: number }>();
+
+const buildKey = (job: Pick<GateJob, "projectSlug" | "taskKey">): string => `${job.projectSlug}/${job.taskKey}`;
+
+function buildStarts(job: GateJob): void {
+  const entry = building.get(buildKey(job));
+  if (entry) {
+    entry.jobs += 1;
+    return;
+  }
+  let settle = (): void => {};
+  const settled = new Promise<void>((resolve) => {
+    settle = resolve;
+  });
+  building.set(buildKey(job), { settled, settle, jobs: 1 });
+}
+
+function buildEnds(job: GateJob): void {
+  const entry = building.get(buildKey(job));
+  if (!entry) return;
+  entry.jobs -= 1;
+  if (entry.jobs > 0) return;
+  building.delete(buildKey(job));
+  entry.settle();
+}
+
+/** How long a delivering run's completion waits for the gates to build its
+ *  revision's pages and for their pictures: a slow build never holds the
+ *  operator longer, and the pages are then shown when they are there. */
+const BUILT_PAGES_WAIT_MS = 300_000;
+
+/**
+ * Ruling 86: resolves when no gate run of this task is queued or running here
+ * and the pictures of what the last one built are made, or after
+ * {@link BUILT_PAGES_WAIT_MS}, whichever is first. At once when nothing of
+ * the task's is under way.
+ */
+export function builtPagesSettled(
+  input: { projectSlug: string; taskKey: string },
+  waitMs: number = BUILT_PAGES_WAIT_MS,
+): Promise<void> {
+  const entry = building.get(buildKey(input));
+  if (!entry) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, waitMs);
+    timer.unref?.();
+    void entry.settled.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 function kick(): void {
   if (draining) return;
   draining = (async () => {
     try {
       while (pending.length > 0) {
         const job = pending.shift()!;
+        let pictured: Promise<void> | null = null;
         try {
-          await runGateJob(job);
+          pictured = (await runGateJob(job)).pictured;
         } catch (error) {
           logger.error("a project gate run failed outside its own handling", {
             taskKey: job.taskKey,
@@ -159,6 +230,10 @@ function kick(): void {
           });
         } finally {
           live.delete(job.runId);
+          // The pictures are made off this queue: the next task's gates do
+          // not wait for a render.
+          if (pictured) void pictured.finally(() => buildEnds(job));
+          else buildEnds(job);
         }
       }
     } finally {
@@ -170,6 +245,9 @@ function kick(): void {
 }
 
 function enqueue(job: GateJob): void {
+  // Counted before a waiting job of the same task is taken out, so the task
+  // is never settled between the two.
+  buildStarts(job);
   // A newer request for the same task replaces one still waiting: the record
   // now names the newer run, so the older one would only be skipped.
   for (let i = pending.length - 1; i >= 0; i -= 1) {
@@ -177,6 +255,7 @@ function enqueue(job: GateJob): void {
     if (queued.projectSlug === job.projectSlug && queued.taskKey === job.taskKey) {
       live.delete(queued.runId);
       pending.splice(i, 1);
+      buildEnds(queued);
     }
   }
   pending.push(job);
@@ -248,7 +327,17 @@ export async function requestProjectGates(
         runId: current.id,
       };
     }
-    if (!opts.force && current.status === "finished" && gateRunMatchesDeclared(current, gates)) {
+    // Ruling 86: a run that passed before a gate named the folder the pages
+    // are built into (or while it named another) kept no build of that
+    // folder, and running again is how one is kept. By the folder the run
+    // itself recorded, never by what is on disk: a folder the build leaves
+    // empty is kept as nothing once, and not asked for again.
+    const folder = projectPagesDir(gates);
+    const owesBuild =
+      folder !== null &&
+      current.results.every((result) => result.exitCode === 0) &&
+      builtFolderOf(current) !== folder;
+    if (!opts.force && current.status === "finished" && gateRunMatchesDeclared(current, gates) && !owesBuild) {
       return {
         status: "current",
         message: `The project's gates already ran on \`${subject.headSha.slice(0, 7)}\`.`,
@@ -651,11 +740,15 @@ function gateRunEvent(run: GateRun, gates: readonly ProjectGate[], taskKey: stri
   return event;
 }
 
-async function runGateJob(job: GateJob): Promise<void> {
+/** Runs one task's gates. Answers the pictures being made of the pages they
+ *  built (ruling 86) in a holder, since awaiting a promise of a promise
+ *  waits for both and the queue must not wait on a render. */
+async function runGateJob(job: GateJob): Promise<{ pictured: Promise<void> | null }> {
+  const none = { pictured: null };
   const ref = refOf(job);
   const file = readTaskFile(ref);
   const record = file?.parsed.frontmatter.gateRun;
-  if (!file || !record || record.id !== job.runId) return; // superseded
+  if (!file || !record || record.id !== job.runId) return none; // superseded
   const project = readProjectFile(
     job.dataRoot ? { projectSlug: job.projectSlug, dataRoot: job.dataRoot } : { projectSlug: job.projectSlug },
   );
@@ -667,7 +760,7 @@ async function runGateJob(job: GateJob): Promise<void> {
       if (parsed.frontmatter.gateRun?.id === job.runId) delete parsed.frontmatter.gateRun;
     });
     reproject(job.db, ref);
-    return;
+    return none;
   }
   const results: GateResult[] = [];
   let failure: string | null = null;
@@ -720,7 +813,7 @@ async function runGateJob(job: GateJob): Promise<void> {
   } catch (error) {
     if (error instanceof GateRunSuperseded) {
       if (checkout) await removeGateCheckout(checkout.root, launch);
-      return;
+      return none;
     }
     // One line, bounded: it is printed on the PR card and in the refusal.
     const said = (error instanceof AppError ? error.userMessage : errorMessage(error))
@@ -734,6 +827,25 @@ async function runGateJob(job: GateJob): Promise<void> {
       err: toError(error),
     });
   }
+  // Ruling 86: the pages this revision builds are kept as the gates built
+  // them, before the checkout goes, so that what Viberr pictures and measures
+  // and what a reviewer is shown is the revision and not somebody's own build.
+  // Only over gates that all passed: a build that failed is no page.
+  let built: KeptBuild | null = null;
+  const pagesDir = projectPagesDir(gates);
+  const builds = checkout !== null && pagesDir !== null && failure === null && results.length === gates.length && results.every((r) => r.exitCode === 0);
+  if (checkout && pagesDir && builds) {
+    try {
+      built = await keepBuild(job.projectSlug, job.taskKey, record.revisionId, checkout.dir, pagesDir, job.dataRoot);
+    } catch (error) {
+      logger.warn("a revision's built pages could not be kept", {
+        projectSlug: job.projectSlug,
+        taskKey: job.taskKey,
+        revisionId: record.revisionId,
+        err: toError(error),
+      });
+    }
+  }
   if (checkout) await removeGateCheckout(checkout.root, launch);
   // A holder, not a `let`: the write below assigns it inside a callback.
   const finished: FinishedRunHolder = { run: null };
@@ -743,15 +855,18 @@ async function runGateJob(job: GateJob): Promise<void> {
       run.finishedAt = new Date().toISOString();
       run.error = failure;
       run.results = results.map((r) => ({ ...r }));
+      // Ruling 86: the folder this run's pages were kept from, so a later
+      // ask knows the revision's build was made under the folder now named.
+      if (builds && pagesDir) run.pages = pagesDir;
       parsed.timeline.unshift(gateRunEvent(run, gates, job.taskKey));
       finished.run = { ...run, results: run.results.map((r) => ({ ...r })) };
     });
   } catch (error) {
-    if (error instanceof GateRunSuperseded) return;
+    if (error instanceof GateRunSuperseded) return none;
     throw error;
   }
   const done = finished.run;
-  if (!done) return;
+  if (!done) return none;
   const passed = done.results.filter((r) => r.exitCode === 0).length;
   const failedGates = done.results.filter((r) => r.exitCode !== 0).map((r) => r.name);
   recordAudit(job.db, {
@@ -774,6 +889,29 @@ async function runGateJob(job: GateJob): Promise<void> {
       runsAs: launch ? launch.uid : "server",
     },
   });
+  let pictured: Promise<void> | null = null;
+  if (builds && pagesDir && done.status === "finished") {
+    // Pictured and measured once the renderer is free, like a files delivery
+    // (ruling 86); a build that left no page there, or could not be kept, is
+    // said on the task by the same job. Imported here: the page capture
+    // reaches back into the task-action modules.
+    const { requestRevisionCaptures } = await import("./page-capture.server");
+    pictured = requestRevisionCaptures(
+      job.db,
+      job.dataRoot ? { dataRoot: job.dataRoot } : {},
+      {
+        projectSlug: job.projectSlug,
+        taskKey: job.taskKey,
+        revisionId: done.revisionId,
+        folder: pagesDir,
+        kept: built !== null,
+        leftOut: built?.leftOut ?? 0,
+      },
+    );
+    const making = pictured;
+    handoffs.add(making);
+    void making.finally(() => handoffs.delete(making));
+  }
   if (done.status === "finished" && failedGates.length > 0) {
     // Ruling 130: a failing gate is the operator's to act on — it dispatches
     // the rework — so the result is handed to it rather than left on a card.
@@ -791,4 +929,5 @@ async function runGateJob(job: GateJob): Promise<void> {
     handoffs.add(handoff);
     void handoff.finally(() => handoffs.delete(handoff));
   }
+  return { pictured };
 }

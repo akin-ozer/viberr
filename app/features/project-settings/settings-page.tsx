@@ -37,7 +37,7 @@ import { MiniModal } from "~/features/org-settings/mini-modal";
 // The one shared "Escape or an outside press closes me" hook.
 import { useDismiss } from "~/ui/use-dismiss";
 import type { MembershipView } from "./membership.server";
-import type { FileLeaseView, SettingsViewData } from "./settings-query.server";
+import type { FileLeaseView, GateView, SettingsViewData } from "./settings-query.server";
 import {
   useChangeRepoForm,
   useCredentialPosts,
@@ -55,7 +55,6 @@ import {
   GATE_MAX_TIMEOUT_SECONDS,
   GATE_NAME_MAX_CHARS,
   PROJECT_GATES_MAX,
-  type ProjectGate,
 } from "~/schemas/project-file.schema";
 import type { RequiredReviewerView } from "~/server/tasks/required-reviewers.server";
 import { isTerminalStage, stageLockReason, stageName } from "~/shared/workflow/stage-roles";
@@ -1406,6 +1405,8 @@ interface GateDraft {
   name: string;
   command: string;
   timeout: string;
+  /** Ruling 86: the folder this gate builds the site's pages into, or "". */
+  pages: string;
 }
 
 /** One gate as the panel saves it: an empty timeout is null (the default). */
@@ -1413,13 +1414,16 @@ interface SavedGate {
   name: string;
   command: string;
   timeoutSeconds: number | null;
+  pages: string | null;
 }
 
-const gateDraftOf = (gates: readonly ProjectGate[]): GateDraft[] =>
+
+const gateDraftOf = (gates: readonly GateView[]): GateDraft[] =>
   gates.map((g) => ({
     name: g.name,
     command: g.command,
     timeout: g.timeoutSeconds === undefined ? "" : String(g.timeoutSeconds),
+    pages: g.pages ?? "",
   }));
 
 /** The rows as the writer receives them. A timeout field that is empty reads
@@ -1432,6 +1436,7 @@ function gatesOfDraft(rows: readonly GateDraft[]) {
       name: r.name.trim(),
       command: r.command.trim(),
       timeoutSeconds: timeout === "" ? null : Number(timeout),
+      pages: r.pages.trim() || null,
     };
   });
 }
@@ -1455,7 +1460,7 @@ export function ProjectGatesPanel({
   busy,
   onSave,
 }: {
-  gates: ProjectGate[];
+  gates: GateView[];
   canManage: boolean;
   busy: boolean;
   onSave: (gates: SavedGate[]) => void;
@@ -1463,7 +1468,7 @@ export function ProjectGatesPanel({
   const [draft, setDraft] = useState<GateDraft[]>(() => gateDraftOf(gates));
   const changed =
     JSON.stringify(gatesOfDraft(draft)) !== JSON.stringify(gatesOfDraft(gateDraftOf(gates)));
-  const add = () => setDraft((rows) => [...rows, { name: "", command: "", timeout: "" }]);
+  const add = () => setDraft((rows) => [...rows, { name: "", command: "", timeout: "", pages: "" }]);
   const update = (i: number, patch: Partial<GateDraft>) =>
     setDraft((rows) => rows.map((row, j) => (j === i ? { ...row, ...patch } : row)));
   const remove = (i: number) => setDraft((rows) => rows.filter((_, j) => j !== i));
@@ -1525,6 +1530,17 @@ export function ProjectGatesPanel({
                   onChange={(e) => update(i, { timeout: e.target.value })}
                 />
               </label>
+              <label className="guard-ctl">
+                Pages folder
+                <input
+                  type="text"
+                  aria-label={`Gate ${i + 1} pages folder`}
+                  placeholder="none"
+                  value={row.pages}
+                  disabled={busy}
+                  onChange={(e) => update(i, { pages: e.target.value })}
+                />
+              </label>
               <button
                 type="button"
                 className="btn ghost sm"
@@ -1548,6 +1564,12 @@ export function ProjectGatesPanel({
                 <span className="guard-desc">
                   <code>{g.command}</code> · stopped after{" "}
                   {g.timeoutSeconds ?? GATE_DEFAULT_TIMEOUT_SECONDS} s
+                  {g.pages && (
+                    <>
+                      {" "}
+                      · builds pages into <code>{g.pages}/</code>
+                    </>
+                  )}
                 </span>
               </div>
             </div>
@@ -1591,7 +1613,9 @@ export function ProjectGatesPanel({
           checkout of every delivered revision, as the task owner, with no
           credentials. It records each exit code, time and log on the task. A
           task is accepted only once every gate exited 0 on its revision; an
-          admin&rsquo;s force accept is recorded as a bypass.
+          admin&rsquo;s force accept is recorded as a bypass. A gate that names
+          a pages folder builds the site there: Viberr keeps it, pictures and
+          measures its pages, and shows a reviewer those pages.
         </span>
       </div>
     </div>

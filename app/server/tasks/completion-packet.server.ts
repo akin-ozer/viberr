@@ -47,7 +47,7 @@ import {
   type PageCaptureViewId,
 } from "~/shared/page-capture";
 import type { PageCaptures } from "~/schemas/task-file.schema";
-import { measuredLine, measuredOf } from "./page-measured.server";
+import { capturesRevision, measuredLine, measuredOf } from "./page-measured.server";
 import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -294,10 +294,15 @@ function measuredLineOf(page: PageCaptures["pages"][number]): string | null {
   return measured ? measuredLine(measured) : null;
 }
 
-/** The record's pages while it pictures the delivery under review. */
+/** The record's pages while it pictures the delivery under review: a files
+ *  delivery by its stamp, or (ruling 86) the build the project's gates made
+ *  of the revision under review. */
 function currentPageCaptures(fm: Pick<TaskFrontmatter, "deliveredAt" | "pageCaptures" | "workRevision">) {
   const record = fm.pageCaptures;
-  if (!record || !deliveredAsFiles(fm) || record.deliveredAt !== fm.deliveredAt) return null;
+  if (!record) return null;
+  const revisionId = capturesRevision(record);
+  if (revisionId !== null) return activeWorkRevision(fm.workRevision)?.id === revisionId ? record : null;
+  if (!deliveredAsFiles(fm) || record.deliveredAt !== fm.deliveredAt) return null;
   return record;
 }
 
