@@ -3941,6 +3941,23 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(reply?.evidence ?? null).toBeNull();
     });
 
+    it("ruling 88: a justification past 2,000 characters is stored to there, with the sentence that says it was cut and where the whole of it is", async () => {
+      // A review that says what differs from a kept look after its findings
+      // (ruling 178) runs past 2,000 characters as a matter of course.
+      // CANARY: store a bare slice of the reply, or the reply whole.
+      writeReviewTask();
+      const report = `Verdict: request_changes\n\n@operator ${"The list folds before its blocks are measured. ".repeat(60)}`.trim();
+      await review(report);
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toBe(
+        `${report.slice(0, 2000)}\n\n[cut here - the reviewer's justification ran to ${report.length.toLocaleString("en-US")} characters and this is its first 2,000. ` +
+          "Its full report is on this task's timeline, whole.]",
+      );
+      // One that fits is stored as it was said.
+      writeReviewTask();
+      await review(blocks(1));
+      expect(taskFile().parsed.frontmatter.verdicts.at(-1)?.reason).toBe(blocks(1));
+    });
+
     it("ruling 87: a run whose verdict channel was withheld gets no prose verdict", async () => {
       writeReviewTask();
       await review(blocks(1));

@@ -605,6 +605,12 @@ export function pageLooksNote(owed: PageLooksOwed): string {
     (owed.looks.length > 0
       ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it."
       : "") +
+    // Asked only where there is a page to picture beside them: an account
+    // of what differs at each width rests on a look at both. A revision whose
+    // pages are not built (ruling 86) has none yet, and may never have.
+    (owed.looks.length > 0 && owed.pages.length > 0
+      ? " Your report says, after its findings, what differs from the kept pictures, section by section at each width, and an approval says why each difference it leaves standing is no finding."
+      : "") +
     " An approval from a run that did not look is not recorded, and the review runs again. A `request_changes` owes no look." +
     (owed.measured.length > 0
       ? ` What Viberr measured as it pictured this delivery: ${owed.measured.map((page) => `${code(page.file)}: ${page.line}`).join(" ")} ` +

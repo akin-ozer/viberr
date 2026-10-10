@@ -19,6 +19,7 @@ import { recordDeliverySources } from "~/server/files/task-sources.server";
 import { pageCapturesAmong, recordedPageCaptures } from "~/shared/page-capture";
 import type { FileLease } from "~/shared/file-leases";
 import { isRelayComment } from "./task-relay.server";
+import { VERDICT_REASON_STORED_MAX_CHARS } from "./verdict-reason.server";
 import type { DatabaseSync } from "node:sqlite";
 import {
   activeWorkRevision,
@@ -61,9 +62,12 @@ const ANCHOR_EVENT_COUNT = 5;
  * Ruling 201 (F39-19): how much of a standing verdict's reason the anchor
  * carries. Generous on purpose — ruling 88 already clips a stored reason at
  * 2,000 characters, so this is the WHOLE of what viberr kept, and it is the one
- * thing a rework run cannot proceed without.
+ * thing a rework run cannot proceed without. A reason that was cut is stored
+ * with the sentence that says so and where the whole report is, after its
+ * 2,000 characters: the room here is for both, or a rework run reads a
+ * verdict that stops mid-finding under a heading that calls it whole.
  */
-const ANCHOR_VERDICT_MAX_CHARS = 2000;
+const ANCHOR_VERDICT_MAX_CHARS = VERDICT_REASON_STORED_MAX_CHARS;
 /** At most this many, newest first. One per reviewer is the normal shape. */
 const ANCHOR_VERDICT_COUNT = 3;
 

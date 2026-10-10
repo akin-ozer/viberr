@@ -27,6 +27,7 @@ import {
 } from "../../../test-support/fake-runtime";
 import { reconfigureProject } from "../../../test-support/projected-store";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
+import { clipVerdictReason } from "./verdict-reason.server";
 import { commentToAgent } from "./task-comments.server";
 import { updateTaskGoal } from "./task-edits.server";
 
@@ -214,6 +215,42 @@ describe("canonicalTaskAnchor", () => {
     // And it says which verdict is the live one, because a superseded verdict
     // is exactly what AX-12's operator dispatched rework against.
     expect(anchor.replace(/\s+/g, " ")).toContain("has been superseded by these");
+  });
+
+  it("ruling 201: a verdict cut at its 2,000 characters carries the sentence that says so and where the whole report is", () => {
+    // A review of work made to a kept look says what differs from it after
+    // its findings (ruling 178), so a report past 2,000 characters is the
+    // usual one. Its stored reason ends with the sentence that says it was
+    // cut (ruling 88), and the anchor's own clamp at 2,000 took that
+    // sentence away: a rework run read a verdict that stopped mid-finding
+    // under a heading that calls the verdicts whole.
+    const report = `Verdict: request-changes\n\n${"Blocking: the list folds before its blocks are measured. ".repeat(60)}`;
+    const reason = clipVerdictReason(report);
+    const anchor = anchorOf({
+      parsed: parsed({
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "impl",
+          validation: "failing",
+          workRevision: {
+            id: "rev_1",
+            headSha: "c".repeat(40),
+            treeSha: "t".repeat(40),
+            branch: "vib-1",
+            createdAt: "2026-10-10T16:43:03.650Z",
+            sourceProfileId: "developer",
+          },
+          verdicts: [
+            { profileId: "reviewer", revisionId: "rev_1", headSha: "c".repeat(40), result: "request_changes", reason, at: "2026-10-10T16:58:19.000Z", rounds: 1 },
+          ],
+        }),
+      }),
+      stageName: "In Progress",
+    });
+    // CANARY: clamp the reason at its 2,000 characters again.
+    expect(anchor).toContain(
+      `[cut here - the reviewer's justification ran to ${report.trim().length.toLocaleString("en-US")} characters and this is its first 2,000. ` +
+        "Its full report is on this task's timeline, whole.]",
+    );
   });
 
   /**

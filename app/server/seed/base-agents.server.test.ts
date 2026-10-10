@@ -343,7 +343,6 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(developer).toContain("**When it is made to look like something that exists, keep that look and work from it.**");
     expect(developer).toContain("The address reads differently next week and a description is its writer's reading, so neither is what you work from");
     expect(developer).toContain("**Take the look, never the thing.**");
-    expect(developer).toContain("A picture on it is the product itself, running on its demo data, or it explains the product");
     expect(developer).toContain("Every link and every control goes somewhere real or is not there.");
     // What the manual says of a tool is what the tool takes: each state it
     // names is an argument of `capture_page`, and the look is kept and taken
@@ -381,6 +380,122 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(reviewer).toContain("A finding about the look with no picture behind it is an opinion.");
     for (const state of ["press", "hover", "tab", "motion", "moving"]) expect(reviewer).toContain(`(\`${state}\`)`);
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "9e5360754136f8feeeb5a3c14813e3ac4dbf8a49e2145edc26e619896e0ddbc9", {})).toBe(true);
+  });
+
+  it("has whoever makes and whoever judges work made to a kept look say what differs, and take a placeholder or an unreadable word for unfinished", () => {
+    // The second board's first page was approved by a review that had looked
+    // at the page and at every kept picture of the look: the product's
+    // screens were drawn with untitled cards, empty pills and grey bars for
+    // lines, and at the phone width one was the desktop's, shrunk until its
+    // labels stood 5 px high. The review named the blanks and let them stand
+    // as showing nothing the board's facts did not hold, and nothing asked
+    // either agent to say what differed from the kept pictures.
+    // CANARY: drop any sentence below from either manual, or either outgoing
+    // hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    // One list of what a look is judged on, the same for both.
+    const judgedOn = "layout and rhythm, the scale and weight of type, colour and contrast, depth, density, how the product is shown, what moves";
+    expect(developer).toContain(`set your own beside them, section by section at each width, on each of: ${judgedOn}. Say in your report what still differs on each and why you left it.`);
+    expect(reviewer).toContain(`set the two side by side at each width, section by section: ${judgedOn}.`);
+    // The account comes after the findings, a line a section and width: a
+    // verdict keeps the first 2,000 characters of a report (ruling 88), and
+    // those are the findings' to have.
+    expect(reviewer).toContain(
+      "Your report says, after its findings, what differs from the kept pictures: one line for each section at each width you were shown, naming what differs on those seven or that nothing does. " +
+        "A difference you do not name is one you did not see. An approval says of each difference it leaves standing why it is not a finding.",
+    );
+    // "Those seven" are the ones the manual itself lists.
+    const listed = /section by section: ([^.]+)\. Judge against the kept pictures/.exec(reviewer)?.[1].split(", ");
+    expect(listed).toHaveLength(7);
+    // A placeholder is neither content nor honesty about its absence, and a
+    // word nobody can read says nothing: unfinished to the maker, a finding
+    // to the judge. The maker is told the way out, which is never to write
+    // something in.
+    // What the work is meant to carry: a template's own placeholders and a
+    // product's empty state shown as it is are content, and what must be
+    // read is what a reader is meant to read at that width, which is what
+    // the Diagrammer's and the Editor's manuals hold a picture to.
+    const placeholder = (verdict: string) =>
+      `Nothing stands in for content the work is meant to carry: an empty box, a bar drawn where words belong or a blank label is ${verdict}, in a picture of the product as anywhere else.`;
+    expect(developer).toContain(
+      `${placeholder("unfinished work")} Put there what is on record, or take it out. ` +
+        "At each width a reader can read every word they are meant to read there, the words inside a picture included: " +
+        "a picture shrunk until those words cannot be read is cropped, or made again for that width.",
+    );
+    expect(reviewer).toContain(
+      `${placeholder("a finding")} So is a word a reader is meant to read at a width and cannot, the words inside a picture included.`,
+    );
+    expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4", {})).toBe(true);
+  });
+
+  it("has a picture of the product show what is on record: the product's own demo data or what the person gave for it, never content made up or put in for it", () => {
+    // Sent back for its blanks, the second board's page came back with its
+    // screens filled: a project, nine tasks, a person and a repository made
+    // up for the pictures and marked as sample, which the review took for
+    // demo data. The manuals said a picture shows "demo data", not whose.
+    // CANARY: drop a sentence; drop the person's gift from either manual,
+    // and a product with no demo data has no picture of itself a review can
+    // pass; drop "and nothing else", and a maker types a project of its own
+    // into the running product and keeps the screenshot as its own proof;
+    // drop what the product shows of its own from the Reviewer's, and no
+    // honest picture of a command's output can be approved; drop the kept
+    // run and the documentation from either, and a screen drawn in markup
+    // passes with totals nobody ran; drop the documentation alone, and a
+    // product an agent cannot run cannot be drawn; drop "word for word", and
+    // a duration the documentation only says the screen shows is drawn in
+    // as "4m 12s"; drop the kept capture, and a drawing placed as an image
+    // reads as one and passes with whatever is in it.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    // One list of what a product may be given, the same in both.
+    const demo = "own demo data (a demo seed, its documented examples)";
+    const gift = "what the person gave for the picture";
+    expect(developer).toContain(
+      `What a picture of the product itself shows comes from one of two places, each kept with \`keep_source\` like any statement: the product's ${demo}, or ${gift} on the task. ` +
+        "Give the product that and nothing else: whatever else you put into it or draw in for the picture is made up, whatever it is marked as. " +
+        "What the product shows of its own (the words of its interface, its output, a total, a date) has a kept source too: " +
+        "the capture itself, kept as you took it of the product running, or, for a drawing, the kept output of a run of the product or its kept documentation, " +
+        "of which you draw only what they show word for word. A figure or a line the documentation only describes stays out. " +
+        "A person's live data goes in only when they gave it to be shown. " +
+        "Where neither place holds anything, see what another task of the board keeps of either (`read_task_source` with its key); " +
+        "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they answer; " +
+        "where they give none, leave the picture out.",
+    );
+    // The reviewer holds what the product was given to the same two places,
+    // wherever on the board the source is kept (a source of another task
+    // can be read from this one and cannot be kept again on it), takes the
+    // rest for the product's, and holds a drawn picture to the run the
+    // maker kept or to the product's documentation: only those tell an
+    // honest drawing from an invented one.
+    expect(reviewer).toContain(
+      "What a picture of the product itself shows rests on a kept source like any statement, on this task or another of the board's. " +
+        `What the product was given comes from its ${demo} or from ${gift}: ` +
+        "a name, a title or a figure given to it from neither was made up for the picture, whatever it is marked as, and is a finding, " +
+        "and so is a person's live data they did not give to be shown. " +
+        "The rest is the product's own (the words of its interface, its output, a total, a date) and rests on a kept source as well: " +
+        "the capture, kept as it was taken of the product running, or, for a drawing, the kept output of a run of the product or its kept documentation, word for word. " +
+        "What none of them shows is a finding too, a figure or a line the documentation only describes included, and so is a picture of the product with none of them behind it.",
+    );
+    // And to the same two kinds of picture the maker is.
+    expect(developer).toContain(
+      "A picture on it is the product itself (a capture of it running, or a drawing of one of its screens) or it explains the product: never a drawing of a screen that does not exist, or a stock picture.",
+    );
+    expect(reviewer).toContain(
+      "Every picture is the product (a capture of it running, or a drawing of one of its screens) or explains it: a drawing of a screen the product does not have, or a stock picture, is a finding.",
+    );
+    // The maker's sentence rests on two things the seeded Developer may do:
+    // ask the person, which the catalog grants it, and keep a source, which
+    // the catalog leaves to that grant's default. CANARY: move "Ask the
+    // human a question" from the profile's `direct` list to its `forbidden`.
+    const granted = SEED_AGENT_PROFILES.find((profile) => profile.frontmatter.id === "developer")!.frontmatter.capabilities;
+    expect(effectiveCollabMode(granted, "ask-human")).toBe("direct");
+    expect(effectiveCollabMode(granted, "attach-evidence-references")).toBe("direct");
   });
 
   it("has the guide plan a page on Viberr's own pictures, widths and figures, as files when nobody named a repository, and as one task", () => {
@@ -501,10 +616,12 @@ describe("ruling 179: the library ships a Diagrammer and a Cover Designer", () =
     // On a board with no repository every skill reaches a run as prompt text
     // under one shared budget (ruling 186), drawn in name order: a manual that
     // filled it would cut the board's own skill off whole. The Writer's and the
-    // Editor's manuals (ruling 179) are held to it here too.
+    // Editor's manuals (ruling 179) are held to it here too, and so are the
+    // Developer's and the Reviewer's (ruling 178), which every board deploys
+    // and which grow with each thing learned about work that is looked at.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
-    for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise"]) {
+    for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise", "developer-expertise", "reviewer-expertise"]) {
       const raw = readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8");
       expect(splitFrontmatter(raw).body.trim().length, name).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET / 2);
     }
