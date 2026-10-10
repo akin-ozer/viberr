@@ -100,9 +100,10 @@ const reportSchema = z.object({
       ended: z.array(z.object({ view: z.string(), pageHeight: z.number() })),
       /** One per view that carried an act: what it did, or why it could not. */
       acts: z.array(z.object({ view: z.string(), done: z.string().nullable(), error: z.string().nullable() })),
-      /** The largest part of the page that scrolls inside it, which no
-       *  picture of the page shows; null when it has none. */
-      scrollsInside: z.strictObject({ what: z.string(), height: z.number() }).nullable(),
+      /** On a page that does not scroll as pages do: the largest part that
+       *  scrolls inside it, which no picture of the page shows, and the first
+       *  view it was found at; null on any other page. */
+      scrollsInside: z.strictObject({ view: z.string(), what: z.string(), height: z.number() }).nullable(),
       dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
@@ -946,11 +947,8 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // frame. Its fonts are waited for, and the window goes down in one step.
     // CANARY: load a moving view as any other (`loadView`) and a walk comes
     // first in each of these.
-    // (What scrolls inside the page is looked for once, at the desktop's
-    // load, while the first frame is waited for.)
     expect(b.browser.asks().map((asked) => asked.ask)).toEqual([
       "fonts",
-      "inner",
       "screen",
       "screen",
       "screen",
@@ -968,35 +966,58 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
   });
 
-  it("says when a page holds a part that scrolls inside it, which no picture of the page shows: the largest one, looked for at the first width that is not a phone's", async () => {
+  it("says when a page scrolls inside itself, which no picture of it shows: only of a page that does not scroll as pages do, and at the first width where that is so", async () => {
     const shell = `main.${"app-shell-".repeat(10)}`;
+    const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4 })}</p>`;
     const b = bench({
       // A page fixed to the screen whose content scrolls in a part of it: one
       // screen of page, as a browser lays it out and as the stand-in does.
-      "app.html": `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4 })}</p>`,
-      "plain.html": "<p>fake-height:3000 a page that scrolls as pages do</p>",
+      "app.html": part,
+      // A long page that keeps a log in a box of its own.
+      "log.html": `<p>fake-height:3000</p>${part}`,
+      // 830 px of page: more than a desktop's 800, and no more than the 844
+      // of a phone, where it is a shell.
+      "narrow.html": `<p>fake-height:830</p>${part}`,
+      // A shell 16 px taller than its screen, as a body's own margin above
+      // and below a part one screen tall makes it.
+      "snug.html": `<p>fake-height:816</p>${part}`,
     });
-    const report = await b.run({ pages: ["app.html", "plain.html"], views: [PHONE, DESKTOP] });
+    const report = await b.run({ pages: ["app.html", "log.html", "narrow.html", "snug.html"], views: [DESKTOP, PHONE] });
+    const found = (view: string) => ({ view, what: shell.slice(0, 80), height: 5200 });
     // CANARY: say nothing of it and a page pictured as the one screen it
     // lays out as reads as the whole of a page that has five more out of
     // sight. The part's name is the page author's, so it is cut at eighty
     // characters like any other, and its height is a whole number of px.
+    // Say it of every page that holds such a part and the long page, whose
+    // pictures are the whole of it, is said to be pictured as its first
+    // screen. Look at one width only and the page that is a shell on a phone
+    // alone says nothing. Take a page a few px taller than its screen for
+    // one that scrolls as pages do and the snug shell is not found at the
+    // desktop's width, where it is one.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
-      ["app.html", null, { what: shell.slice(0, 80), height: 5200 }],
-      ["plain.html", null, null],
+      ["app.html", null, found("desktop")],
+      ["log.html", null, null],
+      ["narrow.html", null, found("phone")],
+      ["snug.html", null, found("desktop")],
     ]);
     // Nothing of what is inside is pictured: the page is its one screen.
     expect(report.pages[0]!.shots.map((shot) => [shot.view, shot.height, shot.contentHeight, shot.cut])).toEqual([
-      ["phone", 844, 844, false],
       ["desktop", 800, 800, false],
+      ["phone", 844, 844, false],
     ]);
-    // Looked for once a page, on the desktop's own load, after its walk and
-    // before its picture, and handed that screen's height. CANARY: look at
-    // the first view whatever it is and the question comes after the first
-    // walk of each page, with a phone's 844 px.
-    expect(b.browser.asks().map((asked) => asked.ask)).toEqual(["walk", "walk", "inner", "walk", "walk", "inner"]);
-    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual([{ height: 800 }, { height: 800 }]);
-    expect(b.browser.shots().map((shot) => shot.width)).toEqual([390, 1280, 390, 1280]);
+    // Looked for on a view's own load, after its walk and before its
+    // picture, with that screen's height, and no more once it is found: the
+    // first page at the desktop, the second never, the third at the phone,
+    // the fourth at the desktop.
+    expect(b.browser.asks().map((asked) => asked.ask)).toEqual(
+      [
+        ["walk", "inner", "walk"],
+        ["walk", "walk"],
+        ["walk", "walk", "inner"],
+        ["walk", "inner", "walk"],
+      ].flat(),
+    );
+    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual([{ height: 800 }, { height: 844 }, { height: 800 }]);
   });
 
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
@@ -1148,8 +1169,10 @@ describe("a page on the web, pictured by the renderer child (ruling 327)", () =>
     // That load is not walked first: what animates in as a reader scrolls to
     // it plays once, and is counted on the page's first walk. Measured on a
     // real page: a second walk counted none of three. CANARY: read motion on
-    // a view's own load, after its walk, and a `walk` comes third here.
-    const reading = b.browser.asks().slice(3);
+    // a view's own load, after its walk, and a `walk` comes first here. (The
+    // four before these are the two pictures': each view's walk, and its
+    // look for a part of the page that scrolls inside it.)
+    const reading = b.browser.asks().slice(4);
     expect(reading.map((asked) => asked.ask)).toEqual([
       "animations",
       "on-scroll",

@@ -74,7 +74,8 @@ import { z } from "zod";
  *  - `fake-trickle:3`: so many requests after the load event, 200 ms apart;
  *    `fake-lands:"about:blank"`: the address the browser is at once loaded.
  *  - `fake-inner:{"what":"main.app","height":5200}`: the largest part of the
- *    page that scrolls inside it, for a page whose own height is one screen.
+ *    page that scrolls inside it, which a page is asked for when its own
+ *    height is one screen.
  *
  * A browser started without `--proxy-server` has the network open: an
  * absolute `src` is then fetched too, where one behind the proxy is only
