@@ -962,6 +962,16 @@ describe("set-project-gates (ruling 17)", () => {
       expect(refused.status, pages).toBe(400);
       expect(refused.error, pages).toContain('Gate "build": a pages folder is a path inside the checkout in plain names');
     }
+    // A board file's row is whatever its author typed (ruling 32 holds an
+    // import to this writer): a folder that is not text is refused in the
+    // writer's own words. CANARY: trim it unread and an import of such a
+    // file reports a broken method call in place of what is wrong.
+    const { validateProjectGates } = await import("./settings-actions.server");
+    const typed = z
+      .array(z.looseObject({ name: z.string(), command: z.string() }))
+      .parse(JSON.parse('[{"name":"build","command":"npm run build","pages":7}]'));
+    expect(() => validateProjectGates(typed)).toThrow('Gate "build": a pages folder is a path inside the checkout in plain names');
+
     const two = await save([
       { name: "site", command: "npm run build", pages: "dist" },
       { name: "docs", command: "npm run docs", pages: "docs-out" },
