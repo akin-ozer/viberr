@@ -783,7 +783,12 @@ describe("the page capture's renderer child (ruling 194)", () => {
     });
     const report = await b.run({
       pages: ["page.html"],
-      views: [{ ...DESKTOP, id: "menu", act: { press: "Menu" } }, { ...DESKTOP, id: "away", act: { press: "Away" } }, PHONE],
+      views: [
+        { ...DESKTOP, id: "menu", act: { press: "Menu" } },
+        { ...DESKTOP, id: "away", act: { press: "Away" } },
+        { ...DESKTOP, id: "far", act: { tab: 500 } },
+        PHONE,
+      ],
     });
     // CANARY: let an act's failure reject the page's work, as a failed load
     // does, and the page carries the reason as its own `error` with the
@@ -804,8 +809,12 @@ describe("the page capture's renderer child (ruling 194)", () => {
         // CANARY: picture the screen without asking where the press left the
         // browser and this is a picture of the browser's own error page.
         { view: "away", done: null, error: "the press sent the browser to another address" },
+        // CANARY: press Tab as often as asked, whatever the number, and five
+        // hundred presses are made out of the page's own time.
+        { view: "far", done: null, error: "an act presses Tab at most 80 times" },
       ],
     });
+    expect(b.browser.inputs().filter((input) => input.method === "Input.dispatchKeyEvent")).toEqual([]);
     expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
     expect(existsSync(path.join(b.out, "1-menu-a.png"))).toBe(false);
   });

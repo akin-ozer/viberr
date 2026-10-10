@@ -27,6 +27,25 @@
 #     with no margin, filling a box it is sized to in percent, not said to
 #     overflow a box it fits (a byte order mark and a text line under the
 #     drawing each made it so), with a picture saved beside it drawn;
+#   - ruling 327: a page on the web is pictured at both widths with the
+#     network open (what it draws from another port of this host is drawn, and
+#     so is what it fetched after its load event), what moves on it is read on
+#     a real page, and a task page pictured after it still reaches nothing;
+#   - ruling 194: a page is shown in a state. A control found by its words is
+#     really pressed (the page's own script sees a trusted click and its menu
+#     is open in the picture, though it shuts when its window is resized), one
+#     under the pointer and one focused with Tab have the styles their
+#     `:hover` and `:focus-visible` rules give, a press lands on a page a
+#     phone shrinks, and an act that finds nothing says what the controls
+#     there are called; `reduce` makes the page's own media query true, and a
+#     view without it false;
+#   - a whole view of a page five screens long comes back as every stretch, in
+#     order, covering it, with what loads only at its end; a moving view comes
+#     back as three frames of a page that moved between them;
+#   - ruling 328: a page with one low-contrast line, one picture with no
+#     `alt`, one control that hides its focus ring and one animation that
+#     ignores reduced motion is measured as having each, at its true weight,
+#     with a load time on the slow line that the weight accounts for;
 #   - any agent uid reads the picture the renderer saved, so a run of another
 #     person than the task's owner can copy it onto the task;
 #   - the renderer reads its pages from a folder it can only pass through, the
@@ -73,6 +92,7 @@ WORK="$DATA/runtimes/$TAG"
 SCRATCH="$WORK/scratch"
 failures=0
 listener=""
+site=""
 
 pass() { echo "ok    $*"; }
 fail() {
@@ -82,9 +102,10 @@ fail() {
 
 cleanup() {
   [ -n "$listener" ] && kill "$listener" 2>/dev/null
+  [ -n "$site" ] && kill "$site" 2>/dev/null
   if [ -d "$WORK" ]; then
     # What the agent wrote is the agent's to remove (ruling 140).
-    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
+    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/web' '$SCRATCH/closed' '$SCRATCH/states' '$SCRATCH/long' '$SCRATCH/measured' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
     rm -rf "$WORK" 2>/dev/null
   fi
 }
@@ -119,7 +140,7 @@ mkdir "$SCRATCH/tmp" && chmod 2770 "$SCRATCH/tmp"
 # The fixtures, the stand-in for "another port on this host", and the reading
 # of what came back, in one helper: Node is what the image has.
 cat >"$WORK/check.mjs" <<'EOF'
-import { appendFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -203,13 +224,56 @@ function decodePng(bytes) {
   };
 }
 
+/** A picture of exactly `bytes` bytes: 200 by 100, and a chunk of its own
+ *  that a decoder skips for the rest of its weight. */
+function heavyPng(bytes) {
+  const picture = solidPng(200, 100, [90, 90, 90]);
+  const end = picture.length - 12;
+  return Buffer.concat([picture.subarray(0, end), chunk("paDd", Buffer.alloc(bytes - picture.length - 12, 120)), picture.subarray(end)]);
+}
+
 if (command === "listen") {
-  // Another server on this host's loopback, as the app's own port is.
+  // Another server on this host's loopback, as the app's own port is. It
+  // answers a picture's path with a picture, so a page the network is open
+  // to draws it, and `/web-late.png` only after a while, as a slow one comes.
   const [hitsFile, portFile] = args;
   const server = createServer((req, res) => {
     appendFileSync(hitsFile, `${req.method} ${req.url}\n`);
     res.setHeader("access-control-allow-origin", "*");
-    res.end("reached");
+    if (!req.url.endsWith(".png")) {
+      res.end("reached");
+      return;
+    }
+    res.setHeader("content-type", "image/png");
+    setTimeout(() => res.end(solidPng(100, 100, [255, 0, 0])), req.url === "/web-late.png" ? 600 : 0);
+  });
+  server.listen(0, "127.0.0.1", () => writeFileSync(portFile, String(server.address().port)));
+}
+
+if (command === "site") {
+  // A site on the web, as far as the renderer can tell: a page at an address
+  // of its own, which draws a picture from the other port, goes on asking
+  // once it has loaded (a first request 300 ms after the load event, and a
+  // picture 300 ms after that was answered), and moves.
+  const [portFile, port] = args;
+  const page = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A site</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;font:16px sans-serif}img{display:block}
+header.bar{position:sticky;top:0;height:40px;background:rgb(20,20,20)}
+a.nav{color:rgb(200,200,200);transition:color .15s}a.nav:hover{color:rgb(255,255,255)}
+.spinner{width:40px;height:40px;background:rgb(0,0,255);animation:spin 2s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.reveal{height:200px;margin:900px 0;opacity:0;transition:opacity .6s}.reveal.in{opacity:1}
+</style></head><body><header class="bar"><a class="nav" href="#docs">Docs</a></header>
+<img src="http://127.0.0.1:${port}/web-pixel.png" width="100" height="100"><div id="late" style="height:100px"></div>
+<div class="spinner"></div><section class="reveal">one</section><section class="reveal">two</section>
+<script>
+const late = () => { const img = new Image(100, 100); img.src = "http://127.0.0.1:${port}/web-late.png"; document.getElementById("late").append(img); };
+addEventListener("load", () => setTimeout(() => fetch("http://127.0.0.1:${port}/web-first").then(() => setTimeout(late, 300)), 300));
+const seen = new IntersectionObserver((entries) => { for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add("in"); seen.unobserve(entry.target); } });
+document.querySelectorAll(".reveal").forEach((el) => seen.observe(el));
+</script></body></html>`;
+  const server = createServer((req, res) => {
+    res.setHeader("content-type", "text/html; charset=utf-8");
+    res.end(page);
   });
   server.listen(0, "127.0.0.1", () => writeFileSync(portFile, String(server.address().port)));
 }
@@ -286,6 +350,97 @@ for (const [family, fallback] of [["Inter Variable", "monospace"], ["Inter", "mo
 }
 </script></body></html>`,
   );
+  // A page with states to show. Its script marks what it saw: the motion its
+  // reader asked for at each width, a press on its menu button and whether a
+  // person's finger could have made it, and the styles its own rules gave a
+  // control under the pointer and one that took focus. The menu shuts when
+  // the window is resized, as many do. And it holds a `menu` element, which
+  // the word "Menu" is also the selector of.
+  writeFileSync(
+    path.join(dir, "states.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0;font:16px sans-serif;background:rgb(255,255,255)}
+@media (prefers-reduced-motion: reduce){body{background:rgb(0,128,0)}}
+header{position:relative;height:60px;background:rgb(20,20,20)}
+#toggle{position:absolute;left:20px;top:10px;width:100px;height:40px;background:rgb(0,0,255);color:rgb(255,255,255);border:0}
+#toggle:hover{background:rgb(255,128,0)}
+#docs{position:absolute;left:200px;top:20px;color:rgb(255,255,255)}
+#docs:focus-visible{outline:6px solid rgb(255,0,255)}
+#panel{display:none;position:absolute;left:0;top:60px;width:300px;height:200px;background:rgb(0,128,128)}
+#panel.open{display:block}
+menu{margin:0;padding:0;height:20px}main{height:1500px}</style></head><body>
+<header><button id="toggle">Menu</button><a id="docs" href="#docs">Docs</a></header>
+<div id="panel"></div><main><menu></menu></main>
+<script>
+const mark = (name) => { new Image().src = name; };
+const numbers = (colour) => colour.match(/[0-9]+/g).join("-");
+mark("motion-" + innerWidth + "-" + (matchMedia("(prefers-reduced-motion: reduce)").matches ? "reduce" : "no-preference"));
+const toggle = document.getElementById("toggle");
+toggle.addEventListener("click", (event) => {
+  document.getElementById("panel").classList.add("open");
+  mark("menu-" + innerWidth + "-opened-by-a-" + (event.isTrusted ? "real" : "scripted") + "-press");
+});
+addEventListener("resize", () => document.getElementById("panel").classList.remove("open"));
+toggle.addEventListener("mouseenter", () => requestAnimationFrame(() => mark("hover-background-" + numbers(getComputedStyle(toggle).backgroundColor))));
+const docs = document.getElementById("docs");
+docs.addEventListener("focus", () => requestAnimationFrame(() => {
+  const style = getComputedStyle(docs);
+  mark("focus-" + (docs.matches(":focus-visible") ? "visible" : "not-visible") + "-outline-" + style.outlineStyle + "-" + numbers(style.outlineColor));
+}));
+</script></body></html>`,
+  );
+  // A page with no viewport of its own: a phone lays it out 980 px wide and
+  // shrinks it, and its one control is far from the top left.
+  writeFileSync(
+    path.join(dir, "shrunk.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<style>html,body{margin:0}body{width:980px;height:3000px}#far{position:absolute;left:700px;top:1500px;width:200px;height:100px;background:rgb(0,0,255);color:rgb(255,255,255);border:0;font-size:40px}</style></head>
+<body><button id="far">Menu</button>
+<script>document.getElementById("far").addEventListener("click", (event) => { new Image().src = "shrunk-" + innerWidth + "-pressed-" + (event.isTrusted ? "real" : "scripted"); });</script></body></html>`,
+  );
+  // A page five screens long, each of a colour of its own. A block slides
+  // across the first screen from the moment the page loads, and another
+  // across the third from the moment it is scrolled to. A last strip is
+  // added only once the fifth screen has been scrolled to.
+  writeFileSync(
+    path.join(dir, "long.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{margin:0}section{height:100vh}
+.slider{position:absolute;left:0;width:50px;height:50px;background:rgb(0,0,0)}
+#early{top:100px;animation:slide 4s linear forwards}
+#late{top:2000px}#late.in{animation:slide 4s linear forwards}
+@keyframes slide{from{left:0}to{left:60vw}}
+#tail{height:100px;background:rgb(255,0,255)}</style></head><body>
+${[[255, 0, 0], [0, 128, 0], [0, 0, 255], [255, 255, 0], [0, 255, 255]].map((c) => '<section style="background:rgb(' + c.join(",") + ')"></section>').join("")}
+<div class="slider" id="early"></div><div class="slider" id="late"></div>
+<script>
+const once = (el, then) => new IntersectionObserver((entries, seen) => { if (entries.some((entry) => entry.isIntersecting)) { seen.disconnect(); then(); } }).observe(el);
+once(document.getElementById("late"), () => document.getElementById("late").classList.add("in"));
+once(document.querySelectorAll("section")[4], () => { const tail = document.createElement("div"); tail.id = "tail"; document.body.append(tail); });
+</script></body></html>`,
+  );
+  // A page to measure: one line too faint to read, one picture with no
+  // `alt`, one button that hides its focus ring, one animation that goes on
+  // when reduced motion is asked for beside one that stops, and a picture of
+  // a known weight.
+  writeFileSync(path.join(dir, "heavy.png"), heavyPng(300000));
+  writeFileSync(
+    path.join(dir, "measured.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A page to measure</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{margin:0;background:rgb(255,255,255);color:rgb(17,17,17);font:16px sans-serif}
+.faint{color:rgb(204,204,204)}
+button.bare:focus{outline:none}
+.loader,.polite{width:40px;height:40px;background:rgb(0,102,204)}
+.loader{animation:spin 2s linear infinite}.polite{animation:spin 3s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion: reduce){.polite{animation:none}}
+main{min-height:1600px}</style></head><body><main>
+<h1>A page to measure</h1><p class="faint">A line too faint to read</p>
+<img src="heavy.png" width="200" height="100">
+<p><a href="#docs">Docs</a> <button class="bare">No ring</button> <button>Ringed</button> <a href="#aside" tabindex="-1">Left out on purpose</a></p>
+<div class="loader"></div><div class="polite"></div>
+</main></body></html>`,
+  );
   // A drawing, saved with a byte order mark and an XML declaration, sized to
   // its box in percent: a line half a CSS px wide, and a picture beside it.
   writeFileSync(
@@ -348,6 +503,347 @@ if (command === "job-sized") {
       maxBytes: 3750000,
     }),
   );
+}
+
+const DESKTOP = { id: "desktop", width: 1280, height: 800, maxHeight: 4800, mobile: false, from: 0 };
+const PHONE = { id: "phone", width: 390, height: 844, maxHeight: 5064, mobile: true, from: 0 };
+
+/** A job over the fixture folder whose scratch is `<work>/scratch/<name>`. */
+function jobIn(work, browser, name, more) {
+  return JSON.stringify({
+    root: path.join(work, "files"),
+    names: readdirSync(path.join(work, "files")),
+    out: path.join(work, "scratch", name, "out"),
+    profile: path.join(work, "scratch", name, "profile"),
+    browser,
+    pageTimeoutMs: 60000,
+    maxBytes: 3750000,
+    ...more,
+  });
+}
+
+if (command === "job-web") {
+  // A page on the web, whole, at the two widths a reference is kept at.
+  const [work, browser, sitePort] = args;
+  process.stdout.write(
+    jobIn(work, browser, "web", {
+      pages: [{ file: "the site", kind: "web", url: `http://127.0.0.1:${sitePort}/` }],
+      views: [
+        { ...DESKTOP, whole: true, stretches: 2 },
+        { ...PHONE, whole: true, stretches: 2 },
+      ],
+    }),
+  );
+}
+
+if (command === "job-closed") {
+  // A task page again, in a job of its own, after the open one.
+  const [work, browser] = args;
+  process.stdout.write(jobIn(work, browser, "closed", { pages: [{ file: "page.html", kind: "html" }], views: [DESKTOP] }));
+}
+
+if (command === "job-states") {
+  const [work, browser] = args;
+  const act = (id, view, asked) => ({ ...view, id, act: asked });
+  process.stdout.write(
+    jobIn(work, browser, "states", {
+      pages: [
+        { file: "states.html", kind: "html" },
+        { file: "shrunk.html", kind: "html" },
+      ],
+      views: [
+        // Reduced motion at a width no other view has, then a view without
+        // it straight after, so the page's own marks say which load was
+        // told what.
+        { ...DESKTOP, id: "reduced", width: 1000, height: 700, reduce: true },
+        { ...DESKTOP, id: "plain", width: 900, height: 700 },
+        act("press", DESKTOP, { press: "Menu" }),
+        act("hover", DESKTOP, { hover: "Menu" }),
+        act("keys", DESKTOP, { tab: 2 }),
+        act("none", DESKTOP, { press: "Pricing" }),
+        act("thumb", PHONE, { press: "Menu" }),
+      ],
+    }),
+  );
+}
+
+if (command === "job-long") {
+  const [work, browser] = args;
+  process.stdout.write(
+    jobIn(work, browser, "long", {
+      pages: [{ file: "long.html", kind: "html" }],
+      views: [
+        // More stretches allowed than the page has, each two screens and a
+        // bit: the page's end is what stops them.
+        { ...DESKTOP, maxHeight: 1700, whole: true, stretches: 5 },
+        { ...PHONE, whole: true, stretches: 2 },
+        { ...DESKTOP, id: "top", moving: true },
+        { ...DESKTOP, id: "down", from: 1700, moving: true },
+      ],
+    }),
+  );
+}
+
+if (command === "job-measured") {
+  const [work, browser, engine] = args;
+  process.stdout.write(
+    jobIn(work, browser, "measured", {
+      pages: [{ file: "measured.html", kind: "html" }],
+      views: [DESKTOP, PHONE],
+      measure: true,
+      axe: engine,
+    }),
+  );
+}
+
+/** What a verify command reads a job's outcome through. */
+function outcomeOf(work, name) {
+  let failures = 0;
+  const check = (holds, what, seen = "") => {
+    console.log(`${holds ? "ok   " : "FAIL "} ${what}${holds || seen === "" ? "" : ` (${seen})`}`);
+    if (!holds) failures += 1;
+  };
+  const out = path.join(work, "scratch", name, "out");
+  const reportFile = path.join(out, "report.json");
+  if (!existsSync(reportFile)) {
+    check(false, `the renderer wrote its report of the ${name} job`);
+    process.exit(1);
+  }
+  return {
+    check,
+    out,
+    pages: JSON.parse(readFileSync(reportFile, "utf8")).pages,
+    picture: (file) => (existsSync(path.join(out, file)) ? decodePng(readFileSync(path.join(out, file))) : null),
+    hits: () => (existsSync(path.join(work, "hits")) ? readFileSync(path.join(work, "hits"), "utf8").split("\n").filter(Boolean) : []),
+    done: () => process.exit(failures === 0 ? 0 : 1),
+  };
+}
+
+if (command === "verify-web") {
+  const [work] = args;
+  const { check, pages, picture, hits, done } = outcomeOf(work, "web");
+  const [site] = pages;
+  const desktop = picture("1-desktop.png");
+  const phone = picture("1-phone.png");
+  check(site.error === null && site.shots.length === 2, "a page on the web is pictured", site.error ?? `${site.shots.length} picture(s)`);
+  check(desktop?.width === 1280 && phone?.width === 390, "at both widths", `${desktop?.width} and ${phone?.width}`);
+  if (desktop && phone) {
+    check(
+      desktop.at(50, 90) === "255,0,0" && phone.at(50, 90) === "255,0,0",
+      "what it draws from another port of this host is drawn: the network is open to it",
+      `${desktop.at(50, 90)} / ${phone.at(50, 90)}`,
+    );
+    // Asked for over half a second after the load event and answered 600 ms
+    // later: in the picture only because the page was let go quiet first.
+    check(
+      desktop.at(50, 190) === "255,0,0" && phone.at(50, 190) === "255,0,0",
+      "and so is what it fetched after its load event: it is pictured once it has gone quiet",
+      `${desktop.at(50, 190)} / ${phone.at(50, 190)}`,
+    );
+  }
+  check(
+    ["GET /web-pixel.png", "GET /web-first", "GET /web-late.png"].every((hit) => hits().includes(hit)),
+    "the other port saw each of its requests",
+    hits().join(" "),
+  );
+  check(
+    site.asked.length === 0 && site.askedCount === 0 && site.missing.length === 0,
+    "it reports nothing as asked of the network or missing",
+    `${site.asked.join(" ")} ${site.missing.join(" ")}`,
+  );
+  const motion = site.motion;
+  check(
+    motion?.runningCount === 1 && motion.running[0]?.name === "spin" && motion.running[0]?.target === "div.spinner" && motion.running[0]?.loops === true,
+    "what moves on it is read: the one animation still running a second after the load, and that it loops",
+    JSON.stringify(motion?.running),
+  );
+  check(motion?.sticky?.what === "header.bar" && motion?.sticky?.position === "sticky", "the bar that stays at the top", JSON.stringify(motion?.sticky));
+  check(motion?.onScroll === 2, "the two sections that animate in as they are scrolled to", String(motion?.onScroll));
+  check(
+    motion?.hover.length === 1 && motion.hover[0].what === "a.nav" && motion.hover[0].changes.join() === "color" && motion.hover[0].durationMs === 150,
+    "and the link whose colour changes under the pointer, over 150 ms",
+    JSON.stringify(motion?.hover),
+  );
+  done();
+}
+
+if (command === "verify-closed") {
+  const [work, port] = args;
+  const { check, pages, hits, done } = outcomeOf(work, "closed");
+  const [page] = pages;
+  const missing = new Set(page.missing);
+  check(page.error === null && page.shots.length === 1, "a task page is pictured in a job after the open one", page.error ?? "");
+  for (const probe of ["loopback", "remote", "fetch", "localhost"]) {
+    check(
+      missing.has(`check-${probe}-refused`) && !missing.has(`check-${probe}-LOADED`),
+      `and its ${probe} request still loaded nothing`,
+      [...missing].join(" "),
+    );
+  }
+  check(page.asked.includes(`127.0.0.1:${port}`), "which it is still said to have asked for", page.asked.join(" "));
+  check(!hits().some((hit) => hit.includes("/hit-")), "no request of a task page has reached the other port", hits().join(" "));
+  done();
+}
+
+if (command === "verify-states") {
+  const [work] = args;
+  const { check, out, pages, picture, done } = outcomeOf(work, "states");
+  const [states, shrunk] = pages;
+  const act = (page, view) => page.acts.find((entry) => entry.view === view);
+  const marks = new Set(states.missing);
+  const said = [...marks].join(" ");
+  check(states.error === null && shrunk.error === null, "a page is shown in the states asked, and no act is the page's failure", `${states.error} / ${shrunk.error}`);
+
+  // The page's own media query, at the two widths only those views have.
+  check(marks.has("motion-1000-reduce") && !marks.has("motion-1000-no-preference"), "a view with reduce makes the page's own media query true", said);
+  check(marks.has("motion-900-no-preference") && !marks.has("motion-900-reduce"), "and the view after it, without, false", said);
+  check(
+    picture("1-reduced.png")?.at(500, 400) === "0,128,0" && picture("1-plain.png")?.at(450, 400) === "255,255,255",
+    "each is pictured as its style sheet then draws it",
+    `${picture("1-reduced.png")?.at(500, 400)} / ${picture("1-plain.png")?.at(450, 400)}`,
+  );
+
+  check(act(states, "press")?.done === 'pressed button "Menu"', "a control is found by its words, not as the menu element its name also selects", JSON.stringify(act(states, "press")));
+  check(
+    marks.has("menu-1280-opened-by-a-real-press") && !marks.has("menu-1280-opened-by-a-scripted-press"),
+    "and really pressed: the page's own script saw a trusted click",
+    said,
+  );
+  check(
+    picture("1-press-a.png")?.at(150, 160) === "0,128,128",
+    "its menu is open in the picture, though it shuts when its window is resized",
+    String(picture("1-press-a.png")?.at(150, 160)),
+  );
+
+  check(act(states, "hover")?.done === 'the pointer is on button "Menu"', "a control is put under the pointer", JSON.stringify(act(states, "hover")));
+  check(marks.has("hover-background-255-128-0"), "and has the computed style its :hover rule gives", said);
+  check(picture("1-hover-a.png")?.at(25, 15) === "255,128,0", "which is how it is pictured", String(picture("1-hover-a.png")?.at(25, 15)));
+
+  check(act(states, "keys")?.done === '2 presses of Tab: focus is on link "Docs"', "Tab moves focus as a keyboard does", JSON.stringify(act(states, "keys")));
+  check(marks.has("focus-visible-outline-solid-255-0-255"), "and the control it lands on matches :focus-visible and has that rule's outline", said);
+  check(picture("1-keys-a.png")?.at(197, 30) === "255,0,255", "which is how it is pictured", String(picture("1-keys-a.png")?.at(197, 30)));
+
+  check(
+    act(states, "none")?.done === null && act(states, "none")?.error === 'nothing at this width is called "Pricing". The controls on it: "Menu", "Docs"',
+    "an act that finds nothing says so, with what the controls there are called",
+    JSON.stringify(act(states, "none")),
+  );
+  check(!existsSync(path.join(out, "1-none-a.png")) && !states.shots.some((shot) => shot.view === "none"), "and takes no picture");
+  check(states.shots.length === 6, "every other view of the page is pictured", states.shots.map((shot) => shot.file).join(" "));
+
+  // A phone lays this page out 980 px wide and shrinks it to its screen.
+  const thumb = shrunk.shots.find((shot) => shot.view === "thumb");
+  check(new Set(shrunk.missing).has("shrunk-980-pressed-real"), "on a page a phone shrinks, the press lands on the control", shrunk.missing.join(" "));
+  check(
+    thumb?.width === 390 && thumb?.height === 844 && thumb?.scale < 1 && thumb?.from > 0,
+    "and the screen is pictured where the window went to reach it, at the phone's own size",
+    JSON.stringify(thumb),
+  );
+  done();
+}
+
+if (command === "verify-long") {
+  const [work] = args;
+  const { check, pages, picture, done } = outcomeOf(work, "long");
+  const [long] = pages;
+  const colours = ["255,0,0", "0,128,0", "0,0,255", "255,255,0", "0,255,255"];
+  /** The colour the page has at a height: its five screens, then the strip. */
+  const at = (y, screen) => (y >= 5 * screen ? "255,0,255" : colours[Math.floor(y / screen)]);
+  const covers = (view, screen) => {
+    const shots = long.shots.filter((shot) => shot.view === view);
+    let next = 0;
+    for (const shot of shots) {
+      const png = picture(shot.file);
+      if (!png || shot.from !== next || png.height !== shot.height) return `${shot.file} starts at ${shot.from}, not ${next}`;
+      if (png.at(600 % png.width, 0) !== at(shot.from, screen)) return `${shot.file} starts with ${png.at(600 % png.width, 0)}`;
+      if (png.at(600 % png.width, png.height - 1) !== at(shot.from + shot.height - 1, screen)) return `${shot.file} ends with ${png.at(600 % png.width, png.height - 1)}`;
+      next += shot.height;
+    }
+    return next === 5 * screen + 100 && shots.every((shot) => shot.cut === false && shot.contentHeight === next) ? "" : `they end at ${next}`;
+  };
+  check(long.error === null, "a page five screens long is pictured whole and moving", long.error ?? "");
+  check(
+    long.shots.filter((shot) => shot.view === "desktop").map((shot) => shot.file).join(" ") === "1-desktop.png 1-desktop-s2.png 1-desktop-s3.png",
+    "a whole view comes back as its stretches, as many as the page takes",
+    long.shots.map((shot) => shot.file).join(" "),
+  );
+  // 4,100 px: five screens and the strip that is added only once the fifth
+  // has been scrolled to, which a walk to the first stretch's end never is.
+  check(covers("desktop", 800) === "", "in order, each starting where the one before ended, covering the page to the strip added at its end", covers("desktop", 800));
+  check(covers("phone", 844) === "", "and the phone's one stretch covers its taller layout the same way", covers("phone", 844));
+
+  /** Where the black block is on a row of a frame. */
+  const block = (file, y) => {
+    const png = picture(file);
+    if (!png) return -1;
+    for (let x = 0; x < png.width; x += 1) if (png.at(x, y) === "0,0,0") return x;
+    return -1;
+  };
+  for (const [view, row, what] of [
+    ["top", 125, "what moves as the page loads"],
+    // On a page nobody walked first: a walk would have played it already.
+    ["down", 325, "what starts to move when it is scrolled to"],
+  ]) {
+    const frames = long.shots.filter((shot) => shot.view === view);
+    const places = frames.map((frame) => block(frame.file, row));
+    check(
+      frames.length === 3 && frames.every((frame, n) => frame.file === `1-${view}-m${n + 1}.png` && frame.height === 800),
+      `a moving view comes back as three frames of one screen (${view})`,
+      frames.map((frame) => frame.file).join(" "),
+    );
+    check(
+      frames.length === 3 && frames[0].moment >= 250 && frames[0].moment < 1000 && frames[1].moment >= 1000 && frames[1].moment < 3000 && frames[2].moment >= 3000,
+      "taken about 250, 1,000 and 3,000 ms after it came into view",
+      frames.map((frame) => frame.moment).join(" "),
+    );
+    check(places[0] >= 0 && places[2] - places[0] > 300, `and ${what} is somewhere else in the last than in the first`, places.join(" "));
+  }
+  done();
+}
+
+if (command === "verify-measured") {
+  const [work] = args;
+  const { check, pages, done } = outcomeOf(work, "measured");
+  const [page] = pages;
+  const measured = page.measured;
+  check(page.error === null && page.shots.length === 2, "a measured page is pictured at both widths", page.error ?? "");
+  check(measured?.views.map((view) => view.view).join(" ") === "desktop phone", "and measured at each", JSON.stringify(measured?.views.map((view) => view.view)));
+  for (const view of measured?.views ?? []) {
+    const kinds = new Map(view.faults.kinds.map((kind) => [kind.id, kind]));
+    check(view.faults.ran === true, `the accessibility engine ran in the page (${view.view})`, String(view.faults.why));
+    check(kinds.get("image-alt")?.count === 1 && kinds.get("image-alt")?.impact === "critical", "it found the one picture with no alt", JSON.stringify(view.faults.kinds));
+    check(
+      kinds.get("color-contrast")?.count === 1 && kinds.get("color-contrast")?.first.join() === ".faint",
+      "and the one line of low contrast",
+      JSON.stringify(view.faults.kinds),
+    );
+    check(
+      view.faults.worstContrast?.text === "A line too faint to read" && view.faults.worstContrast?.ratio > 1 && view.faults.worstContrast?.ratio < 3,
+      "whose ratio and words it reports",
+      JSON.stringify(view.faults.worstContrast),
+    );
+    check(
+      view.keyboard.controls === 3 && view.keyboard.stops === 3 && view.keyboard.unreached.length === 0,
+      "Tab reaches each of the three controls a keyboard should, and the one left out on purpose is not counted",
+      JSON.stringify(view.keyboard),
+    );
+    check(view.keyboard.unmarked.join("|") === 'button "No ring"', "the one control that hides its focus ring is the one said to be unmarked", JSON.stringify(view.keyboard.unmarked));
+    check(
+      view.reduced.runningCount === 1 && view.reduced.running[0]?.target === "div.loader" && view.reduced.running[0]?.loops === true,
+      "with reduced motion asked for, the animation that ignores it is still running and the one that honours it is not",
+      JSON.stringify(view.reduced),
+    );
+  }
+  const weight = statSync(path.join(work, "files", "measured.html")).size + statSync(path.join(work, "files", "heavy.png")).size;
+  check(measured?.weight.bytes === weight && measured?.weight.files === 2, `one load of it weighs its two files, ${weight} bytes`, JSON.stringify(measured?.weight));
+  // 300 KB at 200,000 bytes a second is a second and a half on the wire.
+  check(
+    measured?.loadMs > 0 && measured?.loadMs >= 1000 && measured?.line === "1.6 Mbit/s down, 150 ms",
+    "its load on the slow line takes the time its weight accounts for",
+    `${measured?.loadMs} ms on ${measured?.line}`,
+  );
+  check(page.motion?.runningCount === 2, "and what moves on it is read too: both animations, with no preference asked", JSON.stringify(page.motion?.running));
+  done();
 }
 
 if (command === "verify-sized") {
@@ -594,6 +1090,67 @@ if VIBERR_LAUNCH_UID=$UID_R VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "cat '$SCRAT
 else
   fail "another agent uid cannot read the picture the renderer saved"
 fi
+
+# Run one more job and read it back: its name, what it shows, and what the two
+# commands of that name are given after the work folder.
+further() {
+  name=$1
+  what=$2
+  shift 2
+  job=$("$NODE" "$WORK/check.mjs" "job-$name" "$WORK" "$BROWSER" "$@")
+  started=$(date +%s)
+  render "$job"
+  code=$?
+  took=$(($(date +%s) - started))
+  if [ "$code" -eq 0 ]; then
+    pass "the renderer $what (${took} s)"
+  else
+    fail "the renderer exited $code on the $name job"
+  fi
+}
+
+# --- a page on the web -----------------------------------------------------------
+# Ruling 327: opened at its own address with the network open. The site is a
+# second server on this host, and what it draws comes from the first.
+"$NODE" "$WORK/check.mjs" site "$WORK/site-port" "$PORT" &
+site=$!
+i=0
+while [ ! -s "$WORK/site-port" ] && [ $i -lt 50 ]; do
+  sleep 0.1
+  i=$((i + 1))
+done
+SITE_PORT=$(cat "$WORK/site-port" 2>/dev/null)
+if [ -z "$SITE_PORT" ]; then
+  fail "the stand-in site did not start"
+else
+  further web "pictured a page on the web at both widths and read what moves on it" "$SITE_PORT"
+  "$NODE" "$WORK/check.mjs" verify-web "$WORK" || failures=$((failures + 1))
+fi
+# The open network was that job's browser's alone: a task page pictured after
+# it is as closed in as the first one was.
+further closed "pictured a task page after it"
+"$NODE" "$WORK/check.mjs" verify-closed "$WORK" "$PORT" || failures=$((failures + 1))
+
+# --- a page in a state -----------------------------------------------------------
+# `capture_page` with an act, or with reduced motion: two pages, seven views.
+further states "showed two pages in seven states each"
+"$NODE" "$WORK/check.mjs" verify-states "$WORK" || failures=$((failures + 1))
+
+# --- a whole page, and a page while it moves ---------------------------------------
+further long "pictured a long page whole and while it moves"
+"$NODE" "$WORK/check.mjs" verify-long "$WORK" || failures=$((failures + 1))
+
+# --- a measured page --------------------------------------------------------------
+# Ruling 328: with the engine the image ships, named to the renderer by its
+# path as the server names it.
+ENGINE="$APP/node_modules/axe-core/axe.min.js"
+if [ -f "$ENGINE" ]; then
+  pass "the accessibility engine is in the image ($ENGINE)"
+else
+  fail "the accessibility engine $ENGINE is not in the image"
+fi
+further measured "pictured and measured a page" "$ENGINE"
+"$NODE" "$WORK/check.mjs" verify-measured "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
 left=0

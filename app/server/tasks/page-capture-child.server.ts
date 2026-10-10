@@ -90,10 +90,14 @@ import { z } from "zod";
  *
  * Run as `node page-capture-child.server.ts` with the job, as JSON, on its
  * standard input (never an argument: a job names every file of a delivery
- * and can be past what the kernel takes as one). It writes
- * `<out>/<n>-<view>.png` and `<out>/report.json` and prints nothing the server
- * parses. Node runs it as TypeScript; it imports only `node:` modules and
- * declared packages, and nothing in the app imports it.
+ * and can be past what the kernel takes as one). It writes each picture as
+ * `<out>/<n>-<name>.png` (`pictureNames` has the names) and
+ * `<out>/report.json`, and prints nothing the server parses. The report is
+ * written by the person's own process and read by the server as untrusted
+ * text, so it is plain data, and what a reading of a page puts in it in the
+ * page's own words (an act's outcome, what moves, what is measured) is cut
+ * to a length here (`clip`). Node runs it as TypeScript; it imports only
+ * `node:` modules and declared packages, and nothing in the app imports it.
  */
 
 const pageSchema = z.object({
@@ -143,6 +147,8 @@ type JobView = z.infer<typeof viewSchema>;
 
 /** When a moving view is pictured, in ms after its screen came into view. */
 const MOVING_MOMENTS = [250, 1_000, 3_000];
+/** The most stretches a whole view is taken in, whatever number it names. */
+const WHOLE_STRETCHES_MAX = 100;
 
 /**
  * The pictures a view writes, as their names in `out` without the page's
@@ -153,7 +159,7 @@ const MOVING_MOMENTS = [250, 1_000, 3_000];
 function pictureNames(view: JobView): string[] {
   if (view.act) return [`${view.id}-a`];
   if (view.moving === true) return MOVING_MOMENTS.map((_, at) => `${view.id}-m${at + 1}`);
-  const further = view.whole === true ? (view.stretches ?? 1) - 1 : 0;
+  const further = view.whole === true ? Math.min(view.stretches ?? 1, WHOLE_STRETCHES_MAX) - 1 : 0;
   return [view.id, ...Array.from({ length: further }, (_, at) => `${view.id}-s${at + 2}`)];
 }
 
@@ -177,9 +183,12 @@ function jobFaults(pages: readonly JobPage[], views: readonly JobView[]): string
   const faults: string[] = [];
   const written = new Set<string>();
   for (const view of views) {
-    const kinds = [view.box ? "a box" : "", view.whole === true ? "a whole page" : "", view.act ? "an act" : "", view.moving === true ? "moving" : ""].filter(
-      (kind) => kind !== "",
-    );
+    const kinds = [
+      view.box ? "a box" : "",
+      view.whole === true ? "a whole page" : "",
+      view.act ? "an act" : "",
+      view.moving === true ? "moving" : "",
+    ].filter((kind) => kind !== "");
     if (kinds.length > 1) faults.push(`the view ${view.id} is ${kinds.join(" and ")} at once`);
     if (view.act && view.act.tab === undefined && view.act.press === undefined && view.act.hover === undefined) {
       faults.push(`the act of the view ${view.id} names no tab, press or hover`);
@@ -343,7 +352,7 @@ interface Measured {
   views: MeasuredView[];
   /** What the page server served for one load of the page: the page and
    *  every file it asked for and got. */
-  weight: { bytes: number; files: number };
+  weight: Weight;
   /** The load event at a phone's width on `SLOW_LINE`, in ms; null when the
    *  load did not finish in what was left of the page's time. */
   loadMs: number | null;
@@ -431,7 +440,7 @@ const REDUCED_RUNNING_MAX = 6;
 const FAULT_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 /** The engine's words for how grave a fault is, the gravest first. */
 const FAULT_IMPACTS = ["critical", "serious", "moderate", "minor"];
-/** The most presses of Tab a keyboard walk makes. */
+/** The most presses of Tab a keyboard walk makes, and an act. */
 const TAB_PRESSES_MAX = 80;
 /** Under reduced motion, an animation that lasts longer than this or never
  *  ends is still motion; a shorter one is a change of state. */
@@ -1264,7 +1273,8 @@ const ANIMATIONS_EXPRESSION = inPage(
  * stop that had none at any stop before it, the top of the page included. It
  * has to be the page's first walk. What animates in as a reader scrolls to it
  * plays once: measured on a page of three such sections (Chrome 153), the
- * first walk counted three and a second walk none.
+ * first walk counted three and a second walk none, and Debian Chromium 154
+ * counted none of two on a second walk.
  */
 const ON_SCROLL_EXPRESSION = inPage(
   "on-scroll",
@@ -1936,7 +1946,8 @@ async function screenNow(ctx: ViewContext): Promise<z.infer<typeof screenSchema>
  * position, with whatever holds focus, lies under the pointer or was opened
  * still so. Asked for inside the viewport on purpose: a capture beyond it
  * fires `resize` in the page twice (measured, Chrome 153), and a menu that
- * closes when its window is resized would be pictured shut.
+ * shuts when its window is resized was pictured shut (Chrome 153 and Debian
+ * Chromium 154).
  */
 async function pictureScreen(ctx: ViewContext, view: JobView, file: string): Promise<Shot> {
   const { browser, sessionId } = ctx;
@@ -1977,8 +1988,9 @@ interface Point {
   y: number;
 }
 
-/** A real pointer event at a point of the screen, in the page's own CSS px
- *  (a phone's shrunk page takes them unscaled: measured, Chrome 153). */
+/** A real pointer event at a point of the screen, in the page's own CSS px.
+ *  A page a phone shrinks takes them unscaled: multiplied by the phone's
+ *  scale, a press missed its control (Chrome 153 and Debian Chromium 154). */
 async function pointer(ctx: ViewContext, type: "mouseMoved" | "mousePressed" | "mouseReleased", at: Point): Promise<void> {
   const params: CdpParams =
     type === "mouseMoved" ? { type, x: at.x, y: at.y } : { type, x: at.x, y: at.y, button: "left", clickCount: 1 };
@@ -2013,6 +2025,9 @@ type JobAct = NonNullable<JobView["act"]>;
 async function act(ctx: ViewContext, asked: JobAct): Promise<string> {
   const did: string[] = [];
   if (asked.tab !== undefined) {
+    // Each press is paid for out of the page's time, and a number past any
+    // page's stops would end the page at its limit for the sake of one act.
+    if (asked.tab > TAB_PRESSES_MAX) throw new Error(`an act presses Tab at most ${TAB_PRESSES_MAX} times`);
     for (let press = 0; press < asked.tab; press += 1) await pressTab(ctx);
     await pause(AFTER_POINTER_MS);
     const focus = await askPage(ctx, FOCUS_EXPRESSION, focusSchema);
@@ -2125,11 +2140,12 @@ class Budget {
    *  or the page's time is up. Nothing is started with no time left. */
   async within<T>(start: () => Promise<T>, most: number = STEP_MAX_MS): Promise<T> {
     const left = this.left();
-    if (left <= 0) throw new TimeUp("the page's time ran out first");
+    const out = "the page's time ran out before this was read";
+    if (left <= 0) throw new TimeUp(out);
     let timer: NodeJS.Timeout | null = null;
     const up = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new TimeUp(left <= most ? "the page's time ran out" : `it ran past ${Math.round(most / 1000)} seconds`)),
+        () => reject(new TimeUp(left <= most ? out : `this was not read in ${Math.round(most / 1000)} seconds`)),
         Math.min(left, most),
       );
     });
@@ -2177,12 +2193,12 @@ function atRest(view: JobView): JobView {
   return { id: view.id, width: view.width, height: view.height, maxHeight: view.maxHeight, mobile: view.mobile, from: 0 };
 }
 
-/** The controls whose look changes under the pointer: each brought to the
- *  middle of the screen, read at rest, given the real pointer and read again.
- *  One whose look does not change is left out. */
-async function readHover(study: Study): Promise<Motion["hover"]> {
+/** The controls whose look changes under the pointer, added to `hover` as
+ *  each is found: brought to the middle of the screen, read at rest, given
+ *  the real pointer and read again. One whose look does not change is left
+ *  out. */
+async function readHover(study: Study, hover: Motion["hover"]): Promise<void> {
   const listed = await askWithin(study, HOVER_LIST_EXPRESSION, hoverListSchema);
-  const hover: Motion["hover"] = [];
   for (const [index, what] of listed.controls.slice(0, HOVER_MAX).entries()) {
     const read = await part(
       (async () => {
@@ -2200,7 +2216,6 @@ async function readHover(study: Study): Promise<Motion["hover"]> {
       durationMs: read.durationMs === null ? null : Math.round(read.durationMs),
     });
   }
-  return hover;
 }
 
 /**
@@ -2236,7 +2251,7 @@ async function readMotion(study: Study, view: JobView): Promise<Motion | null> {
     motion.onScroll = (await part(askWithin(study, ON_SCROLL_EXPRESSION, countSchema), { count: 0 })).count;
     const stays = (await part(askWithin(study, STICKY_EXPRESSION, stickySchema), { sticky: null })).sticky;
     motion.sticky = stays ? { what: clip(stays.what, NAME_MAX), position: stays.position } : null;
-    motion.hover = await part(readHover(study), []);
+    await part(readHover(study, motion.hover), undefined);
   } catch {
     // Out of time part way: what was read stands.
   }
@@ -2460,7 +2475,8 @@ const targetSchema = z.looseObject({ targetId: z.string() });
 const sessionSchema = z.looseObject({ sessionId: z.string() });
 
 /** Picture one page at every view in a browser of its own, inside the page's
- *  time limit. Never rejects. */
+ *  time limit, then read of it what the job asks beyond its pictures, in what
+ *  is left of that time. Never rejects. */
 async function picturePage(job: Job, server: PageServer, engine: Engine, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
   const pictures: Pictures = { shots: [], ended: [], acts: [] };
