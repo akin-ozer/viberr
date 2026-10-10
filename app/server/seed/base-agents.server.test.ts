@@ -447,7 +447,8 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // passes with totals nobody ran; drop the documentation alone, and a
     // product an agent cannot run cannot be drawn; drop "word for word", and
     // a duration the documentation only says the screen shows is drawn in
-    // as "4m 12s".
+    // as "4m 12s"; drop the kept capture, and a drawing placed as an image
+    // reads as one and passes with whatever is in it.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const developer = said(dataRoot, "developer-expertise");
@@ -458,12 +459,12 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(developer).toContain(
       `What a picture of the product itself shows comes from one of two places, each kept with \`keep_source\` like any statement: the product's ${demo}, or ${gift} on the task. ` +
         "Give the product that and nothing else: whatever else you put into it or draw in for the picture is made up, whatever it is marked as. " +
-        "What the product shows of its own (the words of its interface, its output, a total, a date) is the product's; " +
-        "where the picture is drawn and not taken of the product running, draw of that only what the kept output of a run of the product shows, " +
-        "or what its documentation, kept too, shows word for word: a figure or a line the documentation only describes stays out. " +
-        "A person's live data goes in only when they gave it for this. " +
+        "What the product shows of its own (the words of its interface, its output, a total, a date) has a kept source too: " +
+        "the capture itself, kept as you took it of the product running, or, for a drawing, the kept output of a run of the product or its kept documentation, " +
+        "of which you draw only what they show word for word. A figure or a line the documentation only describes stays out. " +
+        "A person's live data goes in only when they gave it to be shown. " +
         "Where neither place holds anything, see what another task of the board keeps of either (`read_task_source` with its key); " +
-        "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they give; " +
+        "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they answer; " +
         "where they give none, leave the picture out.",
     );
     // The reviewer holds what the product was given to the same two places,
@@ -476,14 +477,18 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
       "What a picture of the product itself shows rests on a kept source like any statement, on this task or another of the board's. " +
         `What the product was given comes from its ${demo} or from ${gift}: ` +
         "a name, a title or a figure given to it from neither was made up for the picture, whatever it is marked as, and is a finding, " +
-        "and so is a person's live data they did not give for it. " +
-        "The rest is the product's own (the words of its interface, its output, a total, a date): " +
-        "where the picture is drawn and not taken of the product running, hold the rest to the kept output of a run of the product or to its kept documentation, word for word, " +
-        "and what neither shows is a finding too, a figure or a line the documentation only describes included.",
+        "and so is a person's live data they did not give to be shown. " +
+        "The rest is the product's own (the words of its interface, its output, a total, a date) and rests on a kept source as well: " +
+        "the capture, kept as it was taken of the product running, or, for a drawing, the kept output of a run of the product or its kept documentation, word for word. " +
+        "What none of them shows is a finding too, a figure or a line the documentation only describes included, and so is a picture of the product with none of them behind it.",
     );
     // And to the same two kinds of picture the maker is.
-    expect(developer).toContain("A picture on it is the product itself or it explains the product: never a drawing of a screen that does not exist, or a stock picture.");
-    expect(reviewer).toContain("Every picture is the product or explains it: a drawing of a screen the product does not have, or a stock picture, is a finding.");
+    expect(developer).toContain(
+      "A picture on it is the product itself (a capture of it running, or a drawing of one of its screens) or it explains the product: never a drawing of a screen that does not exist, or a stock picture.",
+    );
+    expect(reviewer).toContain(
+      "Every picture is the product (a capture of it running, or a drawing of one of its screens) or explains it: a drawing of a screen the product does not have, or a stock picture, is a finding.",
+    );
     // The maker's sentence rests on two things the seeded Developer may do:
     // ask the person, which the catalog grants it, and keep a source, which
     // the catalog leaves to that grant's default. CANARY: move "Ask the
