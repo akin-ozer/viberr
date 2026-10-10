@@ -1198,6 +1198,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "rooted.html": '<script src="/css/site.js"></script><img src="../up.png"><p>styled from the site\'s root</p>',
         "shrunk.html": "<p>no viewport setting, so a phone lays it out 980 px wide: fake-scale:0.398</p>",
         "wide.html": "<p>fake-width:612</p>",
+        "zapp.html": '<p>an app that scrolls inside itself: fake-inner:{"what":"main.app","height":5200}</p>',
       },
       "dialog:alert.html",
     );
@@ -1207,7 +1208,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // have asked for files "not among this task's files (the folder is
     // flat)", which sends its author looking for a file to add.
     expect(ofThePictures(captureNote()!.text)).toBe(
-      "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, and `wide.html` as a reader sees them, " +
+      "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, `wide.html`, and `zapp.html` as a reader sees them, " +
         "at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         "`alert.html` opens a dialog as it loads (an alert, a confirm or a prompt). A capture dismisses it, so the picture shows the page behind it. " +
@@ -1217,7 +1218,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "`rooted.html` asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
         "which a capture does not serve (it serves the task's own files by name). " +
         "A phone lays `shrunk.html` out 980 px wide and shrinks it to fit its 390 px screen, so its text is small. " +
-        "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways.",
+        "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways. " +
+        // A picture of a page that scrolls inside one of its elements shows
+        // one screen of it, and said nothing: it read as a whole short page.
+        "`zapp.html` scrolls inside `main.app` (5,200 px) and not as a page, so its pictures and what was measured of it are of its first screen only.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1225,6 +1229,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
       shots: [{ view: "desktop", name: "half.html.capture-desktop.png", cut: false }],
       error: "the browser ended before the page was pictured",
     });
+    // An agent that looks at it is told the same.
+    expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
+      "It scrolls inside `main.app` (5,200 px) and not as a page, so its pictures and what was measured of it are of its first screen only.",
+    );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
       "It asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
