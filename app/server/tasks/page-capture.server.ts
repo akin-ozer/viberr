@@ -1148,7 +1148,6 @@ function captureNoteText({ pages, more, notCarried, lookable, accepted }: Captur
         `(${px(phone!.width)} px). The pictures are attached and show beside each file on the result.`,
     );
     for (const page of pictured) parts.push(...pageRemarks(page, notCarried));
-    for (const page of pictured) parts.push(...measuredRemarks(page, accepted));
   }
   for (const page of failed) parts.push(`Viberr could not picture ${code(page.file)}: ${page.error ?? "it was not rendered"}.`);
   if (failed.length > 0) {
@@ -1166,6 +1165,9 @@ function captureNoteText({ pages, more, notCarried, lookable, accepted }: Captur
   if (more > 0) {
     parts.push(`${more === 1 ? "1 more page was" : `${px(more)} more pages were`} not pictured: ${PAST_PAGE_CAP}.`);
   }
+  // Ruling 328: what was measured closes the note, a page at a time, after
+  // everything the pictures themselves have to say.
+  for (const page of pictured) parts.push(...measuredRemarks(page, accepted));
   return parts.join(" ");
 }
 
@@ -1213,14 +1215,16 @@ function viewSentences(view: PageMeasured["views"][number]): string[] {
           : ""),
     );
   }
-  const reached = `Tab reaches ${keyboard.stops} of ${keyboard.controls} controls`;
-  if (keyboard.unreached.length === 0 && keyboard.unmarked.length === 0) {
-    lines.push(`${at} ${reached.charAt(0).toLowerCase()}${reached.slice(1)}, and each shows a change when it takes focus.`);
+  const reached = `Tab reaches ${keyboard.stops} of ${keyboard.controls} ${keyboard.controls === 1 ? "control" : "controls"}`;
+  if (keyboard.controls === 0) {
+    lines.push(`${at} the page has no control for a keyboard to reach.`);
+  } else if (keyboard.unreached.length === 0 && keyboard.unmarked.length === 0) {
+    lines.push(`${at} ${reached}, and each shows a change when it takes focus.`);
   } else {
     const parts: string[] = [];
     if (keyboard.unreached.length > 0) parts.push(`never reached: ${quoted(keyboard.unreached)}`);
     if (keyboard.unmarked.length > 0) parts.push(`looking the same with focus as at rest: ${quoted(keyboard.unmarked)}`);
-    lines.push(`${at} ${reached.charAt(0).toLowerCase()}${reached.slice(1)}; ${parts.join("; ")}.`);
+    lines.push(`${at} ${reached}; ${parts.join("; ")}.`);
   }
   if (reduced.runningCount === 0 && reduced.videosPlaying === 0) {
     lines.push(`${at}, with reduced motion asked for, nothing still moves.`);
@@ -1248,7 +1252,7 @@ function measuredSentences(measured: PageMeasured): string[] {
     `It weighs ${weightText(measured.weight.bytes)}: the page and ${measured.weight.files <= 1 ? "nothing beside it" : `the ${measured.weight.files - 1} ${measured.weight.files === 2 ? "file" : "files"} it loads`}.` +
       (measured.loadMs === null
         ? " Its load time could not be measured."
-        : ` It finishes loading ${loadText(measured.loadMs)} after it is asked for, on a line held to ${measured.line}.`),
+        : ` It finishes loading ${loadText(measured.loadMs)} after it is asked for, on a slow phone line (${measured.line}).`),
   ];
   for (const view of measured.views) lines.push(...viewSentences(view));
   return lines;

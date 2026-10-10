@@ -42,9 +42,11 @@ import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
 import { getRun, insertRunLine } from "~/server/runtimes/run-store.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
 import { readAgentTaskAttachment, readAgentTaskSource } from "./board-read.server";
-import { looksFromRunLog, runLooks } from "./page-looks.server";
+import { completionPacketFact } from "./completion-packet.server";
+import { looksFromRunLog, pageLooksNote, pageLooksOwed, runLooks } from "./page-looks.server";
 import {
   captureTaskPage,
+  measureTaskPage,
   removeRunPageCaptures,
   requestDeliveryCaptures,
 } from "./page-capture.server";
@@ -171,6 +173,13 @@ const inputRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.da
 /** The files the stand-in browser was told to open, in order, once each. */
 const opened = () => [...new Set(fake.pages().map((page) => decodeURIComponent(new URL(page.url).pathname.split("/").pop()!)))];
 const captureAudits = () => listAuditEvents(store.db, { action: "task.pages.captured" });
+/** What a delivery's note says of the pictures: all of it up to what was
+ *  measured of each HTML page (ruling 328), which closes the note and has a
+ *  case of its own. */
+const ofThePictures = (text: string) => text.split(" Measured of ")[0]!;
+/** The figures of a page that was measured as it was pictured, whatever they
+ *  are: the measured case reads them. */
+const MEASURED = { measured: expect.any(Object) };
 
 /** The server's own browser setting, as a deployment sets it. */
 function withBrowser<T>(mode: string, run: () => T | Promise<T>): Promise<T> {
@@ -399,6 +408,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "post.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
     // One note, from Viberr, that claims the pictures.
@@ -408,10 +418,11 @@ describe("a delivered page is pictured (ruling 86)", () => {
       type: "note",
       actor: { kind: "system", systemId: "page-capture" },
       attachments: pictures,
-      text:
-        "Viberr rendered `notes.md` and `post.html` as a reader sees them, at a desktop width (1,280 px) and a " +
-        "phone width (390 px). The pictures are attached and show beside each file on the result.",
     });
+    expect(ofThePictures(notes[0]!.text)).toBe(
+      "Viberr rendered `notes.md` and `post.html` as a reader sees them, at a desktop width (1,280 px) and a " +
+        "phone width (390 px). The pictures are attached and show beside each file on the result.",
+    );
     // The page was served its sibling from the delivery itself.
     const served = fake.pages().find((page) => page.url.endsWith("/post.html"))!;
     expect(served.resources).toEqual([{ src: "chart.png", status: 200, bytes: 25 }]);
@@ -437,6 +448,104 @@ describe("a delivered page is pictured (ruling 86)", () => {
       taskKey: "VIB-1",
       details: { deliveredAt: stamp, pages: 2, captured: 2, failed: [], more: 0, runsAs: "server" },
     });
+  });
+
+  it("ruling 328: a delivered page is measured as it is pictured: the figures are kept on its record, said in the note with what each fault is on, handed to the operator and the reviewer in one line, and set against the pages the board has accepted; an agent takes the same figures before it delivers", async () => {
+    // What a person accepted a page on was an agent's word that it "passes
+    // accessibility" or "loads fast": nothing on the task was a figure.
+    // An earlier page of this board, measured and accepted.
+    const earlier = "2026-10-07T12:00:00.000Z";
+    await keptDelivery("VIB-2", earlier, { "first.html": "<p>the first page</p><p>fake-load-ms:900</p>" });
+    await withBrowser("", () => picture("VIB-2", earlier));
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-2", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.stage = "done";
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const page =
+      '<h1>Launch</h1><img src="hero.png">' +
+      '<p>fake-axe:[{"id":"color-contrast","impact":"serious","help":"Elements must meet minimum color contrast ratio thresholds","count":2,' +
+      '"nodes":[{"target":"p.lede","ratio":3.1,"text":"Governed delivery"},{"target":"a.more","ratio":2.4,"text":"Read more"}]}]</p>' +
+      '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Start"]]</p><p>fake-tab-order:[0,2]</p><p>fake-unmarked:[2]</p>' +
+      '<p>fake-animations-reduced:[{"name":"drift","target":"div.hero","durationMs":8000,"loops":true}]</p>' +
+      "<p>fake-load-ms:1840</p>";
+    await deliver({ "index.html": page, "hero.png": "x".repeat(4000), "notes.md": "# Notes\n" });
+
+    const pages = frontmatter().pageCaptures!.pages;
+    // A markdown file is set in Viberr's own type: nothing of its writer's
+    // is there to measure. CANARY: measure every page of the delivery.
+    expect(pages.find((entry) => entry.file === "notes.md")).not.toHaveProperty("measured");
+    const view = { faultKinds: 1, faultElements: 2, worstContrast: 2.4, controls: 3, unreached: 1, unmarked: 1, stillMoving: 1 };
+    // CANARY: drop `measure` from the delivery's render and the record holds
+    // pictures and no figure.
+    expect(pages.find((entry) => entry.file === "index.html")!.measured).toEqual({
+      weightBytes: Buffer.byteLength(page) + 4000,
+      files: 2,
+      loadMs: 1840,
+      line: "1.6 Mbit/s down, 150 ms",
+      views: [
+        { view: "desktop", ...view },
+        { view: "phone", ...view },
+      ],
+    });
+
+    // The note names what each fault is on, so the maker knows where to look
+    // and the reviewer what to hold it to.
+    const note = captureNote()!.text;
+    expect(note).toContain(
+      "Measured of `index.html`: It weighs 4 KB: the page and the 1 file it loads. " +
+        "It finishes loading 1.8 s after it is asked for, on a slow phone line (1.6 Mbit/s down, 150 ms). " +
+        "At 1280 px the accessibility checks (axe, WCAG 2.2 AA) found 1 kind of fault: " +
+        "`color-contrast` on 2 (Elements must meet minimum color contrast ratio thresholds; first: `p.lede` and `a.more`). " +
+        'The lowest contrast is 2.40 to 1, on "Read more". ',
+    );
+    expect(note).toContain("At 1280 px, with reduced motion asked for, 1 animation still runs: `drift` on `div.hero` (loops).");
+    expect(note).toContain('At 1280 px Tab reaches 2 of 3 controls; never reached: `button "Menu"`; looking the same with focus as at rest: `a "Start"`.');
+    // A board's pages only get lighter and faster: this one is set against
+    // the lightest and the fastest already accepted, with both figures.
+    // CANARY: read the figures of every task, accepted or not, or of this
+    // task itself, and the page is compared with its own delivery.
+    expect(note).toMatch(
+      /That is heavier than the lightest page this board has accepted \(1 KB, VIB-2\) and slower than its fastest \(0\.9 s, VIB-2\)\. A board's pages only get lighter and faster\.$/,
+    );
+
+    // The operator is handed one line a page, and so is the reviewer, in the
+    // note that says what its approval owes.
+    const line =
+      "4 KB in 2 files; loads in 1.8 s on a slow phone line (1.6 Mbit/s down, 150 ms); " +
+      "at 1280 px 1 kind of accessibility fault on 2 elements (lowest contrast 2.4 to 1), 1 of 3 controls the keyboard does not reach, " +
+      "1 that show nothing when they take focus, 1 still moving with reduced motion asked for; " +
+      "at 390 px 1 kind of accessibility fault on 2 elements (lowest contrast 2.4 to 1), 1 of 3 controls the keyboard does not reach, " +
+      "1 that show nothing when they take focus, 1 still moving with reduced motion asked for.";
+    const fact = completionPacketFact(frontmatter(), { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+    expect(fact.pageCaptures.map((entry) => [entry.file, entry.measured])).toEqual([
+      ["index.html", line],
+      ["notes.md", null],
+    ]);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(pageLooksNote(pageLooksOwed({ dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed)!)).toContain(
+      `What Viberr measured as it pictured this delivery: \`index.html\`: ${line} The delivery's "Page captures" note names each element`,
+    );
+
+    // `measure_page`: the same figures of a page as it stands, before it is
+    // delivered, in words and with nothing saved.
+    const before = JSON.stringify(frontmatter());
+    const audits = captureAudits().length;
+    const measure = (name: string) =>
+      withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name, runId: null }));
+    const measured = await measure("index.html");
+    expect(measured).toContain(
+      "[done] `index.html` measured as Viberr measures a delivered page, at the desktop width (1280 px) and the phone width (390 px). It weighs 4 KB: the page and the 1 file it loads.",
+    );
+    expect(measured).toContain("`color-contrast` on 2");
+    expect(measured).toContain("That is heavier than the lightest page this board has accepted (1 KB, VIB-2)");
+    expect(measured.endsWith("Nothing was saved: these are the figures as the file stands now.")).toBe(true);
+    expect(JSON.stringify(frontmatter())).toBe(before);
+    expect(captureAudits()).toHaveLength(audits);
+    expect(await measure("notes.md")).toBe(
+      "[noop] `notes.md` is not a page somebody laid out. measure_page measures an .html or .htm file; " +
+        "a markdown file is set as an article in Viberr's own type, so there is nothing of its writer's to measure.",
+    );
   });
 
   it("the next delivery's pictures replace the last one's, a page it no longer holds loses its picture, the rework is credited with none of them, and the earlier delivery keeps its own", async () => {
@@ -619,9 +728,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "good.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `good.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         "`good.html` asked the network for 1 thing (cdn.example.com); a capture loads none, so the picture shows the page without them. " +
@@ -804,7 +914,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // printed cut. CANARY: cut the name where the report is read, before it
     // is compared, and a file that is among the task's files and was left out
     // for its size is said to be "not among this task's files".
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `post.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         `\`post.html\` asked for \`${film.slice(0, 79)}\u2026\`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).`,
@@ -911,7 +1021,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // `capture_page` keeps nothing under a file's name, so it still shows the
     // long-named page; it refuses the two large ones for the same limit.
-    expect(captureNote()!.text.endsWith(
+    expect(ofThePictures(captureNote()!.text).endsWith(
       `The delivery stands without them, and an agent can look at \`${longName}\` with \`capture_page\`.`,
     )).toBe(true);
     await withBrowser("", async () => {
@@ -1056,7 +1166,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // path for a file name in `missingClauses` and `rooted.html` is said to
     // have asked for files "not among this task's files (the folder is
     // flat)", which sends its author looking for a file to add.
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, and `wide.html` as a reader sees them, " +
         "at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
@@ -1114,12 +1224,13 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "notes.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
     // The page spelled the way the store spells it is the one pictured.
     expect(opened()).toEqual(["notes.html"]);
     expect(fake.pages()[0]!.html).toBe("<p>the notes</p>");
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `notes.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         'Viberr could not picture ` notes.html`: its pictures would be kept under the same names as the pictures of "notes.html". ' +
@@ -1148,6 +1259,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "post.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
   });

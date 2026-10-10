@@ -516,7 +516,7 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
         weightBytes: 412380       # pairs a picture with a file only while this stamp is
         files: 9                  # the task's own. A malformed record reads as absent
         loadMs: 1840              # (no picture is drawn; the next delivery's render
-        line: "150 ms latency, 1.6 Mbit/s down"  # rewrites it). `measured` (ruling 328)
+        line: "1.6 Mbit/s down, 150 ms"  # rewrites it). `measured` (ruling 328)
         views:                    # is on an HTML page that was measured as it was
           - view: desktop         # pictured: the bytes of the page and every file it
             faultKinds: 1         # loaded and how many files, its load time on the slow

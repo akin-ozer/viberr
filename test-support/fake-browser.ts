@@ -48,7 +48,8 @@ import { z } from "zod";
  *    not change when they take focus.
  *  - `fake-axe:[...]`: what the accessibility engine finds, answered only
  *    once the engine's script was run in the page (a script that holds the
- *    text `fake-engine`); `fake-axe-throws:"why"` makes it throw.
+ *    text `fake-engine`, or axe-core's own, by its banner, which is the one
+ *    the server names); `fake-axe-throws:"why"` makes it throw.
  *  - `fake-animations:[...]` and `fake-videos:[...]`: what is running a
  *    moment after the load; `fake-animations-reduced:[...]` what still is
  *    when the page was told reduced motion. `fake-sticky:{...}`,
@@ -363,7 +364,7 @@ function evaluate(message) {
       });
     }
     case "engine":
-      engine = message.params.expression.includes("fake-engine");
+      engine = message.params.expression.includes("fake-engine") || message.params.expression.includes("/*! axe v");
       return reply({ result: { type: "boolean", value: true } });
     case "faults": {
       if (!engine) return thrown("TypeError: Cannot read properties of undefined (reading 'run')");
