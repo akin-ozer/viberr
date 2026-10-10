@@ -169,8 +169,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // the pictures hold none of what it hides. CANARY: say nothing and a
       // reference with a pane of terms reads as shown whole.
       expect(note).toContain(
-        "At 1280 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture.\n" +
-          "At 390 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture.\n",
+        "At 1280 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture at that width.\n" +
+          "At 390 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture at that width.\n",
       );
 
       // The answer names the ids and shows no picture.
@@ -448,8 +448,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // A page that scrolls inside one of its elements: said in the answer
       // and in the note, under what moved, in the page's own name for it.
       expect(answer).toContain(
-        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture. " +
-          "At 390 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture.",
+        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box (sizes as laid out): the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture at that width. " +
+          "At 390 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box (sizes as laid out): the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture at that width.",
       );
       const whole = sourcesOf("VIB-1");
       const pictures = whole.length - 1;
@@ -482,7 +482,7 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // that is no id. CANARY: rename ids in the note's text and VIB-2's note
       // names an element the page does not have.
       expect(textOf("VIB-2", taken.note)).toContain(
-        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture.\n" +
+        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box (sizes as laid out): the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture at that width.\n" +
           "At 390 px 3 parts of the page that scroll inside it",
       );
 

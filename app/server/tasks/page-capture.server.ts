@@ -1230,7 +1230,7 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
     const width = widthRemark(shot, code(page.file));
     if (width) remarks.push(width);
   }
-  remarks.push(...scrollsInsideRemarks(page.scrollsInside, code(page.file)));
+  remarks.push(...scrollsInsideRemarks(page.scrollsInside, code(page.file), page.measured !== null));
   if (page.dialogs > 0) remarks.push(`${code(page.file)} opens ${DIALOG_REMARK}`);
   const asked = askedClause(page);
   if (asked) {
@@ -1248,23 +1248,24 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
  * Said of the parts that scroll inside a page, a sentence a width: how many
  * hold more than a screen beyond their box, how much the one that hides the
  * most holds and in how tall a box, as the page lays them out, and that what
- * they hide is in no picture. Only that. The sizes are the layout's, which a
- * zoom or a transform draws at another size. Where such a part sits, and
- * whether the page also scrolls as pages do, the sentence does not say. And
- * the checks read the document, but the one that judges what a reader sees
- * (contrast) skips what an `overflow: hidden` shell keeps out of sight.
- * `subject` is how the sentence names the page: its name in a note, "the
- * page" in a reply.
+ * they hide is in no picture at that width. Only that. The sizes are the
+ * layout's, which a zoom or a transform draws at another size. Where such a
+ * part sits, and whether the page also scrolls as pages do, the sentence
+ * does not say; another width may lay the same page out with nothing hidden.
+ * Where the page was measured (`measured`), it adds what that means for the
+ * figures: the checks that judge what a reader sees skip what a shell keeps
+ * out of sight. `subject` is how the sentence names the page: its name in a
+ * note, "the page" in a reply.
  */
-function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string): string[] {
+function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string, measured: boolean): string[] {
+  const unread = "the checks that judge what a reader sees (contrast, the size of a target) may not have read it";
   return inside.map((entry) => {
     const where = atWidth(entry.view);
     const at = `${where.charAt(0).toUpperCase()}${where.slice(1)}`;
-    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall (sizes as laid out)`;
-    const unread = "the contrast check may not have read it";
+    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall`;
     return entry.count === 1
-      ? `${at} \`${entry.what}\` scrolls inside ${subject}: it ${holds}, and what it hides is in no picture; ${unread}.`
-      : `${at} ${entry.count} parts of ${subject} that scroll inside it each hold more than a screen beyond their box: the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture, and ${unread}.`;
+      ? `${at} \`${entry.what}\` scrolls inside ${subject}: it ${holds} (sizes as laid out), and what it hides is in no picture at that width${measured ? `; ${unread}` : ""}.`
+      : `${at} ${entry.count} parts of ${subject} that scroll inside it each hold more than a screen beyond their box (sizes as laid out): the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture at that width${measured ? `, and ${unread}` : ""}.`;
   });
 }
 
@@ -2019,7 +2020,7 @@ function endedClause(end: EndedView): string {
  *  missing from the task. */
 function loadRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): string[] {
   const parts: string[] = [];
-  parts.push(...scrollsInsideRemarks(page.scrollsInside, "the page"));
+  parts.push(...scrollsInsideRemarks(page.scrollsInside, "the page", page.measured !== null));
   if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
   const asks: string[] = [];
   const asked = askedClause(page);
@@ -2783,8 +2784,9 @@ export type WebPageAnswer =
   | {
       pictures: WebPagePicture[];
       motion: PageMotion | null;
-      /** At each width, the parts of the page that scroll inside it and hide
-       *  more than a screen: what they hide is in no picture of the look. */
+      /** At each width, the parts of the page that scroll inside it and hold
+       *  more than a screen beyond their box: what they hide is in no
+       *  picture of the look at that width. */
       scrollsInside: ScrollsInside[];
     }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
