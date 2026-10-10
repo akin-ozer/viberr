@@ -1249,7 +1249,7 @@ function viewSentences(view: PageMeasured["views"][number]): string[] {
   const firstOf = (names: readonly string[], count: number | undefined): string =>
     count !== undefined && count > names.length ? `${count}, the first ${quoted(names)}` : quoted(names);
   if (!keyboard.ran) {
-    lines.push(`${at} the keyboard's reach was not measured: the page's time ran out before it was.`);
+    lines.push(`${at} the keyboard's reach was not measured: the walk did not finish.`);
   } else if (keyboard.controls === 0) {
     lines.push(`${at} the page has no control for a keyboard to reach.`);
   } else {
@@ -1262,7 +1262,7 @@ function viewSentences(view: PageMeasured["views"][number]): string[] {
     lines.push(parts.length === 0 ? `${at} ${reached}, and each shows a change when it takes focus.` : `${at} ${reached}; ${parts.join("; ")}.`);
   }
   if (!reduced.ran) {
-    lines.push(`${at} what still moves with reduced motion asked for was not measured: the page's time ran out before it was.`);
+    lines.push(`${at} what still moves with reduced motion asked for was not measured: that load did not finish.`);
   } else if (reduced.runningCount === 0 && reduced.videosPlaying === 0) {
     lines.push(`${at}, with reduced motion asked for, nothing still moves.`);
   } else {

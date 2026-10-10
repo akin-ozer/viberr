@@ -561,6 +561,33 @@ describe("a delivered page is pictured (ruling 86)", () => {
     );
   });
 
+  it("ruling 328: a figure says no more than was measured: a list cut to its first few carries its count, a walk that never came round names nothing it did not try, and a check that did not finish is not a clean one", { timeout: REAL_RENDERS_MS }, async () => {
+    // The first measurements said "0 unreached" of a walk that had stopped
+    // at its press limit, kept the length of a list cut to six as the count,
+    // and wrote a check that never ran as a page with nothing wrong.
+    const links = Array.from({ length: 9 }, (_, at) => ["a", `Link ${at}`]);
+    saveFiles("VIB-1", {
+      "many.html": `<p>fake-controls:${JSON.stringify(links)}</p><p>fake-tab-order:[0,1,2,3,4,5,6,7,8]</p><p>fake-unmarked:[0,1,2,3,4,5,6,7,8]</p>`,
+      "long.html": `<p>fake-controls:${JSON.stringify(Array.from({ length: 100 }, (_, at) => ["a", `Item ${at}`]))}</p><p>fake-tab-order:${JSON.stringify(Array.from({ length: 100 }, (_, at) => at))}</p>`,
+      "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>',
+    });
+    const measure = (name: string) =>
+      withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name, runId: null }));
+    // CANARY: print the list the renderer cut and its length, and nine
+    // controls with no focus mark read as six.
+    expect(await measure("many.html")).toContain(
+      'At 1280 px Tab reaches 9 of 9 controls; looking the same with focus as at rest: 9, the first `a "Link 0"`, `a "Link 1"`, `a "Link 2"`, `a "Link 3"`, `a "Link 4"`, and `a "Link 5"`.',
+    );
+    // CANARY: say nothing of a walk that was cut and a page of a hundred
+    // links reads "Tab reaches 80 of 100 controls, and each shows a change".
+    expect(await measure("long.html")).toContain(
+      "At 1280 px Tab reaches 80 of 100 controls; the walk stopped at its press limit, so the controls past it were not tried.",
+    );
+    // CANARY: read a walk that failed as its zeros and the page is said to
+    // have "no control for a keyboard to reach".
+    expect(await measure("throws.html")).toContain("At 1280 px the keyboard's reach was not measured: the walk did not finish.");
+  });
+
   it("the next delivery's pictures replace the last one's, a page it no longer holds loses its picture, the rework is credited with none of them, and the earlier delivery keeps its own", async () => {
     await deliver({ "post.html": "<p>fake-height:3000</p>", "gone.html": "<p>dropped in the rework</p>" });
     const first = frontmatter().deliveredAt!;
