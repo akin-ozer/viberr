@@ -25,7 +25,7 @@ import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 import { effectiveCollabMode } from "~/server/tasks/agent-outcome.server";
 import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
-import { KEEP_PAGE_LOOK_TOOL, PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, TASK_SOURCE_TOOL } from "~/server/mcp-proxy/board-tool.server";
+import { KEEP_PAGE_LOOK_TOOL, PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL } from "~/server/mcp-proxy/board-tool.server";
 import { PAGE_CAPTURE_VIEWS } from "~/shared/page-capture";
 
 const ctx = createTestDbContext();
@@ -442,7 +442,8 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // pass; drop "and nothing else", and a maker types a project of its own
     // into the running product and keeps the screenshot as its own proof;
     // drop what the product makes of it from the Reviewer's, and no honest
-    // picture of a command's output can be approved.
+    // picture of a command's output can be approved; drop the kept run from
+    // either, and a screen drawn in markup passes with totals nobody ran.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const developer = said(dataRoot, "developer-expertise");
@@ -453,29 +454,34 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(developer).toContain(
       `What a picture of the product itself shows comes from one of two places, each kept with \`keep_source\` like any statement: the product's ${demo}, or ${gift} on the task. ` +
         "Give the product that and nothing else: whatever else you put into it or draw in for the picture is made up, whatever it is marked as. " +
-        "What the product makes of it (its output, a count, a date) is the product's own; where the picture is drawn from a run and not taken of it, keep the run's output too. " +
+        "What the product makes of it (its output, a total, a date) is the product's own; " +
+        "where the picture is drawn from a run and not taken of it, keep the run's output too, and draw in nothing that output does not show. " +
         "A person's live data goes in only when they gave it for this. " +
         "Where neither place holds anything, see what another task of the board keeps of either (`read_task_source` with its key); " +
-        "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they give.",
+        "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they give; " +
+        "where they give none, leave the picture out.",
     );
     // The reviewer holds what the product was given to the same two places,
     // wherever on the board the source is kept (a source of another task
-    // can be read from this one and cannot be kept again on it), and takes
-    // the rest for the product's.
+    // can be read from this one and cannot be kept again on it), takes the
+    // rest for the product's, and holds a drawn picture to the run the
+    // maker kept: only that run tells an honest transcript from an invented
+    // one.
     expect(reviewer).toContain(
-      "What a picture of the product itself shows rests on a kept source like any statement, on this task or another of the board's: " +
-        `what the product was given is its ${demo} or ${gift}, and the rest is what the product itself made of that (its output, a count, a date). ` +
-        "A name, a title or a figure put in from neither place was made up for the picture, whatever it is marked as, and is a finding; so is a person's live data they did not give for it.",
+      "What a picture of the product itself shows rests on a kept source like any statement, on this task or another of the board's. " +
+        `What the product was given comes from its ${demo} or from ${gift}: ` +
+        "a name, a title or a figure given to it from neither was made up for the picture, whatever it is marked as, and is a finding, " +
+        "and so is a person's live data they did not give for it. " +
+        "The rest is what the product itself made of that (its output, a total, a date): " +
+        "where the picture is drawn and not taken of the running product, hold the rest to the kept output of a run, and what that output does not show is a finding too.",
     );
     // And to the same two kinds of picture the maker is.
     expect(developer).toContain("A picture on it is the product itself, running, or it explains the product: never a drawing of a screen that does not exist, or a stock picture.");
     expect(reviewer).toContain("Every picture is the product or explains it: a drawing of a screen the product does not have, or a stock picture, is a finding.");
-    // The maker's sentence rests on a reader that takes another task's key,
-    // and on two things the seeded Developer may do: ask the person, which
-    // the catalog grants it, and keep a source, which the catalog leaves to
-    // that grant's default. CANARY: move "Ask the human a question" from the
-    // profile's `direct` list to its `forbidden`.
-    expect(argsOf(TASK_SOURCE_TOOL)).toContain("taskKey");
+    // The maker's sentence rests on two things the seeded Developer may do:
+    // ask the person, which the catalog grants it, and keep a source, which
+    // the catalog leaves to that grant's default. CANARY: move "Ask the
+    // human a question" from the profile's `direct` list to its `forbidden`.
     const granted = SEED_AGENT_PROFILES.find((profile) => profile.frontmatter.id === "developer")!.frontmatter.capabilities;
     expect(effectiveCollabMode(granted, "ask-human")).toBe("direct");
     expect(effectiveCollabMode(granted, "attach-evidence-references")).toBe("direct");
