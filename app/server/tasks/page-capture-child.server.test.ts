@@ -1504,12 +1504,14 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
 
   it("goes on through a part that may hold stops of its own for as long as it keeps focus, and says a walk was cut only when a control is left that it never came to", async () => {
     const [held, full, edge, wrap] = await walked({
-      // A date field is three stops and one element, a frame holds stops of
-      // its own, and a card's own buttons stand before and after the button
-      // set into it: focus is on the card, on the button, on the card again.
+      // A date field is four stops and one element (the page says it holds
+      // stops of its own: a plain field with focus at four presses running
+      // would be where the walk stops), a frame holds stops of its own, and
+      // a card's own buttons stand before and after the button set into it:
+      // focus is on the card, on the button, on the card again.
       "held.html": declares(
         'fake-controls:[["a","Home"],["input","Date of birth"],["a","Terms"],["button","Send"],["a","Privacy"]]',
-        'fake-tab-order:[0,1,1,1,["iframe","A map"],["iframe","A map"],2,["x-card","Card"],3,["x-card","Card"],4]',
+        'fake-tab-order:[0,1,1,1,1,["iframe","A map"],["iframe","A map"],2,["x-card","Card"],3,["x-card","Card"],4]',
         "fake-tab-holds:[1]",
         "fake-unmarked:[1]",
       ),
@@ -1528,10 +1530,10 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // field are named as never reached, which Tab reaches every one of. Take
     // only a stop met again after another for it and "Privacy" is, since
     // focus comes back to the card. Count a control at each press it holds
-    // focus and the date field is listed three times over.
+    // focus and the date field is listed four times over.
     expect(held!.walk).toEqual({ ...clean, controls: 5, stops: 5, unmarked: ['input "Date of birth"'], unmarkedCount: 1 });
     // To the last control, and no further.
-    expect(held!.presses).toBe(11);
+    expect(held!.presses).toBe(12);
     // A walk that has come to every control has nothing left to find, at
     // whatever press. CANARY: say `cut` of every walk that used its last
     // press and a page whose eighty controls Tab reaches every one of is
@@ -1565,7 +1567,8 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       "dialog-wraps.html": declares(...dialog, "fake-tab-trap:0"),
       // A field that takes one Tab for itself and lets the next through, as
       // a list that opens on focus does to pick its option.
-      "once.html": declares('fake-controls:[["a","Docs"],["input","City"],["button","Go"],["a","Help"]]', "fake-tab-order:[0,1,1,2,3]"),
+      // The button after it keeps two.
+      "once.html": declares('fake-controls:[["a","Docs"],["input","City"],["button","Go"],["a","Help"]]', "fake-tab-order:[0,1,1,2,2,2,3]"),
     });
     // A link, a button or a text field holds no stop but itself, so one
     // that has focus at four presses running keeps the key. CANARY: press on
@@ -1576,9 +1579,11 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // Twice running is one stop still being crossed: the third press goes
     // on. CANARY: take two presses running for a field that keeps the key
     // and the button and the link after this one are named as never
-    // reached, which the next two presses reach.
+    // reached, which the next presses reach. The count starts again at each
+    // element: go on counting from the field into the button and the link
+    // after the button is named.
     expect(once!.walk).toEqual({ ...clean, controls: 4, stops: 4 });
-    expect([keeps!.presses, once!.presses]).toEqual([5, 5]);
+    expect([keeps!.presses, once!.presses]).toEqual([5, 7]);
     // One page, one report, however the browser ends its order.
     const behind = { ...clean, controls: 3, stops: 1, unreached: ['a "Home"', 'a "About"'], unreachedCount: 2 };
     expect(off!.walk).toEqual(behind);
