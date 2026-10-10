@@ -383,6 +383,41 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "9e5360754136f8feeeb5a3c14813e3ac4dbf8a49e2145edc26e619896e0ddbc9", {})).toBe(true);
   });
 
+  it("has whoever makes and whoever judges work made to a kept look say what differs, and take a placeholder or an unreadable word for unfinished", () => {
+    // The second board's first page was approved by a review that had looked
+    // at the page and at every kept picture of the look: the product's
+    // screens were drawn with untitled cards, empty pills and grey bars for
+    // lines, and at the phone width one was the desktop's, shrunk until its
+    // labels stood 5 px high. The review named the blanks and let them stand
+    // as showing nothing the board's facts did not hold, and nothing asked
+    // either agent to say what differed from the kept pictures.
+    // CANARY: drop any sentence below from either manual, or either outgoing
+    // hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    // One list of what a look is judged on, the same for both.
+    const judgedOn = "layout and rhythm, the scale and weight of type, colour and contrast, depth, density, how the product is shown, what moves";
+    expect(developer).toContain(`set your own beside them, section by section at each width, on each of: ${judgedOn}. Say in your report what still differs on each and why you left it.`);
+    expect(reviewer).toContain(`set the two side by side at each width, section by section: ${judgedOn}.`);
+    expect(reviewer).toContain(
+      "Your report says, for each section at each width, what differs from them on each of those seven, or that it is the same there: a difference you do not name is one you did not see. " +
+        "An approval lists every difference it leaves standing and why it is not a finding.",
+    );
+    expect(judgedOn.split(", ")).toHaveLength(7);
+    // A placeholder is neither content nor honesty about its absence, and a
+    // word nobody can read says nothing: unfinished to the maker, a finding
+    // to the judge, in the same words.
+    const placeholder = (verdict: string) =>
+      `Nothing stands where content belongs: an empty box, a bar or a blank label in place of what a reader expects there is ${verdict}, in a picture of the product as anywhere else. ` +
+      "At each width a reader can read every word on it, the words inside a picture included.";
+    expect(developer).toContain(placeholder("unfinished work"));
+    expect(reviewer).toContain(placeholder("a finding"));
+    expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614", {})).toBe(true);
+    expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4", {})).toBe(true);
+  });
+
   it("has the guide plan a page on Viberr's own pictures, widths and figures, as files when nobody named a repository, and as one task", () => {
     // The first board asked for a page was planned as four pull-request tasks
     // (27 runs and $24.93 before a section of the page existed), with a

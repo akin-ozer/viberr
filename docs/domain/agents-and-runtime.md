@@ -1705,8 +1705,11 @@ write grant.
    not recorded" names each page, width and picture the run did not open, says the review
    runs again, and stands in for the "no verdict" note; a check that cannot be made is
    answered the same way. A `request_changes` owes no look, and neither does a markdown
-   file or a delivery that is a revision. The run is told what its approval owes before it
-   starts (`pageLooksNote`, in the collaboration notes on both backends).
+   file. The run is told what its approval owes before it starts (`pageLooksNote`, in the
+   collaboration notes on both backends), and, where the task keeps a look, that its
+   verdict says what differs from the kept pictures, section by section at each width,
+   and that an approval says why each difference it leaves standing is no finding
+   (ruling 178: asked for, not checked).
 4. Question → packet using the live ask grant; evidence rows are written; browser
    working artifacts not cited are pruned (ruling 78). Ruling 78: the run's workspace
    candidates (its `workdir`, `workspace/<repoName>`, `workspace/repo`, `workspace`) are

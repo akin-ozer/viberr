@@ -626,6 +626,11 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    // Ruling 178 (2026-10-10, the second board's first page): before the
+    // manual had the maker say what still differs from a kept look on each
+    // thing a look is judged on, and said that a placeholder where content
+    // belongs, or a word a reader cannot read, is unfinished work.
+    "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614",
     // Ruling 86 (2026-10-10): before the manual said that where the
     // project's gates build the site a page is asked for by its path in the
     // built site, and that a review is shown the gates' build.
@@ -697,6 +702,12 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 178 (2026-10-10, the second board's first page): before the
+    // manual had a review say what differs from a kept look, section by
+    // section, and an approval say why each difference it leaves is no
+    // finding; and before a placeholder where content belongs, or a word a
+    // reader cannot read, was a finding.
+    "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4",
     // Ruling 86 (2026-10-10): before the manual said that where the
     // project's gates build the site the pages judged are the ones the gates
     // built of the delivered revision.

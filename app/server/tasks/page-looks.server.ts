@@ -603,7 +603,8 @@ export function pageLooksNote(owed: PageLooksOwed): string {
     `- An approval here binds only from a run that looked. Before you approve, look at ${parts.join(", and at ")}. ` +
     howToLook({ pages: owed.pages.length > 0 || owed.pending !== null, looks: owed.looks.length > 0 }) +
     (owed.looks.length > 0
-      ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it."
+      ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it." +
+        " Your verdict says what differs from them, section by section at each width, and an approval says why each difference it leaves standing is no finding."
       : "") +
     " An approval from a run that did not look is not recorded, and the review runs again. A `request_changes` owes no look." +
     (owed.measured.length > 0

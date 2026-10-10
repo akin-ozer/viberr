@@ -755,7 +755,9 @@ pictures: pictures a keep that failed left with no note are no look, and the nex
 takes them up. The address reads differently by the next review and a description is its
 writer's reading, so neither is what a result is held to.
 A later task of the same work takes the look over (`from`) and is held to the same
-pictures.
+pictures. Whoever makes the work says in its report what still differs from them, and a
+review says what differs, section by section at each width; an approval says why each
+difference it leaves standing is no finding (ruling 178).
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned

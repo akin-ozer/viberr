@@ -2323,6 +2323,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       const page = await prompt("critic", ["index.html", "styles.css"]);
       expect(page, backend).toContain(`${PAGE}. A page is looked at with \`capture_page\``);
       expect(page, backend).not.toContain("kept pictures section by section");
+      expect(page, backend).not.toContain("Your verdict says what differs");
       // Prose and its notes: an approval there owes no look, and none is asked.
       expect(await prompt("critic", ["notes.md"]), backend).not.toContain("binds only from a run that looked");
     }
@@ -2359,6 +2360,13 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     const withLook = await prompt("critic", ["index.html"]);
     expect(withLook).toContain(`${PAGE}${LOOK}`);
     expect(withLook).toContain("never the address as it reads today and never anyone's description of it");
+    // A review of work made to a kept look says what differs from it, and the
+    // run is told so before it starts. CANARY: drop the sentence from
+    // `pageLooksNote` and a review that looked at both may approve without a
+    // word on what it saw differ, as the second board's did.
+    expect(withLook).toContain(
+      "Your verdict says what differs from them, section by section at each width, and an approval says why each difference it leaves standing is no finding.",
+    );
     // The run that delivers judges nothing, and is told nothing about approving.
     expect(await prompt("dev", ["index.html"], true)).not.toContain("binds only from a run that looked");
     });
