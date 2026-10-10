@@ -1413,10 +1413,11 @@ function stickyExpression(screen: ScreenSize): string {
  * a clamped paragraph) is nothing a reader can scroll. The window's own
  * scroller is not a part of the page, and neither is a `body` whose overflow
  * the browser hands to the window, which it does unless the root element has
- * an overflow of its own. Measured on Chrome 153: a `body` of one screen with
- * `overflow: auto` under a plain root had a scroll height of five screens and
- * the window scrolled them all; under a root with `overflow: hidden` the same
- * `body` scrolled inside a window one screen tall.
+ * an overflow of its own. Measured on Chrome 153 and Debian Chromium 154: a
+ * `body` of one screen with `overflow: auto` under a plain root had a scroll
+ * height of several screens and the window scrolled them all; under a root
+ * with `overflow: hidden` the same `body` scrolled inside a window one screen
+ * tall.
  */
 function innerExpression(screen: ScreenSize): string {
   return inPage(
@@ -2478,8 +2479,9 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
  * Tab only goes where it has been. That is the first stop on a page that
  * sends focus round, and it is any other on a page that traps the keyboard,
  * where the controls past the trap are the ones to name. Measured on a real
- * trap (Chrome 153): Tab went from its last button back to its first for as
- * many presses as were made, and never to the links after it.
+ * trap (Chrome 153 and Debian Chromium 154): Tab went from its last button
+ * back to its first for as many presses as were made, and never to the links
+ * after it.
  *
  * What is counted is the page's own controls, the ones `noted`: a stop that
  * is none of them (a box that scrolls, a frame, something editable) is where

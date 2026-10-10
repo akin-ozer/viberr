@@ -47,7 +47,15 @@
 #   - ruling 328: a page with one low-contrast line, one picture with no
 #     `alt`, one control that hides its focus ring and one animation that
 #     ignores reduced motion is measured as having each, at its true weight,
-#     with a load time on the slow line that the weight accounts for;
+#     with a load time on the slow line that the weight accounts for, and
+#     each check says it ran. The keyboard walk counts only the page's own
+#     controls (a box to write in takes focus and is not one), names the
+#     controls past a keyboard trap with how many there are in all, and says
+#     it was cut on a page with more stops than it presses Tab;
+#   - a page fixed to its screen whose content scrolls in a part of it is
+#     pictured as its one screen and reported as scrolling inside, with how
+#     much that part holds; a part that only hides what does not fit, and a
+#     body whose overflow is the window's, are not;
 #   - any agent uid reads the picture the renderer saved, so a run of another
 #     person than the task's owner can copy it onto the task;
 #   - the renderer reads its pages from a folder it can only pass through, the
@@ -107,7 +115,7 @@ cleanup() {
   [ -n "$site" ] && kill "$site" 2>/dev/null
   if [ -d "$WORK" ]; then
     # What the agent wrote is the agent's to remove (ruling 140).
-    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/web' '$SCRATCH/closed' '$SCRATCH/states' '$SCRATCH/long' '$SCRATCH/measured' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
+    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/web' '$SCRATCH/closed' '$SCRATCH/states' '$SCRATCH/long' '$SCRATCH/measured' '$SCRATCH/walks' '$SCRATCH/inside' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
     rm -rf "$WORK" 2>/dev/null
   fi
 }
@@ -426,7 +434,11 @@ once(document.querySelectorAll("section")[4], () => { const tail = document.crea
   // A page to measure: one line too faint to read, one picture with no
   // `alt`, one button that hides its focus ring, one animation that goes on
   // when reduced motion is asked for beside one that stops, and a picture of
-  // a known weight.
+  // a known weight. Besides its three controls it has a link left out of the
+  // tab order, a link in a part made inert, and a box to write in, which
+  // takes focus and is no control: when it does, the page adds a second
+  // picture with no `alt`, so the engine, which runs after the walk, says
+  // whether the walk stopped there.
   writeFileSync(path.join(dir, "heavy.png"), heavyPng(300000));
   writeFileSync(
     path.join(dir, "measured.html"),
@@ -442,8 +454,61 @@ main{min-height:1600px}</style></head><body><main>
 <h1>A page to measure</h1><p class="faint">A line too faint to read</p>
 <img src="heavy.png" width="200" height="100">
 <p><a href="#docs">Docs</a> <button class="bare">No ring</button> <button>Ringed</button> <a href="#aside" tabindex="-1">Left out on purpose</a></p>
+<p inert><a href="#off">Switched off</a></p>
+<div id="notes" contenteditable="true" style="min-height:24px">Notes go here</div>
 <div class="loader"></div><div class="polite"></div>
-</main></body></html>`,
+</main>
+<script>document.getElementById("notes").addEventListener("focus", () => { const added = new Image(1, 1); added.src = "heavy.png"; document.querySelector("main").append(added); }, { once: true });</script>
+</body></html>`,
+  );
+  // A page that traps the keyboard: from its "Close" button Tab goes back to
+  // "Open", so the eight links after it are never reached. The seven buttons
+  // before it hide their focus ring.
+  writeFileSync(
+    path.join(dir, "trapped.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A keyboard trap</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}button.bare:focus{outline:none}</style></head><body>
+<p><a href="#start">Start</a></p>
+<p>${Array.from({ length: 7 }, (_, n) => `<button class="bare">Bare ${n + 1}</button>`).join(" ")}</p>
+<p><button id="open">Open</button> <button id="close">Close</button></p>
+<p>${Array.from({ length: 8 }, (_, n) => `<a href="#after-${n + 1}">After ${n + 1}</a>`).join(" ")}</p>
+<script>document.getElementById("close").addEventListener("keydown", (event) => { if (event.key === "Tab" && !event.shiftKey) { event.preventDefault(); document.getElementById("open").focus(); } });</script>
+</body></html>`,
+  );
+  // A page with more stops than a walk presses Tab: a hundred links.
+  writeFileSync(
+    path.join(dir, "many.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A hundred links</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}</style></head><body>
+<p>${Array.from({ length: 100 }, (_, n) => `<a href="#link-${n + 1}">Link ${n + 1}</a>`).join(" ")}</p>
+</body></html>`,
+  );
+  // A page fixed to its screen, its content in a part that scrolls: five
+  // screens of 800 px in a `main` one screen tall.
+  const screens = (count) => [[255, 0, 0], [0, 128, 0], [0, 0, 255], [255, 255, 0], [0, 255, 255]].slice(0, count).map((c) => '<section style="height:800px;background:rgb(' + c.join(",") + ')"></section>').join("");
+  writeFileSync(
+    path.join(dir, "inside.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>An app in a shell</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{height:100%;margin:0;overflow:hidden}main.app{height:100vh;overflow-y:auto}</style></head><body>
+<main class="app">${screens(5)}</main></body></html>`,
+  );
+  // The same five screens in a `body` that scrolls by itself: its root has
+  // an overflow of its own, so the browser does not hand the body's to the
+  // window.
+  writeFileSync(
+    path.join(dir, "shell.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A body that scrolls</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html{height:100%;overflow:hidden}body{height:100%;margin:0;overflow:auto}</style></head><body>
+${screens(5)}</body></html>`,
+  );
+  // A page that only looks as if it scrolled inside: a folded part that
+  // hides four screens nobody can scroll to, and a `body` told to scroll,
+  // which the browser hands to the window.
+  writeFileSync(
+    path.join(dir, "folded.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A folded part</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{height:100vh;margin:0;overflow:auto}.fold{max-height:0;overflow:hidden}</style></head><body>
+<div class="fold">${screens(4)}</div>${screens(3)}</body></html>`,
   );
   // A drawing, saved with a byte order mark and an XML declaration, sized to
   // its box in percent: a line half a CSS px wide, and a picture beside it.
@@ -598,6 +663,35 @@ if (command === "job-measured") {
       views: [DESKTOP, PHONE],
       measure: true,
       axe: engine,
+    }),
+  );
+}
+
+if (command === "job-walks") {
+  // Measured with no engine named: the keyboard's walk is what is asked.
+  const [work, browser] = args;
+  process.stdout.write(
+    jobIn(work, browser, "walks", {
+      pages: [
+        { file: "trapped.html", kind: "html" },
+        { file: "many.html", kind: "html" },
+      ],
+      views: [DESKTOP],
+      measure: true,
+    }),
+  );
+}
+
+if (command === "job-inside") {
+  const [work, browser] = args;
+  process.stdout.write(
+    jobIn(work, browser, "inside", {
+      pages: [
+        { file: "inside.html", kind: "html" },
+        { file: "folded.html", kind: "html" },
+        { file: "shell.html", kind: "html" },
+      ],
+      views: [DESKTOP, PHONE],
     }),
   );
 }
@@ -780,6 +874,7 @@ if (command === "verify-long") {
     return next === 5 * screen + 100 && shots.every((shot) => shot.cut === false && shot.contentHeight === next) ? "" : `they end at ${next}`;
   };
   check(long.error === null, "a page five screens long is pictured whole and moving", long.error ?? "");
+  check(long.scrollsInside === null, "and, scrolling as pages do, is not said to scroll inside itself", JSON.stringify(long.scrollsInside));
   check(
     long.shots.filter((shot) => shot.view === "desktop").map((shot) => shot.file).join(" ") === "1-desktop.png 1-desktop-s2.png 1-desktop-s3.png",
     "a whole view comes back as its stretches, as many as the page takes",
@@ -829,7 +924,13 @@ if (command === "verify-measured") {
   for (const view of measured?.views ?? []) {
     const kinds = new Map(view.faults.kinds.map((kind) => [kind.id, kind]));
     check(view.faults.ran === true, `the accessibility engine ran in the page (${view.view})`, String(view.faults.why));
-    check(kinds.get("image-alt")?.count === 1 && kinds.get("image-alt")?.impact === "critical", "it found the one picture with no alt", JSON.stringify(view.faults.kinds));
+    // Two: the page's own, and the one its box to write in adds when it takes
+    // focus. The engine runs after the walk, so that box was a stop of it.
+    check(
+      kinds.get("image-alt")?.count === 2 && kinds.get("image-alt")?.impact === "critical",
+      "it found the picture with no alt, and the one the page adds when its box to write in takes focus",
+      JSON.stringify(view.faults.kinds),
+    );
     check(
       kinds.get("color-contrast")?.count === 1 && kinds.get("color-contrast")?.first.join() === ".faint",
       "and the one line of low contrast",
@@ -840,15 +941,20 @@ if (command === "verify-measured") {
       "whose ratio and words it reports",
       JSON.stringify(view.faults.worstContrast),
     );
+    check(view.keyboard.ran === true && view.keyboard.cut === false, "the keyboard walk was made, all the way round", JSON.stringify(view.keyboard));
     check(
-      view.keyboard.controls === 3 && view.keyboard.stops === 3 && view.keyboard.unreached.length === 0,
-      "Tab reaches each of the three controls a keyboard should, and the one left out on purpose is not counted",
+      view.keyboard.controls === 3 && view.keyboard.stops === 3 && view.keyboard.unreached.length === 0 && view.keyboard.unreachedCount === 0,
+      "Tab stops on each of the page's three controls and is said to: the box that also took focus is none of them, nor is the link left out on purpose or the one in a part made inert",
       JSON.stringify(view.keyboard),
     );
-    check(view.keyboard.unmarked.join("|") === 'button "No ring"', "the one control that hides its focus ring is the one said to be unmarked", JSON.stringify(view.keyboard.unmarked));
     check(
-      view.reduced.runningCount === 1 && view.reduced.running[0]?.target === "div.loader" && view.reduced.running[0]?.loops === true,
-      "with reduced motion asked for, the animation that ignores it is still running and the one that honours it is not",
+      view.keyboard.unmarked.join("|") === 'button "No ring"' && view.keyboard.unmarkedCount === 1,
+      "the one control that hides its focus ring is the one said to be unmarked",
+      JSON.stringify(view.keyboard),
+    );
+    check(
+      view.reduced.ran === true && view.reduced.runningCount === 1 && view.reduced.running[0]?.target === "div.loader" && view.reduced.running[0]?.loops === true,
+      "with reduced motion asked for, the page was read: the animation that ignores it is still running and the one that honours it is not",
       JSON.stringify(view.reduced),
     );
   }
@@ -861,6 +967,78 @@ if (command === "verify-measured") {
     `${measured?.loadMs} ms on ${measured?.line}`,
   );
   check(page.motion?.runningCount === 2, "and what moves on it is read too: both animations, with no preference asked", JSON.stringify(page.motion?.running));
+  done();
+}
+
+if (command === "verify-walks") {
+  const [work] = args;
+  const { check, pages, done } = outcomeOf(work, "walks");
+  const [trapped, many] = pages;
+  const walk = (page) => page.measured?.views[0]?.keyboard;
+  const numbered = (kind, word, count) => Array.from({ length: count }, (_, n) => `${kind} "${word} ${n + 1}"`).join("|");
+  check(trapped.error === null && many.error === null && trapped.shots.length === 1 && many.shots.length === 1, "two pages are pictured and their keyboard walks made", `${trapped.error} / ${many.error}`);
+  check(
+    trapped.measured?.views[0]?.faults.ran === false && trapped.measured?.views[0]?.faults.why === "no accessibility engine is installed",
+    "with no engine named the accessibility check says it did not run, and why",
+    JSON.stringify(trapped.measured?.views[0]?.faults),
+  );
+  // Start, seven bare buttons, Open and Close: ten of eighteen. Then Tab
+  // goes back to Open.
+  check(
+    walk(trapped)?.ran === true && walk(trapped)?.cut === false && walk(trapped)?.controls === 18 && walk(trapped)?.stops === 10,
+    "a walk into a keyboard trap ends where Tab starts going round, and is no cut walk",
+    JSON.stringify(walk(trapped)),
+  );
+  check(
+    walk(trapped)?.unreached.join("|") === numbered("a", "After", 6) && walk(trapped)?.unreachedCount === 8,
+    "the links past the trap are named as never reached: six of them, and that there are eight",
+    JSON.stringify(walk(trapped)),
+  );
+  check(
+    walk(trapped)?.unmarked.join("|") === numbered("button", "Bare", 6) && walk(trapped)?.unmarkedCount === 7,
+    "the buttons that hide their focus ring are named: six of them, and that there are seven",
+    JSON.stringify(walk(trapped)),
+  );
+  check(
+    walk(many)?.ran === true && walk(many)?.cut === true && walk(many)?.controls === 100 && walk(many)?.stops === 80,
+    "a walk of a page with a hundred links stops at its eightieth press and says it was cut",
+    JSON.stringify(walk(many)),
+  );
+  check(
+    walk(many)?.unreached.length === 0 && walk(many)?.unreachedCount === 0 && walk(many)?.unmarkedCount === 0,
+    "and names none of the twenty it did not get to as never reached: each of them can be",
+    JSON.stringify(walk(many)),
+  );
+  done();
+}
+
+if (command === "verify-inside") {
+  const [work] = args;
+  const { check, pages, picture, done } = outcomeOf(work, "inside");
+  const [inside, folded, shell] = pages;
+  const shot = (page, view) => page.shots.find((entry) => entry.view === view);
+  const desktop = picture("1-desktop.png");
+  check(
+    inside.error === null && desktop?.height === 800 && shot(inside, "desktop")?.contentHeight === 800 && shot(inside, "desktop")?.cut === false && desktop?.at(640, 400) === "255,0,0",
+    "a page fixed to its screen, its content in a part that scrolls, is pictured as the one screen it lays out as",
+    `${inside.error} ${desktop?.width}x${desktop?.height} ${JSON.stringify(shot(inside, "desktop"))}`,
+  );
+  check(
+    inside.scrollsInside?.what === "main.app" && inside.scrollsInside?.height === 4000,
+    "and the report says what scrolls inside it and how much that holds: five screens no picture shows",
+    JSON.stringify(inside.scrollsInside),
+  );
+  check(
+    folded.error === null && folded.scrollsInside === null,
+    "a part that only hides what does not fit, and a body whose overflow is the window's, are not said to scroll inside the page",
+    `${folded.error} ${JSON.stringify(folded.scrollsInside)}`,
+  );
+  check(picture("2-desktop.png")?.height === 2400 && shot(folded, "desktop")?.cut === false, "and that page is pictured whole, its three screens", `${picture("2-desktop.png")?.height}`);
+  check(
+    shell.error === null && shell.scrollsInside?.what === "body" && shell.scrollsInside?.height === 4000 && picture("3-desktop.png")?.height === 800,
+    "a body that scrolls by itself, under a root with an overflow of its own, is said to scroll inside a page of one screen",
+    `${shell.error} ${JSON.stringify(shell.scrollsInside)} ${picture("3-desktop.png")?.height}`,
+  );
   done();
 }
 
@@ -1169,6 +1347,14 @@ else
 fi
 further measured "pictured and measured a page" "$ENGINE"
 "$NODE" "$WORK/check.mjs" verify-measured "$WORK" || failures=$((failures + 1))
+# How a keyboard gets round two pages it cannot get all the way round: one
+# that traps it, one with more stops than a walk presses Tab.
+further walks "measured a page that traps the keyboard and one too long to walk round"
+"$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
+
+# --- a page that scrolls inside itself ---------------------------------------------
+further inside "pictured two pages that scroll inside themselves and one that only looks as if it did"
+"$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
 left=0
