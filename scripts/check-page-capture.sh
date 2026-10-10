@@ -36,9 +36,11 @@
 #     is open in the picture, though it shuts when its window is resized), one
 #     under the pointer and one focused with Tab have the styles their
 #     `:hover` and `:focus-visible` rules give, a press lands on a page a
-#     phone shrinks, and an act that finds nothing says what the controls
-#     there are called; `reduce` makes the page's own media query true, and a
-#     view without it false;
+#     phone shrinks, one that moves to another file of the task is pictured
+#     where it led and one that leaves for another site is the act's own
+#     failure, and an act that finds nothing says what the controls there are
+#     called; `reduce` makes the page's own media query true, and a view
+#     without it false;
 #   - a whole view of a page five screens long comes back as every stretch, in
 #     order, covering it, with what loads only at its end; a moving view comes
 #     back as three frames of a page that moved between them;
@@ -354,8 +356,9 @@ for (const [family, fallback] of [["Inter Variable", "monospace"], ["Inter", "mo
   // reader asked for at each width, a press on its menu button and whether a
   // person's finger could have made it, and the styles its own rules gave a
   // control under the pointer and one that took focus. The menu shuts when
-  // the window is resized, as many do. And it holds a `menu` element, which
-  // the word "Menu" is also the selector of.
+  // the window is resized, as many do. It holds a `menu` element, which the
+  // word "Menu" is also the selector of, a link to another file of the task
+  // and a link to another site.
   writeFileSync(
     path.join(dir, "states.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -370,7 +373,8 @@ header{position:relative;height:60px;background:rgb(20,20,20)}
 #panel.open{display:block}
 menu{margin:0;padding:0;height:20px}main{height:1500px}</style></head><body>
 <header><button id="toggle">Menu</button><a id="docs" href="#docs">Docs</a></header>
-<div id="panel"></div><main><menu></menu></main>
+<div id="panel"></div><main><menu></menu>
+<p style="margin:300px 20px 0"><a href="shrunk.html">Next page</a> <a href="https://example.com/away">Away</a></p></main>
 <script>
 const mark = (name) => { new Image().src = name; };
 const numbers = (colour) => colour.match(/[0-9]+/g).join("-");
@@ -561,6 +565,8 @@ if (command === "job-states") {
         act("hover", DESKTOP, { hover: "Menu" }),
         act("keys", DESKTOP, { tab: 2 }),
         act("none", DESKTOP, { press: "Pricing" }),
+        act("next", DESKTOP, { press: "Next page" }),
+        act("away", DESKTOP, { press: "Away" }),
         act("thumb", PHONE, { press: "Menu" }),
       ],
     }),
@@ -724,12 +730,24 @@ if (command === "verify-states") {
   check(picture("1-keys-a.png")?.at(197, 30) === "255,0,255", "which is how it is pictured", String(picture("1-keys-a.png")?.at(197, 30)));
 
   check(
-    act(states, "none")?.done === null && act(states, "none")?.error === 'nothing at this width is called "Pricing". The controls on it: "Menu", "Docs"',
+    act(states, "none")?.done === null &&
+      act(states, "none")?.error === 'nothing at this width is called "Pricing". The controls on it: "Menu", "Docs", "Next page", "Away"',
     "an act that finds nothing says so, with what the controls there are called",
     JSON.stringify(act(states, "none")),
   );
   check(!existsSync(path.join(out, "1-none-a.png")) && !states.shots.some((shot) => shot.view === "none"), "and takes no picture");
-  check(states.shots.length === 6, "every other view of the page is pictured", states.shots.map((shot) => shot.file).join(" "));
+  // The other page has no dark bar across its top.
+  check(
+    act(states, "next")?.done === 'pressed link "Next page"' && picture("1-next-a.png")?.at(640, 30) === "255,255,255",
+    "a press that moves to another file of the task is pictured where it led",
+    `${JSON.stringify(act(states, "next"))} ${picture("1-next-a.png")?.at(640, 30)}`,
+  );
+  check(
+    act(states, "away")?.done === null && act(states, "away")?.error === "the press sent the browser to another address" && !existsSync(path.join(out, "1-away-a.png")),
+    "a press that leaves for another site is that act's own failure, and takes no picture",
+    JSON.stringify(act(states, "away")),
+  );
+  check(states.shots.length === 7, "every other view of the page is pictured", states.shots.map((shot) => shot.file).join(" "));
 
   // A phone lays this page out 980 px wide and shrinks it to its screen.
   const thumb = shrunk.shots.find((shot) => shot.view === "thumb");
@@ -1132,8 +1150,8 @@ further closed "pictured a task page after it"
 "$NODE" "$WORK/check.mjs" verify-closed "$WORK" "$PORT" || failures=$((failures + 1))
 
 # --- a page in a state -----------------------------------------------------------
-# `capture_page` with an act, or with reduced motion: two pages, seven views.
-further states "showed two pages in seven states each"
+# `capture_page` with an act, or with reduced motion: two pages, nine views.
+further states "pictured two pages at nine views each, in a state or with reduced motion"
 "$NODE" "$WORK/check.mjs" verify-states "$WORK" || failures=$((failures + 1))
 
 # --- a whole page, and a page while it moves ---------------------------------------

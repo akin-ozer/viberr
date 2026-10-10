@@ -1267,6 +1267,15 @@ const ANIMATIONS_EXPRESSION = inPage(
 `,
 );
 
+/** A screen in the page's own CSS px: the view's, over the scale a phone
+ *  shrank the page by. The expressions that need it are handed it, as the
+ *  walk is handed its step: this process set the viewport, and nothing reads
+ *  it back from the page. */
+interface ScreenSize {
+  width: number;
+  height: number;
+}
+
 /**
  * Walk the page one screen at a time and count the elements that begin to
  * animate on the way: the ones with a running animation or transition at a
@@ -1276,10 +1285,11 @@ const ANIMATIONS_EXPRESSION = inPage(
  * first walk counted three and a second walk none, and Debian Chromium 154
  * counted none of two on a second walk.
  */
-const ON_SCROLL_EXPRESSION = inPage(
-  "on-scroll",
-  {},
-  `
+function onScrollExpression(screen: ScreenSize): string {
+  return inPage(
+    "on-scroll",
+    { step: screen.height },
+    `
   const moving = () => new Set(document.getAnimations().filter((animation) => animation.playState === "running" && animation.effect && animation.effect.target).map((animation) => animation.effect.target));
   const before = moving();
   const began = new Set();
@@ -1292,7 +1302,7 @@ const ON_SCROLL_EXPRESSION = inPage(
   };
   const root = document.documentElement;
   const height = () => Math.max(root ? root.scrollHeight : 0, document.body ? document.body.scrollHeight : 0);
-  const step = window.innerHeight;
+  const step = args.step;
   for (let y = step, stops = 1; y < height() && stops < ${ON_SCROLL_SCREENS}; y += step, stops += 1) {
     jump(y);
     // Twice a stop: a short transition is over before the stop is.
@@ -1305,7 +1315,8 @@ const ON_SCROLL_EXPRESSION = inPage(
   await pause(100);
   return JSON.stringify({ count: began.size });
 `,
-);
+  );
+}
 
 /**
  * Send the page down and say what stays at the top of the screen: an element
@@ -1316,17 +1327,18 @@ const ON_SCROLL_EXPRESSION = inPage(
  * to be passing the top would be named. A page that does not scroll has
  * nothing to stay.
  */
-const STICKY_EXPRESSION = inPage(
-  "sticky",
-  {},
-  `
+function stickyExpression(screen: ScreenSize): string {
+  return inPage(
+    "sticky",
+    { width: screen.width, height: screen.height },
+    `
   const bars = () => {
     const found = new Map();
     for (const el of Array.from(document.querySelectorAll("body *")).slice(0, 5000)) {
       const style = getComputedStyle(el);
       if ((style.position !== "fixed" && style.position !== "sticky") || style.visibility === "hidden") continue;
       const box = el.getBoundingClientRect();
-      const wide = box.width >= window.innerWidth / 2 && box.height > 0 && box.height <= window.innerHeight / 2;
+      const wide = box.width >= args.width / 2 && box.height > 0 && box.height <= args.height / 2;
       if (wide && box.top >= -1 && box.top <= 24) found.set(el, { top: box.top, position: style.position });
     }
     return found;
@@ -1352,20 +1364,22 @@ const STICKY_EXPRESSION = inPage(
   await pause(50);
   return JSON.stringify({ sticky: bar });
 `,
-);
+  );
+}
 
 /** The controls a pointer is tried on: the visible ones on the page's first
  *  two screens, one of each `tag.firstClass`, kept for the two expressions
  *  below. */
-const HOVER_LIST_EXPRESSION = inPage(
-  "hover-list",
-  {},
-  `
+function hoverListExpression(screen: ScreenSize): string {
+  return inPage(
+    "hover-list",
+    { height: screen.height },
+    `
   const picked = [];
   const seen = new Set();
   for (const el of document.querySelectorAll(${JSON.stringify(CONTROLS)})) {
     if (picked.length >= ${HOVER_MAX}) break;
-    if (!visible(el) || el.getBoundingClientRect().top + window.scrollY >= 2 * window.innerHeight) continue;
+    if (!visible(el) || el.getBoundingClientRect().top + window.scrollY >= 2 * args.height) continue;
     const what = spot(el);
     if (seen.has(what)) continue;
     seen.add(what);
@@ -1374,7 +1388,8 @@ const HOVER_LIST_EXPRESSION = inPage(
   window[KEPT] = { hover: picked, rest: [] };
   return JSON.stringify({ controls: picked.map(spot) });
 `,
-);
+  );
+}
 
 /**
  * A control's look, property by property. The colour of a border that is not
@@ -2197,8 +2212,8 @@ function atRest(view: JobView): JobView {
  *  each is found: brought to the middle of the screen, read at rest, given
  *  the real pointer and read again. One whose look does not change is left
  *  out. */
-async function readHover(study: Study, hover: Motion["hover"]): Promise<void> {
-  const listed = await askWithin(study, HOVER_LIST_EXPRESSION, hoverListSchema);
+async function readHover(study: Study, screen: ScreenSize, hover: Motion["hover"]): Promise<void> {
+  const listed = await askWithin(study, hoverListExpression(screen), hoverListSchema);
   for (const [index, what] of listed.controls.slice(0, HOVER_MAX).entries()) {
     const read = await part(
       (async () => {
@@ -2226,21 +2241,24 @@ async function readHover(study: Study, hover: Motion["hover"]): Promise<void> {
  *
  * On a load of its own and not on a view's, for two reasons. The count of
  * what animates in has to be taken on the page's first walk (see
- * `ON_SCROLL_EXPRESSION`), and every pictured view but a moving one has
+ * `onScrollExpression`), and every pictured view but a moving one has
  * already walked its page. And a view's own load may be in no state to read:
  * an act has pressed something on it, a moving one is mid-flight. For the
  * same reason the count comes before the bar is looked for, which scrolls the
  * page. Null when the page did not load for it.
  */
 async function readMotion(study: Study, view: JobView): Promise<Motion | null> {
+  const rest = atRest(view);
   let loadedAt: number;
   try {
-    loadedAt = await study.budget.within(() => openView(study.ctx, atRest(view), 1));
+    loadedAt = await study.budget.within(() => openView(study.ctx, rest, 1));
   } catch {
     return null;
   }
   const motion: Motion = { running: [], runningCount: 0, videos: [], sticky: null, onScroll: 0, hover: [] };
   try {
+    const { scale } = pageSize(await study.budget.within(() => layoutNow(study.ctx)), rest);
+    const screen: ScreenSize = { width: rest.width / scale, height: rest.height / scale };
     await waitWithin(study, loadedAt + SETTLE_MS - Date.now());
     const moving = await part(askWithin(study, ANIMATIONS_EXPRESSION, animationsSchema), null);
     if (moving) {
@@ -2248,10 +2266,10 @@ async function readMotion(study: Study, view: JobView): Promise<Motion | null> {
       motion.runningCount = Math.max(moving.count, moving.running.length);
       motion.videos = moving.videos.slice(0, VIDEOS_MAX);
     }
-    motion.onScroll = (await part(askWithin(study, ON_SCROLL_EXPRESSION, countSchema), { count: 0 })).count;
-    const stays = (await part(askWithin(study, STICKY_EXPRESSION, stickySchema), { sticky: null })).sticky;
+    motion.onScroll = (await part(askWithin(study, onScrollExpression(screen), countSchema), { count: 0 })).count;
+    const stays = (await part(askWithin(study, stickyExpression(screen), stickySchema), { sticky: null })).sticky;
     motion.sticky = stays ? { what: clip(stays.what, NAME_MAX), position: stays.position } : null;
-    await part(readHover(study, motion.hover), undefined);
+    await part(readHover(study, screen, motion.hover), undefined);
   } catch {
     // Out of time part way: what was read stands.
   }
