@@ -1425,10 +1425,12 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
         `fake-unmarked:${JSON.stringify(places(7))}`,
       ),
       // A keyboard trap: from "Close" focus goes back to "Open", for ever.
+      // "Open" does not show focus.
       "trap.html": declares(
         'fake-controls:[["a","Start"],["button","Open"],["button","Close"],["a","After"],["a","Further on"]]',
         "fake-tab-order:[0,1,2]",
         "fake-tab-trap:1",
+        "fake-unmarked:[1]",
       ),
       // A control and no stop anywhere for Tab.
       "none.html": declares('fake-controls:[["a","Out of reach"]]'),
@@ -1481,7 +1483,17 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // named, and the walk does not go on to its last press. CANARY: take no
     // such step for the end of a walk and the trap is pressed through eighty
     // times and reported as cut, with nothing said of the two links past it.
-    expect(trap!.walk).toEqual({ ...clean, controls: 5, stops: 3, unreached: ['a "After"', 'a "Further on"'], unreachedCount: 2 });
+    // A control is judged the first time focus comes to it. CANARY: judge it
+    // each time and "Open", which the trap comes back to, is listed twice.
+    expect(trap!.walk).toEqual({
+      ...clean,
+      controls: 5,
+      stops: 3,
+      unreached: ['a "After"', 'a "Further on"'],
+      unreachedCount: 2,
+      unmarked: ['button "Open"'],
+      unmarkedCount: 1,
+    });
     expect(trap!.presses).toBe(5);
     // Tab from the page itself that leaves focus on the page itself has no
     // stop to find. CANARY: press on while focus stays off the page and this
@@ -1548,7 +1560,10 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
 
   it("takes an element that can hold no stop of its own and still has focus at the next press for where the walk comes round, and names what lies past it", async () => {
     const dialog = ['fake-controls:[["button","Accept"],["a","Home"],["a","About"]]', "fake-tab-order:[0]", "fake-tab-from:0", "fake-tab-held:true"];
-    const [keeps, off, wraps] = await walked({
+    const [editor, keeps, off, wraps] = await walked({
+      // An editor in a part of its own keeps focus for as long as Tab is
+      // pressed: stops of its own, or a key it keeps, and no telling which.
+      "editor.html": declares('fake-controls:[["a","Docs"],["a","After"]]', 'fake-tab-order:[0,["x-editor","Editor"]]', "fake-tab-trap:1"),
       // A text field whose own script keeps Tab for itself, then a button.
       "keeps.html": declares('fake-controls:[["a","Docs"],["textarea","Notes"],["button","Save"]]', "fake-tab-order:[0,1]", "fake-tab-trap:1"),
       // A dialog over the page with one button a keyboard can reach, which
@@ -1568,10 +1583,17 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     const behind = { ...clean, controls: 3, stops: 1, unreached: ['a "Home"', 'a "About"'], unreachedCount: 2 };
     expect(off!.walk).toEqual(behind);
     expect(wraps!.walk).toEqual(behind);
+    // What may hold stops of its own is pressed on through to the last
+    // press, and the walk then says it was cut: whether "After" can be
+    // reached is not known. CANARY: take any element that still has focus
+    // at the next press for where the walk comes round and "After" is named
+    // as never reached on the strength of one press.
+    expect(editor!.walk).toEqual({ ...clean, cut: true, controls: 2, stops: 1 });
+    expect(editor!.presses).toBe(80);
   });
 
   it("starts a walk at the top of the page with nothing focused, wherever the page put focus as it loaded, and goes round one that takes focus back", async () => {
-    const [far, kept] = await walked({
+    const [far, kept, last] = await walked({
       // A hundred links, the ninety-first of which holds focus when the page
       // is loaded, as a field with `autofocus` does. Three near the end do
       // not show focus.
@@ -1584,6 +1606,9 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       // A page that keeps focus where it put it, as one under a dialog does:
       // the walk begins below its third control.
       "kept.html": declares(`fake-controls:${JSON.stringify(links(5))}`, "fake-tab-order:[0,1,2,3,4]", "fake-tab-from:2", "fake-tab-held:true"),
+      // The same with focus kept on the last of two controls: the first
+      // press takes it off the page.
+      "last.html": declares(`fake-controls:${JSON.stringify(links(2))}`, "fake-tab-order:[0,1]", "fake-tab-from:1", "fake-tab-held:true"),
     });
     // Eighty presses from the top are the first eighty links. CANARY: leave
     // focus where the page put it and the walk begins at the ninety-second:
@@ -1598,6 +1623,11 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(kept!.walk).toEqual({ ...clean, controls: 5, stops: 5 });
     // Two below, off the page, three above.
     expect(kept!.presses).toBe(6);
+    // Nothing focused after the first press says where the walk began, not
+    // that the page has no stop. CANARY: take it for a page with none and
+    // both links are named as never reached, which the next two presses
+    // reach.
+    expect(last!.walk).toEqual({ ...clean, controls: 2, stops: 2 });
   });
 
   it("measures a page only once every view of it is pictured, on loads of its own: what still runs with reduced motion asked for, what one load of it weighs, and how long it takes to load on a slow line", async () => {
