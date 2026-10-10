@@ -5125,8 +5125,13 @@ describe("set_project_gates (ruling 104)", () => {
   it("ruling 86: names the folder a gate builds the site's pages into, and says what Viberr then does with it", async () => {
     // The first board that shipped a site through pull requests had no way
     // to say where its pages were built, so nothing pictured them.
-    // CANARY: drop `pages` from the tool's schema and the call is refused as
-    // an unknown key; drop it from the writer and the list is saved bare.
+    // CANARY: drop `pages` from the tool's schema and a model is never told
+    // of the field (and its call with one is refused as an unknown key); drop
+    // it from the writer and the list is saved bare.
+    const published = (await publishedSchemas((await toolkitAs(ids.projectAdmin)).mcpServers.viberr_controller)).get(
+      "set_project_gates",
+    );
+    expect(JSON.stringify(published)).toContain("the folder of the checkout this gate builds the site's pages into");
     const reply = await call(ids.projectAdmin, "set_project_gates", {
       gates: [
         { name: "install", command: "npm ci" },
