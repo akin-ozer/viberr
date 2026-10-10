@@ -2038,18 +2038,21 @@ export function requestDeliveryCaptures(
 /**
  * The name a picture of a built page is kept under in the attachments store,
  * which holds no slash: the page's path with `--` where its folders part,
- * then the first seven of the revision's sha (`controller/index.html` at
- * `9f2c41a` is pictured as
- * `controller--index.html.9f2c41a.capture-desktop.png`). A revision's
+ * then `@` and the first seven of the revision's sha (`controller/index.html`
+ * at `9f2c41a` is pictured as
+ * `controller--index.html@9f2c41a.capture-desktop.png`). A revision's
  * pictures are named for that revision, so the next one's never take their
- * place under a name a note or a completion packet already shows, and no
- * file a run saved on the task shares a name with the page they picture. The
- * record pairs each picture with its page; no reader takes the page back out
- * of this name.
+ * place under a name a note or a completion packet already shows. The record
+ * pairs each picture with its page. The lightbox prints the name's stem as
+ * it is ("Picture of controller--index.html@9f2c41a"): the page and the
+ * revision, as the store spells them.
  */
 export function builtPictureName(file: string, view: PageCaptureViewId, sha: string): string {
-  return pageCaptureName(`${file.replaceAll("/", "--")}.${sha.slice(0, 7)}`, view);
+  return pageCaptureName(`${file.replaceAll("/", "--")}@${sha.slice(0, 7)}`, view);
 }
+
+/** The longest name a timeline entry takes for an attachment. */
+const BUILT_PICTURE_NAME_MAX_CHARS = 200;
 
 export interface RevisionCaptureInput {
   projectSlug: string;
@@ -2100,7 +2103,9 @@ async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input
         "Nothing was pictured or measured, and a review of this revision is shown no page of it. Running the gates again builds and keeps them.";
     await updateTaskFile(ref, (parsed) => {
       if (activeWorkRevision(parsed.frontmatter.workRevision)?.id !== revisionId) return;
-      delete parsed.frontmatter.pageCaptures;
+      // A record with no page: this revision's build was looked at and held
+      // none, which is what keeps the note from being written twice.
+      parsed.frontmatter.pageCaptures = { deliveredAt: revision.createdAt, at: new Date().toISOString(), pages: [], revisionId };
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
@@ -2116,7 +2121,13 @@ async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input
   }
   const refused = new Map<string, SourceRefusal>();
   for (const page of pages) {
-    const refusal = sourceRefusal(page.file, page.kind, fileSize(() => path.join(dir, page.file)) ?? 0);
+    // A picture's name has to fit what a timeline entry takes (200
+    // characters), and a built page's is longer than its path.
+    const refusal =
+      sourceRefusal(page.file, page.kind, fileSize(() => path.join(dir, page.file)) ?? 0) ??
+      (builtPictureName(page.file, "desktop", revision.headSha).length > BUILT_PICTURE_NAME_MAX_CHARS
+        ? { reason: "its path is too long for a picture to be kept under its name", sharedByTool: false }
+        : null);
     if (refusal) refused.set(page.file, refusal);
   }
   const toRender = pages.filter((page) => !refused.has(page.file));

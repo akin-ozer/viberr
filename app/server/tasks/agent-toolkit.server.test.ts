@@ -1798,7 +1798,12 @@ describe("report_outcome's evidence field (P13-D-26)", () => {
       expect(measure.description).toContain(
         "the gates' own build of the revision when you are asked for a verdict on it, the task's delivering checkout as it stands built for anyone else",
       );
-      // The field a model fills carries the same, on both tools.
+      // The field a model fills carries the same, on both tools, as each
+      // tool registers it. CANARY: describe either tool's `name` with other
+      // text than the shared constant.
+      const nameOf = (tool: typeof capture) => (tool.inputSchema["shape"] ?? {}).name?.description;
+      expect(nameOf(capture)).toBe(CAPTURE_PAGE_FIELDS.name);
+      expect(nameOf(measure)).toBe(MEASURE_PAGE_FIELDS.name);
       expect(CAPTURE_PAGE_FIELDS.name).toContain("a page's path in the built site (`index.html`, `about/`)");
       expect(MEASURE_PAGE_FIELDS.name).toContain("a page's path in the built site (`index.html`, `about/`)");
       // A run that makes pictures is told: it can post files and holds no

@@ -2551,8 +2551,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "index.html",
         shots: [
-          { view: "desktop", name: "index.html.9999999.capture-desktop.png", cut: false },
-          { view: "phone", name: "index.html.9999999.capture-phone.png", cut: false },
+          { view: "desktop", name: "index.html@9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "index.html@9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2560,8 +2560,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "guide/index.html",
         shots: [
-          { view: "desktop", name: "guide--index.html.9999999.capture-desktop.png", cut: false },
-          { view: "phone", name: "guide--index.html.9999999.capture-phone.png", cut: false },
+          { view: "desktop", name: "guide--index.html@9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "guide--index.html@9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2646,9 +2646,70 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     );
     expect(frontmatter().completionPacket!.screenshots).toEqual([]);
 
-    // A newer revision takes the record down with its pictures.
+    // The next revision's pictures are its own: named for it, never under
+    // the names the note and the packet above show. CANARY: name a built
+    // page's picture by its path alone and the earlier revision's packet
+    // shows the new revision's page under its old caption.
+    const gate = ctx.makeTempDir("viberr-gate-checkout-");
+    put(path.join(gate, "dist"), { "index.html": "<h1>home, reworked</h1>" });
+    await keepBuild(store.slug, "VIB-1", "rev_2", gate, "dist", store.dataRoot);
+    await withBrowser("", () =>
+      requestRevisionCaptures(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_2", folder: "dist", kept: true, leftOut: 0 },
+      ),
+    );
+    expect(onTask()).toEqual(["index.html@8888888.capture-desktop.png", "index.html@8888888.capture-phone.png"]);
+    expect(onTask().filter((name) => pictures.includes(name))).toEqual([]);
+    expect(frontmatter().pageCaptures).toMatchObject({ revisionId: "rev_2" });
+
+    // A files delivery's own capture job takes a record of an earlier
+    // revision down with its pictures.
+    await updateTaskFile(ref(), (parsed) => {
+      parsed.frontmatter.workRevision = { ...REVISION, id: "rev_3", headSha: "7".repeat(40) };
+    });
     await withBrowser("", () => picture("VIB-1", frontmatter().deliveredAt!));
     expect(frontmatter().pageCaptures).toBeUndefined();
     expect(onTask()).toEqual([]);
+  });
+
+  it("a packet shows the pictures of nothing but the delivery under review, whichever kind the record on file is of", async () => {
+    // The record on file can be of another kind of delivery than the one
+    // under review: a board that took a repository after it delivered files,
+    // or one whose task went back to files. Neither's pictures are this
+    // work's. CANARY: decide by the kind of record alone, or by the kind of
+    // delivery alone, and one of the two is offered as this work's picture.
+    const candidates = () => completionPacketFact(frontmatter(), ref()).screenshotCandidates;
+    // A files-era record on a task that now delivers a revision.
+    revisionBoard();
+    saveFiles("VIB-1", { "post.html": "<p>the old piece</p>", "post.html.capture-desktop.png": "a picture", "shot.png": "an agent's own" });
+    await updateTaskFile(ref(), (parsed) => {
+      parsed.frontmatter.pageCaptures = {
+        deliveredAt: "2026-10-01T00:00:00.000Z",
+        at: "2026-10-01T00:00:05.000Z",
+        pages: [{ file: "post.html", shots: [{ view: "desktop", name: "post.html.capture-desktop.png", cut: false }], error: null }],
+      };
+    });
+    expect(candidates()).toEqual(["shot.png"]);
+    const named = await writeCompletionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      { projectSlug: store.slug, taskKey: "VIB-1", summary: "Built.", screenshots: [{ name: "post.html.capture-desktop.png", caption: "The page." }] },
+    );
+    expect(named.message).toContain("is Viberr's picture of a page of an earlier delivery, not of revision `9999999`");
+
+    // A revision-era record on a task whose delivery is files again.
+    await updateTaskFile(ref(), (parsed) => {
+      parsed.frontmatter.workRevision = null;
+      parsed.frontmatter.pageCaptures = {
+        deliveredAt: REVISION.createdAt,
+        at: "2026-10-10T09:00:05.000Z",
+        revisionId: "rev_1",
+        pages: [{ file: "index.html", shots: [{ view: "desktop", name: "index.html@9999999.capture-desktop.png", cut: false }], error: null }],
+      };
+    });
+    saveFiles("VIB-1", { "index.html@9999999.capture-desktop.png": "a picture" });
+    expect(candidates()).toEqual(["shot.png"]);
   });
 });

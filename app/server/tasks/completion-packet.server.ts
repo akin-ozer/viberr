@@ -251,8 +251,13 @@ function taskFiles(
   const names = listTaskAttachmentNames(ref.projectSlug, ref.taskKey, ref.dataRoot);
   const recorded = recordedPageCaptures(fm.pageCaptures);
   const revisionId = capturesRevision(fm.pageCaptures);
-  if (deliveredAsFiles(fm) && revisionId === null) {
-    return { names, pagePictures: pageCapturesAmong(names, recorded), stalePictures: new Set() };
+  if (deliveredAsFiles(fm)) {
+    // The pictures of a files delivery's pages show beside them. A record a
+    // revision left behind (the task took its files back) names pictures of
+    // another delivery.
+    return revisionId === null
+      ? { names, pagePictures: pageCapturesAmong(names, recorded), stalePictures: new Set() }
+      : { names, pagePictures: pageCapturesAmong(names), stalePictures: new Set(recorded) };
   }
   // Ruling 86: the result of a revision is a pull request, with no file to
   // put a picture beside. The pictures of the pages its gates built are the

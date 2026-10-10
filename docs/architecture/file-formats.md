@@ -513,6 +513,9 @@ gateRun:                          # optional; ruling 17 — the project's gates 
   pages: dist                     # ruling 86: the folder this run kept the revision's
                                   # build from; absent when it kept none (no gate named
                                   # one, or a gate did not exit 0)
+  pagesKept: { files: 14, leftOut: 0 }  # what that keep held, and how many files were
+                                  # past what a build holds; absent when the folder
+                                  # could not be kept
 pageCaptures:                     # optional; ruling 86 — Viberr's own pictures of the
   deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
@@ -520,8 +523,10 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
                                   # `revisionId` names that revision, `deliveredAt` is
                                   # when it was minted, a page's `file` is its path in
                                   # the site (`guide/index.html`) and its pictures are
-                                  # named with `--` for the slashes and the revision's
-                                  # short sha (`guide--index.html.9f2c41a.capture-…`).
+                                  # named with `--` for the slashes, then `@` and the
+                                  # revision's short sha
+                                  # (`guide--index.html@9f2c41a.capture-…`). A build
+                                  # that held no page is recorded with `pages: []`.
   pages:                          # the render finished. One entry per delivered page
     - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
       shots:                      # view (desktop | phone), the picture's name in the

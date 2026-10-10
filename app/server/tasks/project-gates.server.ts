@@ -19,14 +19,7 @@ import {
   taskAttachmentsDir,
   taskDir,
 } from "~/server/files/file-store-root.server";
-import {
-  builtPagesAmong,
-  keepBuild,
-  keptBuildDir,
-  keptBuildFiles,
-  projectPagesDir,
-  type KeptBuild,
-} from "~/server/files/kept-builds.server";
+import { keepBuild, projectPagesDir, type KeptBuild } from "~/server/files/kept-builds.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   readTaskFile,
@@ -115,6 +108,14 @@ import type { TaskActionDeps } from "./task-action-core.server";
 function builtFolderOf(run: GateRun): string | null {
   const read = z.looseObject({ pages: z.string() }).safeParse(run);
   return read.success ? read.data.pages : null;
+}
+
+/** Ruling 86: what that keep held (`pagesKept` on the run: how many files,
+ *  and how many were past what a build holds), or null when the folder
+ *  could not be kept at all. */
+function keptOf(run: GateRun): { files: number; leftOut: number } | null {
+  const read = z.looseObject({ pagesKept: z.object({ files: z.number(), leftOut: z.number() }) }).safeParse(run);
+  return read.success ? read.data.pagesKept : null;
 }
 
 /** Why a run was asked for; recorded on the run, display only. */
@@ -487,25 +488,33 @@ export async function recoverProjectGates(db: DatabaseSync, dataRoot?: string): 
 
 /**
  * Ruling 86: a run that finished and kept its revision's build, on a task
- * that keeps no picture of that build, was cut off between the two (the
+ * with no record of that build's pictures, was cut off between the two (the
  * render is asked for after the finishing write, and a restart drops the
- * queue). The build is on disk, so the pictures are asked for again. Only
- * for a build that holds a page: one that holds none was said once.
+ * queue). What the run kept is on disk and on its record, so the same ask is
+ * made again, and the task gets its pictures, or the note that says there is
+ * no page to picture, once. Held to what every other asker is held to: an
+ * open task, on the revision under review, while a gate still names that
+ * folder.
  */
 function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFrontmatter, run: GateRun): void {
   const folder = builtFolderOf(run);
   if (run.status !== "finished" || folder === null || gateSubject(fm)?.id !== run.revisionId) return;
+  // The record is written for every build the ask reached, a page or none.
   if (capturesRevision(fm.pageCaptures) === run.revisionId) return;
-  const kept = keptBuildFiles(keptBuildDir(ref.projectSlug, ref.taskKey, run.revisionId, ref.dataRoot));
-  if (builtPagesAmong(kept).pages.length === 0) return;
+  const project = readProjectFile(
+    ref.dataRoot ? { projectSlug: ref.projectSlug, dataRoot: ref.dataRoot } : { projectSlug: ref.projectSlug },
+  )?.parsed.frontmatter;
+  if (!project || fm.archived || isTerminalStage(fm.stage, project.stages)) return;
+  if (projectPagesDir(project.gates) !== folder) return;
+  const kept = keptOf(run);
   const asked = import("./page-capture.server").then(({ requestRevisionCaptures }) =>
     requestRevisionCaptures(db, ref.dataRoot ? { dataRoot: ref.dataRoot } : {}, {
       projectSlug: ref.projectSlug,
       taskKey: ref.taskKey,
       revisionId: run.revisionId,
       folder,
-      kept: true,
-      leftOut: 0,
+      kept: kept !== null,
+      leftOut: kept?.leftOut ?? 0,
     }),
   );
   handoffs.add(asked);
@@ -895,7 +904,10 @@ async function runGateJob(job: GateJob): Promise<{ pictured: Promise<void> | nul
       run.results = results.map((r) => ({ ...r }));
       // Ruling 86: the folder this run's pages were kept from, so a later
       // ask knows the revision's build was made under the folder now named.
-      if (builds && pagesDir) run.pages = pagesDir;
+      if (builds && pagesDir) {
+        run.pages = pagesDir;
+        if (built) run.pagesKept = { files: built.files, leftOut: built.leftOut };
+      }
       parsed.timeline.unshift(gateRunEvent(run, gates, job.taskKey));
       finished.run = { ...run, results: run.results.map((r) => ({ ...r })) };
     });
