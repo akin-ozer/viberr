@@ -409,7 +409,8 @@ function evaluate(message) {
     case "faults": {
       if (!engine) return thrown("TypeError: Cannot read properties of undefined (reading 'run')");
       const why = told("axe-throws", null);
-      return why ? thrown("Error: " + why) : say({ violations: told("axe", []), kinds: told("axe", []).length });
+      const found = told("axe", []);
+      return why ? thrown("Error: " + why) : say({ violations: found, kinds: found.length, elements: found.reduce((sum, kind) => sum + kind.count, 0) });
     }
     case "animations": {
       const running = reducedMotion === "reduce" ? told("animations-reduced", []) : told("animations", []);

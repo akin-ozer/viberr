@@ -1043,6 +1043,11 @@ if (command === "verify-measured") {
       "and how many kinds it found in all, which here is as many as it lists",
       `${view.faults.kindsCount} of ${view.faults.kinds.length}`,
     );
+    check(
+      view.faults.elementsCount === view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0) && view.faults.elementsCount >= 3,
+      "and on how many elements: the two pictures, the faint line and whatever else it lists",
+      `${view.faults.elementsCount} over ${JSON.stringify(view.faults.kinds.map((kind) => kind.count))}`,
+    );
     check(view.keyboard.ran === true && view.keyboard.cut === false, "the keyboard walk was made, all the way round", JSON.stringify(view.keyboard));
     check(
       view.keyboard.controls === 3 && view.keyboard.stops === 3 && view.keyboard.unreached.length === 0 && view.keyboard.unreachedCount === 0,

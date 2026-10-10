@@ -342,6 +342,10 @@ interface Faults {
   /** How many kinds it found in all: `kinds` holds the first
    *  `FAULT_KINDS_MAX` of them. */
   kindsCount: number;
+  /** How many elements those kinds are on, every kind's count added up: a
+   *  number that goes with `kindsCount`, where the counts `kinds` carries
+   *  are those of the kinds it lists. */
+  elementsCount: number;
   /** The lowest contrast it found failing, and the words it is on. */
   worstContrast: { ratio: number; text: string } | null;
 }
@@ -1305,7 +1309,8 @@ const FAULTS_EXPRESSION = inPage(
       };
     }),
   }));
-  return JSON.stringify({ violations, kinds: results.violations.length });
+  const elements = results.violations.reduce((sum, violation) => sum + violation.nodes.length, 0);
+  return JSON.stringify({ violations, kinds: results.violations.length, elements });
 `,
 );
 
@@ -1640,8 +1645,10 @@ const faultsSchema = z.object({
       nodes: z.array(z.object({ target: z.string(), ratio: z.number().nullable().optional(), text: z.string().optional() })),
     }),
   ),
-  /** How many kinds the engine found: the page hands over the first hundred. */
+  /** How many kinds the engine found, and on how many elements in all: the
+   *  page hands over the first hundred kinds. */
   kinds: z.number().int().nonnegative(),
+  elements: z.number().int().nonnegative(),
 });
 const screenSchema = z.object({ x: z.number(), y: z.number(), href: z.string() });
 
@@ -2503,7 +2510,7 @@ function readEngine(file: string | undefined): Engine {
 
 /** A check that did not run, and why. */
 function notRun(why: string): Faults {
-  return { ran: false, why: clip(why, SENTENCE_MAX), kinds: [], kindsCount: 0, worstContrast: null };
+  return { ran: false, why: clip(why, SENTENCE_MAX), kinds: [], kindsCount: 0, elementsCount: 0, worstContrast: null };
 }
 
 /**
@@ -2511,7 +2518,7 @@ function notRun(why: string): Faults {
  * page first (it is the page's `window.axe` from then on), then asked for
  * what breaks the standards in `FAULT_TAGS`. The kinds come back the gravest
  * first, then the most widespread, so the cap never drops the worst of them,
- * with how many there are in all.
+ * with how many there are in all and on how many elements.
  * Rejects with the reason when the engine cannot run, which `measureView`
  * reports and the page does not pay for.
  */
@@ -2548,6 +2555,7 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
         first: violation.nodes.slice(0, FAULT_FIRST_MAX).map((node) => clip(node.target, SENTENCE_MAX)),
       })),
     kindsCount: found.kinds,
+    elementsCount: found.elements,
     worstContrast: worst,
   };
 }
