@@ -746,9 +746,12 @@ export function validateProjectGates(gates: readonly ProjectGateInput[]): Projec
     }
     // Ruling 86: the folder this gate builds the pages into. One for the
     // project: a reader of the built site is shown one tree.
-    const pages = gate.pages?.trim() ?? "";
+    // Read as text or refused: a board file's row is whatever its author
+    // typed (ruling 32 holds an import to this writer's rules).
+    const named = z.string().nullish().safeParse(gate.pages);
+    const pages = named.success ? (named.data?.trim() ?? "") : null;
     if (pages !== "") {
-      const folder = plainPagesDir(pages);
+      const folder = pages === null ? null : plainPagesDir(pages);
       if (folder === null) {
         throw AppError.validation(
           `${which}: a pages folder is a path inside the checkout in plain names, like "dist" or "site/build", ` +

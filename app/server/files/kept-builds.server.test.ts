@@ -70,10 +70,10 @@ describe("a revision's built pages are kept as a tree (ruling 86)", () => {
 
     const result = await keep("rev_1");
 
-    // CANARY: copy with a call that follows links (`cpSync` with
-    // `dereference`, or `statSync` in place of the listing's own entry kind)
-    // and `leak.html` and `linked/also.html` are kept with the bytes of files
-    // outside the checkout, which the renderer then serves to an agent.
+    // A link is refused by its kind in the folder's listing, and again by
+    // the open that reads it. CANARY: take a link for a file in the walk and
+    // open it with no `O_NOFOLLOW`, and `leak.html` is kept with the bytes of
+    // a file outside the checkout, which the renderer then serves.
     expect(keptBuildFiles(kept("rev_1"))).toEqual(["assets/site.css", "guide/index.html", "index.html"]);
     expect(result).toEqual({ files: 3, bytes: 13 + 18 + 16, leftOut: 0 });
     expect(readFileSync(path.join(kept("rev_1")!, "guide/index.html"), "utf8")).toBe("<p>the guide</p>");
@@ -84,8 +84,10 @@ describe("a revision's built pages are kept as a tree (ruling 86)", () => {
     put(elsewhere, { "index.html": "<p>not the site's</p>", "site/index.html": "<p>nor this</p>" });
     symlinkSync(elsewhere, path.join(checkout, "out"));
     const nothing = { files: 0, bytes: 0, leftOut: 0 };
-    // CANARY: list the folder with `readdirSync` alone, which follows a link
-    // at the folder itself, and the page behind it is kept.
+    // The folder's own level is checked where the path is walked and again
+    // where the folder is listed. CANARY: follow a link at both (`statSync`
+    // in `plainFolderUnder`, `readdirSync` alone in `entriesOf`) and the
+    // page behind it is kept.
     expect(await keep("rev_1", "out")).toEqual(nothing);
     // CANARY: check only the last level (`lstat` follows every folder before
     // it) and `out/site` is kept from outside the checkout.
