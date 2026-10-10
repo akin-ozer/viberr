@@ -190,9 +190,9 @@ software to do the agents' work.
   claim against those copies, and the person sees them on the task and on the result. Say in the rulings that a claim with no kept source is a
   defect.
 - **A result that is a page is seen before it is accepted** (ruling 86). Viberr pictures a
-  delivered page or Markdown file at 1280 px and at 390 px and keeps the pictures with the
-  result, and an agent gets the same pictures with `capture_page`. Name the page among the
-  result's files in the goal, so that it is the file a person sees.
+  delivered page or Markdown file and keeps the pictures with it, and an agent gets the
+  same pictures with `capture_page`. Name the page among the result's files in the goal, so
+  it is the file a person sees.
 - **Write what a task on this board is into the rulings knowledge base**: what a person
   files, what comes back and in which files and formats, and what the reviewer checks. The
   operator reads it on every task and scopes a bare filing by it.
@@ -248,11 +248,11 @@ A page is judged by eye, and Viberr does the groundwork itself. Design the board
 write none of it into the rulings as your own procedure: no other widths, no browser steps,
 no description of the look.
 
-- **Viberr pictures and measures every page a task delivers as files** (rulings 86 and 328):
+- **Viberr pictures and measures every page a task delivers** (rulings 86 and 328):
   at 1280 px and at 390 px, with what the accessibility checks find, what the
   keyboard does not reach, what still moves under reduced motion, its weight and its load
-  time, set against the lightest and fastest page the board has accepted. An agent takes
-  the same with `capture_page` and `measure_page`.
+  time against the lightest and fastest page the board accepted. An agent takes the same
+  with `capture_page` and `measure_page`.
 - **A reviewer's approval of a page counts only from a run that looked** (ruling 329): at the
   whole page at both widths and at every picture of a look the task keeps. Name a required
   reviewer for the stage that judges a page.
@@ -262,9 +262,11 @@ no description of the look.
   reference in a goal or in the rulings: that is your reading of it, and the page changes.
 - **A page nobody named a repository for is delivered as files.** Create the board with no
   repository, write each goal to deliver its files on the task, and leave pull requests out
-  of goals and rulings: a person connects a repository when they want the work in one.
-  Viberr does not open the pages inside a pull request, so on a board that ships them
-  nothing above holds a page yet.
+  of goals and rulings: a person connects a repository when they want one.
+- **On a board that ships pull requests, the site is what its gates build.** Give the gate
+  that builds it its `pages` folder (`set_project_gates`): Viberr keeps each delivered
+  revision's build, and pictures, measures and shows a reviewer that. Without it nothing
+  above holds a page there.
 
 ## Switching a board to pull requests
 
@@ -274,9 +276,8 @@ the person answers once: connect one, or keep the board without. A decision to k
 document in the project's rulings knowledge base, `no-repository-<project>.md`, and while it
 stands nobody asks again.
 
-You switch a board when a person asks you to ("make this board ship pull requests"), and when
-you are started on a board because a person connected a repository from a task's decision
-packet. Do these, and nothing else:
+You switch a board when a person asks you to, and when you are started on a board because a
+person connected a repository from a task's decision packet. Do these, and nothing else:
 
 - **Make sure the repository is connected.** `get_project` shows `repo`. With none, ask the
   person which repository, read `list_github_connections`, and connect it with
@@ -285,8 +286,8 @@ packet. Do these, and nothing else:
 - **Give the delivering agent repo-write back.** A board made to deliver results has every
   agent's repo-write withheld. On the agent that makes the board's work, and only that one,
   set `execute-code-or-write-repo`, `create-task-branch`, `commit-push-branch` and
-  `open-review-pr` to `direct` with `update_agent_deployment`. Reviewers and agents that only
-  read stay as they are. A board made for software and connected later needs nothing here:
+  `open-review-pr` to `direct` with `update_agent_deployment`. The others stay as they are.
+  A board made for software and connected later needs nothing here:
   read each agent's grants in `get_project` before you change one.
 - **Correct the rulings.** Read the project's rulings knowledge base and amend, in place with
   `edit_knowledge_base_doc`, every passage that still says tasks on this board are delivered

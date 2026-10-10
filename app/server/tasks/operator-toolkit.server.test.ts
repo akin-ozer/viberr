@@ -294,6 +294,17 @@ describe("buildOperatorToolkit ↔ operatorPlanToolsFor governed-action parity (
     expect(desc("get_task")).toContain("`schedules` (ruling 125) lists the runs scheduled on this task that have not fired yet");
   });
 
+  it("ruling 86: write_completion_packet says which of Viberr's pictures show beside a result and which are the packet's to show", () => {
+    // CANARY: drop PAGE_PICTURES_PACKET_SENTENCE from the tool's description
+    // and the operator is told nothing about the pictures of a revision.
+    const defs = bareToolkit(withPolicy(uniform("direct"))).tools;
+    const said = defs.find((t) => t.name === "write_completion_packet")!.description;
+    expect(said).toContain("On a task delivered as files they show beside the page on the result, so never name one of those as a screenshot.");
+    expect(said).toContain(
+      "On a task delivered as a revision they are the pages the project's gates built of it, and no result card shows them: name the ones a person should see among the `screenshots`.",
+    );
+  });
+
   it("ruling 116: get_task and update_branch_from_base say which head a behind count describes, to check it against the pushed head, and never to quote an older head's", () => {
     // Canaries: drop the `baseComparedHead` sentence from either description.
     const defs = bareToolkit(withPolicy(uniform("direct"))).tools;

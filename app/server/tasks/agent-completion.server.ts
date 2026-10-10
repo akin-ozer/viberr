@@ -179,6 +179,7 @@ import {
   looksFromRunLog,
   looksRunIds,
   pageLooksOwed,
+  projectPagesFolder,
   pageLooksRefusalNote,
   type PageLooksOwed,
   runLooks,
@@ -2639,6 +2640,16 @@ export async function applyAgentCompletionEffects(
       })
     : null;
   await deliveryCapturesSettled(deliveryCaptures);
+  // Ruling 86: a delivered revision's pages are what the project's gates
+  // build of it. Where a gate names the folder, the react waits, so long and
+  // no longer, for the gates the reconcile above queued and for the pictures
+  // of what they built: the operator and the reviewers it dispatches then
+  // start with the pages there, and no review starts on pages nobody can be
+  // shown yet.
+  if (input.delivers && finished.state === "finished" && projectPagesFolder(ctx, input.projectSlug) !== null) {
+    const { builtPagesSettled } = await import("./project-gates.server");
+    await builtPagesSettled({ projectSlug: input.projectSlug, taskKey: input.taskKey });
+  }
   // 4. React: continue an operator chain, or start a fresh one against the
   //    deployed operator. Resolve the effective react context.
   const { resolveOperatorAuthority } = await import("./operator-authority.server");

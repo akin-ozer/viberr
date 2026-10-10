@@ -776,10 +776,16 @@ Commits card lists them apart as "Also on the branch · not this task's".
 
 **Project gates: Viberr runs them itself** (ruling 104,
 `app/server/tasks/project-gates.server.ts`, `app/shared/project-gates.ts`). `project.md`
-declares `gates: [{name, command, timeoutSeconds?}]` (Settings → Gates, or the
-controller's `set_project_gates`; `edit-policy`). A run is asked for by a delivery
+declares `gates: [{name, command, timeoutSeconds?, pages?}]` (Settings → Gates, or the
+controller's `set_project_gates`; `edit-policy`). `pages`, on one gate at most, is the
+folder of the checkout that gate builds the site's pages into: once every gate has exited
+0 the run keeps that folder as the revision's build before its checkout goes, and Viberr
+pictures, measures and shows a reviewer its pages (ruling 86); a revision that passed
+before the folder was named is run again once. A run is asked for by a delivery
 (`performDelivery`'s delivered outcome), by a workspace reconcile that mints a new
-revision while the task's pull request stands, by the reconciler's external revision
+revision while the task's pull request stands (and, on a project whose gates build its
+pages, by a reconcile that mints any revision, the first included: ruling 86), by the
+reconciler's external revision
 (ruling 240), by a changed gate list (every open task with a delivered revision), by a
 person's "Run gates" on the GitHub card (maintainer+ or the owner, audited
 `task.gates.requested`), and at boot for a record a restart left `queued` or `running`.

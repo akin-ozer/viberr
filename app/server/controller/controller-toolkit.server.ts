@@ -4156,7 +4156,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
   add(
     tool(
       "set_project_gates",
-      "Ruling 104: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
+      "Ruling 104: declare the project's GATES, the commands VIBERR ITSELF runs on every delivered revision, or pass [] to clear them. Project admin (edit-policy). The WHOLE list, in run order, replacing what project.md holds; read `gates` from get_project first. Each gate is `{name, command, timeoutSeconds?, pages?}` (a short unique name, a command run with `sh -c` in the checkout's root, and a timeout of 1 to 3600 seconds, 600 when omitted); at most 10. Ruling 86: on a project whose repository builds pages a reader opens (a site), give the gate that builds them `pages`, the folder of the checkout it builds them into (`\"dist\"`, `\"site/build\"`; one gate of the list at most): once every gate has exited 0 Viberr keeps that folder as the revision's build, pictures and measures its pages at 1280 and 390 px (the first 8, the site's `index.html` first) onto the task, shows a reviewer those pages and no other build with `capture_page` and `measure_page`, and records an approval of the revision only from a run that looked at each of them whole at both widths (ruling 329). Without it a revision's pages are pictured, measured and shown by nobody. The gates are what build the site, so the list has to install what the build needs and run the build. Viberr runs them itself, in a fresh checkout of the exact delivered revision, as the task owner's own agent user with no credentials, and records each exit code, wall time and log on the task: the PR card and the accept dialog print \"Gates on <sha>: N/M exit 0 (run by Viberr)\". A plain acceptance is refused until every gate exited 0 on the revision under review (force accept stays, on the record), and a failing gate hands the rework to the operator. This is where a MEASURED gate set belongs once a task has proven it on this host (`instance_health` and a task's run show what the host has): promote it here rather than writing the commands into the rulings knowledge base as prose, which every directive then re-types and no one can check. A changed list queues the gates on every open task that already has a delivered revision; an unchanged one answers `[noop]`. A duplicate or empty name, an empty command, or a timeout out of range is refused by name with nothing written.",
       {
         projectSlug: z.string().optional(),
         gates: z
@@ -4169,6 +4169,12 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
                 .int()
                 .optional()
                 .describe("1 to 3600; 600 when omitted."),
+              pages: z
+                .string()
+                .optional()
+                .describe(
+                  "Ruling 86: the folder of the checkout this gate builds the site's pages into, e.g. \"dist\". On one gate at most; leave it out of a gate that builds none.",
+                ),
             }),
           )
           .describe("The COMPLETE gate list, in run order; [] clears it."),
@@ -4176,7 +4182,7 @@ export function buildControllerToolkit(deps: ControllerToolkitDeps): ControllerT
       runWith(
         async (args: {
           projectSlug?: string;
-          gates: { name: string; command: string; timeoutSeconds?: number }[];
+          gates: { name: string; command: string; timeoutSeconds?: number; pages?: string }[];
         }) => {
           const slug = slugOf(args.projectSlug);
           requireVisible(slug, "change this project's policy");

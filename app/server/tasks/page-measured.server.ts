@@ -54,6 +54,17 @@ export function measuredOf(page: PageCaptures["pages"][number]): PageMeasuredRec
   return parsed.success ? parsed.data : null;
 }
 
+const revisionRecordSchema = z.looseObject({ revisionId: z.string().min(1) });
+
+/** Ruling 86: the revision a record's pictures are of, when they are of the
+ *  pages a revision builds; null for the pictures of a files delivery. Read
+ *  here like `measured`: the browser's schema keeps the key and does not
+ *  declare it. */
+export function capturesRevision(record: PageCaptures | null | undefined): string | null {
+  const read = revisionRecordSchema.safeParse(record);
+  return read.success ? read.data.revisionId : null;
+}
+
 const WIDTH = { desktop: 1280, phone: 390 } as const;
 
 /** "412 KB", "1.2 MB". */

@@ -19,6 +19,7 @@ import {
 import { newId } from "~/shared/ids/new-id.server";
 import { recordAudit } from "~/server/audit/audit-recorder.server";
 import { taskDir } from "~/server/files/file-store-root.server";
+import { projectPagesDir } from "~/server/files/kept-builds.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import {
   appendTimelineEvent,
@@ -624,8 +625,13 @@ export async function reconcileWorkspaceDelivery(
       // Ruling 104 (F40-52): a new head on a task whose pull request stands is
       // the delivered head moving before verdicts count, so the project's
       // gates are queued on it now. Before the first delivery the delivery
-      // itself asks.
-      if (workRevisionPatch && fm.pr && fm.pr.state !== "closed" && fm.pr.state !== "merged") {
+      // itself asks. Ruling 86: where a gate builds the project's pages, a
+      // revision is judged from that build, so the gates are queued on every
+      // new revision, the first included, and what a review is shown is
+      // there before a review is asked for.
+      const prStands = fm.pr ? fm.pr.state !== "closed" && fm.pr.state !== "merged" : false;
+      const buildsPages = projectPagesDir(projectFile?.parsed.frontmatter.gates) !== null;
+      if (workRevisionPatch && (prStands || buildsPages)) {
         const { requestProjectGatesQuietly } = await import(
           "~/server/tasks/project-gates.server"
         );

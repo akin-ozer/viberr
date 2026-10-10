@@ -5,6 +5,7 @@ import {
   constants as fsConstants,
   createReadStream,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -39,6 +40,12 @@ import { z } from "zod";
  *    port, every path under a random token, one file name deep (the task
  *    folder is flat), opened without following a link. Loaded over http and
  *    not `file://`, a page cannot pull a file off the disk into the picture.
+ *  - **Or serves a built site from its root** (a job with `site`): the tree a
+ *    site's build leaves, whose pages name their files from the site's root
+ *    (`/assets/site.css`), which no token before the path survives. The
+ *    token is the host's name there (`<token>.localhost`, which a browser
+ *    takes for this machine by itself), every segment of a path is a plain
+ *    name, and no folder on the way and no file is opened through a link.
  *  - **Sets a markdown file as an article first**, with the pipeline the app's
  *    own preview uses (react-markdown with remark-gfm and no raw HTML), and
  *    **an SVG drawing as a page that holds nothing else**, inline, so it loads
@@ -186,9 +193,10 @@ function webAddress(url: string | undefined): URL | null {
  * one id and one kind would, and so would a stretch, a box and a whole page
  * of one id, whose first pictures share a name. A page on the web is opened
  * with the network open, so it shares no job, and so no browser, with a task
- * page, and it is never a box.
+ * page, and it is never a box. A site's pages are its HTML files: nothing
+ * else of it is set as a page.
  */
-function jobFaults(pages: readonly JobPage[], views: readonly JobView[]): string[] {
+function jobFaults(pages: readonly JobPage[], views: readonly JobView[], site: boolean): string[] {
   const faults: string[] = [];
   const written = new Set<string>();
   for (const view of views) {
@@ -213,6 +221,11 @@ function jobFaults(pages: readonly JobPage[], views: readonly JobView[]): string
     if (!webAddress(page.url)) faults.push(`the page ${page.file} has no http or https address`);
   }
   if (web.length > 0 && views.some((view) => view.box)) faults.push("a page on the web is asked for as a box");
+  if (site) {
+    for (const page of pages) {
+      if (page.kind !== "html") faults.push(`the page ${page.file} of a site is no HTML page`);
+    }
+  }
   return faults;
 }
 
@@ -221,8 +234,15 @@ const jobSchema = z
     /** The folder the page and its sibling files are served from. */
     root: z.string().min(1),
     /** The names `root` holds, when it is a folder this process may pass
-     *  through and not list; absent when it can read the listing itself. */
+     *  through and not list; absent when it can read the listing itself. Of
+     *  a site: the files the page server may serve, each as its path from
+     *  the root with `/` between the folders. */
     names: z.array(z.string()).optional(),
+    /** `root` is a built site and not a task's flat folder: a tree whose
+     *  pages name their files from its root. Every page is then an HTML
+     *  page, named by its path from the root (`guide/index.html`, or
+     *  `guide/` for that folder's `index.html`). */
+    site: z.boolean().optional(),
     /** Where the pictures and the report go. */
     out: z.string().min(1),
     /** A scratch folder for the browser's profile, one below it per page. */
@@ -243,7 +263,7 @@ const jobSchema = z
     axe: z.string().min(1).optional(),
   })
   .superRefine((job, issues) => {
-    for (const message of jobFaults(job.pages, job.views)) issues.addIssue({ code: "custom", message });
+    for (const message of jobFaults(job.pages, job.views, job.site === true)) issues.addIssue({ code: "custom", message });
   });
 type Job = z.infer<typeof jobSchema>;
 
@@ -704,6 +724,98 @@ function openStored(root: string, name: string, names: readonly string[] | undef
   return stored === null || stored === name ? null : openRegular(root, stored);
 }
 
+/** A segment of a site's path that is a plain name: not empty, no dot name
+ *  (so not `.` or `..` either: a dot name is never a site's file, as it is
+ *  never a task's), and nothing in it that would split or end a name. */
+function plainSegment(segment: string): boolean {
+  return segment !== "" && !segment.startsWith(".") && !/[/\\\0]/.test(segment);
+}
+
+/**
+ * A path of a site as the names of its folders and its file. A folder's own
+ * path, which ends in a slash (and the root's, which is nothing), is that
+ * folder's `index.html`. Null when a segment is no plain name.
+ */
+function sitePath(segments: readonly string[]): string[] | null {
+  const names = segments.at(-1) === "" ? [...segments.slice(0, -1), "index.html"] : [...segments];
+  return names.every(plainSegment) ? names : null;
+}
+
+/** What a page asked a site's server for: the path as its names, when every
+ *  segment is a plain one, and the words to say it by when it is not served.
+ *  Those are the path as it was written, with its escapes read, unless an
+ *  escape hides a slash or a NUL: said as sent, it reads as what was asked. */
+interface AskedOfSite {
+  names: string[] | null;
+  written: string;
+}
+
+function askedOfSite(raw: string): AskedOfSite {
+  if (!raw.startsWith("/")) return { names: null, written: raw };
+  let segments: string[];
+  try {
+    segments = raw.slice(1).split("/").map(decodeURIComponent);
+  } catch {
+    // A segment with a broken escape is no file's name: reported as written.
+    return { names: null, written: raw };
+  }
+  const hidden = segments.some((segment) => /[/\0]/.test(segment));
+  return { names: sitePath(segments), written: hidden ? raw : `/${segments.join("/")}` };
+}
+
+/** What a site's folders hold, when a job lists its files: for each
+ *  folder's path from the root (nothing for the root), the names in it. */
+type SiteListing = ReadonlyMap<string, readonly string[]>;
+
+function siteListing(names: readonly string[]): SiteListing {
+  const folders = new Map<string, Set<string>>();
+  for (const name of names) {
+    const segments = name.split("/");
+    for (const [depth, segment] of segments.entries()) {
+      const folder = segments.slice(0, depth).join("/");
+      folders.set(folder, (folders.get(folder) ?? new Set<string>()).add(segment));
+    }
+  }
+  return new Map([...folders].map(([folder, held]) => [folder, [...held]]));
+}
+
+/**
+ * Open a file of a site by the names of its path, from the root down. Each
+ * name is the entry spelled exactly so, else its one twin in the other
+ * Unicode form (ruling 76), looked up in the job's listing of the site, or
+ * in the folder itself when the job gave none. A folder on the way has to be
+ * a folder and not a link to one, and the file is opened without following a
+ * link: the tree a build leaves is written by an agent, and a link in it
+ * would lead off the site. With a listing, a name it does not hold is not
+ * looked for on the disk at all.
+ */
+function openSiteFile(root: string, names: readonly string[], listing: SiteListing | null): OpenFile | null {
+  let folder = root;
+  let stored = "";
+  for (const [depth, written] of names.entries()) {
+    let entries: readonly string[] | null = listing ? (listing.get(stored) ?? []) : null;
+    if (!listing) {
+      try {
+        entries = readdirSync(folder);
+      } catch {
+        // A folder this process may pass through and not list, and no
+        // listing of it: the name as it is written, or nothing.
+      }
+    }
+    const name = entries ? storedNameAmong(entries, written) : written;
+    if (name === null) return null;
+    stored = stored === "" ? name : `${stored}/${name}`;
+    if (depth === names.length - 1) return openRegular(folder, name);
+    folder = path.join(folder, name);
+    try {
+      if (!lstatSync(folder).isDirectory()) return null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 /** A request path as its page wrote it, where it can be decoded. */
 function pathAsWritten(raw: string): string {
   try {
@@ -715,11 +827,13 @@ function pathAsWritten(raw: string): string {
 
 /** The loopback server a page is loaded from. */
 interface PageServer {
-  /** `http://127.0.0.1:<port>`. */
+  /** `http://127.0.0.1:<port>`; of a site, `http://<token>.localhost:<port>`. */
   origin: string;
-  /** `<origin>/<token>/`. */
+  /** `<origin>/<token>/`; of a site, `<origin>/`. */
   base: string;
-  port: number;
+  /** The host and port of `origin`: the one address a browser is let
+   *  through its closed proxy to. */
+  through: string;
   /** Set the page a markdown file or a drawing is served as (null for an
    *  HTML page, which is served as it is) and start a fresh list of what was
    *  asked for and not served. */
@@ -738,9 +852,29 @@ interface Weight {
 
 const listenAddressSchema = z.looseObject({ port: z.number().int().positive() });
 
-function startPageServer(root: string, names: readonly string[] | undefined): Promise<PageServer> {
+/** The largest page of a site that is read for whether it names the icon a
+ *  browser asks for by itself. */
+const ICON_SCAN_MAX_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Start the page server: of a task's flat folder, or of a built site.
+ *
+ * A task's files are served one name deep under a token nobody else on the
+ * machine can guess. A site is served from its own root, since its pages
+ * name their files from there (`/assets/site.css`), so the token cannot be
+ * in the path. It is the host's name instead: `<token>.localhost`, which a
+ * browser takes for this machine without asking anybody (measured on Chrome
+ * 153 and Debian Chromium 154: a page at that name loaded behind the closed
+ * proxy with its files from the root, and the same port under the machine's
+ * bare address was refused by the proxy). A request under any other name is
+ * somebody else's: it is answered "not found" and said nowhere.
+ */
+function startPageServer(root: string, names: readonly string[] | undefined, site: boolean): Promise<PageServer> {
   const token = randomBytes(8).toString("hex");
-  const prefix = `/${token}/`;
+  const prefix = site ? "/" : `/${token}/`;
+  const listing = site && names ? siteListing(names) : null;
+  let through = "";
+  let namesIcon = false;
   let setPage: string | null = null;
   let missing = new Set<string>();
   let served: Weight = { bytes: 0, files: 0 };
@@ -753,10 +887,75 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
     res.end("not found\n");
   };
 
+  /** Answer a request for a path of a site, from its root. */
+  const answerSite = (req: IncomingMessage, res: ServerResponse, raw: string): void => {
+    if (req.headers.host !== through) {
+      refuse(res);
+      return;
+    }
+    const { names, written } = askedOfSite(raw);
+    const file = names ? openSiteFile(root, names, listing) : null;
+    if (!file || !names) {
+      // A folder asked for without its slash is sent on to the path with it,
+      // as a host of static files sends it: its page is then at the address
+      // the files it names beside itself are read against.
+      const page = names && !raw.endsWith("/") ? openSiteFile(root, [...names, "index.html"], listing) : null;
+      if (page) {
+        closeSync(page.fd);
+        res.writeHead(301, { ...PAGE_HEADERS, location: `${raw}/${(req.url ?? "").slice(raw.length)}` });
+        res.end();
+        return;
+      }
+      // The browser asks for the icon by itself: a page that names none did
+      // not ask for it, and one that names it did.
+      if (raw !== "/favicon.ico" || namesIcon) missing.add(written);
+      refuse(res);
+      return;
+    }
+    const html = CONTENT_TYPES.get(".html");
+    const type = CONTENT_TYPES.get(path.extname(names.at(-1) ?? "").toLowerCase());
+    const head = { ...PAGE_HEADERS, "content-type": type ?? "application/octet-stream" };
+    if (req.method === "HEAD") {
+      closeSync(file.fd);
+      res.writeHead(200, { ...head, "content-length": String(file.size) });
+      res.end();
+      return;
+    }
+    if (type === html && file.size <= ICON_SCAN_MAX_BYTES) {
+      // A page: read whole, to know whether it names the icon.
+      let page: Buffer | null = null;
+      try {
+        page = readFileSync(file.fd);
+      } catch {
+        // Answered as a file that is not there, below.
+      } finally {
+        closeSync(file.fd);
+      }
+      if (page === null) {
+        refuse(res);
+        return;
+      }
+      if (page.includes("favicon.ico")) namesIcon = true;
+      serve(page.length);
+      res.writeHead(200, { ...head, "content-length": String(page.length) });
+      res.end(page);
+      return;
+    }
+    serve(file.size);
+    res.writeHead(200, { ...head, "content-length": String(file.size) });
+    createReadStream("", { fd: file.fd, autoClose: true })
+      .on("error", () => res.destroy())
+      .pipe(res);
+  };
+
   const answer = (req: IncomingMessage, res: ServerResponse): void => {
     const raw = (req.url ?? "").split("?")[0] ?? "";
     if (req.method !== "GET" && req.method !== "HEAD") {
       refuse(res);
+      return;
+    }
+    if (site) {
+      answerSite(req, res, raw);
       return;
     }
     if (!raw.startsWith(prefix)) {
@@ -810,13 +1009,15 @@ function startPageServer(root: string, names: readonly string[] | undefined): Pr
     server.on("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const { port } = listenAddressSchema.parse(server.address());
-      const origin = `http://127.0.0.1:${port}`;
+      through = site ? `${token}.localhost:${port}` : `127.0.0.1:${port}`;
+      const origin = `http://${through}`;
       resolve({
         origin,
         base: `${origin}${prefix}`,
-        port,
+        through,
         begin(next) {
           setPage = next;
+          namesIcon = false;
           missing = new Set();
           served = { bytes: 0, files: 0 };
         },
@@ -984,8 +1185,8 @@ class Browser {
  *  every other one; a job never holds both kinds of page, so the open browser
  *  is never a task page's. `--no-sandbox` for the reason the browser mount
  *  gives. */
-function browserArgs(profile: string, port: number, open: boolean): string[] {
-  const closed = open ? [] : ["--proxy-server=http://127.0.0.1:9", `--proxy-bypass-list=<-loopback>;127.0.0.1:${port}`];
+function browserArgs(profile: string, through: string, open: boolean): string[] {
+  const closed = open ? [] : ["--proxy-server=http://127.0.0.1:9", `--proxy-bypass-list=<-loopback>;${through}`];
   return [
     "--headless=new",
     "--remote-debugging-pipe",
@@ -2890,6 +3091,17 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
     const address = webAddress(page.url);
     if (!address) return report("the page has no http or https address");
     url = address.href;
+  } else if (job.site === true) {
+    // A page of a site, opened here first by the page server's own rule, as
+    // a task's page is below, and then at its own path from the root. The
+    // page server starts its lists afresh before that: a page that is not
+    // there asked for nothing, whatever the page before it did.
+    server.begin(null);
+    const names = sitePath(page.file.split("/"));
+    const source = names ? openSiteFile(job.root, names, job.names ? siteListing(job.names) : null) : null;
+    if (!source) return report("the file is not there to render");
+    closeSync(source.fd);
+    url = server.base + page.file.split("/").map(encodeURIComponent).join("/");
   } else {
     // Opened here first, by the page server's own rule: a name it would not
     // answer (a dot name, a path), one that is gone, or a link would otherwise
@@ -2919,7 +3131,7 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
 
   const profile = path.join(job.profile, String(index + 1));
   mkdirSync(profile, { recursive: true });
-  const browser = new Browser(job.browser, browserArgs(profile, server.port, web));
+  const browser = new Browser(job.browser, browserArgs(profile, server.through, web));
   current = browser;
   const startedAt = Date.now();
   let timer: NodeJS.Timeout | null = null;
@@ -3071,7 +3283,7 @@ async function main(): Promise<number> {
   };
   process.on("SIGTERM", stopped);
   process.on("SIGINT", stopped);
-  const server = await startPageServer(job.root, job.names);
+  const server = await startPageServer(job.root, job.names, job.site === true);
   const engine = readEngine(job.measure === true ? job.axe : undefined);
   try {
     for (const [index, page] of job.pages.entries()) {

@@ -134,7 +134,10 @@ own pieces:
   and keeps that look (`keep_page_look`, ruling 327). The controller writes no procedure of
   its own for any of it into a board's rulings: no other widths, no browser steps, no
   description of the reference. A page nobody named a repository for is delivered as files
-  on a board without one, since the pages inside a pull request are not pictured, and a
+  on a board without one. On a board that ships pull requests the site is what its gates
+  build: the controller gives the gate that builds it its `pages` folder
+  (`set_project_gates`), and Viberr keeps, pictures, measures and shows a reviewer each
+  delivered revision's build (ruling 86); without it nothing pictures a page there. A
   page is one task: a task has a price, so an outcome is split only where a person accepts
   the pieces separately or they can be made at once.
 
@@ -818,7 +821,7 @@ matrix the human surfaces use; the tier in brackets is the floor)
 | `set_required_reviewers` | The WHOLE required-reviewer list per non-terminal stage, `[]` clearing it; every profile must be deployed and hold `report-validation-verdict`; an unchanged list answers `[noop]`; audited `project.required_reviewers.updated` [`edit-policy`; ruling 89] |
 | `set_project_rulings_kb` | Name the project's rulings KB by store directory, or `null` to clear; that KB is injected into every run the project makes [`edit-policy`; ruling 208(a)] |
 | `set_file_leases` | Replace the project's file-lease list (path globs a task owns until it merges); overlapping leases held by different unfinished tasks are refused [`edit-policy`; rulings 60 and 61] |
-| `set_project_gates` | Replace the project's gates, the commands Viberr itself runs on every delivered revision (`{name, command, timeoutSeconds?}`, at most 10, run with `sh -c` in order, 600 s by default), `[]` clearing them; a duplicate or empty name, an empty command or a timeout outside 1..3600 is refused by name with nothing written; an unchanged list answers `[noop]`; a changed one queues the gates on every open task with a delivered revision; audited `project.gates.updated`. Its description sends a MEASURED gate set here instead of into the rulings KB as prose [`edit-policy`; ruling 104] |
+| `set_project_gates` | Replace the project's gates, the commands Viberr itself runs on every delivered revision (`{name, command, timeoutSeconds?, pages?}`, at most 10; `pages` on one gate names the folder it builds the site's pages into, ruling 86, run with `sh -c` in order, 600 s by default), `[]` clearing them; a duplicate or empty name, an empty command or a timeout outside 1..3600 is refused by name with nothing written; an unchanged list answers `[noop]`; a changed one queues the gates on every open task with a delivered revision; audited `project.gates.updated`. Its description sends a MEASURED gate set here instead of into the rulings KB as prose [`edit-policy`; ruling 104] |
 | `update_stages` | Add (before the final stage), rename, recolor (one of the twenty presets), remove or reorder; removing a stage never loosens a boundary [`edit-policy`] |
 | `set_transition_boundary` | `auto`, `approval` or `human` for one move; the move into the final stage stays human [`edit-policy`] |
 | `invite_member` | Add a member by email (an unknown email gets an account and a relayed one-time password), seated in the given `role` in one write (default viewer; an unknown role refused by name) [`manage-members`] |

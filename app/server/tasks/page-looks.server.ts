@@ -2,8 +2,11 @@ import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
-import { deliveredAsFiles, type ParsedTaskFile } from "~/schemas/task-file.schema";
+import { activeWorkRevision, deliveredAsFiles, reviewSubjectId, type ParsedTaskFile } from "~/schemas/task-file.schema";
 import { resolveStoredSegment, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { builtPagesAmong, keptBuildDir, keptBuildFiles, projectPagesDir } from "~/server/files/kept-builds.server";
+import { readProjectFile } from "~/server/files/project-writer.server";
+import { gateSubject } from "~/shared/project-gates";
 import { keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
@@ -31,7 +34,7 @@ import {
   viewOfCaptureName,
   type PageCaptureViewId,
 } from "~/shared/page-capture";
-import { measuredLine, measuredOf } from "./page-measured.server";
+import { capturesRevision, measuredLine, measuredOf } from "./page-measured.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { filesClaimedBy } from "./task-replies.server";
 
@@ -220,10 +223,15 @@ export function keptLooks(sources: readonly TaskSource[]): KeptLook[] {
 /** What an approval of a task's delivery owes a look at. */
 export interface PageLooksOwed {
   taskKey: string;
-  /** The files delivery under review. */
+  /** The delivery under review, as a look names it: a files delivery's
+   *  stamp, or a revision's id. */
   deliveredAt: string;
-  /** Its pages: the HTML files the deliverer saved, as the kept delivery holds them. */
+  /** Its pages: the HTML files the deliverer saved, as the kept delivery
+   *  holds them, or the pages of the build kept for a revision. */
   pages: string[];
+  /** Ruling 86: why a revision's pages are not there to look at, when the
+   *  project's gates build them and have not passed on it. */
+  pending: string | null;
   looks: KeptLook[];
   /** Ruling 328: what Viberr measured of those pages as it pictured this
    *  delivery, one line a page; empty while the render has not finished. */
@@ -275,21 +283,70 @@ function deliverersOf(db: DatabaseSync, projectSlug: string, taskKey: string, pa
 }
 
 /**
+ * Ruling 86: the folder the project's gates build its pages into, or null:
+ * the project names none, or cannot be read.
+ */
+function pagesDirOf(ctx: TaskMutationContext, projectSlug: string): string | null {
+  try {
+    const project = readProjectFile(ctx.dataRoot ? { projectSlug, dataRoot: ctx.dataRoot } : { projectSlug });
+    return projectPagesDir(project?.parsed.frontmatter.gates);
+  } catch {
+    return null;
+  }
+}
+
+/** Why a revision's pages are not there to show, read off the gate run on it. */
+export interface BuildPending {
+  why: string;
+  /** The gates are queued or running on it: the pages are on their way. */
+  building: boolean;
+}
+
+/**
+ * Why the pages of a revision the project's gates build are not there to
+ * show yet, or null when the gates passed on it: then what was kept is all
+ * there is, and a build that left no page in the folder the project names
+ * shows nobody anything (the note the gates write on the task says so).
+ */
+function buildPending(parsed: ParsedTaskFile, revisionId: string): BuildPending | null {
+  const run = parsed.frontmatter.gateRun;
+  // A delivery and a new revision queue the gates as they are written, so a
+  // revision with no run of its own is one nobody asked the gates for: not
+  // on its way, and a person's "Run gates" is what builds it.
+  if (!run || run.revisionId !== revisionId) {
+    return { why: "the project's gates have not run on this revision, and its pages are what they build", building: false };
+  }
+  if (run.status === "queued" || run.status === "running") {
+    return { why: "the project's gates are still building this revision's pages", building: true };
+  }
+  if (run.status === "error") {
+    return { why: "the project's gates could not run on this revision, so its pages were not built", building: false };
+  }
+  return run.results.some((result) => result.exitCode !== 0)
+    ? { why: "the project's gates did not pass on this revision, so its pages were not built", building: false }
+    : null;
+}
+
+/**
  * What an approval of this task's delivery owes a look at, or null when it
- * owes none: the delivery is a revision or nothing was delivered, and the
- * task keeps no look; or it is files with no page of a deliverer's among
- * them and no look.
+ * owes none: nothing was delivered; or what was delivered holds no page of a
+ * deliverer's and the task keeps no look.
  *
- * The pages are read from the delivery's kept copy, which is what a judge is
- * shown ({@link judgedDelivery}): what a stopped rework, an upload or a
+ * A files delivery's pages are read from its kept copy, which is what a judge
+ * is shown ({@link judgedDelivery}): what a stopped rework, an upload or a
  * removal has since done to the task's folder changes neither what is owed
  * nor what can be shown. A page a copy that failed part way does not hold is
  * owed by nobody: it can only be shown as it stands on the task, and a look
- * at that is of no delivery. Nothing is owed that no tool can show, or the
- * approval could never bind: with no browser on the server (`canShowPages`
- * false) no page is pictured for anyone, a page past the size `capture_page`
- * renders is not rendered, and a kept picture whose bytes a person took out
- * of the store is not there to open.
+ * at that is of no delivery. A revision's pages (ruling 86) are the pages of
+ * the build the project's gates kept of it, where a gate names the folder it
+ * builds them into; until that build is kept the approval owes it all the
+ * same (`pending`), so a verdict never binds on pages nobody was shown.
+ *
+ * Nothing else is owed that no tool can show, or the approval could never
+ * bind: with no browser on the server (`canShowPages` false) no page is
+ * pictured for anyone, a page past the size `capture_page` renders is not
+ * rendered, and a kept picture whose bytes a person took out of the store is
+ * not there to open.
  */
 export function pageLooksOwed(
   db: DatabaseSync,
@@ -300,19 +357,40 @@ export function pageLooksOwed(
   canShowPages: boolean,
 ): PageLooksOwed | null {
   const fm = parsed.frontmatter;
-  if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
-  const own = filesClaimedBy(parsed.timeline, deliverersOf(db, projectSlug, taskKey, parsed));
-  const keptDir = keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot);
-  const kept = listed(keptDir);
-  // A delivery whose copy could not be kept (ruling 86) is the files on the
-  // task: the pages are read from there, as a judge is shown them from there.
-  const dir = kept.length > 0 && keptDir ? keptDir : taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
-  const held = kept.length > 0 ? kept : listed(dir);
-  const pages = canShowPages
-    ? held
-        .filter((name) => own.has(name) && pageKindOf(name) === "html" && within(path.join(dir, name), PAGE_HTML_MAX_BYTES))
-        .sort()
-    : [];
+  if (reviewSubjectId(fm) === null) return null;
+  const revision = activeWorkRevision(fm.workRevision);
+  let identity: string;
+  let pages: string[] = [];
+  let pending: string | null = null;
+  if (revision) {
+    identity = revision.id;
+    // A verification revision is the default branch as it stands: nothing
+    // was delivered, the gates never run on it and nothing is built of it.
+    if (canShowPages && gateSubject(fm) !== null && pagesDirOf(ctx, projectSlug) !== null) {
+      const dir = keptBuildDir(projectSlug, taskKey, revision.id, ctx.dataRoot);
+      const files = keptBuildFiles(dir);
+      if (dir && files.length > 0) {
+        pages = builtPagesAmong(files).pages.filter((name) => within(path.join(dir, name), PAGE_HTML_MAX_BYTES));
+      } else {
+        pending = buildPending(parsed, revision.id)?.why ?? null;
+      }
+    }
+  } else {
+    if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
+    identity = fm.deliveredAt;
+    const own = filesClaimedBy(parsed.timeline, deliverersOf(db, projectSlug, taskKey, parsed));
+    const keptDir = keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot);
+    const kept = listed(keptDir);
+    // A delivery whose copy could not be kept (ruling 86) is the files on the
+    // task: the pages are read from there, as a judge is shown them from there.
+    const dir = kept.length > 0 && keptDir ? keptDir : taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+    const held = kept.length > 0 ? kept : listed(dir);
+    pages = canShowPages
+      ? held
+          .filter((name) => own.has(name) && pageKindOf(name) === "html" && within(path.join(dir, name), PAGE_HTML_MAX_BYTES))
+          .sort()
+      : [];
+  }
   const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources)
     .map((look) => ({
       ...look,
@@ -322,22 +400,34 @@ export function pageLooksOwed(
       }),
     }))
     .filter((look) => look.stretches.length > 0);
-  if (pages.length === 0 && looks.length === 0) return null;
-  const record = fm.pageCaptures?.deliveredAt === fm.deliveredAt ? fm.pageCaptures : null;
+  if (pages.length === 0 && looks.length === 0 && pending === null) return null;
+  // The record is of one delivery: a revision's by its id, a files delivery's
+  // by its stamp.
+  const of = capturesRevision(fm.pageCaptures);
+  const record = fm.pageCaptures && (revision ? of === revision.id : of === null && fm.pageCaptures.deliveredAt === identity) ? fm.pageCaptures : null;
   const measured = (record?.pages ?? []).flatMap((page) => {
     const figures = pages.includes(page.file) ? measuredOf(page) : null;
     return figures ? [{ file: page.file, line: measuredLine(figures) }] : [];
   });
-  return { taskKey, deliveredAt: fm.deliveredAt, pages, looks, measured };
+  return { taskKey, deliveredAt: identity, pages, pending, looks, measured };
 }
 
-/** The files delivery a run judges, as the run is shown it. */
+/** The delivery a run judges, as the run is shown it. */
 export interface JudgedDelivery {
+  /** What a look at it is credited to: a files delivery's stamp, or a
+   *  revision's id. */
   deliveredAt: string;
-  /** Its kept copy, or null when Viberr holds none (ruling 86: the copy
-   *  failed): the task's files as they stand are then all anyone can be
-   *  shown, and what a look is of. */
+  /** Its kept copy. Null for a files delivery Viberr holds no copy of
+   *  (ruling 86: the copy failed): the task's files as they stand are then
+   *  all anyone can be shown, and what a look is of. Null for a revision
+   *  whose build is not kept: then nothing of it can be shown (`pending`). */
   dir: string | null;
+  /** Ruling 86: the delivery is a revision, by the first seven of its sha,
+   *  and its kept copy is the build the project's gates made of it: a
+   *  site's tree, where a page is a path. Null for a files delivery. */
+  revision: string | null;
+  /** Why a revision's pages are not there to show. */
+  pending: BuildPending | null;
 }
 
 /**
@@ -364,13 +454,36 @@ export function judgedDelivery(
   parsed: ParsedTaskFile,
 ): JudgedDelivery | null {
   const fm = parsed.frontmatter;
-  if (!input.runId || !fm.deliveredAt || !deliveredAsFiles(fm)) return null;
+  if (!input.runId || reviewSubjectId(fm) === null) return null;
   const run = getRun(db, input.runId);
   if (!run || run.kind !== "reviewer" || run.verdict_withheld === 1) return null;
   const engagement = fm.engagements.find((entry) => entry.profileId === run.agent_profile_id);
   if (engagement && engagement.verdictCapable !== true) return null;
+  const revision = activeWorkRevision(fm.workRevision);
+  if (revision) {
+    // Ruling 86: a revision is judged from the build the project's gates
+    // kept of it, where they build its pages. Where they build none (or the
+    // revision is the default branch as it stands, which no gate runs on),
+    // a judge is shown the task's files like anyone.
+    if (gateSubject(fm) === null || pagesDirOf(ctx, input.projectSlug) === null) return null;
+    const dir = keptBuildDir(input.projectSlug, input.taskKey, revision.id, ctx.dataRoot);
+    const built = dir !== null && keptBuildFiles(dir).length > 0;
+    return {
+      deliveredAt: revision.id,
+      dir: built ? dir : null,
+      revision: revision.headSha.slice(0, 7),
+      pending: built ? null : buildPending(parsed, revision.id),
+    };
+  }
+  if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
   const dir = keptDeliveryDir(input.projectSlug, input.taskKey, fm.deliveredAt, ctx.dataRoot);
-  return { deliveredAt: fm.deliveredAt, dir: dir && listed(dir).length > 0 ? dir : null };
+  return { deliveredAt: fm.deliveredAt, dir: dir && listed(dir).length > 0 ? dir : null, revision: null, pending: null };
+}
+
+/** Ruling 86: the folder of a checkout the project's gates build its pages
+ *  into, as the project names it; null when it names none. */
+export function projectPagesFolder(ctx: TaskMutationContext, projectSlug: string): string | null {
+  return pagesDirOf(ctx, projectSlug);
 }
 
 const same = (a: string, b: string): boolean => a.normalize("NFC") === b.normalize("NFC");
@@ -403,6 +516,8 @@ function seenTo(looks: readonly Extract<RunLook, { kind: "page" }>[]) {
  */
 export function unmetPageLooks(owed: PageLooksOwed, looks: readonly RunLook[]): string[] {
   const unmet: string[] = [];
+  // Ruling 86: a revision whose pages are not built was shown to nobody.
+  if (owed.pending) unmet.push(`the pages of this revision (${owed.pending})`);
   for (const page of owed.pages) {
     for (const view of PAGE_CAPTURE_VIEWS) {
       const mine = looks.filter(
@@ -483,9 +598,10 @@ export function pageLooksNote(owed: PageLooksOwed): string {
       `every picture of ${look.url} as this task kept it on ${look.at.slice(0, 10)} (${idRange(look.stretches.map((s) => s.id))})`,
     );
   }
+  if (owed.pending) parts.push(`the pages of this revision as the project's gates build them (${owed.pending}; \`capture_page\` shows them once they are built)`);
   return (
     `- An approval here binds only from a run that looked. Before you approve, look at ${parts.join(", and at ")}. ` +
-    howToLook({ pages: owed.pages.length > 0, looks: owed.looks.length > 0 }) +
+    howToLook({ pages: owed.pages.length > 0 || owed.pending !== null, looks: owed.looks.length > 0 }) +
     (owed.looks.length > 0
       ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it."
       : "") +
@@ -505,7 +621,10 @@ export function pageLooksRefusalNote(reviewer: string, unmet: readonly string[],
   return (
     `${reviewer}'s approval was not recorded: the run did not look at ${unmet.join("; ")}. ` +
     "An approval of a page binds only from a run that looked at the whole page at both widths and at every picture of a look the task keeps. " +
-    howToLook({ pages: owed === null || owed.pages.length > 0, looks: owed === null || owed.looks.length > 0 }) +
+    howToLook({
+      pages: owed === null || owed.pages.length > 0 || owed.pending !== null,
+      looks: owed === null || owed.looks.length > 0,
+    }) +
     " Validation is unchanged and acceptance stays gated: run the review again."
   );
 }
@@ -561,6 +680,10 @@ export function keptPictureLook(
   // The record is of one delivery: a picture read out of another's kept copy
   // is that delivery's, and no look at this one.
   if (!record || !shot || (delivery !== undefined && delivery !== record.deliveredAt)) return null;
+  // The pictures of a revision's build are kept on the task alone, with no
+  // copy of the delivery's to hold them to: its pages are looked at in
+  // stretches, which are rendered from the kept build.
+  if (capturesRevision(record) !== null) return null;
   if (openedAt !== undefined && openedAt < record.at) return null;
   const keptDir = keptDeliveryDir(projectSlug, taskKey, record.deliveredAt, ctx.dataRoot);
   const kept = keptDir ? pictureBytes(() => resolveStoredSegment(keptDir, name)) : null;

@@ -124,7 +124,10 @@ export const PAGE_CAPTURE_NOTE_TITLE = "Page captures";
 /** How many pages of one delivery are pictured; the rest are counted. */
 export const PAGE_CAPTURE_MAX_PAGES = 8;
 /** A source name past this is not pictured: the picture's own name must fit
- *  the 200 characters a timeline entry allows an attachment name. */
+ *  the 200 characters a timeline entry allows an attachment name. A page a
+ *  revision's gates built is pictured under a longer name (its path, a mark
+ *  for each folder and the revision), which the server holds to the same 200
+ *  where it pictures one. */
 export const PAGE_CAPTURE_MAX_NAME_CHARS = 178;
 /** The furthest down a page an agent's stretch may start: the walk to it
  *  stays well inside a page's 25 seconds. */

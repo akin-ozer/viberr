@@ -1,6 +1,7 @@
 import {
   constants as fsConstants,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   rmdirSync,
@@ -13,6 +14,7 @@ import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  activeWorkRevision,
   deliveredAsFiles,
   type PageCaptures,
   type TaskFileEvent,
@@ -22,6 +24,7 @@ import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server"
 import { getEnv } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
 import { storedFileName, storedNameAmong, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { builtPagesAmong, keptBuildDir, keptBuildFiles, sitePath } from "~/server/files/kept-builds.server";
 import { keepDelivery, keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
@@ -71,10 +74,17 @@ import {
   type PageCaptureViewId,
   type PageKind,
 } from "~/shared/page-capture";
-import { loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
+import { capturesRevision, loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
-import { judgedDelivery, PAGE_HTML_MAX_BYTES, recordRunLooks, type JudgedDelivery } from "./page-looks.server";
+import {
+  judgedDelivery,
+  PAGE_HTML_MAX_BYTES,
+  projectPagesFolder,
+  recordRunLooks,
+  type JudgedDelivery,
+} from "./page-looks.server";
+import { taskCloneDir } from "./specialist-workspace.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -90,9 +100,13 @@ import { isRelayComment } from "./task-relay.server";
  *
  *  - **When.** Each stamped files delivery ({@link requestDeliveryCaptures},
  *    asked by `applyAgentCompletionEffects` once the delivery is kept and its
- *    delivery reconcile has run). A delivery that is a revision is not
- *    pictured: its pages live in the pull request. A first delivery on a
- *    board with a repository is stamped before the reconcile mints its
+ *    delivery reconcile has run). A delivery that is a revision is
+ *    pictured from what it builds, not from the files its run saved: where
+ *    a gate of the project names the folder it builds the pages into, the
+ *    gates keep that folder once they have passed and ask for its pictures
+ *    ({@link requestRevisionCaptures}); where none does, a revision is not
+ *    pictured, and its pages live in the pull request. A first delivery on
+ *    a board with a repository is stamped before the reconcile mints its
  *    revision, so the completion asks only after it, and the render writes
  *    nothing unless the delivery is still files under the task file's lock.
  *    An agent can ask for the same picture of any page on its task
@@ -410,6 +424,9 @@ interface ChildJob {
    *  engine at `axe` when the deployment has one. */
   measure?: boolean;
   axe?: string;
+  /** Ruling 86: `root` is a built site, a tree served from its own root: a
+   *  page is a path in it, and a path from the site's root is its file. */
+  site?: boolean;
 }
 
 /** One picture the renderer made, checked by its own header. */
@@ -480,6 +497,10 @@ interface RenderedPage {
    *  name, or (starting with `/`) a path outside its own folder. Whole, as
    *  the report gave them: only a sentence prints them, cut and cleaned. */
   missing: string[];
+  /** Ruling 86: the page is one of a built site, served from the site's
+   *  root: what is `missing` is then a path of the site that it does not
+   *  hold, and never a path a capture refuses. */
+  site?: boolean;
   error: string | null;
 }
 
@@ -718,7 +739,15 @@ interface RenderRequest {
    *  kept delivery, whose files are first copied where the person can read.
    *  `since` (a judge's own ask, ruling 329) puts beside them the files the
    *  task's folder holds under names the delivery does not. */
-  source: { kind: "attachments" } | { kind: "kept"; dir: string; since?: boolean } | { kind: "web" };
+  source:
+    | { kind: "attachments" }
+    | { kind: "kept"; dir: string; since?: boolean }
+    /** Ruling 86: the kept build of a revision, a tree, carried as one. */
+    | { kind: "build"; dir: string }
+    /** A built folder the person's own processes can read as it stands: the
+     *  pages a deliverer built in its checkout. */
+    | { kind: "site"; dir: string }
+    | { kind: "web" };
   pages: PageInput[];
   views: ChildView[];
   /** The run that asked, whose scratch this is until it ends; null for a
@@ -908,6 +937,41 @@ async function carryDelivery(from: string, into: string, pages: readonly PageInp
   return carried;
 }
 
+/**
+ * Ruling 86: a revision's kept build, carried for the render as a kept
+ * delivery is, with its folders: each made the server's own and passable on
+ * the way down, each file 0640. The tree is the server's, so it is walked as
+ * it stands; the same limits apply, and what is past them is named.
+ */
+async function carryBuild(from: string, into: string): Promise<Carried> {
+  passThroughDirForAgents(path.dirname(into));
+  passThroughDirForAgents(into);
+  const carried: Carried = { names: [], notCarried: new Set(), since: [] };
+  const made = new Set<string>();
+  let total = 0;
+  for (const name of keptBuildFiles(from)) {
+    const segments = name.split("/").slice(0, -1);
+    for (let depth = 1; depth <= segments.length; depth += 1) {
+      const folder = segments.slice(0, depth).join("/");
+      if (made.has(folder)) continue;
+      passThroughDirForAgents(path.join(into, folder));
+      made.add(folder);
+    }
+    const copy = path.join(into, name);
+    const room = Math.min(CARRIED_FILE_MAX_BYTES, CARRIED_TOTAL_MAX_BYTES - total);
+    const file = await carryFile(path.join(from, name), copy, room);
+    if (!file) continue;
+    if ("tooLarge" in file) {
+      carried.notCarried.add(name);
+      continue;
+    }
+    shareFileForAgentsToRead(copy);
+    carried.names.push(name);
+    total += file.bytes;
+  }
+  return carried;
+}
+
 /** Remove the renderer's input folder. The server's own remove is the right
  *  one here and only here: no agent can write under it (ruling 140 is about
  *  the trees one can). */
@@ -1002,18 +1066,27 @@ async function render(request: RenderRequest): Promise<Render> {
   let since: string[] = [];
   const timeoutMs = JOB_BASE_MS + pageTimeoutMs * pages.length;
   let outcome: Awaited<ReturnType<typeof runPersonCommand>>;
+  if (request.source.kind === "site") {
+    job.root = request.source.dir;
+    job.site = true;
+  }
+  const carries = request.source.kind === "kept" || request.source.kind === "build";
   try {
-    if (request.source.kind === "kept") {
+    if (request.source.kind === "kept" || request.source.kind === "build") {
       // Whatever is here is an earlier render's that a restart cut short.
       await removeCaptureInput(inputRoot);
       job.root = path.join(inputRoot, captureId);
       try {
-        const carried = await carryDelivery(
-          request.source.dir,
-          job.root,
-          pages,
-          request.source.since ? taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot) : null,
-        );
+        if (request.source.kind === "build") job.site = true;
+        const carried =
+          request.source.kind === "build"
+            ? await carryBuild(request.source.dir, job.root)
+            : await carryDelivery(
+                request.source.dir,
+                job.root,
+                pages,
+                request.source.since ? taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot) : null,
+              );
         job.names = carried.names;
         notCarried = carried.notCarried;
         since = carried.since;
@@ -1054,7 +1127,7 @@ async function render(request: RenderRequest): Promise<Render> {
       timeoutNote: `\n[viberr] the render ran past its ${Math.round(timeoutMs / 1000)} s limit and was stopped\n`,
     });
   } finally {
-    if (request.source.kind === "kept") await removeCaptureInput(inputRoot);
+    if (carries) await removeCaptureInput(inputRoot);
   }
   const reported = new Map<string, z.infer<typeof reportSchema>["pages"][number]>();
   const report = readAttachmentBytes(path.join(out, "report.json"), REPORT_MAX_BYTES);
@@ -1120,7 +1193,7 @@ async function render(request: RenderRequest): Promise<Render> {
         done: act.done === null ? null : reportText(act.done),
         error: act.error === null ? null : reportText(act.error, ACT_ERROR_MAX_CHARS),
       }));
-    return {
+    const made: RenderedPage = {
       file: page.file,
       shots,
       acts,
@@ -1138,6 +1211,8 @@ async function render(request: RenderRequest): Promise<Render> {
       // the render: the act's own sentence says what happened.
       error: shots.length === 0 && error === null && acts.every((act) => act.error === null) ? unreported : error,
     };
+    if (job.site) made.site = true;
+    return made;
   });
   return { pages: rendered, scratch, notCarried, since };
 }
@@ -1174,6 +1249,19 @@ function askedClause(page: RenderedPage): string | null {
 /** "`assets/chart.png`, which is not among this task's files (the folder is
  *  flat)", one clause per kind of miss. */
 function missingClauses(page: RenderedPage, notCarried: ReadonlySet<string>): string[] {
+  const named = (names: readonly string[]): string => LIST_AND.format(names.map((name) => code(reportName(name))));
+  if (page.site) {
+    // A site is served whole from its root, so a path it asked for and did
+    // not get is a file the build does not hold (a broken reference a
+    // reader meets too), or one past what a capture carries.
+    const carried = (name: string): boolean => !notCarried.has(name.replace(/^\/+/, ""));
+    const absent = page.missing.filter(carried);
+    const large = page.missing.filter((name) => !carried(name));
+    return [
+      ...(absent.length > 0 ? [`${named(absent)}, which the built site does not hold`] : []),
+      ...(large.length > 0 ? [`${named(large)}, which a capture does not carry (a file over 25 MB, or past 200 MB in all)`] : []),
+    ];
+  }
   const tooLarge = page.missing.filter((name) => notCarried.has(name));
   // A path the page server refuses whatever the folder holds: from the
   // site's root, or above the page's own folder. No file name starts so.
@@ -1181,7 +1269,6 @@ function missingClauses(page: RenderedPage, notCarried: ReadonlySet<string>): st
   const absent = page.missing.filter((name) => !notCarried.has(name) && !name.startsWith("/"));
   // Sorted into its kind by the name as it is, then printed cut and cleaned:
   // a long name cut first would no longer be the name that was not carried.
-  const named = (names: readonly string[]): string => LIST_AND.format(names.map((name) => code(reportName(name))));
   const clauses: string[] = [];
   if (absent.length > 0) {
     clauses.push(
@@ -1287,10 +1374,13 @@ interface CaptureNote {
   notCarried: ReadonlySet<string>;
   /** The unpictured pages an agent's own `capture_page` can still show. */
   lookable: ReadonlySet<string>;
+  /** Ruling 86: the pages are a revision's, as the project's gates built
+   *  them: its short sha, and how many built files were past what is kept. */
+  built?: { sha: string; leftOut: number } | undefined;
 }
 
 /** The timeline note a delivery's render writes. */
-function captureNoteText({ pages, more, notCarried, lookable, accepted }: CaptureNote): string {
+function captureNoteText({ pages, more, notCarried, lookable, accepted, built }: CaptureNote): string {
   const pictured = pages.filter((page) => page.shots.length > 0);
   const failed = pages.filter((page) => page.shots.length === 0);
   const parts: string[] = [];
@@ -1299,7 +1389,13 @@ function captureNoteText({ pages, more, notCarried, lookable, accepted }: Captur
     parts.push(
       `Viberr rendered ${LIST_AND.format(pictured.map((page) => code(page.file)))} as a reader sees ` +
         `${pictured.length === 1 ? "it" : "them"}, at a desktop width (${px(desktop!.width)} px) and a phone width ` +
-        `(${px(phone!.width)} px). The pictures are attached and show beside each file on the result.`,
+        `(${px(phone!.width)} px). ` +
+        (built
+          ? `${pictured.length === 1 ? "It is" : "They are"} the pages of \`${built.sha}\` as the project's gates built it, and the pictures are attached.` +
+            (built.leftOut > 0
+              ? ` ${built.leftOut === 1 ? "1 built file was" : `${px(built.leftOut)} built files were`} past what a kept build holds and left out.`
+              : "")
+          : "The pictures are attached and show beside each file on the result."),
     );
     for (const page of pictured) parts.push(...pageRemarks(page, notCarried));
   }
@@ -1631,10 +1727,11 @@ async function captureDelivery(
   } catch {
     keptFiles = [];
   }
-  // A delivery that is a revision is not pictured: its pages live in the pull
-  // request, where the reviewers' browser and the operator's named
-  // screenshots show them. The files its run saved are evidence beside it,
-  // and the Result card of such a task shows no files to put a picture by.
+  // A delivery that is a revision is not pictured from the files its run
+  // saved: those are evidence beside it. Its pages are what the project's
+  // gates build of it, pictured when they have ({@link captureRevision}), and
+  // the pictures this task keeps of that revision's build are left alone.
+  if (!deliveredAsFiles(fm) && capturesRevision(fm.pageCaptures) === activeWorkRevision(fm.workRevision)?.id) return;
   const { pages, extra } = deliveredAsFiles(fm)
     ? deliveryPages(keptFiles, fm, file.parsed.timeline)
     : { pages: [], extra: [] };
@@ -1766,10 +1863,11 @@ async function captureDelivery(
     if (parsed.frontmatter.deliveredAt !== stamp) return;
     // The task's work became a revision while this rendered (a caller that
     // asked before the delivery reconcile had minted one): a revision is
-    // never pictured, recorded or noted. The record still here is of an
-    // earlier files delivery, whose pictures went above.
+    // pictured from its build and never from these files. The record still
+    // here is of an earlier files delivery, whose pictures went above; one
+    // the gates have since written of the revision's build stays.
     if (!deliveredAsFiles(parsed.frontmatter)) {
-      if (parsed.frontmatter.pageCaptures) {
+      if (parsed.frontmatter.pageCaptures && capturesRevision(parsed.frontmatter.pageCaptures) === null) {
         delete parsed.frontmatter.pageCaptures;
         wrote.cleared = true;
       }
@@ -1878,8 +1976,13 @@ function owesCapture(ctx: TaskMutationContext, input: DeliveryCaptureInput): boo
     const found = renderer();
     if ("configured" in found && !found.configured) return false;
     const file = readTaskFile(taskRef(ctx, input.projectSlug, input.taskKey));
-    if (!file || file.parsed.frontmatter.pageCaptures) return true;
-    if (!deliveredAsFiles(file.parsed.frontmatter)) return false;
+    if (!file) return true;
+    const fm = file.parsed.frontmatter;
+    // A revision's pictures are of its build, and the gates ask for them.
+    if (!deliveredAsFiles(fm)) {
+      return fm.pageCaptures !== undefined && capturesRevision(fm.pageCaptures) !== activeWorkRevision(fm.workRevision)?.id;
+    }
+    if (fm.pageCaptures) return true;
     const kept = keptDeliveryDir(input.projectSlug, input.taskKey, input.stamp, ctx.dataRoot);
     return !kept || readdirSync(kept).some((name) => pageKindOf(name) !== null);
   } catch {
@@ -1918,6 +2021,258 @@ export function requestDeliveryCaptures(
           await captureDelivery(db, ctx, input);
         } catch (error) {
           logger.warn("a delivery's pages could not be pictured", {
+            projectSlug: input.projectSlug,
+            taskKey: input.taskKey,
+            err: toError(error),
+          });
+        } finally {
+          resolve();
+        }
+      },
+    });
+  });
+}
+
+// ------------------------------------------------------------ a revision's pages
+
+/**
+ * The name a picture of a built page is kept under in the attachments store,
+ * which holds no slash: the page's path with `--` where its folders part,
+ * then `.at-` and the first seven of the revision's sha
+ * (`controller/index.html` at `9f2c41a` is pictured as
+ * `controller--index.html.at-9f2c41a.capture-desktop.png`). A revision's
+ * pictures are named for that revision, so the next one's never take their
+ * place under a name a note or a completion packet already shows. Dots and
+ * hyphens only: a name written bare in a comment stays a name (an `@` in it
+ * is read as a mail address there). The record pairs each picture with its
+ * page. The lightbox prints the name's stem as it is ("Picture of
+ * controller--index.html.at-9f2c41a"): the page and the revision, as the
+ * store spells them.
+ */
+export function builtPictureName(file: string, view: PageCaptureViewId, sha: string): string {
+  return pageCaptureName(`${file.replaceAll("/", "--")}.at-${sha.slice(0, 7)}`, view);
+}
+
+/** The longest name a timeline entry takes for an attachment. */
+const BUILT_PICTURE_NAME_MAX_CHARS = 200;
+
+export interface RevisionCaptureInput {
+  projectSlug: string;
+  taskKey: string;
+  /** The `workRevision.id` whose build was kept. */
+  revisionId: string;
+  /** The folder of the checkout the project's gates build the pages into. */
+  folder: string;
+  /** False when the build could not be kept at all. */
+  kept: boolean;
+  /** How many built files were past what a kept build holds. */
+  leftOut: number;
+}
+
+/**
+ * Ruling 86: picture and measure the pages a delivered revision builds, from
+ * the build the project's gates left (`keepBuild`), as a files delivery is
+ * pictured from its kept copy: the same views, the same figures (ruling 328),
+ * one "Page captures" note with the pictures attached, and the record a later
+ * reader pairs them by, bound to the revision as a files record is bound to
+ * its stamp.
+ */
+async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input: RevisionCaptureInput): Promise<void> {
+  const { projectSlug, taskKey, revisionId } = input;
+  const ref = taskRef(ctx, projectSlug, taskKey);
+  const file = readTaskFile(ref);
+  const revision = activeWorkRevision(file?.parsed.frontmatter.workRevision ?? null);
+  // A newer revision has its own gates, and its own build.
+  if (!file || !revision || revision.id !== revisionId) return;
+  const found = renderer();
+  if ("configured" in found && !found.configured) return;
+  const started = Date.now();
+  const fm = file.parsed.frontmatter;
+  const dir = keptBuildDir(projectSlug, taskKey, revisionId, ctx.dataRoot);
+  const built = builtPagesAmong(keptBuildFiles(dir));
+  const pages = built.pages.map((page): TaskPage => ({ file: page, kind: "html" }));
+  const { extra } = built;
+  unlinkRecorded(ctx, projectSlug, taskKey, recordedPageCaptures(fm.pageCaptures));
+  if (!dir || pages.length === 0) {
+    // Nothing to picture, and the task says so: a review of this revision is
+    // shown no page, and nobody is left to wonder why (a folder misnamed on
+    // the gate looks exactly like this).
+    const sha = code(revision.headSha.slice(0, 7));
+    const text = input.kept
+      ? `The project's gates passed on ${sha} and left no page in \`${input.folder}/\`, the folder a gate names for the pages they build. ` +
+        "Nothing was pictured or measured, and a review of this revision is shown no page of it."
+      : `Viberr could not keep the pages the project's gates built of ${sha} in \`${input.folder}/\`. ` +
+        "Nothing was pictured or measured, and a review of this revision is shown no page of it. Running the gates again builds and keeps them.";
+    await updateTaskFile(ref, (parsed) => {
+      if (activeWorkRevision(parsed.frontmatter.workRevision)?.id !== revisionId) return;
+      // A record with no page: this revision's build was looked at and held
+      // none, which is what keeps the note from being written twice.
+      parsed.frontmatter.pageCaptures = { deliveredAt: revision.createdAt, at: new Date().toISOString(), pages: [], revisionId };
+      parsed.timeline.unshift({
+        occurredAt: new Date().toISOString(),
+        type: "note",
+        actor: CAPTURE_ACTOR,
+        title: PAGE_CAPTURE_NOTE_TITLE,
+        text,
+        toAgent: false,
+        evidence: null,
+      });
+    });
+    reprojectTask(db, ctx, projectSlug, taskKey);
+    return;
+  }
+  const refused = new Map<string, SourceRefusal>();
+  for (const page of pages) {
+    // A picture's name has to fit what a timeline entry takes (200
+    // characters), and a built page's is longer than its path.
+    const refusal =
+      sourceRefusal(page.file, page.kind, fileSize(() => path.join(dir, page.file)) ?? 0) ??
+      (builtPictureName(page.file, "desktop", revision.headSha).length > BUILT_PICTURE_NAME_MAX_CHARS
+        ? { reason: "its path is too long for a picture to be kept under its name", sharedByTool: false }
+        : null);
+    if (refusal) refused.set(page.file, refusal);
+  }
+  const toRender = pages.filter((page) => !refused.has(page.file));
+  let launch: AgentLaunch | null = null;
+  let toolCanRender = false;
+  let rendered: Render = { pages: [], scratch: null, notCarried: new Set(), since: [] };
+  try {
+    if (!("browser" in found)) throw new Error(found.reason ?? "this server has no browser to render with");
+    launch = taskOwnerLaunch(db, fm.ownerUserId, ctx.dataRoot, NO_OWNER);
+    toolCanRender = true;
+    if (toRender.length > 0) {
+      rendered = await render({
+        db,
+        ctx,
+        projectSlug,
+        taskKey,
+        renderer: found,
+        launch,
+        source: { kind: "build", dir },
+        pages: toRender,
+        views: PAGE_CAPTURE_VIEWS.map((view): ChildView => ({ ...childView(view), from: 0 })),
+        runId: null,
+        measure: true,
+        pageTimeoutMs: MEASURED_PAGE_TIMEOUT_MS,
+      });
+    }
+  } catch (error) {
+    const reason = reportText(error instanceof AppError ? error.userMessage : errorMessage(error));
+    rendered = { pages: toRender.map((page) => unpictured(page.file, reason)), scratch: null, notCarried: new Set(), since: [] };
+  }
+  const byFile = new Map(rendered.pages.map((page) => [page.file, page]));
+  const results = pages.map(
+    (page): RenderedPage =>
+      byFile.get(page.file) ?? unpictured(page.file, refused.get(page.file)?.reason ?? "it was not rendered"),
+  );
+  // Bound to the revision, as a files record is to its stamp: `deliveredAt`
+  // is when the revision was minted, and `revisionId` says whose pages these
+  // are (read by `capturesRevision`).
+  const record: PageCaptures = { deliveredAt: revision.createdAt, at: new Date().toISOString(), pages: [], revisionId };
+  const accepted = acceptedPageFigures(db, ctx, projectSlug, taskKey);
+  const written: string[] = [];
+  const failed: string[] = [];
+  let wrote = false;
+  await updateTaskFile(ref, (parsed) => {
+    // A revision minted while this rendered has its own gates and pictures.
+    if (activeWorkRevision(parsed.frontmatter.workRevision)?.id !== revisionId) return;
+    for (const page of results) {
+      const shots: PageCaptures["pages"][number]["shots"] = [];
+      let error = page.error;
+      for (const shot of page.shots) {
+        try {
+          const saved = writeTaskAttachment(
+            projectSlug,
+            taskKey,
+            builtPictureName(page.file, shot.view, revision.headSha),
+            shot.bytes,
+            ctx.dataRoot,
+          );
+          written.push(saved.name);
+          shots.push({ view: shot.view, name: saved.name, cut: shot.cut });
+        } catch (caught) {
+          error ??= `its ${shot.view} picture could not be saved (${reportText(errorMessage(caught))})`;
+        }
+      }
+      const recorded: PageCaptures["pages"][number] = { file: page.file, shots, error };
+      if (page.measured && shots.length > 0) recorded.measured = measuredRecord(page.measured);
+      record.pages.push(recorded);
+      if (shots.length === 0) failed.push(page.file);
+      if (error) logger.warn("a page could not be captured", { taskKey, file: page.file, reason: error });
+    }
+    const noted = results.map((page): RenderedPage => {
+      const recorded = record.pages.find((p) => p.file === page.file);
+      const saved = new Set(recorded?.shots.map((shot) => shot.view));
+      return { ...page, shots: page.shots.filter((shot) => saved.has(shot.view)), error: recorded?.error ?? page.error };
+    });
+    const lookable = new Set(toolCanRender ? failed.filter((name) => refused.get(name)?.sharedByTool !== true) : []);
+    const note: TaskFileEvent = {
+      occurredAt: record.at,
+      type: "note",
+      actor: CAPTURE_ACTOR,
+      title: PAGE_CAPTURE_NOTE_TITLE,
+      text: captureNoteText({
+        pages: noted,
+        more: extra.length,
+        notCarried: rendered.notCarried,
+        lookable,
+        accepted,
+        built: { sha: revision.headSha.slice(0, 7), leftOut: input.leftOut },
+      }),
+      toAgent: false,
+      evidence: null,
+    };
+    if (written.length > 0) note.attachments = [...written];
+    for (const name of extra.slice(0, RECORDED_PAGES_MAX - results.length)) {
+      record.pages.push({ file: name, shots: [], error: PAST_PAGE_CAP });
+    }
+    parsed.frontmatter.pageCaptures = record;
+    parsed.timeline.unshift(note);
+    wrote = true;
+  });
+  if (rendered.scratch) await removeScratch(rendered.scratch, launch);
+  if (!wrote) return;
+  reprojectTask(db, ctx, projectSlug, taskKey);
+  recordAudit(db, {
+    action: "task.pages.captured",
+    actor: SYSTEM_ACTOR,
+    subjectKind: "task",
+    subjectId: taskKey,
+    projectSlug,
+    taskKey,
+    details: {
+      revisionId,
+      pages: results.length,
+      captured: results.length - failed.length,
+      failed,
+      more: extra.length,
+      wallMs: Date.now() - started,
+      runsAs: launch ? launch.uid : "server",
+    },
+  });
+  logger.info("page captures made of a revision's build", { projectSlug, taskKey, revisionId, pages: results.length });
+}
+
+/**
+ * Picture the pages of the build kept for `revisionId` once the renderer is
+ * free. Resolves when that is done; never rejects, like
+ * {@link requestDeliveryCaptures}.
+ */
+export function requestRevisionCaptures(
+  db: DatabaseSync,
+  ctx: TaskMutationContext,
+  input: RevisionCaptureInput,
+): Promise<void> {
+  return new Promise((resolve) => {
+    enqueue({
+      kind: "delivery",
+      task: `${input.projectSlug}/${input.taskKey}`,
+      drop: resolve,
+      run: async () => {
+        try {
+          await captureRevision(db, ctx, input);
+        } catch (error) {
+          logger.warn("a revision's pages could not be pictured", {
             projectSlug: input.projectSlug,
             taskKey: input.taskKey,
             err: toError(error),
@@ -2181,7 +2536,8 @@ function boxReplyText(
 
 /** A file the door has found for a run, and where its bytes are read from. */
 interface FoundFile {
-  /** The name the folder holds it under (ruling 76): what the renderer opens. */
+  /** The name the folder holds it under (ruling 76): what the renderer
+   *  opens. In a built site, the page's path from the site's root. */
   stored: string;
   /** Where its bytes are. */
   abs: string;
@@ -2191,6 +2547,11 @@ interface FoundFile {
   judged: JudgedDelivery | null;
   /** The file is one that delivery's kept copy holds. */
   delivered: boolean;
+  /** Ruling 86: the file is a page of a built site, served as the tree it
+   *  is: the build Viberr kept of the revision a run judges (`kept`), or the
+   *  folder of the task's checkout the project's gates build into, as it
+   *  stands (`folder` names it). */
+  site: { dir: string; kept: true } | { dir: string; kept: false; folder: string } | null;
 }
 
 /** A regular file's size, or null when `file` is none. */
@@ -2204,7 +2565,62 @@ function fileSize(file: () => string): number | null {
 }
 
 /**
- * The file a run asks for by `name`, or null when the task has none.
+ * The size of the regular file at `rel` under `root`, or null when there is
+ * none: every folder on the way a folder and no link, the file a file and no
+ * link, and each name as its folder's listing spells it. For a tree an agent
+ * can write (a checkout): the server follows nothing there, and a disk that
+ * folds case never answers one name for another.
+ */
+function plainFileUnder(root: string, rel: string): number | null {
+  const segments = rel.split("/");
+  let dir = root;
+  for (const [at, segment] of segments.entries()) {
+    let entry: Dirent | undefined;
+    try {
+      entry = readdirSync(dir, { withFileTypes: true }).find((one) => one.name === segment);
+    } catch {
+      return null;
+    }
+    if (!entry) return null;
+    const last = at === segments.length - 1;
+    if (last ? !entry.isFile() : !entry.isDirectory()) return null;
+    dir = path.join(dir, segment);
+  }
+  try {
+    const stat = lstatSync(dir);
+    return stat.isFile() ? stat.size : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The names a sentence lists of a site's pages, and how many it leaves out. */
+function pagesNamed(files: readonly string[]): string {
+  const { pages, extra } = builtPagesAmong(files);
+  if (pages.length === 0) return "It holds no page.";
+  return `It holds ${LIST_AND.format(pages.map(code))}${extra.length > 0 ? `, and ${px(extra.length)} more` : ""}.`;
+}
+
+/**
+ * The page of a built site a name means (ruling 86): the path as written
+ * from the site's root, a folder's path for its `index.html`, and, since the
+ * site is what a checkout holds in the folder the gates build into, the
+ * same path written from the checkout's root (`dist/index.html`). Tried in
+ * that order, so a site that has a folder of the same name keeps its own.
+ */
+function sitePathsOf(name: string, folder: string): string[] {
+  const plain = name.trim().replace(/^(?:\.\/)+/, "").replace(/^\/+/, "");
+  const asWritten = sitePath(plain);
+  const fromCheckout = plain === folder || plain.startsWith(`${folder}/`) ? sitePath(plain.slice(folder.length)) : null;
+  return [asWritten, fromCheckout].flatMap((one) => (one === null ? [] : [one]));
+}
+
+/** What the door answers when it shows nothing. */
+type NotShown = { said: string };
+
+/**
+ * The file a run asks for by `name`, or what to answer when there is none
+ * (null: the reader's own sentence, that the task has no such file).
  *
  * A run that judges a delivery (ruling 329) is answered from the delivery's
  * kept copy first: the page it is to look at is the one that was delivered,
@@ -2215,48 +2631,104 @@ function fileSize(file: () => string): number | null {
  * which on one that folds case answers `Post.html` for `post.html`: one
  * file would be shown and called the other. A name no listing holds is no
  * file of the task, on any disk.
+ *
+ * On a project whose gates build its pages (ruling 86) a name is a page of
+ * the built site first: for a run that judges a revision, of the build
+ * Viberr kept of it, and while the gates have not passed on it there is no
+ * page to show and the answer says why; for anyone else, of the folder the
+ * gates build into as the task's checkout holds it now. A name that is no
+ * page of the site is a file of the task, as before.
  */
 function findAskedFile(
   db: DatabaseSync,
   ctx: TaskMutationContext,
   ask: { projectSlug: string; taskKey: string; name: string; runId: string | null },
-): FoundFile | null {
+): FoundFile | NotShown | null {
   const { projectSlug, taskKey, name } = ask;
   // A dot name is no file of the task to any reader, this one included: the
   // renderer's own page server answers none.
   if (name.startsWith(".")) return null;
   const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const judged = task ? judgedDelivery(db, ctx, ask, task.parsed) : null;
-  const keptDir = judged?.dir ?? null;
-  const kept = keptDir ? storedNameAmong(filesOf(keptDir), name) : null;
-  if (keptDir && kept !== null) {
-    const abs = path.join(keptDir, kept);
-    const size = fileSize(() => abs);
-    if (size !== null) return { stored: kept, abs, size, judged, delivered: true };
+  const folder = task ? projectPagesFolder(ctx, projectSlug) : null;
+  let notInSite: string | null = null;
+  if (judged?.revision && folder) {
+    if (judged.dir) {
+      const files = keptBuildFiles(judged.dir);
+      const hit = sitePathsOf(name, folder).find((one) => files.includes(one));
+      if (hit !== undefined) {
+        const abs = path.join(judged.dir, hit);
+        const size = fileSize(() => abs);
+        if (size !== null) return { stored: hit, abs, size, judged, delivered: true, site: { dir: judged.dir, kept: true } };
+      }
+      notInSite =
+        `[noop] ${code(name)} is not a page of the build Viberr kept of revision \`${judged.revision}\`, ` +
+        `and not a file on ${taskKey}. ${pagesNamed(files)} Ask for a page by its path in the site.`;
+    } else if (judged.pending) {
+      notInSite = judged.pending.building
+        ? `[busy] ${code(name)} cannot be shown yet: ${judged.pending.why}. Call again in a moment.`
+        : `[noop] ${code(name)} cannot be shown: ${judged.pending.why}. A review can say so; the pages are shown once the gates pass.`;
+    }
+  } else if (judged?.dir) {
+    const kept = storedNameAmong(filesOf(judged.dir), name);
+    if (kept !== null) {
+      const abs = path.join(judged.dir, kept);
+      const size = fileSize(() => abs);
+      if (size !== null) return { stored: kept, abs, size, judged, delivered: true, site: null };
+    }
+  } else if (!judged && folder) {
+    // Anyone who judges no delivery is shown the site as the task's
+    // delivering checkout holds it built now: the work as it stands, as the
+    // task's files are on a board with no repository. A supporting run's
+    // own checkout is not read: what it builds there is nobody's delivery.
+    const checkout = taskCloneDir(ctx, projectSlug, taskKey);
+    const root = taskDir(projectSlug, taskKey, ctx.dataRoot);
+    const within = checkout === null ? null : path.relative(root, path.join(checkout, folder)).split(path.sep).join("/");
+    if (checkout !== null && within !== null && !within.startsWith("..")) {
+      for (const one of sitePathsOf(name, folder)) {
+        const size = plainFileUnder(root, `${within}/${one}`);
+        if (size === null) continue;
+        const dir = path.join(checkout, folder);
+        return { stored: one, abs: path.join(dir, one), size, judged, delivered: false, site: { dir, kept: false, folder } };
+      }
+      notInSite =
+        `[noop] ${code(name)} is not a page in \`${folder}/\` of the task's delivering checkout, the folder this project's gates build its pages into, ` +
+        `and not a file on ${taskKey}. The agent that delivers builds the pages there as the gates do; a page is then asked for by its path in the site (\`index.html\`, or \`about/\` for \`about/index.html\`).`;
+    }
   }
   // Ruling 76: found in either Unicode form, and rendered under the spelling
   // the folder holds, which is the one the renderer can open.
-  const folder = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
-  const onTask = storedNameAmong(filesOf(folder), name);
-  if (onTask === null) return null;
-  const abs = path.join(folder, onTask);
-  const size = fileSize(() => abs);
-  return size === null ? null : { stored: onTask, abs, size, judged, delivered: false };
+  const attachments = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+  const onTask = storedNameAmong(filesOf(attachments), name);
+  if (onTask !== null) {
+    const abs = path.join(attachments, onTask);
+    const size = fileSize(() => abs);
+    if (size !== null) return { stored: onTask, abs, size, judged, delivered: false, site: null };
+  }
+  return notInSite === null ? null : { said: notInSite };
 }
 
-/** Where a found file is rendered from: a judge's from the delivery as kept,
- *  with the files the task holds beside it. */
+/** Where a found file is rendered from: a page of a built site from its
+ *  tree; a judge's file from the delivery as kept, with the files the task
+ *  holds beside it; anything else from the task's folder. */
 function sourceOf(found: FoundFile): RenderRequest["source"] {
-  return found.judged?.dir ? { kind: "kept", dir: found.judged.dir, since: true } : { kind: "attachments" };
+  if (found.site) return found.site.kept ? { kind: "build", dir: found.site.dir } : { kind: "site", dir: found.site.dir };
+  return found.judged?.dir && !found.judged.revision
+    ? { kind: "kept", dir: found.judged.dir, since: true }
+    : { kind: "attachments" };
 }
 
 /** The delivery a look at a found file is of (ruling 329): the one its run
- *  judges, when the file was read from that delivery's kept copy, or from the
- *  task's folder because no copy of it is held. Null for anyone else's look,
- *  which is of the files as they stand and counts for no approval. */
+ *  judges, when the file was read from that delivery's kept copy, or (a
+ *  files delivery) from the task's folder because no copy of it is held.
+ *  Null for anyone else's look, which is of the files as they stand and
+ *  counts for no approval, and for a file of the task that is no part of
+ *  the build a revision is judged from. */
 function deliveryLookedAt(found: FoundFile): string | null {
-  if (!found.judged) return null;
-  return found.delivered || found.judged.dir === null ? found.judged.deliveredAt : null;
+  const { judged } = found;
+  if (!judged) return null;
+  if (judged.revision) return found.delivered ? judged.deliveredAt : null;
+  return found.delivered || judged.dir === null ? judged.deliveredAt : null;
 }
 
 const SINCE_NAMED_MAX = 4;
@@ -2281,7 +2753,20 @@ function namedIn(found: FoundFile): (name: string) => boolean {
  */
 function shownToAJudge(found: FoundFile, since: readonly string[]): string {
   const { judged } = found;
+  if (found.site && !found.site.kept) {
+    // Ruling 86: said to whoever builds, so that what a review is shown is
+    // no surprise: the gates build the revision, not this folder.
+    return ` This is \`${found.site.folder}/${found.stored}\` as the task's delivering checkout holds it now. A review is shown the pages as the project's gates build the delivered revision.`;
+  }
   if (!judged) return "";
+  if (judged.revision) {
+    if (found.delivered) {
+      return ` This is the page as the project's gates built revision \`${judged.revision}\` and Viberr kept it, not the task's checkout as it stands now.`;
+    }
+    return judged.dir
+      ? ` This file is not in the build Viberr kept of revision \`${judged.revision}\`, so it is shown as it stands on the task now, and a look at it is of no delivery.`
+      : ` Viberr holds no build of revision \`${judged.revision}\`${judged.pending ? ` (${judged.pending.why})` : ""}, so this is a file of the task as it stands now, and a look at it is of no delivery.`;
+  }
   if (!judged.dir) {
     return ` Viberr holds no kept copy of the delivery of ${judged.deliveredAt}, so this is the task's files as they stand now.`;
   }
@@ -2578,8 +3063,15 @@ export function captureTaskPage(
     // The reader's own sentence.
     return Promise.resolve(said(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name)));
   }
+  if ("said" in file) return Promise.resolve(said(file.said));
   const size = file.size;
-  const kind = pictureKindOf(name);
+  // By the name the file is held under: a folder's path means its page.
+  const kind = pictureKindOf(file.stored);
+  if (file.site && kind !== "html") {
+    return Promise.resolve(
+      said(`[noop] ${code(name)} is a file of the built site and not a page of it. capture_page shows a site's .html pages.`),
+    );
+  }
   if (!kind) {
     return Promise.resolve(
       said(
@@ -2657,8 +3149,14 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
   // A run that judges measures what was delivered, as it looks at it.
   const where = findAskedFile(db, ctx, { projectSlug, taskKey, name, runId: ask.runId });
   if (!where) return Promise.resolve(noSuchAttachment({ db, ctx, projectSlug }, taskKey, name));
+  if ("said" in where) return Promise.resolve(where.said);
   const size = where.size;
-  if (pageKindOf(name) !== "html") {
+  if (where.site && pageKindOf(where.stored) !== "html") {
+    return Promise.resolve(
+      `[noop] ${code(name)} is a file of the built site and not a page of it. measure_page measures a site's .html pages.`,
+    );
+  }
+  if (pageKindOf(where.stored) !== "html") {
     return Promise.resolve(
       `[noop] ${code(name)} is not a page somebody laid out. measure_page measures an .html or .htm file; ` +
         "a markdown file is set as an article in Viberr's own type, so there is nothing of its writer's to measure.",
@@ -2723,7 +3221,7 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
       ...(against ? [against] : []),
       // A judge is told which bytes the figures are of; anyone else measures
       // the file as it stands.
-      `Nothing was saved${where.judged ? "." : ": these are the figures as the file stands now."}${shownToAJudge(where, rendered.since)}`,
+      `Nothing was saved${where.judged || where.site ? "." : ": these are the figures as the file stands now."}${shownToAJudge(where, rendered.since)}`,
     ].join(" ");
   };
   return new Promise((resolve) => {

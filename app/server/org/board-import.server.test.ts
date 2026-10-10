@@ -158,7 +158,9 @@ async function sourceBoard(): Promise<TestStore> {
       guardrails: DEFAULT_GUARDRAILS,
       requiredReviewers: [{ stageId: "review", profileId: "qa-lead" }],
       rulingsKb: "release-rulings",
-      gates: [{ name: "test", command: "npm test" }],
+      // Ruling 86: the folder a gate builds the site's pages into travels
+      // with the board, or the imported board's pages go unpictured.
+      gates: [{ name: "test", command: "npm test" }, { name: "build", command: "npm run build", pages: "dist" }],
       fileLeases: [{ paths: ["package-lock.json"], taskKey: "VIB-1", reason: "regenerating it" }],
     },
     "Ships a release from intake to done.",

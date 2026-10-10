@@ -61,6 +61,10 @@ Created by the code that needs them:
                                                     `<file>.capture-desktop.png` and
                                                     `<file>.capture-phone.png`, replaced by the next
                                                     delivery's (ruling 86)
+  projects/<slug>/tasks/<KEY>/builds/<revisionId>/  the pages a delivered revision builds, as the
+                                                    project's gates built them (ruling 86): the folder a
+                                                    gate names, kept as a tree once every gate exited 0;
+                                                    the two newest revisions' builds
   projects/<slug>/tasks/<KEY>/deliveries/<stamp>/   each files delivery as it was delivered, copied
                                                     when `deliveredAt` is stamped (ruling 86): every
                                                     file on the task then (ruling 81), and that

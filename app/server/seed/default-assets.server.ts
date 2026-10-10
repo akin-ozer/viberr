@@ -272,6 +272,10 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "86f1e309de8bdb5393156fc6f12bc93a035597c43ae74c02b6b6f2c94c1b488b",
   ],
   [path.join("skills", "controller-guide", "SKILL.md")]: [
+    // Ruling 86 (2026-10-10): before the guide said that on a board that
+    // ships pull requests the site is what its gates build, and that a gate
+    // names the folder; it said nothing held a page there.
+    "1237c0afcc06838ace073a279c3828a87df97f79200560eb061d9a031fb29e3c",
     // Ruling 268 (2026-10-10): before the guide had "Work a person looks at"
     // (what Viberr pictures and measures, the look an approval owes, the look
     // a task keeps, a page with no repository delivered as files) and said a
@@ -387,6 +391,10 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "a2defe42d6fb6a5eed063a1e7b9bb9b5636c1619c1f5ea0f6e56838b9628fecd",
   ],
   [path.join("agents", "definitions", "operator.md")]: [
+    // Ruling 86 (2026-10-10): before the completion-packet paragraph said
+    // that Viberr's pictures of the pages a revision's gates built show
+    // nowhere by themselves and are the packet's to show.
+    "db773c4586a50c81b59d3224b0361158fc6dcb9181ad97344bb5e520b39723c3",
     // The rulings compaction (2026-10-09): before the ruling numbers this
     // text cites were renumbered.
     "80902e9e0c68445221b0f642705bc0805aa34f709ac6f3caa2e19cf4c7471f20",
@@ -618,6 +626,10 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "2eaebf8040fe4a8047dc7f78f39482549b15cafeeb2ad18d127264a15113ecc8",
   ],
   [path.join("skills", "developer-expertise", "SKILL.md")]: [
+    // Ruling 86 (2026-10-10): before the manual said that where the
+    // project's gates build the site a page is asked for by its path in the
+    // built site, and that a review is shown the gates' build.
+    "5cb078e4c8b33d04cd2f6fc2f7a9d75c131722b180d1c7684b43744cf6064856",
     // Ruling 178 (2026-10-10): before the manual said how work that is looked
     // at is made: pictured and measured at both widths before it is handed
     // over, made to a kept look and never to the thing, with the product on
@@ -685,6 +697,10 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     "943933d71103d9fc7665ba1ce87f887129cc87394d5171ecb09c81d857afbf78",
   ],
   [path.join("skills", "reviewer-expertise", "SKILL.md")]: [
+    // Ruling 86 (2026-10-10): before the manual said that where the
+    // project's gates build the site the pages judged are the ones the gates
+    // built of the delivered revision.
+    "b72b5f22a49af310d470db6afa0d48c69b5866460edeefeae5bd8adb83bed825",
     // Ruling 178 (2026-10-10): before the manual said how work that is looked
     // at is judged: the whole page at both widths, every kept picture of the
     // look it is made to, the states a still picture hides, what Viberr

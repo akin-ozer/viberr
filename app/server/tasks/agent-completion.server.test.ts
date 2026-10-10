@@ -27,6 +27,7 @@ import {
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { keepBuild } from "~/server/files/kept-builds.server";
 import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
 import { SOURCE_STAGING_PREFIX, readTaskSources, writeTaskSource } from "~/server/files/task-sources.server";
@@ -1562,6 +1563,112 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       ]);
       await review(all);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    describe("of a revision whose pages the project's gates build (ruling 86)", () => {
+      const sha = "9".repeat(40);
+      /** `dev` delivered revision `rev_1` on a project whose build gate names
+       *  `dist`; the gates ran on it and ended `exitCode`, or are `running`. */
+      function writeDeliveredRevision(gates: "running" | number): void {
+        reconfigureProject(store, { gates: [{ name: "build", command: "npm run build", pages: "dist" }] });
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: baseTaskFrontmatter("VIB-1", {
+            stage: "review",
+            ownerUserId: store.users.arda.id,
+            engagements: [DEV_DELIVERS_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+            workRevision: { id: "rev_1", headSha: sha, treeSha: null, branch: "vib-1", createdAt: savedAt, sourceProfileId: "dev" },
+            deliveredAt: savedAt,
+            validation: "changed",
+            gateRun: {
+              id: "gate_1",
+              revisionId: "rev_1",
+              headSha: sha,
+              status: gates === "running" ? "running" : "finished",
+              reason: "delivery",
+              requestedAt: savedAt,
+              startedAt: savedAt,
+              finishedAt: gates === "running" ? null : savedAt,
+              error: null,
+              results:
+                gates === "running"
+                  ? []
+                  : [{ name: "build", command: "npm run build", exitCode: gates, timedOut: false, wallMs: 10, log: null }],
+            },
+          }),
+          goal: "A page for the launch.",
+        });
+        rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      }
+      /** What the gates built of `rev_1`, kept the way the gate job keeps it. */
+      async function keptBuild(): Promise<void> {
+        const gate = ctx.makeTempDir("viberr-gate-checkout-");
+        mkdirSync(path.join(gate, "dist"), { recursive: true });
+        writeFileSync(path.join(gate, "dist", "index.html"), "<h1>home</h1>");
+        await keepBuild(store.slug, "VIB-1", "rev_1", gate, "dist", store.dataRoot);
+      }
+      const seen = (delivery: string | null): RunLook[] =>
+        (["desktop", "phone"] as const).map((view) => ({ ...stretch(view, 0, 1400, true), delivery }));
+
+      it("records no approval from a run that was not shown the pages the gates built, and records one from a run that was", async () => {
+        // The failure on the first board that shipped a site through pull
+        // requests: the reviewer approved the revision from the diff and a
+        // build of its own. CANARY: answer null from `pageLooksOwed` for
+        // every revision, as before, and the first approval binds.
+        writeDeliveredRevision(0);
+        await keptBuild();
+        const unseen = await finishedRunWith("Verdict: approve. The diff is clean.", "rev_1");
+        await review(unseen);
+        expect(approvals()).toEqual([]);
+        expect(refusal()).toContain("`index.html` at the desktop width (1280 px); `index.html` at the phone width (390 px)");
+
+        // A look at its own checkout's build is of no delivery.
+        const own = await finishedRunWith("Verdict: approve. Built it and looked.", "rev_1");
+        recordRunLooks(store.db, own, seen(null));
+        await review(own);
+        expect(approvals()).toEqual([]);
+
+        const looked = await finishedRunWith("Verdict: approve. Looked at the build at both widths.", "rev_1");
+        recordRunLooks(store.db, looked, seen("rev_1"));
+        await review(looked);
+        expect(approvals()).toEqual([["reviewer", "approve"]]);
+      });
+
+      it("records no approval while the gates have still to build the pages, or did not pass, and says which", async () => {
+        // CANARY: owe nothing while no build is kept and a review that ends
+        // before the gates do approves pages nobody was shown.
+        writeDeliveredRevision("running");
+        const early = await finishedRunWith("Verdict: approve.", "rev_1");
+        await review(early);
+        expect(approvals()).toEqual([]);
+        expect(refusal()).toContain(
+          "the run did not look at the pages of this revision (the project's gates are still building this revision's pages).",
+        );
+        expect(refusal()).toContain("A page is looked at with `capture_page`");
+
+        writeDeliveredRevision(1);
+        const failed = await finishedRunWith("Verdict: approve.", "rev_1");
+        await review(failed);
+        expect(approvals()).toEqual([]);
+        expect(refusal()).toContain("the project's gates did not pass on this revision, so its pages were not built");
+
+        // A `request_changes` owes no look, as on any delivery.
+        const sentBack = await finishedRunWith("Verdict: request_changes. The build fails.", "rev_1");
+        await review(sentBack);
+        expect(approvals()).toEqual([["reviewer", "request_changes"]]);
+      });
+
+      it("owes no page where the gates passed and left none, or no gate names a folder", async () => {
+        writeDeliveredRevision(0);
+        const nothingBuilt = await finishedRunWith("Verdict: approve.", "rev_1");
+        await review(nothingBuilt);
+        expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+        writeDeliveredRevision("running");
+        reconfigureProject(store, { gates: [{ name: "build", command: "npm run build" }] });
+        const noFolder = await finishedRunWith("Verdict: approve.", "rev_1");
+        await review(noFolder);
+        expect(approvals()).toEqual([["reviewer", "approve"]]);
+      });
     });
   });
 

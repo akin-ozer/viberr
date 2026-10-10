@@ -555,7 +555,9 @@ base`, `Edit MCP server`, `GitHub sign-in`).
   images show the picture, fitted to the card, except Viberr's own picture of a delivered
   page (`<file>.capture-desktop.png`, `<file>.capture-phone.png`, ruling 86), which is
   the whole page and opens at the page's width in a scroller the keyboard reaches, named
-  "Picture of <file>"; the known binary kinds (archives, media, fonts, office and
+  "Picture of <file>" (for a page a revision's gates built, the name's own stem: its path
+  with `--` for the slashes, `.at-` and the revision, "Picture of
+  guide--index.html.at-9f2c41a"); the known binary kinds (archives, media, fonts, office and
   PDF documents, executables, databases) are decided by name and get an honest "no
   in-app preview" note; every other file is fetched and read in a read-only CODE reader
   (ruling 317: Shiki tokens by the name's grammar, line numbers, plain when no grammar

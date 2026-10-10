@@ -13,9 +13,14 @@ import { z } from "zod";
  * the DevTools protocol the child speaks, on the same fd 3 and 4.
  *
  * What it does with a page it is told to open: it FETCHES the address from the
- * page server, as a browser would, and every `src="..."` in what came back, so
- * a test reads the page server's real answers (the article a markdown file was
- * set as, a sibling picture, a refused link). It lays nothing out, so a page
+ * page server, as a browser would, and every `src="..."` and the
+ * `href="..."` of every `link` that is a stylesheet or an icon in what came
+ * back, each read against the page's own address
+ * as a browser reads it (a path from the root, one beside the page, one a
+ * folder up), so a test reads the page server's real answers (the article a
+ * markdown file was set as, a sibling picture, a refused link, a site's
+ * stylesheet). A name under `localhost` is asked at this machine's loopback
+ * address under that name. It lays nothing out, so a page
  * says how large it is in its own text: `fake-height:3000`, `fake-width:612`
  * and `fake-scale:0.398` anywhere in the document (markdown included) are the
  * page's content height, content width and phone scale; without them a page
@@ -186,6 +191,11 @@ function reach(url) {
     const asked = new URL(url);
     const stood = hosts.get(asked.host);
     if (stood) return { target: "http://" + stood + asked.pathname + asked.search, headers: { host: asked.host } };
+    // A name under \`localhost\` is this machine, which a browser knows
+    // without asking anybody: asked at the loopback address, under its name.
+    if (asked.hostname.endsWith(".localhost")) {
+      return { target: "http://127.0.0.1:" + asked.port + asked.pathname + asked.search, headers: { host: asked.host } };
+    }
   } catch {
     // Not an address: fetched as it is, and answered as one nothing is at.
   }
@@ -304,8 +314,14 @@ async function navigate(message) {
   }
   if (mode === "dialog") await openDialog(message.sessionId, url, "alert");
   const resources = [];
-  for (const found of html.matchAll(/src="([^"]+)"/g)) {
-    const src = found[1];
+  // What the page names to load, in the order it names it: every \`src\`, and
+  // the \`href\` of a \`link\` that is a stylesheet or an icon. Not that of an
+  // anchor, and not that of any other \`link\`: a preload names what another
+  // element loads, and a canonical address is nothing a browser fetches.
+  for (const found of html.matchAll(/<link\\b[^>]*>|\\bsrc="([^"]+)"/g)) {
+    const linked = found[1] === undefined && /\\brel="(?:stylesheet|icon|shortcut icon)"/.test(found[0]) ? /\\bhref="([^"]+)"/.exec(found[0]) : null;
+    const src = found[1] === undefined ? (linked ? linked[1] : "") : found[1];
+    if (src === "") continue;
     if (/^https?:/.test(src)) {
       // A browser reports the request; behind the proxy it never leaves.
       requested(message.sessionId, src);

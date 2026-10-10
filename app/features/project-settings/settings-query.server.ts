@@ -1,3 +1,4 @@
+import { projectPagesDir } from "~/server/files/kept-builds.server";
 import type { DatabaseSync } from "node:sqlite";
 import { getProject, listProjectTasks } from "~/server/projections/board-query.server";
 import {
@@ -67,7 +68,24 @@ export interface SettingsViewData {
   /** Ruling 104: the commands Viberr runs on every delivered revision.
    *  Absent when the project declares none (the settings payload is budgeted,
    *  ruling 11). */
-  gates?: ProjectGate[];
+  gates?: GateView[];
+}
+
+/** One gate as Settings shows it: what project.md holds, with the folder it
+ *  builds the site's pages into read out (ruling 86). */
+export interface GateView {
+  name: string;
+  command: string;
+  timeoutSeconds?: number;
+  pages?: string;
+}
+
+function gateView(gate: ProjectGate): GateView {
+  const row: GateView = { name: gate.name, command: gate.command };
+  if (gate.timeoutSeconds !== undefined) row.timeoutSeconds = gate.timeoutSeconds;
+  const pages = projectPagesDir([gate]);
+  if (pages) row.pages = pages;
+  return row;
 }
 
 /**
@@ -146,7 +164,7 @@ export function getSettingsViewData(
     fileLeases: fileLeaseViews(projectSlug, tasks, ctx),
     leaseCandidates: tasks.map((t) => ({ key: t.key, title: t.title })),
   };
-  if (project.gates.length > 0) view.gates = project.gates;
+  if (project.gates.length > 0) view.gates = project.gates.map(gateView);
   return view;
 }
 

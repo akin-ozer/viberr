@@ -74,6 +74,14 @@
 #     a file in it, and it still finds a page and the picture beside it stored
 #     in the other Unicode form (ruling 76), on a disk that holds names byte
 #     for byte;
+#   - a built site (a job with `site`) is served from its own root, in folders
+#     the renderer can pass through and not list: a home page and a page in a
+#     folder of its own are drawn with the stylesheet they name from the
+#     site's root and the picture one names beside itself and the other a
+#     folder up; a folder's own path answers its index page, and a press on a
+#     link written without its slash is pictured where a host of static files
+#     sends it; a stylesheet under a dot name, one through a folder that is a
+#     link and one the job does not list are not served and are reported;
 #   - the renderer writes in a scratch folder made new under a parent it can
 #     only pass through, the way the server makes one in a task's `.captures/`:
 #     an agent uid cannot list that parent or put a link beside the scratch;
@@ -126,7 +134,7 @@ cleanup() {
   [ -n "$site" ] && kill "$site" 2>/dev/null
   if [ -d "$WORK" ]; then
     # What the agent wrote is the agent's to remove (ruling 140).
-    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/web' '$SCRATCH/closed' '$SCRATCH/states' '$SCRATCH/long' '$SCRATCH/measured' '$SCRATCH/walks' '$SCRATCH/inside' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
+    VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "rm -rf '$SCRATCH/out' '$SCRATCH/profile' '$SCRATCH/sized' '$SCRATCH/web' '$SCRATCH/closed' '$SCRATCH/states' '$SCRATCH/long' '$SCRATCH/measured' '$SCRATCH/walks' '$SCRATCH/inside' '$SCRATCH/built' '$SCRATCH/tmp' '$SCRATCH'/.[!.]*" >/dev/null 2>&1
     rm -rf "$WORK" 2>/dev/null
   fi
 }
@@ -161,7 +169,7 @@ mkdir "$SCRATCH/tmp" && chmod 2770 "$SCRATCH/tmp"
 # The fixtures, the stand-in for "another port on this host", and the reading
 # of what came back, in one helper: Node is what the image has.
 cat >"$WORK/check.mjs" <<'EOF'
-import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import zlib from "node:zlib";
@@ -301,6 +309,34 @@ document.querySelectorAll(".reveal").forEach((el) => seen.observe(el));
 
 if (command === "fixtures") {
   const [dir, port] = args;
+  // A built site, in a tree of its own beside the task's flat folder: a home
+  // page and a guide in a folder, both drawn green by the stylesheet they
+  // name from the site's root, a red picture the home page names beside
+  // itself and the guide a folder up, and a band of the page's own colour
+  // (blue at home, yellow in the guide). Three stylesheets would turn the
+  // guide magenta, and none may be served: one under a dot name, the same
+  // one through a folder that is a link, and one the job does not list.
+  const tree = path.join(dir, "..", "tree");
+  const magenta = "body{background:rgb(255,0,255)}";
+  const sitePage = (title, band, logo, more) => `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/assets/site.css">${more}<style>.band{background:${band}}</style></head><body>
+<img src="${logo}" width="100" height="100"><div class="band"></div><p><a href="/guide">Guide</a></p></body></html>`;
+  for (const folder of ["assets", "guide", ".well-known"]) mkdirSync(path.join(tree, folder), { recursive: true });
+  writeFileSync(path.join(tree, "assets", "site.css"), "html,body{margin:0}body{background:rgb(0,128,0)}img{display:block}.band{height:200px}");
+  writeFileSync(path.join(tree, "logo.png"), solidPng(100, 100, [255, 0, 0]));
+  writeFileSync(path.join(tree, ".well-known", "secret.css"), magenta);
+  writeFileSync(path.join(tree, "guide", "unlisted.css"), magenta);
+  symlinkSync(".well-known", path.join(tree, "linked"));
+  writeFileSync(path.join(tree, "index.html"), sitePage("Home", "rgb(0,0,255)", "logo.png", ""));
+  writeFileSync(
+    path.join(tree, "guide", "index.html"),
+    sitePage(
+      "Guide",
+      "rgb(255,255,0)",
+      "../logo.png",
+      '<link rel="stylesheet" href="/.well-known/secret.css"><link rel="stylesheet" href="/linked/secret.css"><link rel="stylesheet" href="unlisted.css"><script src="/gone.js"></script>',
+    ),
+  );
   writeFileSync(path.join(dir, "chart.png"), solidPng(100, 100, [255, 0, 0]));
   writeFileSync(
     path.join(dir, "page.html"),
@@ -878,6 +914,28 @@ if (command === "job-walks") {
   );
 }
 
+if (command === "job-built") {
+  // A built site, as the server hands a kept copy over: the tree's own
+  // root, and the files it may serve, each by its path from there. The
+  // stylesheet under a dot name and the one under the folder that is a link
+  // are listed, so it is the path's own rule that refuses each, and the
+  // third is not, so it is the listing.
+  const [work, browser] = args;
+  process.stdout.write(
+    jobIn(work, browser, "built", {
+      root: path.join(work, "tree"),
+      names: ["index.html", "guide/index.html", "assets/site.css", "logo.png", ".well-known/secret.css", "linked/secret.css"],
+      site: true,
+      // The home page by its file, the guide by its folder's own path.
+      pages: [
+        { file: "index.html", kind: "html" },
+        { file: "guide/", kind: "html" },
+      ],
+      views: [DESKTOP, PHONE, { ...DESKTOP, id: "press", act: { press: "Guide" } }],
+    }),
+  );
+}
+
 if (command === "job-inside") {
   const [work, browser] = args;
   process.stdout.write(
@@ -1377,6 +1435,57 @@ if (command === "verify-inside") {
   done();
 }
 
+if (command === "verify-built") {
+  const [work] = args;
+  const { check, pages, picture, done } = outcomeOf(work, "built");
+  const [home, guide] = pages;
+  check(
+    pages.length === 2 && home.error === null && home.file === "index.html" && guide.error === null && guide.file === "guide/",
+    "two pages of a built site are pictured, each named in the report as it was asked",
+    pages.map((page) => `${page.file}: ${page.error}`).join(", "),
+  );
+  // The picture at the top left is red, the band under it the page's own
+  // colour, and the page below the band green: the stylesheet's doing, and
+  // white without it.
+  const drawn = (file) => {
+    const png = picture(file);
+    return png ? [png.at(50, 50), png.at(300, 150), png.at(300, 400)].join(" ") : "no picture";
+  };
+  for (const view of ["desktop", "phone"]) {
+    check(
+      drawn(`1-${view}.png`) === "255,0,0 0,0,255 0,128,0",
+      `the home page is drawn with the stylesheet it names from the site's root and the picture it names beside itself (${view})`,
+      drawn(`1-${view}.png`),
+    );
+    check(
+      drawn(`2-${view}.png`) === "255,0,0 255,255,0 0,128,0",
+      `the guide, asked for by its folder's own path, is drawn with the same stylesheet and the picture it names a folder up, and with none of the three it may not have (${view})`,
+      drawn(`2-${view}.png`),
+    );
+  }
+  const refused = "/.well-known/secret.css /gone.js /guide/unlisted.css /linked/secret.css";
+  check(
+    [...guide.missing].sort().join(" ") === refused,
+    "the guide's stylesheet under a dot name, the one through a folder that is a link, the one the job does not list and a script that is not there are each said, by its path from the root",
+    JSON.stringify(guide.missing),
+  );
+  // The home page's press leads to the guide, so what the guide asked for is
+  // said of the home page's views too. The icon is not: no page names one,
+  // and this browser asks for it by itself.
+  check(
+    [...home.missing].sort().join(" ") === refused,
+    "the home page itself was served all it asked for, and the icon the browser asks for by itself is said of neither page",
+    JSON.stringify(home.missing),
+  );
+  // The link is written `/guide`, with no slash after the folder's name.
+  check(
+    home.acts.find((act) => act.view === "press")?.error === null && drawn("1-press-a.png") === "255,0,0 255,255,0 0,128,0",
+    "a press on a link to a folder, written without its slash, is pictured where a host of static files sends it: the guide, with its stylesheet and its picture",
+    `${JSON.stringify(home.acts)} ${drawn("1-press-a.png")}`,
+  );
+  done();
+}
+
 if (command === "verify-sized") {
   const [work] = args;
   let failures = 0;
@@ -1535,6 +1644,16 @@ chgrp -R viberr-agents "$WORK/files" && chmod 0640 "$WORK/files"/* && chmod 0710
 as_agent() {
   VIBERR_LAUNCH_UID=$UID_C VIBERR_LAUNCH_EXEC=/bin/sh "$LAUNCH" -c "$1" >/dev/null 2>&1
 }
+# A built site's kept copy is a tree of such folders: each passed through and
+# not listed, each file read by its path.
+chgrp -R viberr-agents "$WORK/tree"
+find "$WORK/tree" -type d -exec chmod 0710 {} +
+find "$WORK/tree" -type f -exec chmod 0640 {} +
+if as_agent "cat '$WORK/tree/assets/site.css'" && ! as_agent "ls '$WORK/tree/assets'"; then
+  pass "an agent uid reads a file of a kept site by its path and cannot list the folder it is in"
+else
+  fail "an agent uid cannot read a file of a kept site by its path, or can list its folder"
+fi
 if as_agent "cat '$WORK/files/page.html'"; then
   pass "an agent uid reads a file of the input folder by its name"
 else
@@ -1693,6 +1812,11 @@ further walks "measured six pages a keyboard walk has to get right"
 # --- a page that scrolls inside itself ---------------------------------------------
 further inside "pictured fourteen pages and found the parts that scroll inside them"
 "$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
+
+# --- a built site ----------------------------------------------------------------
+# Ruling 194: a site's build, served from its own root.
+further built "pictured two pages of a built site from its root"
+"$NODE" "$WORK/check.mjs" verify-built "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
 left=0
