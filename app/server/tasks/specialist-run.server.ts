@@ -1402,7 +1402,7 @@ async function dispatchAgentRun(
       // Imported dynamically, like every reach from this module into the
       // task-action modules (ruling 13).
       const { pageLooksNote, pageLooksOwed } = await import("./page-looks.server");
-      const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, existing.parsed);
+      const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, existing.parsed, pageCaptureStatus().available);
       if (owed) collabNotes.push(pageLooksNote(owed));
     } catch (error) {
       logger.warn("the note on what an approval owes a look at could not be built", {

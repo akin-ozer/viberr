@@ -573,8 +573,9 @@ history opens with "Converted from goal-N …", and the project's Activity colum
   `node_modules/axe-core/axe.min.js` (the image installs it with the runtime
   dependencies; a host install needs `npm ci`), and every other figure is still taken;
   "Its load time could not be measured" means the page never finished loading on the
-  slow line inside its limit. `measured` is absent from a page's entry of `pageCaptures`
-  when the render ended before it measured anything, and the page's pictures stand.
+  slow line inside its limit. A check that ran out of the page's time is said in the note ("the keyboard's reach was
+  not measured: the page's time ran out before it was") and kept as `null` in the page's
+  `measured`, never as zero, and the page's pictures stand either way.
 - **`keep_page_look` could not picture an address** (ruling 327). It is the one render with
   the network open: it runs in the same browser as every other, as the task owner's agent
   user, so the address must be reachable from the container as that user. The answer

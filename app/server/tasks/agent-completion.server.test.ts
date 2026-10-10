@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -33,6 +33,7 @@ import { SOURCE_STAGING_PREFIX, readTaskSources, writeTaskSource } from "~/serve
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import {
@@ -1105,8 +1106,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       from,
       to,
       end,
-      delivery: null,
+      delivery: savedAt,
     });
+    /** The review's completion, on a server that can render a page (the
+     *  browser is named; no test here starts it). */
+    const review = (runId: string) =>
+      withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, () => complete(runId, { role: "Review & validation" }));
     const approvals = () => taskFile().parsed.frontmatter.verdicts.map((v) => [v.profileId, v.result]);
     const refusal = () =>
       taskFile().parsed.timeline.find((e) => e.type === "note" && e.text.includes("approval was not recorded"))?.text;
@@ -1117,7 +1122,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // `unmetPageLooks` check from the completion and the approval binds.
       writeDeliveredPageTask(["index.html", "styles.css"]);
       const runId = await finishedRunWith("Verdict: approve. The markup is clean and the copy matches the brief.", SUBJECT);
-      await complete(runId, { role: "Review & validation" });
+      await review(runId);
       expect(approvals()).toEqual([]);
       expect(taskFile().parsed.frontmatter.validation).toBe("changed");
       expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
@@ -1137,7 +1142,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         stretch("phone", 2000, 4000, false),
         stretch("phone", 4000, 5120, true),
       ]);
-      await complete(runId, { role: "Review & validation" });
+      await review(runId);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
       expect(refusal()).toBeUndefined();
     });
@@ -1153,7 +1158,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         stretch("phone", 0, 2000, false),
         stretch("phone", 4000, 5120, true),
       ]);
-      await complete(runId, { role: "Review & validation" });
+      await review(runId);
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("`index.html` at the phone width (390 px) below 2,000 px, where the page runs on");
       expect(refusal()).not.toContain("desktop");
@@ -1168,7 +1173,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
       const down = (view: "desktop" | "phone") => Array.from({ length: 21 }, (_, at) => stretch(view, at * 2000, at * 2000 + 2000, false));
       recordRunLooks(store.db, runId, [...down("desktop"), ...down("phone")]);
-      await complete(runId, { role: "Review & validation" });
+      await review(runId);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
     });
 
@@ -1181,7 +1186,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { ...stretch("desktop", 0, 4800, true), delivery: savedAt },
         { ...stretch("phone", 0, 5064, true), delivery: savedAt },
       ]);
-      await complete(runId, { role: "Review & validation" });
+      await review(runId);
       expect(approvals()).toEqual([]);
     });
 
@@ -1191,12 +1196,12 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       // verdict, or to markdown, and one of these two is refused.
       writeDeliveredPageTask(["index.html"]);
       const objected = await finishedRunWith("Verdict: request-changes. The hero link points nowhere.", SUBJECT);
-      await complete(objected, { role: "Review & validation" });
+      await review(objected);
       expect(approvals()).toEqual([["reviewer", "request_changes"]]);
 
       writeDeliveredPageTask(["post.md", "notes-for-author.md"]);
       const approved = await finishedRunWith("Verdict: approve. Every claim has its source.", SUBJECT);
-      await complete(approved, { role: "Review & validation" });
+      await review(approved);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
     });
 
@@ -1208,14 +1213,14 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeDeliveredPageTask(["index.html"]);
       const first = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-1" });
       recordRunLooks(store.db, first, [stretch("desktop", 0, 1400, true)]);
-      await complete(first, { role: "Review & validation" });
+      await review(first);
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("`index.html` at the phone width (390 px)");
       expect(refusal()).not.toContain("desktop");
 
       const resumed = await finishedRunWith("Verdict: approve. Looked at the phone width too.", SUBJECT, { session: "review-1" });
       recordRunLooks(store.db, resumed, [stretch("phone", 0, 1900, true)]);
-      await complete(resumed, { role: "Review & validation" });
+      await review(resumed);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
 
       // A session that was compacted holds a summary of what it was shown,
@@ -1224,12 +1229,57 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       writeDeliveredPageTask(["index.html"]);
       const before = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
       recordRunLooks(store.db, before, [stretch("desktop", 0, 1400, true)]);
+      // The compaction lands on the run that ends before it (ruling 174).
+      patchRun(store.db, before, { compactions: 1 });
       const after = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
-      patchRun(store.db, after, { compactions: 1 });
       recordRunLooks(store.db, after, [stretch("phone", 0, 1900, true)]);
-      await complete(after, { role: "Review & validation" });
+      await review(after);
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
+
+      // And what a session was shown of other work is not a look at this:
+      // the run before judged another delivery. CANARY: carry a session's
+      // looks whatever its runs judged.
+      writeDeliveredPageTask(["index.html"]);
+      const other = await finishedRunWith("Verdict: approve.", "files:2026-10-08T10:00:00.000Z", { session: "review-3" });
+      recordRunLooks(store.db, other, [stretch("desktop", 0, 1400, true)]);
+      const next = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-3" });
+      recordRunLooks(store.db, next, [stretch("phone", 0, 1900, true)]);
+      await review(next);
+      expect(approvals()).toEqual([]);
+    });
+
+    it("counts a look only for the delivery it is of, and owes nothing that no tool can show", async () => {
+      // A stretch taken of the task's files after a stopped rework or an
+      // upload changed one is a look at other bytes than the review judges
+      // (`delivery` null), and so is a kept picture of an earlier delivery.
+      // CANARY: accept a look whatever delivery it is of.
+      writeDeliveredPageTask(["index.html"]);
+      const stale = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, stale, [
+        { ...stretch("desktop", 0, 1400, true), delivery: null },
+        { ...stretch("phone", 0, 1900, true), delivery: "2026-10-08T10:00:00.000Z" },
+      ]);
+      await review(stale);
+      expect(approvals()).toEqual([]);
+
+      // A page past the size `capture_page` renders can be shown to nobody,
+      // and neither can any page on a server with no browser: held to a look
+      // nothing can give, the approval could never bind and the task would
+      // wait for a review no run can complete. CANARY: owe every HTML page
+      // the deliverer saved, whatever can show it.
+      writeDeliveredPageTask(["index.html", "report.html"]);
+      truncateSync(path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "report.html"), 11 * 1024 * 1024);
+      const looked = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, looked, [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)]);
+      await review(looked);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+      writeDeliveredPageTask(["index.html"]);
+      const blind = await finishedRunWith("Verdict: approve. Read the source; this server renders nothing.", SUBJECT);
+      await complete(blind, { role: "Review & validation" });
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+      expect(refusal()).toBeUndefined();
     });
 
     it("owes every picture of a look the task keeps, and names the ones a run did not open", async () => {
@@ -1268,7 +1318,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
 
       const half = await finishedRunWith("Verdict: approve.", SUBJECT);
       recordRunLooks(store.db, half, [...whole, { kind: "source", task: "VIB-1", id: "S1" }]);
-      await complete(half, { role: "Review & validation" });
+      await review(half);
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("pictures S2 and S3 of https://example.com/ as it was kept on 2026-10-09");
 
@@ -1279,7 +1329,7 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
         { kind: "source", task: "VIB-1", id: "S2" },
         { kind: "source", task: "VIB-1", id: "S3" },
       ]);
-      await complete(all, { role: "Review & validation" });
+      await review(all);
       expect(approvals()).toEqual([["reviewer", "approve"]]);
     });
   });

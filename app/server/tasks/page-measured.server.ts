@@ -31,10 +31,11 @@ const pageMeasuredSchema = z
             faultKinds: z.number().int().nonnegative().nullable().default(null),
             faultElements: z.number().int().nonnegative().default(0),
             worstContrast: z.number().positive().nullable().default(null),
-            controls: z.number().int().nonnegative().default(0),
-            unreached: z.number().int().nonnegative().default(0),
-            unmarked: z.number().int().nonnegative().default(0),
-            stillMoving: z.number().int().nonnegative().default(0),
+            // Null where that check did not run: not measured, not clean.
+            controls: z.number().int().nonnegative().nullable().default(null),
+            unreached: z.number().int().nonnegative().nullable().default(null),
+            unmarked: z.number().int().nonnegative().nullable().default(null),
+            stillMoving: z.number().int().nonnegative().nullable().default(null),
           })
           .loose(),
       )
@@ -76,9 +77,14 @@ function viewClause(view: MeasuredViewRecord): string | null {
         (view.worstContrast === null ? "" : ` (lowest contrast ${view.worstContrast.toFixed(1)} to 1)`),
     );
   }
-  if (view.unreached > 0) parts.push(`${view.unreached} of ${view.controls} controls the keyboard does not reach`);
-  if (view.unmarked > 0) parts.push(`${view.unmarked} that show nothing when they take focus`);
-  if (view.stillMoving > 0) parts.push(`${view.stillMoving} still moving with reduced motion asked for`);
+  if (view.controls === null) parts.push("the keyboard's reach not measured");
+  else {
+    if (view.unreached === null) parts.push(`the keyboard's walk cut short of ${view.controls} controls`);
+    else if (view.unreached > 0) parts.push(`${view.unreached} of ${view.controls} controls the keyboard does not reach`);
+    if (view.unmarked !== null && view.unmarked > 0) parts.push(`${view.unmarked} that show nothing when they take focus`);
+  }
+  if (view.stillMoving === null) parts.push("reduced motion not measured");
+  else if (view.stillMoving > 0) parts.push(`${view.stillMoving} still moving with reduced motion asked for`);
   return parts.length > 0 ? `at ${WIDTH[view.view]} px ${parts.join(", ")}` : null;
 }
 

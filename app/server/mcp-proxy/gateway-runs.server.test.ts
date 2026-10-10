@@ -831,6 +831,12 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
       const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
       expect(refused.isError).toBe(true);
       expect(z.array(z.object({ text: z.string() })).parse(refused.content)[0]!.text).toBe(notTheTools);
+      // An argument the tool does not have is refused too (ruling 136).
+      // CANARY: parse loosely and `pressed` is dropped in silence: the run is
+      // handed a stretch of the page at rest and told nothing was pressed.
+      const misnamed = await client.callTool({ name: "capture_page", arguments: { name: "post.html", pressed: "Menu" } });
+      expect(misnamed.isError).toBe(true);
+      expect(z.array(z.object({ text: z.string() })).parse(misnamed.content)[0]!.text).toBe(notTheTools);
 
       // Given a size, the same one picture of exactly that size a Claude run
       // gets, and the same word on how it is kept. CANARY: leave `width`,

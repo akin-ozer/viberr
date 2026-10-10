@@ -78,7 +78,7 @@ import {
 import { loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
-import { recordRunLooks } from "./page-looks.server";
+import { deliveryOfTaskFiles, PAGE_HTML_MAX_BYTES, recordRunLooks } from "./page-looks.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -196,7 +196,7 @@ function pictureKindOf(name: string): PictureKind | null {
 
 /** The largest source set as a page, by kind. */
 const SOURCE_MAX_BYTES = {
-  html: 10 * 1024 * 1024,
+  html: PAGE_HTML_MAX_BYTES,
   markdown: 2 * 1024 * 1024,
   svg: 10 * 1024 * 1024,
 } satisfies Record<PictureKind, number>;
@@ -457,6 +457,9 @@ interface RenderedPage {
   motion: PageMotion | null;
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
+  /** The element the page scrolls inside, when it scrolls there and not as a
+   *  page: a picture and a figure are then of its first screen only. */
+  scrollsInside: { what: string; height: number } | null;
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
   /** How many script dialogs the page opened, each dismissed. */
@@ -479,6 +482,7 @@ function unpictured(file: string, error: string): RenderedPage {
     acts: [],
     motion: null,
     measured: null,
+    scrollsInside: null,
     ended: [],
     dialogs: 0,
     asked: [],
@@ -578,12 +582,22 @@ const measuredSchema = z.looseObject({
           worstContrast: z.looseObject({ ratio: z.number().positive(), text: reportWords }).nullable().catch(null),
         }),
         keyboard: z.looseObject({
+          /** False when the walk could not be made or did not finish. */
+          ran: z.boolean().catch(true),
+          /** The walk stopped at its press limit before it came round, so
+           *  what it never reached is not known. */
+          cut: z.boolean().catch(false),
           controls: z.number().int().nonnegative().catch(0),
           stops: z.number().int().nonnegative().catch(0),
+          /** The first few of each, and how many there are in all. */
           unreached: z.array(reportWords).catch([]),
+          unreachedCount: z.number().int().nonnegative().optional().catch(undefined),
           unmarked: z.array(reportWords).catch([]),
+          unmarkedCount: z.number().int().nonnegative().optional().catch(undefined),
         }),
         reduced: z.looseObject({
+          /** False when the page could not be read with reduced motion asked for. */
+          ran: z.boolean().catch(true),
           runningCount: z.number().int().nonnegative().catch(0),
           running: z
             .array(z.looseObject({ name: reportWords, target: reportWords, loops: z.boolean().catch(false) }))
@@ -610,6 +624,11 @@ const reportSchema = z.looseObject({
       acts: z.array(reportActSchema).catch([]),
       motion: motionSchema.optional().catch(undefined),
       measured: measuredSchema.optional().catch(undefined),
+      scrollsInside: z
+        .looseObject({ what: reportWords, height: z.number().nonnegative() })
+        .nullable()
+        .optional()
+        .catch(undefined),
       ended: z.array(reportEndedSchema).catch([]),
       dialogs: z.number().int().nonnegative().catch(0),
       asked: z.array(z.string()).catch([]),
@@ -998,6 +1017,7 @@ async function render(request: RenderRequest): Promise<Render> {
       acts,
       motion: said.motion ?? null,
       measured: said.measured ?? null,
+      scrollsInside: said.scrollsInside ?? null,
       ended: said.ended.filter((end) => views.some((view) => view.id === end.view)),
       dialogs: said.dialogs,
       asked: said.asked.slice(0, 12).map(reportName),
@@ -1101,6 +1121,7 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
     const width = widthRemark(shot, code(page.file));
     if (width) remarks.push(width);
   }
+  if (page.scrollsInside) remarks.push(`${code(page.file)} ${scrollsInsideRemark(page.scrollsInside)}`);
   if (page.dialogs > 0) remarks.push(`${code(page.file)} opens ${DIALOG_REMARK}`);
   const asked = askedClause(page);
   if (asked) {
@@ -1112,6 +1133,12 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
   if (missing.length > 0) remarks.push(`${code(page.file)} asked ${missing.join(", and ")}.`);
   if (page.error) remarks.push(`Not every picture of ${code(page.file)} was made: ${page.error}.`);
   return remarks;
+}
+
+/** Said of a page whose content scrolls inside one of its elements: what a
+ *  picture and a figure of it then cover. */
+function scrollsInsideRemark(inside: { what: string; height: number }): string {
+  return `scrolls inside \`${inside.what}\` (${px(inside.height)} px) and not as a page, so its pictures and what was measured of it are of its first screen only.`;
 }
 
 /** Ruling 328: what was measured of one pictured page, for the note. */
@@ -1184,10 +1211,13 @@ function measuredRecord(measured: PageMeasured): PageMeasuredRecord {
       faultKinds: view.faults.ran ? view.faults.kinds.length : null,
       faultElements: view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0),
       worstContrast: view.faults.worstContrast?.ratio ?? null,
-      controls: view.keyboard.controls,
-      unreached: view.keyboard.unreached.length,
-      unmarked: view.keyboard.unmarked.length,
-      stillMoving: view.reduced.runningCount + view.reduced.videosPlaying,
+      // A check that did not run keeps no figure: null is "not measured",
+      // which zero would say was measured and clean. A walk cut at its press
+      // limit knows what looked the same with focus and not what it missed.
+      controls: view.keyboard.ran ? view.keyboard.controls : null,
+      unreached: view.keyboard.ran && !view.keyboard.cut ? (view.keyboard.unreachedCount ?? view.keyboard.unreached.length) : null,
+      unmarked: view.keyboard.ran ? (view.keyboard.unmarkedCount ?? view.keyboard.unmarked.length) : null,
+      stillMoving: view.reduced.ran ? view.reduced.runningCount + view.reduced.videosPlaying : null,
     })),
   };
 }
@@ -1215,17 +1245,25 @@ function viewSentences(view: PageMeasured["views"][number]): string[] {
     );
   }
   const reached = `Tab reaches ${keyboard.stops} of ${keyboard.controls} ${keyboard.controls === 1 ? "control" : "controls"}`;
-  if (keyboard.controls === 0) {
+  /** A list the renderer cut to its first few, with how many there are. */
+  const firstOf = (names: readonly string[], count: number | undefined): string =>
+    count !== undefined && count > names.length ? `${count}, the first ${quoted(names)}` : quoted(names);
+  if (!keyboard.ran) {
+    lines.push(`${at} the keyboard's reach was not measured: the page's time ran out before it was.`);
+  } else if (keyboard.controls === 0) {
     lines.push(`${at} the page has no control for a keyboard to reach.`);
-  } else if (keyboard.unreached.length === 0 && keyboard.unmarked.length === 0) {
-    lines.push(`${at} ${reached}, and each shows a change when it takes focus.`);
   } else {
     const parts: string[] = [];
-    if (keyboard.unreached.length > 0) parts.push(`never reached: ${quoted(keyboard.unreached)}`);
-    if (keyboard.unmarked.length > 0) parts.push(`looking the same with focus as at rest: ${quoted(keyboard.unmarked)}`);
-    lines.push(`${at} ${reached}; ${parts.join("; ")}.`);
+    if (keyboard.cut) parts.push("the walk stopped at its press limit, so the controls past it were not tried");
+    if (keyboard.unreached.length > 0) parts.push(`never reached: ${firstOf(keyboard.unreached, keyboard.unreachedCount)}`);
+    if (keyboard.unmarked.length > 0) {
+      parts.push(`looking the same with focus as at rest: ${firstOf(keyboard.unmarked, keyboard.unmarkedCount)}`);
+    }
+    lines.push(parts.length === 0 ? `${at} ${reached}, and each shows a change when it takes focus.` : `${at} ${reached}; ${parts.join("; ")}.`);
   }
-  if (reduced.runningCount === 0 && reduced.videosPlaying === 0) {
+  if (!reduced.ran) {
+    lines.push(`${at} what still moves with reduced motion asked for was not measured: the page's time ran out before it was.`);
+  } else if (reduced.runningCount === 0 && reduced.videosPlaying === 0) {
     lines.push(`${at}, with reduced motion asked for, nothing still moves.`);
   } else {
     const moving = reduced.running.map((entry) => `\`${entry.name}\` on \`${entry.target}\`${entry.loops ? " (loops)" : ""}`);
@@ -1276,7 +1314,7 @@ function acceptedPageFigures(db: DatabaseSync, ctx: TaskMutationContext, project
     // SAFETY: the SELECT list is `task_key` and `stage`, both TEXT NOT NULL on
     // `task_projections` in 0001_baseline.
     const rows = db
-      .prepare(`SELECT task_key, stage FROM task_projections WHERE project_slug = ? AND archived = 0`)
+      .prepare(`SELECT task_key, stage FROM task_projections WHERE project_slug = ?`)
       .all(projectSlug) as { task_key: string; stage: string }[];
     for (const row of rows) {
       if (row.task_key === taskKey || !isTerminalStage(row.stage, stages)) continue;
@@ -1843,6 +1881,7 @@ function endedClause(end: EndedView): string {
  *  and what it asked for and did not get. */
 function loadRemarks(page: RenderedPage): string[] {
   const parts: string[] = [];
+  if (page.scrollsInside) parts.push(`It ${scrollsInsideRemark(page.scrollsInside)}`);
   if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
   const asks: string[] = [];
   const asked = askedClause(page);
@@ -2088,6 +2127,10 @@ async function capturePage(
   // reader's width, and a state, a moving screen or the page with reduced
   // motion is not the page as it loads for every reader, so none is one.
   if (!box && !act && !ask.moving && !reduce) {
+    // The look is of the task's delivery only while its files are still as
+    // delivered: read after the render, so a file changed under it counts.
+    const now = readTaskFile(taskRef(ctx, projectSlug, taskKey));
+    const delivery = now ? deliveryOfTaskFiles(ctx, projectSlug, taskKey, now.parsed) : null;
     recordRunLooks(
       db,
       ask.runId,
@@ -2099,7 +2142,7 @@ async function capturePage(
         from: shot.from,
         to: shot.from + shot.height,
         end: !shot.cut,
-        delivery: null,
+        delivery,
       })),
     );
   }
@@ -2389,8 +2432,11 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
         launch,
         source: { kind: "attachments" },
         pages: [{ file, kind: "html" }],
-        views: PAGE_CAPTURE_VIEWS.map((view): ChildView => ({ ...childView(view), maxHeight: TOOL_STRETCH_PX, from: 0 })),
-        runId: ask.runId,
+        // The delivery's own views, so the page is walked as far and weighs
+        // what it will weigh when it is delivered. Not in the run's folder:
+        // nothing here is the run's to open, and its last capture stays.
+        views: PAGE_CAPTURE_VIEWS.map((view): ChildView => ({ ...childView(view), from: 0 })),
+        runId: null,
         measure: true,
         pageTimeoutMs: MEASURED_PAGE_TIMEOUT_MS,
       });
@@ -2523,7 +2569,9 @@ export function pictureWebPage(
         source: { kind: "web" },
         pages: [{ file: WEB_PAGE_LABEL, kind: "web", url: input.url }],
         views,
-        runId: input.runId,
+        // Not in the run's folder: the pictures are kept as sources, and the
+        // run's own last capture stays where its reply said it is.
+        runId: null,
         pageTimeoutMs: WEB_PAGE_TIMEOUT_MS,
       });
     } catch (error) {
@@ -2534,8 +2582,13 @@ export function pictureWebPage(
     if (rendered.scratch) await removeScratch(rendered.scratch, launch);
     const page = rendered.pages[0];
     const stretches = page?.shots.filter((shot) => shot.kind === "stretch") ?? [];
-    if (!page || stretches.length === 0) {
-      const reason = page?.error ?? "it was not rendered";
+    // A look is the whole page at both widths or it is nothing: a render that
+    // failed part way (the browser gone at the second width, an address that
+    // stopped answering, the limit reached) leaves pictures of a part, and a
+    // part kept as the look is what a result is then made to and judged by.
+    const pictured = new Set(stretches.map((shot) => shot.view));
+    if (!page || page.error !== null || PAGE_CAPTURE_VIEWS.some((view) => !pictured.has(view.id))) {
+      const reason = page?.error ?? "it was not pictured at both widths";
       logger.warn("a page on the web could not be pictured", { taskKey, reason });
       return { refused: reason };
     }

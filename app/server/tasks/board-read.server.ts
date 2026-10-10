@@ -354,10 +354,11 @@ export function readAgentTaskAttachment(
   if (!read) return { text: noSuchAttachment(deps, key, name) };
   if ("unreadable" in read) return { text: `[noop] ${read.unreadable}` };
   if (read.kind === "image") {
-    // Ruling 329: one of the pictures Viberr kept of the task's delivery, as
-    // the folder holds it now, is a look at that page.
-    if (deps.runId && !delivery) {
-      const look = keptPictureLook(deps.ctx, deps.projectSlug, key, read.name);
+    // Ruling 329: one of the pictures Viberr kept of the task's delivery is a
+    // look at that page, read from the task's folder or out of that
+    // delivery's own kept copy.
+    if (deps.runId) {
+      const look = keptPictureLook(deps.ctx, deps.projectSlug, key, read.name, delivery);
       if (look) recordRunLooks(deps.db, deps.runId, [look]);
     }
     return { header: attachmentImageHeader(key, read), image: { data: read.data, mimeType: read.mimeType } };

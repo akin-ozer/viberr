@@ -249,7 +249,7 @@ write none of it into the rulings as your own procedure: no other widths, no bro
 no description of the look.
 
 - **Viberr pictures and measures every page a task delivers as files** (rulings 86 and 328):
-  top to end at 1280 px and at 390 px, with what the accessibility checks find, what the
+  at 1280 px and at 390 px, with what the accessibility checks find, what the
   keyboard does not reach, what still moves under reduced motion, its weight and its load
   time, set against the lightest and fastest page the board has accepted. An agent takes
   the same with `capture_page` and `measure_page`.

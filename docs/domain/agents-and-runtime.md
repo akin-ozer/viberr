@@ -1670,10 +1670,16 @@ write grant.
    and, for a Claude run, each of those it opened with its own file reader, read from its
    log (`looksFromRunLog`). The looks that count are the session's (`looksRunIds`): this
    run's, and those of the earlier runs of the session it continued on the same task and
-   subject, back to the last compaction. A resumed review told what it had not opened
-   opens only that, and still holds the pictures of its earlier turns; a compacted one
-   holds a summary of them. A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
-   look, and a kept picture counts only for the delivery it is of. When something owed was
+   subject, since the last compaction (which lands on the run that ends before it, so
+   that run's looks do not carry). A resumed review told what it had not opened opens
+   only that, and still holds the pictures of its earlier turns; a compacted one holds a
+   summary of them. A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
+   look, and a look counts only for the delivery it is of: a kept picture for the delivery
+   it pictures, a `capture_page` stretch for the delivery under review only while every
+   file of its kept copy is still on the task byte for byte (`deliveryOfTaskFiles`).
+   Nothing is owed that no tool can show: no page on a server with no browser, none past
+   the 10 MB `capture_page` renders, no kept picture whose bytes were taken out of the
+   store, and a page longer than 40,000 px only to there. When something owed was
    not looked at, the verdict is not recorded and nothing binds: a `note` titled "Approval
    not recorded" names each page, width and picture the run did not open, says the review
    runs again, and stands in for the "no verdict" note; a check that cannot be made is

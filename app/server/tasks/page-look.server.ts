@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
 import type { FileActorRef } from "~/schemas/task-file.schema";
@@ -9,6 +9,7 @@ import { encodeActorRef } from "~/server/files/actor-ref.server";
 import {
   readTaskSources,
   resolveTaskSource,
+  sourcesRoomRefusal,
   writeTaskSource,
   type SourceLook,
   type TaskSource,
@@ -17,7 +18,7 @@ import { readTaskFile } from "~/server/files/task-writer.server";
 import { readsAsCredential } from "~/server/secrets/git-output-redact.server";
 import { PAGE_CAPTURE_VIEWS, pageCaptureView } from "~/shared/page-capture";
 import { aboutMs, pictureWebPage, type PageMotion, type WebPagePicture } from "./page-capture.server";
-import { idRange, keptLooks } from "./page-looks.server";
+import { idRange, keptLooks, type KeptLook } from "./page-looks.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 
 /**
@@ -58,22 +59,33 @@ export interface KeepPageLookInput {
 
 const refused = (why: string): string => `[noop] ${why} Nothing was kept.`;
 
-/** A host that is this machine or a private network, by its name or its
- *  literal address: a look is of a page on the web. */
+/**
+ * A host that is this machine or a private network, by its name or its
+ * literal address: a look is of a page on the web. A name with no dot in it
+ * is one only this network answers to (`localhost`, a compose service, a
+ * metadata host). What a public name resolves to is not looked up, so a name
+ * a person points at a private address still reads as the web: the run's own
+ * browser reaches the same places (ruling 193), and this door adds none.
+ */
 function isLocalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
-    return true;
-  }
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   const family = isIP(host);
   if (family === 4) {
     const [a = 0, b = 0] = host.split(".").map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+    return (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    );
   }
   if (family === 6) {
     return host === "::1" || host === "::" || /^f[cd]/.test(host) || /^fe[89ab]/.test(host) || host.startsWith("::ffff:");
   }
-  return false;
+  return !host.includes(".") || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal");
 }
 
 /** The address a look is asked of, or the sentence that says why it is not one. */
@@ -250,7 +262,17 @@ function auditKept(
 const HOW_TO_READ =
   "Open each picture with `read_task_source`: none is shown here. From now on this look is what the result is made to and judged against: the address will read differently later, and nobody describes it from memory.";
 
-/** Take over the look task `from` keeps: the same bytes, under its date. */
+/** A look's note with the ids of the task it was written on changed for the
+ *  ids its sources were kept under here. */
+function noteForThisTask(text: string, ids: ReadonlyMap<string, string>): string {
+  return text.replace(/\bS[1-9]\d{0,5}\b/g, (id) => ids.get(id) ?? id);
+}
+
+/**
+ * Take over the looks task `from` keeps: the pictures byte for byte, under
+ * their date, and each look's note with this task's own ids in it. Checked
+ * whole before anything is copied, so a look arrives entire or not at all.
+ */
 function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLookInput, from: string): string {
   const { projectSlug, taskKey, actorRef } = input;
   if (actorRef.kind !== "agent") return refused("A look is kept by an agent's run.");
@@ -261,42 +283,77 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
   const theirs = readTaskSources(projectSlug, from, ctx.dataRoot).sources.filter((source) => source.look);
   if (theirs.length === 0) return refused(`${from} keeps no look of a page.`);
   const mine = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
-  const adopted: string[] = [];
-  const looks = new Set<string>();
-  for (const source of theirs) {
-    const look = source.look!;
-    if (mine.some((kept) => kept.look?.url === look.url && kept.look.at !== look.at)) {
-      return refused(
-        `${taskKey} already keeps a look of ${look.url} from another day, and a result is judged against one look of an address.`,
-      );
-    }
+  const clash = theirs.find((source) => mine.some((kept) => kept.look?.url === source.look!.url && kept.look.at !== source.look!.at));
+  if (clash) {
+    return refused(
+      `${taskKey} already keeps a look of ${clash.look!.url} from another day, and a result is judged against one look of an address.`,
+    );
+  }
+  // Read first, so what does not fit is said before a picture is written.
+  const held = new Set(mine.map((kept) => kept.sha256));
+  const toCopy = theirs.flatMap((source) => {
     const resolved = resolveTaskSource(projectSlug, from, source.id, ctx.dataRoot);
-    if (!resolved) continue;
+    if (!resolved || !existsSync(resolved.abs)) return [];
+    return [{ source, data: readFileSync(resolved.abs) }];
+  });
+  const looks = [...new Set(theirs.map((source) => `${source.look!.url} as it was pictured on ${source.look!.at.slice(0, 10)}`))];
+  const already = `[noop] ${taskKey} already keeps what ${from} keeps of ${LIST_AND.format(looks)}. \`read_task_source\` lists it.`;
+  // A picture is new here by its bytes; a note is rewritten with this task's
+  // ids, so it is new while no picture of its look is here yet.
+  const fresh = toCopy.filter((entry) => entry.source.look!.part !== "note" && !held.has(entry.source.sha256));
+  if (fresh.length === 0) return already;
+  const notes = toCopy.filter((entry) => entry.source.look!.part === "note");
+  const room = sourcesRoomRefusal(
+    projectSlug,
+    taskKey,
+    fresh.length + notes.length,
+    [...fresh, ...notes].reduce((sum, entry) => sum + entry.data.length, 0),
+    ctx.dataRoot,
+  );
+  if (room) return refused(room);
+  const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
+  const adopted: string[] = [];
+  // The pictures first, so each note can name them by the ids they have here.
+  const ids = new Map<string, string>();
+  const keep = (source: TaskSource, data: Buffer): void => {
     const written = writeTaskSource(
       projectSlug,
       taskKey,
       {
         name: source.name,
-        data: readFileSync(resolved.abs),
+        data,
         title: source.title,
         from: `${source.from} (kept on ${from} as ${source.id})`.slice(0, 2_000),
-        by: { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint },
+        by,
         runId: input.runId,
-        look,
+        look: source.look,
       },
       ctx.dataRoot,
     );
-    if ("kept" in written) adopted.push(written.kept.id);
-    looks.add(`${look.url} as it was pictured on ${look.at.slice(0, 10)}`);
-  }
-  if (adopted.length === 0) {
-    return `[noop] ${taskKey} already keeps what ${from} keeps of ${LIST_AND.format([...looks])}. \`read_task_source\` lists it.`;
+    if ("kept" in written) {
+      adopted.push(written.kept.id);
+      ids.set(source.id, written.kept.id);
+    } else if ("already" in written) {
+      ids.set(source.id, written.already.id);
+    }
+  };
+  for (const entry of toCopy) if (entry.source.look!.part !== "note") keep(entry.source, entry.data);
+  for (const entry of toCopy) {
+    if (entry.source.look!.part === "note") keep(entry.source, Buffer.from(noteForThisTask(entry.data.toString("utf8"), ids)));
   }
   const first = theirs[0]!.look!;
   auditKept(db, input, { url: first.url, at: first.at, sources: adopted, from });
   return (
-    `[kept] ${taskKey} now keeps ${LIST_AND.format([...looks])}, taken over from ${from} byte for byte, as ${idRange(adopted)}. ` +
+    `[kept] ${taskKey} now keeps ${LIST_AND.format(looks)}, taken over from ${from}: the pictures byte for byte, as ${idRange(adopted)}. ` +
     HOW_TO_READ
+  );
+}
+
+/** The answer to an ask for an address the task already keeps a look of. */
+function alreadyKept(taskKey: string, standing: KeptLook): string {
+  return (
+    `[noop] ${taskKey} already keeps how ${standing.url} looked on ${standing.at.slice(0, 10)} (${idRange(standing.stretches.map((s) => s.id))}). ` +
+    "A result is judged against one look of an address: read that one. `read_task_source` lists every picture of it."
   );
 }
 
@@ -330,18 +387,27 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
 
   const before = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
   const standing = keptLooks(before).find((look) => look.url === url);
-  if (standing) {
-    return (
-      `[noop] ${taskKey} already keeps how ${url} looked on ${standing.at.slice(0, 10)} (${idRange(standing.stretches.map((s) => s.id))}). ` +
-      "A result is judged against one look of an address: read that one. `read_task_source` lists every picture of it."
-    );
-  }
+  if (standing) return alreadyKept(taskKey, standing);
 
   const answer = await pictureWebPage(db, ctx, { projectSlug, taskKey, url, runId: input.runId });
   if ("busy" in answer) return "[busy] The renderer is working on other pages. Call again in a moment.";
   if ("refused" in answer) {
     return `[error] ${url} could not be pictured: ${answer.refused}. Nothing was kept. Say in your report that the page could not be opened, and state nothing about its look from memory.`;
   }
+  // The render took its time: another run's ask for the same address may
+  // have kept its look meanwhile, and a task keeps one.
+  const meanwhile = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources).find((look) => look.url === url);
+  if (meanwhile) return alreadyKept(taskKey, meanwhile);
+  // Whole or not at all: a look cut off by the task's limits would stand as
+  // the look, with no note and no way to finish it.
+  const room = sourcesRoomRefusal(
+    projectSlug,
+    taskKey,
+    answer.pictures.length + 1,
+    answer.pictures.reduce((sum, picture) => sum + picture.bytes.length, 0) + 8_192,
+    ctx.dataRoot,
+  );
+  if (room) return `[error] ${room} Nothing was kept of ${url}.`;
   const at = new Date().toISOString();
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
   const kept: KeptPicture[] = [];

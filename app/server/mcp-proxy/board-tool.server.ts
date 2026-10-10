@@ -236,7 +236,7 @@ export const PAGE_CAPTURE_TOOL: Tool = {
 
 /** Ruling 328: what `measure_page` says it does, on either backend. */
 export const MEASURE_PAGE_DESCRIPTION =
-  "Measure ONE page on this task as Viberr measures every delivered page, before you deliver it or while you review it. `name` is an .html or .htm file among this task's files. Viberr renders it in a real browser at the desktop width (1280 px) and the phone width (390 px) and answers in words, with no picture: what the accessibility checks found at each width (axe, WCAG 2.2 AA: contrast, names for controls and pictures, landmarks and headings), with the lowest contrast and the first elements of each kind of fault; how many of the page's controls Tab reaches, which it never reaches and which look the same holding focus as at rest; what still moves with reduced motion asked for; the weight of the page and every file it loads; and how long it takes to finish loading on a slow phone line. Where the board has accepted pages before, the answer says how this one's weight and load stand against the lightest and the fastest of them: a board's pages only get lighter and faster. The same figures are taken of the delivery itself and written on the task, so a page is measured, and what it found is fixed, before it is handed over. Nothing is saved by this call.";
+  "Measure ONE page on this task as Viberr measures every delivered page, before you deliver it or while you review it. `name` is an .html or .htm file among this task's files. Viberr renders it in a real browser at the desktop width (1280 px) and the phone width (390 px) and answers in words, with no picture: what the accessibility checks found at each width (axe, WCAG 2.2 A and AA: contrast, names for controls and pictures, and the rest of those rules), with the lowest contrast and the first elements of each kind of fault; how many of the page's controls Tab reaches, which it never reaches and which look the same holding focus as at rest; what still moves with reduced motion asked for; the weight of the page and every file it loads; and how long it takes to finish loading on a slow phone line. Where the board has accepted pages before, the answer says how this one's weight and load stand against the lightest and the fastest of them: a board's pages only get lighter and faster. The same figures are taken of the delivery itself and written on the task, so a page is measured, and what it found is fixed, before it is handed over. Nothing is saved by this call.";
 
 export const MEASURE_PAGE_FIELDS = {
   name: "The page's file name among this task's files, exactly as `read_board` lists it: an .html or .htm file.",
@@ -267,8 +267,10 @@ export const captureBoxScale = z.union([z.literal(0.25), z.literal(0.5), z.liter
 export const captureActControl = z.string().min(1).max(CAPTURE_PAGE_ACT.maxChars);
 export const captureActTab = z.number().int().min(CAPTURE_PAGE_ACT.minTab).max(CAPTURE_PAGE_ACT.maxTab);
 
-/** `capture_page`'s arguments, parsed where the gateway receives the call. */
-export const pageCaptureArgsSchema = z.object({
+/** `capture_page`'s arguments, parsed where the gateway receives the call.
+ *  Strict, as its Claude twin is (ruling 136): a misnamed state argument
+ *  dropped in silence came back as a plain stretch of the page at rest. */
+export const pageCaptureArgsSchema = z.strictObject({
   name: z.string(),
   view: z.enum(["desktop", "phone"]).optional(),
   from: z.number().int().min(0).max(PAGE_CAPTURE_MAX_FROM).optional(),

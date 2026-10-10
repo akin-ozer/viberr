@@ -178,7 +178,10 @@ const sourceLineSchema = z.object({
       pageHeight: z.number().int().min(0).optional(),
       moment: z.number().min(0).optional(),
     })
-    .optional(),
+    .optional()
+    // A look that does not read leaves the line what it otherwise is: a
+    // kept source, with none.
+    .catch(undefined),
 });
 
 const deliveryLineSchema = z.object({
@@ -287,6 +290,25 @@ const MB = 1024 * 1024;
  * `AppError.validation`, with the sentence an agent reads, when the task
  * already keeps as many sources as it may or has no room left for these bytes.
  */
+/**
+ * Why `count` more sources of `bytes` in all would not fit on a task, as the
+ * sentence a keeper prints, or null when they fit. For a keep of several
+ * sources that are one thing (the pictures of one look, ruling 327): asked
+ * before the first is written, so the task holds all of them or none.
+ */
+export function sourcesRoomRefusal(slug: string, key: string, count: number, bytes: number, dataRoot?: string): string | null {
+  const { sources } = parseIndex(readIndexText(taskSourcesDir(slug, key, dataRoot)));
+  const keptBytes = sources.reduce((sum, s) => sum + s.bytes, 0);
+  if (sources.length + count > SOURCES_PER_TASK_MAX) {
+    return `${key} keeps ${sources.length} of the ${SOURCES_PER_TASK_MAX} sources a task holds, and this needs ${count} more.`;
+  }
+  if (keptBytes + bytes > SOURCES_TASK_MAX_BYTES) {
+    const left = Math.floor((Math.max(0, SOURCES_TASK_MAX_BYTES - keptBytes) / MB) * 10) / 10;
+    return `${key} keeps ${(keptBytes / MB).toFixed(1)} MB of sources and a task may keep ${SOURCES_TASK_MAX_BYTES / MB} MB, so ${left.toFixed(1)} MB is left and this needs ${(Math.ceil((bytes / MB) * 10) / 10).toFixed(1)} MB.`;
+  }
+  return null;
+}
+
 export function writeTaskSource(
   slug: string,
   key: string,

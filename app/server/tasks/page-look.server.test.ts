@@ -9,7 +9,7 @@ import { writeFakeBrowser, type FakeBrowser } from "../../../test-support/fake-b
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
 import { baseTaskFrontmatter, setupTestStore, writeTask, type TestStore } from "../../../test-support/test-store";
 import type { FileActorRef } from "~/schemas/task-file.schema";
-import { readTaskSources, resolveTaskSource } from "~/server/files/task-sources.server";
+import { readTaskSources, resolveTaskSource, writeTaskSource } from "~/server/files/task-sources.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
 import { keepPageLook } from "./page-look.server";
@@ -90,8 +90,13 @@ const REFERENCE =
   '<p>fake-sticky:{"what":"header.site","position":"sticky"}</p><p>fake-on-scroll:3</p>' +
   '<p>fake-hover:[{"what":"a.cta","at":[640,420],"changes":["background-color"],"durationMs":150}]</p>';
 
+/** The limit of a case that keeps a look: a real child process and stand-in
+ *  browser, four loads, and two screens watched for three seconds each, which
+ *  is nine seconds on a quiet machine. */
+const REAL_LOOK_MS = 90_000;
+
 describe("ruling 327: a task keeps how a page on the web looked", () => {
-  it("pictures the address once, whole at both widths with what moved, keeps it as the sources of one look, answers a second ask with the one kept, and hands the same look to another task", async () => {
+  it("pictures the address once, whole at both widths with what moved, keeps it as the sources of one look, answers a second ask with the one kept, and hands the same look to another task", { timeout: REAL_LOOK_MS }, async () => {
     // The first board asked for a page made to the look of a site judged it
     // against the address as it read on the day of each review, and built it
     // from pictures a script of its own took at a width Viberr pictures
@@ -174,12 +179,29 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
 
       // Another task of the same work takes the look over: the same bytes
       // under the same date, and nothing is opened for it.
+      // VIB-2 keeps a source of its own first, so the look's ids differ there.
+      writeTaskSource(
+        store.slug,
+        "VIB-2",
+        { name: "readme.md", data: Buffer.from("# The product"), title: "The product's readme", from: "the repository", by: { backend: "claude", profileId: "developer", roleHint: "Developer" }, runId: null },
+        store.dataRoot,
+      );
       const taken = await keep({ taskKey: "VIB-2", from: "VIB-1" });
-      expect(taken).toContain(`[kept] VIB-2 now keeps https://look.example/ as it was pictured on ${day}, taken over from VIB-1 byte for byte, as S1 to S${kept.length}.`);
-      const theirs = sourcesOf("VIB-2");
-      expect(theirs.map((source) => [source.look, source.sha256])).toEqual(kept.map((source) => [source.look, source.sha256]));
-      expect(sha256Of("VIB-2", "S1")).toBe(kept[0]!.sha256);
+      expect(taken).toContain(
+        `[kept] VIB-2 now keeps https://look.example/ as it was pictured on ${day}, taken over from VIB-1: the pictures byte for byte, as S2 to S${kept.length + 1}.`,
+      );
+      const theirs = sourcesOf("VIB-2").filter((source) => source.look);
+      const pictures = (sources: typeof kept) => sources.filter((source) => source.look!.part !== "note").map((source) => [source.look, source.sha256]);
+      expect(pictures(theirs)).toEqual(pictures(kept));
+      expect(sha256Of("VIB-2", "S2")).toBe(kept[0]!.sha256);
       expect(theirs[0]!.from).toContain("(kept on VIB-1 as S1)");
+      // The note says where each picture is by the ids it has on THIS task.
+      // CANARY: copy the note byte for byte and VIB-2's note sends its reader
+      // to S1 to S3, which on VIB-2 are the readme and two other pictures.
+      const adoptedNote = theirs.find((source) => source.look!.part === "note")!;
+      const text = readFileSync(resolveTaskSource(store.slug, "VIB-2", adoptedNote.id, store.dataRoot)!.abs, "utf8");
+      expect(text).toContain("- Desktop, 1280 px wide: S2 to S4, the whole page (4,500 px) in 3 pictures.\n  - S2: 0 to 2,000 px.");
+      expect(text).not.toContain("S1:");
       expect(fake.launches()).toHaveLength(launches);
       // Taken twice, it is already there.
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[noop] VIB-2 already keeps what VIB-1 keeps of");
@@ -194,7 +216,7 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
     });
   });
 
-  it("keeps a long page to twelve stretches a width and says it runs on, and keeps a stretch that looks the same as another once and says where", async () => {
+  it("keeps a long page to twelve stretches a width and says it runs on, and keeps a stretch that looks the same as another once and says where", { timeout: REAL_LOOK_MS }, async () => {
     // The stand-in draws a page in a grey that comes round again after
     // 20,000 px, so the eleventh and twelfth stretches of this one are, to
     // the byte, its first and second: a task keeps no bytes twice (ruling
@@ -221,6 +243,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
   it.each([
     ["a file on disk", { url: "file:///etc/passwd" }, "A look is of a page a browser opens over `http` or `https`."],
     ["this machine by name", { url: "http://localhost:5173/board" }, "A look is of a page on the web, and this address is this machine's or a private network's. A page among the task's files is looked at with `capture_page`."],
+    ["this machine by its rooted name", { url: "http://localhost./" }, "A look is of a page on the web, and this address is this machine's or a private network's. A page among the task's files is looked at with `capture_page`."],
+    ["a name only this network answers to", { url: "http://viberr:3000/" }, "A look is of a page on the web, and this address is this machine's or a private network's. A page among the task's files is looked at with `capture_page`."],
     ["a private network by address", { url: "http://192.168.1.10/" }, "A look is of a page on the web, and this address is this machine's or a private network's. A page among the task's files is looked at with `capture_page`."],
     ["a password in the address", { url: "https://arda:hunter2@look.example/" }, "`url` holds what reads as a user name, a token or a password. Give the address without it."],
     ["what is not an address", { url: "the retool site" }, "`url` is not an address a browser opens. Give it whole, with `https://`."],
@@ -235,6 +259,24 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
     await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
       expect(await keep(input)).toBe(`[noop] ${why} Nothing was kept.`);
       expect(fake.launches()).toEqual([]);
+      expect(sourcesOf("VIB-1")).toEqual([]);
+      expect(lookAudits()).toEqual([]);
+    });
+  });
+
+  it("keeps nothing of a look that was pictured only in part", async () => {
+    // The browser ends when the page is loaded at the phone's width: the
+    // desktop pictures are in hand and the look is half a look. Kept, it
+    // answered "the whole page" for one width, a second ask answered
+    // "already keeps", and maker and reviewer were held to it for good.
+    // CANARY: keep whatever stretches the render returned.
+    const reference = await site({ "/": "<p>fake-height:4500</p><p>fake-crash-at:390</p>" });
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
+      const answer = await keep({ url: "https://look.example/" });
+      expect(answer).toBe(
+        "[error] https://look.example/ could not be pictured: the browser ended before the page was pictured. Nothing was kept. " +
+          "Say in your report that the page could not be opened, and state nothing about its look from memory.",
+      );
       expect(sourcesOf("VIB-1")).toEqual([]);
       expect(lookAudits()).toEqual([]);
     });

@@ -172,6 +172,11 @@ const scratches = (key = "VIB-1") =>
 const inputRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.dataRoot), ".capture-input");
 /** The files the stand-in browser was told to open, in order, once each. */
 const opened = () => [...new Set(fake.pages().map((page) => decodeURIComponent(new URL(page.url).pathname.split("/").pop()!)))];
+/** The limit of a case that waits on several real renders: each is a child
+ *  process and a stand-in browser, and a measured page loads five more times
+ *  with a second's settle on three of them, so a case with six pages runs
+ *  past the suite's 20 s on a loaded machine. */
+const REAL_RENDERS_MS = 90_000;
 const captureAudits = () => listAuditEvents(store.db, { action: "task.pages.captured" });
 /** What a delivery's note says of the pictures: all of it up to what was
  *  measured of each HTML page (ruling 328), which closes the note and has a
@@ -450,15 +455,22 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
   });
 
-  it("ruling 328: a delivered page is measured as it is pictured: the figures are kept on its record, said in the note with what each fault is on, handed to the operator and the reviewer in one line, and set against the pages the board has accepted; an agent takes the same figures before it delivers", async () => {
+  it("ruling 328: a delivered page is measured as it is pictured: the figures are kept on its record, said in the note with what each fault is on, handed to the operator and the reviewer in one line, and set against the pages the board has accepted; an agent takes the same figures before it delivers", { timeout: REAL_RENDERS_MS }, async () => {
     // What a person accepted a page on was an agent's word that it "passes
     // accessibility" or "loads fast": nothing on the task was a figure.
-    // An earlier page of this board, measured and accepted.
+    // An earlier page of this board, measured and accepted, and since
+    // archived with its epic; and a lighter, faster page on a task nobody
+    // has accepted, which sets no figure.
     const earlier = "2026-10-07T12:00:00.000Z";
-    await keptDelivery("VIB-2", earlier, { "first.html": "<p>the first page</p><p>fake-load-ms:900</p>" });
-    await withBrowser("", () => picture("VIB-2", earlier));
+    await keptDelivery("VIB-2", earlier, { "first.html": "<p>the first page, accepted</p><p>fake-load-ms:900</p>" });
+    await keptDelivery("VIB-3", earlier, { "draft.html": "<p>fake-load-ms:300</p>" });
+    await withBrowser("", async () => {
+      await picture("VIB-2", earlier);
+      await picture("VIB-3", earlier);
+    });
     await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-2", dataRoot: store.dataRoot }, (parsed) => {
       parsed.frontmatter.stage = "done";
+      parsed.frontmatter.archived = true;
     });
     rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
 
@@ -502,9 +514,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(note).toContain("At 1280 px, with reduced motion asked for, 1 animation still runs: `drift` on `div.hero` (loops).");
     expect(note).toContain('At 1280 px Tab reaches 2 of 3 controls; never reached: `button "Menu"`; looking the same with focus as at rest: `a "Start"`.');
     // A board's pages only get lighter and faster: this one is set against
-    // the lightest and the fastest already accepted, with both figures.
-    // CANARY: read the figures of every task, accepted or not, or of this
-    // task itself, and the page is compared with its own delivery.
+    // the lightest and the fastest it has had accepted, with both figures.
+    // CANARY: read the figures of every task, accepted or not, and the page
+    // is set against VIB-3's draft (0.3 s); leave archived tasks out and the
+    // board forgets the page it accepted and says nothing at all.
     expect(note).toMatch(
       /That is heavier than the lightest page this board has accepted \(1 KB, VIB-2\) and slower than its fastest \(0\.9 s, VIB-2\)\. A board's pages only get lighter and faster\.$/,
     );
@@ -523,7 +536,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
       ["notes.md", null],
     ]);
     const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
-    expect(pageLooksNote(pageLooksOwed({ dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed)!)).toContain(
+    expect(pageLooksNote(pageLooksOwed({ dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed, true)!)).toContain(
       `What Viberr measured as it pictured this delivery: \`index.html\`: ${line} The delivery's "Page captures" note names each element`,
     );
 
@@ -710,7 +723,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     );
   });
 
-  it("a page that cannot be pictured is said on the task and leaves the delivery, its kept copy and the other pages as they were", async () => {
+  it("a page that cannot be pictured is said on the task and leaves the delivery, its kept copy and the other pages as they were", { timeout: REAL_RENDERS_MS }, async () => {
     await deliver(
       { "good.html": '<img src="https://cdn.example.com/a.js"><img src="nested/b.png">', "bad.html": "<p>this one ends the browser</p>" },
       "crash:bad.html",
@@ -1149,7 +1162,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(readdirSync(attachments("VIB-3"))).toEqual(["report.html"]);
   });
 
-  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, one that asks for a path it is never served, and one pictured at one width only", async () => {
+  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, one that asks for a path it is never served, and one pictured at one width only", { timeout: REAL_RENDERS_MS }, async () => {
     await deliver(
       {
         "alert.html": '<script>alert("Welcome")</script><p>behind the dialog</p>',
@@ -1446,7 +1459,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
   });
 
-  it("ruling 194: an agent's ask puts a page in a state before the picture, says what the act found at each width, refuses a state it cannot show, and writes down no look", async () => {
+  it("ruling 194: an agent's ask puts a page in a state before the picture, says what the act found at each width, refuses a state it cannot show, and writes down no look", { timeout: REAL_RENDERS_MS }, async () => {
     // A still picture of a page at rest hides its menu, what a control looks
     // like under the pointer and where the keyboard goes. On the first board
     // asked for a page, its agents scripted a browser of their own to see
@@ -1639,12 +1652,40 @@ describe("a delivered page is pictured (ruling 86)", () => {
       readAgentTaskAttachment(deps(runId), "VIB-1", "notes.txt");
       readAgentTaskSource(deps(runId), "VIB-1", undefined);
       readAgentTaskAttachment(deps(null), "VIB-1", "post.html.capture-desktop.png");
+      // The task's files are as delivered, so a stretch of them is a look at
+      // that delivery.
       expect(runLooks(store.db, runId)).toEqual([
-        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 2000, end: false, delivery: null },
-        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 2000, to: 3000, end: true, delivery: null },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 2000, end: false, delivery: STAMP },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 2000, to: 3000, end: true, delivery: STAMP },
         { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
         { kind: "source", task: "VIB-1", id: "S1" },
       ]);
+      // The same kept picture read out of the delivery's own copy is the same
+      // look. CANARY: record nothing for a read that names its delivery, the
+      // one read that is provably of it.
+      const second = await liveRun("proofreader");
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png", 0, STAMP)).toBe(true);
+      expect(runLooks(store.db, second)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+      ]);
+      // A file changed on the task since the delivery (a rework that was
+      // stopped, an upload): `capture_page` renders the files as they are,
+      // and that look is of other bytes than the review judges.
+      // CANARY: credit every stretch to the task's delivery and a reviewer
+      // approves the delivery on a look at a page it does not hold.
+      saveFiles("VIB-1", { "post.html": "<p>half a rework</p><p>fake-height:3000</p>" });
+      await ask("post.html", { runId: second, view: "desktop" });
+      expect(runLooks(store.db, second).at(-1)).toEqual({
+        kind: "page",
+        task: "VIB-1",
+        file: "post.html",
+        view: "desktop",
+        from: 0,
+        to: 2000,
+        end: false,
+        delivery: null,
+      });
+      await stopRun(second);
 
       // A Claude run that opens the kept pictures with its own file reader has
       // looked too: its log holds the read and the image it was handed.

@@ -1,4 +1,5 @@
-import { readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -11,7 +12,7 @@ import {
   readAttachmentBytes,
   resolveTaskAttachment,
 } from "~/server/files/task-attachments.server";
-import { readTaskSources, type TaskSource } from "~/server/files/task-sources.server";
+import { readTaskSources, resolveTaskSource, type TaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile } from "~/server/files/task-writer.server";
 import { logger } from "~/server/logging/logger.server";
 import { getRun, patchRun } from "~/server/runtimes/run-store.server";
@@ -78,8 +79,10 @@ const runLookSchema = z.discriminatedUnion("kind", [
     to: z.number().min(0),
     /** The page ends inside the picture. */
     end: z.boolean(),
-    /** The delivery a kept picture is of; null for the task's files as they
-     *  stood when `capture_page` rendered them. */
+    /** The delivery the picture is of: a kept picture's own, and for a
+     *  stretch `capture_page` rendered the task's delivery when its files
+     *  were then as delivered. Null when they were not, or nothing was
+     *  delivered: such a look is of other bytes than a review judges. */
     delivery: z.string().nullable(),
   }),
   z.object({ kind: z.literal("source"), task: z.string(), id: z.string() }),
@@ -144,12 +147,14 @@ export function looksRunIds(db: DatabaseSync, runId: string): string[] {
     .all(run.session_id, run.project_slug, run.task_key) as { id: string; review_subject: string | null; compactions: number }[];
   let ids: string[] = [];
   for (const row of session) {
-    // Another subject, or a compaction: what was seen before does not carry.
+    if (row.id === runId) return [...ids, runId];
+    // A compaction lands on the run that ends before it (ruling 174): what
+    // that run and every run before it were shown is a summary from then on.
+    // Another subject's looks are of other work.
     if (row.review_subject !== run.review_subject || row.compactions > 0) ids = [];
-    ids.push(row.id);
-    if (row.id === runId) break;
+    else ids.push(row.id);
   }
-  return ids.includes(runId) ? ids : [runId];
+  return [runId];
 }
 
 /** One look a task keeps: the stretches of one page on the web. */
@@ -196,27 +201,60 @@ function listed(dir: string | null): string[] {
   }
 }
 
+/** The largest HTML page `capture_page` renders, in bytes. */
+export const PAGE_HTML_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Whether a file is there and within `bytes`. */
+function within(file: string, bytes: number): boolean {
+  try {
+    const stat = statSync(file);
+    return stat.isFile() && stat.size <= bytes;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * What an approval of this task's delivery owes a look at, or null when it
  * owes none: the delivery is a revision or nothing was delivered, and the
  * task keeps no look; or it is files with no page of the deliverer's among
  * them and no look.
+ *
+ * Nothing is owed that no tool can show, or the approval could never bind:
+ * with no browser on the server (`canShowPages` false) no page is pictured
+ * for anyone; a page past the size `capture_page` renders is not rendered;
+ * and a kept picture whose bytes a person took out of the store is not there
+ * to open.
  */
 export function pageLooksOwed(
   ctx: TaskMutationContext,
   projectSlug: string,
   taskKey: string,
   parsed: ParsedTaskFile,
+  canShowPages: boolean,
 ): PageLooksOwed | null {
   const fm = parsed.frontmatter;
   if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
   const own = deliverersOwnFileNames(fm, parsed.timeline);
-  const kept = listed(keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot));
+  const keptDir = keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot);
+  const kept = listed(keptDir);
   // A delivery whose copy could not be kept (ruling 86) is still the files on
   // the task: the pages are read from there.
-  const held = kept.length > 0 ? kept : listed(taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot));
-  const pages = held.filter((name) => own.has(name) && pageKindOf(name) === "html").sort();
-  const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources);
+  const attachments = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+  const dir = kept.length > 0 && keptDir ? keptDir : attachments;
+  const held = kept.length > 0 ? kept : listed(attachments);
+  const pages = canShowPages
+    ? held.filter((name) => own.has(name) && pageKindOf(name) === "html" && within(path.join(dir, name), PAGE_HTML_MAX_BYTES)).sort()
+    : [];
+  const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources)
+    .map((look) => ({
+      ...look,
+      stretches: look.stretches.filter((stretch) => {
+        const resolved = resolveTaskSource(projectSlug, taskKey, stretch.id, ctx.dataRoot);
+        return resolved !== null && within(resolved.abs, Number.MAX_SAFE_INTEGER);
+      }),
+    }))
+    .filter((look) => look.stretches.length > 0);
   if (pages.length === 0 && looks.length === 0) return null;
   const record = fm.pageCaptures?.deliveredAt === fm.deliveredAt ? fm.pageCaptures : null;
   const measured = (record?.pages ?? []).flatMap((page) => {
@@ -224,6 +262,44 @@ export function pageLooksOwed(
     return figures ? [{ file: page.file, line: measuredLine(figures) }] : [];
   });
   return { taskKey, deliveredAt: fm.deliveredAt, pages, looks, measured };
+}
+
+const sha256 = (file: string): string => createHash("sha256").update(readFileSync(file)).digest("hex");
+
+/**
+ * The delivery a picture of the task's files, as they stand, is a picture of:
+ * the task's own `deliveredAt` while every file its kept copy holds is still
+ * on the task byte for byte, else null. `capture_page` renders the files as
+ * they are, and a rework that was stopped, or a person's upload, can have
+ * changed one since the delivery a review judges: a look at those bytes is
+ * not a look at what was delivered. A delivery with no kept copy (ruling 86)
+ * is the files on the task, so they are as delivered by definition.
+ */
+export function deliveryOfTaskFiles(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  parsed: ParsedTaskFile,
+): string | null {
+  const fm = parsed.frontmatter;
+  if (!fm.deliveredAt || !deliveredAsFiles(fm)) return null;
+  const keptDir = keptDeliveryDir(projectSlug, taskKey, fm.deliveredAt, ctx.dataRoot);
+  const kept = listed(keptDir);
+  if (!keptDir || kept.length === 0) return fm.deliveredAt;
+  const attachments = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+  try {
+    for (const name of kept) {
+      // Viberr's own pictures of the delivery are not files of the result.
+      if (viewOfCaptureName(name)) continue;
+      const delivered = path.join(keptDir, name);
+      const now = path.join(attachments, name);
+      if (statSync(delivered).size !== statSync(now).size || sha256(delivered) !== sha256(now)) return null;
+    }
+  } catch {
+    // A file of the delivery that is no longer on the task, or cannot be read.
+    return null;
+  }
+  return fm.deliveredAt;
 }
 
 const same = (a: string, b: string): boolean => a.normalize("NFC") === b.normalize("NFC");
@@ -265,8 +341,10 @@ export function unmetPageLooks(owed: PageLooksOwed, looks: readonly RunLook[]): 
           look.task === owed.taskKey &&
           look.view === view.id &&
           same(look.file, page) &&
-          // A kept picture is of one delivery; this one, or it shows another.
-          (look.delivery === null || look.delivery === owed.deliveredAt) &&
+          // A look is of one delivery: this one, or it shows other bytes
+          // (a kept picture of an earlier delivery, the task's files as a
+          // rework or an upload has since left them).
+          look.delivery === owed.deliveredAt &&
           look.to - look.from <= PAGE_LOOK_MAX_PX,
       );
       const seen = seenTo(mine);
@@ -293,11 +371,19 @@ export function unmetPageLooks(owed: PageLooksOwed, looks: readonly RunLook[]): 
   return unmet;
 }
 
-/** How a run looks at a page and at a kept look, in one sentence each: said
- *  to a reviewer before it starts and in the note when it did not. */
-const HOW_TO_LOOK =
-  "A page is looked at with `capture_page`: its name, one `view` at a time, reading on from each `nextFrom` until the reply says the page ends. " +
-  "A look the task keeps is opened picture by picture with `read_task_source`.";
+/** How a run looks at what it owes a look at, a sentence for each kind owed:
+ *  said to a reviewer before it starts and in the note when it did not. A
+ *  tool is named only where there is something of its kind to open. */
+function howToLook(owes: { pages: boolean; looks: boolean }): string {
+  const parts: string[] = [];
+  if (owes.pages) {
+    parts.push(
+      "A page is looked at with `capture_page`: its name, one `view` at a time, reading on from each `nextFrom` until the reply gives none.",
+    );
+  }
+  if (owes.looks) parts.push("A look the task keeps is opened picture by picture with `read_task_source`.");
+  return parts.join(" ");
+}
 
 /** Source ids as a sentence names them: "S4 to S9" for three or more that
  *  run on, each id by itself otherwise, so "S1 to S3 and S5 to S7". */
@@ -329,7 +415,7 @@ export function pageLooksNote(owed: PageLooksOwed): string {
   }
   return (
     `- An approval here binds only from a run that looked. Before you approve, look at ${parts.join(", and at ")}. ` +
-    HOW_TO_LOOK +
+    howToLook({ pages: owed.pages.length > 0, looks: owed.looks.length > 0 }) +
     (owed.looks.length > 0
       ? " Set the page beside those kept pictures section by section: they are what it is judged against, never the address as it reads today and never anyone's description of it."
       : "") +
@@ -345,28 +431,25 @@ export function pageLooksNote(owed: PageLooksOwed): string {
 export const PAGE_LOOKS_NOTE_TITLE = "Approval not recorded";
 
 /** The note written when an approval did not bind for want of a look. */
-export function pageLooksRefusalNote(reviewer: string, unmet: readonly string[]): string {
+export function pageLooksRefusalNote(reviewer: string, unmet: readonly string[], owed: PageLooksOwed | null): string {
   return (
     `${reviewer}'s approval was not recorded: the run did not look at ${unmet.join("; ")}. ` +
     "An approval of a page binds only from a run that looked at the whole page at both widths and at every picture of a look the task keeps. " +
-    HOW_TO_LOOK +
+    howToLook({ pages: owed === null || owed.pages.length > 0, looks: owed === null || owed.looks.length > 0 }) +
     " Validation is unchanged and acceptance stays gated: run the review again."
   );
 }
 
 const readInputSchema = z.looseObject({ file_path: z.string() });
 const toolUseSchema = z.looseObject({ type: z.literal("tool_use"), id: z.string(), name: z.string(), input: z.unknown() });
-const toolResultSchema = z.looseObject({
-  type: z.literal("tool_result"),
-  tool_use_id: z.string(),
-  is_error: z.boolean().optional(),
-  // A result is a string or a list of blocks; only a list can hold a picture.
-  content: z.array(z.looseObject({ type: z.string() })).catch([]),
-});
 const envelopeSchema = z.looseObject({
   type: z.string(),
   message: z.looseObject({ content: z.array(z.unknown()) }),
 });
+
+/** How much of a tool result's line is read: its id, whether it failed and
+ *  what kind of block it opens with all stand before the picture's bytes. */
+const RESULT_HEAD_CHARS = 2_000;
 
 /**
  * The look a run takes when it opens one of the pictures Viberr kept of a
@@ -379,12 +462,17 @@ export function keptPictureLook(
   projectSlug: string,
   taskKey: string,
   name: string,
+  /** The kept delivery the picture was read from; absent for the task's own
+   *  folder, which holds the pictures of its latest delivery. */
+  delivery?: string | undefined,
 ): RunLook | null {
   const view = viewOfCaptureName(name);
   if (!view) return null;
   const record = readTaskFile(taskRef(ctx, projectSlug, taskKey))?.parsed.frontmatter.pageCaptures;
   const shot = record?.pages.flatMap((page) => page.shots).find((entry) => same(entry.name, name));
-  if (!record || !shot) return null;
+  // The record is of one delivery: a picture read out of another's kept copy
+  // is that delivery's, and no look at this one.
+  if (!record || !shot || (delivery !== undefined && delivery !== record.deliveredAt)) return null;
   let height: number | null = null;
   try {
     const read = readAttachmentBytes(resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot), IMAGE_READ_MAX_BYTES);
@@ -418,14 +506,15 @@ export function looksFromRunLog(
 ): RunLook[] {
   const attachments = taskAttachmentsDir(input.projectSlug, input.taskKey, ctx.dataRoot);
   const sources = path.join(taskDir(input.projectSlug, input.taskKey, ctx.dataRoot), "sources");
+  // What the run asked its file reader for: the calls are short lines, read
+  // whole.
   const asked = new Map<string, string>();
-  const looks: RunLook[] = [];
   // SAFETY: the SELECT list is the single column `raw_json`, which
   // `run_log_lines` declares TEXT NOT NULL in 0001_baseline.
-  const rows = db
-    .prepare(`SELECT raw_json FROM run_log_lines WHERE run_id = ? AND raw_json LIKE '%tool_%' ORDER BY seq`)
+  const calls = db
+    .prepare(`SELECT raw_json FROM run_log_lines WHERE run_id = ? AND raw_json LIKE '%"tool_use"%' AND raw_json LIKE '%"Read"%' ORDER BY seq`)
     .all(input.runId) as { raw_json: string }[];
-  for (const row of rows) {
+  for (const row of calls) {
     let envelope: z.infer<typeof envelopeSchema>;
     try {
       const parsed = envelopeSchema.safeParse(JSON.parse(row.raw_json));
@@ -436,26 +525,38 @@ export function looksFromRunLog(
     }
     for (const block of envelope.message.content) {
       const use = toolUseSchema.safeParse(block);
-      if (use.success && use.data.name === "Read") {
-        const read = readInputSchema.safeParse(use.data.input);
-        if (read.success) asked.set(use.data.id, read.data.file_path);
-        continue;
-      }
-      const result = toolResultSchema.safeParse(block);
-      // A picture the model was really handed: an image block in the result.
-      const handed = result.success && result.data.is_error !== true && result.data.content.some((part) => part.type === "image");
-      if (!result.success || !handed) continue;
-      const file = asked.get(result.data.tool_use_id);
-      if (!file) continue;
-      const dir = path.dirname(file);
-      const name = path.basename(file);
-      if (dir === sources) {
-        const id = /^(S[1-9]\d{0,5})(?:\.[a-z0-9]{1,10})?$/.exec(name)?.[1];
-        if (id) looks.push({ kind: "source", task: input.taskKey, id });
-      } else if (dir === attachments) {
-        const look = keptPictureLook(ctx, input.projectSlug, input.taskKey, name);
-        if (look) looks.push(look);
-      }
+      if (!use.success || use.data.name !== "Read") continue;
+      const read = readInputSchema.safeParse(use.data.input);
+      if (read.success) asked.set(use.data.id, read.data.file_path);
+    }
+  }
+  if (asked.size === 0) return [];
+  // What it was handed back: a result's line holds the picture itself, so
+  // only its head is taken out of the store. A review that opened forty
+  // pictures would otherwise load every one of them again at its completion.
+  const looks: RunLook[] = [];
+  // SAFETY: the SELECT list is one column, `head`, a `substr` of `raw_json`,
+  // which `run_log_lines` declares TEXT NOT NULL in 0001_baseline.
+  const results = db
+    .prepare(
+      `SELECT substr(raw_json, 1, ${RESULT_HEAD_CHARS}) AS head FROM run_log_lines
+        WHERE run_id = ? AND raw_json LIKE '%"tool_result"%' ORDER BY seq`,
+    )
+    .all(input.runId) as { head: string }[];
+  for (const { head } of results) {
+    const id = /"tool_use_id"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+    const file = id ? asked.get(id) : undefined;
+    // A picture the model was really handed: an image block in a result that
+    // did not fail.
+    if (!file || /"is_error"\s*:\s*true/.test(head) || !/"type"\s*:\s*"image"/.test(head)) continue;
+    const dir = path.dirname(file);
+    const name = path.basename(file);
+    if (dir === sources) {
+      const source = /^(S[1-9]\d{0,5})(?:\.[a-z0-9]{1,10})?$/.exec(name)?.[1];
+      if (source) looks.push({ kind: "source", task: input.taskKey, id: source });
+    } else if (dir === attachments) {
+      const look = keptPictureLook(ctx, input.projectSlug, input.taskKey, name);
+      if (look) looks.push(look);
     }
   }
   return looks;

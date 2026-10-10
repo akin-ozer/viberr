@@ -369,7 +369,7 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // (ruling 329): `capture_page` in stretches to the page's end, since one
     // kept picture of a long page is taller than a look.
     expect(reviewer).toContain(
-      "Look with `capture_page`: the page's name, one width at a time, on from each `nextFrom` until the reply says the page ends. " +
+      "Look with `capture_page`: the page's name, one width at a time, on from each `nextFrom` until the reply gives none. " +
         "An approval from a run that has not is not recorded",
     );
     expect(argsOf(PAGE_CAPTURE_TOOL)).toEqual(expect.arrayContaining(["name", "view", "from"]));
@@ -397,7 +397,7 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // The widths the guide names are the ones a delivered page is pictured at.
     const widths = PAGE_CAPTURE_VIEWS.map((view) => `${view.width} px`);
     expect(widths).toEqual(["1280 px", "390 px"]);
-    expect(guide).toContain(`top to end at ${widths[0]} and at ${widths[1]}`);
+    expect(guide).toContain(`(rulings 86 and 328): at ${widths[0]} and at ${widths[1]}`);
     expect(guide).toContain("**A reviewer's approval of a page counts only from a run that looked** (ruling 329)");
     expect(guide).toContain("**Work made to look like something keeps that look** (ruling 327)");
     expect(guide).toContain("Never describe the reference in a goal or in the rulings");

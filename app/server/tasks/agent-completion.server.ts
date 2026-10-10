@@ -171,6 +171,7 @@ import {
   deliveryCapturesSettled,
   removeRunPageCaptures,
   requestDeliveryCaptures,
+  pageCaptureStatus,
 } from "./page-capture.server";
 import { recordedPageCaptures } from "~/shared/page-capture";
 import {
@@ -179,6 +180,7 @@ import {
   looksRunIds,
   pageLooksOwed,
   pageLooksRefusalNote,
+  type PageLooksOwed,
   runLooks,
   unmetPageLooks,
 } from "./page-looks.server";
@@ -2096,9 +2098,11 @@ export async function applyAgentCompletionEffects(
     // be made is an approval that cannot be shown to rest on a look, so it is
     // not recorded either, and the note says so.
     let unlooked: string[] = [];
+    let owedLooks: PageLooksOwed | null = null;
     if (verdict === "approve" && completionFile) {
       try {
-        const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, completionFile);
+        const owed = pageLooksOwed(ctx, input.projectSlug, input.taskKey, completionFile, pageCaptureStatus().available);
+        owedLooks = owed;
         if (owed) {
           // The session's looks, not only this run's: a resumed review still
           // holds the pictures its earlier turns on this subject were shown.
@@ -2229,7 +2233,7 @@ export async function applyAgentCompletionEffects(
       try {
         await appendPolicyNote(db, ctx, input.projectSlug, input.taskKey, {
           title: PAGE_LOOKS_NOTE_TITLE,
-          text: pageLooksRefusalNote(deployedName ?? agentRoleDisplay(actorRef), unlooked),
+          text: pageLooksRefusalNote(deployedName ?? agentRoleDisplay(actorRef), unlooked, owedLooks),
         });
       } catch (noteError) {
         logger.error("could not write the note on an approval that did not bind", {

@@ -2273,7 +2273,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         parsed.frontmatter.deliveredAt = DELIVERED;
         parsed.frontmatter.verdicts = [];
         parsed.frontmatter.engagements = [
-          { profileId: "dev", backend: "claude", role: "Implementation", delivers: true, verdictCapable: false },
+          // It could judge, by its grant: only being dispatched to deliver keeps the rule from it.
+          { profileId: "dev", backend: "claude", role: "Implementation", delivers: true, verdictCapable: true },
           { profileId: "critic", backend: "claude", role: "Review", delivers: false, verdictCapable: true },
         ];
         parsed.timeline = [
@@ -2297,6 +2298,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     const PAGE =
       "- An approval here binds only from a run that looked. Before you approve, look at `index.html`, whole, at the desktop width (1280 px) and at the phone width (390 px)";
     const LOOK = ", and at every picture of https://example.com/ as this task kept it on 2026-10-09 (S1 to S3). ";
+    // A server that can render a page (the browser is named; nothing here starts it).
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () => {
     for (const backend of ["claude", "codex"] as const) {
       const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
       writeProject(store.dataRoot, {
@@ -2304,8 +2307,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         repo: null,
         agents: ["dev", "critic"].map((profileId) => ({
           profileId,
-          capabilities:
-            profileId === "critic" ? [{ capabilityId: "report-validation-verdict", mode: "direct" as const }] : [],
+          capabilities: [{ capabilityId: "report-validation-verdict", mode: "direct" as const }],
           extras: [],
           definition: {
             kind: "specialist" as const,
@@ -2334,6 +2336,15 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(withLook).toContain("never the address as it reads today and never anyone's description of it");
     // The run that delivers judges nothing, and is told nothing about approving.
     expect(await prompt("dev", ["index.html"], true)).not.toContain("binds only from a run that looked");
+    });
+    // On a server with no browser nothing can show a page, so none is owed
+    // and the tool is not named; the kept pictures are still there to open.
+    // CANARY: owe the page whatever the server can render and a reviewer is
+    // told to use a tool it was never offered, and can never approve.
+    const noBrowser = await prompt("critic", ["index.html"]);
+    expect(noBrowser).not.toContain("look at `index.html`");
+    expect(noBrowser).not.toContain("capture_page");
+    expect(noBrowser).toContain("Before you approve, look at every picture of https://example.com/ as this task kept it on 2026-10-09 (S1 to S3).");
   });
 
   it("ruling 201: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {
