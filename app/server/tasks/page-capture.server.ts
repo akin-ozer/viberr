@@ -2038,17 +2038,19 @@ export function requestDeliveryCaptures(
 /**
  * The name a picture of a built page is kept under in the attachments store,
  * which holds no slash: the page's path with `--` where its folders part,
- * then `@` and the first seven of the revision's sha (`controller/index.html`
- * at `9f2c41a` is pictured as
- * `controller--index.html@9f2c41a.capture-desktop.png`). A revision's
+ * then `.at-` and the first seven of the revision's sha
+ * (`controller/index.html` at `9f2c41a` is pictured as
+ * `controller--index.html.at-9f2c41a.capture-desktop.png`). A revision's
  * pictures are named for that revision, so the next one's never take their
- * place under a name a note or a completion packet already shows. The record
- * pairs each picture with its page. The lightbox prints the name's stem as
- * it is ("Picture of controller--index.html@9f2c41a"): the page and the
- * revision, as the store spells them.
+ * place under a name a note or a completion packet already shows. Dots and
+ * hyphens only: a name written bare in a comment stays a name (an `@` in it
+ * is read as a mail address there). The record pairs each picture with its
+ * page. The lightbox prints the name's stem as it is ("Picture of
+ * controller--index.html.at-9f2c41a"): the page and the revision, as the
+ * store spells them.
  */
 export function builtPictureName(file: string, view: PageCaptureViewId, sha: string): string {
-  return pageCaptureName(`${file.replaceAll("/", "--")}@${sha.slice(0, 7)}`, view);
+  return pageCaptureName(`${file.replaceAll("/", "--")}.at-${sha.slice(0, 7)}`, view);
 }
 
 /** The longest name a timeline entry takes for an attachment. */

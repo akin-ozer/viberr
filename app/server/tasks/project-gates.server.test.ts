@@ -735,8 +735,8 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       // place under a name a note or a packet already shows.
       const sha = revisionSha.slice(0, 7);
       expect(record!.pages.map((page) => [page.file, page.shots.map((shot) => shot.name), page.error])).toEqual([
-        ["index.html", [`index.html@${sha}.capture-desktop.png`, `index.html@${sha}.capture-phone.png`], null],
-        ["guide/index.html", [`guide--index.html@${sha}.capture-desktop.png`, `guide--index.html@${sha}.capture-phone.png`], null],
+        ["index.html", [`index.html.at-${sha}.capture-desktop.png`, `index.html.at-${sha}.capture-phone.png`], null],
+        ["guide/index.html", [`guide--index.html.at-${sha}.capture-desktop.png`, `guide--index.html.at-${sha}.capture-phone.png`], null],
       ]);
       // Ruling 328: measured as it was pictured.
       expect(record!.pages.every((page) => "measured" in page)).toBe(true);
@@ -747,10 +747,10 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(note!.text).toContain(`They are the pages of \`${revisionSha.slice(0, 7)}\` as the project's gates built it, and the pictures are attached.`);
     const sha = revisionSha.slice(0, 7);
     expect(note!.attachments).toEqual([
-      `index.html@${sha}.capture-desktop.png`,
-      `index.html@${sha}.capture-phone.png`,
-      `guide--index.html@${sha}.capture-desktop.png`,
-      `guide--index.html@${sha}.capture-phone.png`,
+      `index.html.at-${sha}.capture-desktop.png`,
+      `index.html.at-${sha}.capture-phone.png`,
+      `guide--index.html.at-${sha}.capture-desktop.png`,
+      `guide--index.html.at-${sha}.capture-phone.png`,
     ]);
     // The pictures are Viberr's own: no run in flight is credited with them.
     expect(attachmentNamesSince(store.slug, "VIB-1", "2000-01-01T00:00:00.000Z", store.dataRoot).filter((name) => name.endsWith(".png"))).toEqual(
@@ -843,6 +843,22 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       expect(captureNotes()).toHaveLength(1);
     });
 
+    // The folder is corrected on the gate, the gates run again and keep the
+    // build, and a restart lands before the render: the record on file is of
+    // the earlier run, which found no page.
+    setGates([{ name: "build", command: BUILD, pages: "dist" }]);
+    expect((await ask("gates-changed")).status).toBe("queued");
+    await whenProjectGatesIdle();
+    expect(built()).toContain("index.html");
+    expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1", pages: [] });
+    await withBrowser(async () => {
+      // CANARY: take any record of the revision for this run's and the
+      // corrected build is never pictured until a person runs the gates.
+      await boot();
+      expect(task().frontmatter.pageCaptures!.pages.map((page) => page.file)).toEqual(["index.html", "guide/index.html"]);
+      expect(captureNotes()).toHaveLength(2);
+    });
+
     // A task that is closed is nobody's to picture: every other asker
     // answers that its gates are not run again.
     setGates([{ name: "build", command: BUILD, pages: "dist" }]);
@@ -866,6 +882,39 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       await boot();
       expect(task().frontmatter.pageCaptures).toBeUndefined();
     });
+  });
+
+  it("says on the task that a build could not be kept, when the gates end and when a restart cut that off", async () => {
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    const withBrowser = <T>(run: () => Promise<T>) =>
+      withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, run);
+    const couldNot =
+      `Viberr could not keep the pages the project's gates built of \`${revisionSha.slice(0, 7)}\` in \`dist/\`. ` +
+      "Nothing was pictured or measured, and a review of this revision is shown no page of it. Running the gates again builds and keeps them.";
+    setGates([{ name: "build", command: BUILD, pages: "dist" }]);
+    writeDeliveredTask();
+    // Where the task's builds are kept there is a file: no build's folder
+    // can be made.
+    mkdirSync(taskDir(store.slug, "VIB-1", store.dataRoot), { recursive: true });
+    writeFileSync(path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "builds"), "in the way");
+
+    await withBrowser(() => gateOnce());
+    expect(run()).toMatchObject({ status: "finished", pages: "dist" });
+    expect(run().pagesKept).toBeUndefined();
+    // CANARY: say of a keep that failed what is said of a folder with no
+    // page, and a person looks for a misnamed folder that is named right.
+    expect(captureNotes().map((note) => note.text)).toEqual([couldNot]);
+
+    // The same on a server that pictured nothing when the gates ended.
+    writeDeliveredTask();
+    await gateOnce();
+    expect(captureNotes()).toEqual([]);
+    await withBrowser(async () => {
+      await recoverProjectGates(store.db, store.dataRoot);
+      await whenProjectGatesIdle();
+    });
+    // CANARY: ask at boot as though every build had been kept.
+    expect(captureNotes().map((note) => note.text)).toEqual([couldNot]);
     expect(fake.launches()).toEqual([]);
   });
 

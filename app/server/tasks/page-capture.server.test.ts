@@ -2551,8 +2551,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "index.html",
         shots: [
-          { view: "desktop", name: "index.html@9999999.capture-desktop.png", cut: false },
-          { view: "phone", name: "index.html@9999999.capture-phone.png", cut: false },
+          { view: "desktop", name: "index.html.at-9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "index.html.at-9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2560,8 +2560,8 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       {
         file: "guide/index.html",
         shots: [
-          { view: "desktop", name: "guide--index.html@9999999.capture-desktop.png", cut: false },
-          { view: "phone", name: "guide--index.html@9999999.capture-phone.png", cut: false },
+          { view: "desktop", name: "guide--index.html.at-9999999.capture-desktop.png", cut: false },
+          { view: "phone", name: "guide--index.html.at-9999999.capture-phone.png", cut: false },
         ],
         error: null,
         ...MEASURED,
@@ -2660,7 +2660,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_2", folder: "dist", kept: true, leftOut: 0 },
       ),
     );
-    expect(onTask()).toEqual(["index.html@8888888.capture-desktop.png", "index.html@8888888.capture-phone.png"]);
+    expect(onTask()).toEqual(["index.html.at-8888888.capture-desktop.png", "index.html.at-8888888.capture-phone.png"]);
     expect(onTask().filter((name) => pictures.includes(name))).toEqual([]);
     expect(frontmatter().pageCaptures).toMatchObject({ revisionId: "rev_2" });
 
@@ -2672,6 +2672,33 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     await withBrowser("", () => picture("VIB-1", frontmatter().deliveredAt!));
     expect(frontmatter().pageCaptures).toBeUndefined();
     expect(onTask()).toEqual([]);
+  });
+
+  it("pictures no page whose picture's name a timeline entry would not take, and says so", { timeout: REAL_RENDERS_MS }, async () => {
+    // A built page's picture is named for its path and its revision, which
+    // is longer than the path: past 200 characters the note's own list of
+    // pictures would drop it unsaid.
+    revisionBoard();
+    const long = `${"a".repeat(170)}.html`;
+    await keptBuild({ "index.html": "<h1>home</h1>", [long]: "<p>a long way down</p>" });
+    await withBrowser("", () =>
+      requestRevisionCaptures(
+        store.db,
+        { dataRoot: store.dataRoot },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", folder: "dist", kept: true, leftOut: 0 },
+      ),
+    );
+    const pages = frontmatter().pageCaptures!.pages;
+    // CANARY: drop the check and the page is pictured under a name the
+    // note's list of pictures leaves out.
+    expect(pages.find((page) => page.file === long)).toEqual({
+      file: long,
+      shots: [],
+      error: "its path is too long for a picture to be kept under its name",
+    });
+    expect(pages.find((page) => page.file === "index.html")!.shots).toHaveLength(2);
+    expect(captureNote()!.text).toContain(`Viberr could not picture \`${long}\`: its path is too long for a picture to be kept under its name.`);
+    expect(onTask().every((name) => name.length <= 200)).toBe(true);
   });
 
   it("a packet shows the pictures of nothing but the delivery under review, whichever kind the record on file is of", async () => {
@@ -2706,10 +2733,10 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         deliveredAt: REVISION.createdAt,
         at: "2026-10-10T09:00:05.000Z",
         revisionId: "rev_1",
-        pages: [{ file: "index.html", shots: [{ view: "desktop", name: "index.html@9999999.capture-desktop.png", cut: false }], error: null }],
+        pages: [{ file: "index.html", shots: [{ view: "desktop", name: "index.html.at-9999999.capture-desktop.png", cut: false }], error: null }],
       };
     });
-    saveFiles("VIB-1", { "index.html@9999999.capture-desktop.png": "a picture" });
+    saveFiles("VIB-1", { "index.html.at-9999999.capture-desktop.png": "a picture" });
     expect(candidates()).toEqual(["shot.png"]);
     // Left out for what it is: of another delivery, and beside no file.
     const again = await writeCompletionPacket(
@@ -2720,10 +2747,10 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
         taskKey: "VIB-1",
         summary: "Delivered.",
         files: [{ name: "post.html", caption: "The piece." }],
-        screenshots: [{ name: "index.html@9999999.capture-desktop.png", caption: "The page." }],
+        screenshots: [{ name: "index.html.at-9999999.capture-desktop.png", caption: "The page." }],
       },
     );
-    expect(again.message).toContain("`index.html@9999999.capture-desktop.png` is Viberr's picture of a page of an earlier delivery");
+    expect(again.message).toContain("`index.html.at-9999999.capture-desktop.png` is Viberr's picture of a page of an earlier delivery");
     expect(again.message).not.toContain("shows beside it");
   });
 });

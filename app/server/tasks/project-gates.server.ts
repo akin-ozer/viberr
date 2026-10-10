@@ -487,20 +487,25 @@ export async function recoverProjectGates(db: DatabaseSync, dataRoot?: string): 
 }
 
 /**
- * Ruling 86: a run that finished and kept its revision's build, on a task
- * with no record of that build's pictures, was cut off between the two (the
- * render is asked for after the finishing write, and a restart drops the
- * queue). What the run kept is on disk and on its record, so the same ask is
- * made again, and the task gets its pictures, or the note that says there is
- * no page to picture, once. Held to what every other asker is held to: an
- * open task, on the revision under review, while a gate still names that
- * folder.
+ * Ruling 86: a run whose gates passed where a gate names a pages folder, on
+ * a task with no record of that run's build, was cut off before the ask (it
+ * is made after the finishing write, and a restart drops the queue). What
+ * the run kept is on disk and on its record, so the same ask is made again,
+ * and the task gets that build's pictures, or the note that says there is no
+ * page to picture. Held to what every other asker is held to: an open task,
+ * on the revision under review, while a gate still names that folder.
  */
 function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFrontmatter, run: GateRun): void {
   const folder = builtFolderOf(run);
   if (run.status !== "finished" || folder === null || gateSubject(fm)?.id !== run.revisionId) return;
-  // The record is written for every build the ask reached, a page or none.
-  if (capturesRevision(fm.pageCaptures) === run.revisionId) return;
+  // The record is written for every build the ask reached, a page or none,
+  // when its render ends: one older than this run's end is of an earlier
+  // run on the same revision (a folder since corrected on the gate, a keep
+  // that failed and was run again), and this run's build is still to picture.
+  const record = fm.pageCaptures;
+  const ofThisRun =
+    record !== undefined && capturesRevision(record) === run.revisionId && run.finishedAt !== null && record.at >= run.finishedAt;
+  if (ofThisRun) return;
   const project = readProjectFile(
     ref.dataRoot ? { projectSlug: ref.projectSlug, dataRoot: ref.dataRoot } : { projectSlug: ref.projectSlug },
   )?.parsed.frontmatter;

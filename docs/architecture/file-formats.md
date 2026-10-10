@@ -510,12 +510,12 @@ gateRun:                          # optional; ruling 17 — the project's gates 
       wallMs: 41230
       log: gate-a91f7c2-02-build-20260925T101512Z.log  # the task attachment holding
                                   # the combined output (null when it could not be saved)
-  pages: dist                     # ruling 86: the folder this run kept the revision's
-                                  # build from; absent when it kept none (no gate named
-                                  # one, or a gate did not exit 0)
-  pagesKept: { files: 14, leftOut: 0 }  # what that keep held, and how many files were
-                                  # past what a build holds; absent when the folder
-                                  # could not be kept
+  pages: dist                     # ruling 86: the folder a gate named for the pages when
+                                  # this run's gates all exited 0; absent when no gate
+                                  # named one or a gate did not exit 0
+  pagesKept: { files: 14, leftOut: 0 }  # what the keep of that folder held, and how many
+                                  # files were past what a build holds; absent when
+                                  # the folder could not be kept
 pageCaptures:                     # optional; ruling 86 — Viberr's own pictures of the
   deliveredAt: 2026-10-07T12:00:00.000Z  # pages of one files delivery, bound to that
   at: 2026-10-07T12:00:09.412Z    # delivery's `deliveredAt` like a verdict; `at` is when
@@ -523,9 +523,9 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
                                   # `revisionId` names that revision, `deliveredAt` is
                                   # when it was minted, a page's `file` is its path in
                                   # the site (`guide/index.html`) and its pictures are
-                                  # named with `--` for the slashes, then `@` and the
+                                  # named with `--` for the slashes, then `.at-` and the
                                   # revision's short sha
-                                  # (`guide--index.html@9f2c41a.capture-…`). A build
+                                  # (`guide--index.html.at-9f2c41a.capture-…`). A build
                                   # that held no page is recorded with `pages: []`.
   pages:                          # the render finished. One entry per delivered page
     - file: post.html             # (.html, .htm, .md, .markdown): its shots, each a
