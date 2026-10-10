@@ -64,12 +64,16 @@ const measuredSchema = z.strictObject({
         worstContrast: z.strictObject({ ratio: z.number(), text: z.string() }).nullable(),
       }),
       keyboard: z.strictObject({
+        /** False when the walk could not be made or did not finish. */
+        ran: z.boolean(),
         controls: z.number(),
         stops: z.number(),
         unreached: z.array(z.string()),
         unmarked: z.array(z.string()),
       }),
       reduced: z.strictObject({
+        /** False when the page was not read with reduced motion asked for. */
+        ran: z.boolean(),
         runningCount: z.number(),
         running: z.array(z.strictObject({ name: z.string(), target: z.string(), loops: z.boolean() })),
         videosPlaying: z.number(),
@@ -1304,6 +1308,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     const report = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
     expect(report.pages[0]).toMatchObject({ error: null });
     expect(measuredOf(report).views[0]!.keyboard).toEqual({
+      ran: true,
       controls: 5,
       stops: 4,
       unreached: ['a "Legal"'],
@@ -1327,7 +1332,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // would be, and every one of them can be. CANARY: list what the cut walk
     // did not get to and `unreached` names six links a keyboard reaches.
     const many = await b.run({ pages: ["many.html"], views: [DESKTOP], measure: true });
-    expect(measuredOf(many).views[0]!.keyboard).toEqual({ controls: 100, stops: 80, unreached: [], unmarked: [] });
+    expect(measuredOf(many).views[0]!.keyboard).toEqual({ ran: true, controls: 100, stops: 80, unreached: [], unmarked: [] });
   });
 
   it("measures a page only once every view of it is pictured, on loads of its own: what still runs with reduced motion asked for, what one load of it weighs, and how long it takes to load on a slow line", async () => {
@@ -1356,6 +1361,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // lasts. CANARY: hand on everything that runs and the count is 4.
     expect(measured.views.map((view) => view.reduced)).toEqual(
       Array.from({ length: 2 }, () => ({
+        ran: true,
         runningCount: 2,
         running: [
           { name: "spin", target: "div.loader", loops: true },
@@ -1396,6 +1402,53 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       { method: "Network.emulateNetworkConditions", offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 },
       { method: "Network.setCacheDisabled", cacheDisabled: false },
     ]);
+  });
+
+  it("says of each check at each width whether it ran, so a width that was not measured does not read as a clean one", async () => {
+    const b = bench({
+      // Its load with reduced motion asked for never finishes (the stand-in's
+      // word for it), so the page's time runs out there, on the first width.
+      "stuck.html": ['<p>fake-controls:[["a","Docs"]]</p>', "<p>fake-tab-order:[0]</p>", "<p>fake-reduced-load:never</p>"].join("\n"),
+      // A page that breaks under the keyboard walk alone.
+      "breaks.html": [
+        '<p>fake-controls:[["a","Docs"],["button","Menu"]]</p>',
+        "<p>fake-tab-order:[0,1]</p>",
+        '<p>fake-keyboard-throws:"the page went away"</p>',
+        "<p>fake-axe:[]</p>",
+      ].join("\n"),
+    });
+    const stuck = await b.run({ pages: ["stuck.html"], measure: true, pageTimeoutMs: 6_000 });
+    // The pictures stand, and so does what was measured before the time went.
+    expect(stuck.pages[0]).toMatchObject({ error: null });
+    expect(stuck.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png", "1-phone.png"]);
+    const [desktop, phone] = measuredOf(stuck).views;
+    expect(desktop).toMatchObject({
+      view: "desktop",
+      keyboard: { ran: true, controls: 1, stops: 1 },
+      faults: { ran: false, why: "no accessibility engine is installed" },
+    });
+    // CANARY: answer a reduced-motion read that failed with its zeros alone
+    // (`ran: true`) and this reads as a page on which nothing still moves.
+    expect(desktop!.reduced).toEqual({ ran: false, runningCount: 0, running: [], videosPlaying: 0 });
+    // The phone's turn never came. CANARY: report a width that was never
+    // measured as measured (`ran: true` in `unmeasured`) and it reads as a
+    // page with no control, nothing still moving and nothing to say why.
+    expect(phone).toEqual({
+      view: "phone",
+      faults: { ran: false, why: "the page's time ran out before it was measured", kinds: [], worstContrast: null },
+      keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+      reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
+    });
+
+    // One check that fails is said of that check, and the others still run.
+    const breaks = await b.run({ pages: ["breaks.html"], views: [DESKTOP], measure: true, axe: engineIn(b) });
+    expect(breaks.pages[0]).toMatchObject({ error: null });
+    expect(measuredOf(breaks).views[0]).toEqual({
+      view: "desktop",
+      faults: { ran: true, why: null, kinds: [], worstContrast: null },
+      keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+      reduced: { ran: true, runningCount: 0, running: [], videosPlaying: 0 },
+    });
   });
 
   it("leaves `loadMs` out when the slow load does not finish in what is left of the page's time, and the page's pictures stand", async () => {

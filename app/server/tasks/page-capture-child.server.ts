@@ -319,6 +319,9 @@ interface Faults {
 
 /** How a keyboard gets round a page at one width. */
 interface Keyboard {
+  /** False when the walk could not be made or did not finish: the rest is
+   *  then zero and empty, and says nothing of the page. */
+  ran: boolean;
   /** The visible controls a keyboard should reach. */
   controls: number;
   /** How many Tab stopped on. */
@@ -332,6 +335,9 @@ interface Keyboard {
 /** What still moves at one width with reduced motion asked for: what loops
  *  or lasts, a second after the load. */
 interface Reduced {
+  /** False when the page could not be loaded and read that way, or not in
+   *  time: the rest is then zero and empty, and says nothing of the page. */
+  ran: boolean;
   runningCount: number;
   running: Array<{ name: string; target: string; loops: boolean }>;
   videosPlaying: number;
@@ -345,8 +351,9 @@ interface MeasuredView {
 }
 
 /** How a page measures (ruling 328): on every page of a measured job, never
- *  on a page on the web. Whatever could not be measured says so (`ran:
- *  false`, zeros, null) and costs the page's pictures nothing. */
+ *  on a page on the web. Whatever could not be measured says so and costs
+ *  the page's pictures nothing: each check at each width carries `ran`, and
+ *  a zero beside `ran: false` is no figure of the page's. */
 interface Measured {
   /** One entry per view that is a stretch of the page. */
   views: MeasuredView[];
@@ -2147,6 +2154,10 @@ async function pictureMoving(ctx: ViewContext, view: JobView, files: readonly st
 /** A page's time ran out under a reading of it. */
 class TimeUp extends Error {}
 
+/** Why a check did not run when the page's time was up: the one sentence for
+ *  it, whether the time went before the check's turn or under it. */
+const OUT_OF_TIME = "the page's time ran out before it was measured";
+
 /**
  * What is left of a page's time once its pictures are taken. The pictures are
  * what a capture is for, so what is read of a page beyond them (what moves on
@@ -2170,12 +2181,11 @@ class Budget {
    *  or the page's time is up. Nothing is started with no time left. */
   async within<T>(start: () => Promise<T>, most: number = STEP_MAX_MS): Promise<T> {
     const left = this.left();
-    const out = "the page's time ran out before this was read";
-    if (left <= 0) throw new TimeUp(out);
+    if (left <= 0) throw new TimeUp(OUT_OF_TIME);
     let timer: NodeJS.Timeout | null = null;
     const up = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new TimeUp(left <= most ? out : `this was not read in ${Math.round(most / 1000)} seconds`)),
+        () => reject(new TimeUp(left <= most ? OUT_OF_TIME : `it was not measured in ${Math.round(most / 1000)} seconds`)),
         Math.min(left, most),
       );
     });
@@ -2393,6 +2403,7 @@ async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>)
   }
   const missed = round ? noted.names.filter((_, control) => !reached.has(control)) : [];
   return {
+    ran: true,
     controls: noted.count,
     stops: stops.size,
     unreached: missed.slice(0, KEYBOARD_NAMES_MAX).map((name) => clip(name, NAME_MAX)),
@@ -2401,7 +2412,9 @@ async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>)
 }
 
 /** What still runs at a view with reduced motion asked for, a second after a
- *  load of its own. A page that honours the preference has nothing here. */
+ *  load of its own. A page that honours the preference has nothing here, and
+ *  so has one that could not be read, which is why each says whether it
+ *  ran. */
 async function readReduced(study: Study, view: JobView): Promise<Reduced> {
   try {
     const loadedAt = await study.budget.within(() => openView(study.ctx, { ...view, reduce: true }, 1));
@@ -2409,23 +2422,24 @@ async function readReduced(study: Study, view: JobView): Promise<Reduced> {
     const moving = await askWithin(study, ANIMATIONS_EXPRESSION, animationsSchema);
     const lasting = moving.running.map(asRunning).filter((running) => running.loops || (running.durationMs ?? 0) > LASTING_MS);
     return {
+      ran: true,
       runningCount: lasting.length,
       running: lasting.slice(0, REDUCED_RUNNING_MAX).map(({ name, target, loops }) => ({ name, target, loops })),
       videosPlaying: moving.videos.filter((video) => video.playing).length,
     };
   } catch {
-    return { runningCount: 0, running: [], videosPlaying: 0 };
+    return { ran: false, runningCount: 0, running: [], videosPlaying: 0 };
   }
 }
 
 /** A view as the report states it before it is measured, and when it could
- *  not be. */
+ *  not be: no check ran, so none of its zeros is a figure of the page's. */
 function unmeasured(view: JobView): MeasuredView {
   return {
     view: view.id,
-    faults: notRun("the page's time ran out before it was measured"),
-    keyboard: { controls: 0, stops: 0, unreached: [], unmarked: [] },
-    reduced: { runningCount: 0, running: [], videosPlaying: 0 },
+    faults: notRun(OUT_OF_TIME),
+    keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+    reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
   };
 }
 

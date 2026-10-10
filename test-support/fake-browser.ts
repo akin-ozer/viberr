@@ -45,7 +45,8 @@ import { z } from "zod";
  *    should reach, `fake-tab-order:[0,1]` the ones Tab stops on, in order (a
  *    key-down of Tab moves focus one stop along it, off the page after the
  *    last, and round again), `fake-unmarked:[1]` the stops whose look does
- *    not change when they take focus.
+ *    not change when they take focus. `fake-keyboard-throws:"why"` makes the
+ *    page throw when a keyboard walk asks what holds focus.
  *  - `fake-axe:[...]`: what the accessibility engine finds, answered only
  *    once the engine's script was run in the page (a script that holds the
  *    text `fake-engine`, or axe-core's own, by its banner, which is the one
@@ -58,7 +59,8 @@ import { z } from "zod";
  *    control's look changes only while the pointer is on its centre.
  *  - `fake-load-ms:1234`: the load time it reports on a held line with the
  *    cache off (1 otherwise); `fake-slow-line:never` never finishes a load on
- *    a held line.
+ *    a held line, and `fake-reduced-load:never` never finishes one that was
+ *    told reduced motion.
  *  - `fake-trickle:3`: so many requests after the load event, 200 ms apart;
  *    `fake-lands:"about:blank"`: the address the browser is at once loaded.
  *
@@ -272,6 +274,7 @@ async function navigate(message) {
   if (mode === "crash" || (crashAt && Number(crashAt[1]) === metrics.width)) process.exit(7);
   if (mode === "hang") return;
   if (line.held && html.includes("fake-slow-line:never")) return;
+  if (reducedMotion === "reduce" && html.includes("fake-reduced-load:never")) return;
   if (mode === "hold") {
     while (!fs.existsSync(path.join(evidenceDir, "release"))) await pause(20);
   }
@@ -355,6 +358,8 @@ function evaluate(message) {
       noted = true;
       return say({ count: told("controls", []).length, names: told("controls", []).map(([tag, words]) => tag + ' "' + words + '"') });
     case "focus": {
+      // A page that breaks under a keyboard walk: one whose controls were noted.
+      if (noted && told("keyboard-throws", null)) return thrown("Error: " + told("keyboard-throws", null));
       if (focus < 0) return say({ on: null });
       const order = told("tab-order", []);
       const index = order[focus];
