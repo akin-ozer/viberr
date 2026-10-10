@@ -51,8 +51,8 @@ import { filesClaimedBy } from "./task-replies.server";
  * ({@link pageLooksOwed}):
  *
  *  - **each page of the delivery, whole, at both widths.** The pages are the
- *    HTML files an agent saved while it was the task's deliverer, as the kept
- *    delivery holds them. A page counts as seen at a width when the pictures
+ *    HTML files claimed by an agent that is the task's deliverer or was
+ *    dispatched as it, as the kept delivery holds them. A page counts as seen at a width when the pictures
  *    the run was shown there run from its top to its end with no gap. A
  *    picture taller than a stretch (`PAGE_LOOK_MAX_PX`) is not a look: a model
  *    is handed it shrunk until its words cannot be read, which is how a kept
@@ -327,8 +327,6 @@ export interface JudgedDelivery {
    *  failed): the task's files as they stand are then all anyone can be
    *  shown, and what a look is of. */
   dir: string | null;
-  /** The names the kept copy holds. */
-  names: string[];
 }
 
 /**
@@ -345,7 +343,8 @@ export interface JudgedDelivery {
  * withheld, on an engagement that holds one. Where the engagement was taken
  * off the task under the run, the completion lets the agent's grant decide;
  * such a run is shown the delivery here, so its looks count wherever its
- * verdict does.
+ * verdict does (and a supporting agent caught in that state is shown the
+ * delivery too, and told so).
  */
 export function judgedDelivery(
   db: DatabaseSync,
@@ -357,12 +356,10 @@ export function judgedDelivery(
   if (!input.runId || !fm.deliveredAt || !deliveredAsFiles(fm)) return null;
   const run = getRun(db, input.runId);
   if (!run || run.kind !== "reviewer" || run.verdict_withheld === 1) return null;
-  if (run.project_slug !== input.projectSlug || run.task_key !== input.taskKey) return null;
   const engagement = fm.engagements.find((entry) => entry.profileId === run.agent_profile_id);
   if (engagement && engagement.verdictCapable !== true) return null;
   const dir = keptDeliveryDir(input.projectSlug, input.taskKey, fm.deliveredAt, ctx.dataRoot);
-  const names = listed(dir);
-  return { deliveredAt: fm.deliveredAt, dir: dir && names.length > 0 ? dir : null, names };
+  return { deliveredAt: fm.deliveredAt, dir: dir && listed(dir).length > 0 ? dir : null };
 }
 
 const same = (a: string, b: string): boolean => a.normalize("NFC") === b.normalize("NFC");

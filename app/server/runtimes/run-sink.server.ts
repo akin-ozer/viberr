@@ -522,11 +522,17 @@ export function createRunSink(
           compactions += 1;
           // Ruling 329: what the run was shown so far is a summary from here
           // on, so its list of looks starts again. An approval rests on what
-          // its session still holds, never on pictures it no longer has.
-          try {
-            patchRun(db, spec.runId, { lookedJson: null });
-          } catch (error) {
-            logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+          // its session still holds, never on pictures it no longer has. The
+          // compaction that closes a run (ruling 174) comes after the run's
+          // verdict was given: it empties nothing, so a completion that is
+          // replayed finds what this run was shown, and the next run of the
+          // session counts none of it (`looksRunIds`).
+          if (f.compaction.trigger !== "completion") {
+            try {
+              patchRun(db, spec.runId, { lookedJson: null });
+            } catch (error) {
+              logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+            }
           }
           // What a resume replays now is the summary, not the history the
           // compaction folded: the last prompt is the post size until the

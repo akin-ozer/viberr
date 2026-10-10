@@ -1244,6 +1244,18 @@ describe("ruling 172: the sink folds the prompt-cache record", () => {
       occurredAt: new Date().toISOString(),
     });
     expect(looked("run_looked")).toBeNull();
+    // The compaction that closes a run (ruling 174) comes after its verdict:
+    // it empties nothing, so a completion that is replayed still finds what
+    // the run was shown. CANARY: clear on every compaction and a review
+    // whose effects were lost in a restart is told it did not look.
+    patchRun(store.db, "run_looked", { lookedJson: shown });
+    streamed.line({
+      raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+      display: { t: "00:00:00", ev: "meta", tag: "run·compacted·completion", text: "context compacted at the end of the run" },
+      facts: { compaction: { trigger: "completion", preTokens: 150_000, postTokens: 12_000 } },
+      occurredAt: new Date().toISOString(),
+    });
+    expect(looked("run_looked")).toBe(shown);
 
     // A Codex compaction is known only once the CLI has exited, and nothing
     // says before or after which look it fell: all of them go.

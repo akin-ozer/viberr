@@ -319,7 +319,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // that does not fit and the task keeps twenty-two pictures of a look
       // with no note, for good.
       expect(await keep({ url: "https://look.example/long" })).toBe(
-        "[error] VIB-1 keeps 178 of the 200 sources a task holds, and this needs 23 more. Nothing was kept of https://look.example/long.",
+        "[error] VIB-1 keeps 178 of the 200 sources a task holds, and this needs 23 more. Nothing was kept of https://look.example/long. " +
+          "Say in your report that the look could not be kept, and state nothing about it from memory.",
       );
       expect(sourcesOf("VIB-1")).toHaveLength(178);
     });
@@ -415,6 +416,20 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       const settled = fake.launches().length;
       expect(await keep({ url: "https://look.example/" })).toContain("[noop] VIB-1 already keeps how https://look.example/ looked on");
       expect(fake.launches()).toHaveLength(settled);
+
+      // A picture a person took out of the store is never kept again (ruling
+      // 82), so the look cannot be whole on this task: said before anything
+      // is written, and the run is told to state nothing of the look from
+      // memory. CANARY: find it at the write and the task is left the
+      // pictures before it, and told to ask again for what can never fit.
+      cutSourcesTo("VIB-1", 8);
+      unlinkSync(resolveTaskSource(store.slug, "VIB-1", "S2", store.dataRoot)!.abs);
+      expect(await keep({ url: "https://look.example/" })).toBe(
+        "[error] A person took S2 out of VIB-1's store, and it is a picture of this page as it looks today: the same bytes are not kept again, " +
+          "so the look of https://look.example/ cannot be kept on this task. Nothing was kept. " +
+          "Say in your report that the look could not be kept, and state nothing about it from memory.",
+      );
+      expect(sourcesOf("VIB-1")).toHaveLength(8);
     });
   });
 
@@ -432,7 +447,7 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // day, and one picture of VIB-1's look already (kept there by its
       // bytes, as its first source). Neither is a look of its own.
       // CANARY: read a clash off every source that carries a look and VIB-2
-      // is refused "already keeps a look ... from another day" for good.
+      // is refused "already keeps a look ... pictured at another time" for good.
       const second = readFileSync(resolveTaskSource(store.slug, "VIB-1", "S2", store.dataRoot)!.abs);
       const by = { backend: "claude", profileId: "developer", roleHint: "Developer" };
       writeTaskSource(
@@ -466,15 +481,34 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       expect(keptLooks(sourcesOf("VIB-2"))[0]!.pictures.map((picture) => picture.id)).toEqual(taken.pictures.map((picture) => picture.id));
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toContain("[noop] VIB-2 already keeps what VIB-1 keeps of");
 
+      for (const key of ["VIB-3", "VIB-4"]) {
+        writeTask(store.dataRoot, store.slug, {
+          frontmatter: baseTaskFrontmatter(key, { stage: "impl", ownerUserId: store.users.arda.id, title: "Another page" }),
+          goal: "Another page of the same work.",
+        });
+      }
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      // A task whose store a person took one of the look's pictures out of
+      // cannot take the look over: the same bytes are not kept again, the
+      // note is not written, and what was copied before that is no look.
+      // CANARY: write the note over the pictures that did land and VIB-4
+      // keeps a look with a picture nobody can open.
+      writeTaskSource(
+        store.slug,
+        "VIB-4",
+        { name: "taken-out.png", data: second, title: "Taken out by a person", from: "https://look.example/", by, runId: null },
+        store.dataRoot,
+      );
+      unlinkSync(resolveTaskSource(store.slug, "VIB-4", "S1", store.dataRoot)!.abs);
+      const refusedWhole = await keep({ taskKey: "VIB-4", from: "VIB-1" });
+      expect(refusedWhole).toContain("[error] S2 of VIB-1 could not be kept on VIB-4 (a person took the same bytes out of its store), so the look was not taken over.");
+      expect(refusedWhole).toContain("Say in your report that the look could not be kept, and state nothing about it from memory.");
+      expect(keptLooks(sourcesOf("VIB-4"))).toEqual([]);
+
       // And pictures with no note on the other task are nothing to take over.
       // CANARY: copy every source that carries a look and VIB-2 is told it
       // "now keeps" what nobody owes a look at.
       cutSourcesTo("VIB-1", pictures);
-      writeTask(store.dataRoot, store.slug, {
-        frontmatter: baseTaskFrontmatter("VIB-3", { stage: "impl", ownerUserId: store.users.arda.id, title: "Another page" }),
-        goal: "Another page of the same work.",
-      });
-      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       expect(await keep({ taskKey: "VIB-3", from: "VIB-1" })).toBe("[noop] VIB-1 keeps no look of a page. Nothing was kept.");
       expect(sourcesOf("VIB-3")).toEqual([]);
     });

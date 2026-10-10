@@ -31,7 +31,7 @@ import { taskRef, type TaskMutationContext } from "./task-mutation.server";
  * is its writer's reading. `keep_page_look` pictures the address once, whole,
  * at the two widths a delivered page is pictured at, with its first screen at
  * three moments while it moves and what the renderer read of its motion, and
- * keeps all of it on the task as sources that share one date. Every later
+ * keeps all of it on the task as the sources of one look. Every later
  * judgement reads those (ruling 329 holds a reviewer's approval to them).
  *
  * One look of an address per task: a second ask for it is answered with the
@@ -204,9 +204,9 @@ const WHAT_MOVED_HEADING = "## What moved, as measured at the desktop width";
  * motion. It holds the page's own names and no id of a source, so a task
  * that takes the look over keeps it word for word.
  */
-function whatMoved(motion: PageMotion | null, scrollsInside: ScrollsInside | null): string {
+function whatMoved(motion: PageMotion | null, scrollsInside: readonly ScrollsInside[]): string {
   const lines = [WHAT_MOVED_HEADING, "", ...motionLines(motion), ""];
-  if (scrollsInside) lines.push(firstScreenOnly(scrollsInside), "");
+  if (scrollsInside.length > 0) lines.push(firstScreenOnly(scrollsInside), "");
   lines.push(
     "The pictures show the page at rest and its first screen at a few moments. What a visitor's own pointer or scrolling does beyond the lines above is not in them.",
   );
@@ -241,10 +241,11 @@ function lookNote(address: string, at: string, pictures: readonly LookPicture[],
   return `${lines.join("\n")}\n\n${moved}`;
 }
 
-/** Said of a look of a page that scrolls inside one of its elements. */
-function firstScreenOnly(inside: ScrollsInside): string {
-  const where = inside.view ? ` at ${pageCaptureView(inside.view).width} px` : "";
-  return `The page scrolls inside \`${inside.what}\` (${px(inside.height)} px)${where} and not as a page, so the pictures at that width are of its first screen only.`;
+/** Said of a look of a page that scrolls inside one of its elements, at one
+ *  width or at both. */
+function firstScreenOnly(inside: readonly ScrollsInside[]): string {
+  const where = LIST_AND.format(inside.map((entry) => `\`${entry.what}\` (${px(entry.height)} px) at ${pageCaptureView(entry.view).width} px`));
+  return `The page scrolls inside ${where} and not as a page, so the pictures at ${inside.length === 1 ? "that width" : "those widths"} are of its first screen only.`;
 }
 
 /** The file name a picture of the look is kept under. */
@@ -282,6 +283,9 @@ function auditKept(
   });
 }
 
+/** Said whenever a look was asked for and none was kept. */
+const NOT_FROM_MEMORY = "Say in your report that the look could not be kept, and state nothing about it from memory.";
+
 /** How a run reads what a look holds, said at the end of every answer. */
 const HOW_TO_READ =
   "Open each picture with `read_task_source`: none is shown here. From now on this look is what the result is made to and judged against: the address will read differently later, and nobody describes it from memory.";
@@ -292,9 +296,11 @@ const pictureIds = (pictures: readonly LookPicture[]): string[] => [...new Set(p
 /**
  * Take over the looks task `from` keeps: the pictures byte for byte, under
  * their date, and each look's note written again with this task's own ids.
- * Checked whole before anything is copied, so a look arrives entire or not at
- * all; a take-over that was cut off is finished by asking again, since a
- * picture already here is taken up by its bytes and the note closes the look.
+ * Checked whole before anything is copied (every picture in the other task's
+ * store, room for all of it here), and a look counts only once its note is
+ * written, so one that could not be finished leaves pictures and no look. A
+ * take-over that was cut off is finished by asking again, since a picture
+ * already here is taken up by its bytes and the note closes the look.
  */
 function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLookInput, from: string): string {
   const { projectSlug, taskKey, actorRef } = input;
@@ -311,7 +317,7 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
   const clash = theirs.find((look) => standing.some((kept) => kept.url === look.url && kept.at !== look.at));
   if (clash) {
     return refused(
-      `${taskKey} already keeps a look of ${clash.url} from another day, and a result is judged against one look of an address.`,
+      `${taskKey} already keeps a look of ${clash.url} pictured at another time, and a result is judged against one look of an address.`,
     );
   }
   const named = (look: KeptLook): string => `${look.url} as it was pictured on ${look.at.slice(0, 10)}`;
@@ -374,7 +380,8 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
   };
   const notWhole = (what: string): string =>
     `[error] ${what} could not be kept on ${taskKey} (a person took the same bytes out of its store), so the look was not taken over. ` +
-    (written.length > 0 ? `The pictures written before that (${idRange(written)}) stay as sources and are no look.` : "Nothing was kept.");
+    (written.length > 0 ? `The pictures written before that (${idRange(written)}) stay as sources and are no look. ` : "Nothing was kept. ") +
+    NOT_FROM_MEMORY;
   for (const id of pictures) {
     const theirLook = record.get(id)?.look;
     const kept = keep(id, bytes.get(id) ?? Buffer.alloc(0), theirLook && { url: theirLook.url, at: theirLook.at, part: theirLook.part, view: theirLook.view });
@@ -459,9 +466,22 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   // the look, with no note and no way to finish it.
   // Counted as it will be written: a frame or a stretch whose bytes the task
   // already keeps, or that equals one before it, is kept once.
-  const seen = new Set(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources.map((source) => source.sha256));
-  const fresh = answer.pictures.filter((picture) => {
-    const hash = createHash("sha256").update(picture.bytes).digest("hex");
+  const held = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
+  const seen = new Set(held.map((source) => source.sha256));
+  const hashes = answer.pictures.map((picture) => createHash("sha256").update(picture.bytes).digest("hex"));
+  // A picture whose bytes a person took out of this task's store is never
+  // kept again (ruling 82), so the look cannot be whole here: said before
+  // anything is written, and asking again would only picture the page again.
+  const removed = held.find((source) => {
+    if (!hashes.includes(source.sha256)) return false;
+    const resolved = resolveTaskSource(projectSlug, taskKey, source.id, ctx.dataRoot);
+    return !resolved || !existsSync(resolved.abs);
+  });
+  if (removed) {
+    return `[error] A person took ${removed.id} out of ${taskKey}'s store, and it is a picture of this page as it looks today: the same bytes are not kept again, so the look of ${url} cannot be kept on this task. Nothing was kept. ${NOT_FROM_MEMORY}`;
+  }
+  const fresh = answer.pictures.filter((_picture, at) => {
+    const hash = hashes[at]!;
     if (seen.has(hash)) return false;
     seen.add(hash);
     return true;
@@ -473,7 +493,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     fresh.reduce((sum, picture) => sum + picture.bytes.length, 0) + 8_192,
     ctx.dataRoot,
   );
-  if (room) return `[error] ${room} Nothing was kept of ${url}.`;
+  if (room) return `[error] ${room} Nothing was kept of ${url}. ${NOT_FROM_MEMORY}`;
   const at = new Date().toISOString();
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
   /** The look's pictures, each with the source it is kept under. */
@@ -483,8 +503,9 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   const notKept = (why: string): string =>
     `[error] ${why} The look of ${url} was not kept. ` +
     (written.length > 0
-      ? `The pictures written before that (${idRange(written)}) stay as sources and are no look: ask again and they are taken up, not kept twice.`
-      : "Nothing was kept.");
+      ? `The pictures written before that (${idRange(written)}) stay as sources and are no look: asked again once there is room, they are taken up and not kept twice. `
+      : "Nothing was kept. ") +
+    NOT_FROM_MEMORY;
   try {
     const listed = new Set<string>();
     for (const [index, picture] of answer.pictures.entries()) {
@@ -504,6 +525,8 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
         },
         ctx.dataRoot,
       );
+      // Checked before the first write; a picture taken out of the store in
+      // the moment since is answered the same way.
       if ("removed" in kept) {
         return notKept(`A person took one of this page's pictures (${kept.removed.id}) out of ${taskKey}'s store, and the same bytes are not kept again.`);
       }
@@ -555,7 +578,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     }
     const frames = pictures.filter((entry) => entry.part === "frame");
     if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.id))}.`);
-    if (answer.scrollsInside) parts.push(firstScreenOnly(answer.scrollsInside));
+    if (answer.scrollsInside.length > 0) parts.push(firstScreenOnly(answer.scrollsInside));
     parts.push(`Where each picture is and what moved on the page, as measured: ${note.kept.id}.`);
     parts.push(HOW_TO_READ);
     return parts.join(" ");

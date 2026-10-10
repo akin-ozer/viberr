@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -1892,6 +1893,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     await keptDelivery("VIB-1", STAMP, {
       "post.html": '<p>the piece</p><img src="cover.png"><img src="film.bin"><p>fake-height:3000</p>',
       "film.bin": "a film",
+      "styles.css": "body { margin: 0 }",
     });
     const keptDir = keptDeliveryDir(store.slug, "VIB-1", STAMP, store.dataRoot)!;
     // Past what a capture carries (25 MB a file), and sparse.
@@ -1918,7 +1920,18 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // copy. Rendered from the kept copy alone, the judge was handed the
       // piece with a broken picture and told the picture was "not among this
       // task's files". CANARY: carry the kept copy and nothing beside it.
-      saveFiles("VIB-1", { "cover.png": "the cover", "notes-for-the-editor.md": "beside" });
+      // What is no file of the task to a page, or no part of any delivery,
+      // is not carried and not named: a dot name, Viberr's own picture of a
+      // page, and the browser's working files. CANARY: carry every name the
+      // folder holds and the reply names four files that crowd the cover out.
+      saveFiles("VIB-1", {
+        "cover.png": "the cover",
+        "notes-for-the-editor.md": "beside",
+        ".source-staged.html": "staged",
+        "post.html.capture-desktop.png": "an earlier picture",
+        "page-2026-10-09T22-41-00-000Z.yml": "a snapshot",
+        "console-2026-10-09T22-41-00-000Z.log": "a dump",
+      });
       const first = await ask("post.html", { runId: editor, view: "desktop" });
       expect(first.text).toContain("[done] `post.html` as a reader sees it.");
       expect(first.text).not.toContain("`cover.png`, which");
@@ -1928,9 +1941,14 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(first.text).not.toContain("not among this task's files");
       expect(first.text).toContain(
         `This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now. ` +
-          "Saved on the task since, and shown as they stand: `cover.png` and `notes-for-the-editor.md`.",
+          "Beside it, as they stand on the task now, since that copy does not hold them: `cover.png` and `notes-for-the-editor.md`.",
       );
+      expect(first.text.endsWith("`cover.png` and `notes-for-the-editor.md`.")).toBe(true);
       expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+      // A picture of an exact size says the same of what was not carried.
+      // CANARY: leave what the carry left out out of the sized reply.
+      const sized = await ask("post.html", { runId: editor, width: 600, height: 400 });
+      expect(sized.text).toContain("It asked for `film.bin`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).");
 
       // A stopped rework took the page off the task, then left one too large
       // to render under its name. The delivery is what it was, and so is
@@ -1953,8 +1971,26 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // the delivery.
       saveFiles("VIB-1", { "cover.html": "<p>the cover's drawing</p>" });
       const drawing = await ask("cover.html", { runId: editor, view: "desktop" });
-      expect(drawing.text).toContain(`This file was saved on the task after the delivery of ${STAMP}, so it is shown as it stands now, beside that delivery as Viberr kept it.`);
+      // Said of what the kept copy holds, never of when the file was saved:
+      // a copy that failed part way lacks files that were delivered.
+      expect(drawing.text).toContain(`This file is not in the delivery of ${STAMP} as Viberr kept it, so it is shown as it stands on the task now, beside that delivery.`);
       expect(lastLook(editor)).toMatchObject({ file: "cover.html", delivery: null });
+      // More files beside the delivery than a reply names: the first four,
+      // and how many more. CANARY: name every file and a task that holds a
+      // reviewer's twenty screenshots answers each look with a paragraph.
+      saveFiles("VIB-1", { "a.png": "a", "b.png": "b", "c.png": "c" });
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain(
+        "Beside it, as they stand on the task now, since that copy does not hold them: `a.png`, `b.png`, `c.png`, and `cover.html`, and 2 more.",
+      );
+
+      // A file on the task whose name differs from a delivered one by case
+      // alone. On a disk that folds case its copy cannot stand beside the
+      // delivery's, which was carried first and wins; on one that does not,
+      // both are carried. Either way the judge is shown the page. CANARY (on
+      // a disk that folds case): let the second copy's open throw and every
+      // look of this judge answers that the files could not be handed over.
+      renameSync(path.join(attachments(), "styles.css"), path.join(attachments(), "STYLES.css"));
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain("[done] `post.html` as a reader sees it.");
 
       // Anyone who does not judge works on the files as they stand: a
       // supporting agent, and a reviewer asked with its verdict withheld.
@@ -1976,7 +2012,9 @@ describe("a delivered page is pictured (ruling 86)", () => {
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.engagements = [WRITER];
       });
-      await ask("post.html", { runId: editor, view: "desktop" });
+      const before = runLooks(store.db, editor).length;
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      expect(runLooks(store.db, editor)).toHaveLength(before + 1);
       expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
 
       // No copy of the delivery is held (the copy failed): the task's files

@@ -742,7 +742,7 @@ the task's folder. A `request_changes` owes no look.
 on the web is made to, and judged against, pictures of that page kept on the task:
 `keep_page_look` pictures the address once, whole, at 1280 px and 390 px, with its first
 screen at three moments while it moves and a note of what the renderer read of its motion,
-and keeps all of it as sources under one date. The note closes the look and lists its
+and keeps all of it as the sources of one look. The note closes the look and lists its
 pictures: pictures a keep that failed left with no note are no look, and the next ask
 takes them up. The address reads differently by the next review and a description is its
 writer's reading, so neither is what a result is held to.

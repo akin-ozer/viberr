@@ -3,13 +3,12 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
-  rmSync,
   rmdirSync,
   statSync,
   unlinkSync,
   type Dirent,
 } from "node:fs";
-import { open, unlink } from "node:fs/promises";
+import { open, rm, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
@@ -28,6 +27,7 @@ import {
   IMAGE_READ_MAX_BYTES,
   checkAttachmentUpload,
   imageHeader,
+  isBrowserWorkingArtifact,
   readAttachmentBytes,
   resolveTaskAttachment,
   writeTaskAttachment,
@@ -444,10 +444,10 @@ interface RenderedAct {
   error: string | null;
 }
 
-/** The element a page scrolls inside when the page itself does not scroll,
- *  and the width that was first seen at. */
+/** A width at which a page scrolls inside one of its elements and not as a
+ *  page: the element, and how tall what it holds is. */
 export interface ScrollsInside {
-  view?: PageCaptureViewId | undefined;
+  view: PageCaptureViewId;
   what: string;
   height: number;
 }
@@ -463,7 +463,9 @@ interface RenderedPage {
   measured: PageMeasured | null;
   /** The element the page scrolls inside, when it scrolls there and not as a
    *  page: a picture and a figure are then of its first screen only. */
-  scrollsInside: ScrollsInside | null;
+  /** Each width at which the page scrolls inside one of its elements; none
+   *  for a page that scrolls as pages do. */
+  scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
   /** How many script dialogs the page opened, each dismissed. */
@@ -486,7 +488,7 @@ function unpictured(file: string, error: string): RenderedPage {
     acts: [],
     motion: null,
     measured: null,
-    scrollsInside: null,
+    scrollsInside: [],
     ended: [],
     dialogs: 0,
     asked: [],
@@ -576,6 +578,7 @@ const measuredSchema = z.looseObject({
           why: z.string().nullable().catch(null),
           /** How many kinds were found, of which `kinds` is the first few. */
           kindsCount: z.number().int().nonnegative().optional().catch(undefined),
+          elementsCount: z.number().int().nonnegative().optional().catch(undefined),
           kinds: z
             .array(
               z.looseObject({
@@ -620,6 +623,11 @@ const measuredSchema = z.looseObject({
   line: z.string().transform((text) => reportText(text, REPORT_NAME_MAX_CHARS)).catch(""),
 });
 export type PageMeasured = z.infer<typeof measuredSchema>;
+const reportInsideSchema = z.looseObject({
+  view: z.enum(["desktop", "phone"]),
+  what: reportWords,
+  height: z.number().nonnegative(),
+});
 const reportEndedSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
   pageHeight: z.number().int().nonnegative(),
@@ -632,13 +640,10 @@ const reportSchema = z.looseObject({
       acts: z.array(reportActSchema).catch([]),
       motion: motionSchema.optional().catch(undefined),
       measured: measuredSchema.optional().catch(undefined),
+      /** One entry a width at which it holds. A renderer that reports the
+       *  first such width alone sends the one entry bare. */
       scrollsInside: z
-        .looseObject({
-          /** The width it was seen at: the first where it holds. */
-          view: z.enum(["desktop", "phone"]).optional().catch(undefined),
-          what: reportWords,
-          height: z.number().nonnegative(),
-        })
+        .union([reportInsideSchema.transform((entry) => [entry]), z.array(reportInsideSchema)])
         .nullable()
         .optional()
         .catch(undefined),
@@ -748,11 +753,20 @@ async function carryFile(source: string, copy: string, room: number): Promise<Ca
     const stat = await from.stat();
     if (!stat.isFile()) return null;
     if (stat.size > room) return { tooLarge: true };
-    const to = await open(
-      copy,
-      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
-      0o640,
-    );
+    let to: Awaited<ReturnType<typeof open>>;
+    try {
+      to = await open(
+        copy,
+        fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
+        0o640,
+      );
+    } catch (error) {
+      // A copy of that name is already there: on a disk that folds case, a
+      // name saved on the task since that differs from a delivered one by
+      // case alone. The delivery's bytes were carried first, and stand.
+      if (alreadyThere.safeParse(error).success) return null;
+      throw error;
+    }
     let bytes = 0;
     try {
       const buffer = Buffer.allocUnsafe(Math.max(1, Math.min(CARRY_CHUNK_BYTES, stat.size)));
@@ -779,6 +793,9 @@ async function carryFile(source: string, copy: string, room: number): Promise<Ca
     await from.close();
   }
 }
+
+/** The file system's answer to making a file where an entry already stands. */
+const alreadyThere = z.object({ code: z.literal("EEXIST") });
 
 /** What of a kept delivery reached the renderer. */
 interface Carried {
@@ -836,13 +853,15 @@ async function carryDelivery(from: string, into: string, pages: readonly PageInp
   if (since) {
     // By the name as the store composes it (ruling 76): one file under two
     // Unicode forms of its name is the delivery's, not a later one. A dot
-    // name is no file of the task to any reader, and Viberr's own pictures
-    // of a page are no part of it.
+    // name is no file of the task to any reader, and neither Viberr's own
+    // pictures of a page nor the browser's working files are part of any
+    // delivery (ruling 85), so they are no part of this.
     const delivered = new Set(kept.map(storedFileName));
     const onTask = filesOf(since);
     const pictures = pageCapturesAmong(onTask);
     for (const name of onTask.sort(byName)) {
-      if (name.startsWith(".") || pictures.has(name) || delivered.has(storedFileName(name))) continue;
+      if (name.startsWith(".") || pictures.has(name) || isBrowserWorkingArtifact(name)) continue;
+      if (delivered.has(storedFileName(name))) continue;
       wanted.push({ name, dir: since, since: true });
     }
   }
@@ -871,9 +890,9 @@ async function carryDelivery(from: string, into: string, pages: readonly PageInp
 /** Remove the renderer's input folder. The server's own remove is the right
  *  one here and only here: no agent can write under it (ruling 140 is about
  *  the trees one can). */
-function removeCaptureInput(inputRoot: string): void {
+async function removeCaptureInput(inputRoot: string): Promise<void> {
   try {
-    rmSync(inputRoot, { recursive: true, force: true });
+    await rm(inputRoot, { recursive: true, force: true });
   } catch (error) {
     logger.warn("a page capture's input folder could not be removed", { dir: inputRoot, err: toError(error) });
   }
@@ -965,7 +984,7 @@ async function render(request: RenderRequest): Promise<Render> {
   try {
     if (request.source.kind === "kept") {
       // Whatever is here is an earlier render's that a restart cut short.
-      removeCaptureInput(inputRoot);
+      await removeCaptureInput(inputRoot);
       job.root = path.join(inputRoot, captureId);
       try {
         const carried = await carryDelivery(
@@ -1014,7 +1033,7 @@ async function render(request: RenderRequest): Promise<Render> {
       timeoutNote: `\n[viberr] the render ran past its ${Math.round(timeoutMs / 1000)} s limit and was stopped\n`,
     });
   } finally {
-    if (request.source.kind === "kept") removeCaptureInput(inputRoot);
+    if (request.source.kind === "kept") await removeCaptureInput(inputRoot);
   }
   const reported = new Map<string, z.infer<typeof reportSchema>["pages"][number]>();
   const report = readAttachmentBytes(path.join(out, "report.json"), REPORT_MAX_BYTES);
@@ -1086,7 +1105,7 @@ async function render(request: RenderRequest): Promise<Render> {
       acts,
       motion: said.motion ?? null,
       measured: said.measured ?? null,
-      scrollsInside: said.scrollsInside ?? null,
+      scrollsInside: (said.scrollsInside ?? []).filter((inside) => views.some((view) => view.id === inside.view)),
       ended: said.ended.filter((end) => views.some((view) => view.id === end.view)),
       dialogs: said.dialogs,
       asked: said.asked.slice(0, 12).map(reportName),
@@ -1190,7 +1209,7 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
     const width = widthRemark(shot, code(page.file));
     if (width) remarks.push(width);
   }
-  if (page.scrollsInside) remarks.push(`${code(page.file)} ${scrollsInsideRemark(page.scrollsInside)}`);
+  if (page.scrollsInside.length > 0) remarks.push(`${code(page.file)} ${scrollsInsideRemark(page.scrollsInside)}`);
   if (page.dialogs > 0) remarks.push(`${code(page.file)} opens ${DIALOG_REMARK}`);
   const asked = askedClause(page);
   if (asked) {
@@ -1204,11 +1223,12 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
   return remarks;
 }
 
-/** Said of a page whose content scrolls inside one of its elements: what a
- *  picture and a figure of it then cover. */
-function scrollsInsideRemark(inside: ScrollsInside): string {
-  const where = inside.view ? ` ${atWidth(inside.view)}` : "";
-  return `scrolls inside \`${inside.what}\` (${px(inside.height)} px)${where} and not as a page, so its pictures and what was measured of it there are of its first screen only.`;
+/** Said of a page whose content scrolls inside one of its elements: at which
+ *  widths, and what a picture and a figure of it then cover there. */
+function scrollsInsideRemark(inside: readonly ScrollsInside[]): string {
+  const where = LIST_AND.format(inside.map((entry) => `\`${entry.what}\` (${px(entry.height)} px) ${atWidth(entry.view)}`));
+  const there = inside.length < PAGE_CAPTURE_VIEWS.length ? " there" : "";
+  return `scrolls inside ${where} and not as a page, so its pictures and what was measured of it${there} are of its first screen only.`;
 }
 
 /** Ruling 328: what was measured of one pictured page, for the note. */
@@ -1279,7 +1299,12 @@ function measuredRecord(measured: PageMeasured): PageMeasuredRecord {
     views: measured.views.map((view) => ({
       view: view.view,
       faultKinds: view.faults.ran ? (view.faults.kindsCount ?? view.faults.kinds.length) : null,
-      faultElements: view.faults.ran ? view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0) : null,
+      // Of every kind, where the renderer says: its list of kinds is cut to
+      // the first twenty, and the count of those alone would be set beside
+      // the count of all the kinds.
+      faultElements: view.faults.ran
+        ? (view.faults.elementsCount ?? view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0))
+        : null,
       worstContrast: view.faults.worstContrast?.ratio ?? null,
       // A check that did not run keeps no figure: null is "not measured",
       // which zero would say was measured and clean. A walk cut at its press
@@ -1951,16 +1976,13 @@ function endedClause(end: EndedView): string {
   return `at ${px(end.pageHeight)} px at the ${view.id} width (${view.width} px)`;
 }
 
-/** A render of the task's own folder carries nothing, so leaves nothing out. */
-const NONE_LEFT_OUT: ReadonlySet<string> = new Set();
-
 /** What a page did as it loaded, in a reply's words: the dialog it opened,
  *  and what it asked for and did not get. `notCarried` is what a render of a
  *  kept delivery left out, so a file too large to carry is not said to be
  *  missing from the task. */
-function loadRemarks(page: RenderedPage, notCarried: ReadonlySet<string> = NONE_LEFT_OUT): string[] {
+function loadRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): string[] {
   const parts: string[] = [];
-  if (page.scrollsInside) parts.push(`It ${scrollsInsideRemark(page.scrollsInside)}`);
+  if (page.scrollsInside.length > 0) parts.push(`It ${scrollsInsideRemark(page.scrollsInside)}`);
   if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
   const asks: string[] = [];
   const asked = askedClause(page);
@@ -2204,15 +2226,17 @@ function shownToAJudge(found: FoundFile, since: readonly string[]): string {
   }
   const beside = since.filter((name) => name !== found.stored);
   const more = beside.length - SINCE_NAMED_MAX;
+  // Said of what the kept copy does not hold, never of when a file was
+  // saved: a copy that failed part way lacks files that were delivered.
   const later =
     beside.length === 0
       ? ""
-      : ` Saved on the task since, and shown as ${beside.length === 1 ? "it stands" : "they stand"}: ` +
+      : ` Beside it, as ${beside.length === 1 ? "it stands" : "they stand"} on the task now, since that copy does not hold ${beside.length === 1 ? "it" : "them"}: ` +
         `${LIST_AND.format(beside.slice(0, SINCE_NAMED_MAX).map(code))}${more > 0 ? `, and ${px(more)} more` : ""}.`;
   return (
     (found.delivered
       ? ` This is the delivery of ${judged.deliveredAt} as Viberr kept it, not the task's files as they stand now.`
-      : ` This file was saved on the task after the delivery of ${judged.deliveredAt}, so it is shown as it stands now, beside that delivery as Viberr kept it.`) +
+      : ` This file is not in the delivery of ${judged.deliveredAt} as Viberr kept it, so it is shown as it stands on the task now, beside that delivery.`) +
     later
   );
 }
@@ -2693,9 +2717,9 @@ export type WebPageAnswer =
   | {
       pictures: WebPagePicture[];
       motion: PageMotion | null;
-      /** The element the page scrolls inside, when it does not scroll as a
-       *  page: its pictures are then of its first screen only. */
-      scrollsInside: ScrollsInside | null;
+      /** Each width at which the page scrolls inside one of its elements and
+       *  not as a page: its pictures there are of its first screen only. */
+      scrollsInside: ScrollsInside[];
     }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
   | { refused: string }
