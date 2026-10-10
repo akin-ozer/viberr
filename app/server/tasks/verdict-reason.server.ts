@@ -9,7 +9,7 @@
  * said. The full text is never lost - the agent's own report is on the same
  * timeline, untruncated - so the marker's job is to send the reader there.
  */
-export const VERDICT_REASON_MAX_CHARS = 2_000;
+const VERDICT_REASON_MAX_CHARS = 2_000;
 
 /** What a reason that did not fit ends with: that it was cut, how long the
  *  whole ran, and where the whole is. */

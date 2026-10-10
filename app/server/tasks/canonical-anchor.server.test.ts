@@ -27,7 +27,7 @@ import {
 } from "../../../test-support/fake-runtime";
 import { reconfigureProject } from "../../../test-support/projected-store";
 import { canonicalTaskAnchor, specialistReplyDirective } from "./task-replies.server";
-import { VERDICT_REASON_MAX_CHARS, clipVerdictReason } from "./verdict-reason.server";
+import { clipVerdictReason } from "./verdict-reason.server";
 import { commentToAgent } from "./task-comments.server";
 import { updateTaskGoal } from "./task-edits.server";
 
@@ -226,7 +226,6 @@ describe("canonicalTaskAnchor", () => {
     // under a heading that calls the verdicts whole.
     const report = `Verdict: request-changes\n\n${"Blocking: the list folds before its blocks are measured. ".repeat(60)}`;
     const reason = clipVerdictReason(report);
-    expect(report.length).toBeGreaterThan(VERDICT_REASON_MAX_CHARS);
     const anchor = anchorOf({
       parsed: parsed({
         frontmatter: baseTaskFrontmatter("VIB-1", {
@@ -247,7 +246,7 @@ describe("canonicalTaskAnchor", () => {
       }),
       stageName: "In Progress",
     });
-    // CANARY: clamp the reason at `VERDICT_REASON_MAX_CHARS` again.
+    // CANARY: clamp the reason at its 2,000 characters again.
     expect(anchor).toContain(
       `[cut here - the reviewer's justification ran to ${report.trim().length.toLocaleString("en-US")} characters and this is its first 2,000. ` +
         "Its full report is on this task's timeline, whole.]",

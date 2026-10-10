@@ -405,7 +405,7 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // verdict keeps the first 2,000 characters of a report (ruling 88), and
     // those are the findings' to have.
     expect(reviewer).toContain(
-      "Your report says, after its findings, what differs from them: one line for each section at each width, naming what differs on those seven or that nothing does. " +
+      "Your report says, after its findings, what differs from the kept pictures: one line for each section at each width you were shown, naming what differs on those seven or that nothing does. " +
         "A difference you do not name is one you did not see. An approval says of each difference it leaves standing why it is not a finding.",
     );
     // "Those seven" are the ones the manual itself lists.
@@ -415,15 +415,19 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // word nobody can read says nothing: unfinished to the maker, a finding
     // to the judge. The maker is told the way out, which is never to write
     // something in.
+    // What the work is meant to carry: a template's own placeholders and a
+    // product's empty state shown as it is are content, and what must be
+    // read is what a reader is meant to read at that width, which is what
+    // the Diagrammer's and the Editor's manuals hold a picture to.
     const placeholder = (verdict: string) =>
-      `Nothing stands in for content: an empty box, a bar or a blank label where a reader expects something is ${verdict}, in a picture of the product as anywhere else.`;
+      `Nothing stands in for content the work is meant to carry: an empty box, a bar drawn where words belong or a blank label is ${verdict}, in a picture of the product as anywhere else.`;
     expect(developer).toContain(
       `${placeholder("unfinished work")} Put there what is on record, or take it out. ` +
-        "At each width a reader can read every word they are meant to read, the words inside a picture included: " +
-        "a picture shrunk until its words cannot be read is cropped, or made again for that width.",
+        "At each width a reader can read every word they are meant to read there, the words inside a picture included: " +
+        "a picture shrunk until those words cannot be read is cropped, or made again for that width.",
     );
     expect(reviewer).toContain(
-      `${placeholder("a finding")} So is a word a reader is meant to read and cannot, at the desktop width or at the phone width, the words inside a picture included.`,
+      `${placeholder("a finding")} So is a word a reader is meant to read at a width and cannot, the words inside a picture included.`,
     );
     expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614", {})).toBe(true);
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4", {})).toBe(true);

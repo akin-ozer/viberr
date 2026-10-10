@@ -53,6 +53,7 @@ import {
 } from "./specialist-tool-policy";
 import { SKILL_INJECTION_BUDGET } from "~/server/files/skill-body.server";
 import { appendTimelineEvent, readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
+import { pageLooksNote, pageLooksOwed } from "./page-looks.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { upsertRun } from "~/server/runtimes/run-store.server";
@@ -2320,7 +2321,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
     };
     const ACCOUNT =
-      "Your report says, after its findings, what differs from them, section by section at each width, and an approval says why each difference it leaves standing is no finding.";
+      "Your report says, after its findings, what differs from the kept pictures, section by section at each width, and an approval says why each difference it leaves standing is no finding.";
     // A server that can render a page (the browser is named; nothing here starts it).
     await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () => {
     for (const backend of ["claude", "codex"] as const) {
@@ -2329,7 +2330,7 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       const page = await prompt("critic", ["index.html", "styles.css"]);
       expect(page, backend).toContain(`${PAGE}. A page is looked at with \`capture_page\``);
       expect(page, backend).not.toContain("kept pictures section by section");
-      expect(page, backend).not.toContain("what differs from them");
+      expect(page, backend).not.toContain("what differs from the kept pictures");
       // Prose and its notes: an approval there owes no look, and none is asked.
       expect(await prompt("critic", ["notes.md"]), backend).not.toContain("binds only from a run that looked");
     }
@@ -2390,6 +2391,17 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     // too. CANARY: ask for it wherever a look is kept and a review that can
     // be shown no page is asked what it saw differ at widths it never saw.
     expect(noBrowser).not.toContain(ACCOUNT);
+    // Nor of a revision whose pages are not built (ruling 86), which has no
+    // page yet and may never have one. CANARY: ask whenever pages are pending.
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    const kept = await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () =>
+      pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed, true),
+    );
+    expect(kept?.pages).toEqual(["index.html"]);
+    expect(pageLooksNote(kept!)).toContain(ACCOUNT);
+    const unbuilt = pageLooksNote({ ...kept!, pages: [], measured: [], pending: "the project's gates did not pass on this revision" });
+    expect(unbuilt).toContain("the pages of this revision as the project's gates build them (the project's gates did not pass on this revision;");
+    expect(unbuilt).not.toContain(ACCOUNT);
   });
 
   it("ruling 201: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {

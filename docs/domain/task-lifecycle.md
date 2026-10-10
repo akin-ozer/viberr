@@ -758,8 +758,8 @@ A later task of the same work takes the look over (`from`) and is held to the sa
 pictures. The seeded Developer's manual has the maker say in its report what still
 differs from them, and the Reviewer's has a review say what differs, a line for each
 section at each width, and an approval say why each difference it leaves standing is no
-finding (ruling 178); a reviewer of any profile is told the last two in the note it starts
-with (ruling 329).
+finding (ruling 178); where there is a page to picture beside the look, a reviewer of any
+profile is told the last two in the note it starts with (ruling 329).
 
 A reviewer's `report_outcome` records a **verdict** (`approve | request_changes`)
 bound to the review subject (§6). A run whose workspace could not be provisioned
