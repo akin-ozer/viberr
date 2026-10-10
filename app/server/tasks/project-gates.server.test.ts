@@ -856,7 +856,28 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       // corrected build is never pictured until a person runs the gates.
       await boot();
       expect(task().frontmatter.pageCaptures!.pages.map((page) => page.file)).toEqual(["index.html", "guide/index.html"]);
+      expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
       expect(captureNotes()).toHaveLength(2);
+    });
+
+    // A render of an earlier run's build can end after the next run has: its
+    // record is newer than this run and of the same revision, and still not
+    // of this run's build. CANARY: tell the two apart by the clock and the
+    // build this run kept is never pictured.
+    writeDeliveredTask({
+      gateRun: run(),
+      pageCaptures: {
+        deliveredAt: "2026-09-25T09:00:00.000Z",
+        at: "2099-01-01T00:00:00.000Z",
+        pages: [],
+        revisionId: "rev_1",
+        gateRunId: "gate_of_an_earlier_run",
+      },
+    });
+    await withBrowser(async () => {
+      await boot();
+      expect(task().frontmatter.pageCaptures).toMatchObject({ gateRunId: run().id });
+      expect(task().frontmatter.pageCaptures!.pages).toHaveLength(2);
     });
 
     // A task that is closed is nobody's to picture: every other asker

@@ -2542,11 +2542,11 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       requestRevisionCaptures(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", folder: "dist", kept: true, leftOut: 2 },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", gateRunId: "gate_1", folder: "dist", kept: true, leftOut: 2 },
       );
     await withBrowser("", pictured);
     const record = frontmatter().pageCaptures!;
-    expect(record).toMatchObject({ revisionId: "rev_1", deliveredAt: REVISION.createdAt });
+    expect(record).toMatchObject({ revisionId: "rev_1", gateRunId: "gate_1", deliveredAt: REVISION.createdAt });
     expect(record.pages).toEqual([
       {
         file: "index.html",
@@ -2657,7 +2657,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       requestRevisionCaptures(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_2", folder: "dist", kept: true, leftOut: 0 },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_2", gateRunId: "gate_2", folder: "dist", kept: true, leftOut: 0 },
       ),
     );
     expect(onTask()).toEqual(["index.html.at-8888888.capture-desktop.png", "index.html.at-8888888.capture-phone.png"]);
@@ -2685,7 +2685,7 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
       requestRevisionCaptures(
         store.db,
         { dataRoot: store.dataRoot },
-        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", folder: "dist", kept: true, leftOut: 0 },
+        { projectSlug: store.slug, taskKey: "VIB-1", revisionId: "rev_1", gateRunId: "gate_1", folder: "dist", kept: true, leftOut: 0 },
       ),
     );
     const pages = frontmatter().pageCaptures!.pages;

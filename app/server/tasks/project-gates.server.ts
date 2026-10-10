@@ -13,7 +13,7 @@ import {
 import { GATE_DEFAULT_TIMEOUT_SECONDS, type ProjectGate } from "~/schemas/project-file.schema";
 import { AppError } from "~/server/errors/app-error.server";
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
-import { capturesRevision } from "./page-measured.server";
+import { capturesGateRun } from "./page-measured.server";
 import {
   resolveStoreSegment,
   taskAttachmentsDir,
@@ -102,9 +102,10 @@ import type { TaskActionDeps } from "./task-action-core.server";
  *    (`gates-failed`) to dispatch the rework.
  */
 
-/** Ruling 86: the folder a finished run kept its revision's pages from
- *  (`pages` on the run, which the task file's schema keeps and does not
- *  declare), or null when it kept none. */
+/** Ruling 86: the folder a gate named for the pages when this finished
+ *  run's gates all exited 0 (`pages` on the run, which the task file's
+ *  schema keeps and does not declare), or null: no gate named one, or a
+ *  gate did not pass. Whether the folder was then kept is `pagesKept`. */
 function builtFolderOf(run: GateRun): string | null {
   const read = z.looseObject({ pages: z.string() }).safeParse(run);
   return read.success ? read.data.pages : null;
@@ -499,13 +500,11 @@ function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFr
   const folder = builtFolderOf(run);
   if (run.status !== "finished" || folder === null || gateSubject(fm)?.id !== run.revisionId) return;
   // The record is written for every build the ask reached, a page or none,
-  // when its render ends: one older than this run's end is of an earlier
-  // run on the same revision (a folder since corrected on the gate, a keep
-  // that failed and was run again), and this run's build is still to picture.
-  const record = fm.pageCaptures;
-  const ofThisRun =
-    record !== undefined && capturesRevision(record) === run.revisionId && run.finishedAt !== null && record.at >= run.finishedAt;
-  if (ofThisRun) return;
+  // and names the run whose build it is of. One of another run on the same
+  // revision (a folder since corrected on the gate, a keep that failed and
+  // was run again, a render that outlasted the next run) leaves this run's
+  // build still to picture. By the run's id, never by the clock.
+  if (capturesGateRun(fm.pageCaptures) === run.id) return;
   const project = readProjectFile(
     ref.dataRoot ? { projectSlug: ref.projectSlug, dataRoot: ref.dataRoot } : { projectSlug: ref.projectSlug },
   )?.parsed.frontmatter;
@@ -517,6 +516,7 @@ function picturesOwedAfterRestart(db: DatabaseSync, ref: TaskFileRef, fm: TaskFr
       projectSlug: ref.projectSlug,
       taskKey: ref.taskKey,
       revisionId: run.revisionId,
+      gateRunId: run.id,
       folder,
       kept: kept !== null,
       leftOut: kept?.leftOut ?? 0,
@@ -907,8 +907,9 @@ async function runGateJob(job: GateJob): Promise<{ pictured: Promise<void> | nul
       run.finishedAt = new Date().toISOString();
       run.error = failure;
       run.results = results.map((r) => ({ ...r }));
-      // Ruling 86: the folder this run's pages were kept from, so a later
-      // ask knows the revision's build was made under the folder now named.
+      // Ruling 86: the folder a gate named for the pages of this run, whose
+      // gates all passed, so a later ask knows the revision was built under
+      // the folder now named; and what the keep of it held, when it held.
       if (builds && pagesDir) {
         run.pages = pagesDir;
         if (built) run.pagesKept = { files: built.files, leftOut: built.leftOut };
@@ -958,6 +959,7 @@ async function runGateJob(job: GateJob): Promise<{ pictured: Promise<void> | nul
         projectSlug: job.projectSlug,
         taskKey: job.taskKey,
         revisionId: done.revisionId,
+        gateRunId: done.id,
         folder: pagesDir,
         kept: built !== null,
         leftOut: built?.leftOut ?? 0,

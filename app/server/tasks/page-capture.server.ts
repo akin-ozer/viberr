@@ -2061,6 +2061,8 @@ export interface RevisionCaptureInput {
   taskKey: string;
   /** The `workRevision.id` whose build was kept. */
   revisionId: string;
+  /** The gate run that kept it: what the record says its pictures are of. */
+  gateRunId: string;
   /** The folder of the checkout the project's gates build the pages into. */
   folder: string;
   /** False when the build could not be kept at all. */
@@ -2107,7 +2109,13 @@ async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input
       if (activeWorkRevision(parsed.frontmatter.workRevision)?.id !== revisionId) return;
       // A record with no page: this revision's build was looked at and held
       // none, which is what keeps the note from being written twice.
-      parsed.frontmatter.pageCaptures = { deliveredAt: revision.createdAt, at: new Date().toISOString(), pages: [], revisionId };
+      parsed.frontmatter.pageCaptures = {
+        deliveredAt: revision.createdAt,
+        at: new Date().toISOString(),
+        pages: [],
+        revisionId,
+        gateRunId: input.gateRunId,
+      };
       parsed.timeline.unshift({
         occurredAt: new Date().toISOString(),
         type: "note",
@@ -2168,7 +2176,13 @@ async function captureRevision(db: DatabaseSync, ctx: TaskMutationContext, input
   // Bound to the revision, as a files record is to its stamp: `deliveredAt`
   // is when the revision was minted, and `revisionId` says whose pages these
   // are (read by `capturesRevision`).
-  const record: PageCaptures = { deliveredAt: revision.createdAt, at: new Date().toISOString(), pages: [], revisionId };
+  const record: PageCaptures = {
+    deliveredAt: revision.createdAt,
+    at: new Date().toISOString(),
+    pages: [],
+    revisionId,
+    gateRunId: input.gateRunId,
+  };
   const accepted = acceptedPageFigures(db, ctx, projectSlug, taskKey);
   const written: string[] = [];
   const failed: string[] = [];
