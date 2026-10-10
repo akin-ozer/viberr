@@ -466,8 +466,8 @@ interface RenderedPage {
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
   /** At each width, the parts of the page that scroll inside it and hold
-   *  more than a screen beyond their box: what they hide is in no picture.
-   *  None where no part hides that much. */
+   *  more than a screen beyond their box: what they hide is in no picture
+   *  at that width. None where no part hides that much. */
   scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
@@ -1258,7 +1258,7 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
  * note, "the page" in a reply.
  */
 function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string, measured: boolean): string[] {
-  const unread = "the checks that judge what a reader sees (contrast, the size of a target) may not have read it";
+  const unread = "the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it";
   return inside.map((entry) => {
     const where = atWidth(entry.view);
     const at = `${where.charAt(0).toUpperCase()}${where.slice(1)}`;

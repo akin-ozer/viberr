@@ -1278,8 +1278,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
         // A picture of a page with a part that scrolls inside it shows none
         // of what the part hides, and said nothing: it read as a whole short
         // page.
-        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target) may not have read it. " +
-        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target) may not have read it.",
+        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it. " +
+        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1318,7 +1318,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(
       await withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name: "lanes.html", runId: null })),
     ).toContain(
-      "What they hide is in no picture at that width, and the checks that judge what a reader sees (contrast, the size of a target) may not have read it.",
+      "What they hide is in no picture at that width, and the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it.",
     );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
