@@ -49,13 +49,17 @@
 #     ignores reduced motion is measured as having each, at its true weight,
 #     with a load time on the slow line that the weight accounts for, and
 #     each check says it ran. The keyboard walk counts only the page's own
-#     controls (a box to write in takes focus and is not one), names the
-#     controls past a keyboard trap with how many there are in all, and says
-#     it was cut on a page with more stops than it presses Tab;
+#     controls (a box to write in takes focus and is not one, and a button in
+#     a set of fields switched off is none a keyboard should reach), starts
+#     at the top of a page that had put focus elsewhere, goes on through a
+#     date field, a frame and a card that each keep focus for more than one
+#     press, names the controls past a keyboard trap with how many there are
+#     in all, and says it was cut only where it used its last press with a
+#     control still not come to;
 #   - a page fixed to its screen whose content scrolls in a part of it is
-#     pictured as its one screen and reported as scrolling inside, with how
-#     much that part holds; a part that only hides what does not fit, and a
-#     body whose overflow is the window's, are not;
+#     pictured as its one screen and reported as scrolling inside, with the
+#     width that is at and how much that part holds; a page that scrolls as
+#     pages do is not, whatever scrolls in a box somewhere in it;
 #   - any agent uid reads the picture the renderer saved, so a run of another
 #     person than the task's owner can copy it onto the task;
 #   - the renderer reads its pages from a folder it can only pass through, the
@@ -435,10 +439,11 @@ once(document.querySelectorAll("section")[4], () => { const tail = document.crea
   // `alt`, one button that hides its focus ring, one animation that goes on
   // when reduced motion is asked for beside one that stops, and a picture of
   // a known weight. Besides its three controls it has a link left out of the
-  // tab order, a link in a part made inert, and a box to write in, which
-  // takes focus and is no control: when it does, the page adds a second
-  // picture with no `alt`, so the engine, which runs after the walk, says
-  // whether the walk stopped there.
+  // tab order, a link in a part made inert, a button in a set of fields that
+  // is switched off, and a box to write in between the first control and
+  // the others, which takes focus and is no control: when it does, the page
+  // adds a second picture with no `alt`, so the engine, which runs after
+  // the walk, says whether the walk stopped there.
   writeFileSync(path.join(dir, "heavy.png"), heavyPng(300000));
   writeFileSync(
     path.join(dir, "measured.html"),
@@ -453,9 +458,11 @@ button.bare:focus{outline:none}
 main{min-height:1600px}</style></head><body><main>
 <h1>A page to measure</h1><p class="faint">A line too faint to read</p>
 <img src="heavy.png" width="200" height="100">
-<p><a href="#docs">Docs</a> <button class="bare">No ring</button> <button>Ringed</button> <a href="#aside" tabindex="-1">Left out on purpose</a></p>
-<p inert><a href="#off">Switched off</a></p>
+<p><a href="#docs">Docs</a></p>
 <div id="notes" contenteditable="true" style="min-height:24px">Notes go here</div>
+<p><button class="bare">No ring</button> <button>Ringed</button> <a href="#aside" tabindex="-1">Left out on purpose</a></p>
+<p inert><a href="#off">Switched off</a></p>
+<fieldset disabled><legend>Not yet</legend><button>Send</button></fieldset>
 <div class="loader"></div><div class="polite"></div>
 </main>
 <script>document.getElementById("notes").addEventListener("focus", () => { const added = new Image(1, 1); added.src = "heavy.png"; document.querySelector("main").append(added); }, { once: true });</script>
@@ -475,22 +482,58 @@ main{min-height:1600px}</style></head><body><main>
 <script>document.getElementById("close").addEventListener("keydown", (event) => { if (event.key === "Tab" && !event.shiftKey) { event.preventDefault(); document.getElementById("open").focus(); } });</script>
 </body></html>`,
   );
-  // A page with more stops than a walk presses Tab: a hundred links.
+  // A page with more stops than a walk presses Tab: a hundred links. The
+  // page puts focus on the ninety-first as it loads, and the three from the
+  // ninety-fifth hide their focus ring: a walk that starts at the top never
+  // meets them, one that starts where the page left focus does.
+  const link = (n, bare = false) => `<a href="#link-${n}"${bare ? ' class="bare"' : ""} id="link-${n}">Link ${n}</a>`;
   writeFileSync(
     path.join(dir, "many.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A hundred links</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}a.bare:focus{outline:none}</style></head><body>
+<p>${Array.from({ length: 100 }, (_, n) => link(n + 1, n + 1 >= 95 && n + 1 <= 97)).join(" ")}</p>
+<script>document.getElementById("link-91").focus();</script>
+</body></html>`,
+  );
+  // One link fewer than a walk presses Tab, and a last one that gives focus
+  // up the moment it takes it: the walk's last press leaves nothing focused.
+  writeFileSync(
+    path.join(dir, "edge.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Seventy-nine links and one</title><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{font:16px sans-serif}</style></head><body>
-<p>${Array.from({ length: 100 }, (_, n) => `<a href="#link-${n + 1}">Link ${n + 1}</a>`).join(" ")}</p>
+<p>${Array.from({ length: 79 }, (_, n) => link(n + 1)).join(" ")} <a href="#thrown" id="thrown">Thrown</a></p>
+<script>document.getElementById("thrown").addEventListener("focus", (event) => event.target.blur());</script>
+</body></html>`,
+  );
+  // What keeps focus for more than one press of Tab, on a page that takes
+  // focus as it loads. A field with `autofocus` stands below the first link.
+  // A date field is one element and several stops, a frame holds two links
+  // of its own, and a card with a closed shadow tree has a button of its own
+  // before the link set into it and another after: focus is on the card, on
+  // the link, and on the card again.
+  writeFileSync(
+    path.join(dir, "crossed.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Stops inside stops</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}iframe{height:40px}</style></head><body>
+<p><a href="#above">Above the field</a></p>
+<p><label>Search <input type="search" autofocus></label></p>
+<p><label>Date of birth <input type="date"></label></p>
+<p><iframe title="Two links in a frame" srcdoc="<a href='#one'>One</a> <a href='#two'>Two</a>"></iframe></p>
+<x-card><a href="#inside">Inside the card</a></x-card>
+<p><a href="#after">After the card</a></p>
+<script>customElements.define("x-card", class extends HTMLElement { constructor() { super(); this.attachShadow({ mode: "closed" }).innerHTML = "<button>Before</button><slot></slot><button>After</button>"; } });</script>
 </body></html>`,
   );
   // A page fixed to its screen, its content in a part that scrolls: five
-  // screens of 800 px in a `main` one screen tall.
-  const screens = (count) => [[255, 0, 0], [0, 128, 0], [0, 0, 255], [255, 255, 0], [0, 255, 255]].slice(0, count).map((c) => '<section style="height:800px;background:rgb(' + c.join(",") + ')"></section>').join("");
+  // screens of 800 px in a `main` one screen tall. Below them, in the same
+  // `main`, a strip 100 px tall that only hides the six screens it holds:
+  // more than the `main` does, and nothing a reader can scroll.
+  const screens = (count) => [[255, 0, 0], [0, 128, 0], [0, 0, 255], [255, 255, 0], [0, 255, 255], [255, 0, 255]].slice(0, count).map((c) => '<section style="height:800px;background:rgb(' + c.join(",") + ')"></section>').join("");
   writeFileSync(
     path.join(dir, "inside.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>An app in a shell</title><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>html,body{height:100%;margin:0;overflow:hidden}main.app{height:100vh;overflow-y:auto}</style></head><body>
-<main class="app">${screens(5)}</main></body></html>`,
+<style>html,body{height:100%;margin:0;overflow:hidden}main.app{height:100vh;overflow-y:auto}.strip{height:100px;overflow:hidden}</style></head><body>
+<main class="app">${screens(5)}<div class="strip">${screens(6)}</div></main></body></html>`,
   );
   // The same five screens in a `body` that scrolls by itself: its root has
   // an overflow of its own, so the browser does not hand the body's to the
@@ -503,12 +546,24 @@ ${screens(5)}</body></html>`,
   );
   // A page that only looks as if it scrolled inside: a folded part that
   // hides four screens nobody can scroll to, and a `body` told to scroll,
-  // which the browser hands to the window.
+  // which the browser hands to the window. It does hold a log that scrolls
+  // in a box of its own, six screens of it, and is still a page that
+  // scrolls as pages do: its pictures are the whole of it.
   writeFileSync(
     path.join(dir, "folded.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A folded part</title><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{height:100vh;margin:0;overflow:auto}.fold{max-height:0;overflow:hidden}</style></head><body>
-<div class="fold">${screens(4)}</div>${screens(3)}</body></html>`,
+<style>body{height:100vh;margin:0;overflow:auto}.fold{max-height:0;overflow:hidden}pre.log{height:200px;margin:0;overflow:auto;font:16px/20px monospace}</style></head><body>
+<div class="fold">${screens(4)}</div>${screens(2)}<pre class="log">${"a line of the log\n".repeat(250)}</pre><section style="height:600px;background:rgb(0,0,255)"></section></body></html>`,
+  );
+  // A long page on a wide screen that is an app in a shell on a narrow one.
+  // Its `body` keeps the margin browsers give it, so the shell is 16 px
+  // taller than the phone's screen: a page that scrolls by its own margin
+  // and no more.
+  writeFileSync(
+    path.join(dir, "narrow.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A shell on a phone</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>@media (max-width:600px){main.app{height:100vh;overflow-y:auto}}</style></head><body>
+<main class="app">${screens(5)}</main></body></html>`,
   );
   // A drawing, saved with a byte order mark and an XML declaration, sized to
   // its box in percent: a line half a CSS px wide, and a picture beside it.
@@ -672,10 +727,7 @@ if (command === "job-walks") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "walks", {
-      pages: [
-        { file: "trapped.html", kind: "html" },
-        { file: "many.html", kind: "html" },
-      ],
+      pages: ["trapped.html", "many.html", "edge.html", "crossed.html"].map((file) => ({ file, kind: "html" })),
       views: [DESKTOP],
       measure: true,
     }),
@@ -686,11 +738,7 @@ if (command === "job-inside") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "inside", {
-      pages: [
-        { file: "inside.html", kind: "html" },
-        { file: "folded.html", kind: "html" },
-        { file: "shell.html", kind: "html" },
-      ],
+      pages: ["inside.html", "folded.html", "shell.html", "narrow.html"].map((file) => ({ file, kind: "html" })),
       views: [DESKTOP, PHONE],
     }),
   );
@@ -941,10 +989,15 @@ if (command === "verify-measured") {
       "whose ratio and words it reports",
       JSON.stringify(view.faults.worstContrast),
     );
+    check(
+      view.faults.kindsCount === view.faults.kinds.length && view.faults.kindsCount >= 2,
+      "and how many kinds it found in all, which here is as many as it lists",
+      `${view.faults.kindsCount} of ${view.faults.kinds.length}`,
+    );
     check(view.keyboard.ran === true && view.keyboard.cut === false, "the keyboard walk was made, all the way round", JSON.stringify(view.keyboard));
     check(
       view.keyboard.controls === 3 && view.keyboard.stops === 3 && view.keyboard.unreached.length === 0 && view.keyboard.unreachedCount === 0,
-      "Tab stops on each of the page's three controls and is said to: the box that also took focus is none of them, nor is the link left out on purpose or the one in a part made inert",
+      "Tab stops on each of the page's three controls and is said to: the box that also took focus is none of them, nor is the link left out on purpose, the one in a part made inert, or the button in a set of fields switched off",
       JSON.stringify(view.keyboard),
     );
     check(
@@ -973,20 +1026,24 @@ if (command === "verify-measured") {
 if (command === "verify-walks") {
   const [work] = args;
   const { check, pages, done } = outcomeOf(work, "walks");
-  const [trapped, many] = pages;
+  const [trapped, many, edge, crossed] = pages;
   const walk = (page) => page.measured?.views[0]?.keyboard;
   const numbered = (kind, word, count) => Array.from({ length: count }, (_, n) => `${kind} "${word} ${n + 1}"`).join("|");
-  check(trapped.error === null && many.error === null && trapped.shots.length === 1 && many.shots.length === 1, "two pages are pictured and their keyboard walks made", `${trapped.error} / ${many.error}`);
+  check(
+    pages.length === 4 && pages.every((page) => page.error === null && page.shots.length === 1 && walk(page)?.ran === true),
+    "four pages are pictured and their keyboard walks made",
+    pages.map((page) => `${page.file}: ${page.error} ${walk(page)?.ran}`).join(", "),
+  );
   check(
     trapped.measured?.views[0]?.faults.ran === false && trapped.measured?.views[0]?.faults.why === "no accessibility engine is installed",
     "with no engine named the accessibility check says it did not run, and why",
     JSON.stringify(trapped.measured?.views[0]?.faults),
   );
   // Start, seven bare buttons, Open and Close: ten of eighteen. Then Tab
-  // goes back to Open.
+  // goes back to Open, and on to Close as it did before.
   check(
-    walk(trapped)?.ran === true && walk(trapped)?.cut === false && walk(trapped)?.controls === 18 && walk(trapped)?.stops === 10,
-    "a walk into a keyboard trap ends where Tab starts going round, and is no cut walk",
+    walk(trapped)?.cut === false && walk(trapped)?.controls === 18 && walk(trapped)?.stops === 10,
+    "a walk into a keyboard trap ends where Tab takes a step it took before, and is no cut walk",
     JSON.stringify(walk(trapped)),
   );
   check(
@@ -1000,14 +1057,47 @@ if (command === "verify-walks") {
     JSON.stringify(walk(trapped)),
   );
   check(
-    walk(many)?.ran === true && walk(many)?.cut === true && walk(many)?.controls === 100 && walk(many)?.stops === 80,
+    walk(many)?.cut === true && walk(many)?.controls === 100 && walk(many)?.stops === 80,
     "a walk of a page with a hundred links stops at its eightieth press and says it was cut",
     JSON.stringify(walk(many)),
   );
   check(
-    walk(many)?.unreached.length === 0 && walk(many)?.unreachedCount === 0 && walk(many)?.unmarkedCount === 0,
+    walk(many)?.unreached.length === 0 && walk(many)?.unreachedCount === 0,
     "and names none of the twenty it did not get to as never reached: each of them can be",
     JSON.stringify(walk(many)),
+  );
+  // The page put focus on its ninety-first link as it loaded. A walk from
+  // there meets the three links that hide their focus ring within its first
+  // seven presses; one from the top stops on the first eighty and never does.
+  check(
+    walk(many)?.unmarkedCount === 0 && walk(many)?.unmarked.length === 0,
+    "the walk began at the top of the page with nothing focused, though the page had put focus far down it: Tab is where a reader's would be",
+    JSON.stringify(walk(many)),
+  );
+  // The last link gives focus up the moment it takes it, so the eightieth
+  // press leaves nothing focused. One more shows the walk has been round,
+  // whichever way this browser ends its order: off the page, or straight
+  // back to the first link.
+  check(
+    walk(edge)?.cut === false && walk(edge)?.controls === 80 && walk(edge)?.stops === 79 && walk(edge)?.unreached.join("|") === 'a "Thrown"' && walk(edge)?.unreachedCount === 1,
+    "a walk whose last press left nothing focused is seen round and is no cut walk: it names the one link that never holds focus",
+    JSON.stringify(walk(edge)),
+  );
+  // The link above the field, the field, the date field, the link in the
+  // card and the link after it. The date field holds focus for several
+  // presses, and so does the frame; the card holds it before the link set
+  // into it and again after.
+  check(
+    walk(crossed)?.cut === false && walk(crossed)?.controls === 5 && walk(crossed)?.stops === 5 && walk(crossed)?.unreached.length === 0 && walk(crossed)?.unreachedCount === 0,
+    "a walk goes on through a date field, a frame and a card that each keep focus for more than one press, on a page whose field took focus as it loaded: every control is reached, and none is named",
+    JSON.stringify(walk(crossed)),
+  );
+  // With the field still focused when its look at rest is noted, it looks
+  // the same when focus comes to it.
+  check(
+    walk(crossed)?.unmarkedCount === 0 && walk(crossed)?.unmarked.length === 0,
+    "and the field is not said to look the same with focus as at rest: its look at rest was noted with nothing focused",
+    JSON.stringify(walk(crossed)),
   );
   done();
 }
@@ -1015,7 +1105,7 @@ if (command === "verify-walks") {
 if (command === "verify-inside") {
   const [work] = args;
   const { check, pages, picture, done } = outcomeOf(work, "inside");
-  const [inside, folded, shell] = pages;
+  const [inside, folded, shell, narrow] = pages;
   const shot = (page, view) => page.shots.find((entry) => entry.view === view);
   const desktop = picture("1-desktop.png");
   check(
@@ -1024,20 +1114,33 @@ if (command === "verify-inside") {
     `${inside.error} ${desktop?.width}x${desktop?.height} ${JSON.stringify(shot(inside, "desktop"))}`,
   );
   check(
-    inside.scrollsInside?.what === "main.app" && inside.scrollsInside?.height === 4000,
-    "and the report says what scrolls inside it and how much that holds: five screens no picture shows",
+    inside.scrollsInside?.view === "desktop" && inside.scrollsInside?.what === "main.app" && inside.scrollsInside?.height === 4100,
+    "and the report says at which width that is, what scrolls inside it and how much that holds: five screens and a strip no picture shows, and not the six the strip only hides",
     JSON.stringify(inside.scrollsInside),
   );
   check(
     folded.error === null && folded.scrollsInside === null,
-    "a part that only hides what does not fit, and a body whose overflow is the window's, are not said to scroll inside the page",
+    "a page that scrolls as pages do is not said to scroll inside, whatever it holds: a part that only hides what does not fit, a body whose overflow is the window's, a log six screens long in a box of its own",
     `${folded.error} ${JSON.stringify(folded.scrollsInside)}`,
   );
   check(picture("2-desktop.png")?.height === 2400 && shot(folded, "desktop")?.cut === false, "and that page is pictured whole, its three screens", `${picture("2-desktop.png")?.height}`);
   check(
-    shell.error === null && shell.scrollsInside?.what === "body" && shell.scrollsInside?.height === 4000 && picture("3-desktop.png")?.height === 800,
+    shell.error === null && shell.scrollsInside?.view === "desktop" && shell.scrollsInside?.what === "body" && shell.scrollsInside?.height === 4000 && picture("3-desktop.png")?.height === 800,
     "a body that scrolls by itself, under a root with an overflow of its own, is said to scroll inside a page of one screen",
     `${shell.error} ${JSON.stringify(shell.scrollsInside)} ${picture("3-desktop.png")?.height}`,
+  );
+  // A long page on the desktop, pictured whole there, and a shell on the
+  // phone, where its one screen and the body's own margin are all a picture
+  // shows: 844 px and 16.
+  check(
+    narrow.error === null && picture("4-desktop.png")?.height === 4016 && shot(narrow, "phone")?.contentHeight === 860 && shot(narrow, "phone")?.cut === false,
+    "a page that scrolls as pages do on a wide screen and inside itself on a narrow one is pictured whole at the one and as its screen at the other",
+    `${narrow.error} ${picture("4-desktop.png")?.height} ${JSON.stringify(shot(narrow, "phone"))}`,
+  );
+  check(
+    narrow.scrollsInside?.view === "phone" && narrow.scrollsInside?.what === "main.app" && narrow.scrollsInside?.height === 4000,
+    "and is said to scroll inside at the phone's width, the first at which it does, though the body's own margin makes it 16 px taller than the screen there",
+    JSON.stringify(narrow.scrollsInside),
   );
   done();
 }
@@ -1347,13 +1450,15 @@ else
 fi
 further measured "pictured and measured a page" "$ENGINE"
 "$NODE" "$WORK/check.mjs" verify-measured "$WORK" || failures=$((failures + 1))
-# How a keyboard gets round two pages it cannot get all the way round: one
-# that traps it, one with more stops than a walk presses Tab.
-further walks "measured a page that traps the keyboard and one too long to walk round"
+# How a keyboard gets round four pages: one that traps it, one with more stops
+# than a walk presses Tab and focus put far down it, one whose last press
+# leaves nothing focused, and one whose stops keep focus for more than a press
+# and whose field takes focus as it loads.
+further walks "measured four pages a keyboard walk has to get right"
 "$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
 
 # --- a page that scrolls inside itself ---------------------------------------------
-further inside "pictured two pages that scroll inside themselves and one that only looks as if it did"
+further inside "pictured three pages that scroll inside themselves, one of them on a phone alone, and one that scrolls as pages do"
 "$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
