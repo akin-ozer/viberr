@@ -84,6 +84,10 @@ import { z } from "zod";
  *    weighs and how long it takes on a slow line. All of it after the last
  *    picture, in what is left of the page's time: a page that cannot be
  *    measured is still a pictured page.
+ *  - **Says when a page scrolls inside itself.** A page fixed to its screen
+ *    with its content in a box that scrolls is pictured as the one screen it
+ *    lays out as. The report names the largest such box and how much it
+ *    holds, so a picture of one screen is not read as the whole page.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -277,6 +281,20 @@ interface Act {
   error: string | null;
 }
 
+/**
+ * A part of a page that scrolls inside it. A page whose own height is its
+ * screen's, with its content in a box that scrolls, is pictured as the one
+ * screen it lays out as, and so is a long page down to a log or a list that
+ * scrolls in a box of its own: what is inside is in no picture. The report
+ * says so, and nothing here tries to picture it.
+ */
+interface ScrollsInside {
+  /** The part, as `tag.firstClass` or `tag#id`. */
+  what: string;
+  /** How tall what it holds is, in the picture's px. */
+  height: number;
+}
+
 /** One thing that was running on a page a second after it loaded. */
 interface Running {
   /** A CSS animation's name, a transition's property, or "script
@@ -385,6 +403,10 @@ interface PageReport {
   ended: Ended[];
   /** One entry per view that carried an act. */
   acts: Act[];
+  /** The largest part of the page that scrolls inside it with more than a
+   *  screen of it out of sight, at the first view that is not a phone's;
+   *  null when there is none, and when the page did not load to be read. */
+  scrollsInside: ScrollsInside | null;
   /** How many script dialogs the page opened, each dismissed. */
   dialogs: number;
   /** Hosts the page asked the network for, and how many addresses in all. */
@@ -1384,6 +1406,38 @@ function stickyExpression(screen: ScreenSize): string {
   );
 }
 
+/**
+ * The largest part of the page that scrolls inside it with more than a screen
+ * of what it holds out of sight. A part scrolls when its own `overflow-y` is
+ * `auto` or `scroll`: one that only hides what does not fit (a folded panel,
+ * a clamped paragraph) is nothing a reader can scroll. The window's own
+ * scroller is not a part of the page, and neither is a `body` whose overflow
+ * the browser hands to the window, which it does unless the root element has
+ * an overflow of its own. Measured on Chrome 153: a `body` of one screen with
+ * `overflow: auto` under a plain root had a scroll height of five screens and
+ * the window scrolled them all; under a root with `overflow: hidden` the same
+ * `body` scrolled inside a window one screen tall.
+ */
+function innerExpression(screen: ScreenSize): string {
+  return inPage(
+    "inner",
+    { height: screen.height },
+    `
+  const own = document.scrollingElement;
+  const bodyItself = getComputedStyle(document.documentElement).overflowY !== "visible";
+  let most = null;
+  for (const el of Array.from(document.querySelectorAll("body, body *")).slice(0, 5000)) {
+    if (el === own || el.scrollHeight - el.clientHeight <= args.height) continue;
+    if (most && el.scrollHeight <= most.scrollHeight) continue;
+    const flow = getComputedStyle(el).overflowY;
+    if ((flow !== "auto" && flow !== "scroll") || (el === document.body && !bodyItself) || !visible(el)) continue;
+    most = el;
+  }
+  return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight } : null });
+`,
+  );
+}
+
 /** The controls a pointer is tried on: the visible ones on the page's first
  *  two screens, one of each `tag.firstClass`, kept for the two expressions
  *  below. */
@@ -1466,6 +1520,7 @@ const animationsSchema = z.object({
   ),
 });
 const stickySchema = z.object({ sticky: z.object({ what: z.string(), position: z.enum(["fixed", "sticky"]) }).nullable() });
+const insideSchema = z.object({ inside: z.object({ what: z.string(), height: z.number().nonnegative() }).nullable() });
 const countSchema = z.object({ count: z.number().int().nonnegative() });
 const hoverListSchema = z.object({ controls: z.array(z.string()) });
 const pointSchema = z.object({ x: z.number(), y: z.number() });
@@ -1610,6 +1665,8 @@ interface Pictures {
   /** The views with nothing at `from`: no picture, and no failure either. */
   ended: Ended[];
   acts: Act[];
+  /** What scrolls inside the page, once it was looked for. */
+  scrollsInside: ScrollsInside | null;
 }
 
 interface ViewContext {
@@ -1632,6 +1689,9 @@ interface ViewContext {
   out: string;
   maxBytes: number;
   pictures: Pictures;
+  /** The view at whose load the page is looked at for a part that scrolls
+   *  inside it: the first that is not a phone's, else the first. */
+  insideAt: JobView | null;
 }
 
 /** Resolves once `ms` have passed by this process's clock, and not before: a
@@ -1791,12 +1851,32 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
   return layoutSchema.parse(await ctx.browser.send("Page.getLayoutMetrics", {}, ctx.sessionId));
 }
 
+/**
+ * Look, at the one view it is looked for at, for a part of the page that
+ * scrolls inside it. On that view's own load, once the page is laid out and
+ * before anything is done to it. What the page answers is the page's to say
+ * and never the page's to fail on: a page that throws under it is one where
+ * nothing was found.
+ */
+async function noteInside(ctx: ViewContext, view: JobView, layout: Layout): Promise<void> {
+  if (view !== ctx.insideAt) return;
+  const { scale } = pageSize(layout, view);
+  try {
+    const { inside } = await askPage(ctx, innerExpression({ width: view.width / scale, height: view.height / scale }), insideSchema);
+    ctx.pictures.scrollsInside = inside ? { what: clip(inside.what, NAME_MAX), height: Math.round(inside.height * scale) } : null;
+  } catch (caught) {
+    if (!ctx.browser.alive) throw caught;
+  }
+}
+
 /** Load the page at a view's viewport and device scale, walk it, and read
  *  how it was laid out. */
 async function loadView(ctx: ViewContext, view: JobView, deviceScaleFactor: number): Promise<Layout> {
   await openView(ctx, view, deviceScaleFactor);
   await walkPage(ctx, view);
-  return layoutNow(ctx);
+  const layout = await layoutNow(ctx);
+  await noteInside(ctx, view, layout);
+  return layout;
 }
 
 /**
@@ -2141,7 +2221,10 @@ async function pictureMoving(ctx: ViewContext, view: JobView, files: readonly st
   // the web is not waited on there until it goes quiet.
   const loadedAt = await openView(ctx, view, 1, view.from > 0);
   await askPage(ctx, FONTS_EXPRESSION, z.object({}));
-  const size = pageSize(await layoutNow(ctx), view);
+  const layout = await layoutNow(ctx);
+  // Inside the wait for the first frame, which is due a quarter second on.
+  await noteInside(ctx, view, layout);
+  const size = pageSize(layout, view);
   if (view.from >= size.pageHeight) {
     ctx.pictures.ended.push({ view: view.id, pageHeight: size.pageHeight });
     return;
@@ -2537,8 +2620,10 @@ interface Readings {
   measured: Measured | null;
 }
 
-/** The view a page's motion is read at: the first that is not a phone's,
- *  where a pointer means something, else the first. */
+/** The view a page's motion is read at, and the one it is looked at for a
+ *  part that scrolls inside it: the first that is not a phone's, where a
+ *  pointer means something and a page is laid out at its widest, else the
+ *  first. */
 function motionView(views: readonly JobView[]): JobView | null {
   return views.find((view) => !view.mobile) ?? views[0] ?? null;
 }
@@ -2554,7 +2639,7 @@ const sessionSchema = z.looseObject({ sessionId: z.string() });
  *  is left of that time. Never rejects. */
 async function picturePage(job: Job, server: PageServer, engine: Engine, page: JobPage, index: number): Promise<PageReport> {
   const asked: Asked = { hosts: new Set(), urls: new Set() };
-  const pictures: Pictures = { shots: [], ended: [], acts: [] };
+  const pictures: Pictures = { shots: [], ended: [], acts: [], scrollsInside: null };
   const { shots, ended, acts } = pictures;
   const dialogs = { count: 0 };
   // Ruling 327: a page on the web is opened at its own address, never through
@@ -2574,7 +2659,15 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
   });
   let settled: ReturnType<typeof pictured> | null = null;
   const report = (error: string | null): PageReport => {
-    const said: PageReport = { file: page.file, shots, ended, acts, ...(settled ?? pictured()), error };
+    const said: PageReport = {
+      file: page.file,
+      shots,
+      ended,
+      acts,
+      scrollsInside: pictures.scrollsInside,
+      ...(settled ?? pictured()),
+      error,
+    };
     if (read.motion) said.motion = read.motion;
     if (read.measured) said.measured = read.measured;
     return said;
@@ -2667,6 +2760,7 @@ async function picturePage(job: Job, server: PageServer, engine: Engine, page: J
       out: job.out,
       maxBytes: job.maxBytes,
       pictures,
+      insideAt: motionView(job.views),
     };
     try {
       await browser.send("Page.enable", {}, sessionId);

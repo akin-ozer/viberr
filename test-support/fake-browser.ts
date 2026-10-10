@@ -67,6 +67,8 @@ import { z } from "zod";
  *    told reduced motion.
  *  - `fake-trickle:3`: so many requests after the load event, 200 ms apart;
  *    `fake-lands:"about:blank"`: the address the browser is at once loaded.
+ *  - `fake-inner:{"what":"main.app","height":5200}`: the largest part of the
+ *    page that scrolls inside it, for a page whose own height is one screen.
  *
  * A browser started without `--proxy-server` has the network open: an
  * absolute `src` is then fetched too, where one behind the proxy is only
@@ -409,6 +411,8 @@ function evaluate(message) {
       const on = pointer !== null && pointer[0] === control.at[0] && pointer[1] === control.at[1];
       return say({ changes: on ? control.changes : [], durationMs: on && control.durationMs !== undefined ? control.durationMs : null });
     }
+    case "inner":
+      return say({ inside: told("inner", null) });
     case "load-time":
       return say({ ms: line.held && line.cacheDisabled ? declared("load-ms", 1) : 1 });
     default:
