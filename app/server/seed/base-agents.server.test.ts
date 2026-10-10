@@ -393,17 +393,17 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     seedDefaultAgentAssets(dataRoot);
     const guide = said(dataRoot, "controller-guide");
     expect(guide).toContain("## Work a person looks at");
-    expect(guide).toContain("write none of it into the rulings as a procedure of your own: no other widths, no browser steps, no description of what the work should look like");
+    expect(guide).toContain("write none of it into the rulings as your own procedure: no other widths, no browser steps, no description of the look");
     // The widths the guide names are the ones a delivered page is pictured at.
     const widths = PAGE_CAPTURE_VIEWS.map((view) => `${view.width} px`);
     expect(widths).toEqual(["1280 px", "390 px"]);
-    expect(guide).toContain(`pictured from its top to its end at ${widths[0]} and at ${widths[1]}`);
+    expect(guide).toContain(`top to end at ${widths[0]} and at ${widths[1]}`);
     expect(guide).toContain("**A reviewer's approval of a page counts only from a run that looked** (ruling 329)");
     expect(guide).toContain("**Work made to look like something keeps that look** (ruling 327)");
     expect(guide).toContain("Never describe the reference in a goal or in the rulings");
     expect(guide).toContain("**A page nobody named a repository for is delivered as files.**");
-    expect(guide).toContain("It does not open the pages inside a pull request");
-    expect(guide).toContain("**A task has a price.**");
+    expect(guide).toContain("Viberr does not open the pages inside a pull request");
+    expect(guide).toContain("**A task has a price**: a making run, a review of every delivery and an operator turn at each hand-off.");
     expect(guide).toContain("What one agent makes and one review judges as a whole is one task: a page is one");
     for (const tool of [PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, KEEP_PAGE_LOOK_TOOL]) expect(guide).toContain(`\`${tool.name}\``);
     expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "e9766677fe0e282ae0662b4ccc2ee69e90ebca9e1115703b6baf8a7b9ae55480", {})).toBe(true);
