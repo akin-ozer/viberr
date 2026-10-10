@@ -711,9 +711,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // finding; before a placeholder where content belongs or a word a
     // reader cannot read was a finding; and before it said what a picture of
     // the product may show (what the product was given, from its own demo
-    // data or the person's gift, and what the product made of that) where
-    // it said "demo data, never a person's", and named a drawn screen the
-    // product does not have and a stock picture.
+    // data or the person's gift, and what the product shows of its own)
+    // where it said "demo data, never a person's", and named a drawn screen
+    // the product does not have and a stock picture.
     "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4",
     // Ruling 86 (2026-10-10): before the manual said that where the
     // project's gates build the site the pages judged are the ones the gates
