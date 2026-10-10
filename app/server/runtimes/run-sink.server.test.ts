@@ -1286,10 +1286,11 @@ describe("ruling 172: the sink folds the prompt-cache record", () => {
       compactionEvents: [{ preTokens: 177_960, postTokens: 19_509 }],
     });
     expect(looked("run_looked_rollout")).toBe(LOOKS_COMPACTED_JSON);
-    // The compaction that closes a Codex run is on the rollout too. Its line
-    // reaches the sink first, so the fold after it finds no compaction it
-    // had not counted, and the list stands. CANARY: fold the rollout before
-    // the line is written and the closing compaction restarts the list.
+    // The compaction that closes a Codex run is on the rollout too. Its
+    // line reaches the sink first (the run service writes it, then folds),
+    // so the fold after it finds no compaction it had not counted, and the
+    // list stands. CANARY: restart the list at every fold that reports a
+    // compaction, counted before or not.
     patchRun(store.db, "run_looked_rollout", { lookedJson: shown });
     told.line({
       raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion" }),

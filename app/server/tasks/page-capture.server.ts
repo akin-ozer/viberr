@@ -749,7 +749,7 @@ type CarriedFile = { bytes: number } | { tooLarge: true } | null;
  * ask carries its delivery, and a copy that held the loop would hold every
  * other request with it.
  */
-async function carryFile(source: string, copy: string, room: number, taken: "refuse" | "skip"): Promise<CarriedFile> {
+async function carryFile(source: string, copy: string, room: number): Promise<CarriedFile> {
   let from: Awaited<ReturnType<typeof open>>;
   try {
     from = await open(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
@@ -768,12 +768,12 @@ async function carryFile(source: string, copy: string, room: number, taken: "ref
         0o640,
       );
     } catch (error) {
-      // A copy of that name is already there: on a disk that folds case, a
-      // name the task's folder holds that differs from a delivered one by
-      // case alone. The delivery's files are carried first, so its bytes
-      // stand and the folder's file is left out. A delivered file that finds
-      // its name taken is refused like any other failure to hand it over.
-      if (taken === "skip" && alreadyThere.safeParse(error).success) return null;
+      // A copy of that name is already there: on a disk that folds case, two
+      // names that differ by case alone, one the delivery's and one the task
+      // folder's. The one carried first stands: the page asked for, which is
+      // found by its name as a listing spells it, and after it the
+      // delivery's files before the folder's.
+      if (alreadyThere.safeParse(error).success) return null;
       throw error;
     }
     let bytes = 0;
@@ -867,26 +867,27 @@ async function carryDelivery(from: string, into: string, pages: readonly PageInp
     // delivery (ruling 85), so they are no part of this.
     const delivered = new Set(kept.map(storedFileName));
     const onTask = filesOf(since);
-    const pictures = pageCapturesAmong(onTask);
+    // Viberr's own pictures of a page either folder holds: an agent's own
+    // file that only ends like one is the agent's, and is carried.
+    const pictures = pageCapturesAmong([...kept, ...onTask]);
     for (const name of onTask.sort(byName)) {
       if (delivered.has(storedFileName(name))) continue;
       // The page asked for is carried whatever it is called.
-      const noPart = name.startsWith(".") || pictures.has(name) || isPageCaptureName(name) || isBrowserWorkingArtifact(name);
+      const noPart = name.startsWith(".") || pictures.has(name) || isBrowserWorkingArtifact(name);
       if (noPart && !first.has(name)) continue;
       wanted.push({ name, dir: since, since: true });
     }
   }
-  // The delivery's files first, so no file of the folder ever stands where a
-  // delivered one belongs; among each, the pages asked for first, so the
-  // limits leave out the file the render is of last. The sort keeps the
-  // order of everything else.
-  wanted.sort((a, b) => Number(a.since) - Number(b.since) || Number(first.has(b.name)) - Number(first.has(a.name)));
+  // The pages asked for go first, so the limits never leave out the one file
+  // the render is of. The sort keeps the order of everything else: the
+  // delivery's files, then the folder's.
+  wanted.sort((a, b) => Number(first.has(b.name)) - Number(first.has(a.name)));
   const carried: Carried = { names: [], notCarried: new Set(), since: [] };
   let total = 0;
   for (const entry of wanted) {
     const copy = path.join(into, entry.name);
     const room = Math.min(CARRIED_FILE_MAX_BYTES, CARRIED_TOTAL_MAX_BYTES - total);
-    const file = await carryFile(path.join(entry.dir, entry.name), copy, room, entry.since ? "skip" : "refuse");
+    const file = await carryFile(path.join(entry.dir, entry.name), copy, room);
     if (!file) continue;
     if ("tooLarge" in file) {
       carried.notCarried.add(entry.name);
@@ -2192,10 +2193,11 @@ function fileSize(file: () => string): number | null {
  * kept copy first: the page it is to look at is the one that was delivered,
  * whatever a stopped rework has since renamed, removed or grown in the task's
  * folder. A name the kept copy does not hold is found on the task like
- * anyone's. Whether it holds one is read off its own listing (ruling 76: the
- * name as spelled, or its one Unicode twin), never by asking the disk, which
- * on one that folds case answers `Post.html` for `post.html`: the task's
- * `post.html` would be shown and called the delivery.
+ * anyone's. Whether a folder holds a name is read off its listing (ruling 76:
+ * the name as spelled, or its one Unicode twin), never by asking the disk,
+ * which on one that folds case answers `Post.html` for `post.html`: one
+ * file would be shown and called the other. A name no listing holds is no
+ * file of the task, on any disk.
  */
 function findAskedFile(
   db: DatabaseSync,
@@ -2217,9 +2219,12 @@ function findAskedFile(
   }
   // Ruling 76: found in either Unicode form, and rendered under the spelling
   // the folder holds, which is the one the renderer can open.
-  let onTask = "";
-  const size = fileSize(() => (onTask = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot)));
-  return size === null ? null : { stored: path.basename(onTask), abs: onTask, size, judged, delivered: false };
+  const folder = taskAttachmentsDir(projectSlug, taskKey, ctx.dataRoot);
+  const onTask = storedNameAmong(filesOf(folder), name);
+  if (onTask === null) return null;
+  const abs = path.join(folder, onTask);
+  const size = fileSize(() => abs);
+  return size === null ? null : { stored: onTask, abs, size, judged, delivered: false };
 }
 
 /** Where a found file is rendered from: a judge's from the delivery as kept,
@@ -2263,11 +2268,13 @@ function shownToAJudge(found: FoundFile, since: readonly string[]): string {
   if (!judged.dir) {
     return ` Viberr holds no kept copy of the delivery of ${judged.deliveredAt}, so this is the task's files as they stand now.`;
   }
-  // The ones the page's own text names go first: they are the ones it most
-  // likely loaded, and the sentence is there so that a file that was not
-  // delivered is not taken for one.
-  const names = namedIn(found);
-  const beside = since.filter((name) => name !== found.stored).sort((a, b) => Number(names(b)) - Number(names(a)));
+  // Where there are more than the sentence names, the ones the page's own
+  // text names go first: they are the ones it most likely loaded, and the
+  // sentence is there so that a file that was not delivered is not taken
+  // for one. (A file a stylesheet or a script asks for is not in that text.)
+  const others = since.filter((name) => name !== found.stored);
+  const named = new Set(others.length > SINCE_NAMED_MAX ? others.filter(namedIn(found)) : []);
+  const beside = [...others].sort((a, b) => Number(named.has(b)) - Number(named.has(a)));
   const more = beside.length - SINCE_NAMED_MAX;
   // Said of what the kept copy does not hold, never of when a file was
   // saved: a copy that failed part way lacks files that were delivered.

@@ -71,7 +71,7 @@ import {
 import { resolvePacket } from "./packet-resolution.server";
 import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
-import { recordRunLooks, type RunLook } from "./page-looks.server";
+import { recordRunLooks, runLooks, type RunLook } from "./page-looks.server";
 import { assignReviewer, assignSpecialist } from "./specialist-assignment.server";
 import { startAgentRun } from "./specialist-run.server";
 
@@ -1265,6 +1265,16 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       recordRunLooks(store.db, compacted, [stretch("phone", 0, 1900, true)]);
       await review(compacted);
       expect(approvals()).toEqual([]);
+
+      // The mark stays at the head of the list however many looks follow
+      // it: the list keeps its newest six hundred, and a mark that went with
+      // the oldest would hand the run its session's earlier looks back.
+      // CANARY: cut the list from its head, mark and all.
+      const many = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-6" });
+      patchRun(store.db, many, { lookedJson: LOOKS_COMPACTED_JSON });
+      recordRunLooks(store.db, many, Array.from({ length: 650 }, (_, at) => stretch("phone", at * 10, at * 10 + 10, false)));
+      expect(runLooks(store.db, many)).toHaveLength(600);
+      expect(runLooks(store.db, many)[0]).toEqual({ kind: "compacted" });
 
       // The compaction that closes a run (ruling 174) comes after its
       // verdict. A completion replayed after it (effects lost in a restart)

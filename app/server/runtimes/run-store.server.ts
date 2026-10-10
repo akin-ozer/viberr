@@ -99,7 +99,9 @@ export type AgentRunRow = {
    *  deployment as it stands later. */
   effort: string | null;
   /** Ruling 329: what the run was shown, as the JSON list `page-looks.server.ts`
-   *  writes and reads. Null on a run that looked at nothing. */
+   *  writes and reads, started again with a mark by a compaction while the
+   *  run works (`LOOKS_COMPACTED_JSON`, written by the run's sink). Null on a
+   *  run that looked at nothing and was not compacted. */
   looked_json: string | null;
   /** Ruling 87 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
@@ -417,7 +419,7 @@ export interface RunPatch {
   /** Ruling 172: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
   /** Ruling 329: see `AgentRunRow.looked_json`. Written whole each time a
-   *  reader hands the run a picture. */
+   *  reader hands the run a picture, and by the sink at a compaction. */
   lookedJson?: string | null;
 }
 

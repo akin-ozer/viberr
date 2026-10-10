@@ -2058,31 +2058,43 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
   });
 
-  it("ruling 329: a name that differs from a delivered page's by case alone is never taken for the delivered page", { timeout: REAL_RENDERS_MS }, async () => {
+  it("ruling 329: a name that differs from a delivered page's by case alone is never taken for the delivered page, nor the delivered page for it", { timeout: REAL_RENDERS_MS }, async () => {
     // The kept copy holds `Post.html`; a stopped rework left `post.html`,
     // changed, on the task. A disk that folds case answers one for the
-    // other, and the judge that asked for `post.html` was rendered "half a
-    // rework" and told it was the delivery. CANARY: ask the disk whether the
-    // kept copy holds the name, and carry the page asked for ahead of the
-    // delivery's own files.
+    // other: the judge that asked for `post.html` was rendered "half a
+    // rework" and told it was the delivery, and after a first repair was
+    // rendered the delivery and told it was the task's file. Whether a
+    // folder holds a name is read off its listing, on any disk.
+    // CANARY: ask the disk whether the kept copy, or the task's folder,
+    // holds the name.
     const STAMP = "2026-10-09T22:40:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     await keptDelivery("VIB-1", STAMP, { "Post.html": "<p>the piece</p>" });
-    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+    await updateTaskFile(ref, (parsed) => {
       parsed.frontmatter.engagements = [WRITER, EDITOR];
     });
-    unlinkSync(path.join(attachments(), "Post.html"));
-    saveFiles("VIB-1", { "post.html": "<p>half a rework</p>" });
     await withBrowser("", async () => {
       const editor = await liveRun("editor");
+      // The task holds no `post.html`, and is not said to: the delivered
+      // page is `Post.html`.
+      const absent = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(absent.text).toContain("[noop] VIB-1 has no attachment `post.html`.");
+      expect(runLooks(store.db, editor)).toEqual([]);
+
+      unlinkSync(path.join(attachments(), "Post.html"));
+      saveFiles("VIB-1", { "post.html": "<p>half a rework</p>" });
+      // The task's own file is shown as that, and a look at it is of no
+      // delivery.
       const asked = await ask("post.html", { runId: editor, view: "desktop" });
-      // Whatever the disk does with the two names, the task's file is not
-      // called the delivery and a look at it is of no delivery.
-      expect(asked.text).not.toContain("This is the delivery of");
-      expect(runLooks(store.db, editor).filter((look) => look.kind === "page" && look.delivery !== null)).toEqual([]);
+      expect(asked.text).toContain("[done] `post.html` as a reader sees it.");
+      expect(asked.text).toContain(`This file is not in the delivery of ${STAMP} as Viberr kept it, so it is shown as it stands on the task now, beside that delivery.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>half a rework</p>");
+      expect(runLooks(store.db, editor).at(-1)).toMatchObject({ file: "post.html", delivery: null });
       // The delivered page by its own name is the delivery.
       const delivered = await ask("Post.html", { runId: editor, view: "desktop" });
       expect(delivered.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
       expect(fake.pages().at(-1)!.html).toBe("<p>the piece</p>");
+      expect(runLooks(store.db, editor).at(-1)).toMatchObject({ file: "Post.html", delivery: STAMP });
     });
   });
 

@@ -493,10 +493,9 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       }
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
       // A task whose store a person took one of the look's pictures out of
-      // cannot take the look over: the same bytes are not kept again, the
-      // note is not written, and what was copied before that is no look.
-      // CANARY: write the note over the pictures that did land and VIB-4
-      // keeps a look with a picture nobody can open.
+      // cannot take the look over: the same bytes are not kept again (ruling
+      // 82). Said before anything is copied. CANARY: find it at the write
+      // and VIB-4 is left the pictures copied before it, for good.
       writeTaskSource(
         store.slug,
         "VIB-4",

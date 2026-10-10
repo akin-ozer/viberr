@@ -316,8 +316,9 @@ const pictureIds = (pictures: readonly LookPicture[]): string[] => [...new Set(p
  * Take over the looks task `from` keeps: the pictures byte for byte, under
  * their date, and each look's note written again with this task's own ids.
  * Checked whole before anything is copied (every picture in the other task's
- * store, room for all of it here), and a look counts only once its note is
- * written, so one that could not be finished leaves pictures and no look. A
+ * store, none of them taken out of this one's, room for all of it here), and
+ * a look counts only once its note is written, so one that could not be
+ * finished leaves pictures and no look. A
  * take-over that was cut off is finished by asking again, since a picture
  * already here is taken up by its bytes and the note closes the look.
  */
@@ -404,14 +405,14 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
     if ("kept" in kept) written.push(kept.kept.id);
     return "kept" in kept ? kept.kept.id : kept.already.id;
   };
-  const notWhole = (what: string): string =>
-    `[error] ${what} could not be kept on ${taskKey} (a person took the same bytes out of its store), so the look was not taken over. ` +
-    (written.length > 0 ? `The pictures written before that (${idRange(written)}) stay as sources and are no look. ` : "Nothing was kept. ") +
-    NOT_FROM_MEMORY;
+  // Everything that can refuse was asked above, and nothing between there
+  // and here waits: a write that still cannot land (the store changed under
+  // this call) is a failure, which the tool answers as one, and what it left
+  // is pictures with no note, so no look.
   for (const id of pictures) {
     const theirLook = record.get(id)?.look;
     const kept = keep(id, bytes.get(id) ?? Buffer.alloc(0), theirLook && { url: theirLook.url, at: theirLook.at, part: theirLook.part, view: theirLook.view });
-    if (kept === null) return notWhole(`${id} of ${from}`);
+    if (kept === null) throw new Error(`${id} of ${from} could not be kept on ${taskKey}`);
     here.set(id, kept);
   }
   const taken: string[] = [];
@@ -428,7 +429,7 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
     });
     // The note is what makes the pictures a look: one that was not written
     // new leaves none.
-    if (note === null || written.at(-1) !== note) return notWhole(`The note of ${named(look)}`);
+    if (note === null || written.at(-1) !== note) throw new Error(`the note of ${named(look)} could not be kept on ${taskKey}`);
     taken.push(`${named(look)} (${idRange(pictureIds(listed))}, with its note ${note})`);
   }
   const first = toAdopt[0]!;

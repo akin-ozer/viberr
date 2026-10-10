@@ -1672,8 +1672,9 @@ write grant.
    source it opened as an image with `read_task_source`, and, for a Claude run, each of
    those it opened with its own file reader, read from its log (`looksFromRunLog`). The
    looks that count are the session's (`looksRunIds`): this run's, and those of the
-   earlier runs of the session it continued on the same task and subject, while neither
-   they nor this run were compacted. A run's list is emptied when its context is replaced
+   earlier runs of the session it continued on the same task and subject, while none of
+   them was compacted, at its end or before, and this run was not compacted while it
+   worked. A run's list is emptied when its context is replaced
    by a summary while it works, whether the stream carried the compaction or a Codex
    rollout told of it after the CLI exited, and its log is read from that compaction's
    own line on (found by the line's tag); the compaction that closes a run (ruling 174)
