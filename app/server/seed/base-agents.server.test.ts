@@ -25,7 +25,7 @@ import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 import { effectiveCollabMode } from "~/server/tasks/agent-outcome.server";
 import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
-import { KEEP_PAGE_LOOK_TOOL, PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL } from "~/server/mcp-proxy/board-tool.server";
+import { KEEP_PAGE_LOOK_TOOL, PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, TASK_SOURCE_TOOL } from "~/server/mcp-proxy/board-tool.server";
 import { PAGE_CAPTURE_VIEWS } from "~/shared/page-capture";
 
 const ctx = createTestDbContext();
@@ -425,21 +425,41 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(reviewer).toContain(
       `${placeholder("a finding")} So is a word a reader is meant to read and cannot, at the desktop width or at the phone width, the words inside a picture included.`,
     );
-    // Sent back for its blanks, the same page came back with its screens
-    // filled: a project, nine tasks, a person and a repository made up for
-    // the pictures and marked as sample, which the review took for demo
-    // data. What a picture of the product shows is on record like any
-    // statement: the demo data the product ships.
-    const madeUp = "never a name, a title or a figure made up for the picture, whatever it is marked as";
-    expect(developer).toContain(
-      "What a picture of the product shows is on record like any statement: the demo data the product ships (its seed, its fixtures, its documented examples), " +
-        `kept with \`keep_source\`, ${madeUp}. Where the record holds none, ask the person before you draw.`,
-    );
-    expect(reviewer).toContain(
-      `What a picture of the product shows is the demo data the product ships, with a kept source like any statement: never a person's data, and ${madeUp}.`,
-    );
     expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614", {})).toBe(true);
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4", {})).toBe(true);
+  });
+
+  it("has a picture of the product show what is on record: the product's own demo data, a run's output or the person's answer, never content made up for it", () => {
+    // Sent back for its blanks, the second board's page came back with its
+    // screens filled: a project, nine tasks, a person and a repository made
+    // up for the pictures and marked as sample, which the review took for
+    // demo data. The manuals said a picture shows "demo data", not whose.
+    // CANARY: drop a sentence, or one of the three things that are on record:
+    // without the person's answer a product that ships no demo data has no
+    // picture of itself a review can pass.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    const onRecord =
+      "the demo data the product ships (its seed, its documented examples), the output of a run of it, or what the person gave for it on the task.";
+    const madeUp = "never a name, a title or a figure made up for the picture, whatever it is marked as.";
+    expect(developer).toContain(
+      `What a picture of the product itself shows is on record like any statement, kept with \`keep_source\`: ${onRecord} It is ${madeUp} ` +
+        "Where the record holds none, see what another task of the board keeps (`read_task_source`), then ask the person, and keep the answer.",
+    );
+    expect(reviewer).toContain(
+      `What a picture of the product itself shows has a kept source like any statement: ${onRecord} Never a person's live data, and ${madeUp}`,
+    );
+    // The maker's sentence rests on two grants of the seeded Developer, to
+    // ask and to keep, and on a reader that takes another task's key.
+    // CANARY: withhold either in the catalog (an absent grant is a granted
+    // one, ruling 182, so only a `forbidden` entry takes it away).
+    const granted = SEED_AGENT_PROFILES.find((profile) => profile.frontmatter.id === "developer")!.frontmatter.capabilities;
+    expect(effectiveCollabMode(granted, "ask-human")).toBe("direct");
+    expect(effectiveCollabMode(granted, "attach-evidence-references")).toBe("direct");
+    expect(TASK_SOURCE_TOOL.name).toBe("read_task_source");
+    expect(argsOf(TASK_SOURCE_TOOL)).toContain("taskKey");
   });
 
   it("has the guide plan a page on Viberr's own pictures, widths and figures, as files when nobody named a repository, and as one task", () => {
@@ -560,10 +580,12 @@ describe("ruling 179: the library ships a Diagrammer and a Cover Designer", () =
     // On a board with no repository every skill reaches a run as prompt text
     // under one shared budget (ruling 186), drawn in name order: a manual that
     // filled it would cut the board's own skill off whole. The Writer's and the
-    // Editor's manuals (ruling 179) are held to it here too.
+    // Editor's manuals (ruling 179) are held to it here too, and so are the
+    // Developer's and the Reviewer's (ruling 178), which every board deploys
+    // and which grow with each thing learned about work that is looked at.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
-    for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise"]) {
+    for (const name of ["diagrammer-expertise", "cover-designer-expertise", "editor-expertise", "writer-expertise", "developer-expertise", "reviewer-expertise"]) {
       const raw = readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8");
       expect(splitFrontmatter(raw).body.trim().length, name).toBeLessThanOrEqual(SKILL_INJECTION_BUDGET / 2);
     }
