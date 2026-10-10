@@ -84,13 +84,13 @@ import { z } from "zod";
  *    weighs and how long it takes on a slow line. All of it after the last
  *    picture, in what is left of the page's time: a page that cannot be
  *    measured is still a pictured page.
- *  - **Says when a page scrolls inside itself.** A page most of whose first
- *    screen is one part that scrolls, holding more than the page itself
- *    scrolls by, is pictured as it lays out. The report names that part and
- *    how much it holds, at each view where the page is such a one, so a
- *    picture of one screen is not read as the whole page. A page that
- *    scrolls as pages do is pictured whole, and nothing is said of a box
- *    that scrolls somewhere in it.
+ *  - **Says what scrolls inside a page.** A part of a page that scrolls by
+ *    itself is pictured as far as it is on screen, and what it holds past
+ *    that is in no picture. Where a part holds more than a screen out of
+ *    sight, the report names the one that hides the most, how much it holds
+ *    and how much of that is on screen, at each view. It does not judge
+ *    what kind of page that makes it: a shell fixed to its screen and a
+ *    long page with a log in a box of its own are said the same way.
  *  - **Dismisses a dialog the page opens.** `alert()`, `confirm()` and
  *    `prompt()` stop a page until somebody answers, and nobody is there: each
  *    is dismissed and counted, so the page loads on and the report says so.
@@ -285,22 +285,23 @@ interface Act {
 }
 
 /**
- * A page that scrolls inside itself: most of its first screen is one part
- * that scrolls, and that part holds more out of sight than the page itself
- * scrolls by. The page is pictured as it lays out, and what the part holds
- * past its own height is in no picture. The report says so, and nothing
- * here tries to picture it. A page that scrolls as pages do is not such a
- * page, whatever scrolls in a box somewhere in it: its pictures are the
- * whole of it.
+ * A part of a page that scrolls inside it, at one view: the part that hides
+ * the most there, of those that hide more than a screen. The page is
+ * pictured as it lays out, so a picture covers the part's own height and no
+ * more of what it holds. The report says how much that is of how much, and
+ * nothing here tries to picture the rest or to say what kind of page it is.
  */
 interface ScrollsInside {
-  /** The view it holds at: one that is a stretch of the page or the whole
-   *  of it, a phone's included. */
+  /** The view: one that is a stretch of the page or the whole of it, a
+   *  phone's included. */
   view: string;
   /** The part, as `tag.firstClass` or `tag#id`. */
   what: string;
   /** How tall what it holds is, in the picture's px. */
   height: number;
+  /** How tall the part itself is, which is how much of that a picture
+   *  shows, in the picture's px. */
+  shown: number;
 }
 
 /** One thing that was running on a page a second after it loaded. */
@@ -419,11 +420,12 @@ interface PageReport {
   ended: Ended[];
   /** One entry per view that carried an act. */
   acts: Act[];
-  /** On a page that scrolls inside itself: the part that does, at each
-   *  view where the page is such a one, in the order of the views. Null
-   *  when it is one at none, and when the page did not load to be read.
-   *  Only a view that is a stretch of the page or the whole of it is asked:
-   *  one of an exact size, one with an act and a moving one never are. */
+  /** The part of the page that scrolls inside it and hides the most, at
+   *  each view where one hides more than a screen, in the order of the
+   *  views. Null when none does at any, and when the page did not load to
+   *  be read. Only a view that is a stretch of the page or the whole of it
+   *  is asked: one of an exact size, one with an act and a moving one never
+   *  are. */
   scrollsInside: ScrollsInside[] | null;
   /** How many script dialogs the page opened, each dismissed. */
   dialogs: number;
@@ -1488,50 +1490,35 @@ function stickyExpression(screen: ScreenSize): string {
 }
 
 /**
- * The part of the page that scrolls inside it, when the page is one that
- * scrolls inside itself: a part that
- *
- *  - scrolls (its own `overflow-y` is `auto` or `scroll`: one that only hides
- *    what does not fit, a folded panel or a clamped paragraph, is nothing a
- *    reader can scroll) and is not the `body` whose overflow the browser
- *    hands to the window, which it does under a plain root element;
- *  - holds more than one screen out of sight;
- *  - holds more out of sight than the document itself scrolls by, so a long
- *    page that scrolls as pages do is never said to scroll inside a part of
- *    it, while a shell under a header, which scrolls by its header, is;
- *  - covers at least half of the page's first screen, so a log in a box of
- *    its own, a code block or a long text field is not it.
- *
- * The largest of those, by what it holds. `screen` is the first screen and
- * `page` how tall the document is, in the page's own px. Measured on Chrome
- * 153 and Debian Chromium 154: a `main` one screen tall under a 56 px header
- * made a document of 856 px and held 24,000; a `body` of half a screen with
- * `overflow: auto` under a plain root held more than its document scrolled,
- * and it was the window that scrolled.
+ * The part of the page that scrolls inside it and hides the most, of those
+ * that hide more than one screen: how much it holds and how tall it is
+ * itself. A part scrolls when its own `overflow-y` is `auto` or `scroll`:
+ * one that only hides what does not fit (a folded panel, a clamped
+ * paragraph) is nothing a reader can scroll. The `body` whose overflow the
+ * browser hands to the window, which it does under a plain root element, is
+ * no part of the page: it is the window that scrolls then, and the pictures
+ * follow it. Nothing is concluded about the page from where the part is or
+ * how large: three lanes side by side, a shell under a header with more page
+ * below it and a log in a box on a long page each hold what no picture
+ * shows, and are said the same way.
  */
-function innerExpression(screen: ScreenSize, page: number): string {
+function innerExpression(screen: ScreenSize): string {
   return inPage(
     "inner",
-    { width: screen.width, height: screen.height, page },
+    { height: screen.height },
     `
-  const own = Math.max(0, args.page - args.height);
   const handed = getComputedStyle(document.documentElement).overflowY === "visible";
   let most = null;
+  let hides = args.height;
   for (const el of Array.from(document.querySelectorAll("body, body *")).slice(0, 5000)) {
     const hidden = el.scrollHeight - el.clientHeight;
-    if (hidden <= args.height || hidden <= own) continue;
-    if (most && el.scrollHeight <= most.scrollHeight) continue;
+    if (hidden <= hides) continue;
     const flow = getComputedStyle(el).overflowY;
     if ((flow !== "auto" && flow !== "scroll") || (el === document.body && handed) || !visible(el)) continue;
-    const box = el.getBoundingClientRect();
-    const left = box.left + window.scrollX;
-    const top = box.top + window.scrollY;
-    const wide = Math.min(left + box.width, args.width) - Math.max(left, 0);
-    const high = Math.min(top + box.height, args.height) - Math.max(top, 0);
-    if (wide <= 0 || high <= 0 || wide * high * 2 < args.width * args.height) continue;
     most = el;
+    hides = hidden;
   }
-  return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight } : null });
+  return JSON.stringify({ inside: most ? { what: spot(most), height: most.scrollHeight, shown: most.clientHeight } : null });
 `,
   );
 }
@@ -1618,7 +1605,9 @@ const animationsSchema = z.object({
   ),
 });
 const stickySchema = z.object({ sticky: z.object({ what: z.string(), position: z.enum(["fixed", "sticky"]) }).nullable() });
-const insideSchema = z.object({ inside: z.object({ what: z.string(), height: z.number().nonnegative() }).nullable() });
+const insideSchema = z.object({
+  inside: z.object({ what: z.string(), height: z.number().nonnegative(), shown: z.number().nonnegative() }).nullable(),
+});
 const countSchema = z.object({ count: z.number().int().nonnegative() });
 const hoverListSchema = z.object({ controls: z.array(z.string()) });
 const pointSchema = z.object({ x: z.number(), y: z.number() });
@@ -1769,7 +1758,7 @@ interface Pictures {
   /** The views with nothing at `from`: no picture, and no failure either. */
   ended: Ended[];
   acts: Act[];
-  /** What scrolls inside the page, at each view that found it. */
+  /** What scrolls inside the page, at each view that found such a part. */
   scrollsInside: ScrollsInside[];
 }
 
@@ -1953,19 +1942,25 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
 }
 
 /**
- * Say when the page scrolls inside itself at this view (`innerExpression` has
- * what makes it one). Asked on each view's own load, once the page is laid
- * out and before it is pictured: a page can be such a one at one width and
- * not at another, and each picture is read by what its own view says. What
- * the page answers is the page's to say and never the page's to fail on: a
- * page that throws under it is one where nothing was found.
+ * Note the part of the page that scrolls inside it at this view, when one
+ * hides more than a screen (`innerExpression`). Asked on each view's own
+ * load, once the page is laid out and before it is pictured: a page can have
+ * such a part at one width and not at another, and each picture is read by
+ * what its own view says. What the page answers is the page's to say and
+ * never the page's to fail on: a page that throws under it is one where
+ * nothing was found.
  */
 async function noteInside(ctx: ViewContext, view: JobView, size: PageSize): Promise<void> {
   const { scale } = size;
-  const screen = { width: view.width / scale, height: view.height / scale };
   try {
-    const { inside } = await askPage(ctx, innerExpression(screen, size.contentHeight / scale), insideSchema);
-    if (inside) ctx.pictures.scrollsInside.push({ view: view.id, what: clip(inside.what, NAME_MAX), height: Math.round(inside.height * scale) });
+    const { inside } = await askPage(ctx, innerExpression({ width: view.width / scale, height: view.height / scale }), insideSchema);
+    if (!inside) return;
+    ctx.pictures.scrollsInside.push({
+      view: view.id,
+      what: clip(inside.what, NAME_MAX),
+      height: Math.round(inside.height * scale),
+      shown: Math.round(inside.shown * scale),
+    });
   } catch (caught) {
     if (!ctx.browser.alive) throw caught;
   }

@@ -102,10 +102,10 @@ const reportSchema = z.object({
       ended: z.array(z.object({ view: z.string(), pageHeight: z.number() })),
       /** One per view that carried an act: what it did, or why it could not. */
       acts: z.array(z.object({ view: z.string(), done: z.string().nullable(), error: z.string().nullable() })),
-      /** On a page that scrolls inside itself: at each view where it does,
-       *  the part that scrolls, which no picture of the page shows; null on
-       *  any other page. */
-      scrollsInside: z.array(z.strictObject({ view: z.string(), what: z.string(), height: z.number() })).nullable(),
+      /** At each view where a part of the page scrolls inside it with more
+       *  than a screen out of sight: the one that hides the most, how much
+       *  it holds and how much of that is on screen; null when none does. */
+      scrollsInside: z.array(z.strictObject({ view: z.string(), what: z.string(), height: z.number(), shown: z.number() })).nullable(),
       dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
@@ -968,56 +968,43 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
   });
 
-  it("asks a page at every width whether it scrolls inside itself, which no picture of it shows, and says so of each width where it does", async () => {
+  it("asks a page at every width for the part that scrolls inside it, and says of each width where there is one how much it holds and how much of that a picture shows", async () => {
     const shell = `main.${"app-shell-".repeat(10)}`;
-    const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4 })}</p>`;
+    const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4, shown: 640.4 })}</p>`;
     const b = bench({
-      // A page fixed to the screen whose content scrolls in a part of it: one
-      // screen of page, as a browser lays it out and as the stand-in does.
+      // A page whose content scrolls in a part of it, as the page's own
+      // layout says: the stand-in answers what the page declares.
       "app.html": part,
-      // The same under a header 56 px tall: a document taller than its
-      // screen, which scrolls by its header and no more.
-      "header.html": `<p>fake-height:856</p>${part}`,
-      // A shell on a phone alone.
+      // A long page with such a part in it.
+      "long.html": `<p>fake-height:3000</p>${part}`,
+      // One at a phone's width alone.
       "narrow.html": `<p>fake-height:3000 fake-inner-under:600</p>${part}`,
-      // A page that scrolls as pages do: its own script finds no such part.
+      // A page with no such part.
       "plain.html": "<p>fake-height:3000</p>",
     });
-    const report = await b.run({ pages: ["app.html", "header.html", "narrow.html", "plain.html"], views: [DESKTOP, PHONE] });
-    const found = (view: string) => ({ view, what: shell.slice(0, 80), height: 5200 });
-    // CANARY: say nothing of it and a page pictured as the one screen it
-    // lays out as reads as the whole of a page that has five more out of
-    // sight. The part's name is the page author's, so it is cut at eighty
-    // characters like any other, and its height is a whole number of px.
-    // Stop at the first width that finds it and a page that is a shell at
-    // both is said to be one at the desktop alone, so its phone picture
-    // reads as the whole of the page. Ask only a page no taller than its
-    // screen and the shell under a header says nothing at all.
+    const report = await b.run({ pages: ["app.html", "long.html", "narrow.html", "plain.html"], views: [DESKTOP, PHONE] });
+    const found = (view: string) => ({ view, what: shell.slice(0, 80), height: 5200, shown: 640 });
+    // CANARY: say nothing of it and a picture of a page whose content
+    // scrolls in a part of it reads as showing all the page holds. The
+    // part's name is the page author's, so it is cut at eighty characters
+    // like any other, and its two heights are whole numbers of px. Stop at
+    // the first width that finds one and a page that has it at both is said
+    // to have it at the desktop alone. Ask only a page no taller than its
+    // screen and the long page says nothing of the part its pictures show
+    // 640 px of.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
       ["app.html", null, [found("desktop"), found("phone")]],
-      ["header.html", null, [found("desktop"), found("phone")]],
+      ["long.html", null, [found("desktop"), found("phone")]],
       ["narrow.html", null, [found("phone")]],
       ["plain.html", null, null],
     ]);
-    // Nothing of what is inside is pictured: the page is its one screen.
-    expect(report.pages[0]!.shots.map((shot) => [shot.view, shot.height, shot.contentHeight, shot.cut])).toEqual([
-      ["desktop", 800, 800, false],
-      ["phone", 844, 844, false],
-    ]);
     // Asked on each view's own load, after its walk and before its picture,
-    // with that screen's size and how tall the document is there: which
-    // part it is, if any, is the page's own layout to say.
+    // with that screen's height: which part it is, if any, is the page's
+    // own layout to say.
     expect(b.browser.asks().map((asked) => asked.ask)).toEqual(Array.from({ length: 8 }, () => ["walk", "inner"]).flat());
-    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual([
-      { width: 1280, height: 800, page: 800 },
-      { width: 390, height: 844, page: 844 },
-      { width: 1280, height: 800, page: 856 },
-      { width: 390, height: 844, page: 856 },
-      { width: 1280, height: 800, page: 3000 },
-      { width: 390, height: 844, page: 3000 },
-      { width: 1280, height: 800, page: 3000 },
-      { width: 390, height: 844, page: 3000 },
-    ]);
+    expect(b.browser.asks().filter((asked) => asked.ask === "inner").map((asked) => asked.args)).toEqual(
+      Array.from({ length: 4 }, () => [{ height: 800 }, { height: 844 }]).flat(),
+    );
   });
 
   it.each<{ what: string; pages?: string[]; web?: WebPage[]; views: View[] }>([
