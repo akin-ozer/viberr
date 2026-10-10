@@ -666,6 +666,10 @@ describe("as the task owner's agent uid (ruling 139)", () => {
   });
 });
 
+/** The limit of a case that waits on several real renders (each a child
+ *  process and the stand-in browser) on a loaded machine. */
+const REAL_RENDERS_MS = 90_000;
+
 describe("ruling 86: the pages a delivered revision builds are kept as the gates built them", () => {
   /** A build: two pages, and the revision's own work beside them. */
   const BUILD =
@@ -717,7 +721,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(run().pages).toBeUndefined();
   });
 
-  it("pictures and measures the kept build onto the task, and a waiter is let go only when the pictures are there", async () => {
+  it("pictures and measures the kept build onto the task, and a waiter is let go only when the pictures are there", { timeout: REAL_RENDERS_MS }, async () => {
     const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
     setGates([{ name: "build", command: BUILD, pages: "dist" }]);
     writeDeliveredTask();
@@ -795,7 +799,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1", pages: [] });
   });
 
-  it("pictures a kept build again at boot when a restart cut the pictures off, and says nothing twice", async () => {
+  it("pictures a kept build again at boot when a restart cut the pictures off, and says nothing twice", { timeout: REAL_RENDERS_MS }, async () => {
     // The render is asked for after the gate run's finishing write, and a
     // restart drops the queue: the build was on disk, the run read finished,
     // and nothing ever pictured it.
@@ -831,7 +835,7 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
     });
   });
 
-  it("at boot, says once that a kept build held no page, and pictures nothing on a closed task or where no gate names the folder now", async () => {
+  it("at boot, says once that a kept build held no page, and pictures nothing on a closed task or where no gate names the folder now", { timeout: REAL_RENDERS_MS }, async () => {
     const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
     const withBrowser = <T>(run: () => Promise<T>) =>
       withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env("") }, run);
@@ -884,6 +888,15 @@ describe("ruling 86: the pages a delivered revision builds are kept as the gates
       await boot();
       expect(fake.launches()).toHaveLength(launches);
       expect(task().frontmatter.pageCaptures).toEqual(unnamed);
+    });
+
+    // Only a record of this run's revision stands for it. One that names no
+    // run and is of an earlier revision hides nothing. CANARY: leave any
+    // record that names no run alone and this build is never pictured.
+    writeDeliveredTask({ gateRun: run(), pageCaptures: { ...unnamed, revisionId: "rev_0" } });
+    await withBrowser(async () => {
+      await boot();
+      expect(task().frontmatter.pageCaptures).toMatchObject({ revisionId: "rev_1", gateRunId: run().id });
     });
 
     // A render of an earlier run's build can end after the next run has: its
