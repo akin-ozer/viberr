@@ -1275,11 +1275,11 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "which a capture does not serve (it serves the task's own files by name). " +
         "A phone lays `shrunk.html` out 980 px wide and shrinks it to fit its 390 px screen, so its text is small. " +
         "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways. " +
-        // A picture of a page with a part that scrolls inside it shows what
-        // of that part is on screen, and said nothing: it read as a whole
-        // short page.
-        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture. " +
-        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
+        // A picture of a page with a part that scrolls inside it shows none
+        // of what the part hides, and said nothing: it read as a whole short
+        // page.
+        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture; the contrast check may not have read it. " +
+        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture; the contrast check may not have read it.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1289,7 +1289,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // An agent that looks at it is told the same.
     expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
-      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture; the contrast check may not have read it.",
     );
     // At both widths it says so of both: a phone's one screen is not "the
     // whole page" because the desktop's was the first to be asked. CANARY:
@@ -1298,8 +1298,17 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // the part holds and shows, never what kind of page it is: a page that
     // also scrolls as pages do was called one that does not.
     expect((await withBrowser("", () => ask("zapp.html"))).text).toContain(
-      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture. " +
-        "At the phone width (390 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture; the contrast check may not have read it. " +
+        "At the phone width (390 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture; the contrast check may not have read it.",
+    );
+    // Several such parts: how many, and the one that hides the most. Not a
+    // count of everything that scrolls. CANARY: say of several what is said
+    // of one and a board of lanes reads as one lane.
+    saveFiles("VIB-1", { "lanes.html": '<p>three lanes: fake-inner:{"what":"section#doing","height":5000,"box":800,"count":3}</p>' });
+    expect((await withBrowser("", () => ask("lanes.html", { view: "desktop" }))).text).toContain(
+      "At the desktop width (1280 px) 3 parts of the page that scroll inside it each hold more than a screen beyond their box: " +
+        "the one that hides the most, `section#doing`, holds 5,000 px in a box 800 px tall (sizes as laid out). " +
+        "What they hide is in no picture, and the contrast check may not have read it.",
     );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(

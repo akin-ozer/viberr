@@ -98,7 +98,7 @@ function cutSourcesTo(key: string, kept: number): void {
 /** The reference: longer than two stretches at the desktop width, with
  *  something of each kind of motion the renderer reads. */
 const REFERENCE =
-  "<h1>The reference</h1><p>fake-height:4500</p>" +
+  '<h1>The reference</h1><p>fake-height:4500</p><p>fake-inner:{"what":"pre.terms","height":9000,"box":300}</p>' +
   '<p>fake-animations:[{"name":"drift","target":"div.hero","loops":true,"durationMs":8000},{"name":"rise","target":"h1","loops":false,"durationMs":600}]</p>' +
   '<p>fake-videos:[{"autoplay":true,"loop":true,"playing":true,"width":960,"height":540}]</p>' +
   '<p>fake-sticky:{"what":"header.site","position":"sticky"}</p><p>fake-on-scroll:3</p>' +
@@ -165,6 +165,13 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       expect(note).toContain("- A bar stays at the top of the screen while the page scrolls (`header.site`, sticky).");
       expect(note).toContain("- 3 elements began to animate as they were scrolled into view.");
       expect(note).toContain("- Under the pointer, `a.cta` changes its background-color over 150 ms.");
+      // A part that scrolls inside the page is said with its sizes, and that
+      // the pictures hold none of what it hides. CANARY: say nothing and a
+      // reference with a pane of terms reads as shown whole.
+      expect(note).toContain(
+        "At 1280 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture.\n" +
+          "At 390 px `pre.terms` scrolls inside the page: it holds 9,000 px in a box 300 px tall (sizes as laid out), and what it hides is in no picture.\n",
+      );
 
       // The answer names the ids and shows no picture.
       expect(answer).toContain(`[kept] How https://look.example/S3-series looked on ${day} is kept on VIB-1.`);
@@ -441,8 +448,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // A page that scrolls inside one of its elements: said in the answer
       // and in the note, under what moved, in the page's own name for it.
       expect(answer).toContain(
-        "At 1280 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture. " +
-          "At 390 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture.",
+        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture. " +
+          "At 390 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture.",
       );
       const whole = sourcesOf("VIB-1");
       const pictures = whole.length - 1;
@@ -475,8 +482,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // that is no id. CANARY: rename ids in the note's text and VIB-2's note
       // names an element the page does not have.
       expect(textOf("VIB-2", taken.note)).toContain(
-        "At 1280 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture.\n" +
-          "At 390 px 3 parts of the page scroll inside it",
+        "At 1280 px 3 parts of the page that scroll inside it each hold more than a screen beyond their box: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall (sizes as laid out). What they hide is in no picture.\n" +
+          "At 390 px 3 parts of the page that scroll inside it",
       );
 
       // A take-over cut off before its note: every picture is there and the

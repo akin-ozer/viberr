@@ -444,9 +444,10 @@ interface RenderedAct {
   error: string | null;
 }
 
-/** The parts of a page that scroll inside it at one width, each hiding more
- *  than a screen: how many there are, and of the one that hides the most its
- *  name, how tall what it holds is and how tall its own box. */
+/** The parts of a page that scroll inside it at one width, each holding more
+ *  than a screen beyond its own box: how many there are, and of the one that
+ *  hides the most its name, how tall what it holds is and how tall its box,
+ *  in the page's own px as it is laid out. */
 export interface ScrollsInside {
   view: PageCaptureViewId;
   what: string;
@@ -464,9 +465,9 @@ interface RenderedPage {
   motion: PageMotion | null;
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
-  /** At each width, the parts of the page that scroll inside it and hide
-   *  more than a screen: what they hide is in no picture. None where no
-   *  part hides that much. */
+  /** At each width, the parts of the page that scroll inside it and hold
+   *  more than a screen beyond their box: what they hide is in no picture.
+   *  None where no part hides that much. */
   scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
@@ -1245,21 +1246,25 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
 
 /**
  * Said of the parts that scroll inside a page, a sentence a width: how many
- * hide more than a screen, how much the one that hides the most holds and in
- * how tall a box, and that what they hide is in no picture. Only that: where
- * such a part sits and whether the page also scrolls as pages do are in the
- * pictures, and the checks read the whole document whatever is scrolled out
- * of sight. `subject` is how the sentence names the page: its name in a
- * note, "the page" in a reply.
+ * hold more than a screen beyond their box, how much the one that hides the
+ * most holds and in how tall a box, as the page lays them out, and that what
+ * they hide is in no picture. Only that. The sizes are the layout's, which a
+ * zoom or a transform draws at another size. Where such a part sits, and
+ * whether the page also scrolls as pages do, the sentence does not say. And
+ * the checks read the document, but the one that judges what a reader sees
+ * (contrast) skips what an `overflow: hidden` shell keeps out of sight.
+ * `subject` is how the sentence names the page: its name in a note, "the
+ * page" in a reply.
  */
 function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string): string[] {
   return inside.map((entry) => {
     const where = atWidth(entry.view);
     const at = `${where.charAt(0).toUpperCase()}${where.slice(1)}`;
-    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall`;
+    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall (sizes as laid out)`;
+    const unread = "the contrast check may not have read it";
     return entry.count === 1
-      ? `${at} \`${entry.what}\` scrolls inside ${subject}: it ${holds}, and what it hides is in no picture.`
-      : `${at} ${entry.count} parts of ${subject} scroll inside it and each hides more than a screen: the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture.`;
+      ? `${at} \`${entry.what}\` scrolls inside ${subject}: it ${holds}, and what it hides is in no picture; ${unread}.`
+      : `${at} ${entry.count} parts of ${subject} that scroll inside it each hold more than a screen beyond their box: the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture, and ${unread}.`;
   });
 }
 
