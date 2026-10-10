@@ -20,7 +20,6 @@ import { z } from "zod";
 import {
   deliveredAsFiles,
   type PageCaptures,
-  type PageMeasuredRecord,
   type TaskFileEvent,
   type TaskFrontmatter,
 } from "~/schemas/task-file.schema";
@@ -76,7 +75,7 @@ import {
   type PageCaptureViewId,
   type PageKind,
 } from "~/shared/page-capture";
-import { loadText, weightText } from "~/shared/page-measure";
+import { loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
 import { recordRunLooks } from "./page-looks.server";
@@ -1283,7 +1282,7 @@ function acceptedPageFigures(db: DatabaseSync, ctx: TaskMutationContext, project
       if (row.task_key === taskKey || !isTerminalStage(row.stage, stages)) continue;
       const pages = readTaskFile(taskRef(ctx, projectSlug, row.task_key))?.parsed.frontmatter.pageCaptures?.pages ?? [];
       for (const page of pages) {
-        const measured = page.measured;
+        const measured = measuredOf(page);
         if (!measured) continue;
         if (!figures.weight || measured.weightBytes < figures.weight.bytes) {
           figures.weight = { bytes: measured.weightBytes, taskKey: row.task_key };

@@ -24,7 +24,7 @@ import {
   viewOfCaptureName,
   type PageCaptureViewId,
 } from "~/shared/page-capture";
-import { measuredLine } from "~/shared/page-measure";
+import { measuredLine, measuredOf } from "./page-measured.server";
 import { taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 
@@ -218,9 +218,10 @@ export function pageLooksOwed(
   const looks = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources);
   if (pages.length === 0 && looks.length === 0) return null;
   const record = fm.pageCaptures?.deliveredAt === fm.deliveredAt ? fm.pageCaptures : null;
-  const measured = (record?.pages ?? []).flatMap((page) =>
-    page.measured && pages.includes(page.file) ? [{ file: page.file, line: measuredLine(page.measured) }] : [],
-  );
+  const measured = (record?.pages ?? []).flatMap((page) => {
+    const figures = pages.includes(page.file) ? measuredOf(page) : null;
+    return figures ? [{ file: page.file, line: measuredLine(figures) }] : [];
+  });
   return { taskKey, deliveredAt: fm.deliveredAt, pages, looks, measured };
 }
 

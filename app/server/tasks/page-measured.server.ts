@@ -1,4 +1,5 @@
-import type { PageMeasuredRecord } from "~/schemas/task-file.schema";
+import { z } from "zod";
+import type { PageCaptures } from "~/schemas/task-file.schema";
 
 /**
  * Ruling 328: what Viberr measured of one pictured page, as a task's record
@@ -9,11 +10,48 @@ import type { PageMeasuredRecord } from "~/schemas/task-file.schema";
  * and at each width how many kinds of accessibility fault the checks found,
  * how many controls the keyboard did not reach or that showed nothing on
  * focus, and how many things still moved with reduced motion asked for. The
- * sentences that name each element are in the delivery's note. Client-safe:
- * the result card may print the line.
+ * sentences that name each element are in the delivery's note.
+ *
+ * Server-only on purpose. The task file's own schema is loaded by the browser
+ * too, and keeps `measured` as it is written without reading its shape; the
+ * readers here are the note, the completion packet and the review's prompt.
  */
 
+const pageMeasuredSchema = z
+  .object({
+    weightBytes: z.number().int().nonnegative(),
+    files: z.number().int().nonnegative(),
+    loadMs: z.number().nonnegative().nullable().default(null),
+    line: z.string().default(""),
+    views: z
+      .array(
+        z
+          .object({
+            view: z.enum(["desktop", "phone"]),
+            faultKinds: z.number().int().nonnegative().nullable().default(null),
+            faultElements: z.number().int().nonnegative().default(0),
+            worstContrast: z.number().positive().nullable().default(null),
+            controls: z.number().int().nonnegative().default(0),
+            unreached: z.number().int().nonnegative().default(0),
+            unmarked: z.number().int().nonnegative().default(0),
+            stillMoving: z.number().int().nonnegative().default(0),
+          })
+          .loose(),
+      )
+      .default([]),
+  })
+  .loose();
+
+export type PageMeasuredRecord = z.infer<typeof pageMeasuredSchema>;
+
 type MeasuredViewRecord = PageMeasuredRecord["views"][number];
+
+/** What a page's entry of `pageCaptures` holds as measured, or null when it
+ *  holds none or one that does not read as a record. */
+export function measuredOf(page: PageCaptures["pages"][number]): PageMeasuredRecord | null {
+  const parsed = pageMeasuredSchema.safeParse(page.measured);
+  return parsed.success ? parsed.data : null;
+}
 
 const WIDTH = { desktop: 1280, phone: 390 } as const;
 

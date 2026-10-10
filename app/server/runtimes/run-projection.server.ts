@@ -252,9 +252,6 @@ function projectRow(
     backend,
     sdk: row.sdk || SDK_LABEL[backend] || "",
     model: row.model,
-    // Left out, not null, for a run given none: the console payload carries
-    // every run on the task (ruling 11's budget), and most were given none.
-    effort: row.effort ?? undefined,
     sid: row.session_id,
     // P11-43: the Export link 404s when the provider kept no on-disk transcript.
     // Compute REAL exportability here (does the transcript actually exist?) so

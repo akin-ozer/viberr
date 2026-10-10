@@ -497,9 +497,6 @@ export interface RunView {
   backend: "claude" | "codex";
   sdk: string;
   model: string;
-  /** Ruling 153: the reasoning effort the run's backend was given, null when
-   *  none was set and the vendor's default applied. Printed beside the model. */
-  effort?: string | null;
   /** Provider session/thread id (may be null before init lands). */
   sid: string | null;
   /** P11-43: the provider kept an on-disk transcript for this session, so the

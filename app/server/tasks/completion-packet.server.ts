@@ -46,7 +46,8 @@ import {
   pageOfCaptureName,
   type PageCaptureViewId,
 } from "~/shared/page-capture";
-import { measuredLine } from "~/shared/page-measure";
+import type { PageCaptures } from "~/schemas/task-file.schema";
+import { measuredLine, measuredOf } from "./page-measured.server";
 import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -287,6 +288,12 @@ export interface PageCaptureFact {
   measured: string | null;
 }
 
+/** The one line of what was measured of a page, or null when nothing was. */
+function measuredLineOf(page: PageCaptures["pages"][number]): string | null {
+  const measured = measuredOf(page);
+  return measured ? measuredLine(measured) : null;
+}
+
 /** The record's pages while it pictures the delivery under review. */
 function currentPageCaptures(fm: Pick<TaskFrontmatter, "deliveredAt" | "pageCaptures" | "workRevision">) {
   const record = fm.pageCaptures;
@@ -351,7 +358,7 @@ export function completionPacketFact(
       file: page.file,
       pictures: page.shots.map((shot) => shot.name),
       problem: page.error,
-      measured: page.measured ? measuredLine(page.measured) : null,
+      measured: measuredLineOf(page),
     })),
     note,
   };
