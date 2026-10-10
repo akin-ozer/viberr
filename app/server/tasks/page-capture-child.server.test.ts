@@ -104,8 +104,11 @@ const reportSchema = z.object({
       acts: z.array(z.object({ view: z.string(), done: z.string().nullable(), error: z.string().nullable() })),
       /** At each view where a part of the page scrolls inside it with more
        *  than a screen out of sight: the one that hides the most, how much
-       *  it holds and how much of that is on screen; null when none does. */
-      scrollsInside: z.array(z.strictObject({ view: z.string(), what: z.string(), height: z.number(), shown: z.number() })).nullable(),
+       *  it holds, how tall its own box is, and how many such parts there
+       *  are; null when none does. */
+      scrollsInside: z
+        .array(z.strictObject({ view: z.string(), what: z.string(), height: z.number(), box: z.number(), count: z.number() }))
+        .nullable(),
       dialogs: z.number(),
       asked: z.array(z.string()),
       askedCount: z.number(),
@@ -968,22 +971,23 @@ describe("the page capture's renderer child (ruling 194)", () => {
     expect(past.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-phone.png"]);
   });
 
-  it("asks a page at every width for the part that scrolls inside it, and says of each width where there is one how much it holds and how much of that a picture shows", async () => {
+  it("asks a page at every width for the part that scrolls inside it, and says of each width where there is one how much it holds, in a box how tall, and how many such parts there are", async () => {
     const shell = `main.${"app-shell-".repeat(10)}`;
-    const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4, shown: 640.4 })}</p>`;
+    const part = `<p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4, box: 640.4 })}</p>`;
     const b = bench({
       // A page whose content scrolls in a part of it, as the page's own
       // layout says: the stand-in answers what the page declares.
       "app.html": part,
-      // A long page with such a part in it.
-      "long.html": `<p>fake-height:3000</p>${part}`,
+      // A long page with three such parts in it, of which this is the one
+      // that hides the most.
+      "long.html": `<p>fake-height:3000</p><p>fake-inner:${JSON.stringify({ what: shell, height: 5200.4, box: 640.4, count: 3 })}</p>`,
       // One at a phone's width alone.
       "narrow.html": `<p>fake-height:3000 fake-inner-under:600</p>${part}`,
       // A page with no such part.
       "plain.html": "<p>fake-height:3000</p>",
     });
     const report = await b.run({ pages: ["app.html", "long.html", "narrow.html", "plain.html"], views: [DESKTOP, PHONE] });
-    const found = (view: string) => ({ view, what: shell.slice(0, 80), height: 5200, shown: 640 });
+    const found = (view: string, count = 1) => ({ view, what: shell.slice(0, 80), height: 5200, box: 640, count });
     // CANARY: say nothing of it and a picture of a page whose content
     // scrolls in a part of it reads as showing all the page holds. The
     // part's name is the page author's, so it is cut at eighty characters
@@ -991,10 +995,11 @@ describe("the page capture's renderer child (ruling 194)", () => {
     // the first width that finds one and a page that has it at both is said
     // to have it at the desktop alone. Ask only a page no taller than its
     // screen and the long page says nothing of the part its pictures show
-    // 640 px of.
+    // 640 px of. Name the one part and not how many there are and a page
+    // with three reads as one whose other two hide nothing.
     expect(report.pages.map((page) => [page.file, page.error, page.scrollsInside])).toEqual([
       ["app.html", null, [found("desktop"), found("phone")]],
-      ["long.html", null, [found("desktop"), found("phone")]],
+      ["long.html", null, [found("desktop", 3), found("phone", 3)]],
       ["narrow.html", null, [found("phone")]],
       ["plain.html", null, null],
     ]);

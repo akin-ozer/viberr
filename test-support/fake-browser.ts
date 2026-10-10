@@ -76,9 +76,11 @@ import { z } from "zod";
  *    told reduced motion.
  *  - `fake-trickle:3`: so many requests after the load event, 200 ms apart;
  *    `fake-lands:"about:blank"`: the address the browser is at once loaded.
- *  - `fake-inner:{"what":"main.app","height":5200,"shown":800}`: the part
- *    of the page that scrolls inside it and hides the most, at every width,
- *    or with `fake-inner-under:600` only at a viewport narrower than that.
+ *  - `fake-inner:{"what":"main.app","height":5200,"box":800}`: the part of
+ *    the page that scrolls inside it and hides the most, at every width, or
+ *    with `fake-inner-under:600` only at a viewport narrower than that; a
+ *    `"count":3` beside them is how many such parts there are (1 when left
+ *    out).
  *
  * A browser started without `--proxy-server` has the network open: an
  * absolute `src` is then fetched too, where one behind the proxy is only
@@ -431,8 +433,10 @@ function evaluate(message) {
       const on = pointer !== null && pointer[0] === control.at[0] && pointer[1] === control.at[1];
       return say({ changes: on ? control.changes : [], durationMs: on && control.durationMs !== undefined ? control.durationMs : null });
     }
-    case "inner":
-      return say({ inside: metrics.width < declared("inner-under", Infinity) ? told("inner", null) : null });
+    case "inner": {
+      const part = metrics.width < declared("inner-under", Infinity) ? told("inner", null) : null;
+      return say({ inside: part ? { count: 1, ...part } : null });
+    }
     case "load-time":
       return say({ ms: line.held && line.cacheDisabled ? declared("load-ms", 1) : 1 });
     default:

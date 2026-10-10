@@ -62,9 +62,9 @@
 #     (a shell fixed to its screen, one under a header with or without page
 #     below it, a body that scrolls by itself, three lanes side by side, a
 #     log in a box on a long page), the report names the one that hides the
-#     most at each width, with how much it holds and how much of that is on
-#     screen, and not a part that only hides what does not fit or a body
-#     whose overflow is the window's;
+#     most at each width, with how much it holds, how tall its own box is
+#     and how many such parts there are, and not a part that only hides what
+#     does not fit or a body whose overflow is the window's;
 #   - any agent uid reads the picture the renderer saved, so a run of another
 #     person than the task's owner can copy it onto the task;
 #   - the renderer reads its pages from a folder it can only pass through, the
@@ -631,6 +631,15 @@ ${screens(5)}</body></html>`,
 <style>body{margin:0}header{height:56px;background:rgb(0,0,0)}main.app{height:100vh;overflow:auto}footer{height:1200px;background:rgb(0,0,255)}</style></head><body>
 <header></header><main class="app"><div style="height:24000px;background:rgb(0,128,0)"></div></main><footer></footer></body></html>`,
   );
+  // A shell fixed to its screen with two panes that each scroll: a rail
+  // holding 6,000 px and an article holding 4,000. A note in the article
+  // scrolls too, by 300 px, which is less than a screen and so no such part.
+  writeFileSync(
+    path.join(dir, "panes.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Two panes</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{height:100%;margin:0;overflow:hidden}body{display:flex}aside.rail{width:30%;overflow-y:auto}main.article{flex:1;overflow-y:auto}</style></head><body>
+<aside class="rail"><div style="height:6000px"></div></aside><main class="article"><div class="note" style="height:100px;overflow:auto"><div style="height:400px"></div></div><div style="height:3900px"></div></main></body></html>`,
+  );
   // A long page on a wide screen that is an app in a shell on a narrow one.
   // Its `body` keeps the margin browsers give it, so the shell is 16 px
   // taller than the phone's screen: a page that scrolls by its own margin
@@ -814,7 +823,7 @@ if (command === "job-inside") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "inside", {
-      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html"].map((file) => ({
+      pages: ["inside.html", "folded.html", "shell.html", "narrow.html", "header.html", "header-hidden.html", "boxes.html", "lanes.html", "below.html", "panes.html"].map((file) => ({
         file,
         kind: "html",
       })),
@@ -1001,7 +1010,7 @@ if (command === "verify-long") {
     return next === 5 * screen + 100 && shots.every((shot) => shot.cut === false && shot.contentHeight === next) ? "" : `they end at ${next}`;
   };
   check(long.error === null, "a page five screens long is pictured whole and moving", long.error ?? "");
-  check(long.scrollsInside === null, "and, scrolling as pages do, is not said to scroll inside itself", JSON.stringify(long.scrollsInside));
+  check(long.scrollsInside === null, "and has no part that scrolls inside it", JSON.stringify(long.scrollsInside));
   check(
     long.shots.filter((shot) => shot.view === "desktop").map((shot) => shot.file).join(" ") === "1-desktop.png 1-desktop-s2.png 1-desktop-s3.png",
     "a whole view comes back as its stretches, as many as the page takes",
@@ -1204,12 +1213,12 @@ if (command === "verify-walks") {
 if (command === "verify-inside") {
   const [work] = args;
   const { check, pages, picture, done } = outcomeOf(work, "inside");
-  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below] = pages;
+  const [inside, folded, shell, narrow, header, hidden, boxes, lanes, below, panes] = pages;
   const shot = (page, view) => page.shots.find((entry) => entry.view === view);
   const desktop = picture("1-desktop.png");
   check(
-    pages.length === 9 && pages.every((page) => page.error === null),
-    "nine pages are pictured at both widths",
+    pages.length === 10 && pages.every((page) => page.error === null),
+    "ten pages are pictured at both widths",
     pages.map((page) => `${page.file}: ${page.error}`).join(", "),
   );
   check(
@@ -1218,22 +1227,23 @@ if (command === "verify-inside") {
     `${desktop?.width}x${desktop?.height} ${JSON.stringify(shot(inside, "desktop"))}`,
   );
   // What a page says of each view where a part scrolls inside it: the view,
-  // the part, how much it holds and how much of that is on screen.
-  const said = (page) => (page.scrollsInside ?? []).map((at) => `${at.view} ${at.what} ${at.height} ${at.shown}`).join(", ");
+  // the part that hides the most, how much it holds, how tall its own box
+  // is, and how many such parts there are.
+  const said = (page) => (page.scrollsInside ?? []).map((at) => `${at.view} ${at.what} ${at.height} ${at.box} ${at.count}`).join(", ");
   const says = (page, words, what) => check(said(page) === words, what, JSON.stringify(page.scrollsInside));
   says(
     inside,
-    "desktop main.app 4100 800, phone main.app 4100 844",
-    "and the report says at each width what scrolls inside it, how much that holds and how much of it a picture shows: not the strip that only hides six screens, which is more",
+    "desktop main.app 4100 800 1, phone main.app 4100 844 1",
+    "and the report says at each width what scrolls inside it, how much that holds in a box how tall, and that it is the one such part: the strip that only hides six screens is none",
   );
   // A document of 8,000 px, and the log's 5,000 in a box of 200.
   says(
     folded,
-    "desktop pre.log 5000 200, phone pre.log 5000 200",
-    "a long page with a log in a box of its own says so too: the log, and not the body that holds more out of sight, whose overflow is the window's",
+    "desktop pre.log 5000 200 2, phone pre.log 5000 200 2",
+    "a long page with a log in a box of its own says so too: the log, one of two with the reel, and not the body that holds more out of sight, whose overflow is the window's",
   );
   check(shot(folded, "desktop")?.contentHeight === 8000, "and that page is pictured as the long page it is", JSON.stringify(shot(folded, "desktop")));
-  says(shell, "desktop body 4000 800, phone body 4000 844", "a body that scrolls by itself, under a root with an overflow of its own, is the part that scrolls inside a page of one screen");
+  says(shell, "desktop body 4000 800 1, phone body 4000 844 1", "a body that scrolls by itself, under a root with an overflow of its own, is the part that scrolls inside a page of one screen");
   check(picture("3-desktop.png")?.height === 800, "and that page is pictured as its one screen", `${picture("3-desktop.png")?.height}`);
   // A long page on the desktop, pictured whole there, and a shell on the
   // phone, where its one screen and the body's own margin are all a picture
@@ -1243,24 +1253,29 @@ if (command === "verify-inside") {
     "a page that is a long page on a wide screen and a shell on a narrow one is pictured whole at the one and as its screen at the other",
     `${picture("4-desktop.png")?.height} ${JSON.stringify(shot(narrow, "phone"))}`,
   );
-  says(narrow, "phone main.app 4000 844", "and has a part that scrolls inside it at the phone's width alone");
+  says(narrow, "phone main.app 4000 844 1", "and has a part that scrolls inside it at the phone's width alone");
   // The document is its screen and the header: 856 px, and 900 on the phone.
   check(shot(header, "desktop")?.contentHeight === 856, "a shell under a header is a document 56 px taller than its screen", JSON.stringify(shot(header, "desktop")));
-  says(header, "desktop main.app 24000 800, phone main.app 24000 844", "and its part that scrolls is said at both widths, with the one screen of thirty a picture shows");
-  says(hidden, "desktop main.app 24000 800, phone main.app 24000 844", "and so is the same shell under a root that hides what overflows it");
+  says(header, "desktop main.app 24000 800 1, phone main.app 24000 844 1", "and its part that scrolls is said at both widths: thirty screens in a box of one");
+  says(hidden, "desktop main.app 24000 800 1, phone main.app 24000 844 1", "and so is the same shell under a root that hides what overflows it");
   says(
     boxes,
-    "desktop pre.log 5000 300, phone pre.log 5000 300",
-    "a page of one screen with a long text field and a block with a height of its own names the one that hides the more, and not the part that only hides what runs past the screen",
+    "desktop pre.log 5000 300 2, phone pre.log 5000 300 2",
+    "a page of one screen with a long text field and a block with a height of its own names the one that hides the more and counts both, and not the part that only hides what runs past the screen",
   );
   says(
     lanes,
-    "desktop section#doing 5000 800, phone section#doing 5000 844",
-    "three lanes side by side, none of them half the screen, are not a page shown whole: the lane that hides the most is named",
+    "desktop section#doing 5000 800 3, phone section#doing 5000 844 3",
+    "three lanes side by side, none of them half the screen, are not a page shown whole: the lane that hides the most is named, as one of three",
   );
   // 56 px of header, one screen of main and 1,200 px of page after it.
   check(shot(below, "desktop")?.contentHeight === 2056, "a shell under a header with more page below it is a document of 2,056 px", JSON.stringify(shot(below, "desktop")));
-  says(below, "desktop main.app 24000 800, phone main.app 24000 844", "and its part that scrolls is said with what a picture shows of it, whatever page there is around it");
+  says(below, "desktop main.app 24000 800 1, phone main.app 24000 844 1", "and its part that scrolls is said the same way, whatever page there is around it");
+  says(
+    panes,
+    "desktop aside.rail 6000 800 2, phone aside.rail 6000 844 2",
+    "a shell with two panes that each scroll names the rail, which hides the more, and says there are two such parts: the note that scrolls by less than a screen is none",
+  );
   done();
 }
 
@@ -1578,7 +1593,7 @@ further walks "measured six pages a keyboard walk has to get right"
 "$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
 
 # --- a page that scrolls inside itself ---------------------------------------------
-further inside "pictured nine pages with a part that scrolls inside them"
+further inside "pictured ten pages with a part that scrolls inside them"
 "$NODE" "$WORK/check.mjs" verify-inside "$WORK" || failures=$((failures + 1))
 
 # --- nothing left running -------------------------------------------------------
