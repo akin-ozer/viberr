@@ -81,6 +81,10 @@ describe("ensureBaselineColumns (pass 32 C02-R11; ruling 249 controller tables)"
         "credential_kind",
         // Ruling 138: `upsertRun` names the billed account on every insert.
         "credential_account_id",
+        // Ruling 153: `upsertRun` names the run's effort on every insert too.
+        "effort",
+        // Ruling 329: every reader that hands a run a picture writes it.
+        "looked_json",
       ]);
 
       // F37-71: a task projection from before the recommendation-kinds column.

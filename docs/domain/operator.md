@@ -681,8 +681,11 @@ Details that matter:
   took: Viberr prints the runs, agent time, cost, questions and send-backs beside it
   from the record (ruling 83), as it prints the verdicts and the change. Ruling 316: `pageCaptures` lists,
   for the files delivery under review, each page of the record (`file`), the pictures'
-  names among the attachments (`pictures`) and why a page has none (`problem`, which for
-  a page past the 8 a delivery is pictured for says so); it is empty when the delivery
+  names among the attachments (`pictures`), why a page has none (`problem`, which for
+  a page past the 8 a delivery is pictured for says so) and, for an HTML page that was
+  measured as it was pictured, one line of what was measured (`measured`, ruling 328: its
+  weight, its load time and what the checks found at each width; `null` otherwise), which
+  the note tells the operator to report in its figures and never as a check passed; it is empty when the delivery
   holds no page, when the server names no browser, while the render has not finished,
   and when the record on file pictures an earlier delivery. A page it does not list was
   not pictured (a person's own upload never is). The card shows those pictures beside

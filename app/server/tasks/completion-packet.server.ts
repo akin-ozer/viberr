@@ -46,6 +46,8 @@ import {
   pageOfCaptureName,
   type PageCaptureViewId,
 } from "~/shared/page-capture";
+import type { PageCaptures } from "~/schemas/task-file.schema";
+import { measuredLine, measuredOf } from "./page-measured.server";
 import { IMAGE_RE } from "~/ui/picked-files";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 
@@ -94,7 +96,7 @@ import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutatio
  * names none, and it opens one before it writes how a page looks.
  */
 export const PAGE_PICTURES_PACKET_SENTENCE =
-  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures, which show beside it on the result, so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured.";
+  "When Viberr pictured the delivery's pages, `completionPacket.pageCaptures` lists each page with its pictures, which show beside it on the result, so never name one of those as a screenshot. Open a page's picture with `read_task_attachment` before you say how it looks. A page listed with no picture carries the reason, and a page that is not listed was not pictured. A page's `measured` line is what Viberr measured as it pictured it (its weight, its load time, and what the accessibility, keyboard and reduced-motion checks found at each width): say what it found in the summary, in its figures, and never that a page passes a check the line does not show.";
 /** The same, in the space a plan field's description has. */
 export const PAGE_PICTURES_PLAN_SENTENCE =
   "Never one of Viberr's own pictures of a result page (`completionPacket.pageCaptures`): those show beside the page without being named.";
@@ -281,6 +283,15 @@ export interface PageCaptureFact {
   /** The pictures' names among the task's attachments. */
   pictures: string[];
   problem: string | null;
+  /** Ruling 328: what Viberr measured of the page as it pictured it, in one
+   *  line; null when it was not measured. */
+  measured: string | null;
+}
+
+/** The one line of what was measured of a page, or null when nothing was. */
+function measuredLineOf(page: PageCaptures["pages"][number]): string | null {
+  const measured = measuredOf(page);
+  return measured ? measuredLine(measured) : null;
 }
 
 /** The record's pages while it pictures the delivery under review. */
@@ -347,6 +358,7 @@ export function completionPacketFact(
       file: page.file,
       pictures: page.shots.map((shot) => shot.name),
       problem: page.error,
+      measured: measuredLineOf(page),
     })),
     note,
   };

@@ -242,6 +242,7 @@ describe("codex adapter (SDK, injected fake client)", () => {
           viberr: { type: "sdk", instance: {} },
           malformed: { command: "npx", args: ["ok", 42] },
           viberr_browser: { command: "node", args: ["browser-supervisor.server.ts", "cli.js"] },
+          viberr_board: { type: "http", url: "http://127.0.0.1:4100/mcp/viberr_board" },
         },
       },
       { onLine: () => {}, onExit: () => {} },
@@ -303,6 +304,18 @@ describe("codex adapter (SDK, injected fake client)", () => {
         args: ["browser-supervisor.server.ts", "cli.js"],
         default_tools_approval_mode: "approve",
         tool_timeout_sec: 120,
+        required: true,
+        startup_timeout_sec: 60,
+      },
+      // Ruling 327: the board server's `keep_page_look` opens a page on the
+      // web and pictures it whole at two widths, past the CLI's default wait
+      // on a tool.
+      // CANARY: drop the board's `tool_timeout_sec` and a Codex run's look
+      // of a long page ends as a bare timeout with nothing kept said.
+      viberr_board: {
+        url: "http://127.0.0.1:4100/mcp/viberr_board",
+        default_tools_approval_mode: "approve",
+        tool_timeout_sec: 180,
         required: true,
         startup_timeout_sec: 60,
       },

@@ -27,7 +27,8 @@ import {
   readTimelineEntry,
 } from "./board-read.server";
 import { PAGE_CAPTURE_MAX_FROM } from "~/shared/page-capture";
-import { captureTaskPage, pageCaptureStatus } from "./page-capture.server";
+import { captureTaskPage, measureTaskPage, pageCaptureStatus } from "./page-capture.server";
+import { KEEP_PAGE_LOOK_NAME, keepPageLook } from "./page-look.server";
 import {
   KB_DOC_KB_DESCRIPTION,
   KB_DOC_OFFSET_DESCRIPTION,
@@ -37,6 +38,10 @@ import {
 } from "~/server/files/kb-injection.server";
 import { KB_CORRECTION_FIELDS, KB_CORRECTION_SPECIALIST_DESCRIPTION } from "~/server/mcp-proxy/knowledge-tool.server";
 import {
+  KEEP_PAGE_LOOK_DESCRIPTION,
+  KEEP_PAGE_LOOK_FIELDS,
+  MEASURE_PAGE_DESCRIPTION,
+  MEASURE_PAGE_FIELDS,
   KEEP_SOURCE_NAME,
   READ_BOARD_DESCRIPTION,
   READ_BOARD_TASK_KEY_DESCRIPTION,
@@ -51,6 +56,8 @@ import {
   READ_TIMELINE_ENTRY_ENTRY_DESCRIPTION,
   READ_TIMELINE_ENTRY_OFFSET_DESCRIPTION,
   READ_TIMELINE_ENTRY_TASK_KEY_DESCRIPTION,
+  captureActControl,
+  captureActTab,
   captureBoxScale,
   captureBoxSide,
   keepSourceDescription,
@@ -161,6 +168,9 @@ interface AgentToolkitDeps {
    *  `keep_source` says a run can keep: a page it fetched, or only what a run
    *  without the web can reach. */
   webEgress: boolean;
+  /** Ruling 327: the run holds the browser grant, so it may have a page on
+   *  the web pictured and kept (`keep_page_look`). */
+  browser: boolean;
 }
 
 const prose = normalizeEscapedNewlines;
@@ -775,6 +785,39 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
     );
   }
 
+  // Ruling 327: a run that keeps sources and holds the browser has a page on
+  // the web pictured once and kept on its task, on a server that can render
+  // one. The Codex twin is the gateway's board server.
+  if (collab.evidence && deps.browser && pageCaptureStatus().available) {
+    tools.push(
+      tool(
+        KEEP_PAGE_LOOK_NAME,
+        KEEP_PAGE_LOOK_DESCRIPTION,
+        {
+          url: z.string().optional().describe(KEEP_PAGE_LOOK_FIELDS.url),
+          from: z.string().optional().describe(KEEP_PAGE_LOOK_FIELDS.from),
+        },
+        async (args) => {
+          try {
+            return textResult(
+              await keepPageLook(db, ctx, {
+                projectSlug,
+                taskKey,
+                url: args.url,
+                from: args.from,
+                actorRef,
+                runId: runIdForOutcomeKey(db, outcomeKey),
+              }),
+            );
+          } catch (error) {
+            logger.warn("agent keep_page_look failed", { taskKey, err: toError(error) });
+            return textResult("[error] The look could not be kept. Say so in your report, and state nothing about the look from memory.");
+          }
+        },
+      ),
+    );
+  }
+
   // Ruling 213(a) (pass 37, F37-114): an agent can read its repository and not the
   // board it works on. Its whole Viberr toolkit was post_comment, ask_human,
   // report_outcome and (with a grant) github_read — so a task key it is TOLD
@@ -868,7 +911,8 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const read = readAgentTaskAttachment(
-              { db, ctx, projectSlug },
+              // Ruling 329: a picture this run is handed is a look of its own.
+              { db, ctx, projectSlug, runId: runIdForOutcomeKey(db, outcomeKey) },
               args.taskKey?.trim() || taskKey,
               args.name,
               args.offset ?? 0,
@@ -896,7 +940,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
         async (args) => {
           try {
             const read = readAgentTaskSource(
-              { db, ctx, projectSlug },
+              { db, ctx, projectSlug, runId: runIdForOutcomeKey(db, outcomeKey) },
               args.taskKey?.trim() || taskKey,
               args.id,
               args.offset ?? 0,
@@ -927,6 +971,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             width: captureBoxSide.optional().describe(CAPTURE_PAGE_FIELDS.width),
             height: captureBoxSide.optional().describe(CAPTURE_PAGE_FIELDS.height),
             scale: captureBoxScale.optional().describe(CAPTURE_PAGE_FIELDS.scale),
+            press: captureActControl.optional().describe(CAPTURE_PAGE_FIELDS.press),
+            hover: captureActControl.optional().describe(CAPTURE_PAGE_FIELDS.hover),
+            tab: captureActTab.optional().describe(CAPTURE_PAGE_FIELDS.tab),
+            motion: z.literal("reduce").optional().describe(CAPTURE_PAGE_FIELDS.motion),
+            moving: z.boolean().optional().describe(CAPTURE_PAGE_FIELDS.moving),
           },
           async (args) => {
             try {
@@ -939,6 +988,11 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
                 width: args.width,
                 height: args.height,
                 scale: args.scale,
+                press: args.press,
+                hover: args.hover,
+                tab: args.tab,
+                motion: args.motion,
+                moving: args.moving,
                 // Told how a picture is kept: a run that can post files and
                 // holds no verdict (ruling 194). One that holds the verdict
                 // judges pictures and makes none, and one that cannot post
@@ -951,6 +1005,28 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             } catch (error) {
               logger.warn("agent capture_page failed", { taskKey, err: toError(error) });
               return textResult("[error] The page could not be captured.");
+            }
+          },
+        ),
+        // Ruling 328: the figures Viberr takes of a delivered page, taken now
+        // of a page on this task. Same gate, text only, nothing saved.
+        tool(
+          "measure_page",
+          MEASURE_PAGE_DESCRIPTION,
+          { name: z.string().describe(MEASURE_PAGE_FIELDS.name) },
+          async (args) => {
+            try {
+              return textResult(
+                await measureTaskPage(db, ctx, {
+                  projectSlug,
+                  taskKey,
+                  name: args.name,
+                  runId: runIdForOutcomeKey(db, outcomeKey),
+                }),
+              );
+            } catch (error) {
+              logger.warn("agent measure_page failed", { taskKey, err: toError(error) });
+              return textResult("[error] The page could not be measured.");
             }
           },
         ),

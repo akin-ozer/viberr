@@ -991,6 +991,18 @@ export async function startRun(
   // (an env key colliding with a credential key) throws instead of stranding
   // a `running` row.
   const credential = resolveRunCredential(db, input);
+  // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
+  // funnel every path goes through (specialist, operator, resume). It used to
+  // run only on the D4 cross-backend retry, so a profile whose stored effort
+  // came from the other backend's scale ("minimal" from Codex, "max" from
+  // Claude) shipped a tier the target SDK does not accept. An unset effort
+  // stays unset on Claude, where the SDK default applies. On Codex it is the
+  // catalog default, `medium` (ruling 149): the CLI's own default is set per
+  // model, and in 0.160.1 it is `low` on gpt-6.1-sol, the model every
+  // model-less operator and undeployed fallback runs, while the picker and the
+  // catalog say `medium`.
+  const effort =
+    input.effort?.trim() || input.backend === "codex" ? resolveRunEffort(input.backend, input.effort) : null;
   const runRow: InsertRunInput = {
     id: runId,
     projectSlug: input.projectSlug,
@@ -1020,6 +1032,9 @@ export async function startRun(
     // Ruling 153: what this run is judging, for the completion to compare.
     reviewSubject:
       input.reviewSubject === undefined ? null : (input.reviewSubject ?? NO_REVIEW_SUBJECT),
+    // Ruling 153: the effort the backend is given below, so what a setting
+    // cost is read from the run and not from the deployment as it stands later.
+    effort,
     // A reserved row is ALREADY running (that is the point) — re-stamping it
     // `queued` would blink the strip off between preparation and the spawn, and
     // would throw away the clock the human has been watching.
@@ -1082,19 +1097,7 @@ export async function startRun(
   // as `CLAUDE_CONFIG_DIR` on the credential env; the Codex adapter's private
   // home copies the account's sign-in from here and hands it back here.
   if (credential.ok) spec.accountHome = credential.credential.accountHome;
-  // P13-RT-08: normalize the effort tier for the RUN's backend here, the one
-  // funnel every path goes through (specialist, operator, resume). It used to
-  // run only on the D4 cross-backend retry, so a profile whose stored effort
-  // came from the other backend's scale ("minimal" from Codex, "max" from
-  // Claude) shipped a tier the target SDK does not accept. An unset effort
-  // stays unset on Claude, where the SDK default applies. On Codex it is the
-  // catalog default, `medium` (ruling 149): the CLI's own default is set per
-  // model, and in 0.160.1 it is `low` on gpt-6.1-sol, the model every
-  // model-less operator and undeployed fallback runs, while the picker and the
-  // catalog say `medium`.
-  if (input.effort?.trim() || input.backend === "codex") {
-    spec.effort = resolveRunEffort(input.backend, input.effort);
-  }
+  if (effort !== null) spec.effort = effort;
   if (input.systemPrompt) spec.systemPrompt = input.systemPrompt;
   if (input.compactAnchor) spec.compactAnchor = input.compactAnchor;
   if (input.steering) spec.steering = input.steering;

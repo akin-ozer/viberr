@@ -92,6 +92,17 @@ export type AgentRunRow = {
    *  that subject when it completes. NULL on a run that is not a task agent's
    *  and on rows written before the column existed. */
   review_subject: string | null;
+  /** Ruling 153: the reasoning effort the run's backend was given, in that
+   *  backend's own tiers. Null when nothing was set and the vendor's default
+   *  applied (a Claude run with no effort), and on rows written before the
+   *  column existed. What a setting cost is read from here, never from the
+   *  deployment as it stands later. */
+  effort: string | null;
+  /** Ruling 329: what the run was shown, as the JSON list `page-looks.server.ts`
+   *  writes and reads, started again with a mark by a compaction while the
+   *  run works (`LOOKS_COMPACTED_JSON`, written by the run's sink). Null on a
+   *  run that looked at nothing and was not compacted. */
+  looked_json: string | null;
   /** Ruling 87 (pass 37, F37-77): 1 when the workspace checkout could not be
    *  provisioned, so this run executed with NO working tree. A run that could
    *  not read the work judges nothing — the completion pipeline closes the
@@ -272,6 +283,8 @@ export interface InsertRunInput {
   /** Ruling 138: the account the run bills (see
    *  `AgentRunRow.credential_account_id`). Omitted stores NULL. */
   credentialAccountId?: string | null;
+  /** Ruling 153: see `AgentRunRow.effort`. Omitted stores NULL. */
+  effort?: string | null;
 }
 
 /** Insert (or replace, for seed idempotency) an agent_runs row. */
@@ -284,7 +297,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         started_at, finished_at,
         turns, input_tokens, cached_input_tokens, output_tokens, total_cost_usd,
         interrupted_by, interrupted_reason, credential_user_id, verdict_withheld,
-        review_subject, credential_kind, credential_account_id,
+        review_subject, credential_kind, credential_account_id, effort,
         created_at, updated_at)
      VALUES
        (@id, @taskKey, @projectSlug, @threadId, @role, @kind, @backend,
@@ -292,7 +305,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         @startedAt, @finishedAt,
         @turns, @inputTokens, @cachedInputTokens, @outputTokens, @totalCostUsd,
         @interruptedBy, @interruptedReason, @credentialUserId, @verdictWithheld,
-        @reviewSubject, @credentialKind, @credentialAccountId,
+        @reviewSubject, @credentialKind, @credentialAccountId, @effort,
         @createdAt, @updatedAt)
      ON CONFLICT(id) DO UPDATE SET
         task_key=excluded.task_key, project_slug=excluded.project_slug,
@@ -312,6 +325,7 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
         review_subject=excluded.review_subject,
         credential_kind=excluded.credential_kind,
         credential_account_id=excluded.credential_account_id,
+        effort=excluded.effort,
         updated_at=excluded.updated_at`,
   ).run({
     id: input.id,
@@ -343,10 +357,20 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
     reviewSubject: input.reviewSubject ?? null,
     credentialKind: input.credentialKind ?? null,
     credentialAccountId: input.credentialAccountId ?? null,
+    effort: input.effort ?? null,
     createdAt: now,
     updatedAt: now,
   });
 }
+
+/**
+ * Ruling 329: what a run's `looked_json` is set to when its context is
+ * compacted while it works. What it was shown before is a summary from then
+ * on, so the list starts again, and it starts with this mark: the looks of
+ * the session's earlier runs are behind the same summary and count no more.
+ * The compaction that closes a run (ruling 174) writes none.
+ */
+export const LOOKS_COMPACTED_JSON = JSON.stringify([{ kind: "compacted" }]);
 
 export interface RunPatch {
   sessionId?: string | null;
@@ -394,6 +418,9 @@ export interface RunPatch {
   compactions?: number;
   /** Ruling 172: patchable so the start path can stamp it on a reserved row. */
   credentialKind?: CredentialKind | null;
+  /** Ruling 329: see `AgentRunRow.looked_json`. Written whole each time a
+   *  reader hands the run a picture, and by the sink at a compaction. */
+  lookedJson?: string | null;
 }
 
 /** Patch selected fields on a run row; always bumps updated_at. */
@@ -431,6 +458,7 @@ export function patchRun(db: DatabaseSync, runId: string, patch: RunPatch): void
     lastPromptTokens: ["last_prompt_tokens", patch.lastPromptTokens],
     compactions: ["compactions", patch.compactions],
     credentialKind: ["credential_kind", patch.credentialKind],
+    lookedJson: ["looked_json", patch.lookedJson],
   } satisfies Record<keyof RunPatch, readonly [string, SQLInputValue | undefined]>;
 
   const cols: string[] = [];

@@ -14,7 +14,7 @@ import {
   parseQuotaResetAt,
 } from "./backend-quota.server";
 import { createLineRedactor, createRunSink } from "./run-sink.server";
-import { listRunLines, rawLogPath, upsertRun, getRun } from "./run-store.server";
+import { listRunLines, LOOKS_COMPACTED_JSON, patchRun, rawLogPath, upsertRun, getRun } from "./run-store.server";
 
 /**
  * P13-U-1: output-side secret redaction at the sink.
@@ -1226,6 +1226,88 @@ describe("ruling 172: the sink folds the prompt-cache record", () => {
     expect(rowOf("run_codex_turn").last_prompt_tokens).toBe(22_600);
     // A fold without a first call leaves the recorded one alone.
     expect(rowOf("run_codex_turn").first_call_prompt_tokens).toBe(14_000);
+  });
+
+  it("ruling 329: a compaction while a run works starts the list of what it was shown again, marked, whether the stream carried it or the rollout told of it; the one that closes a run leaves it", () => {
+    // An approval rests on the pictures its session still holds, and a
+    // compaction replaces them with a summary. CANARY: drop the patch that
+    // restarts `looked_json` from the stream's arm, or from the rollout's,
+    // and the list outlives the compaction on that backend.
+    const shown = JSON.stringify([{ kind: "source", task: "VIB-1", id: "S1" }]);
+    const looked = (runId: string) => getRun(store.db, runId)?.looked_json ?? null;
+    const streamed = sinkFor("run_looked");
+    patchRun(store.db, "run_looked", { lookedJson: shown });
+    streamed.line({
+      raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+      display: { t: "00:00:00", ev: "meta", tag: "system·compact_boundary", text: "context compacted (auto)" },
+      facts: { compaction: { trigger: "auto", preTokens: 150_000, postTokens: 12_000 } },
+      occurredAt: new Date().toISOString(),
+    });
+    // The mark is what tells a run compacted while it worked from one that
+    // was not: the looks of its session's earlier runs then count no more.
+    expect(looked("run_looked")).toBe(LOOKS_COMPACTED_JSON);
+    // The compaction that closes a run (ruling 174) comes after its verdict:
+    // it empties nothing, so a completion that is replayed still finds what
+    // the run was shown. CANARY: clear on every compaction and a review
+    // whose effects were lost in a restart is told it did not look.
+    patchRun(store.db, "run_looked", { lookedJson: shown });
+    streamed.line({
+      raw: JSON.stringify({ type: "system", subtype: "compact_boundary" }),
+      display: { t: "00:00:00", ev: "meta", tag: "run·compacted·completion", text: "context compacted at the end of the run" },
+      facts: { compaction: { trigger: "completion", preTokens: 150_000, postTokens: 12_000 } },
+      occurredAt: new Date().toISOString(),
+    });
+    expect(looked("run_looked")).toBe(shown);
+
+    // A Codex compaction is known only once the CLI has exited, and nothing
+    // says before or after which look it fell: all of them go.
+    upsertRun(store.db, {
+      id: "run_looked_rollout",
+      projectSlug: store.slug,
+      taskKey: "VIB-3",
+      threadId: "looked-rollout",
+      role: "reviewer",
+      kind: "reviewer",
+      backend: "codex",
+      model: "gpt-5.6-terra",
+      sdk: "Codex SDK",
+      agentName: "Reviewer",
+      agentProfileId: "reviewer",
+      state: "running",
+    });
+    const told = createRunSink(store.db, { ...spec("run_looked_rollout"), backend: "codex", taskKey: "VIB-3" });
+    patchRun(store.db, "run_looked_rollout", { lookedJson: shown });
+    told.foldRolloutStats({ peakPromptTokens: 9_000, lastPromptTokens: 9_000, compactions: 0 });
+    expect(looked("run_looked_rollout")).toBe(shown);
+    told.foldRolloutStats({
+      peakPromptTokens: 177_960,
+      lastPromptTokens: 26_700,
+      compactions: 1,
+      compactionEvents: [{ preTokens: 177_960, postTokens: 19_509 }],
+    });
+    expect(looked("run_looked_rollout")).toBe(LOOKS_COMPACTED_JSON);
+    // The compaction that closes a Codex run is on the rollout too. Its
+    // line reaches the sink first (the run service writes it, then folds),
+    // so the fold after it finds no compaction it had not counted, and the
+    // list stands. CANARY: restart the list at every fold that reports a
+    // compaction, counted before or not.
+    patchRun(store.db, "run_looked_rollout", { lookedJson: shown });
+    told.line({
+      raw: JSON.stringify({ type: "compacted", source: "viberr", trigger: "completion" }),
+      display: { t: "00:00:00", ev: "meta", tag: "run·compacted·completion", text: "context compacted at the end of the run" },
+      facts: { compaction: { trigger: "completion", preTokens: 90_000, postTokens: 9_000 } },
+      occurredAt: new Date().toISOString(),
+    });
+    told.foldRolloutStats({
+      peakPromptTokens: 177_960,
+      lastPromptTokens: 9_000,
+      compactions: 2,
+      compactionEvents: [
+        { preTokens: 177_960, postTokens: 19_509 },
+        { preTokens: 90_000, postTokens: 9_000 },
+      ],
+    });
+    expect(looked("run_looked_rollout")).toBe(shown);
   });
 
   it("a compaction the rollout reports and the stream never carried is audited at finalize", async () => {

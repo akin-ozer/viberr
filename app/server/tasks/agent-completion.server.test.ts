@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestDbContext, type TestDbContext } from "../../../test-support/test-db";
@@ -26,18 +26,20 @@ import {
 } from "~/server/files/task-writer.server";
 import { withFileLock } from "~/server/files/file-mutex.server";
 import { readProjectFile } from "~/server/files/project-writer.server";
-import { taskAttachmentsDir } from "~/server/files/file-store-root.server";
-import { listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { readTaskAttachment } from "~/server/files/task-attachments.server";
-import { SOURCE_STAGING_PREFIX, readTaskSources } from "~/server/files/task-sources.server";
+import { SOURCE_STAGING_PREFIX, readTaskSources, writeTaskSource } from "~/server/files/task-sources.server";
 import { insertUser } from "~/server/auth/user-store.server";
 import { logger } from "~/server/logging/logger.server";
 import { listAuditEvents } from "../../../test-support/audit-log";
+import { withEnv } from "../../../test-support/env";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { startRun } from "~/server/runtimes/run-service.server";
 import {
   getRun,
   insertRunLine,
+  LOOKS_COMPACTED_JSON,
   patchRun,
   upsertRun,
   type InsertRunInput,
@@ -69,6 +71,7 @@ import {
 import { resolvePacket } from "./packet-resolution.server";
 import { attachTaskFile } from "./task-edits.server";
 import { OPERATOR_REACT_HOP_CEILING } from "./task-action-core.server";
+import { recordRunLooks, runLooks, type RunLook } from "./page-looks.server";
 import { assignReviewer, assignSpecialist } from "./specialist-assignment.server";
 import { startAgentRun } from "./specialist-run.server";
 
@@ -298,7 +301,7 @@ let runSeq = 0;
 async function finishedRunWith(
   text: string,
   reviewSubject?: string | null,
-  { verdictWithheld = false } = {},
+  { verdictWithheld = false, session = "" }: { verdictWithheld?: boolean; session?: string } = {},
 ): Promise<string> {
   runSeq += 1;
   queueFakeRun({
@@ -308,7 +311,8 @@ async function finishedRunWith(
       { t: "", ev: "result", tag: "result", text: "done" },
     ],
     occurredAt: [new Date().toISOString(), new Date().toISOString(), new Date().toISOString()],
-    sessionId: `t-${runSeq}`,
+    // A session of its own, unless the case has this run continue one.
+    sessionId: session || `t-${runSeq}`,
   });
   const input: Parameters<typeof startRun>[1] = {
     projectSlug: store.slug,
@@ -1052,6 +1056,513 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
     expect(parsed.frontmatter.verdicts).toEqual([]);
     const note = parsed.timeline.find((e) => e.type === "quality");
     expect(note?.text).toContain("but it made what is delivered, so its verdict does not count");
+  });
+
+  describe("ruling 329: an approval of a page binds only from a run that looked at it", () => {
+    const savedAt = "2026-10-09T22:40:00.000Z";
+    const SUBJECT = `files:${savedAt}`;
+
+    /** `dev` delivered `files` at `savedAt`; `reviewer` is engaged to judge them. */
+    function writeDeliveredPageTask(files: readonly string[]): void {
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          ownerUserId: store.users.arda.id,
+          engagements: [DEV_DELIVERS_ENGAGEMENT, REVIEWER_ENGAGEMENT],
+          workRevision: null,
+          deliveredAt: savedAt,
+          validation: "changed",
+        }),
+        goal: "A page for the launch.",
+        timeline: [
+          {
+            occurredAt: savedAt,
+            type: "comment",
+            actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Implementation" },
+            title: null,
+            text: "The page is saved on the task.",
+            toAgent: false,
+            evidence: null,
+            attachments: [...files],
+          },
+        ],
+      });
+      const dir = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+      mkdirSync(dir, { recursive: true });
+      for (const name of files) writeFileSync(path.join(dir, name), `content of ${name}`);
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    }
+
+    /** One stretch of `index.html` as `capture_page` hands a run one. */
+    const stretch = (
+      view: "desktop" | "phone",
+      from: number,
+      to: number,
+      end: boolean,
+    ): Extract<RunLook, { kind: "page" }> => ({
+      kind: "page",
+      task: "VIB-1",
+      file: "index.html",
+      view,
+      from,
+      to,
+      end,
+      delivery: savedAt,
+    });
+    /** The review's completion, on a server that can render a page (the
+     *  browser is named; no test here starts it). */
+    const review = (runId: string) =>
+      withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, () => complete(runId, { role: "Review & validation" }));
+    const approvals = () => taskFile().parsed.frontmatter.verdicts.map((v) => [v.profileId, v.result]);
+    const refusal = () =>
+      taskFile().parsed.timeline.find((e) => e.type === "note" && e.text.includes("approval was not recorded"))?.text;
+
+    it("records no verdict from a run that approved a delivered page without being shown it, and says what it did not open", async () => {
+      // The failure the ruling closes: `approve` from a run that read the
+      // source, or the deliverer's report, released the task. CANARY: drop the
+      // `unmetPageLooks` check from the completion and the approval binds.
+      writeDeliveredPageTask(["index.html", "styles.css"]);
+      const runId = await finishedRunWith("Verdict: approve. The markup is clean and the copy matches the brief.", SUBJECT);
+      await review(runId);
+      expect(approvals()).toEqual([]);
+      expect(taskFile().parsed.frontmatter.validation).toBe("changed");
+      expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
+      expect(refusal()).toContain("`index.html` at the phone width (390 px)");
+      // One note says why: the generic "no readable verdict" note would send a
+      // person looking for a verdict the run did state.
+      expect(taskFile().parsed.timeline.filter((e) => e.text.includes("without a readable verdict"))).toEqual([]);
+    });
+
+    it("records the approval of a run that was shown the whole page at both widths", async () => {
+      writeDeliveredPageTask(["index.html", "styles.css"]);
+      const runId = await finishedRunWith("Verdict: approve. Looked at it at both widths.", SUBJECT);
+      recordRunLooks(store.db, runId, [
+        stretch("desktop", 0, 2000, false),
+        stretch("desktop", 2000, 3400, true),
+        stretch("phone", 0, 2000, false),
+        stretch("phone", 2000, 4000, false),
+        stretch("phone", 4000, 5120, true),
+      ]);
+      await review(runId);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+      expect(refusal()).toBeUndefined();
+    });
+
+    it("counts a page as seen only to where the pictures run with no gap, and names where the run stopped", async () => {
+      // A reviewer that looks at the first stretch of a long page has judged
+      // its top. CANARY: make `seenTo` take any stretch that ends the page and
+      // the gap between 2,000 and 4,000 px passes.
+      writeDeliveredPageTask(["index.html"]);
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, runId, [
+        stretch("desktop", 0, 1400, true),
+        stretch("phone", 0, 2000, false),
+        stretch("phone", 4000, 5120, true),
+      ]);
+      await review(runId);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the phone width (390 px) below 2,000 px, where the page runs on");
+      expect(refusal()).not.toContain("desktop");
+
+      // A page whose end was seen inside what the run read from its top has
+      // been seen whole, whatever a taller stretch of another capture says
+      // (a page that loads a little longer the second time). CANARY: take
+      // the end only from the stretch that reaches furthest down and this
+      // review is told the page "runs on" below a place it ends above.
+      writeDeliveredPageTask(["index.html"]);
+      const twice = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, twice, [
+        stretch("desktop", 0, 2000, false),
+        stretch("desktop", 0, 1900, true),
+        stretch("phone", 0, 1900, true),
+      ]);
+      await review(twice);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("holds a run to no more of a page than the tool can show: read to the last place a stretch may start, it has looked", async () => {
+      // `capture_page` starts no stretch past 40,000 px. A page longer than
+      // that never reports its end, and an approval of it could never bind.
+      // CANARY: require the page's end whatever its length and the task waits
+      // for a review nothing can complete.
+      writeDeliveredPageTask(["index.html"]);
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      const down = (view: "desktop" | "phone") => Array.from({ length: 21 }, (_, at) => stretch(view, at * 2000, at * 2000 + 2000, false));
+      recordRunLooks(store.db, runId, [...down("desktop"), ...down("phone")]);
+      await review(runId);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("does not count a picture taller than a stretch, which a model is handed too small to read", async () => {
+      // CANARY: drop the `PAGE_LOOK_MAX_PX` bound and one tall kept picture a
+      // width passes for a look at a page five screens long.
+      writeDeliveredPageTask(["index.html"]);
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, runId, [
+        { ...stretch("desktop", 0, 4800, true), delivery: savedAt },
+        { ...stretch("phone", 0, 5064, true), delivery: savedAt },
+      ]);
+      await review(runId);
+      expect(approvals()).toEqual([]);
+    });
+
+    it("lets a `request_changes` bind with no look, and an approval of a delivery that holds no page of the deliverer's", async () => {
+      // A fault found in the source is a fault, and a board that delivers
+      // prose reads its notes as text. CANARY: apply the check to every
+      // verdict, or to markdown, and one of these two is refused.
+      writeDeliveredPageTask(["index.html"]);
+      const objected = await finishedRunWith("Verdict: request-changes. The hero link points nowhere.", SUBJECT);
+      await review(objected);
+      expect(approvals()).toEqual([["reviewer", "request_changes"]]);
+
+      writeDeliveredPageTask(["post.md", "notes-for-author.md"]);
+      const approved = await finishedRunWith("Verdict: approve. Every claim has its source.", SUBJECT);
+      await review(approved);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("counts what a resumed review was shown in its earlier turns on the same delivery, and nothing a compaction has since replaced", async () => {
+      // A review told what it had not opened opens only that. Held to its own
+      // run's list, the resumed turn's approval is refused for the width it
+      // was shown a turn earlier, and the review can never be seen to have
+      // looked at the whole. CANARY: read only the completing run's looks.
+      writeDeliveredPageTask(["index.html"]);
+      const first = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-1" });
+      recordRunLooks(store.db, first, [stretch("desktop", 0, 1400, true)]);
+      await review(first);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the phone width (390 px)");
+      expect(refusal()).not.toContain("desktop");
+
+      const resumed = await finishedRunWith("Verdict: approve. Looked at the phone width too.", SUBJECT, { session: "review-1" });
+      recordRunLooks(store.db, resumed, [stretch("phone", 0, 1900, true)]);
+      await review(resumed);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+      // A session that was compacted holds a summary of what it was shown,
+      // not the pictures: only what it looked at since counts. CANARY: carry
+      // looks across a compaction and this approval binds.
+      writeDeliveredPageTask(["index.html"]);
+      const before = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
+      recordRunLooks(store.db, before, [stretch("desktop", 0, 1400, true)]);
+      // The compaction lands on the run that ends before it (ruling 174).
+      patchRun(store.db, before, { compactions: 1 });
+      const after = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-2" });
+      recordRunLooks(store.db, after, [stretch("phone", 0, 1900, true)]);
+      await review(after);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
+
+      // A run compacted while it worked holds a summary of everything before
+      // that line, its session's earlier runs included: its own list was
+      // emptied there, and theirs is not counted. CANARY: carry earlier runs
+      // into a run that was itself compacted.
+      writeDeliveredPageTask(["index.html"]);
+      const early = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
+      recordRunLooks(store.db, early, [stretch("desktop", 0, 1400, true)]);
+      const compacted = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
+      patchRun(store.db, compacted, { compactions: 1, lookedJson: LOOKS_COMPACTED_JSON });
+      recordRunLooks(store.db, compacted, [stretch("phone", 0, 1900, true)]);
+      await review(compacted);
+      expect(approvals()).toEqual([]);
+
+      // The mark stays at the head of the list however many looks follow
+      // it: the list keeps its newest six hundred, and a mark that went with
+      // the oldest would hand the run its session's earlier looks back.
+      // CANARY: cut the list from its head, mark and all.
+      const many = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-6" });
+      patchRun(store.db, many, { lookedJson: LOOKS_COMPACTED_JSON });
+      recordRunLooks(store.db, many, Array.from({ length: 650 }, (_, at) => stretch("phone", at * 10, at * 10 + 10, false)));
+      expect(runLooks(store.db, many)).toHaveLength(600);
+      expect(runLooks(store.db, many)[0]).toEqual({ kind: "compacted" });
+
+      // The compaction that closes a run (ruling 174) comes after its
+      // verdict. A completion replayed after it (effects lost in a restart)
+      // rests on what the verdict rested on: this run's looks and its
+      // session's before it. CANARY: read "compacted while it worked" off
+      // the run's count of compactions and a review that looked at
+      // everything is told it did not.
+      writeDeliveredPageTask(["index.html"]);
+      const opened = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-5" });
+      recordRunLooks(store.db, opened, [stretch("desktop", 0, 1400, true)]);
+      const closed = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-5" });
+      recordRunLooks(store.db, closed, [stretch("phone", 0, 1900, true)]);
+      patchRun(store.db, closed, { compactions: 1 });
+      await review(closed);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+      // And what a session was shown of other work is not a look at this:
+      // the run before judged another delivery. CANARY: carry a session's
+      // looks whatever its runs judged.
+      writeDeliveredPageTask(["index.html"]);
+      const other = await finishedRunWith("Verdict: approve.", "files:2026-10-08T10:00:00.000Z", { session: "review-3" });
+      recordRunLooks(store.db, other, [stretch("desktop", 0, 1400, true)]);
+      const next = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-3" });
+      recordRunLooks(store.db, next, [stretch("phone", 0, 1900, true)]);
+      await review(next);
+      expect(approvals()).toEqual([]);
+    });
+
+    it("counts a look only for the delivery it is of, and owes nothing that no tool can show", async () => {
+      // A stretch taken of the task's files after a stopped rework or an
+      // upload changed one is a look at other bytes than the review judges
+      // (`delivery` null), and so is a kept picture of an earlier delivery.
+      // CANARY: accept a look whatever delivery it is of.
+      writeDeliveredPageTask(["index.html"]);
+      const stale = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, stale, [
+        { ...stretch("desktop", 0, 1400, true), delivery: null },
+        { ...stretch("phone", 0, 1900, true), delivery: "2026-10-08T10:00:00.000Z" },
+      ]);
+      await review(stale);
+      expect(approvals()).toEqual([]);
+
+      // A page past the size `capture_page` renders can be shown to nobody,
+      // and neither can any page on a server with no browser: held to a look
+      // nothing can give, the approval could never bind and the task would
+      // wait for a review no run can complete. CANARY: owe every HTML page
+      // the deliverer saved, whatever can show it.
+      writeDeliveredPageTask(["index.html", "report.html"]);
+      truncateSync(path.join(taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot), "report.html"), 11 * 1024 * 1024);
+      const looked = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, looked, [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)]);
+      await review(looked);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+
+      writeDeliveredPageTask(["index.html"]);
+      const blind = await finishedRunWith("Verdict: approve. Read the source; this server renders nothing.", SUBJECT);
+      await complete(blind, { role: "Review & validation" });
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+      expect(refusal()).toBeUndefined();
+    });
+
+    it("reads the pages it owes from the delivery as it was kept, whatever a stopped rework left in the task's folder", async () => {
+      // A rework that was stopped took the page off the task, or left one too
+      // large to render under its name. The delivery is what it was, a judge
+      // is shown it from the kept copy, and the approval owes that look.
+      // CANARY: read the pages off the task's folder and this approval binds
+      // with no look at a page that was delivered and can be shown.
+      writeDeliveredPageTask(["index.html", "about.html"]);
+      keepDelivery(store.slug, "VIB-1", savedAt, ["index.html", "about.html"], store.dataRoot);
+      const folder = taskAttachmentsDir(store.slug, "VIB-1", store.dataRoot);
+      unlinkSync(path.join(folder, "index.html"));
+      truncateSync(path.join(folder, "about.html"), 11 * 1024 * 1024);
+      const unseen = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unseen);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`about.html` at the desktop width (1280 px); `about.html` at the phone width (390 px); `index.html` at the desktop width (1280 px)");
+
+      // And a page the kept copy holds past the size a capture renders is
+      // owed by nobody, whatever the folder holds under its name.
+      writeDeliveredPageTask(["index.html"]);
+      truncateSync(path.join(keptDeliveryDir(store.slug, "VIB-1", savedAt, store.dataRoot)!, "index.html"), 11 * 1024 * 1024);
+      unlinkSync(path.join(keptDeliveryDir(store.slug, "VIB-1", savedAt, store.dataRoot)!, "about.html"));
+      const unshowable = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unshowable);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("still owes the page an agent delivered once delivery is handed to another", async () => {
+      // Delivery handed on leaves the page what it was, and the new deliverer
+      // has saved nothing yet. CANARY: count the files of today's deliverer
+      // alone and the page is owed by nobody until it is saved again, so an
+      // approval binds with no look.
+      writeDeliveredPageTask(["index.html"]);
+      runRow("run_dev_delivered", { agentProfileId: "dev", state: "finished", backend: "claude", model: "sonnet", sdk: "Claude Agent SDK" });
+      writeTask(store.dataRoot, store.slug, {
+        frontmatter: baseTaskFrontmatter("VIB-1", {
+          stage: "review",
+          ownerUserId: store.users.arda.id,
+          engagements: [{ ...DEV_DELIVERS_ENGAGEMENT, delivers: false }, { ...DEV_DELIVERS_ENGAGEMENT, profileId: "dev2" }, REVIEWER_ENGAGEMENT],
+          workRevision: null,
+          deliveredAt: savedAt,
+          validation: "changed",
+        }),
+        goal: "A page for the launch.",
+        timeline: [
+          {
+            occurredAt: savedAt,
+            type: "comment",
+            actor: { kind: "agent", backend: "claude", profileId: "dev", roleHint: "Implementation" },
+            title: null,
+            text: "The page is saved on the task.",
+            toAgent: false,
+            evidence: null,
+            attachments: ["index.html"],
+          },
+        ],
+      });
+      rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+      const runId = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(runId);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
+    });
+
+    it("counts a kept picture a Claude review opened with its own file reader, read from its log", async () => {
+      // `Read` hands a model a picture as the board's own readers do, and a
+      // reviewer that works in its folder opens the kept pictures by path.
+      // CANARY: count only what the board's readers wrote down and that
+      // review is refused for every picture it looked at.
+      writeDeliveredPageTask(["notes.md"]);
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "desktop-1.png",
+          data: Buffer.from("the reference"),
+          title: "The reference at 1280 px",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view: "desktop" },
+        },
+        store.dataRoot,
+      );
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "what-moved.md",
+          data: Buffer.from("# How https://example.com/ looked"),
+          title: "What moved",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: {
+            url: "https://example.com/",
+            at: "2026-10-09T22:00:00.000Z",
+            part: "note",
+            view: null,
+            pictures: [{ id: "S1", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 2000, cut: false }],
+          },
+        },
+        store.dataRoot,
+      );
+      const unread = await finishedRunWith("Verdict: approve.", SUBJECT);
+      await review(unread);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("picture S1 of https://example.com/ as it was kept on 2026-10-09");
+      // The note names the one tool that opens what is owed, and no other.
+      expect(refusal()).toContain("A look the task keeps is opened picture by picture with `read_task_source`.");
+      expect(refusal()).not.toContain("capture_page");
+
+      const reader = await finishedRunWith("Verdict: approve. Opened the kept picture.", SUBJECT);
+      const kept = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "sources", "S1.png");
+      const line = (seq: number, raw: string) =>
+        insertRunLine(store.db, {
+          runId: reader,
+          seq,
+          occurredAt: new Date().toISOString(),
+          raw,
+          display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+        });
+      line(100, JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Read", input: { file_path: kept } }] } }));
+      line(
+        101,
+        JSON.stringify({
+          type: "user",
+          message: {
+            content: [
+              {
+                tool_use_id: "t1",
+                type: "tool_result",
+                // A picture's worth of bytes after the head of the line, which
+                // is all the completion takes out of the store.
+                content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(200_000) } }],
+              },
+            ],
+          },
+        }),
+      );
+      await review(reader);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
+
+    it("owes every picture of a look the task keeps, and names the ones a run did not open", async () => {
+      // Ruling 327: the look is what the page is judged against. CANARY: drop
+      // the look's stretches from `unmetPageLooks` and a run that never
+      // opened the reference approves.
+      writeDeliveredPageTask(["index.html"]);
+      const look = (view: "desktop" | "phone") => ({
+        url: "https://example.com/",
+        at: "2026-10-09T22:00:00.000Z",
+        part: "stretch" as const,
+        view,
+      });
+      const keep = (name: string, body: string, part: ReturnType<typeof look>) =>
+        writeTaskSource(
+          store.slug,
+          "VIB-1",
+          {
+            name,
+            data: Buffer.from(body),
+            title: name,
+            from: "https://example.com/",
+            by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+            runId: null,
+            look: part,
+          },
+          store.dataRoot,
+        );
+      keep("desktop-1.png", "d1", look("desktop"));
+      keep("desktop-2.png", "d2", look("desktop"));
+      keep("phone-1.png", "p1", look("phone"));
+      // Pictures with no note are a keep that was cut off: no look, and
+      // nothing an approval owes. CANARY: owe every stretch among the
+      // sources and a failed keep holds every later review to its leavings.
+      const cutOff = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, cutOff, [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)]);
+      await review(cutOff);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+      // The note closes the look, and from then on it is owed.
+      writeDeliveredPageTask(["index.html"]);
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "what-moved.md",
+          data: Buffer.from("# How https://example.com/ looked"),
+          title: "What moved",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          // The note lists the look's pictures: the two stretches of the
+          // desktop width, and the phone's twice, since the second stretch
+          // there looked the same as the first and is kept once.
+          look: {
+            url: "https://example.com/",
+            at: "2026-10-09T22:00:00.000Z",
+            part: "note",
+            view: null,
+            pictures: [
+              { id: "S1", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 3000, cut: true },
+              { id: "S2", part: "stretch", view: "desktop", from: 2000, to: 3000, pageHeight: 3000, cut: false },
+              { id: "S3", part: "stretch", view: "phone", from: 0, to: 2000, pageHeight: 4000, cut: true },
+              { id: "S3", part: "stretch", view: "phone", from: 2000, to: 4000, pageHeight: 4000, cut: false },
+            ],
+          },
+        },
+        store.dataRoot,
+      );
+      const whole = [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)];
+
+      const half = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, half, [...whole, { kind: "source", task: "VIB-1", id: "S1" }]);
+      await review(half);
+      expect(approvals()).toEqual([]);
+      expect(refusal()).toContain("pictures S2 and S3 of https://example.com/ as it was kept on 2026-10-09");
+
+      const all = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, all, [
+        ...whole,
+        { kind: "source", task: "VIB-1", id: "S1" },
+        { kind: "source", task: "VIB-1", id: "S2" },
+        { kind: "source", task: "VIB-1", id: "S3" },
+      ]);
+      await review(all);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+    });
   });
 
   /** Ruling 85: `dev` delivered two files at `savedAt`, and `reviewer` asked

@@ -69,6 +69,7 @@ import {
   type AgentLaunch,
 } from "./agent-isolation.server";
 import { joinedPrompt, sortedNames, sortedRecord } from "./prompt-prefix.server";
+import { BOARD_MCP_NAME, BOARD_TOOL_TIMEOUT_SEC } from "~/server/mcp-proxy/board-tool.server";
 import { BROWSER_MCP_NAME, BROWSER_TOOL_TIMEOUT_SEC } from "~/server/tasks/browser-deadline.server";
 import { errorMessage, toError } from "~/shared/errors";
 
@@ -345,6 +346,9 @@ function codexMcpServers(
         http.http_headers = sortedRecord(declaration.data.headers);
       }
       if (disabledTools.length) http.disabled_tools = disabledTools;
+      // Ruling 327: the board server pictures a page on the web whole at two
+      // widths, which takes longer than the CLI waits on a tool by default.
+      if (name === BOARD_MCP_NAME) http.tool_timeout_sec = BOARD_TOOL_TIMEOUT_SEC;
       startFirst(http, name);
       translated[name] = http;
       continue;

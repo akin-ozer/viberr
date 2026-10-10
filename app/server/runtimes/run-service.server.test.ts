@@ -396,6 +396,42 @@ describe("run-service lifecycle", () => {
     await settle();
     expect(specs[2]?.effort).toBe("medium");
   });
+
+  // Ruling 153. Owns: the run row says which effort its backend was given, so
+  // what a setting cost is read from the record and not from the deployment as
+  // it stands later. Breaks if `startRun` stops writing `effort`, writes the
+  // stored tier in place of the one the backend took, or invents one for a
+  // Claude run that was left on the SDK's default.
+  it("keeps on the run's row the effort its backend was given (ruling 153)", async () => {
+    captureSpecs();
+    const start = (threadId: string, backend: "claude" | "codex", model: string, effort?: string) => {
+      const input: Parameters<typeof startTestRun>[1] = {
+        projectSlug: store.slug, taskKey: "VIB-1", threadId, role: "R", kind: "primary",
+        backend, model, prompt: "go", dataRoot: store.dataRoot,
+      };
+      if (effort !== undefined) input.effort = effort;
+      return startTestRun(store.db, input);
+    };
+
+    const asked = await start("e1", "claude", "sonnet", "xhigh");
+    await settle();
+    expect(getRun(store.db, asked.runId)?.effort).toBe("xhigh");
+
+    // A tier from the other backend's scale is stored as the one this backend took.
+    const translated = await start("e2", "claude", "sonnet", "minimal");
+    await settle();
+    expect(getRun(store.db, translated.runId)?.effort).toBe("low");
+
+    // Nothing set on Claude: the SDK's default applied, and the row says nothing was set.
+    const unset = await start("e3", "claude", "sonnet");
+    await settle();
+    expect(getRun(store.db, unset.runId)?.effort).toBeNull();
+
+    // Nothing set on Codex: the catalog's default is what the run was given.
+    const catalog = await start("e4", "codex", "gpt-6.1-sol");
+    await settle();
+    expect(getRun(store.db, catalog.runId)?.effort).toBe("medium");
+  });
 });
 
 describe("a run with no credential principal (ruling 137)", () => {

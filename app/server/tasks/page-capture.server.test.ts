@@ -1,10 +1,13 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
+  rmSync,
   symlinkSync,
   truncateSync,
   unlinkSync,
@@ -31,18 +34,23 @@ import {
 import { reconfigureProject } from "../../../test-support/projected-store";
 import type { Engagement, WorkRevision } from "~/schemas/task-file.schema";
 import { taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
-import { keepDelivery, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
+import { keepDelivery, keptDeliveryDir, listKeptDeliveries } from "~/server/files/kept-deliveries.server";
 import { attachmentNamesSince, imageHeader } from "~/server/files/task-attachments.server";
+import { writeTaskSource } from "~/server/files/task-sources.server";
 import { readTaskFile, updateTaskFile } from "~/server/files/task-writer.server";
 import { rebuildAll } from "~/server/projections/rebuilder.server";
 import { AGENT_UID_FLOOR, resetAgentIsolationForTests } from "~/server/runtimes/agent-isolation.server";
 import type { runOperator } from "~/server/runtimes/operator-run.server";
 import { interruptRun, startRun } from "~/server/runtimes/run-service.server";
-import { getRun } from "~/server/runtimes/run-store.server";
+import { getRun, insertRunLine } from "~/server/runtimes/run-store.server";
+import { COMPACTION_LINE_TAG } from "~/server/runtimes/wire-format.server";
 import { applyAgentCompletionEffects } from "./agent-completion.server";
-import { readAgentTaskAttachment } from "./board-read.server";
+import { readAgentTaskAttachment, readAgentTaskSource } from "./board-read.server";
+import { completionPacketFact } from "./completion-packet.server";
+import { looksFromRunLog, pageLooksNote, pageLooksOwed, runLooks } from "./page-looks.server";
 import {
   captureTaskPage,
+  measureTaskPage,
   removeRunPageCaptures,
   requestDeliveryCaptures,
 } from "./page-capture.server";
@@ -73,6 +81,9 @@ const WRITER: Engagement = {
   delivers: true,
   verdictCapable: false,
 };
+/** A reviewer that may record a verdict, and a supporting agent that may not. */
+const EDITOR: Engagement = { profileId: "editor", backend: "claude", role: "Editor", delivers: false, verdictCapable: true };
+const PROOFREADER: Engagement = { profileId: "proofreader", backend: "claude", role: "Proofreader", delivers: false, verdictCapable: false };
 
 /** A board that delivers files: no repository (unless the case names one),
  *  one deliverer, and (when the case is about the react) an operator. */
@@ -168,7 +179,19 @@ const scratches = (key = "VIB-1") =>
 const inputRoot = (key = "VIB-1") => path.join(taskDir(store.slug, key, store.dataRoot), ".capture-input");
 /** The files the stand-in browser was told to open, in order, once each. */
 const opened = () => [...new Set(fake.pages().map((page) => decodeURIComponent(new URL(page.url).pathname.split("/").pop()!)))];
+/** The limit of a case that waits on several real renders: each is a child
+ *  process and a stand-in browser, and a measured page loads five more times
+ *  with a second's settle on three of them, so a case with six pages runs
+ *  past the suite's 20 s on a loaded machine. */
+const REAL_RENDERS_MS = 90_000;
 const captureAudits = () => listAuditEvents(store.db, { action: "task.pages.captured" });
+/** What a delivery's note says of the pictures: all of it up to what was
+ *  measured of each HTML page (ruling 328), which closes the note and has a
+ *  case of its own. */
+const ofThePictures = (text: string) => text.split(" Measured of ")[0]!;
+/** The figures of a page that was measured as it was pictured, whatever they
+ *  are: the measured case reads them. */
+const MEASURED = { measured: expect.any(Object) };
 
 /** The server's own browser setting, as a deployment sets it. */
 function withBrowser<T>(mode: string, run: () => T | Promise<T>): Promise<T> {
@@ -227,6 +250,11 @@ interface AskOver {
   height?: number;
   scale?: number;
   keeps?: boolean;
+  press?: string;
+  hover?: string;
+  tab?: number;
+  motion?: "reduce";
+  moving?: boolean;
 }
 
 /** An agent's `capture_page`, at the door both backends call. */
@@ -276,8 +304,9 @@ async function finishedRunSaving(files: Record<string, string>, sized: Sized = {
   return started.runId;
 }
 
-/** A reviewer's run that is still going. */
-async function liveRun(profileId: string): Promise<string> {
+/** A reviewer's run that is still going; `verdictWithheld` for one asked a
+ *  question with no verdict to give (ruling 87). */
+async function liveRun(profileId: string, verdictWithheld = false): Promise<string> {
   runSeq += 1;
   queueFakeRun({
     lines: [{ t: "", ev: "text", tag: "assistant", text: "looking" }],
@@ -290,6 +319,7 @@ async function liveRun(profileId: string): Promise<string> {
     kind: "reviewer",
     role: "Reviewer",
     agentProfileId: profileId,
+    verdictWithheld,
     credentialUserId: store.users.arda.id,
     backend: "claude",
     model: "sonnet",
@@ -392,6 +422,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "post.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
     // One note, from Viberr, that claims the pictures.
@@ -401,10 +432,11 @@ describe("a delivered page is pictured (ruling 86)", () => {
       type: "note",
       actor: { kind: "system", systemId: "page-capture" },
       attachments: pictures,
-      text:
-        "Viberr rendered `notes.md` and `post.html` as a reader sees them, at a desktop width (1,280 px) and a " +
-        "phone width (390 px). The pictures are attached and show beside each file on the result.",
     });
+    expect(ofThePictures(notes[0]!.text)).toBe(
+      "Viberr rendered `notes.md` and `post.html` as a reader sees them, at a desktop width (1,280 px) and a " +
+        "phone width (390 px). The pictures are attached and show beside each file on the result.",
+    );
     // The page was served its sibling from the delivery itself.
     const served = fake.pages().find((page) => page.url.endsWith("/post.html"))!;
     expect(served.resources).toEqual([{ src: "chart.png", status: 200, bytes: 25 }]);
@@ -430,6 +462,186 @@ describe("a delivered page is pictured (ruling 86)", () => {
       taskKey: "VIB-1",
       details: { deliveredAt: stamp, pages: 2, captured: 2, failed: [], more: 0, runsAs: "server" },
     });
+  });
+
+  it("ruling 328: a delivered page is measured as it is pictured: the figures are kept on its record, said in the note with what each fault is on, handed to the operator and the reviewer in one line, and set against the pages the board has accepted; an agent takes the same figures before it delivers", { timeout: REAL_RENDERS_MS }, async () => {
+    // What a person accepted a page on was an agent's word that it "passes
+    // accessibility" or "loads fast": nothing on the task was a figure.
+    // An earlier page of this board, measured and accepted, and since
+    // archived with its epic; and a lighter, faster page on a task nobody
+    // has accepted, which sets no figure.
+    const earlier = "2026-10-07T12:00:00.000Z";
+    await keptDelivery("VIB-2", earlier, { "first.html": "<p>the first page, accepted</p><p>fake-load-ms:900</p>" });
+    await keptDelivery("VIB-3", earlier, { "draft.html": "<p>fake-load-ms:300</p>" });
+    await withBrowser("", async () => {
+      await picture("VIB-2", earlier);
+      await picture("VIB-3", earlier);
+    });
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-2", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.stage = "done";
+      parsed.frontmatter.archived = true;
+    });
+    rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+
+    const page =
+      '<h1>Launch</h1><img src="hero.png">' +
+      '<p>fake-axe:[{"id":"color-contrast","impact":"serious","help":"Elements must meet minimum color contrast ratio thresholds","count":2,' +
+      '"nodes":[{"target":"p.lede","ratio":3.1,"text":"Governed delivery"},{"target":"a.more","ratio":2.4,"text":"Read more"}]}]</p>' +
+      '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Start"]]</p><p>fake-tab-order:[0,2]</p><p>fake-unmarked:[2]</p>' +
+      '<p>fake-animations-reduced:[{"name":"drift","target":"div.hero","durationMs":8000,"loops":true}]</p>' +
+      "<p>fake-load-ms:1840</p>";
+    await deliver({ "index.html": page, "hero.png": "x".repeat(4000), "notes.md": "# Notes\n" });
+
+    const pages = frontmatter().pageCaptures!.pages;
+    // A markdown file is set in Viberr's own type: nothing of its writer's
+    // is there to measure. CANARY: measure every page of the delivery.
+    expect(pages.find((entry) => entry.file === "notes.md")).not.toHaveProperty("measured");
+    const view = { faultKinds: 1, faultElements: 2, worstContrast: 2.4, controls: 3, unreached: 1, unmarked: 1, stillMoving: 1 };
+    // CANARY: drop `measure` from the delivery's render and the record holds
+    // pictures and no figure.
+    expect(pages.find((entry) => entry.file === "index.html")!.measured).toEqual({
+      weightBytes: Buffer.byteLength(page) + 4000,
+      files: 2,
+      loadMs: 1840,
+      line: "1.6 Mbit/s down, 150 ms",
+      views: [
+        { view: "desktop", ...view },
+        { view: "phone", ...view },
+      ],
+    });
+
+    // The note names what each fault is on, so the maker knows where to look
+    // and the reviewer what to hold it to.
+    const note = captureNote()!.text;
+    expect(note).toContain(
+      "Measured of `index.html`: It weighs 4 KB: the page and the 1 file it loads. " +
+        "It finishes loading 1.8 s after it is asked for, on a slow phone line (1.6 Mbit/s down, 150 ms). " +
+        "At 1280 px the accessibility checks (axe, WCAG 2.2 AA) found 1 kind of fault: " +
+        "`color-contrast` on 2 (Elements must meet minimum color contrast ratio thresholds; first: `p.lede` and `a.more`). " +
+        'The lowest contrast is 2.40 to 1, on "Read more". ',
+    );
+    expect(note).toContain("At 1280 px, with reduced motion asked for, 1 animation still runs: `drift` on `div.hero` (loops).");
+    expect(note).toContain('At 1280 px Tab reaches 2 of 3 controls; never reached: `button "Menu"`; looking the same with focus as at rest: `a "Start"`.');
+    // A board's pages only get lighter and faster: this one is set against
+    // the lightest and the fastest it has had accepted, with both figures.
+    // CANARY: read the figures of every task, accepted or not, and the page
+    // is set against VIB-3's draft (0.3 s); leave archived tasks out and the
+    // board forgets the page it accepted and says nothing at all.
+    expect(note).toMatch(
+      /That is heavier than the lightest page this board has accepted \(1 KB, VIB-2\) and slower than its fastest \(0\.9 s, VIB-2\)\. A board's pages only get lighter and faster\.$/,
+    );
+
+    // The operator is handed one line a page, and so is the reviewer, in the
+    // note that says what its approval owes.
+    const line =
+      "4 KB in 2 files; loads in 1.8 s on a slow phone line (1.6 Mbit/s down, 150 ms); " +
+      "at 1280 px 1 kind of accessibility fault in 2 places (lowest contrast 2.4 to 1), 1 of 3 controls the keyboard does not reach, " +
+      "1 that show nothing when they take focus, 1 still moving with reduced motion asked for; " +
+      "at 390 px 1 kind of accessibility fault in 2 places (lowest contrast 2.4 to 1), 1 of 3 controls the keyboard does not reach, " +
+      "1 that show nothing when they take focus, 1 still moving with reduced motion asked for.";
+    const fact = completionPacketFact(frontmatter(), { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot });
+    expect(fact.pageCaptures.map((entry) => [entry.file, entry.measured])).toEqual([
+      ["index.html", line],
+      ["notes.md", null],
+    ]);
+    const parsed = readTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot })!.parsed;
+    expect(pageLooksNote(pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", parsed, true)!)).toContain(
+      `What Viberr measured as it pictured this delivery: \`index.html\`: ${line} The delivery's "Page captures" note names each element`,
+    );
+
+    // `measure_page`: the same figures of a page as it stands, before it is
+    // delivered, in words and with nothing saved.
+    const before = JSON.stringify(frontmatter());
+    const audits = captureAudits().length;
+    const measure = (name: string) =>
+      withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name, runId: null }));
+    const measured = await measure("index.html");
+    expect(measured).toContain(
+      "[done] `index.html` measured as Viberr measures a delivered page, at the desktop width (1280 px) and the phone width (390 px). It weighs 4 KB: the page and the 1 file it loads.",
+    );
+    expect(measured).toContain("`color-contrast` on 2");
+    expect(measured).toContain("That is heavier than the lightest page this board has accepted (1 KB, VIB-2)");
+    expect(measured.endsWith("Nothing was saved: these are the figures as the file stands now.")).toBe(true);
+    expect(JSON.stringify(frontmatter())).toBe(before);
+    expect(captureAudits()).toHaveLength(audits);
+    expect(await measure("notes.md")).toBe(
+      "[noop] `notes.md` is not a page somebody laid out. measure_page measures an .html or .htm file; " +
+        "a markdown file is set as an article in Viberr's own type, so there is nothing of its writer's to measure.",
+    );
+  });
+
+  it("ruling 328: a figure says no more than was measured: a list cut to its first few carries its count, a walk that never came round names nothing it did not try, and a check that did not finish is not a clean one", { timeout: REAL_RENDERS_MS }, async () => {
+    // The first measurements said "0 unreached" of a walk that had stopped
+    // at its press limit, kept the length of a list cut to six as the count,
+    // and wrote a check that never ran as a page with nothing wrong.
+    const links = Array.from({ length: 9 }, (_, at) => ["a", `Link ${at}`]);
+    saveFiles("VIB-1", {
+      "many.html": `<p>fake-controls:${JSON.stringify(links)}</p><p>fake-tab-order:[0,1,2,3,4,5,6,7,8]</p><p>fake-unmarked:[0,1,2,3,4,5,6,7,8]</p>`,
+      "long.html": `<p>fake-controls:${JSON.stringify(Array.from({ length: 100 }, (_, at) => ["a", `Item ${at}`]))}</p><p>fake-tab-order:${JSON.stringify(Array.from({ length: 100 }, (_, at) => at))}</p>`,
+      "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>',
+    });
+    const measure = (name: string) =>
+      withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name, runId: null }));
+    // CANARY: print the list the renderer cut and its length, and nine
+    // controls with no focus mark read as six.
+    expect(await measure("many.html")).toContain(
+      'At 1280 px Tab reaches 9 of 9 controls; looking the same with focus as at rest: 9, the first `a "Link 0"`, `a "Link 1"`, `a "Link 2"`, `a "Link 3"`, `a "Link 4"`, and `a "Link 5"`.',
+    );
+    // CANARY: say nothing of a walk that was cut and a page of a hundred
+    // links reads "Tab reaches 80 of 100 controls, and each shows a change".
+    expect(await measure("long.html")).toContain(
+      "At 1280 px Tab reaches 80 of 100 controls; the walk stopped at its press limit, so the controls past it were not tried.",
+    );
+    // CANARY: read a walk that failed as its zeros and the page is said to
+    // have "no control for a keyboard to reach".
+    expect(await measure("throws.html")).toContain("At 1280 px the keyboard's reach was not measured: the walk did not finish.");
+    // What a task keeps of a delivery says the same: null where a check did
+    // not finish, never the zero of a clean page, in the record and in the
+    // line the operator and the reviewer are handed.
+    // CANARY: keep zeros for a check that did not run and a page nobody
+    // measured is recorded as one with nothing wrong.
+    // A page with more kinds of fault than a report lists, and one whose
+    // accessibility engine gave up.
+    const kinds = Array.from({ length: 21 }, (_, at) => ({
+      id: `rule-${at + 1}`,
+      impact: "serious",
+      help: `Rule ${at + 1}`,
+      count: 1,
+      nodes: [{ target: `#n${at + 1}` }],
+    }));
+    await deliver({
+      "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>',
+      "faulty.html": `<p>fake-axe:${JSON.stringify(kinds)}</p>`,
+      "unchecked.html": '<p>fake-axe-throws:"axe gave up"</p>',
+    });
+    const recorded = (file: string) => frontmatter().pageCaptures!.pages.find((page) => page.file === file)!.measured;
+    expect(recorded("throws.html")).toMatchObject({
+      views: [
+        { view: "desktop", controls: null, unreached: null, unmarked: null, stillMoving: 0, faultKinds: 0, faultElements: 0 },
+        { view: "phone", controls: null, unreached: null, unmarked: null },
+      ],
+    });
+    // CANARY: count the kinds a report lists and a page with twenty-one
+    // kinds of fault is recorded, and said, to have twenty.
+    // And on how many elements, over every kind and not the listed twenty.
+    expect(recorded("faulty.html")).toMatchObject({
+      views: [
+        { view: "desktop", faultKinds: 21, faultElements: 21 },
+        { view: "phone", faultKinds: 21, faultElements: 21 },
+      ],
+    });
+    expect(timeline().find((entry) => entry.title === "Page captures")!.text).toContain(
+      "At 1280 px the accessibility checks (axe, WCAG 2.2 AA) found 21 kinds of fault, the first 20 of them: `rule-1` on 1 (Rule 1; first: `#n1`);",
+    );
+    // CANARY: keep zeros for an engine that did not run and the page is
+    // recorded as one the checks found nothing on.
+    expect(recorded("unchecked.html")).toMatchObject({
+      views: [{ view: "desktop", faultKinds: null, faultElements: null }, { view: "phone", faultKinds: null, faultElements: null }],
+    });
+    const line = completionPacketFact(frontmatter(), { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }).pageCaptures.find(
+      (page) => page.file === "throws.html",
+    )!.measured;
+    expect(line).toContain("at 1280 px the keyboard's reach not measured; at 390 px the keyboard's reach not measured.");
   });
 
   it("the next delivery's pictures replace the last one's, a page it no longer holds loses its picture, the rework is credited with none of them, and the earlier delivery keeps its own", async () => {
@@ -594,7 +806,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     );
   });
 
-  it("a page that cannot be pictured is said on the task and leaves the delivery, its kept copy and the other pages as they were", async () => {
+  it("a page that cannot be pictured is said on the task and leaves the delivery, its kept copy and the other pages as they were", { timeout: REAL_RENDERS_MS }, async () => {
     await deliver(
       { "good.html": '<img src="https://cdn.example.com/a.js"><img src="nested/b.png">', "bad.html": "<p>this one ends the browser</p>" },
       "crash:bad.html",
@@ -612,9 +824,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "good.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `good.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         "`good.html` asked the network for 1 thing (cdn.example.com); a capture loads none, so the picture shows the page without them. " +
@@ -662,7 +875,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(timeline().filter((event) => event.title === "Page captures")).toHaveLength(2);
   });
 
-  it("a render still running after 45 seconds no longer holds the operator, an ask that cannot start within 15 seconds is told the renderer is busy, and a render past its limit is stopped and said on the task", async () => {
+  it("a render still running after 120 seconds no longer holds the operator, an ask that cannot start within 15 seconds is told the renderer is busy, and a render past its limit is stopped and said on the task", async () => {
     deployBoard({ operator: true });
     const runOp = vi.fn<typeof runOperator>(async () => ({
       runId: null,
@@ -701,7 +914,9 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // the render is stopped, past a Codex tool call's 60 seconds.
       await vi.advanceTimersByTimeAsync(1_000);
       expect(answer.text).toBe("[busy] The renderer is working on other pages. Call again in a moment.");
-      await vi.advanceTimersByTimeAsync(25_000); // 40 s in; the bound is 45 s (ruling 86)
+      // 115 s in; the bound is 120 s (ruling 86): a page that is measured as
+      // it is pictured (ruling 328) loads several times, once on a slow line.
+      await vi.advanceTimersByTimeAsync(100_000);
       expect(settled).toBe(false);
       // CANARY: await the capture promise without the bound in
       // applyAgentCompletionEffects and the operator's run never starts while
@@ -710,17 +925,18 @@ describe("a delivered page is pictured (ruling 86)", () => {
       await done;
       expect(runOp).toHaveBeenCalledTimes(1);
       expect(frontmatter().pageCaptures).toBeUndefined();
-      // The job's own limit, 10 s and 25 s a page: the render is stopped.
-      await vi.advanceTimersByTimeAsync(15_000);
+      // The job's own limit, 10 s and 70 s for each page that is measured:
+      // the render is stopped.
+      await vi.advanceTimersByTimeAsync(30_000);
       // Waited to its last write, so nothing of the job outlives the test.
       await vi.waitFor(() => expect(captureAudits()).toHaveLength(1), { timeout: 15_000 });
     });
     await effects;
     expect(frontmatter().pageCaptures!.pages).toEqual([
-      { file: "one.html", shots: [], error: "the render ran past 60 seconds" },
-      { file: "two.html", shots: [], error: "the render ran past 60 seconds" },
+      { file: "one.html", shots: [], error: "the render ran past 150 seconds" },
+      { file: "two.html", shots: [], error: "the render ran past 150 seconds" },
     ]);
-    expect(captureNote()!.text).toContain("Viberr could not picture `one.html`: the render ran past 60 seconds.");
+    expect(captureNote()!.text).toContain("Viberr could not picture `one.html`: the render ran past 150 seconds.");
     // The ask that was told `busy` never reached the renderer.
     expect(fake.launches()).toHaveLength(1);
   });
@@ -794,7 +1010,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // printed cut. CANARY: cut the name where the report is read, before it
     // is compared, and a file that is among the task's files and was left out
     // for its size is said to be "not among this task's files".
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `post.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         `\`post.html\` asked for \`${film.slice(0, 79)}\u2026\`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).`,
@@ -901,7 +1117,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // `capture_page` keeps nothing under a file's name, so it still shows the
     // long-named page; it refuses the two large ones for the same limit.
-    expect(captureNote()!.text.endsWith(
+    expect(ofThePictures(captureNote()!.text).endsWith(
       `The delivery stands without them, and an agent can look at \`${longName}\` with \`capture_page\`.`,
     )).toBe(true);
     await withBrowser("", async () => {
@@ -1029,7 +1245,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(readdirSync(attachments("VIB-3"))).toEqual(["report.html"]);
   });
 
-  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, one that asks for a path it is never served, and one pictured at one width only", async () => {
+  it("the note says what a picture cannot show by itself: a page cut short, one a phone shrinks, one wider than its screen, one that opens a dialog, one that asks for a path it is never served, and one pictured at one width only", { timeout: REAL_RENDERS_MS }, async () => {
     await deliver(
       {
         "alert.html": '<script>alert("Welcome")</script><p>behind the dialog</p>',
@@ -1038,6 +1254,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "rooted.html": '<script src="/css/site.js"></script><img src="../up.png"><p>styled from the site\'s root</p>',
         "shrunk.html": "<p>no viewport setting, so a phone lays it out 980 px wide: fake-scale:0.398</p>",
         "wide.html": "<p>fake-width:612</p>",
+        "zapp.html": '<p>an app that scrolls inside itself: fake-inner:{"what":"main.app","height":5200,"box":640}</p>',
       },
       "dialog:alert.html",
     );
@@ -1046,8 +1263,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // path for a file name in `missingClauses` and `rooted.html` is said to
     // have asked for files "not among this task's files (the folder is
     // flat)", which sends its author looking for a file to add.
-    expect(captureNote()!.text).toBe(
-      "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, and `wide.html` as a reader sees them, " +
+    expect(ofThePictures(captureNote()!.text)).toBe(
+      "Viberr rendered `alert.html`, `half.html`, `long.html`, `rooted.html`, `shrunk.html`, `wide.html`, and `zapp.html` as a reader sees them, " +
         "at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         "`alert.html` opens a dialog as it loads (an alert, a confirm or a prompt). A capture dismisses it, so the picture shows the page behind it. " +
@@ -1057,7 +1274,12 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "`rooted.html` asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
         "which a capture does not serve (it serves the task's own files by name). " +
         "A phone lays `shrunk.html` out 980 px wide and shrinks it to fit its 390 px screen, so its text is small. " +
-        "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways.",
+        "`wide.html` is 612 px wide on a 390 px screen, so a reader scrolls sideways. " +
+        // A picture of a page with a part that scrolls inside it shows none
+        // of what the part hides, and said nothing: it read as a whole short
+        // page.
+        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it. " +
+        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width; the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1065,6 +1287,39 @@ describe("a delivered page is pictured (ruling 86)", () => {
       shots: [{ view: "desktop", name: "half.html.capture-desktop.png", cut: false }],
       error: "the browser ended before the page was pictured",
     });
+    // An agent that looks at it is told the same.
+    expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
+      // No check ran for a look, so the reply says nothing of one.
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width. Saved",
+    );
+    // At both widths it says so of both: a phone's one screen is not "the
+    // whole page" because the desktop's was the first to be asked. CANARY:
+    // carry the first width alone and the phone's picture reads as a whole
+    // short page beside a sentence about the desktop. And it says how much
+    // the part holds and shows, never what kind of page it is: a page that
+    // also scrolls as pages do was called one that does not.
+    expect((await withBrowser("", () => ask("zapp.html"))).text).toContain(
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width. " +
+        "At the phone width (390 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall (sizes as laid out), and what it hides is in no picture at that width.",
+    );
+    // Several such parts: how many, and the one that hides the most. Not a
+    // count of everything that scrolls. CANARY: say of several what is said
+    // of one and a board of lanes reads as one lane.
+    saveFiles("VIB-1", { "lanes.html": '<p>three lanes: fake-inner:{"what":"section#doing","height":5000,"box":800,"count":3}</p>' });
+    expect((await withBrowser("", () => ask("lanes.html", { view: "desktop" }))).text).toContain(
+      "At the desktop width (1280 px) 3 parts of the page that scroll inside it each hold more than a screen beyond their box (sizes as laid out): " +
+        "the one that hides the most, `section#doing`, holds 5,000 px in a box 800 px tall. " +
+        "What they hide is in no picture at that width.",
+    );
+    // Where the page was measured, the reply says what that means for the
+    // figures. CANARY: say it of every look and a reply that measured
+    // nothing speaks of checks; say it of none and a clean figure for a
+    // shell reads as a clean page.
+    expect(
+      await withBrowser("", () => measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name: "lanes.html", runId: null })),
+    ).toContain(
+      "What they hide is in no picture at that width, and the checks that judge what a reader sees (contrast, the size of a target and the like) may not have read it.",
+    );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
       "It asked for `/css/site.js` and `/up.png`, paths from the site's root or above the page's folder, " +
@@ -1104,12 +1359,13 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "notes.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
     // The page spelled the way the store spells it is the one pictured.
     expect(opened()).toEqual(["notes.html"]);
     expect(fake.pages()[0]!.html).toBe("<p>the notes</p>");
-    expect(captureNote()!.text).toBe(
+    expect(ofThePictures(captureNote()!.text)).toBe(
       "Viberr rendered `notes.html` as a reader sees it, at a desktop width (1,280 px) and a phone width (390 px). " +
         "The pictures are attached and show beside each file on the result. " +
         'Viberr could not picture ` notes.html`: its pictures would be kept under the same names as the pictures of "notes.html". ' +
@@ -1138,6 +1394,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
           { view: "phone", name: "post.html.capture-phone.png", cut: false },
         ],
         error: null,
+        ...MEASURED,
       },
     ]);
   });
@@ -1324,6 +1581,101 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
   });
 
+  it("ruling 194: an agent's ask puts a page in a state before the picture, says what the act found at each width, refuses a state it cannot show, and writes down no look", { timeout: REAL_RENDERS_MS }, async () => {
+    // A still picture of a page at rest hides its menu, what a control looks
+    // like under the pointer and where the keyboard goes. On the first board
+    // asked for a page, its agents scripted a browser of their own to see
+    // them, at a width Viberr pictures nothing at.
+    const runId = await liveRun("writer");
+    saveFiles("VIB-1", {
+      "site.html":
+        '<nav>fake-find:{"Menu":[340,28,"button"],"Docs":[120,28,"a"]}</nav>' +
+        '<p>fake-names:["Docs","Menu","Sign in"]</p>' +
+        '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Sign in"]]</p><p>fake-tab-order:[0,1,2]</p>' +
+        "<p>fake-height:3000</p>",
+    });
+    await withBrowser("", async () => {
+      // A press: one screen at each width, as it stood after it.
+      const pressed = await ask("site.html", { press: "Menu", runId });
+      expect(pressed.text).toContain("[done] `site.html` in the state asked for: each picture is one screen, as it stood after the act.");
+      expect(pressed.text).toContain('At the desktop width (1280 px): pressed button "Menu".');
+      expect(pressed.text).toContain('At the phone width (390 px): pressed button "Menu".');
+      expect(handedBack(pressed)).toEqual([
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 390, height: 844 },
+      ]);
+      // The press reached the browser as a pointer's press and release on the
+      // control, at each width.
+      // CANARY: drop `act` from the view the door builds and the reply is a
+      // stretch of the page at rest, with nothing pressed.
+      expect(fake.inputs().filter((input) => input.type === "mousePressed")).toEqual([
+        expect.objectContaining({ x: 340, y: 28 }),
+        expect.objectContaining({ x: 340, y: 28 }),
+      ]);
+
+      // Tab, then the pointer on another control, in one call at one width.
+      const before = fake.inputs().length;
+      const focused = await ask("site.html", { tab: 2, hover: "Docs", view: "phone", runId });
+      expect(focused.text).toContain('At the phone width (390 px): 2 presses of Tab: focus is on button "Menu"; the pointer is on a "Docs".');
+      expect(handedBack(focused)).toEqual([{ mimeType: "image/png", width: 390, height: 844 }]);
+      const sent = fake.inputs().slice(before);
+      expect(sent.filter((input) => input.type === "rawKeyDown").map((input) => input.key)).toEqual(["Tab", "Tab"]);
+      expect(sent.at(-1)).toEqual(expect.objectContaining({ type: "mouseMoved", x: 120, y: 28 }));
+
+      // A name nothing answers to is said with the names that are there, and
+      // no picture stands in for the state that was not reached.
+      const missed = await ask("site.html", { press: "Pricing", view: "desktop", runId });
+      expect(missed.text).toBe(
+        "[noop] `site.html` was not pictured: the act found nothing to act on. " +
+          'At the desktop width (1280 px): nothing at this width is called "Pricing". The controls on it: "Docs", "Menu", "Sign in".',
+      );
+      expect(missed.images).toEqual([]);
+
+      // Reduced motion is the reader's setting, told to the browser before
+      // the page loads.
+      const reduced = await ask("site.html", { motion: "reduce", view: "desktop", runId });
+      expect(reduced.text).toContain("with reduced motion asked for");
+      expect(fake.pages().at(-1)!.reducedMotion).toBe("reduce");
+
+      // The screen while it moves: three pictures a width, and when each was
+      // taken, in place of a stretch.
+      const moving = await ask("site.html", { moving: true, view: "desktop", runId });
+      expect(moving.text).toContain(
+        "[done] `site.html` while it moves: the screen at 0 px, pictured more than once as the page loaded. " +
+          "What differs between two pictures of one width is what moved. Desktop, 1280 px wide: 3 pictures, about ",
+      );
+      // The moments are the renderer's own clock, so only their shape is read.
+      expect(moving.text).toMatch(/about [\d,]+ ms, [\d,]+ ms, and [\d,]+ ms after it came into view\./);
+      expect(handedBack(moving)).toEqual([
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 1280, height: 800 },
+        { mimeType: "image/png", width: 1280, height: 800 },
+      ]);
+
+      // A state goes with no size and an act with no place on the page: each
+      // is refused in a sentence that says what to leave out, and no browser
+      // is started for it.
+      const launched = fake.launches().length;
+      for (const [over, why] of [
+        [{ press: "Menu", width: 1200, height: 630 }, "a size makes one picture of the page at rest, so it goes with none of `press`, `hover`, `tab`, `moving` and `motion`."],
+        [{ tab: 1, from: 2000 }, "`press`, `hover` and `tab` picture the screen where the act leaves it, so they go with no `from`. Leave `from` out."],
+        [{ hover: "Docs", moving: true }, "`moving` pictures the screen while the page loads, before anything is pressed, so it goes with none of `press`, `hover` and `tab`."],
+      ] as const) {
+        const refused = await ask("site.html", { ...over, runId });
+        expect(refused.text).toContain(`[noop] \`site.html\` was not pictured: ${why}`);
+        expect(refused.images).toEqual([]);
+      }
+      expect(fake.launches()).toHaveLength(launched);
+    });
+    // Ruling 329: a look is a stretch of the page as it reads at rest. One
+    // screen in a state, or the page with reduced motion asked for, is not
+    // the page a reader scrolls, and counts for none of it.
+    // CANARY: record every picture `capture_page` hands back and a reviewer
+    // that opened the menu once has looked at the page's first 800 px.
+    expect(runLooks(store.db, runId)).toEqual([]);
+    await stopRun(runId);
+  });
+
   it("keeps an agent's pictures for the run that asked: only the pictures, apart from another run's, until that run ends", async () => {
     saveFiles("VIB-1", { "post.html": "<p>fake-height:3000</p>" });
     const first = await liveRun("editor");
@@ -1383,6 +1735,393 @@ describe("a delivered page is pictured (ruling 86)", () => {
     expect(unnamed.text).toMatch(
       /Saved at `\S+\/\.captures\/no\.run\/cap_\S+\/out\/1-desktop\.png` and `\S+\/out\/1-phone\.png`: scratch, and the next capture on this task replaces it\.$/,
     );
+  });
+
+  it("ruling 329: every reader that hands a run a picture writes down what it showed, and a picture of a size, a text read and a read by no run write nothing", async () => {
+    // What an approval of a page rests on is this list. CANARY: drop
+    // `recordRunLooks` from `capture_page`, from the attachment reader or from
+    // the source reader and the matching entry below is missing.
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    await keptDelivery("VIB-1", STAMP, { "post.html": "<p>fake-height:3000</p>", "notes.txt": "plain" });
+    // The editor judges this task; the proofreader below only reads beside
+    // it, engaged with no verdict to give.
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, EDITOR, PROOFREADER];
+    });
+    const deps = (runId: string | null) => ({ db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug, runId });
+    await withBrowser("", async () => {
+      await picture("VIB-1", STAMP);
+      const runId = await liveRun("editor");
+      // A source that is a picture: the phone picture's own bytes.
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "reference-phone.png",
+          data: readFileSync(path.join(attachments(), "post.html.capture-phone.png")),
+          title: "The reference at the phone width",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "writer", roleHint: "Writer" },
+          runId: null,
+        },
+        store.dataRoot,
+      );
+      // Two stretches of the page at the desktop width: its top, then its end.
+      await ask("post.html", { runId, view: "desktop" });
+      await ask("post.html", { runId, view: "desktop", from: 2000 });
+      // The picture Viberr kept of the delivery at the phone width.
+      expect("image" in readAgentTaskAttachment(deps(runId), "VIB-1", "post.html.capture-phone.png")).toBe(true);
+      // The kept source, opened as an image.
+      expect("image" in readAgentTaskSource(deps(runId), "VIB-1", "S1")).toBe(true);
+      // None of these is a look: a picture of a size somebody chose, a file
+      // read as text, the list of sources, and a picture handed to no run.
+      await ask("post.html", { runId, width: 600, height: 400 });
+      readAgentTaskAttachment(deps(runId), "VIB-1", "notes.txt");
+      readAgentTaskSource(deps(runId), "VIB-1", undefined);
+      readAgentTaskAttachment(deps(null), "VIB-1", "post.html.capture-desktop.png");
+      // A run that judges is shown the delivery as it was kept, so a stretch
+      // it is handed is a look at that delivery.
+      expect(runLooks(store.db, runId)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 2000, end: false, delivery: STAMP },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 2000, to: 3000, end: true, delivery: STAMP },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "source", task: "VIB-1", id: "S1" },
+      ]);
+      // The same kept picture read out of the delivery's own copy is the same
+      // look. CANARY: record nothing for a read that names its delivery, the
+      // one read that is provably of it.
+      const second = await liveRun("proofreader");
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png", 0, STAMP)).toBe(true);
+      expect(runLooks(store.db, second)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+      ]);
+      // The task's folder holds each kept picture under a name any run that
+      // posts files can save over. One opened there is a look only while it
+      // is the picture Viberr kept; out of the delivery's own copy it always
+      // is. CANARY: take the picture's height from the folder's file and the
+      // run is credited a whole page for whatever bytes stand there.
+      const phonePicture = path.join(attachments(), "post.html.capture-phone.png");
+      const asKept = readFileSync(phonePicture);
+      copyFileSync(path.join(attachments(), "post.html.capture-desktop.png"), phonePicture);
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png")).toBe(true);
+      expect(runLooks(store.db, second)).toHaveLength(1);
+      unlinkSync(phonePicture);
+      expect("image" in readAgentTaskAttachment(deps(second), "VIB-1", "post.html.capture-phone.png", 0, STAMP)).toBe(true);
+      expect(runLooks(store.db, second)).toEqual([
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
+      ]);
+      writeFileSync(phonePicture, asKept);
+      // A file changed on the task since the delivery (a rework that was
+      // stopped, an upload). The run that judges is still shown what was
+      // delivered, and told so; a run that only reads beside it is shown the
+      // files as they stand, and its look is of no delivery.
+      // CANARY: render the task's folder for every run and the judge is
+      // handed "half a rework", which its approval of the delivery would
+      // then rest on.
+      saveFiles("VIB-1", { "post.html": "<p>half a rework</p><p>fake-height:3000</p>" });
+      const judged = await ask("post.html", { runId, view: "desktop" });
+      expect(judged.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>fake-height:3000</p>");
+      expect(runLooks(store.db, runId).at(-1)).toMatchObject({ file: "post.html", view: "desktop", from: 0, to: 2000, delivery: STAMP });
+      const beside = await ask("post.html", { runId: second, view: "desktop" });
+      expect(beside.text).not.toContain("as Viberr kept it");
+      expect(fake.pages().at(-1)!.html).toContain("half a rework");
+      expect(runLooks(store.db, second).at(-1)).toEqual({
+        kind: "page",
+        task: "VIB-1",
+        file: "post.html",
+        view: "desktop",
+        from: 0,
+        to: 2000,
+        end: false,
+        delivery: null,
+      });
+      await stopRun(second);
+
+      // A Claude run that opens the kept pictures with its own file reader has
+      // looked too: its log holds the read and the image it was handed.
+      // CANARY: count a read whose result is an error, or text, as a look.
+      const reader = await liveRun("proofreader");
+      type Handed =
+        | { type: "image"; source: { type: "base64"; media_type: "image/png"; data: string } }
+        | { type: "text"; text: string };
+      type Block =
+        | { type: "tool_use"; id: string; name: "Read"; input: { file_path: string } }
+        | { type: "tool_result"; tool_use_id: string; is_error: boolean; content: Handed[] };
+      interface Envelope {
+        type: "assistant" | "user";
+        message: { content: Block[] };
+      }
+      const line = (seq: number, envelope: Envelope | { type: "system"; subtype: string }, tag = "tool_use") =>
+        insertRunLine(store.db, {
+          runId: reader,
+          seq,
+          occurredAt: new Date().toISOString(),
+          raw: JSON.stringify(envelope),
+          display: { t: "00:00:00", ev: "tool", tag, text: "" },
+        });
+      const read = (id: string, file: string): Envelope => ({
+        type: "assistant",
+        message: { content: [{ type: "tool_use", id, name: "Read", input: { file_path: file } }] },
+      });
+      const handed = (id: string, content: Handed[], isError = false): Envelope => ({
+        type: "user",
+        message: { content: [{ type: "tool_result", tool_use_id: id, is_error: isError, content }] },
+      });
+      const image: Handed[] = [{ type: "image", source: { type: "base64", media_type: "image/png", data: "" } }];
+      const sources = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "sources");
+      line(100, read("t1", path.join(attachments(), "post.html.capture-desktop.png")));
+      line(101, handed("t1", image));
+      line(102, read("t2", path.join(sources, "S1.png")));
+      line(103, handed("t2", image));
+      line(104, read("t3", path.join(attachments(), "post.html.capture-phone.png")));
+      line(105, handed("t3", [{ type: "text", text: "File does not exist." }], true));
+      line(106, read("t4", path.join(attachments(), "notes.txt")));
+      line(107, handed("t4", [{ type: "text", text: "plain" }]));
+      const fromLog = () =>
+        looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: reader });
+      const opened = [
+        { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 3000, end: true, delivery: STAMP },
+        { kind: "source", task: "VIB-1", id: "S1" },
+      ];
+      expect(fromLog()).toEqual(opened);
+      // A line that only holds the words of a compaction is none: a reviewer
+      // on a repository that names them (this one) greps or quotes them.
+      // CANARY: find the line by its text and every read above is dropped,
+      // so the note names pictures the run opened.
+      line(108, read("t5", path.join(attachments(), "compact_boundary.md")));
+      line(109, handed("t5", [{ type: "text", text: '{"type":"system","subtype":"compact_boundary"}' }]));
+      expect(fromLog()).toEqual(opened);
+      // The compaction itself: what the run was handed before it is a
+      // summary now, and only what it opens after counts. CANARY: read the
+      // whole log whatever was compacted.
+      line(110, { type: "system", subtype: "compact_boundary" }, COMPACTION_LINE_TAG);
+      expect(fromLog()).toEqual([]);
+      line(111, read("t6", path.join(sources, "S1.png")));
+      line(112, handed("t6", image));
+      expect(fromLog()).toEqual([{ kind: "source", task: "VIB-1", id: "S1" }]);
+      // A picture opened before the delivery's own render finished was the
+      // picture of an earlier delivery under the same name. CANARY: drop
+      // `openedAt` and a look at the last delivery's picture counts for this.
+      await stopRun(reader);
+      const early = await liveRun("proofreader");
+      insertRunLine(store.db, {
+        runId: early,
+        seq: 100,
+        occurredAt: "2026-10-09T22:40:01.000Z",
+        raw: JSON.stringify(read("t1", path.join(attachments(), "post.html.capture-desktop.png"))),
+        display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+      });
+      insertRunLine(store.db, {
+        runId: early,
+        seq: 101,
+        occurredAt: "2026-10-09T22:40:02.000Z",
+        raw: JSON.stringify(handed("t1", image)),
+        display: { t: "00:00:00", ev: "tool", tag: "tool_use", text: "" },
+      });
+      expect(looksFromRunLog(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", runId: early })).toEqual([]);
+    });
+  });
+
+  it("ruling 329: a run that judges is shown the delivery as kept, with the files the task holds beside it, whatever became of the page in the task's folder", { timeout: REAL_RENDERS_MS }, async () => {
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    await keptDelivery("VIB-1", STAMP, {
+      "post.html": '<p>the piece</p><img src="cover.png"><img src="film.bin"><p>fake-height:3000</p>',
+      "film.bin": "a film",
+      "styles.css": "body { margin: 0 }",
+    });
+    const keptDir = keptDeliveryDir(store.slug, "VIB-1", STAMP, store.dataRoot)!;
+    // Past what a capture carries (25 MB a file), and sparse.
+    truncateSync(path.join(keptDir, "film.bin"), 26 * 1024 * 1024);
+    const CRITIC: Engagement = { ...EDITOR, profileId: "critic", role: "Critic" };
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, EDITOR, CRITIC, PROOFREADER];
+      parsed.timeline.unshift({
+        occurredAt: STAMP,
+        type: "comment",
+        actor: { kind: "agent", backend: "claude", profileId: "writer", roleHint: "Writer" },
+        title: null,
+        text: "The piece is saved on the task.",
+        toAgent: false,
+        evidence: null,
+        attachments: ["post.html", "film.bin"],
+      });
+    });
+    const lastLook = (runId: string) => runLooks(store.db, runId).at(-1);
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      // A picture saved after the piece was delivered, under a new name,
+      // moves no delivery (ruling 85): it is on the task and not in the kept
+      // copy. Rendered from the kept copy alone, the judge was handed the
+      // piece with a broken picture and told the picture was "not among this
+      // task's files". CANARY: carry the kept copy and nothing beside it.
+      // What is no file of the task to a page, or no part of any delivery,
+      // is not carried and not named: a dot name, Viberr's own picture of a
+      // page, and the browser's working files. CANARY: carry every name the
+      // folder holds and the reply names four files that crowd the cover out.
+      saveFiles("VIB-1", {
+        "cover.png": "the cover",
+        "notes-for-the-editor.md": "beside",
+        ".source-staged.html": "staged",
+        "post.html.capture-desktop.png": "an earlier picture",
+        "page-2026-10-09T22-41-00-000Z.yml": "a snapshot",
+        "console-2026-10-09T22-41-00-000Z.log": "a dump",
+      });
+      const first = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(first.text).toContain("[done] `post.html` as a reader sees it.");
+      expect(first.text).not.toContain("`cover.png`, which");
+      // A file past what a capture carries is said as that, not as missing.
+      // CANARY: drop what the carry left out from the reply's remarks.
+      expect(first.text).toContain("It asked for `film.bin`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).");
+      expect(first.text).not.toContain("not among this task's files");
+      expect(first.text).toContain(
+        `This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now. ` +
+          "Beside it, as they stand on the task now, since that copy does not hold them: `cover.png` and `notes-for-the-editor.md`.",
+      );
+      expect(first.text.endsWith("`cover.png` and `notes-for-the-editor.md`.")).toBe(true);
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+      // A picture of an exact size says the same of what was not carried.
+      // CANARY: leave what the carry left out out of the sized reply.
+      const sized = await ask("post.html", { runId: editor, width: 600, height: 400 });
+      expect(sized.text).toContain("It asked for `film.bin`, which a capture does not carry (a file over 25 MB, or past 200 MB in all).");
+
+      // A stopped rework took the page off the task, then left one too large
+      // to render under its name. The delivery is what it was, and so is
+      // what the judge is shown. CANARY: look for the page in the task's
+      // folder first and an approval owes a look no tool can give.
+      unlinkSync(path.join(attachments(), "post.html"));
+      const afterTheRework = await ask("post.html", { runId: editor, view: "phone" });
+      expect(afterTheRework.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      // Viberr's own picture of the page is told by the page it is of, and
+      // the delivery still holds that page though the task's folder no
+      // longer does. CANARY: tell the pictures by the folder's pages alone
+      // and the picture is carried and named beside the delivery.
+      expect(afterTheRework.text).not.toContain("capture-desktop.png");
+      expect(fake.pages().at(-1)!.html).toContain("<p>the piece</p>");
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "phone", delivery: STAMP });
+      saveFiles("VIB-1", {}, { "post.html": 11 * 1024 * 1024 });
+      expect((await ask("post.html", { runId: editor, view: "phone", from: 2000 })).text).toContain("the end of the page");
+      const owed = pageLooksOwed(store.db, { dataRoot: store.dataRoot }, store.slug, "VIB-1", readTaskFile(ref)!.parsed, true);
+      expect(owed?.pages).toEqual(["post.html"]);
+      // And it is measured as delivered.
+      const measured = await measureTaskPage(store.db, { dataRoot: store.dataRoot }, { projectSlug: store.slug, taskKey: "VIB-1", name: "post.html", runId: editor });
+      expect(measured).toContain("[done] `post.html` measured as Viberr measures a delivered page");
+      expect(measured).toContain("It asked for `film.bin`, which a capture does not carry");
+      expect(measured).toContain(`Nothing was saved. This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now.`);
+      // A file the kept copy does not hold is the judge's to look at too, and
+      // is no page of the delivery.
+      saveFiles("VIB-1", { "cover.html": "<p>the cover's drawing</p>" });
+      const drawing = await ask("cover.html", { runId: editor, view: "desktop" });
+      // Said of what the kept copy holds, never of when the file was saved:
+      // a copy that failed part way lacks files that were delivered.
+      expect(drawing.text).toContain(`This file is not in the delivery of ${STAMP} as Viberr kept it, so it is shown as it stands on the task now, beside that delivery.`);
+      expect(lastLook(editor)).toMatchObject({ file: "cover.html", delivery: null });
+      // More files beside the delivery than a reply names: the first four,
+      // and how many more. CANARY: name every file and a task that holds a
+      // reviewer's twenty screenshots answers each look with a paragraph.
+      saveFiles("VIB-1", { "a.png": "a", "b.png": "b", "c.png": "c" });
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain(
+        // The picture the page's own text names goes first.
+        "Beside it, as they stand on the task now, since that copy does not hold them: `cover.png`, `a.png`, `b.png`, and `c.png`, and 2 more.",
+      );
+
+      // A page on the task named the way the browser names its working
+      // files is still a page when it is the one asked for. CANARY: leave it
+      // out with the working files and the judge is told it is not there.
+      saveFiles("VIB-1", { "report-2026-10-09T22-41-00-000Z.html": "<p>a stamped page</p>" });
+      expect((await ask("report-2026-10-09T22-41-00-000Z.html", { runId: editor, view: "desktop" })).text).toContain(
+        "[done] `report-2026-10-09T22-41-00-000Z.html` as a reader sees it.",
+      );
+
+      // A file on the task whose name differs from a delivered one by case
+      // alone. On a disk that folds case its copy cannot stand beside the
+      // delivery's, which was carried first and wins; on one that does not,
+      // both are carried. Either way the judge is shown the page. CANARY (on
+      // a disk that folds case): let the second copy's open throw and every
+      // look of this judge answers that the files could not be handed over.
+      renameSync(path.join(attachments(), "styles.css"), path.join(attachments(), "STYLES.css"));
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain("[done] `post.html` as a reader sees it.");
+
+      // Anyone who does not judge works on the files as they stand: a
+      // supporting agent, and a reviewer asked with its verdict withheld.
+      const proofreader = await liveRun("proofreader");
+      expect((await ask("post.html", { runId: proofreader })).text).toContain("is 11 MB; capture_page renders a page of up to 10 MB");
+      const asked = await liveRun("critic", true);
+      expect((await ask("post.html", { runId: asked })).text).toContain("is 11 MB; capture_page renders a page of up to 10 MB");
+
+      // The completion lets a run dispatched to review record its verdict
+      // after its engagement was handed delivery or taken off the task
+      // (ruling 87), so such a run is still shown the delivery. CANARY: read
+      // "judges" off the engagement as it stands and its approval is refused
+      // for pages it was shown.
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.engagements = [{ ...WRITER, delivers: false }, { ...EDITOR, delivers: true }];
+      });
+      const handed = runLooks(store.db, editor).length;
+      await ask("post.html", { runId: editor, view: "desktop" });
+      expect(runLooks(store.db, editor)).toHaveLength(handed + 1);
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+      await updateTaskFile(ref, (parsed) => {
+        parsed.frontmatter.engagements = [WRITER];
+      });
+      const before = runLooks(store.db, editor).length;
+      expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      expect(runLooks(store.db, editor)).toHaveLength(before + 1);
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
+
+      // No copy of the delivery is held (the copy failed): the task's files
+      // are all anyone can be shown, the judge is told so, and its look is
+      // of the delivery, or an approval could never bind.
+      saveFiles("VIB-1", { "post.html": "<p>as it stands</p>" });
+      rmSync(keptDir, { recursive: true });
+      const uncopied = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(uncopied.text).toContain(`Viberr holds no kept copy of the delivery of ${STAMP}, so this is the task's files as they stand now.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>as it stands</p>");
+      expect(lastLook(editor)).toMatchObject({ file: "post.html", delivery: STAMP });
+    });
+  });
+
+  it("ruling 329: a name that differs from a delivered page's by case alone is never taken for the delivered page, nor the delivered page for it", { timeout: REAL_RENDERS_MS }, async () => {
+    // The kept copy holds `Post.html`; a stopped rework left `post.html`,
+    // changed, on the task. A disk that folds case answers one for the
+    // other: the judge that asked for `post.html` was rendered "half a
+    // rework" and told it was the delivery, and after a first repair was
+    // rendered the delivery and told it was the task's file. Whether a
+    // folder holds a name is read off its listing, on any disk.
+    // CANARY (on a disk that folds case; on one that does not, the two
+    // names are two files and each answer is right either way): ask the
+    // disk whether the kept copy, or the task's folder, holds the name.
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
+    await keptDelivery("VIB-1", STAMP, { "Post.html": "<p>the piece</p>" });
+    await updateTaskFile(ref, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, EDITOR];
+    });
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      // The task holds no `post.html`, and is not said to: the delivered
+      // page is `Post.html`.
+      const absent = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(absent.text).toContain("[noop] VIB-1 has no attachment `post.html`.");
+      expect(runLooks(store.db, editor)).toEqual([]);
+
+      unlinkSync(path.join(attachments(), "Post.html"));
+      saveFiles("VIB-1", { "post.html": "<p>half a rework</p>" });
+      // The task's own file is shown as that, and a look at it is of no
+      // delivery.
+      const asked = await ask("post.html", { runId: editor, view: "desktop" });
+      expect(asked.text).toContain("[done] `post.html` as a reader sees it.");
+      expect(asked.text).toContain(`This file is not in the delivery of ${STAMP} as Viberr kept it, so it is shown as it stands on the task now, beside that delivery.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>half a rework</p>");
+      expect(runLooks(store.db, editor).at(-1)).toMatchObject({ file: "post.html", delivery: null });
+      // The delivered page by its own name is the delivery.
+      const delivered = await ask("Post.html", { runId: editor, view: "desktop" });
+      expect(delivered.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>the piece</p>");
+      expect(runLooks(store.db, editor).at(-1)).toMatchObject({ file: "Post.html", delivery: STAMP });
+    });
   });
 
   it("makes, shares and removes nothing through a link where a render's scratch would go, and says the scratch could not be made", async () => {

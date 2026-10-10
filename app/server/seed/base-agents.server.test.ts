@@ -24,6 +24,8 @@ import { isKnownModel } from "~/server/runtimes/model-catalog.server";
 import { effectiveCollabMode } from "~/server/tasks/agent-outcome.server";
 import { grantsWriteRepository } from "~/server/tasks/specialist-tool-policy";
 import type { AgentDeploymentDefinition } from "~/schemas/project-file.schema";
+import { KEEP_PAGE_LOOK_TOOL, PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL } from "~/server/mcp-proxy/board-tool.server";
+import { PAGE_CAPTURE_VIEWS } from "~/shared/page-capture";
 
 const ctx = createTestDbContext();
 afterEach(ctx.cleanup);
@@ -315,6 +317,96 @@ describe("ruling 218: a record that grows is read to its latest entry on the sub
     expect(guide).toContain("Deploy the Editor at `high` effort");
     expect(guide).toContain("its review of a full piece took 4 minutes at `high`, and a review of the same piece and pictures at `max` took 19 and found nothing more");
     expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "a9ff90ee8fc6a085586d661a8d56cccdb5e52f489027afd4f0db9d71db5bd3e7", {})).toBe(true);
+  });
+});
+
+describe("rulings 178 and 268: work that is looked at is made, judged and planned on what Viberr pictures", () => {
+  const said = (dataRoot: string, name: string) =>
+    readFileSync(path.join(dataRoot, "skills", name, "SKILL.md"), "utf8").replace(/\s+/g, " ");
+  /** The arguments a tool's own schema takes, as the manuals may name them. */
+  const argsOf = (tool: { inputSchema: { properties?: object } }) => Object.keys(tool.inputSchema.properties ?? {});
+
+  it("has the Developer look at, measure and keep the look of what it makes, with the tools as they are", () => {
+    // The first board asked for a page built one from the reference as it
+    // read that day, pictured it with a script of its own at a width Viberr
+    // does not use, and drew the product's screens in markup: nothing in the
+    // manual every Developer reads said how work that is looked at is made.
+    // CANARY: drop the section, a bullet of it, or the outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const developer = said(dataRoot, "developer-expertise");
+    expect(developer).toContain("## When what you make is looked at");
+    expect(developer).toContain("**Look at it yourself, at both widths, before you hand it over.**");
+    expect(developer).toContain("Say nothing about how the page looks that a picture you opened does not show.");
+    expect(developer).toContain("**Measure it before you hand it over.**");
+    expect(developer).toContain("**When it is made to look like something that exists, keep that look and work from it.**");
+    expect(developer).toContain("The address reads differently next week and a description is its writer's reading, so neither is what you work from");
+    expect(developer).toContain("**Take the look, never the thing.**");
+    expect(developer).toContain("A picture on it is the product itself, running on its demo data, or it explains the product");
+    expect(developer).toContain("Every link and every control goes somewhere real or is not there.");
+    // What the manual says of a tool is what the tool takes: each state it
+    // names is an argument of `capture_page`, and the look is kept and taken
+    // over by the arguments `keep_page_look` has.
+    for (const tool of [PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, KEEP_PAGE_LOOK_TOOL]) expect(developer).toContain(`\`${tool.name}\``);
+    for (const state of ["press", "hover", "tab", "motion", "moving"]) {
+      expect(argsOf(PAGE_CAPTURE_TOOL)).toContain(state);
+      expect(developer).toContain(`(\`${state}\`)`);
+    }
+    expect(argsOf(KEEP_PAGE_LOOK_TOOL)).toContain("from");
+    expect(developer).toContain("take that one over (`from`)");
+    expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "dabe7985106e69d4351cc6d7feec4a11ab42ee65f15cacc3d8bbf7a16093b3bb", {})).toBe(true);
+  });
+
+  it("has the Reviewer look the way an approval is held to, and write a finding as what is seen", () => {
+    // The first board's reviewer looked only because the board's own rulings
+    // told it to, in its own browser, at the reference as it read that day.
+    // CANARY: drop the section, a bullet of it, or the outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const reviewer = said(dataRoot, "reviewer-expertise");
+    expect(reviewer).toContain("## When the work is looked at");
+    // The way to look that the manual gives is the one the gate counts
+    // (ruling 329): `capture_page` in stretches to the page's end, since one
+    // kept picture of a long page is taller than a look.
+    expect(reviewer).toContain(
+      "Look with `capture_page`: the page's name, one width at a time, on from each `nextFrom` until the reply gives none. " +
+        "An approval from a run that has not is not recorded",
+    );
+    expect(argsOf(PAGE_CAPTURE_TOOL)).toEqual(expect.arrayContaining(["name", "view", "from"]));
+    expect(reviewer).toContain("Judge against the kept pictures, never against the address as it reads today or a description of it.");
+    expect(reviewer).toContain("Work made to a look the task keeps no pictures of cannot be judged: request changes and say so.");
+    expect(reviewer).toContain("**Read what Viberr measured.**");
+    expect(reviewer).toContain("Nothing is borrowed from the reference");
+    expect(reviewer).toContain("A finding about the look with no picture behind it is an opinion.");
+    for (const state of ["press", "hover", "tab", "motion", "moving"]) expect(reviewer).toContain(`(\`${state}\`)`);
+    expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "9e5360754136f8feeeb5a3c14813e3ac4dbf8a49e2145edc26e619896e0ddbc9", {})).toBe(true);
+  });
+
+  it("has the guide plan a page on Viberr's own pictures, widths and figures, as files when nobody named a repository, and as one task", () => {
+    // The first board asked for a page was planned as four pull-request tasks
+    // (27 runs and $24.93 before a section of the page existed), with a
+    // review procedure of the controller's own at 1440 px, a width Viberr
+    // pictures nothing at; its pages, in pull requests, were never pictured.
+    // CANARY: drop the section, a bullet of it, the price of a task, or the
+    // outgoing hash.
+    const dataRoot = ctx.makeTempDir();
+    seedDefaultAgentAssets(dataRoot);
+    const guide = said(dataRoot, "controller-guide");
+    expect(guide).toContain("## Work a person looks at");
+    expect(guide).toContain("write none of it into the rulings as your own procedure: no other widths, no browser steps, no description of the look");
+    // The widths the guide names are the ones a delivered page is pictured at.
+    const widths = PAGE_CAPTURE_VIEWS.map((view) => `${view.width} px`);
+    expect(widths).toEqual(["1280 px", "390 px"]);
+    expect(guide).toContain(`(rulings 86 and 328): at ${widths[0]} and at ${widths[1]}`);
+    expect(guide).toContain("**A reviewer's approval of a page counts only from a run that looked** (ruling 329)");
+    expect(guide).toContain("**Work made to look like something keeps that look** (ruling 327)");
+    expect(guide).toContain("Never describe the reference in a goal or in the rulings");
+    expect(guide).toContain("**A page nobody named a repository for is delivered as files.**");
+    expect(guide).toContain("Viberr does not open the pages inside a pull request");
+    expect(guide).toContain("**A task has a price**: a making run, a review of every delivery and an operator turn at each hand-off.");
+    expect(guide).toContain("What one agent makes and one review judges as a whole is one task: a page is one");
+    for (const tool of [PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL, KEEP_PAGE_LOOK_TOOL]) expect(guide).toContain(`\`${tool.name}\``);
+    expect(shippedCopyIsUnedited("skills/controller-guide/SKILL.md", "e9766677fe0e282ae0662b4ccc2ee69e90ebca9e1115703b6baf8a7b9ae55480", {})).toBe(true);
   });
 });
 

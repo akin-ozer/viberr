@@ -81,13 +81,21 @@ import {
   boardMountSchema,
   boardReadArgsSchema,
   boardReadResult,
+  KEEP_PAGE_LOOK_TOOL,
+  keepPageLookArgsRefusal,
+  keepPageLookArgsSchema,
+  keepPageLookResult,
   keepSourceArgsRefusal,
   keepSourceArgsSchema,
   keepSourceResult,
   keepSourceTool,
+  PAGE_MEASURE_TOOL,
   pageCaptureArgsRefusal,
   pageCaptureArgsSchema,
   pageCaptureResult,
+  pageMeasureArgsRefusal,
+  pageMeasureArgsSchema,
+  pageMeasureResult,
   taskAttachmentArgsSchema,
   taskAttachmentResult,
   taskSourceArgsSchema,
@@ -1426,8 +1434,10 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
   // told how for what its web grant lets it reach.
   const tools = [
     ...BOARD_TOOLS,
-    ...(pageCaptureStatus().available ? [PAGE_CAPTURE_TOOL] : []),
+    ...(pageCaptureStatus().available ? [PAGE_CAPTURE_TOOL, PAGE_MEASURE_TOOL] : []),
     ...(mount.sources ? [keepSourceTool(mount.sources.web)] : []),
+    // Ruling 327: and a page on the web, to a run that holds the browser.
+    ...(mount.sources?.browser && pageCaptureStatus().available ? [KEEP_PAGE_LOOK_TOOL] : []),
   ];
   const context = {
     db: grant.db,
@@ -1465,6 +1475,18 @@ async function openBoardSession(grant: RunGrant, server: string, mount: BoardMou
       return args.success
         ? await keepSourceResult({ ...context, runId: grant.runId }, args.data)
         : keepSourceArgsRefusal();
+    }
+    // Ruling 328: one page of the run's own task, measured.
+    if (tool === PAGE_MEASURE_TOOL.name && tools.includes(PAGE_MEASURE_TOOL)) {
+      const args = pageMeasureArgsSchema.safeParse(raw);
+      return args.success ? await pageMeasureResult(context, args.data) : pageMeasureArgsRefusal();
+    }
+    // Ruling 327: a page on the web, pictured and kept on the run's task.
+    if (tool === KEEP_PAGE_LOOK_TOOL.name && tools.includes(KEEP_PAGE_LOOK_TOOL)) {
+      const args = keepPageLookArgsSchema.safeParse(raw);
+      return args.success
+        ? await keepPageLookResult({ ...context, runId: grant.runId }, args.data)
+        : keepPageLookArgsRefusal();
     }
     // Ruling 194: one page of the run's own task, as a reader sees it.
     if (tool === PAGE_CAPTURE_TOOL.name && tools.includes(PAGE_CAPTURE_TOOL)) {

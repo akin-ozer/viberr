@@ -24,6 +24,7 @@ import { withTransaction } from "~/server/db/transaction.server";
 import {
   appendRawLine,
   appendRunLine,
+  LOOKS_COMPACTED_JSON,
   patchRun,
   type RunPatch,
   getRun,
@@ -520,6 +521,21 @@ export function createRunSink(
         // by construction, and never on the line's own persist path.
         if (f.compaction) {
           compactions += 1;
+          // Ruling 329: what the run was shown so far is a summary from here
+          // on, so its list of looks starts again, marked as compacted. An
+          // approval rests on what its session still holds, never on
+          // pictures it no longer has. The compaction that closes a run
+          // (ruling 174) comes after the run's verdict was given: it empties
+          // and marks nothing, so a completion that is replayed counts what
+          // the verdict rested on, and the next run of the session counts
+          // none of it (`looksRunIds`).
+          if (f.compaction.trigger !== "completion") {
+            try {
+              patchRun(db, spec.runId, { lookedJson: LOOKS_COMPACTED_JSON });
+            } catch (error) {
+              logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+            }
+          }
           // What a resume replays now is the summary, not the history the
           // compaction folded: the last prompt is the post size until the
           // next call says otherwise (ruling 173 reads it; ruling 174 sets it
@@ -716,7 +732,19 @@ export function createRunSink(
           });
         }
       }
-      if (stats.compactions > compactions) compactions = stats.compactions;
+      if (stats.compactions > compactions) {
+        compactions = stats.compactions;
+        // Ruling 329: a compaction learned of here happened somewhere in the
+        // run, and nothing says before or after which look. Everything the
+        // run was shown is taken as summarised, which errs toward a review
+        // that looks again and never toward an approval on pictures it no
+        // longer holds.
+        try {
+          patchRun(db, spec.runId, { lookedJson: LOOKS_COMPACTED_JSON });
+        } catch (error) {
+          logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+        }
+      }
       // The run's real first REQUEST: a Codex turn total (the streamed fact)
       // sums every call of the turn, so its "first call" read a whole turn's
       // cache hits. The rollout's first `token_count` is one request, and the

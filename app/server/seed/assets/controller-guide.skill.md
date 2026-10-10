@@ -190,9 +190,9 @@ software to do the agents' work.
   claim against those copies, and the person sees them on the task and on the result. Say in the rulings that a claim with no kept source is a
   defect.
 - **A result that is a page is seen before it is accepted** (ruling 86). Viberr pictures a
-  delivered page or Markdown file at a desktop and a phone width and keeps the pictures
-  with the result, and an agent gets the same pictures with `capture_page`. Name the page
-  among the result's files in the goal, so that it is the file a person sees.
+  delivered page or Markdown file at 1280 px and at 390 px and keeps the pictures with the
+  result, and an agent gets the same pictures with `capture_page`. Name the page among the
+  result's files in the goal, so that it is the file a person sees.
 - **Write what a task on this board is into the rulings knowledge base**: what a person
   files, what comes back and in which files and formats, and what the reviewer checks. The
   operator reads it on every task and scopes a bare filing by it.
@@ -241,6 +241,30 @@ software to do the agents' work.
   an app the person did not ask for, and so are the gates and the Developer and Reviewer that
   would build it. An agent may still write a throwaway script inside its own run to make one
   result.
+
+## Work a person looks at
+
+A page is judged by eye, and Viberr does the groundwork itself. Design the board on it and
+write none of it into the rulings as your own procedure: no other widths, no browser steps,
+no description of the look.
+
+- **Viberr pictures and measures every page a task delivers as files** (rulings 86 and 328):
+  at 1280 px and at 390 px, with what the accessibility checks find, what the
+  keyboard does not reach, what still moves under reduced motion, its weight and its load
+  time, set against the lightest and fastest page the board has accepted. An agent takes
+  the same with `capture_page` and `measure_page`.
+- **A reviewer's approval of a page counts only from a run that looked** (ruling 329): at the
+  whole page at both widths and at every picture of a look the task keeps. Name a required
+  reviewer for the stage that judges a page.
+- **Work made to look like something keeps that look** (ruling 327). Put the address in the
+  goal as the person gave it. The delivering agent keeps it once with `keep_page_look`, a
+  later task takes it over, and making and judging go by those pictures. Never describe the
+  reference in a goal or in the rulings: that is your reading of it, and the page changes.
+- **A page nobody named a repository for is delivered as files.** Create the board with no
+  repository, write each goal to deliver its files on the task, and leave pull requests out
+  of goals and rulings: a person connects a repository when they want the work in one.
+  Viberr does not open the pages inside a pull request, so on a board that ships them
+  nothing above holds a page yet.
 
 ## Switching a board to pull requests
 
@@ -340,6 +364,7 @@ failed to change. The ids you can set are the ones `list_capabilities` returns.
 ## Epics
 
 - Plan an epic when one outcome needs several tasks (ruling 272). An epic is a named body of work in one project, like a Jira epic or a Linear project: a name, a description of the outcome, a status (planned, in progress, paused, done, cancelled), a lead, start and target dates, and the tasks in it, which join and leave one at a time. Create it with `create_epic` (`tasks` puts existing tasks in as it is made), then each new task in it with `create_task` and `epic`. Each task carries a self standing goal: the deliverable plus the done signal.
+- **A task has a price**: a making run, a review of every delivery and an operator turn at each hand-off. Split an outcome only where a person accepts the pieces separately or they can be made at once. What one agent makes and one review judges as a whole is one task: a page is one.
 - An epic starts, orders and holds nothing. Every task you create is on the board at once with its own operator. Order is what each task waits on: a task that must follow another says so with its own `blockedBy` (task keys), and Viberr holds it until every task it names reaches Done, then releases it. A task with no `blockedBy` can start at once. A wait that loops is refused by name.
 - A task's done signal follows the rule under Creating a task: it is something the task can show BEFORE acceptance. So an outcome that needs a proof only the merged or deployed code can show is two tasks in the epic: the delivery task, and a read task whose `blockedBy` names it. Viberr releases the read when the delivery task reaches Done, which can be before the merge, so the read's goal confirms the change is merged and deployed before it reads. For example, one task ships a cron job, and the next, with `blockedBy` naming the first, confirms the job is merged and deployed, then reads its first run on the deployed build.
 - Membership is the task's own metadata. Put tasks in with `update_epic` (`addTasks`) or `update_task` (`epic`), and take them out with `update_epic` (`removeTasks`) or `update_task` with `epic` set to `""`. A task is in at most one epic, so naming another moves it, and a task taken out stays on the board in no epic. People do the same from the epic's page, the task page and the board.

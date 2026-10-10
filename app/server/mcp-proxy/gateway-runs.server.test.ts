@@ -56,6 +56,7 @@ const SECRET = "cf-api-token-sentinel-runs";
 const READS_ONLY = {
   keepsSources: false,
   webEgress: true,
+  browser: false,
   agent: { profileId: "workflow-researcher", roleHint: "Workflow Researcher" },
 };
 /** Ruling 158(b): one call with one answer, 100 times within 60 seconds. */
@@ -627,7 +628,7 @@ describe("ruling 82: a Codex run keeps and reads a task's sources through the bo
     // tools/list has no keep_source for the granted run.
     const agent = { profileId: "cost-researcher", roleHint: "Cost Researcher" };
     const startCodexRun = async (taskKey: string, keepsSources: boolean) => {
-      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, agent, dataRoot: store.dataRoot });
+      const mount = resolveBoardMcp({ backend: "codex", collaborates: true, keepsSources, webEgress: true, browser: false, agent, dataRoot: store.dataRoot });
       queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "pricing" }], sessionId: "s", backend: "codex", keepRunning: true }, "codex");
       const { runId } = await startRun(store.db, {
         projectSlug: store.slug,
@@ -749,6 +750,7 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
       // A writer's run holds both: it looks at its page and keeps its sources.
       keepsSources: true,
       webEgress: true,
+      browser: false,
       agent: { profileId: "writer", roleHint: "Writer" },
       dataRoot: store.dataRoot,
     });
@@ -791,6 +793,7 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
         "read_task_attachment",
         "read_task_source",
         "capture_page",
+        "measure_page",
         "keep_source",
       ]);
       const result = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "desktop" } });
@@ -821,12 +824,19 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
       // is. CANARY: answer with the board server's own "takes ... as text"
       // and a run that sent 99 for a width is told to send text.
       const notTheTools =
-        "capture_page takes `name` as text, `view` as `desktop` or `phone`, `from` as a whole number of px up to 40000, " +
-        "and, for a picture of an exact size, `width` and `height` as whole numbers of px from 100 to 4000 " +
-        "and `scale` as one of 0.25, 0.5, 1, 1.5 and 2. Nothing was pictured.";
+        "capture_page takes `name` as text, `view` as `desktop` or `phone` and `from` as a whole number of px up to 40000; " +
+        "for a picture of an exact size, `width` and `height` as whole numbers of px from 100 to 4000 " +
+        "and `scale` as one of 0.25, 0.5, 1, 1.5 and 2; and for the page in a state, `press` and `hover` as text of up to 200 characters, " +
+        "`tab` as a whole number from 1 to 60, `motion` as `reduce` and `moving` as true or false. Nothing was pictured.";
       const refused = await client.callTool({ name: "capture_page", arguments: { name: "post.html", view: "tablet" } });
       expect(refused.isError).toBe(true);
       expect(z.array(z.object({ text: z.string() })).parse(refused.content)[0]!.text).toBe(notTheTools);
+      // An argument the tool does not have is refused too (ruling 136).
+      // CANARY: parse loosely and `pressed` is dropped in silence: the run is
+      // handed a stretch of the page at rest and told nothing was pressed.
+      const misnamed = await client.callTool({ name: "capture_page", arguments: { name: "post.html", pressed: "Menu" } });
+      expect(misnamed.isError).toBe(true);
+      expect(z.array(z.object({ text: z.string() })).parse(misnamed.content)[0]!.text).toBe(notTheTools);
 
       // Given a size, the same one picture of exactly that size a Claude run
       // gets, and the same word on how it is kept. CANARY: leave `width`,
@@ -864,6 +874,10 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
         height: { type: "integer", minimum: 100, maximum: 4000 },
         scale: { type: "number", enum: [0.25, 0.5, 1, 1.5, 2] },
       });
+      // And that it takes nothing else, as its door holds it to above.
+      // CANARY: list the schema open and a model is never told that a key it
+      // invents is refused, only the refusal after it sent one.
+      expect(listed?.inputSchema.additionalProperties).toBe(false);
       for (const size of [{ width: 99, height: 630 }, { width: 1200, height: 4001 }, { width: 1200.5, height: 630 }, { width: 1200, height: 630, scale: 2.5 }, { width: 1200, height: 630, scale: 0.7 }]) {
         const outside = await client.callTool({ name: "capture_page", arguments: { name: "post.html", ...size } });
         expect(outside.isError).toBe(true);
@@ -874,6 +888,69 @@ describe("ruling 194: the gateway's board server pictures a page for a Codex run
 
     await interrupt(runId);
     await settle();
+  });
+
+  it("ruling 327: a Codex run's board server offers keep_page_look only where the run holds the browser grant, and answers it at the look's own door", async () => {
+    // CANARY: list it for every mount that keeps sources and a Codex run the
+    // browser is withheld from opens a page on the web through the renderer;
+    // leave it out of the call switch and the listed tool answers that the
+    // server has no such tool.
+    const fake = writeFakeBrowser(ctx.makeTempDir("viberr-fake-browser-"));
+    const connectAs = async (browser: boolean, sessionId: string) => {
+      const mount = resolveBoardMcp({
+        backend: "codex",
+        collaborates: true,
+        keepsSources: true,
+        webEgress: true,
+        browser,
+        agent: { profileId: "writer", roleHint: "Writer" },
+        dataRoot: store.dataRoot,
+      });
+      queueFakeRun({ lines: [{ t: "1", ev: "text", tag: "assistant", text: "building" }], sessionId, backend: "codex", keepRunning: true }, "codex");
+      await startRun(store.db, {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        role: "Writer",
+        // One run delivers on a task at a time; the other reads beside it.
+        kind: browser ? "primary" : "reviewer",
+        backend: "codex",
+        model: defaultModelFor("codex"),
+        prompt: "go",
+        dataRoot: store.dataRoot,
+        mcpServers: { viberr_board: mount! },
+        agentProfileId: "writer",
+        credentialUserId: store.users.arda.id,
+        threadId: `look-${sessionId}`,
+      });
+      await settle();
+      const board = mountSchema.parse(lastRunSpec()?.mcpServers?.viberr_board);
+      const client = new Client({ name: "codex-cli", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(board.url), { requestInit: { headers: board.headers } }));
+      return client;
+    };
+    const textOf = (result: Awaited<ReturnType<Client["callTool"]>>) => z.array(z.object({ text: z.string() })).parse(result.content)[0]!.text;
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env() }, async () => {
+      const without = await connectAs(false, "no-browser");
+      expect((await without.listTools()).tools.map((tool) => tool.name)).not.toContain("keep_page_look");
+      expect((await without.callTool({ name: "keep_page_look", arguments: { url: "https://look.example/" } })).isError).toBe(true);
+      await without.close();
+
+      const client = await connectAs(true, "browser");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("keep_page_look");
+      // The door's own refusal, as a Claude run's reads: an answer, not an error.
+      const local = await client.callTool({ name: "keep_page_look", arguments: { url: "http://127.0.0.1:5173/" } });
+      expect(local.isError).toBeFalsy();
+      expect(textOf(local)).toBe(
+        "[noop] A look is of a page on the web, and this address is this machine's or a private network's. " +
+          "A page among the task's files is looked at with `capture_page`. Nothing was kept.",
+      );
+      // Arguments that are not the tool's are refused by name (ruling 136).
+      const stray = await client.callTool({ name: "keep_page_look", arguments: { url: "https://look.example/", width: 1280 } });
+      expect(stray.isError).toBe(true);
+      expect(textOf(stray)).toBe("keep_page_look takes `url` or `from` as text, and nothing else. Nothing was kept.");
+      expect(fake.launches()).toEqual([]);
+      await client.close();
+    });
   });
 });
 
