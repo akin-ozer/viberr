@@ -672,12 +672,12 @@ ${screens(5)}</body></html>`,
 <style>html,body{overflow-x:hidden;margin:0}</style></head><body><div style="height:5000px;background:rgb(0,128,0)"></div></body></html>`,
   );
   // Two small boxes that scroll, then 5,200 elements, then a box 200 px
-  // tall that holds 9,000: the one that hides the most is far down the
-  // document's elements.
+  // tall inside a border of 10 that holds 9,000: the one that hides the most
+  // is far down the document's elements, and its own box is 220 px.
   writeFileSync(
     path.join(dir, "crowd.html"),
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A crowded page</title><meta name="viewport" content="width=device-width, initial-scale=1">
-<style>body{margin:0}div.small,div.big{overflow:auto}div.small{height:100px}div.big{height:200px}</style></head><body>
+<style>body{margin:0}div.small,div.big{overflow:auto}div.small{height:100px}div.big{height:200px;border:10px solid rgb(0,0,0)}</style></head><body>
 <div class="small"><div style="height:2000px"></div></div><div class="small"><div style="height:3000px"></div></div>
 <p>${"<i></i>".repeat(5200)}</p>
 <div class="big"><div style="height:9000px"></div></div></body></html>`,
@@ -1350,8 +1350,8 @@ if (command === "verify-inside") {
   );
   says(
     crowd,
-    "desktop div.big 9000 200 3, phone div.big 9000 200 3",
-    "the part that hides the most is found past five thousand elements, and all three such parts are counted",
+    "desktop div.big 9000 220 3, phone div.big 9000 220 3",
+    "the part that hides the most is found past five thousand elements, all three such parts are counted, and its box is the 200 px it is tall and its border",
   );
   done();
 }
