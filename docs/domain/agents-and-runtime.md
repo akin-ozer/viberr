@@ -1687,7 +1687,7 @@ write grant.
    verdict not withheld, its engagement verdict-capable or taken off the task under it)
    is answered from the delivery's kept copy first: the page is found there, and rendered
    with the kept files and, beside them, the files the task's folder holds under names
-   the delivery does not, and the reply says so and names them. With no kept copy it is
+   the kept copy does not, and the reply says so and names up to four of them. With no kept copy it is
    shown the task's files as they stand, is told so, and its look still counts. Any other
    run is rendered the task's files as they stand, and its looks count for no approval.
    Nothing is owed that no tool can show: no page on a server with no browser, none past

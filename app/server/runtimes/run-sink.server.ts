@@ -24,6 +24,7 @@ import { withTransaction } from "~/server/db/transaction.server";
 import {
   appendRawLine,
   appendRunLine,
+  LOOKS_COMPACTED_JSON,
   patchRun,
   type RunPatch,
   getRun,
@@ -521,15 +522,16 @@ export function createRunSink(
         if (f.compaction) {
           compactions += 1;
           // Ruling 329: what the run was shown so far is a summary from here
-          // on, so its list of looks starts again. An approval rests on what
-          // its session still holds, never on pictures it no longer has. The
-          // compaction that closes a run (ruling 174) comes after the run's
-          // verdict was given: it empties nothing, so a completion that is
-          // replayed finds what this run was shown, and the next run of the
-          // session counts none of it (`looksRunIds`).
+          // on, so its list of looks starts again, marked as compacted. An
+          // approval rests on what its session still holds, never on
+          // pictures it no longer has. The compaction that closes a run
+          // (ruling 174) comes after the run's verdict was given: it empties
+          // and marks nothing, so a completion that is replayed counts what
+          // the verdict rested on, and the next run of the session counts
+          // none of it (`looksRunIds`).
           if (f.compaction.trigger !== "completion") {
             try {
-              patchRun(db, spec.runId, { lookedJson: null });
+              patchRun(db, spec.runId, { lookedJson: LOOKS_COMPACTED_JSON });
             } catch (error) {
               logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
             }
@@ -738,7 +740,7 @@ export function createRunSink(
         // that looks again and never toward an approval on pictures it no
         // longer holds.
         try {
-          patchRun(db, spec.runId, { lookedJson: null });
+          patchRun(db, spec.runId, { lookedJson: LOOKS_COMPACTED_JSON });
         } catch (error) {
           logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
         }

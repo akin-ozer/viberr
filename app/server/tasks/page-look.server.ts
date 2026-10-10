@@ -284,8 +284,25 @@ function auditKept(
   });
 }
 
-/** Said whenever a look was asked for and none was kept. */
+/** Said when a look was asked for well and still could not be kept: the task
+ *  holds none, and a run that goes on must not describe one. */
 const NOT_FROM_MEMORY = "Say in your report that the look could not be kept, and state nothing about it from memory.";
+
+/** The source among a task's whose bytes are one of `hashes` and were taken
+ *  out of its store by a person: its record stands and its file is gone. */
+function removedAmong(
+  ctx: TaskMutationContext,
+  projectSlug: string,
+  taskKey: string,
+  held: readonly TaskSource[],
+  hashes: ReadonlySet<string>,
+): TaskSource | undefined {
+  return held.find((source) => {
+    if (!hashes.has(source.sha256)) return false;
+    const resolved = resolveTaskSource(projectSlug, taskKey, source.id, ctx.dataRoot);
+    return !resolved || !existsSync(resolved.abs);
+  });
+}
 
 /** How a run reads what a look holds, said at the end of every answer. */
 const HOW_TO_READ =
@@ -335,7 +352,7 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
       if (bytes.has(id)) continue;
       const resolved = resolveTaskSource(projectSlug, from, id, ctx.dataRoot);
       if (!resolved || !existsSync(resolved.abs)) {
-        return refused(`${from} no longer holds ${id} of its look (it was taken out of the store), so the look is not whole.`);
+        return `${refused(`${from} no longer holds ${id} of its look (it was taken out of the store), so the look is not whole.`)} ${NOT_FROM_MEMORY}`;
       }
       bytes.set(id, readFileSync(resolved.abs));
     }
@@ -344,6 +361,13 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
   // bytes, is kept once, and each note is written new.
   const held = new Set(mine.map((kept) => kept.sha256));
   const pictures = pictureIds(toAdopt.flatMap((look) => look.pictures));
+  // A picture whose bytes a person took out of this task's store is never
+  // kept again (ruling 82), so the look cannot arrive whole: said before
+  // anything is copied.
+  const gone = removedAmong(ctx, projectSlug, taskKey, mine, new Set(pictures.map((id) => record.get(id)?.sha256 ?? "")));
+  if (gone) {
+    return `${refused(`A person took ${gone.id} out of ${taskKey}'s store, and it is a picture of this look: the same bytes are not kept again, so the look cannot be taken over whole.`)} ${NOT_FROM_MEMORY}`;
+  }
   const fresh = pictures.filter((id) => !held.has(record.get(id)?.sha256 ?? ""));
   const room = sourcesRoomRefusal(
     projectSlug,
@@ -353,7 +377,7 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
       toAdopt.reduce((sum, look) => sum + (bytes.get(look.note)?.length ?? 0) + NOTE_SLACK_BYTES, 0),
     ctx.dataRoot,
   );
-  if (room) return refused(room);
+  if (room) return `${refused(room)} ${NOT_FROM_MEMORY}`;
   const by = { backend: actorRef.backend, profileId: actorRef.profileId, roleHint: actorRef.roleHint };
   const written: string[] = [];
   /** The id each of their sources is kept under here. */
@@ -461,23 +485,19 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   }
   // The render took its time: another run's ask for the same address may
   // have kept its look meanwhile, and a task keeps one.
-  const meanwhile = keptLooks(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources).find((look) => look.url === url);
+  const held = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
+  const meanwhile = keptLooks(held).find((look) => look.url === url);
   if (meanwhile) return alreadyKept(taskKey, meanwhile);
   // Whole or not at all: a look cut off by the task's limits would stand as
   // the look, with no note and no way to finish it.
   // Counted as it will be written: a frame or a stretch whose bytes the task
   // already keeps, or that equals one before it, is kept once.
-  const held = readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources;
   const seen = new Set(held.map((source) => source.sha256));
   const hashes = answer.pictures.map((picture) => createHash("sha256").update(picture.bytes).digest("hex"));
   // A picture whose bytes a person took out of this task's store is never
   // kept again (ruling 82), so the look cannot be whole here: said before
   // anything is written, and asking again would only picture the page again.
-  const removed = held.find((source) => {
-    if (!hashes.includes(source.sha256)) return false;
-    const resolved = resolveTaskSource(projectSlug, taskKey, source.id, ctx.dataRoot);
-    return !resolved || !existsSync(resolved.abs);
-  });
+  const removed = removedAmong(ctx, projectSlug, taskKey, held, new Set(hashes));
   if (removed) {
     return `[error] A person took ${removed.id} out of ${taskKey}'s store, and it is a picture of this page as it looks today: the same bytes are not kept again, so the look of ${url} cannot be kept on this task. Nothing was kept. ${NOT_FROM_MEMORY}`;
   }
@@ -501,10 +521,11 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   const pictures: LookPicture[] = [];
   /** The sources this keep wrote. */
   const written: string[] = [];
-  const notKept = (why: string): string =>
+  /** `again` is what would let a second ask keep it, where anything would. */
+  const notKept = (why: string, again: string | null): string =>
     `[error] ${why} The look of ${url} was not kept. ` +
     (written.length > 0
-      ? `The pictures written before that (${idRange(written)}) stay as sources and are no look: asked again once there is room, they are taken up and not kept twice. `
+      ? `The pictures written before that (${idRange(written)}) stay as sources and are no look${again ? `: asked again ${again}, they are taken up and not kept twice` : ""}. `
       : "Nothing was kept. ") +
     NOT_FROM_MEMORY;
   try {
@@ -529,7 +550,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
       // Checked before the first write; a picture taken out of the store in
       // the moment since is answered the same way.
       if ("removed" in kept) {
-        return notKept(`A person took one of this page's pictures (${kept.removed.id}) out of ${taskKey}'s store, and the same bytes are not kept again.`);
+        return notKept(`A person took one of this page's pictures (${kept.removed.id}) out of ${taskKey}'s store, and the same bytes are not kept again.`, null);
       }
       // Bytes the task already keeps are this look's picture under the id
       // they have: what an earlier keep that failed left behind, or a part of
@@ -568,7 +589,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
       ctx.dataRoot,
     );
     // The note is what makes the pictures a look.
-    if (!("kept" in note)) return notKept("The note that closes the look could not be written.");
+    if (!("kept" in note)) return notKept("The note that closes the look could not be written.", null);
     written.push(note.kept.id);
     auditKept(db, input, { url, at, sources: written, from: null });
     const parts = [`[kept] How ${url} looked on ${at.slice(0, 10)} is kept on ${taskKey}.`];
@@ -585,7 +606,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     return parts.join(" ");
   } catch (error) {
     // The store's own sentence for a task that has no room left.
-    if (isAppError(error) && error.code === ERROR_CODES.VALIDATION_FAILED) return notKept(error.userMessage);
+    if (isAppError(error) && error.code === ERROR_CODES.VALIDATION_FAILED) return notKept(error.userMessage, "once there is room");
     throw error;
   }
 }

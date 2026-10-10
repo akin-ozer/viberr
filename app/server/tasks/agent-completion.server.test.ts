@@ -39,6 +39,7 @@ import { startRun } from "~/server/runtimes/run-service.server";
 import {
   getRun,
   insertRunLine,
+  LOOKS_COMPACTED_JSON,
   patchRun,
   upsertRun,
   type InsertRunInput,
@@ -1260,10 +1261,25 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       const early = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
       recordRunLooks(store.db, early, [stretch("desktop", 0, 1400, true)]);
       const compacted = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
-      patchRun(store.db, compacted, { compactions: 1 });
+      patchRun(store.db, compacted, { compactions: 1, lookedJson: LOOKS_COMPACTED_JSON });
       recordRunLooks(store.db, compacted, [stretch("phone", 0, 1900, true)]);
       await review(compacted);
       expect(approvals()).toEqual([]);
+
+      // The compaction that closes a run (ruling 174) comes after its
+      // verdict. A completion replayed after it (effects lost in a restart)
+      // rests on what the verdict rested on: this run's looks and its
+      // session's before it. CANARY: read "compacted while it worked" off
+      // the run's count of compactions and a review that looked at
+      // everything is told it did not.
+      writeDeliveredPageTask(["index.html"]);
+      const opened = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-5" });
+      recordRunLooks(store.db, opened, [stretch("desktop", 0, 1400, true)]);
+      const closed = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-5" });
+      recordRunLooks(store.db, closed, [stretch("phone", 0, 1900, true)]);
+      patchRun(store.db, closed, { compactions: 1 });
+      await review(closed);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
 
       // And what a session was shown of other work is not a look at this:
       // the run before judged another delivery. CANARY: carry a session's

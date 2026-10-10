@@ -735,7 +735,7 @@ picture of a look the task keeps (ruling 327, below). A run that read the source
 deliverer's report, and approved leaves a note titled "Approval not recorded" that names
 what it did not open; validation is unchanged and the review runs again. The reviewer is
 told what its approval owes before it starts, and is shown the delivery as Viberr kept
-it, with what was saved on the task since beside it, whatever a stopped rework left in
+it, with the files the task holds beside it, whatever a stopped rework left in
 the task's folder. A `request_changes` owes no look.
 
 **A task keeps how a page on the web looked (ruling 327).** Work made to look like a page

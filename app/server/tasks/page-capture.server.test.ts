@@ -623,7 +623,13 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // CANARY: count the kinds a report lists and a page with twenty-one
     // kinds of fault is recorded, and said, to have twenty.
-    expect(recorded("faulty.html")).toMatchObject({ views: [{ view: "desktop", faultKinds: 21 }, { view: "phone", faultKinds: 21 }] });
+    // And on how many elements, over every kind and not the listed twenty.
+    expect(recorded("faulty.html")).toMatchObject({
+      views: [
+        { view: "desktop", faultKinds: 21, faultElements: 21 },
+        { view: "phone", faultKinds: 21, faultElements: 21 },
+      ],
+    });
     expect(timeline().find((entry) => entry.title === "Page captures")!.text).toContain(
       "At 1280 px the accessibility checks (axe, WCAG 2.2 AA) found 21 kinds of fault, the first 20 of them: `rule-1` on 1 (Rule 1; first: `#n1`);",
     );
@@ -1895,7 +1901,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
   });
 
-  it("ruling 329: a run that judges is shown the delivery as kept, with what was saved beside it since, whatever became of the page in the task's folder", { timeout: REAL_RENDERS_MS }, async () => {
+  it("ruling 329: a run that judges is shown the delivery as kept, with the files the task holds beside it, whatever became of the page in the task's folder", { timeout: REAL_RENDERS_MS }, async () => {
     const STAMP = "2026-10-09T22:40:00.000Z";
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     await keptDelivery("VIB-1", STAMP, {
@@ -1975,8 +1981,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(measured).toContain("[done] `post.html` measured as Viberr measures a delivered page");
       expect(measured).toContain("It asked for `film.bin`, which a capture does not carry");
       expect(measured).toContain(`Nothing was saved. This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now.`);
-      // A file saved since is the judge's to look at too, and is no page of
-      // the delivery.
+      // A file the kept copy does not hold is the judge's to look at too, and
+      // is no page of the delivery.
       saveFiles("VIB-1", { "cover.html": "<p>the cover's drawing</p>" });
       const drawing = await ask("cover.html", { runId: editor, view: "desktop" });
       // Said of what the kept copy holds, never of when the file was saved:
@@ -1988,7 +1994,16 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // reviewer's twenty screenshots answers each look with a paragraph.
       saveFiles("VIB-1", { "a.png": "a", "b.png": "b", "c.png": "c" });
       expect((await ask("post.html", { runId: editor, view: "desktop" })).text).toContain(
-        "Beside it, as they stand on the task now, since that copy does not hold them: `a.png`, `b.png`, `c.png`, and `cover.html`, and 2 more.",
+        // The picture the page's own text names goes first.
+        "Beside it, as they stand on the task now, since that copy does not hold them: `cover.png`, `a.png`, `b.png`, and `c.png`, and 2 more.",
+      );
+
+      // A page on the task named the way the browser names its working
+      // files is still a page when it is the one asked for. CANARY: leave it
+      // out with the working files and the judge is told it is not there.
+      saveFiles("VIB-1", { "report-2026-10-09T22-41-00-000Z.html": "<p>a stamped page</p>" });
+      expect((await ask("report-2026-10-09T22-41-00-000Z.html", { runId: editor, view: "desktop" })).text).toContain(
+        "[done] `report-2026-10-09T22-41-00-000Z.html` as a reader sees it.",
       );
 
       // A file on the task whose name differs from a delivered one by case
@@ -2015,7 +2030,9 @@ describe("a delivered page is pictured (ruling 86)", () => {
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.engagements = [{ ...WRITER, delivers: false }, { ...EDITOR, delivers: true }];
       });
+      const handed = runLooks(store.db, editor).length;
       await ask("post.html", { runId: editor, view: "desktop" });
+      expect(runLooks(store.db, editor)).toHaveLength(handed + 1);
       expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "desktop", delivery: STAMP });
       await updateTaskFile(ref, (parsed) => {
         parsed.frontmatter.engagements = [WRITER];
@@ -2034,6 +2051,34 @@ describe("a delivered page is pictured (ruling 86)", () => {
       expect(uncopied.text).toContain(`Viberr holds no kept copy of the delivery of ${STAMP}, so this is the task's files as they stand now.`);
       expect(fake.pages().at(-1)!.html).toBe("<p>as it stands</p>");
       expect(lastLook(editor)).toMatchObject({ file: "post.html", delivery: STAMP });
+    });
+  });
+
+  it("ruling 329: a name that differs from a delivered page's by case alone is never taken for the delivered page", { timeout: REAL_RENDERS_MS }, async () => {
+    // The kept copy holds `Post.html`; a stopped rework left `post.html`,
+    // changed, on the task. A disk that folds case answers one for the
+    // other, and the judge that asked for `post.html` was rendered "half a
+    // rework" and told it was the delivery. CANARY: ask the disk whether the
+    // kept copy holds the name, and carry the page asked for ahead of the
+    // delivery's own files.
+    const STAMP = "2026-10-09T22:40:00.000Z";
+    await keptDelivery("VIB-1", STAMP, { "Post.html": "<p>the piece</p>" });
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, EDITOR];
+    });
+    unlinkSync(path.join(attachments(), "Post.html"));
+    saveFiles("VIB-1", { "post.html": "<p>half a rework</p>" });
+    await withBrowser("", async () => {
+      const editor = await liveRun("editor");
+      const asked = await ask("post.html", { runId: editor, view: "desktop" });
+      // Whatever the disk does with the two names, the task's file is not
+      // called the delivery and a look at it is of no delivery.
+      expect(asked.text).not.toContain("This is the delivery of");
+      expect(runLooks(store.db, editor).filter((look) => look.kind === "page" && look.delivery !== null)).toEqual([]);
+      // The delivered page by its own name is the delivery.
+      const delivered = await ask("Post.html", { runId: editor, view: "desktop" });
+      expect(delivered.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>the piece</p>");
     });
   });
 

@@ -92,6 +92,9 @@ const runLookSchema = z.discriminatedUnion("kind", [
     delivery: z.string().nullable(),
   }),
   z.object({ kind: z.literal("source"), task: z.string(), id: z.string() }),
+  /** No look: the mark a compaction leaves at the head of the list it
+   *  started again (`LOOKS_COMPACTED_JSON`). */
+  z.object({ kind: z.literal("compacted") }),
 ]);
 export type RunLook = z.infer<typeof runLookSchema>;
 
@@ -124,7 +127,11 @@ export function recordRunLooks(db: DatabaseSync, runId: string | null | undefine
   try {
     const row = getRun(db, runId);
     if (!row) return;
-    const next = [...parseLooks(row.looked_json), ...looks].slice(-RUN_LOOKS_MAX);
+    const shown = [...parseLooks(row.looked_json), ...looks];
+    // The oldest go first, and never the mark that the list was started
+    // again by a compaction.
+    const mark = shown.filter((look) => look.kind === "compacted").slice(0, 1);
+    const next = [...mark, ...shown.filter((look) => look.kind !== "compacted").slice(mark.length - RUN_LOOKS_MAX)];
     patchRun(db, runId, { lookedJson: JSON.stringify(next) });
   } catch (error) {
     logger.warn("what a run looked at could not be recorded", { runId, err: toError(error) });
@@ -153,13 +160,15 @@ export function looksRunIds(db: DatabaseSync, runId: string): string[] {
     .all(run.session_id, run.project_slug, run.task_key) as { id: string; review_subject: string | null; compactions: number }[];
   let ids: string[] = [];
   for (const row of session) {
-    // Its own looks are the ones since its last compaction: a run's list is
-    // emptied when its context is replaced by a summary (`run-sink`), and its
-    // log is read from that line on. So a run that was compacted while it
-    // worked carries nothing over from the runs before it either.
-    if (row.id === runId) return row.compactions > 0 ? [runId] : [...ids, runId];
+    // A run that was compacted while it worked carries nothing over from the
+    // runs before it: its own list was started again there, with the mark
+    // that says so, and its log is read from that line on. Not read off its
+    // count of compactions, which the one that closes a run (ruling 174)
+    // raises after the verdict was given: a completion replayed after that
+    // one still rests on everything the session held.
+    if (row.id === runId) return parseLooks(run.looked_json).some((look) => look.kind === "compacted") ? [runId] : [...ids, runId];
     // What an earlier run was shown is a summary once it was compacted, at
-    // its end (ruling 174) or before. Another subject's looks are of other work.
+    // its end or before. Another subject's looks are of other work.
     if (row.review_subject !== run.review_subject || row.compactions > 0) ids = [];
     else ids.push(row.id);
   }
@@ -274,7 +283,9 @@ function deliverersOf(db: DatabaseSync, projectSlug: string, taskKey: string, pa
  * The pages are read from the delivery's kept copy, which is what a judge is
  * shown ({@link judgedDelivery}): what a stopped rework, an upload or a
  * removal has since done to the task's folder changes neither what is owed
- * nor what can be shown. Nothing is owed that no tool can show, or the
+ * nor what can be shown. A page a copy that failed part way does not hold is
+ * owed by nobody: it can only be shown as it stands on the task, and a look
+ * at that is of no delivery. Nothing is owed that no tool can show, or the
  * approval could never bind: with no browser on the server (`canShowPages`
  * false) no page is pictured for anyone, a page past the size `capture_page`
  * renders is not rendered, and a kept picture whose bytes a person took out
@@ -379,7 +390,8 @@ function seenTo(looks: readonly Extract<RunLook, { kind: "page" }>[]) {
     if (look.from > to + 1) break;
     to = Math.max(to, look.to);
     // The page ends inside a stretch that starts within what was seen: a
-    // taller stretch of an earlier capture does not undo that.
+    // taller stretch of another capture does not undo that (the same page
+    // can lay out a little taller on one load than on the next).
     if (look.end) return { to, whole: true };
   }
   return { to, whole: false };

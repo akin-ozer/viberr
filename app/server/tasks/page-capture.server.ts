@@ -21,7 +21,7 @@ import {
 import { recordAudit, SYSTEM_ACTOR } from "~/server/audit/audit-recorder.server";
 import { getEnv } from "~/server/config/env.server";
 import { AppError } from "~/server/errors/app-error.server";
-import { resolveStoredSegment, storedFileName, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
+import { storedFileName, storedNameAmong, taskAttachmentsDir, taskDir } from "~/server/files/file-store-root.server";
 import { keepDelivery, keptDeliveryDir } from "~/server/files/kept-deliveries.server";
 import {
   IMAGE_READ_MAX_BYTES,
@@ -461,10 +461,9 @@ interface RenderedPage {
   motion: PageMotion | null;
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
-  /** The element the page scrolls inside, when it scrolls there and not as a
-   *  page: a picture and a figure are then of its first screen only. */
-  /** Each width at which the page scrolls inside one of its elements; none
-   *  for a page that scrolls as pages do. */
+  /** Each width at which the page scrolls inside one of its elements, where
+   *  a picture and a figure are of its first screen only; none for a page
+   *  that scrolls as pages do. */
   scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
@@ -640,10 +639,16 @@ const reportSchema = z.looseObject({
       acts: z.array(reportActSchema).catch([]),
       motion: motionSchema.optional().catch(undefined),
       measured: measuredSchema.optional().catch(undefined),
-      /** One entry a width at which it holds. A renderer that reports the
-       *  first such width alone sends the one entry bare. */
+      /** One entry a width at which it holds, each read by itself: one that
+       *  does not read takes no other with it. */
       scrollsInside: z
-        .union([reportInsideSchema.transform((entry) => [entry]), z.array(reportInsideSchema)])
+        .array(z.unknown())
+        .transform((entries) =>
+          entries.flatMap((entry) => {
+            const read = reportInsideSchema.safeParse(entry);
+            return read.success ? [read.data] : [];
+          }),
+        )
         .nullable()
         .optional()
         .catch(undefined),
@@ -742,7 +747,7 @@ type CarriedFile = { bytes: number } | { tooLarge: true } | null;
  * ask carries its delivery, and a copy that held the loop would hold every
  * other request with it.
  */
-async function carryFile(source: string, copy: string, room: number): Promise<CarriedFile> {
+async function carryFile(source: string, copy: string, room: number, taken: "refuse" | "skip"): Promise<CarriedFile> {
   let from: Awaited<ReturnType<typeof open>>;
   try {
     from = await open(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
@@ -762,9 +767,11 @@ async function carryFile(source: string, copy: string, room: number): Promise<Ca
       );
     } catch (error) {
       // A copy of that name is already there: on a disk that folds case, a
-      // name saved on the task since that differs from a delivered one by
-      // case alone. The delivery's bytes were carried first, and stand.
-      if (alreadyThere.safeParse(error).success) return null;
+      // name the task's folder holds that differs from a delivered one by
+      // case alone. The delivery's files are carried first, so its bytes
+      // stand and the folder's file is left out. A delivered file that finds
+      // its name taken is refused like any other failure to hand it over.
+      if (taken === "skip" && alreadyThere.safeParse(error).success) return null;
       throw error;
     }
     let bytes = 0;
@@ -829,11 +836,11 @@ function filesOf(dir: string): string[] {
  * first, then the rest by name, within the limits.
  *
  * `since` names the task's folder for a judge's ask (ruling 329): the files
- * it holds under names the delivery does not are carried last, as they stand.
- * A new name moves no delivery (ruling 85), so a picture a supporting agent
- * saved after the piece was delivered is on the task and not in the kept
- * copy, and the piece is judged with it. A name the delivery does hold is
- * always the delivery's own bytes.
+ * it holds under names the kept copy does not are carried last, as they
+ * stand. A new name moves no delivery (ruling 85), so a picture a supporting
+ * agent saved after the piece was delivered is on the task and not in the
+ * kept copy, and the piece is judged with it. A name the delivery does hold
+ * is always the delivery's own bytes.
  *
  * Throws when a folder or a file cannot be made so. Nothing is copied into a
  * folder that is not the server's own (ruling 140), and a file the renderer
@@ -860,20 +867,24 @@ async function carryDelivery(from: string, into: string, pages: readonly PageInp
     const onTask = filesOf(since);
     const pictures = pageCapturesAmong(onTask);
     for (const name of onTask.sort(byName)) {
-      if (name.startsWith(".") || pictures.has(name) || isBrowserWorkingArtifact(name)) continue;
       if (delivered.has(storedFileName(name))) continue;
+      // The page asked for is carried whatever it is called.
+      const noPart = name.startsWith(".") || pictures.has(name) || isPageCaptureName(name) || isBrowserWorkingArtifact(name);
+      if (noPart && !first.has(name)) continue;
       wanted.push({ name, dir: since, since: true });
     }
   }
-  // The pages asked for go first, so the limits never leave out the one file
-  // the render is of. The sort keeps the order of everything else.
-  wanted.sort((a, b) => Number(first.has(b.name)) - Number(first.has(a.name)));
+  // The delivery's files first, so no file of the folder ever stands where a
+  // delivered one belongs; among each, the pages asked for first, so the
+  // limits leave out the file the render is of last. The sort keeps the
+  // order of everything else.
+  wanted.sort((a, b) => Number(a.since) - Number(b.since) || Number(first.has(b.name)) - Number(first.has(a.name)));
   const carried: Carried = { names: [], notCarried: new Set(), since: [] };
   let total = 0;
   for (const entry of wanted) {
     const copy = path.join(into, entry.name);
     const room = Math.min(CARRIED_FILE_MAX_BYTES, CARRIED_TOTAL_MAX_BYTES - total);
-    const file = await carryFile(path.join(entry.dir, entry.name), copy, room);
+    const file = await carryFile(path.join(entry.dir, entry.name), copy, room, entry.since ? "skip" : "refuse");
     if (!file) continue;
     if ("tooLarge" in file) {
       carried.notCarried.add(entry.name);
@@ -2146,6 +2157,8 @@ function boxReplyText(
 interface FoundFile {
   /** The name the folder holds it under (ruling 76): what the renderer opens. */
   stored: string;
+  /** Where its bytes are. */
+  abs: string;
   size: number;
   /** Ruling 329: the delivery the asking run judges, or null when it judges
    *  none and is shown the task's files as they stand. */
@@ -2170,8 +2183,11 @@ function fileSize(file: () => string): number | null {
  * A run that judges a delivery (ruling 329) is answered from the delivery's
  * kept copy first: the page it is to look at is the one that was delivered,
  * whatever a stopped rework has since renamed, removed or grown in the task's
- * folder. A name the delivery does not hold is a file saved on the task since,
- * found there like anyone's.
+ * folder. A name the kept copy does not hold is found on the task like
+ * anyone's. Whether it holds one is read off its own listing (ruling 76: the
+ * name as spelled, or its one Unicode twin), never by asking the disk, which
+ * on one that folds case answers `Post.html` for `post.html`: the task's
+ * `post.html` would be shown and called the delivery.
  */
 function findAskedFile(
   db: DatabaseSync,
@@ -2185,20 +2201,21 @@ function findAskedFile(
   const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
   const judged = task ? judgedDelivery(db, ctx, ask, task.parsed) : null;
   const keptDir = judged?.dir ?? null;
-  if (keptDir) {
-    let kept = "";
-    const size = fileSize(() => (kept = resolveStoredSegment(keptDir, name)));
-    if (size !== null) return { stored: path.basename(kept), size, judged, delivered: true };
+  const kept = keptDir ? storedNameAmong(filesOf(keptDir), name) : null;
+  if (keptDir && kept !== null) {
+    const abs = path.join(keptDir, kept);
+    const size = fileSize(() => abs);
+    if (size !== null) return { stored: kept, abs, size, judged, delivered: true };
   }
   // Ruling 76: found in either Unicode form, and rendered under the spelling
   // the folder holds, which is the one the renderer can open.
   let onTask = "";
   const size = fileSize(() => (onTask = resolveTaskAttachment(projectSlug, taskKey, name, ctx.dataRoot)));
-  return size === null ? null : { stored: path.basename(onTask), size, judged, delivered: false };
+  return size === null ? null : { stored: path.basename(onTask), abs: onTask, size, judged, delivered: false };
 }
 
 /** Where a found file is rendered from: a judge's from the delivery as kept,
- *  with what was saved on the task since beside it. */
+ *  with the files the task holds beside it. */
 function sourceOf(found: FoundFile): RenderRequest["source"] {
   return found.judged?.dir ? { kind: "kept", dir: found.judged.dir, since: true } : { kind: "attachments" };
 }
@@ -2214,6 +2231,19 @@ function deliveryLookedAt(found: FoundFile): string | null {
 
 const SINCE_NAMED_MAX = 4;
 
+/** Whether a found page's own text holds a file's name, as written or as an
+ *  address spells it. A page that cannot be read names nothing. */
+function namedIn(found: FoundFile): (name: string) => boolean {
+  let text = "";
+  try {
+    const read = readAttachmentBytes(found.abs, PAGE_HTML_MAX_BYTES);
+    text = read && "bytes" in read ? read.bytes.toString("utf8") : "";
+  } catch {
+    text = "";
+  }
+  return (name) => text.includes(name) || text.includes(encodeURI(name));
+}
+
 /**
  * What a judge is told it was shown (ruling 329), so a page that reads
  * differently in the task's folder is no surprise, and a file that was not
@@ -2225,7 +2255,11 @@ function shownToAJudge(found: FoundFile, since: readonly string[]): string {
   if (!judged.dir) {
     return ` Viberr holds no kept copy of the delivery of ${judged.deliveredAt}, so this is the task's files as they stand now.`;
   }
-  const beside = since.filter((name) => name !== found.stored);
+  // The ones the page's own text names go first: they are the ones it most
+  // likely loaded, and the sentence is there so that a file that was not
+  // delivered is not taken for one.
+  const names = namedIn(found);
+  const beside = since.filter((name) => name !== found.stored).sort((a, b) => Number(names(b)) - Number(names(a)));
   const more = beside.length - SINCE_NAMED_MAX;
   // Said of what the kept copy does not hold, never of when a file was
   // saved: a copy that failed part way lacks files that were delivered.

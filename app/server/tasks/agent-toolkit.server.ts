@@ -811,7 +811,7 @@ export function buildAgentToolkit(deps: AgentToolkitDeps): AgentToolkit | null {
             );
           } catch (error) {
             logger.warn("agent keep_page_look failed", { taskKey, err: toError(error) });
-            return textResult("[error] The look could not be kept.");
+            return textResult("[error] The look could not be kept. Say so in your report, and state nothing about the look from memory.");
           }
         },
       ),

@@ -368,7 +368,8 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       await keep({ url: "https://look.example/" });
       unlinkSync(resolveTaskSource(store.slug, "VIB-1", "S2", store.dataRoot)!.abs);
       expect(await keep({ taskKey: "VIB-2", from: "VIB-1" })).toBe(
-        "[noop] VIB-1 no longer holds S2 of its look (it was taken out of the store), so the look is not whole. Nothing was kept.",
+        "[noop] VIB-1 no longer holds S2 of its look (it was taken out of the store), so the look is not whole. Nothing was kept. " +
+          "Say in your report that the look could not be kept, and state nothing about it from memory.",
       );
       expect(sourcesOf("VIB-2")).toEqual([]);
     });
@@ -502,17 +503,29 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
         store.dataRoot,
       );
       unlinkSync(resolveTaskSource(store.slug, "VIB-4", "S1", store.dataRoot)!.abs);
-      const refusedWhole = await keep({ taskKey: "VIB-4", from: "VIB-1" });
-      expect(refusedWhole).toContain("[error] S2 of VIB-1 could not be kept on VIB-4 (a person took the same bytes out of its store), so the look was not taken over.");
-      expect(refusedWhole).toContain("Say in your report that the look could not be kept, and state nothing about it from memory.");
-      expect(keptLooks(sourcesOf("VIB-4"))).toEqual([]);
+      expect(await keep({ taskKey: "VIB-4", from: "VIB-1" })).toBe(
+        "[noop] A person took S1 out of VIB-4's store, and it is a picture of this look: the same bytes are not kept again, " +
+          "so the look cannot be taken over whole. Nothing was kept. " +
+          "Say in your report that the look could not be kept, and state nothing about it from memory.",
+      );
+      // Said before anything was copied: the task holds what it held.
+      expect(sourcesOf("VIB-4")).toHaveLength(1);
+
+      // A task that keeps its own look of the address, pictured at another
+      // time, is held to that one. CANARY: take the other task's over beside
+      // it and the page is judged against two looks of one address.
+      expect(await keep({ taskKey: "VIB-3", url: "https://look.example/" })).toContain("[kept] How https://look.example/ looked on");
+      expect(await keep({ taskKey: "VIB-3", from: "VIB-1" })).toBe(
+        "[noop] VIB-3 already keeps a look of https://look.example/ pictured at another time, and a result is judged against one look of an address. Nothing was kept.",
+      );
 
       // And pictures with no note on the other task are nothing to take over.
       // CANARY: copy every source that carries a look and VIB-2 is told it
       // "now keeps" what nobody owes a look at.
       cutSourcesTo("VIB-1", pictures);
-      expect(await keep({ taskKey: "VIB-3", from: "VIB-1" })).toBe("[noop] VIB-1 keeps no look of a page. Nothing was kept.");
-      expect(sourcesOf("VIB-3")).toEqual([]);
+      const before = sourcesOf("VIB-4").length;
+      expect(await keep({ taskKey: "VIB-4", from: "VIB-1" })).toBe("[noop] VIB-1 keeps no look of a page. Nothing was kept.");
+      expect(sourcesOf("VIB-4")).toHaveLength(before);
     });
   });
 

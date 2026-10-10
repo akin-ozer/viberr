@@ -361,6 +361,15 @@ export function upsertRun(db: DatabaseSync, input: InsertRunInput): void {
   });
 }
 
+/**
+ * Ruling 329: what a run's `looked_json` is set to when its context is
+ * compacted while it works. What it was shown before is a summary from then
+ * on, so the list starts again, and it starts with this mark: the looks of
+ * the session's earlier runs are behind the same summary and count no more.
+ * The compaction that closes a run (ruling 174) writes none.
+ */
+export const LOOKS_COMPACTED_JSON = JSON.stringify([{ kind: "compacted" }]);
+
 export interface RunPatch {
   sessionId?: string | null;
   state?: RunState;
