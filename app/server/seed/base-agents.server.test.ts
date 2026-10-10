@@ -414,6 +414,19 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
       "At each width a reader can read every word on it, the words inside a picture included.";
     expect(developer).toContain(placeholder("unfinished work"));
     expect(reviewer).toContain(placeholder("a finding"));
+    // Sent back for its blanks, the same page came back with its screens
+    // filled: a project, nine tasks, a person and a repository made up for
+    // the pictures and marked as sample, which the review took for demo
+    // data. What a picture of the product shows is on record like any
+    // statement: the demo data the product ships.
+    const madeUp = "never a name, a title or a figure made up for the picture, whatever it is marked as";
+    expect(developer).toContain(
+      "What a picture of the product shows is on record like any statement: the demo data the product ships (its seed, its fixtures, its documented examples), " +
+        `kept with \`keep_source\`, ${madeUp}. Where the record holds none, ask the person before you draw.`,
+    );
+    expect(reviewer).toContain(
+      `What a picture of the product shows is the demo data the product ships, with a kept source like any statement: never a person's data, and ${madeUp}.`,
+    );
     expect(shippedCopyIsUnedited("skills/developer-expertise/SKILL.md", "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614", {})).toBe(true);
     expect(shippedCopyIsUnedited("skills/reviewer-expertise/SKILL.md", "8eb176885fd2c7d2f8a9e3764d1341cd96c510e85117adc5bf07937ec28244e4", {})).toBe(true);
   });
