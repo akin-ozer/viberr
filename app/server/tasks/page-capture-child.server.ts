@@ -1271,6 +1271,11 @@ const FOCUS_EXPRESSION = inPage(
  * focused a field and blurred it again. A page that takes focus back, and
  * one under a modal dialog, stay as they are: `readKeyboard` does not count
  * on where a walk begins.
+ *
+ * It also keeps where each part of the page that scrolls stands, which is
+ * where it stood when the page was pictured: focus scrolls a part to what
+ * it lands on, and `FAULTS_EXPRESSION` puts each back before the engine
+ * reads the page.
  */
 const START_EXPRESSION = inPage(
   "start",
@@ -1287,6 +1292,13 @@ const START_EXPRESSION = inPage(
     if (had === null) body.removeAttribute("tabindex");
     else body.setAttribute("tabindex", had);
   }
+  const kept = window[KEPT];
+  if (kept) {
+    kept.scrolls = new Map();
+    for (const el of document.querySelectorAll("body, body *")) {
+      if (el.scrollTop !== 0 || el.scrollLeft !== 0) kept.scrolls.set(el, [el.scrollTop, el.scrollLeft]);
+    }
+  }
   return JSON.stringify({});
 `,
 );
@@ -1296,16 +1308,29 @@ const START_EXPRESSION = inPage(
 const ENGINE_MARK = "/* viberr:engine {} */\n";
 
 /**
- * Run the engine over the page as it rests, with nothing holding focus, and
- * answer with its findings cut down to what a report carries: each kind, how
- * many places have it, and the first of them. Every place of the contrast
- * finding is kept, with the ratio the engine measured and the words it is on.
+ * Run the engine over the page as it rests and as it was pictured: nothing
+ * holding focus, the window at its top, and every part that scrolls back
+ * where the keyboard walk found it. The walk leaves a part scrolled to the
+ * last control focus came to, and the engine does not judge what a part has
+ * scrolled out of sight: on a shell whose last links are screens down its
+ * scrolling part it found none of the three kinds of fault on the first
+ * screen (measured on Chrome 153 and Debian Chromium 154). It answers with
+ * its findings cut down to what a report carries: each kind, how many places
+ * have it, and the first of them. Every place of the contrast finding is
+ * kept, with the ratio the engine measured and the words it is on.
  */
 const FAULTS_EXPRESSION = inPage(
   "faults",
   {},
   `
   if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) document.activeElement.blur();
+  const kept = window[KEPT];
+  if (kept && kept.scrolls) {
+    for (const el of document.querySelectorAll("body, body *")) {
+      const [top, left] = kept.scrolls.get(el) || [0, 0];
+      if (el !== document.scrollingElement && (el.scrollTop !== top || el.scrollLeft !== left)) el.scrollTo({ top, left, behavior: "instant" });
+    }
+  }
   jump(0);
   const results = await window.axe.run(document, {
     runOnly: { type: "tag", values: ${JSON.stringify(FAULT_TAGS)} },

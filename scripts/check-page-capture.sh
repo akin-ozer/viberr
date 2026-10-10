@@ -475,6 +475,25 @@ main{min-height:1600px}</style></head><body><main>
 <script>document.getElementById("notes").addEventListener("focus", () => { const added = new Image(1, 1); added.src = "heavy.png"; document.querySelector("main").append(added); }, { once: true });</script>
 </body></html>`,
   );
+  // A shell fixed to its screen with its faults on its first screen: a line
+  // too faint to read, two buttons 10 px across side by side, and a link in
+  // a sentence that nothing but its colour marks. Three screens further
+  // down, at the end of the part that scrolls, two ordinary links: a
+  // keyboard walk ends there, with the part scrolled to its end.
+  writeFileSync(
+    path.join(dir, "deep.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A shell with its faults at the top</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>html,body{height:100%;margin:0;overflow:hidden}body{background:rgb(255,255,255);color:rgb(17,17,17);font:16px sans-serif}
+main.app{height:100%;overflow-y:auto}.faint{color:rgb(188,188,188)}button.tiny{width:10px;height:10px;padding:0;border:0;margin:0 1px;background:rgb(0,0,0)}
+a.plain{color:rgb(60,60,60);text-decoration:none}.filler{height:3000px}</style></head><body><main class="app">
+<h1>A shell with its faults at the top</h1>
+<p class="faint">A line too faint to read</p>
+<p><button class="tiny" aria-label="One"></button><button class="tiny" aria-label="Two"></button></p>
+<p>A sentence with <a class="plain" href="#plain">a link</a> in it that nothing marks.</p>
+<div class="filler"></div>
+<p><a href="#first">First</a> <a href="#second">Second</a></p>
+</main></body></html>`,
+  );
   // A page that traps the keyboard: from its "Close" button Tab goes back to
   // "Open", so the eight links after it are never reached. The seven buttons
   // before it hide their focus ring.
@@ -822,7 +841,10 @@ if (command === "job-measured") {
   const [work, browser, engine] = args;
   process.stdout.write(
     jobIn(work, browser, "measured", {
-      pages: [{ file: "measured.html", kind: "html" }],
+      pages: [
+        { file: "measured.html", kind: "html" },
+        { file: "deep.html", kind: "html" },
+      ],
       views: [DESKTOP, PHONE],
       measure: true,
       axe: engine,
@@ -1076,7 +1098,7 @@ if (command === "verify-long") {
 if (command === "verify-measured") {
   const [work] = args;
   const { check, pages, done } = outcomeOf(work, "measured");
-  const [page] = pages;
+  const [page, deep] = pages;
   const measured = page.measured;
   check(page.error === null && page.shots.length === 2, "a measured page is pictured at both widths", page.error ?? "");
   check(measured?.views.map((view) => view.view).join(" ") === "desktop phone", "and measured at each", JSON.stringify(measured?.views.map((view) => view.view)));
@@ -1136,6 +1158,28 @@ if (command === "verify-measured") {
     `${measured?.loadMs} ms on ${measured?.line}`,
   );
   check(page.motion?.runningCount === 2, "and what moves on it is read too: both animations, with no preference asked", JSON.stringify(page.motion?.running));
+  // The shell whose faults are on its first screen, and whose last controls
+  // are three screens down the part that scrolls: the walk leaves that part
+  // at its end, and the engine reads the page as it was pictured.
+  check(deep?.error === null && deep?.measured?.views.length === 2, "a shell with its faults on its first screen is pictured and measured at both widths", `${deep?.error}`);
+  for (const view of deep?.measured?.views ?? []) {
+    const kinds = view.faults.kinds.map((kind) => kind.id).sort().join(" ");
+    check(
+      view.keyboard.ran === true && view.keyboard.controls === 5 && view.keyboard.stops === 5,
+      `the keyboard walk went to the two links at the end of the part that scrolls (${view.view})`,
+      JSON.stringify(view.keyboard),
+    );
+    check(
+      view.faults.ran === true && kinds === "color-contrast link-in-text-block target-size" && view.faults.kindsCount === 3,
+      "and the engine still found the three kinds of fault on the shell's first screen: the part was put back where the walk found it",
+      JSON.stringify(view.faults.kinds.map((kind) => `${kind.id} ${kind.count}`)),
+    );
+    check(
+      view.faults.worstContrast?.text === "A line too faint to read" && view.faults.worstContrast?.ratio < 3,
+      "with the faint line's contrast, which the picture shows",
+      JSON.stringify(view.faults.worstContrast),
+    );
+  }
   done();
 }
 
