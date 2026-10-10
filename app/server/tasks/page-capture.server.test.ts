@@ -2711,5 +2711,19 @@ describe("ruling 86: a revision's pages are the ones the project's gates built",
     });
     saveFiles("VIB-1", { "index.html@9999999.capture-desktop.png": "a picture" });
     expect(candidates()).toEqual(["shot.png"]);
+    // Left out for what it is: of another delivery, and beside no file.
+    const again = await writeCompletionPacket(
+      store.db,
+      { dataRoot: store.dataRoot },
+      {
+        projectSlug: store.slug,
+        taskKey: "VIB-1",
+        summary: "Delivered.",
+        files: [{ name: "post.html", caption: "The piece." }],
+        screenshots: [{ name: "index.html@9999999.capture-desktop.png", caption: "The page." }],
+      },
+    );
+    expect(again.message).toContain("`index.html@9999999.capture-desktop.png` is Viberr's picture of a page of an earlier delivery");
+    expect(again.message).not.toContain("shows beside it");
   });
 });
