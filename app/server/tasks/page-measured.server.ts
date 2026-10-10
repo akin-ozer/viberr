@@ -73,7 +73,7 @@ function viewClause(view: MeasuredViewRecord): string | null {
   if (view.faultKinds === null) parts.push("accessibility checks not run");
   else if (view.faultKinds > 0) {
     parts.push(
-      `${view.faultKinds} ${view.faultKinds === 1 ? "kind" : "kinds"} of accessibility fault on ${view.faultElements} ${view.faultElements === 1 ? "element" : "elements"}` +
+      `${view.faultKinds} ${view.faultKinds === 1 ? "kind" : "kinds"} of accessibility fault in ${view.faultElements} ${view.faultElements === 1 ? "place" : "places"}` +
         (view.worstContrast === null ? "" : ` (lowest contrast ${view.worstContrast.toFixed(1)} to 1)`),
     );
   }

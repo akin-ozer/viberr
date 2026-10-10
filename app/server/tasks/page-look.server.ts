@@ -206,7 +206,7 @@ const WHAT_MOVED_HEADING = "## What moved, as measured at the desktop width";
  */
 function whatMoved(motion: PageMotion | null, scrollsInside: readonly ScrollsInside[]): string {
   const lines = [WHAT_MOVED_HEADING, "", ...motionLines(motion), ""];
-  if (scrollsInside.length > 0) lines.push(firstScreenOnly(scrollsInside), "");
+  if (scrollsInside.length > 0) lines.push(...insideSentences(scrollsInside), "");
   lines.push(
     "The pictures show the page at rest and its first screen at a few moments. What a visitor's own pointer or scrolling does beyond the lines above is not in them.",
   );
@@ -241,12 +241,13 @@ function lookNote(address: string, at: string, pictures: readonly LookPicture[],
   return `${lines.join("\n")}\n\n${moved}`;
 }
 
-/** Said of a look of a page that scrolls inside one of its elements, at one
- *  width or at both. */
-function firstScreenOnly(inside: readonly ScrollsInside[]): string {
-  const where = inside.map((entry) => `inside \`${entry.what}\` (${px(entry.height)} px) at ${pageCaptureView(entry.view).width} px`).join(" and ");
-  const [comma, widths] = inside.length === 1 ? ["", "that width"] : [",", "those widths"];
-  return `The page scrolls ${where}${comma} and not as a page, so the pictures at ${widths} are of its first screen only.`;
+/** Said of a look where a part of the page scrolls inside it, a sentence a
+ *  width: how much the part holds, and how little of that the pictures show. */
+function insideSentences(inside: readonly ScrollsInside[]): string[] {
+  return inside.map(
+    (entry) =>
+      `At ${pageCaptureView(entry.view).width} px \`${entry.what}\` scrolls inside the page: it holds ${px(entry.height)} px, and the pictures show only the ${px(entry.shown)} px of it on screen.`,
+  );
 }
 
 /** The file name a picture of the look is kept under. */
@@ -600,7 +601,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     }
     const frames = pictures.filter((entry) => entry.part === "frame");
     if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.id))}.`);
-    if (answer.scrollsInside.length > 0) parts.push(firstScreenOnly(answer.scrollsInside));
+    parts.push(...insideSentences(answer.scrollsInside));
     parts.push(`Where each picture is and what moved on the page, as measured: ${note.kept.id}.`);
     parts.push(HOW_TO_READ);
     return parts.join(" ");

@@ -523,8 +523,8 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
             faultKinds: 1         # loaded and how many files, its load time on the slow
             faultElements: 3      # line `line` names (null when it was not timed), and
             worstContrast: 3.1    # per width how many kinds of accessibility fault the
-            controls: 14          # checks found (null when they did not run) on how
-            unreached: 0          # many elements, the lowest contrast among them, how
+            controls: 14          # checks found (null when they did not run) in how
+            unreached: 0          # many places, the lowest contrast among them, how
             unmarked: 2           # many controls the page has, how many Tab never
             stillMoving: 0        # reaches, how many look the same holding focus, and
           - view: phone           # how many things still move with reduced motion

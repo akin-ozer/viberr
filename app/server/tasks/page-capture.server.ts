@@ -444,12 +444,13 @@ interface RenderedAct {
   error: string | null;
 }
 
-/** A width at which a page scrolls inside one of its elements and not as a
- *  page: the element, and how tall what it holds is. */
+/** A part of a page that scrolls inside it at one width: the element, how
+ *  tall what it holds is, and how much of that its own box shows. */
 export interface ScrollsInside {
   view: PageCaptureViewId;
   what: string;
   height: number;
+  shown: number;
 }
 
 interface RenderedPage {
@@ -461,9 +462,9 @@ interface RenderedPage {
   motion: PageMotion | null;
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
-  /** Each width at which the page scrolls inside one of its elements, where
-   *  a picture and a figure are of its first screen only; none for a page
-   *  that scrolls as pages do. */
+  /** At each width, the part of the page that hides the most of what it
+   *  holds by scrolling inside the page: no picture and no figure reaches
+   *  past its box. None where no part hides more than a screen. */
   scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
@@ -626,6 +627,7 @@ const reportInsideSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
   what: reportWords,
   height: z.number().nonnegative(),
+  shown: z.number().nonnegative(),
 });
 const reportEndedSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
@@ -1220,7 +1222,7 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
     const width = widthRemark(shot, code(page.file));
     if (width) remarks.push(width);
   }
-  if (page.scrollsInside.length > 0) remarks.push(`${code(page.file)} ${scrollsInsideRemark(page.scrollsInside)}`);
+  remarks.push(...scrollsInsideRemarks(page.scrollsInside, code(page.file)));
   if (page.dialogs > 0) remarks.push(`${code(page.file)} opens ${DIALOG_REMARK}`);
   const asked = askedClause(page);
   if (asked) {
@@ -1234,13 +1236,19 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
   return remarks;
 }
 
-/** Said of a page whose content scrolls inside one of its elements: at which
- *  widths, and what a picture and a figure of it then cover there. */
-function scrollsInsideRemark(inside: readonly ScrollsInside[]): string {
-  const where = inside.map((entry) => `inside \`${entry.what}\` (${px(entry.height)} px) ${atWidth(entry.view)}`).join(" and ");
-  // At both widths nothing of it is a whole page; at one, the other is.
-  const [comma, there] = inside.length < PAGE_CAPTURE_VIEWS.length ? ["", " there"] : [",", ""];
-  return `scrolls ${where}${comma} and not as a page, so its pictures and what was measured of it${there} are of its first screen only.`;
+/**
+ * Said of a part that scrolls inside a page, a sentence a width: how much it
+ * holds and how little of that a picture or a figure of the page covers.
+ * Nothing is said of whether the page also scrolls as pages do: that is in
+ * the pictures, and a sentence that guessed at it was wrong both ways.
+ * `subject` is how the sentence names the page: its name in a note, "the
+ * page" in a reply.
+ */
+function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string): string[] {
+  return inside.map((entry) => {
+    const where = atWidth(entry.view);
+    return `${where.charAt(0).toUpperCase()}${where.slice(1)} \`${entry.what}\` scrolls inside ${subject}: it holds ${px(entry.height)} px, and a picture or a figure of the page covers only the ${px(entry.shown)} px of it on screen.`;
+  });
 }
 
 /** Ruling 328: what was measured of one pictured page, for the note. */
@@ -1994,7 +2002,7 @@ function endedClause(end: EndedView): string {
  *  missing from the task. */
 function loadRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): string[] {
   const parts: string[] = [];
-  if (page.scrollsInside.length > 0) parts.push(`It ${scrollsInsideRemark(page.scrollsInside)}`);
+  parts.push(...scrollsInsideRemarks(page.scrollsInside, "the page"));
   if (page.dialogs > 0) parts.push(`It opens ${DIALOG_REMARK}`);
   const asks: string[] = [];
   const asked = askedClause(page);
@@ -2752,8 +2760,8 @@ export type WebPageAnswer =
   | {
       pictures: WebPagePicture[];
       motion: PageMotion | null;
-      /** Each width at which the page scrolls inside one of its elements and
-       *  not as a page: its pictures there are of its first screen only. */
+      /** At each width, the part of the page that scrolls inside it and
+       *  hides the most: the pictures show only what of it is on screen. */
       scrollsInside: ScrollsInside[];
     }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
