@@ -61,6 +61,8 @@ const measuredSchema = z.strictObject({
             first: z.array(z.string()),
           }),
         ),
+        /** How many kinds the engine found: `kinds` is the first twenty. */
+        kindsCount: z.number(),
         worstContrast: z.strictObject({ ratio: z.number(), text: z.string() }).nullable(),
       }),
       keyboard: z.strictObject({
@@ -1290,6 +1292,10 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // order and its first twenty and the two that matter most, which the
     // engine lists last here, are the two that are cut.
     expect(faults.kinds).toHaveLength(20);
+    // And how many there are in all. CANARY: count the kinds the report
+    // lists and a page with twenty-one kinds of fault reads as one with
+    // twenty.
+    expect(faults.kindsCount).toBe(21);
     expect(faults.kinds.slice(0, 3)).toEqual([
       {
         id: "image-alt",
@@ -1317,7 +1323,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     const [, thrown] = report.pages;
     expect(thrown).toMatchObject({ file: "throws.html", error: null });
     expect(thrown!.shots).toHaveLength(1);
-    expect(thrown!.measured!.views[0]!.faults).toEqual({ ran: false, why: "Error: axe gave up", kinds: [], worstContrast: null });
+    expect(thrown!.measured!.views[0]!.faults).toEqual({ ran: false, why: "Error: axe gave up", kinds: [], kindsCount: 0, worstContrast: null });
 
     // The engine is the job's to name: with none named, or one that is not
     // there to read, the check is said not to have run. CANARY: ask for the
@@ -1325,12 +1331,19 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // run above says the same of an engine that was named and is there.
     const none = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
     expect(none.pages[0]).toMatchObject({ error: null });
-    expect(measuredOf(none).views[0]!.faults).toEqual({ ran: false, why: "no accessibility engine is installed", kinds: [], worstContrast: null });
+    expect(measuredOf(none).views[0]!.faults).toEqual({
+      ran: false,
+      why: "no accessibility engine is installed",
+      kinds: [],
+      kindsCount: 0,
+      worstContrast: null,
+    });
     const unread = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true, axe: path.join(b.root, "no-such-engine.js") });
     expect(measuredOf(unread).views[0]!.faults).toEqual({
       ran: false,
       why: "the accessibility engine could not be read",
       kinds: [],
+      kindsCount: 0,
       worstContrast: null,
     });
     // Its own limit: four pages are measured above, one after another, each
@@ -1630,7 +1643,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // walk is the whole of a walk or none, and the engine is either the one
     // nobody named or one whose turn never came.
     expect([{ ...notWalked, ran: true, controls: 1, stops: 1 }, notWalked]).toContainEqual(desktop!.keyboard);
-    expect(desktop!.faults).toMatchObject({ ran: false, kinds: [] });
+    expect(desktop!.faults).toMatchObject({ ran: false, kinds: [], kindsCount: 0 });
     expect(["no accessibility engine is installed", outOfTime]).toContain(desktop!.faults.why);
     // The read with reduced motion asked for never ran, whether the time
     // went under it or before it. CANARY: answer a reduced-motion read that
@@ -1642,7 +1655,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     // page with no control, nothing still moving and nothing to say why.
     expect(phone).toEqual({
       view: "phone",
-      faults: { ran: false, why: outOfTime, kinds: [], worstContrast: null },
+      faults: { ran: false, why: outOfTime, kinds: [], kindsCount: 0, worstContrast: null },
       keyboard: notWalked,
       reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
     });
@@ -1652,7 +1665,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(breaks.pages[0]).toMatchObject({ error: null });
     expect(measuredOf(breaks).views[0]).toEqual({
       view: "desktop",
-      faults: { ran: true, why: null, kinds: [], worstContrast: null },
+      faults: { ran: true, why: null, kinds: [], kindsCount: 0, worstContrast: null },
       keyboard: notWalked,
       reduced: { ran: true, runningCount: 0, running: [], videosPlaying: 0 },
     });
