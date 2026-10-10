@@ -2456,7 +2456,8 @@ states what holds now and by the editor beyond the entry cited (ruling 218), a p
 asked once and only what they alone know, their voice is taken from their own writing
 and nothing of a sample is carried over, and the page is looked at as its reader sees it
 (ruling 194). Each manual stays within half of the 24 000 characters a run with no
-checkout is given, so a board's own skill still fits beside it.
+checkout is given, so a board's own skill still fits beside it; the seeded Developer's
+and Reviewer's manuals are held to the same (ruling 178).
 
 The Diagrammer and the Cover Designer (ruling 179) make the pictures such a piece carries.
 Neither holds a delivery grant, so each runs as a supporting agent at the stage a board

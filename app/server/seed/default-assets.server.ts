@@ -630,9 +630,9 @@ const PRIOR_SHIPPED_HASHES: PriorShippedHashes = {
     // manual had the maker say what still differs from a kept look on each
     // thing a look is judged on, and said that a placeholder where content
     // belongs, or a word a reader cannot read, is unfinished work, and that
-    // what a picture of the product shows is on record (the demo data the
-    // product ships, a run's output, the person's answer), never content
-    // made up for the picture.
+    // what a picture of the product shows is on record (the product's own
+    // demo data or what the person gave for it), never content made up for
+    // the picture or typed into the product for it.
     "5af46bab6b9f1fb52a15d2ea6647bd94040be2c3e676713f8471ba55d8a4c614",
     // Ruling 86 (2026-10-10): before the manual said that where the
     // project's gates build the site a page is asked for by its path in the
