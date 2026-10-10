@@ -322,14 +322,24 @@ interface Keyboard {
   /** False when the walk could not be made or did not finish: the rest is
    *  then zero and empty, and says nothing of the page. */
   ran: boolean;
+  /** True when the walk stopped at its last press before it came round, so
+   *  what Tab never reaches is not known: `unreached` is then empty and its
+   *  count zero, and neither says the page has none. */
+  cut: boolean;
   /** The visible controls a keyboard should reach. */
   controls: number;
-  /** How many Tab stopped on. */
+  /** How many of those controls Tab stopped on: never more than there are.
+   *  What else took focus on the way is no control of the page's and is not
+   *  counted. */
   stops: number;
-  /** Controls Tab never reached, each as `tag "its words"`. */
+  /** Controls Tab never reached, each as `tag "its words"`: the first of
+   *  them, and how many there are in all. */
   unreached: string[];
-  /** Stops whose look did not change when they took focus. */
+  unreachedCount: number;
+  /** Controls whose look did not change when they took focus: the first of
+   *  them, and how many there are in all. */
   unmarked: string[];
+  unmarkedCount: number;
 }
 
 /** What still moves at one width with reduced motion asked for: what loops
@@ -1109,17 +1119,17 @@ const FOCUS_LOOK_SOURCE = `
  * Note every visible control a keyboard should reach, with its look at rest,
  * for the walk that follows (`FOCUS_EXPRESSION`). A control is a link with an
  * address, a button, a form field, a `summary`, or anything given a tab
- * index. Not one that is disabled, and not one its page took out of the tab
- * order on purpose (a negative tab index, every radio of a group but the one
- * Tab stops on): those are reached another way, and would be named as never
- * reached.
+ * index. Not one that is disabled or in a part of the page made `inert`, and
+ * not one its page took out of the tab order on purpose (a negative tab
+ * index, every radio of a group but the one Tab stops on): those are reached
+ * another way or by nobody, and would be named as never reached.
  */
 const CONTROLS_EXPRESSION = inPage(
   "controls",
   {},
   `${FOCUS_LOOK_SOURCE}
   const reach = (el) => {
-    if (el.disabled || !visible(el)) return false;
+    if (el.disabled || el.closest("[inert]") || !visible(el)) return false;
     const index = el.getAttribute("tabindex");
     if (index !== null && Number.parseInt(index, 10) < 0) return false;
     if (tagOf(el) === "input" && el.type === "radio" && el.name) {
@@ -1136,9 +1146,9 @@ const CONTROLS_EXPRESSION = inPage(
 
 /**
  * What holds keyboard focus: nothing while it is on the page itself. On a
- * page whose controls were noted it also says which of them this is, which
- * stop of the walk (the first time it is met), and whether its look differs
- * from its look at rest. A transition that focus started counts as a change:
+ * page whose controls were noted it also says which of them this is (none,
+ * for something else that takes focus), which stop of the walk (the first
+ * time it is met), and whether its look differs from its look at rest. A transition that focus started counts as a change:
  * read this soon, its values are still the ones at rest.
  */
 const FOCUS_EXPRESSION = inPage(
@@ -2378,36 +2388,54 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
 
 /**
  * Walk the page with the keyboard: Tab, with real key events so that
- * `:focus-visible` holds, until focus comes back to the first stop, leaves
- * the page, or `TAB_PRESSES_MAX` presses. A stop that looks as it did at rest
- * is unmarked. A control of `noted` that focus never came to is unreached,
- * and only a walk that went all the way round can say so: one that was cut
- * at the last press names none, since what it did not get to may well be
- * reachable.
+ * `:focus-visible` holds, until focus leaves the page, comes to a stop it has
+ * been on, or `TAB_PRESSES_MAX` presses.
+ *
+ * A stop met again ends the walk as focus leaving the page does: from there
+ * Tab only goes where it has been. That is the first stop on a page that
+ * sends focus round, and it is any other on a page that traps the keyboard,
+ * where the controls past the trap are the ones to name. Measured on a real
+ * trap (Chrome 153): Tab went from its last button back to its first for as
+ * many presses as were made, and never to the links after it.
+ *
+ * What is counted is the page's own controls, the ones `noted`: a stop that
+ * is none of them (a box that scrolls, a frame, something editable) is where
+ * focus was, not a control Tab reached, so the stops are never more than the
+ * controls. A stop that looks as it did at rest is unmarked. A control focus
+ * never came to is unreached, and only a walk that went all the way round
+ * can say so: one cut at the last press says it was cut, and names and
+ * counts none, since what it did not get to may well be reachable. Both
+ * lists are the first few; the counts are of all.
  */
 async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>): Promise<Keyboard> {
-  const stops = new Set<number>();
+  const met = new Set<number>();
   const reached = new Set<number>();
   const unmarked: string[] = [];
   let round = false;
   for (let press = 0; press < TAB_PRESSES_MAX && !round; press += 1) {
     await study.budget.within(() => pressTab(study.ctx));
     const focus = (await askWithin(study, FOCUS_EXPRESSION, focusSchema)).on;
-    if (!focus || (focus.stop === 0 && stops.size > 0)) {
+    if (!focus || met.has(focus.stop)) {
       round = true;
-    } else if (!stops.has(focus.stop)) {
-      stops.add(focus.stop);
-      if (focus.control >= 0) reached.add(focus.control);
-      if (focus.marked === false && unmarked.length < KEYBOARD_NAMES_MAX) unmarked.push(clip(focus.tag, NAME_MAX));
+      continue;
     }
+    met.add(focus.stop);
+    if (focus.control < 0) continue;
+    reached.add(focus.control);
+    if (focus.marked === false) unmarked.push(clip(focus.tag, NAME_MAX));
   }
-  const missed = round ? noted.names.filter((_, control) => !reached.has(control)) : [];
+  const unreached = round ? noted.names.filter((_, control) => !reached.has(control)) : [];
   return {
     ran: true,
+    cut: !round,
     controls: noted.count,
-    stops: stops.size,
-    unreached: missed.slice(0, KEYBOARD_NAMES_MAX).map((name) => clip(name, NAME_MAX)),
-    unmarked,
+    stops: reached.size,
+    unreached: unreached.slice(0, KEYBOARD_NAMES_MAX).map((name) => clip(name, NAME_MAX)),
+    // Counted from how many were noted, not from the names: the page hands
+    // over the first few hundred of those.
+    unreachedCount: round ? noted.count - reached.size : 0,
+    unmarked: unmarked.slice(0, KEYBOARD_NAMES_MAX),
+    unmarkedCount: unmarked.length,
   };
 }
 
@@ -2438,7 +2466,7 @@ function unmeasured(view: JobView): MeasuredView {
   return {
     view: view.id,
     faults: notRun(OUT_OF_TIME),
-    keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+    keyboard: { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 },
     reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
   };
 }

@@ -66,10 +66,16 @@ const measuredSchema = z.strictObject({
       keyboard: z.strictObject({
         /** False when the walk could not be made or did not finish. */
         ran: z.boolean(),
+        /** The walk stopped at its last press before it came round. */
+        cut: z.boolean(),
         controls: z.number(),
+        /** How many of those controls Tab stopped on. */
         stops: z.number(),
+        /** Six names at most, and how many there are in all. */
         unreached: z.array(z.string()),
+        unreachedCount: z.number(),
         unmarked: z.array(z.string()),
+        unmarkedCount: z.number(),
       }),
       reduced: z.strictObject({
         /** False when the page was not read with reduced motion asked for. */
@@ -1293,33 +1299,52 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
   });
 
   it("walks a page with real presses of Tab and says which of the controls a keyboard should reach it never reached, and which took focus with no change of look", async () => {
+    const links = (count: number) => Array.from({ length: count }, (_, at) => ["a", `Link ${at}`]);
+    const places = (count: number) => Array.from({ length: count }, (_, at) => at);
     const b = bench({
       "page.html": [
         '<p>fake-controls:[["a","Docs"],["button","Menu"],["a","Pricing"],["input","Email"],["a","Legal"]]</p>',
-        // Tab stops on four of the five, and two of those do not show it.
-        "<p>fake-tab-order:[0,1,2,3]</p>",
+        // Tab stops on four of the five, two of which do not show it, and on
+        // two things that are no control of the page's: a skip link that is
+        // only there with focus, a list that scrolls.
+        '<p>fake-tab-order:[["a","Skip to content"],0,1,["div","A list that scrolls"],2,3]</p>',
         "<p>fake-unmarked:[1,3]</p>",
       ].join("\n"),
-      "many.html": [
-        `<p>fake-controls:${JSON.stringify(Array.from({ length: 100 }, (_, at) => ["a", `Link ${at}`]))}</p>`,
-        `<p>fake-tab-order:${JSON.stringify(Array.from({ length: 100 }, (_, at) => at))}</p>`,
+      // Twenty controls: Tab goes round the first twelve, seven of which do
+      // not show it.
+      "wide.html": [
+        `<p>fake-controls:${JSON.stringify(links(20))}</p>`,
+        `<p>fake-tab-order:${JSON.stringify(places(12))}</p>`,
+        `<p>fake-unmarked:${JSON.stringify(places(7))}</p>`,
       ].join("\n"),
+      // A keyboard trap: from "Close" focus goes back to "Open", for ever.
+      "trap.html": [
+        '<p>fake-controls:[["a","Start"],["button","Open"],["button","Close"],["a","After"],["a","Further on"]]</p>',
+        "<p>fake-tab-order:[0,1,2]</p>",
+        "<p>fake-tab-trap:1</p>",
+      ].join("\n"),
+      "many.html": [`<p>fake-controls:${JSON.stringify(links(100))}</p>`, `<p>fake-tab-order:${JSON.stringify(places(100))}</p>`].join("\n"),
     });
     const report = await b.run({ pages: ["page.html"], views: [DESKTOP], measure: true });
     expect(report.pages[0]).toMatchObject({ error: null });
+    // CANARY: count every element that took focus as a stop and Tab is said
+    // to have stopped on 6 of the page's 5 controls.
     expect(measuredOf(report).views[0]!.keyboard).toEqual({
       ran: true,
+      cut: false,
       controls: 5,
       stops: 4,
       unreached: ['a "Legal"'],
+      unreachedCount: 1,
       unmarked: ['button "Menu"', 'input "Email"'],
+      unmarkedCount: 2,
     });
-    // Real key events: four stops, and the press that takes focus off the
+    // Real key events: six stops, and the press that takes focus off the
     // page, where the walk ends. CANARY: move focus from a script and
     // `:focus-visible` never holds, so every control would look unmarked;
     // here the stand-in's focus would not move at all.
     const tabs = b.browser.inputs().filter((input) => input.type === "rawKeyDown");
-    expect(tabs).toHaveLength(5);
+    expect(tabs).toHaveLength(7);
     expect(tabs[0]).toEqual({ method: "Input.dispatchKeyEvent", type: "rawKeyDown", key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     // The controls are noted, with their look at rest, before the page is
     // walked: the walk is what a reader does next. CANARY: note them after
@@ -1327,12 +1352,55 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     const measuring = b.browser.asks().slice(1).map((asked) => asked.ask);
     expect(measuring.slice(0, 2)).toEqual(["controls", "walk"]);
 
+    const taken = b.browser.inputs().length;
+    const others = await b.run({ pages: ["wide.html", "trap.html", "many.html"], views: [DESKTOP], measure: true });
+    const [wide, trap, many] = others.pages.map((page) => page.measured!.views[0]!.keyboard);
+    // Six names at most of each, and how many there are in all. CANARY:
+    // count what the lists hold and eight controls nobody can tab to are
+    // said to be six.
+    expect(wide).toEqual({
+      ran: true,
+      cut: false,
+      controls: 20,
+      stops: 12,
+      unreached: places(6).map((at) => `a "Link ${at + 12}"`),
+      unreachedCount: 8,
+      unmarked: places(6).map((at) => `a "Link ${at}"`),
+      unmarkedCount: 7,
+    });
+    // A stop met again is a walk that has been round all it can reach: what
+    // lies past a trap is named, and the walk does not go on to its last
+    // press. CANARY: end a walk only off the page or back at its first stop
+    // and the trap is pressed through eighty times and reported as cut, with
+    // nothing said of the two links past it.
+    expect(trap).toEqual({
+      ran: true,
+      cut: false,
+      controls: 5,
+      stops: 3,
+      unreached: ['a "After"', 'a "Further on"'],
+      unreachedCount: 2,
+      unmarked: [],
+      unmarkedCount: 0,
+    });
     // Eighty presses at most. A walk that was cut there has not been round
-    // the page, so it names nothing as never reached: twenty of these links
-    // would be, and every one of them can be. CANARY: list what the cut walk
+    // the page, and says so: twenty of these links were never reached and
+    // every one of them can be, so it names none and counts none. CANARY:
+    // say `cut` of no walk and this one reads as a walk all the way round a
+    // page of a hundred controls that reached eighty. List what the cut walk
     // did not get to and `unreached` names six links a keyboard reaches.
-    const many = await b.run({ pages: ["many.html"], views: [DESKTOP], measure: true });
-    expect(measuredOf(many).views[0]!.keyboard).toEqual({ ran: true, controls: 100, stops: 80, unreached: [], unmarked: [] });
+    expect(many).toEqual({
+      ran: true,
+      cut: true,
+      controls: 100,
+      stops: 80,
+      unreached: [],
+      unreachedCount: 0,
+      unmarked: [],
+      unmarkedCount: 0,
+    });
+    // Thirteen presses round the first page, four into the trap, eighty.
+    expect(b.browser.inputs().slice(taken).filter((input) => input.type === "rawKeyDown")).toHaveLength(13 + 4 + 80);
   });
 
   it("measures a page only once every view of it is pictured, on loads of its own: what still runs with reduced motion asked for, what one load of it weighs, and how long it takes to load on a slow line", async () => {
@@ -1436,7 +1504,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(phone).toEqual({
       view: "phone",
       faults: { ran: false, why: "the page's time ran out before it was measured", kinds: [], worstContrast: null },
-      keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+      keyboard: { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 },
       reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
     });
 
@@ -1446,7 +1514,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(measuredOf(breaks).views[0]).toEqual({
       view: "desktop",
       faults: { ran: true, why: null, kinds: [], worstContrast: null },
-      keyboard: { ran: false, controls: 0, stops: 0, unreached: [], unmarked: [] },
+      keyboard: { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 },
       reduced: { ran: true, runningCount: 0, running: [], videosPlaying: 0 },
     });
   });

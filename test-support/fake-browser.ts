@@ -42,10 +42,14 @@ import { z } from "zod";
  *    controls are called when the one asked for is not among them, and
  *    `fake-scrolled:340` where the window stands once the page was acted on.
  *  - `fake-controls:[["a","Docs"],["button","Menu"]]`: the controls a keyboard
- *    should reach, `fake-tab-order:[0,1]` the ones Tab stops on, in order (a
+ *    should reach, `fake-tab-order:[0,1]` what Tab stops on, in order (a
  *    key-down of Tab moves focus one stop along it, off the page after the
- *    last, and round again), `fake-unmarked:[1]` the stops whose look does
- *    not change when they take focus. `fake-keyboard-throws:"why"` makes the
+ *    last, and round again): a control by its place among them, and
+ *    `["div","A list"]` for something that takes focus and is no control of
+ *    the page's. `fake-tab-trap:1` sends focus from the last stop back to
+ *    the one at that place of the order, for ever, as a keyboard trap does.
+ *    `fake-unmarked:[1]` are the stops whose look does not change when they
+ *    take focus. `fake-keyboard-throws:"why"` makes the
  *    page throw when a keyboard walk asks what holds focus.
  *  - `fake-axe:[...]`: what the accessibility engine finds, answered only
  *    once the engine's script was run in the page (a script that holds the
@@ -362,15 +366,19 @@ function evaluate(message) {
       if (noted && told("keyboard-throws", null)) return thrown("Error: " + told("keyboard-throws", null));
       if (focus < 0) return say({ on: null });
       const order = told("tab-order", []);
-      const index = order[focus];
-      const [tag, words] = told("controls", [])[index];
+      const at = order[focus];
+      // One of the page's controls, by its place among them, or something
+      // else that takes focus, as its own tag and words.
+      const index = Array.isArray(at) ? -1 : at;
+      const [tag, words] = Array.isArray(at) ? at : told("controls", [])[at];
       return say({
         on: {
           name: (tag === "a" ? "link" : tag) + ' "' + words + '"',
           tag: tag + ' "' + words + '"',
           control: noted ? index : -1,
-          stop: order.indexOf(index),
-          marked: noted ? !told("unmarked", []).includes(index) : null,
+          // The first place it has in the order: met again, it is the same stop.
+          stop: order.findIndex((other) => JSON.stringify(other) === JSON.stringify(at)),
+          marked: noted && index >= 0 ? !told("unmarked", []).includes(index) : null,
         },
       });
     }
@@ -458,8 +466,9 @@ function handle(message) {
       evidence("inputs.jsonl", { method: message.method, ...message.params });
       lastInputAt = Date.now();
       if ((message.params.type === "rawKeyDown" || message.params.type === "keyDown") && message.params.key === "Tab") {
-        // One stop along the tab order; off the page after the last.
-        focus = focus + 1 >= told("tab-order", []).length ? -1 : focus + 1;
+        // One stop along the tab order; after the last, off the page, or
+        // back into the order where the page traps the keyboard.
+        focus = focus + 1 >= told("tab-order", []).length ? declared("tab-trap", -1) : focus + 1;
         scrollY = declared("scrolled", scrollY);
       }
       return reply({});
