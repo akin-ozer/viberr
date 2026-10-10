@@ -444,13 +444,15 @@ interface RenderedAct {
   error: string | null;
 }
 
-/** A part of a page that scrolls inside it at one width: the element, how
- *  tall what it holds is, and how much of that its own box shows. */
+/** The parts of a page that scroll inside it at one width, each hiding more
+ *  than a screen: how many there are, and of the one that hides the most its
+ *  name, how tall what it holds is and how tall its own box. */
 export interface ScrollsInside {
   view: PageCaptureViewId;
   what: string;
   height: number;
-  shown: number;
+  box: number;
+  count: number;
 }
 
 interface RenderedPage {
@@ -462,9 +464,9 @@ interface RenderedPage {
   motion: PageMotion | null;
   /** Ruling 328: what the render measured of the page, when it was asked to. */
   measured: PageMeasured | null;
-  /** At each width, the part of the page that hides the most of what it
-   *  holds by scrolling inside the page: no picture and no figure reaches
-   *  past its box. None where no part hides more than a screen. */
+  /** At each width, the parts of the page that scroll inside it and hide
+   *  more than a screen: what they hide is in no picture. None where no
+   *  part hides that much. */
   scrollsInside: ScrollsInside[];
   /** The widths with nothing at `from`: no picture there, and no failure. */
   ended: EndedView[];
@@ -627,7 +629,8 @@ const reportInsideSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
   what: reportWords,
   height: z.number().nonnegative(),
-  shown: z.number().nonnegative(),
+  box: z.number().nonnegative(),
+  count: z.number().int().min(1),
 });
 const reportEndedSchema = z.looseObject({
   view: z.enum(["desktop", "phone"]),
@@ -838,11 +841,14 @@ function filesOf(dir: string): string[] {
  * first, then the rest by name, within the limits.
  *
  * `since` names the task's folder for a judge's ask (ruling 329): the files
- * it holds under names the kept copy does not are carried last, as they
- * stand. A new name moves no delivery (ruling 85), so a picture a supporting
- * agent saved after the piece was delivered is on the task and not in the
- * kept copy, and the piece is judged with it. A name the delivery does hold
- * is always the delivery's own bytes.
+ * it holds under names the kept copy does not are carried after the
+ * delivery's, as they stand (the page asked for first, whichever it is). A
+ * new name moves no delivery (ruling 85), so a picture a supporting agent
+ * saved after the piece was delivered is on the task and not in the kept
+ * copy, and the piece is judged with it. A name the delivery does hold is
+ * the delivery's own bytes; on a disk that folds case, two names that
+ * differ by case alone are one name to the render, and the first carried
+ * stands.
  *
  * Throws when a folder or a file cannot be made so. Nothing is copied into a
  * folder that is not the server's own (ruling 140), and a file the renderer
@@ -1238,17 +1244,22 @@ function pageRemarks(page: RenderedPage, notCarried: ReadonlySet<string>): strin
 }
 
 /**
- * Said of a part that scrolls inside a page, a sentence a width: how much it
- * holds and how little of that a picture or a figure of the page covers.
- * Nothing is said of whether the page also scrolls as pages do: that is in
- * the pictures, and a sentence that guessed at it was wrong both ways.
- * `subject` is how the sentence names the page: its name in a note, "the
- * page" in a reply.
+ * Said of the parts that scroll inside a page, a sentence a width: how many
+ * hide more than a screen, how much the one that hides the most holds and in
+ * how tall a box, and that what they hide is in no picture. Only that: where
+ * such a part sits and whether the page also scrolls as pages do are in the
+ * pictures, and the checks read the whole document whatever is scrolled out
+ * of sight. `subject` is how the sentence names the page: its name in a
+ * note, "the page" in a reply.
  */
 function scrollsInsideRemarks(inside: readonly ScrollsInside[], subject: string): string[] {
   return inside.map((entry) => {
     const where = atWidth(entry.view);
-    return `${where.charAt(0).toUpperCase()}${where.slice(1)} \`${entry.what}\` scrolls inside ${subject}: it holds ${px(entry.height)} px, and a picture or a figure of the page covers only the ${px(entry.shown)} px of it on screen.`;
+    const at = `${where.charAt(0).toUpperCase()}${where.slice(1)}`;
+    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall`;
+    return entry.count === 1
+      ? `${at} \`${entry.what}\` scrolls inside ${subject}: it ${holds}, and what it hides is in no picture.`
+      : `${at} ${entry.count} parts of ${subject} scroll inside it and each hides more than a screen: the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture.`;
   });
 }
 
@@ -2767,8 +2778,8 @@ export type WebPageAnswer =
   | {
       pictures: WebPagePicture[];
       motion: PageMotion | null;
-      /** At each width, the part of the page that scrolls inside it and
-       *  hides the most: the pictures show only what of it is on screen. */
+      /** At each width, the parts of the page that scroll inside it and hide
+       *  more than a screen: what they hide is in no picture of the look. */
       scrollsInside: ScrollsInside[];
     }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */

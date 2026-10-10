@@ -1254,7 +1254,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
         "rooted.html": '<script src="/css/site.js"></script><img src="../up.png"><p>styled from the site\'s root</p>',
         "shrunk.html": "<p>no viewport setting, so a phone lays it out 980 px wide: fake-scale:0.398</p>",
         "wide.html": "<p>fake-width:612</p>",
-        "zapp.html": '<p>an app that scrolls inside itself: fake-inner:{"what":"main.app","height":5200,"shown":640}</p>',
+        "zapp.html": '<p>an app that scrolls inside itself: fake-inner:{"what":"main.app","height":5200,"box":640}</p>',
       },
       "dialog:alert.html",
     );
@@ -1278,8 +1278,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
         // A picture of a page with a part that scrolls inside it shows what
         // of that part is on screen, and said nothing: it read as a whole
         // short page.
-        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px, and a picture or a figure of the page covers only the 640 px of it on screen. " +
-        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px, and a picture or a figure of the page covers only the 640 px of it on screen.",
+        "At the desktop width (1280 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture. " +
+        "At the phone width (390 px) `main.app` scrolls inside `zapp.html`: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
     );
     // The page pictured at one width keeps that picture and its reason.
     expect(frontmatter().pageCaptures!.pages.find((page) => page.file === "half.html")).toEqual({
@@ -1289,7 +1289,7 @@ describe("a delivered page is pictured (ruling 86)", () => {
     });
     // An agent that looks at it is told the same.
     expect((await withBrowser("", () => ask("zapp.html", { view: "desktop" }))).text).toContain(
-      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px, and a picture or a figure of the page covers only the 640 px of it on screen.",
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
     );
     // At both widths it says so of both: a phone's one screen is not "the
     // whole page" because the desktop's was the first to be asked. CANARY:
@@ -1298,8 +1298,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // the part holds and shows, never what kind of page it is: a page that
     // also scrolls as pages do was called one that does not.
     expect((await withBrowser("", () => ask("zapp.html"))).text).toContain(
-      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px, and a picture or a figure of the page covers only the 640 px of it on screen. " +
-        "At the phone width (390 px) `main.app` scrolls inside the page: it holds 5,200 px, and a picture or a figure of the page covers only the 640 px of it on screen.",
+      "At the desktop width (1280 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture. " +
+        "At the phone width (390 px) `main.app` scrolls inside the page: it holds 5,200 px in a box 640 px tall, and what it hides is in no picture.",
     );
     // An agent that looks is told the same about the paths.
     expect((await withBrowser("", () => ask("rooted.html"))).text).toContain(
@@ -1973,7 +1973,13 @@ describe("a delivered page is pictured (ruling 86)", () => {
       // what the judge is shown. CANARY: look for the page in the task's
       // folder first and an approval owes a look no tool can give.
       unlinkSync(path.join(attachments(), "post.html"));
-      expect((await ask("post.html", { runId: editor, view: "phone" })).text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      const afterTheRework = await ask("post.html", { runId: editor, view: "phone" });
+      expect(afterTheRework.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it`);
+      // Viberr's own picture of the page is told by the page it is of, and
+      // the delivery still holds that page though the task's folder no
+      // longer does. CANARY: tell the pictures by the folder's pages alone
+      // and the picture is carried and named beside the delivery.
+      expect(afterTheRework.text).not.toContain("capture-desktop.png");
       expect(fake.pages().at(-1)!.html).toContain("<p>the piece</p>");
       expect(lastLook(editor)).toMatchObject({ file: "post.html", view: "phone", delivery: STAMP });
       saveFiles("VIB-1", {}, { "post.html": 11 * 1024 * 1024 });
@@ -2065,8 +2071,9 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // rework" and told it was the delivery, and after a first repair was
     // rendered the delivery and told it was the task's file. Whether a
     // folder holds a name is read off its listing, on any disk.
-    // CANARY: ask the disk whether the kept copy, or the task's folder,
-    // holds the name.
+    // CANARY (on a disk that folds case; on one that does not, the two
+    // names are two files and each answer is right either way): ask the
+    // disk whether the kept copy, or the task's folder, holds the name.
     const STAMP = "2026-10-09T22:40:00.000Z";
     const ref = { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot };
     await keptDelivery("VIB-1", STAMP, { "Post.html": "<p>the piece</p>" });

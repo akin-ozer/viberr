@@ -435,14 +435,14 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
   });
 
   it("takes over only a look that was kept whole, finishes a take-over that was cut off, and is not stopped by what a failed keep left", { timeout: REAL_LOOK_MS }, async () => {
-    const reference = await site({ "/": '<p>fake-inner:{"what":"div#S2","height":5200,"shown":640}</p>' });
+    const reference = await site({ "/": '<p>fake-inner:{"what":"div#S2","height":5200,"box":640,"count":3}</p>' });
     await withEnv({ VIBERR_BROWSER_EXECUTABLE: fake.executable, ...fake.env(`host:look.example=${reference}`) }, async () => {
       const answer = await keep({ url: "https://look.example/" });
       // A page that scrolls inside one of its elements: said in the answer
       // and in the note, under what moved, in the page's own name for it.
       expect(answer).toContain(
-        "At 1280 px `div#S2` scrolls inside the page: it holds 5,200 px, and the pictures show only the 640 px of it on screen. " +
-          "At 390 px `div#S2` scrolls inside the page: it holds 5,200 px, and the pictures show only the 640 px of it on screen.",
+        "At 1280 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture. " +
+          "At 390 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture.",
       );
       const whole = sourcesOf("VIB-1");
       const pictures = whole.length - 1;
@@ -474,7 +474,10 @@ describe("ruling 327: a task keeps how a page on the web looked", () => {
       // The page's own name for the element it scrolls inside holds an `S2`
       // that is no id. CANARY: rename ids in the note's text and VIB-2's note
       // names an element the page does not have.
-      expect(textOf("VIB-2", taken.note)).toContain("At 1280 px `div#S2` scrolls inside the page: it holds 5,200 px");
+      expect(textOf("VIB-2", taken.note)).toContain(
+        "At 1280 px 3 parts of the page scroll inside it and each hides more than a screen: the one that hides the most, `div#S2`, holds 5,200 px in a box 640 px tall. What they hide is in no picture.\n" +
+          "At 390 px 3 parts of the page scroll inside it",
+      );
 
       // A take-over cut off before its note: every picture is there and the
       // look is not. Asked again, it is finished. CANARY: answer "already

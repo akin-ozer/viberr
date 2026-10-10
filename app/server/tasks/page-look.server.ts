@@ -241,13 +241,17 @@ function lookNote(address: string, at: string, pictures: readonly LookPicture[],
   return `${lines.join("\n")}\n\n${moved}`;
 }
 
-/** Said of a look where a part of the page scrolls inside it, a sentence a
- *  width: how much the part holds, and how little of that the pictures show. */
+/** Said of a look where parts of the page scroll inside it, a sentence a
+ *  width: how many hide more than a screen, how much the one that hides the
+ *  most holds and in how tall a box, and that the pictures hold none of it. */
 function insideSentences(inside: readonly ScrollsInside[]): string[] {
-  return inside.map(
-    (entry) =>
-      `At ${pageCaptureView(entry.view).width} px \`${entry.what}\` scrolls inside the page: it holds ${px(entry.height)} px, and the pictures show only the ${px(entry.shown)} px of it on screen.`,
-  );
+  return inside.map((entry) => {
+    const at = `At ${pageCaptureView(entry.view).width} px`;
+    const holds = `holds ${px(entry.height)} px in a box ${px(entry.box)} px tall`;
+    return entry.count === 1
+      ? `${at} \`${entry.what}\` scrolls inside the page: it ${holds}, and what it hides is in no picture.`
+      : `${at} ${entry.count} parts of the page scroll inside it and each hides more than a screen: the one that hides the most, \`${entry.what}\`, ${holds}. What they hide is in no picture.`;
+  });
 }
 
 /** The file name a picture of the look is kept under. */
