@@ -53,9 +53,10 @@
 #     a set of fields switched off is none a keyboard should reach), starts
 #     at the top of a page that had put focus elsewhere, goes on through a
 #     date field, a frame and a card that each keep focus for more than one
-#     press, names the controls past a keyboard trap with how many there are
-#     in all, and says it was cut only where it used its last press with a
-#     control still not come to;
+#     press, comes round at a text field that keeps Tab and at the one
+#     button of a dialog, names the controls past a keyboard trap with how
+#     many there are in all, and says it was cut only where it used its last
+#     press with a control still not come to;
 #   - a page most of whose first screen is one part that scrolls (a shell
 #     fixed to its screen, one under a header, a body that scrolls by itself)
 #     is reported as scrolling inside at each width where it does, with how
@@ -507,6 +508,30 @@ main{min-height:1600px}</style></head><body><main>
 <script>document.getElementById("thrown").addEventListener("focus", (event) => event.target.blur());</script>
 </body></html>`,
   );
+  // A text field whose own script keeps Tab for itself, with a button after
+  // it. And a dialog over its page with one button in it: the two links
+  // behind it are out of a keyboard's reach while it is open, and Tab from
+  // its button goes off the page or straight back to it, as the browser
+  // chooses.
+  writeFileSync(
+    path.join(dir, "keeps.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A field that keeps Tab</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}</style></head><body>
+<p><a href="#docs">Docs</a></p>
+<p><label>Notes <textarea id="notes"></textarea></label></p>
+<p><button>Save</button></p>
+<script>document.getElementById("notes").addEventListener("keydown", (event) => { if (event.key === "Tab") event.preventDefault(); });</script>
+</body></html>`,
+  );
+  writeFileSync(
+    path.join(dir, "dialog.html"),
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A dialog over the page</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>body{font:16px sans-serif}</style></head><body>
+<p><a href="#home">Home</a> <a href="#about">About</a></p>
+<dialog id="ask"><p>Before you go on.</p><button>Accept</button></dialog>
+<script>document.getElementById("ask").showModal();</script>
+</body></html>`,
+  );
   // What keeps focus for more than one press of Tab, on a page that takes
   // focus as it loads. A field with `autofocus` stands below the first link.
   // A date field is one element and several stops, a frame holds two links
@@ -751,7 +776,7 @@ if (command === "job-walks") {
   const [work, browser] = args;
   process.stdout.write(
     jobIn(work, browser, "walks", {
-      pages: ["trapped.html", "many.html", "edge.html", "crossed.html"].map((file) => ({ file, kind: "html" })),
+      pages: ["trapped.html", "many.html", "edge.html", "crossed.html", "keeps.html", "dialog.html"].map((file) => ({ file, kind: "html" })),
       views: [DESKTOP],
       measure: true,
     }),
@@ -1050,12 +1075,12 @@ if (command === "verify-measured") {
 if (command === "verify-walks") {
   const [work] = args;
   const { check, pages, done } = outcomeOf(work, "walks");
-  const [trapped, many, edge, crossed] = pages;
+  const [trapped, many, edge, crossed, keeps, dialog] = pages;
   const walk = (page) => page.measured?.views[0]?.keyboard;
   const numbered = (kind, word, count) => Array.from({ length: count }, (_, n) => `${kind} "${word} ${n + 1}"`).join("|");
   check(
-    pages.length === 4 && pages.every((page) => page.error === null && page.shots.length === 1 && walk(page)?.ran === true),
-    "four pages are pictured and their keyboard walks made",
+    pages.length === 6 && pages.every((page) => page.error === null && page.shots.length === 1 && walk(page)?.ran === true),
+    "six pages are pictured and their keyboard walks made",
     pages.map((page) => `${page.file}: ${page.error} ${walk(page)?.ran}`).join(", "),
   );
   check(
@@ -1122,6 +1147,20 @@ if (command === "verify-walks") {
     walk(crossed)?.unmarkedCount === 0 && walk(crossed)?.unmarked.length === 0,
     "and the field is not said to look the same with focus as at rest: its look at rest was noted with nothing focused",
     JSON.stringify(walk(crossed)),
+  );
+  // Docs, then the field, which still has focus at the next press: Tab went
+  // nowhere, and a text field holds no stop but itself.
+  check(
+    walk(keeps)?.cut === false && walk(keeps)?.controls === 3 && walk(keeps)?.stops === 2 && walk(keeps)?.unreached.join("|") === 'button "Save"' && walk(keeps)?.unreachedCount === 1,
+    "a walk comes round at a text field that keeps Tab for itself, and names the button after it as never reached",
+    JSON.stringify(walk(keeps)),
+  );
+  // The same report whichever way this browser ends the dialog's order: off
+  // the page, or straight back to its one button.
+  check(
+    walk(dialog)?.cut === false && walk(dialog)?.controls === 3 && walk(dialog)?.stops === 1 && walk(dialog)?.unreached.join("|") === 'a "Home"|a "About"' && walk(dialog)?.unreachedCount === 2,
+    "a walk of a page under a dialog with one button reaches that button, is no cut walk, and names the two links behind the dialog",
+    JSON.stringify(walk(dialog)),
   );
   done();
 }
@@ -1492,11 +1531,12 @@ else
 fi
 further measured "pictured and measured a page" "$ENGINE"
 "$NODE" "$WORK/check.mjs" verify-measured "$WORK" || failures=$((failures + 1))
-# How a keyboard gets round four pages: one that traps it, one with more stops
+# How a keyboard gets round six pages: one that traps it, one with more stops
 # than a walk presses Tab and focus put far down it, one whose last press
-# leaves nothing focused, and one whose stops keep focus for more than a press
-# and whose field takes focus as it loads.
-further walks "measured four pages a keyboard walk has to get right"
+# leaves nothing focused, one whose stops keep focus for more than a press
+# and whose field takes focus as it loads, one whose text field keeps Tab,
+# and one under a dialog with a single button.
+further walks "measured six pages a keyboard walk has to get right"
 "$NODE" "$WORK/check.mjs" verify-walks "$WORK" || failures=$((failures + 1))
 
 # --- a page that scrolls inside itself ---------------------------------------------

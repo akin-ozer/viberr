@@ -1497,6 +1497,7 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       "held.html": declares(
         'fake-controls:[["a","Home"],["input","Date of birth"],["a","Terms"],["button","Send"],["a","Privacy"]]',
         'fake-tab-order:[0,1,1,1,["iframe","A map"],["iframe","A map"],2,["x-card","Card"],3,["x-card","Card"],4]',
+        "fake-tab-holds:[1]",
         "fake-unmarked:[1]",
       ),
       // Exactly as many controls as there are presses, every one a stop.
@@ -1534,6 +1535,30 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(edge!.walk).toEqual(round);
     expect(wrap!.walk).toEqual(round);
     expect([edge!.presses, wrap!.presses]).toEqual([81, 81]);
+  });
+
+  it("takes an element that can hold no stop of its own and still has focus at the next press for where the walk comes round, and names what lies past it", async () => {
+    const dialog = ['fake-controls:[["button","Accept"],["a","Home"],["a","About"]]', "fake-tab-order:[0]", "fake-tab-from:0", "fake-tab-held:true"];
+    const [keeps, off, wraps] = await walked({
+      // A text field whose own script keeps Tab for itself, then a button.
+      "keeps.html": declares('fake-controls:[["a","Docs"],["textarea","Notes"],["button","Save"]]', "fake-tab-order:[0,1]", "fake-tab-trap:1"),
+      // A dialog over the page with one button a keyboard can reach, which
+      // holds focus as the page loads. One browser sends focus off the page
+      // after it, the other straight back to it.
+      "dialog-off.html": declares(...dialog),
+      "dialog-wraps.html": declares(...dialog, "fake-tab-trap:0"),
+    });
+    // A link, a button or a text field holds no stop but itself, so Tab that
+    // leaves focus on one went nowhere. CANARY: press on through it as
+    // through a date field and the walk uses its eighty presses and is said
+    // to be cut, with nothing said of "Save", which a keyboard never
+    // reaches.
+    expect(keeps!.walk).toEqual({ ...clean, controls: 3, stops: 2, unreached: ['button "Save"'], unreachedCount: 1 });
+    expect(keeps!.presses).toBe(3);
+    // One page, one report, however the browser ends its order.
+    const behind = { ...clean, controls: 3, stops: 1, unreached: ['a "Home"', 'a "About"'], unreachedCount: 2 };
+    expect(off!.walk).toEqual(behind);
+    expect(wraps!.walk).toEqual(behind);
   });
 
   it("starts a walk at the top of the page with nothing focused, wherever the page put focus as it loaded, and goes round one that takes focus back", async () => {

@@ -1194,6 +1194,11 @@ const CONTROLS_EXPRESSION = inPage(
  * time it is met), and whether its look differs from its look at rest. A
  * transition that focus started counts as a change: read this soon, its
  * values are still the ones at rest.
+ *
+ * `single` says the element can hold no stop but itself: a link, a button, a
+ * text field, a list to choose from. A date or time field holds several, and
+ * so may a frame, anything with a shadow tree and anything else that takes
+ * focus, of which the document names only the element.
  */
 const FOCUS_EXPRESSION = inPage(
   "focus",
@@ -1211,13 +1216,17 @@ const FOCUS_EXPRESSION = inPage(
     if (stop < 0) stop = kept.stops.push(el) - 1;
     if (control >= 0) marked = focusLook(el) !== kept.looks[control] || el.getAnimations().length > kept.moving[control];
   }
+  const tag = tagOf(el);
+  const plain = tag === "a" || tag === "button" || tag === "textarea" || tag === "select";
+  const field = tag === "input" && !["date", "time", "datetime-local", "month", "week"].includes(el.type);
   return JSON.stringify({
     on: {
       name: kind(el) + ' "' + words(el).slice(0, ${ACT_NAME_MAX}) + '"',
-      tag: tagOf(el) + ' "' + words(el).slice(0, 60) + '"',
+      tag: tag + ' "' + words(el).slice(0, 60) + '"',
       control,
       stop,
       marked,
+      single: !el.shadowRoot && (plain || field),
     },
   });
 `,
@@ -1615,6 +1624,8 @@ const focusSchema = z.object({
       /** Which stop of the walk; -1 when no walk is under way. */
       stop: z.number().int(),
       marked: z.boolean().nullable(),
+      /** It can hold no stop but itself. */
+      single: z.boolean(),
     })
     .nullable(),
 });
@@ -2548,20 +2559,24 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
  *
  * What a press can show, each measured on Chrome 153 and Debian Chromium 154:
  *
- *  - The same element as at the press before. That is one stop still being
- *    crossed, and the walk goes on. A date field is four stops and one
- *    element, a frame or a part with a shadow tree holds stops of its own
- *    while the document names only the frame or the part, and a field that
- *    keeps the key for itself looks the same, so nothing is concluded from
- *    it.
+ *  - The same element as at the press before. On one that can hold stops of
+ *    its own, that is one stop still being crossed, and the walk goes on: a
+ *    date field is four stops and one element, and a frame or a part with a
+ *    shadow tree holds stops of its own while the document names only the
+ *    frame or the part. On one that cannot (a link, a button, a text field)
+ *    Tab went nowhere: the element keeps the key, or the browser sent focus
+ *    from the page's only stop straight back to it. Either way the walk has
+ *    come round at that element, and the controls it never came to are the
+ *    ones to name.
  *  - An element the walk was on earlier. That alone is not a walk gone
  *    round: a card whose own buttons stand before and after the link set
  *    into it holds focus, hands it to the link, and holds it again.
  *  - A step it has taken before, from one place to the same next one. From
  *    there Tab only goes where it has been, so the walk has been round all
  *    it can reach. That is the first step again on a page whose order comes
- *    round, and a step inside the trap on a page that traps the keyboard,
- *    where the controls past the trap are the ones to name.
+ *    round, and a step inside the trap on a page that traps the keyboard
+ *    between two controls or more, where the controls past the trap are the
+ *    ones to name.
  *  - Nothing: focus left the page. The next press shows where Tab comes back
  *    in. Back on the walk's first stop is its first step again. Nothing
  *    twice running is Tab going nowhere from the page itself, so there is no
@@ -2606,7 +2621,7 @@ async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>)
     const place = focus ? focus.stop : null;
     if (place === at) {
       // The first press may start anywhere, so nothing then is no finding.
-      round = place === null && presses > 1;
+      round = focus ? focus.single : presses > 1;
       back = false;
       continue;
     }

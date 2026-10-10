@@ -47,7 +47,10 @@ import { z } from "zod";
  *    last, and round again): a control by its place among them, and
  *    `["div","A list"]` for something that takes focus and is no control of
  *    the page's. The same entry again is the same element: next to itself it
- *    is one that keeps focus for more than one press, as a date field does.
+ *    is one that keeps focus for more than one press. A link, a button or a
+ *    field (`a`, `button`, `textarea`, `select`, `input`) holds no stop but
+ *    itself, unless `fake-tab-holds:[1]` names it as one that does, as a
+ *    date field is; anything else may.
  *    `fake-tab-trap:1` sends focus from the last stop back to the one at
  *    that place of the order, for ever, as a keyboard trap does (and as a
  *    browser that never sends focus off the page does, with `0`).
@@ -393,6 +396,9 @@ function evaluate(message) {
           control: noted ? index : -1,
           // The first place it has in the order: met again, it is the same stop.
           stop: order.findIndex((other) => JSON.stringify(other) === JSON.stringify(at)),
+          // A link, a button or a field holds no stop but itself, unless the
+          // page says this one does, as a date field would.
+          single: ["a", "button", "textarea", "select", "input"].includes(tag) && !(index >= 0 && told("tab-holds", []).includes(index)),
           marked: noted && index >= 0 ? !told("unmarked", []).includes(index) : null,
         },
       });
