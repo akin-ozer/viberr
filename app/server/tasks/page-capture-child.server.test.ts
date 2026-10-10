@@ -1558,9 +1558,9 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect([edge!.presses, wrap!.presses]).toEqual([81, 81]);
   });
 
-  it("takes an element that can hold no stop of its own and still has focus at the next press for where the walk comes round, and names what lies past it", async () => {
+  it("takes an element that can hold no stop of its own and has focus at four presses running for where the walk comes round, and names what lies past it", async () => {
     const dialog = ['fake-controls:[["button","Accept"],["a","Home"],["a","About"]]', "fake-tab-order:[0]", "fake-tab-from:0", "fake-tab-held:true"];
-    const [editor, keeps, off, wraps] = await walked({
+    const [editor, keeps, off, wraps, once] = await walked({
       // An editor in a part of its own keeps focus for as long as Tab is
       // pressed: stops of its own, or a key it keeps, and no telling which.
       "editor.html": declares('fake-controls:[["a","Docs"],["a","After"]]', 'fake-tab-order:[0,["x-editor","Editor"]]', "fake-tab-trap:1"),
@@ -1571,14 +1571,22 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       // after it, the other straight back to it.
       "dialog-off.html": declares(...dialog),
       "dialog-wraps.html": declares(...dialog, "fake-tab-trap:0"),
+      // A field that takes one Tab for itself and lets the next through, as
+      // a list that opens on focus does to pick its option.
+      "once.html": declares('fake-controls:[["a","Docs"],["input","City"],["button","Go"],["a","Help"]]', "fake-tab-order:[0,1,1,2,3]"),
     });
-    // A link, a button or a text field holds no stop but itself, so Tab that
-    // leaves focus on one went nowhere. CANARY: press on through it as
-    // through a date field and the walk uses its eighty presses and is said
-    // to be cut, with nothing said of "Save", which a keyboard never
-    // reaches.
+    // A link, a button or a text field holds no stop but itself, so one
+    // that has focus at four presses running keeps the key. CANARY: press on
+    // through it as through a date field and the walk uses its eighty
+    // presses and is said to be cut, with nothing said of "Save", which a
+    // keyboard never reaches.
     expect(keeps!.walk).toEqual({ ...clean, controls: 3, stops: 2, unreached: ['button "Save"'], unreachedCount: 1 });
-    expect(keeps!.presses).toBe(3);
+    // Twice running is one stop still being crossed: the third press goes
+    // on. CANARY: take two presses running for a field that keeps the key
+    // and the button and the link after this one are named as never
+    // reached, which the next two presses reach.
+    expect(once!.walk).toEqual({ ...clean, controls: 4, stops: 4 });
+    expect([keeps!.presses, once!.presses]).toEqual([5, 5]);
     // One page, one report, however the browser ends its order.
     const behind = { ...clean, controls: 3, stops: 1, unreached: ['a "Home"', 'a "About"'], unreachedCount: 2 };
     expect(off!.walk).toEqual(behind);

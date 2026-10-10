@@ -53,8 +53,9 @@
 #     a set of fields switched off is none a keyboard should reach), starts
 #     at the top of a page that had put focus elsewhere, goes on through a
 #     date field, a frame and a card that each keep focus for more than one
-#     press, comes round at a text field that keeps Tab and at the one
-#     button of a dialog, names the controls past a keyboard trap with how
+#     press and a field that takes one Tab for itself, comes round at a
+#     text field that keeps every Tab and at the one button of a dialog,
+#     names the controls past a keyboard trap with how
 #     many there are in all, and says it was cut only where it used its last
 #     press with a control still not come to;
 #   - a page most of whose first screen is one part that scrolls (a shell
@@ -508,8 +509,10 @@ main{min-height:1600px}</style></head><body><main>
 <script>document.getElementById("thrown").addEventListener("focus", (event) => event.target.blur());</script>
 </body></html>`,
   );
-  // A text field whose own script keeps Tab for itself, with a button after
-  // it. And a dialog over its page with one button in it: the two links
+  // A field that takes one Tab for itself and lets the next through, as a
+  // list that opens on focus does to pick its option; then a text field
+  // whose own script keeps every Tab, with a button after it. And a dialog
+  // over its page with one button in it: the two links
   // behind it are out of a keyboard's reach while it is open, and Tab from
   // its button goes off the page or straight back to it, as the browser
   // chooses.
@@ -518,9 +521,16 @@ main{min-height:1600px}</style></head><body><main>
     `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>A field that keeps Tab</title><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>body{font:16px sans-serif}</style></head><body>
 <p><a href="#docs">Docs</a></p>
+<p><label>City <input id="city"></label></p>
 <p><label>Notes <textarea id="notes"></textarea></label></p>
 <p><button>Save</button></p>
-<script>document.getElementById("notes").addEventListener("keydown", (event) => { if (event.key === "Tab") event.preventDefault(); });</script>
+<script>
+let open = false;
+const city = document.getElementById("city");
+city.addEventListener("focus", () => { open = true; });
+city.addEventListener("keydown", (event) => { if (event.key === "Tab" && open) { event.preventDefault(); open = false; } });
+document.getElementById("notes").addEventListener("keydown", (event) => { if (event.key === "Tab") event.preventDefault(); });
+</script>
 </body></html>`,
   );
   writeFileSync(
@@ -1153,11 +1163,12 @@ if (command === "verify-walks") {
     "and the field is not said to look the same with focus as at rest: its look at rest was noted with nothing focused",
     JSON.stringify(walk(crossed)),
   );
-  // Docs, then the field, which still has focus at the next press: Tab went
-  // nowhere, and a text field holds no stop but itself.
+  // Docs, then the field that keeps one Tab and lets the next through, then
+  // the text field, which has focus at four presses running: a text field
+  // holds no stop but itself, so Tab is going nowhere.
   check(
-    walk(keeps)?.cut === false && walk(keeps)?.controls === 3 && walk(keeps)?.stops === 2 && walk(keeps)?.unreached.join("|") === 'button "Save"' && walk(keeps)?.unreachedCount === 1,
-    "a walk comes round at a text field that keeps Tab for itself, and names the button after it as never reached",
+    walk(keeps)?.cut === false && walk(keeps)?.controls === 4 && walk(keeps)?.stops === 3 && walk(keeps)?.unreached.join("|") === 'button "Save"' && walk(keeps)?.unreachedCount === 1,
+    "a walk goes on through a field that takes one Tab for itself, comes round at a text field that keeps every Tab, and names the button after it as never reached",
     JSON.stringify(walk(keeps)),
   );
   // The same report whichever way this browser ends the dialog's order: off

@@ -497,6 +497,12 @@ const REDUCED_RUNNING_MAX = 6;
 const FAULT_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 /** The engine's words for how grave a fault is, the gravest first. */
 const FAULT_IMPACTS = ["critical", "serious", "moderate", "minor"];
+/** How many presses running, after the one that brought focus to it, a
+ *  link, a button or a field has to keep focus before a walk takes it for
+ *  where Tab goes no further. A list that opens on focus keeps one Tab to
+ *  pick its option and lets the next through, so one press more says
+ *  nothing. */
+const KEPT_PRESSES = 3;
 /** The presses of Tab a keyboard walk has to come round in, and the most an
  *  act asks for. A walk makes one more only when its last took focus off
  *  the page or back to where it had been, to see whether it has just come
@@ -1203,9 +1209,10 @@ const CONTROLS_EXPRESSION = inPage(
  * values are still the ones at rest.
  *
  * `single` says the element can hold no stop but itself: a link, a button, a
- * text field, a list to choose from. A date or time field holds several, and
- * so may a frame, anything with a shadow tree and anything else that takes
- * focus, of which the document names only the element.
+ * text field, a list to choose from, none of which can be given a shadow
+ * tree. A date or time field holds several, and so may a frame, anything
+ * with a shadow tree and anything else that takes focus, of which the
+ * document names only the element.
  */
 const FOCUS_EXPRESSION = inPage(
   "focus",
@@ -1233,7 +1240,7 @@ const FOCUS_EXPRESSION = inPage(
       control,
       stop,
       marked,
-      single: !el.shadowRoot && (plain || field),
+      single: plain || field,
     },
   });
 `,
@@ -2574,11 +2581,13 @@ async function readFaults(study: Study, engine: Engine): Promise<Faults> {
  *    its own, that is one stop still being crossed, and the walk goes on: a
  *    date field is four stops and one element, and a frame or a part with a
  *    shadow tree holds stops of its own while the document names only the
- *    frame or the part. On one that cannot (a link, a button, a text field)
- *    Tab went nowhere: the element keeps the key, or the browser sent focus
- *    from the page's only stop straight back to it. Either way the walk has
- *    come round at that element, and the controls it never came to are the
- *    ones to name.
+ *    frame or the part. One that cannot (a link, a button, a text field)
+ *    is crossed the same way while it has focus for fewer than four presses
+ *    running: a list that opens on focus keeps one Tab to pick its option.
+ *    At the fourth Tab is going nowhere: the element keeps the key, or the
+ *    browser sends focus from the page's only stop straight back to it.
+ *    Either way the walk has come round at that element, and the controls
+ *    it never came to are the ones to name.
  *  - An element the walk was on earlier. That alone is not a walk gone
  *    round: a card whose own buttons stand before and after the link set
  *    into it holds focus, hands it to the link, and holds it again.
@@ -2621,6 +2630,7 @@ async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>)
   // whether the last press took it there from somewhere else: off the page,
   // or back to a stop the walk had been on.
   let at: number | null = null;
+  let kept = 0;
   let back = false;
   let round = noted.count === 0;
   let presses = 0;
@@ -2631,11 +2641,13 @@ async function readKeyboard(study: Study, noted: z.infer<typeof controlsSchema>)
     const focus = (await askWithin(study, FOCUS_EXPRESSION, focusSchema)).on;
     const place = focus ? focus.stop : null;
     if (place === at) {
+      kept += 1;
       // The first press may start anywhere, so nothing then is no finding.
-      round = focus ? focus.single : presses > 1;
+      round = focus ? focus.single && kept >= KEPT_PRESSES : presses > 1;
       back = false;
       continue;
     }
+    kept = 0;
     const step = `${String(at)}>${String(place)}`;
     back = place === null || been.has(place);
     if (place !== null) been.add(place);
