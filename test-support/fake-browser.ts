@@ -49,8 +49,8 @@ import { z } from "zod";
  *    the page's. `fake-tab-trap:1` sends focus from the last stop back to
  *    the one at that place of the order, for ever, as a keyboard trap does.
  *    `fake-unmarked:[1]` are the stops whose look does not change when they
- *    take focus. `fake-keyboard-throws:"why"` makes the
- *    page throw when a keyboard walk asks what holds focus.
+ *    take focus. `fake-keyboard-throws:"why"` makes the page throw when a
+ *    keyboard walk asks what holds focus.
  *  - `fake-axe:[...]`: what the accessibility engine finds, answered only
  *    once the engine's script was run in the page (a script that holds the
  *    text `fake-engine`, or axe-core's own, by its banner, which is the one

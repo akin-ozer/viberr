@@ -284,9 +284,10 @@ interface Act {
 /**
  * A part of a page that scrolls inside it. A page whose own height is its
  * screen's, with its content in a box that scrolls, is pictured as the one
- * screen it lays out as, and so is a long page down to a log or a list that
- * scrolls in a box of its own: what is inside is in no picture. The report
- * says so, and nothing here tries to picture it.
+ * screen it lays out as, and a long page that keeps a log or a list in a box
+ * of its own is pictured with that box as it stands. Either way what the box
+ * holds past its own height is in no picture. The report says so, and
+ * nothing here tries to picture it.
  */
 interface ScrollsInside {
   /** The part, as `tag.firstClass` or `tag#id`. */
@@ -1170,8 +1171,9 @@ const CONTROLS_EXPRESSION = inPage(
  * What holds keyboard focus: nothing while it is on the page itself. On a
  * page whose controls were noted it also says which of them this is (none,
  * for something else that takes focus), which stop of the walk (the first
- * time it is met), and whether its look differs from its look at rest. A transition that focus started counts as a change:
- * read this soon, its values are still the ones at rest.
+ * time it is met), and whether its look differs from its look at rest. A
+ * transition that focus started counts as a change: read this soon, its
+ * values are still the ones at rest.
  */
 const FOCUS_EXPRESSION = inPage(
   "focus",
@@ -1853,11 +1855,10 @@ async function layoutNow(ctx: ViewContext): Promise<Layout> {
 }
 
 /**
- * Look, at the one view it is looked for at, for a part of the page that
- * scrolls inside it. On that view's own load, once the page is laid out and
- * before anything is done to it. What the page answers is the page's to say
- * and never the page's to fail on: a page that throws under it is one where
- * nothing was found.
+ * Look for a part of the page that scrolls inside it, at the one view it is
+ * looked for at: on that view's own load, once the page is laid out and
+ * before anything is done to it. A page that throws under the question is
+ * one where nothing was found, and loses no picture for it.
  */
 async function noteInside(ctx: ViewContext, view: JobView, layout: Layout): Promise<void> {
   if (view !== ctx.insideAt) return;
