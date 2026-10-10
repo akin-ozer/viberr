@@ -783,7 +783,9 @@ folder of the checkout that gate builds the site's pages into: once every gate h
 pictures, measures and shows a reviewer its pages (ruling 86); a revision that passed
 before the folder was named is run again once. A run is asked for by a delivery
 (`performDelivery`'s delivered outcome), by a workspace reconcile that mints a new
-revision while the task's pull request stands, by the reconciler's external revision
+revision while the task's pull request stands (and, on a project whose gates build its
+pages, by a reconcile that mints any revision, the first included: ruling 86), by the
+reconciler's external revision
 (ruling 240), by a changed gate list (every open task with a delivered revision), by a
 person's "Run gates" on the GitHub card (maintainer+ or the owner, audited
 `task.gates.requested`), and at boot for a record a restart left `queued` or `running`.

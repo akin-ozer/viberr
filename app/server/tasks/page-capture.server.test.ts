@@ -56,6 +56,7 @@ import {
   requestDeliveryCaptures,
   requestRevisionCaptures,
 } from "./page-capture.server";
+import { whenProjectGatesIdle } from "./project-gates.server";
 import { attachTaskFile } from "./task-edits.server";
 
 /**
@@ -1197,6 +1198,59 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // CANARY: drop the revision check from owesCapture and from the head of
     // captureDelivery and a render is started here too.
     expect(pictured()).toEqual(nothing);
+  });
+
+  it("ruling 86: on a board whose gates build its pages, a delivering run's completion has the gates build the revision and waits for its pictures before the operator goes on", { timeout: REAL_RENDERS_MS }, async () => {
+    // The whole path a pull-request board takes: the run commits, the
+    // reconcile mints the revision, the gates build it, the build is kept
+    // and pictured, and only then does the react start. On the first board
+    // that shipped a site this way the gates ran only once a pull request
+    // stood, after the review had been asked for.
+    deployBoard({ repo: "akin-ozer/viberr", operator: true });
+    reconfigureProject(store, {
+      gates: [{ name: "build", command: "mkdir -p dist && cp page.html dist/index.html", pages: "dist" }],
+    });
+    const checkout = path.join(taskDir(store.slug, "VIB-1", store.dataRoot), "workspace", "viberr");
+    mkdirSync(checkout, { recursive: true });
+    gitOutSync(checkout, ["init", "-q", "-b", "main"]);
+    gitOutSync(checkout, ["config", "user.email", "t@viberr.local"]);
+    gitOutSync(checkout, ["config", "user.name", "Test"]);
+    gitOutSync(checkout, ["commit", "-q", "--allow-empty", "-m", "init"]);
+    gitOutSync(checkout, ["checkout", "-q", "-b", "vib-1"]);
+    writeFileSync(path.join(checkout, "page.html"), "<h1>the delivered page</h1>");
+    gitOutSync(checkout, ["add", "-A"]);
+    gitOutSync(checkout, ["commit", "-q", "-m", "[VIB-1] the page"]);
+    const bin = ctx.makeTempDir("viberr-gh-");
+    writeFileSync(path.join(bin, "gh"), "#!/bin/sh\necho 'no pull requests found' >&2\nexit 1\n");
+    chmodSync(path.join(bin, "gh"), 0o755);
+    /** What the task held when the operator was started on it. */
+    const atReact: { record: unknown; notes: number }[] = [];
+    const operator = vi.fn<typeof runOperator>(async () => {
+      atReact.push({ record: frontmatter().pageCaptures, notes: timeline().filter((event) => event.title === "Page captures").length });
+      return { runId: null, queued: true, backend: "claude" as const, autonomy: "supervised" as const };
+    });
+    const runId = await finishedRunSaving({});
+    await withEnv(
+      {
+        VIBERR_BROWSER_EXECUTABLE: fake.executable,
+        ...fake.env(""),
+        PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
+      },
+      () => completeDelivery(runId, { deps: { runOperator: operator } }),
+    );
+    const revisionId = frontmatter().workRevision!.id;
+    // CANARY: ask for the gates on a new revision only while a pull request
+    // stands, as before, and nothing has built the page when the operator
+    // starts; or drop the wait before the react, and it starts while the
+    // gates are still building.
+    expect(atReact).toHaveLength(1);
+    expect(atReact[0]).toMatchObject({ record: { revisionId }, notes: 1 });
+    expect(frontmatter().gateRun).toMatchObject({ revisionId, status: "finished", reason: "revision", pages: "dist" });
+    expect(readFileSync(path.join(keptBuildDir(store.slug, "VIB-1", revisionId, store.dataRoot)!, "index.html"), "utf8")).toBe(
+      "<h1>the delivered page</h1>",
+    );
+    expect(frontmatter().pageCaptures!.pages.map((page) => [page.file, page.shots.length])).toEqual([["index.html", 2]]);
+    await whenProjectGatesIdle();
   });
 
   it("a delivery that becomes a revision after its pictures were asked for gets no picture, record or note, with the renderer idle or busy, and the pictures of the files delivery before it go", async () => {
