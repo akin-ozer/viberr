@@ -2331,6 +2331,21 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     stretch("desktop", 1);
     stretch("desktop", 2);
     stretch("phone", 1);
+    // The note is what says the look was kept whole.
+    writeTaskSource(
+      store.slug,
+      "VIB-1",
+      {
+        name: "what-moved.md",
+        data: Buffer.from("# How https://example.com/ looked"),
+        title: "What moved",
+        from: "https://example.com/",
+        by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+        runId: null,
+        look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
+      },
+      store.dataRoot,
+    );
     const withLook = await prompt("critic", ["index.html"]);
     expect(withLook).toContain(`${PAGE}${LOOK}`);
     expect(withLook).toContain("never the address as it reads today and never anyone's description of it");

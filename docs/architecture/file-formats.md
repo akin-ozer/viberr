@@ -518,7 +518,8 @@ pageCaptures:                     # optional; ruling 86 — Viberr's own picture
         loadMs: 1840              # (no picture is drawn; the next delivery's render
         line: "1.6 Mbit/s down, 150 ms"  # rewrites it). `measured` (ruling 328)
         views:                    # is on an HTML page that was measured as it was
-          - view: desktop         # pictured: the bytes of the page and every file it
+          - view: desktop         # pictured (a figure is null where its check did not
+                                  # finish, never zero): the bytes of the page and every file it
             faultKinds: 1         # loaded and how many files, its load time on the slow
             faultElements: 3      # line `line` names (null when it was not timed), and
             worstContrast: 3.1    # per width how many kinds of accessibility fault the

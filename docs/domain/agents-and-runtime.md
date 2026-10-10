@@ -1670,13 +1670,17 @@ write grant.
    and, for a Claude run, each of those it opened with its own file reader, read from its
    log (`looksFromRunLog`). The looks that count are the session's (`looksRunIds`): this
    run's, and those of the earlier runs of the session it continued on the same task and
-   subject, since the last compaction (which lands on the run that ends before it, so
-   that run's looks do not carry). A resumed review told what it had not opened opens
-   only that, and still holds the pictures of its earlier turns; a compacted one holds a
-   summary of them. A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
+   subject, while neither they nor this run were compacted: a run's list is emptied when
+   its context is replaced by a summary, and its log is read from that line on. A resumed
+   review told what it had not opened opens only that and still holds the pictures of its
+   earlier turns, unless the run before it was compacted when it ended (ruling 174, past
+   100,000 tokens): that review then holds a summary, and looks again. A picture taller than 2,000 px (`PAGE_LOOK_MAX_PX`) is not a
    look, and a look counts only for the delivery it is of: a kept picture for the delivery
-   it pictures, a `capture_page` stretch for the delivery under review only while every
-   file of its kept copy is still on the task byte for byte (`deliveryOfTaskFiles`).
+   it pictures, and a `capture_page` stretch for the delivery under review when the run
+   was shown that delivery. A run that judges (not the deliverer's, its verdict not
+   withheld, its engagement verdict-capable) is rendered the delivery's kept copy
+   (`deliveredCopyFor`) and told so; any other run is rendered the task's files as they
+   stand, and its looks count for no approval.
    Nothing is owed that no tool can show: no page on a server with no browser, none past
    the 10 MB `capture_page` renders, no kept picture whose bytes were taken out of the
    store, and a page longer than 40,000 px only to there. When something owed was

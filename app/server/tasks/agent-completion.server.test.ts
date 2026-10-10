@@ -1237,6 +1237,19 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       expect(approvals()).toEqual([]);
       expect(refusal()).toContain("`index.html` at the desktop width (1280 px)");
 
+      // A run compacted while it worked holds a summary of everything before
+      // that line, its session's earlier runs included: its own list was
+      // emptied there, and theirs is not counted. CANARY: carry earlier runs
+      // into a run that was itself compacted.
+      writeDeliveredPageTask(["index.html"]);
+      const early = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
+      recordRunLooks(store.db, early, [stretch("desktop", 0, 1400, true)]);
+      const compacted = await finishedRunWith("Verdict: approve.", SUBJECT, { session: "review-4" });
+      patchRun(store.db, compacted, { compactions: 1 });
+      recordRunLooks(store.db, compacted, [stretch("phone", 0, 1900, true)]);
+      await review(compacted);
+      expect(approvals()).toEqual([]);
+
       // And what a session was shown of other work is not a look at this:
       // the run before judged another delivery. CANARY: carry a session's
       // looks whatever its runs judged.
@@ -1299,6 +1312,20 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
           by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
           runId: null,
           look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "stretch", view: "desktop", from: 0, to: 2000, pageHeight: 2000 },
+        },
+        store.dataRoot,
+      );
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "what-moved.md",
+          data: Buffer.from("# How https://example.com/ looked"),
+          title: "What moved",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
         },
         store.dataRoot,
       );
@@ -1374,6 +1401,29 @@ describe("applyAgentCompletionEffects (the shared effects)", () => {
       keep("desktop-1.png", "d1", look("desktop", 0, 2000));
       keep("desktop-2.png", "d2", look("desktop", 2000, 3000));
       keep("phone-1.png", "p1", look("phone", 0, 2000));
+      // Pictures with no note are a keep that was cut off: no look, and
+      // nothing an approval owes. CANARY: owe every stretch among the
+      // sources and a failed keep holds every later review to its leavings.
+      const cutOff = await finishedRunWith("Verdict: approve.", SUBJECT);
+      recordRunLooks(store.db, cutOff, [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)]);
+      await review(cutOff);
+      expect(approvals()).toEqual([["reviewer", "approve"]]);
+      // The note closes the look, and from then on it is owed.
+      writeDeliveredPageTask(["index.html"]);
+      writeTaskSource(
+        store.slug,
+        "VIB-1",
+        {
+          name: "what-moved.md",
+          data: Buffer.from("# How https://example.com/ looked"),
+          title: "What moved",
+          from: "https://example.com/",
+          by: { backend: "claude", profileId: "dev", roleHint: "Implementation" },
+          runId: null,
+          look: { url: "https://example.com/", at: "2026-10-09T22:00:00.000Z", part: "note", view: null },
+        },
+        store.dataRoot,
+      );
       const whole = [stretch("desktop", 0, 1400, true), stretch("phone", 0, 1900, true)];
 
       const half = await finishedRunWith("Verdict: approve.", SUBJECT);

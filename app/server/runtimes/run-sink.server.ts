@@ -520,6 +520,14 @@ export function createRunSink(
         // by construction, and never on the line's own persist path.
         if (f.compaction) {
           compactions += 1;
+          // Ruling 329: what the run was shown so far is a summary from here
+          // on, so its list of looks starts again. An approval rests on what
+          // its session still holds, never on pictures it no longer has.
+          try {
+            patchRun(db, spec.runId, { lookedJson: null });
+          } catch (error) {
+            logger.error("a compacted run's looks could not be cleared", { runId: spec.runId, err: toError(error) });
+          }
           // What a resume replays now is the summary, not the history the
           // compaction folded: the last prompt is the post size until the
           // next call says otherwise (ruling 173 reads it; ruling 174 sets it

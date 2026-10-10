@@ -586,6 +586,23 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // CANARY: read a walk that failed as its zeros and the page is said to
     // have "no control for a keyboard to reach".
     expect(await measure("throws.html")).toContain("At 1280 px the keyboard's reach was not measured: the walk did not finish.");
+    // What a task keeps of a delivery says the same: null where a check did
+    // not finish, never the zero of a clean page, in the record and in the
+    // line the operator and the reviewer are handed.
+    // CANARY: keep zeros for a check that did not run and a page nobody
+    // measured is recorded as one with nothing wrong.
+    await deliver({ "throws.html": '<p>fake-controls:[["a","One"]]</p><p>fake-tab-order:[0]</p><p>fake-keyboard-throws:"the page went away"</p>' });
+    const kept = frontmatter().pageCaptures!.pages.find((page) => page.file === "throws.html")!;
+    expect(kept.measured).toMatchObject({
+      views: [
+        { view: "desktop", controls: null, unreached: null, unmarked: null, stillMoving: 0, faultKinds: 0, faultElements: 0 },
+        { view: "phone", controls: null, unreached: null, unmarked: null },
+      ],
+    });
+    const line = completionPacketFact(frontmatter(), { projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }).pageCaptures.find(
+      (page) => page.file === "throws.html",
+    )!.measured;
+    expect(line).toContain("at 1280 px the keyboard's reach not measured; at 390 px the keyboard's reach not measured.");
   });
 
   it("the next delivery's pictures replace the last one's, a page it no longer holds loses its picture, the rework is credited with none of them, and the earlier delivery keeps its own", async () => {
@@ -1656,6 +1673,10 @@ describe("a delivered page is pictured (ruling 86)", () => {
     // the source reader and the matching entry below is missing.
     const STAMP = "2026-10-09T22:40:00.000Z";
     await keptDelivery("VIB-1", STAMP, { "post.html": "<p>fake-height:3000</p>", "notes.txt": "plain" });
+    // The editor judges this task; the proofreader below only reads beside it.
+    await updateTaskFile({ projectSlug: store.slug, taskKey: "VIB-1", dataRoot: store.dataRoot }, (parsed) => {
+      parsed.frontmatter.engagements = [WRITER, { profileId: "editor", backend: "claude", role: "Editor", delivers: false, verdictCapable: true }];
+    });
     const deps = (runId: string | null) => ({ db: store.db, ctx: { dataRoot: store.dataRoot }, projectSlug: store.slug, runId });
     await withBrowser("", async () => {
       await picture("VIB-1", STAMP);
@@ -1687,8 +1708,8 @@ describe("a delivered page is pictured (ruling 86)", () => {
       readAgentTaskAttachment(deps(runId), "VIB-1", "notes.txt");
       readAgentTaskSource(deps(runId), "VIB-1", undefined);
       readAgentTaskAttachment(deps(null), "VIB-1", "post.html.capture-desktop.png");
-      // The task's files are as delivered, so a stretch of them is a look at
-      // that delivery.
+      // A run that judges is shown the delivery as it was kept, so a stretch
+      // it is handed is a look at that delivery.
       expect(runLooks(store.db, runId)).toEqual([
         { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 0, to: 2000, end: false, delivery: STAMP },
         { kind: "page", task: "VIB-1", file: "post.html", view: "desktop", from: 2000, to: 3000, end: true, delivery: STAMP },
@@ -1704,12 +1725,20 @@ describe("a delivered page is pictured (ruling 86)", () => {
         { kind: "page", task: "VIB-1", file: "post.html", view: "phone", from: 0, to: 3000, end: true, delivery: STAMP },
       ]);
       // A file changed on the task since the delivery (a rework that was
-      // stopped, an upload): `capture_page` renders the files as they are,
-      // and that look is of other bytes than the review judges.
-      // CANARY: credit every stretch to the task's delivery and a reviewer
-      // approves the delivery on a look at a page it does not hold.
+      // stopped, an upload). The run that judges is still shown what was
+      // delivered, and told so; a run that only reads beside it is shown the
+      // files as they stand, and its look is of no delivery.
+      // CANARY: render the task's folder for every run and the judge is
+      // handed "half a rework", which its approval of the delivery would
+      // then rest on.
       saveFiles("VIB-1", { "post.html": "<p>half a rework</p><p>fake-height:3000</p>" });
-      await ask("post.html", { runId: second, view: "desktop" });
+      const judged = await ask("post.html", { runId, view: "desktop" });
+      expect(judged.text).toContain(`This is the delivery of ${STAMP} as Viberr kept it, not the task's files as they stand now.`);
+      expect(fake.pages().at(-1)!.html).toBe("<p>fake-height:3000</p>");
+      expect(runLooks(store.db, runId).at(-1)).toMatchObject({ file: "post.html", view: "desktop", from: 0, to: 2000, delivery: STAMP });
+      const beside = await ask("post.html", { runId: second, view: "desktop" });
+      expect(beside.text).not.toContain("as Viberr kept it");
+      expect(fake.pages().at(-1)!.html).toContain("half a rework");
       expect(runLooks(store.db, second).at(-1)).toEqual({
         kind: "page",
         task: "VIB-1",

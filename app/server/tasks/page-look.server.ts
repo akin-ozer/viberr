@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 import type { DatabaseSync } from "node:sqlite";
@@ -194,6 +195,7 @@ function lookNote(
   kept: readonly KeptPicture[],
   repeats: readonly RepeatedStretch[],
   motion: PageMotion | null,
+  scrollsInside: { what: string; height: number } | null,
 ): string {
   const lines = [`# How ${address} looked on ${at.slice(0, 10)}`, "", `Pictured by Viberr at ${at}, at the two widths a delivered page is pictured at.`, ""];
   for (const view of PAGE_CAPTURE_VIEWS) {
@@ -216,11 +218,17 @@ function lookNote(
       );
     }
   }
-  lines.push("", "## What moved, as measured at the desktop width", "", ...motionLines(motion), "");
+  if (scrollsInside) lines.push(`- ${firstScreenOnly(scrollsInside)}`);
+  lines.push("", WHAT_MOVED_HEADING, "", ...motionLines(motion), "");
   lines.push(
     "The pictures show the page at rest and its first screen at a few moments. What a visitor's own pointer or scrolling does beyond the lines above is not in them.",
   );
   return `${lines.join("\n")}\n`;
+}
+
+/** Said of a look of a page that scrolls inside one of its elements. */
+function firstScreenOnly(inside: { what: string; height: number }): string {
+  return `The page scrolls inside \`${inside.what}\` (${px(inside.height)} px) and not as a page, so these pictures are of its first screen only.`;
 }
 
 /** The file name a picture of the look is kept under. */
@@ -262,10 +270,20 @@ function auditKept(
 const HOW_TO_READ =
   "Open each picture with `read_task_source`: none is shown here. From now on this look is what the result is made to and judged against: the address will read differently later, and nobody describes it from memory.";
 
-/** A look's note with the ids of the task it was written on changed for the
- *  ids its sources were kept under here. */
+/** Where a look's note stops listing its pictures and starts on what moved. */
+const WHAT_MOVED_HEADING = "## What moved, as measured at the desktop width";
+
+/**
+ * A look's note with the ids of the task it was written on changed for the
+ * ids its sources were kept under here. Only where the note lists its
+ * pictures: its heading holds the address and the lines under "What moved"
+ * hold the page's own names, and an `S3` in either is not an id.
+ */
 function noteForThisTask(text: string, ids: ReadonlyMap<string, string>): string {
-  return text.replace(/\bS[1-9]\d{0,5}\b/g, (id) => ids.get(id) ?? id);
+  const cut = text.indexOf(WHAT_MOVED_HEADING);
+  const [heading = "", ...listed] = (cut < 0 ? text : text.slice(0, cut)).split("\n");
+  const renamed = listed.join("\n").replace(/\bS[1-9]\d{0,5}\b/g, (id) => ids.get(id) ?? id);
+  return `${heading}\n${renamed}${cut < 0 ? "" : text.slice(cut)}`;
 }
 
 /**
@@ -289,13 +307,17 @@ function adoptLook(db: DatabaseSync, ctx: TaskMutationContext, input: KeepPageLo
       `${taskKey} already keeps a look of ${clash.look!.url} from another day, and a result is judged against one look of an address.`,
     );
   }
-  // Read first, so what does not fit is said before a picture is written.
+  // Read first, so what is missing or does not fit is said before a picture
+  // is written: a look arrives whole.
   const held = new Set(mine.map((kept) => kept.sha256));
-  const toCopy = theirs.flatMap((source) => {
+  const toCopy: { source: TaskSource; data: Buffer }[] = [];
+  for (const source of theirs) {
     const resolved = resolveTaskSource(projectSlug, from, source.id, ctx.dataRoot);
-    if (!resolved || !existsSync(resolved.abs)) return [];
-    return [{ source, data: readFileSync(resolved.abs) }];
-  });
+    if (!resolved || !existsSync(resolved.abs)) {
+      return refused(`${from} no longer holds ${source.id} of its look (the picture was taken out of the store), so the look is not whole.`);
+    }
+    toCopy.push({ source, data: readFileSync(resolved.abs) });
+  }
   const looks = [...new Set(theirs.map((source) => `${source.look!.url} as it was pictured on ${source.look!.at.slice(0, 10)}`))];
   const already = `[noop] ${taskKey} already keeps what ${from} keeps of ${LIST_AND.format(looks)}. \`read_task_source\` lists it.`;
   // A picture is new here by its bytes; a note is rewritten with this task's
@@ -400,11 +422,20 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
   if (meanwhile) return alreadyKept(taskKey, meanwhile);
   // Whole or not at all: a look cut off by the task's limits would stand as
   // the look, with no note and no way to finish it.
+  // Counted as it will be written: a frame or a stretch whose bytes the task
+  // already keeps, or that equals one before it, is kept once.
+  const seen = new Set(readTaskSources(projectSlug, taskKey, ctx.dataRoot).sources.map((source) => source.sha256));
+  const fresh = answer.pictures.filter((picture) => {
+    const hash = createHash("sha256").update(picture.bytes).digest("hex");
+    if (seen.has(hash)) return false;
+    seen.add(hash);
+    return true;
+  });
   const room = sourcesRoomRefusal(
     projectSlug,
     taskKey,
-    answer.pictures.length + 1,
-    answer.pictures.reduce((sum, picture) => sum + picture.bytes.length, 0) + 8_192,
+    fresh.length + 1,
+    fresh.reduce((sum, picture) => sum + picture.bytes.length, 0) + 8_192,
     ctx.dataRoot,
   );
   if (room) return `[error] ${room} Nothing was kept of ${url}.`;
@@ -446,7 +477,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
       taskKey,
       {
         name: `${host}-what-moved.md`,
-        data: Buffer.from(lookNote(url, at, kept, repeats, answer.motion)),
+        data: Buffer.from(lookNote(url, at, kept, repeats, answer.motion, answer.scrollsInside)),
         title: `${host}: where its pictures are, and what moved on it`,
         from: `${url}, read by Viberr's renderer on ${at.slice(0, 10)}`,
         by,
@@ -467,6 +498,7 @@ export async function keepPageLook(db: DatabaseSync, ctx: TaskMutationContext, i
     }
     const frames = kept.filter((entry) => entry.picture.kind === "frame");
     if (frames.length > 0) parts.push(`Its first screen while it loaded: ${idRange(frames.map((entry) => entry.source.id))}.`);
+    if (answer.scrollsInside) parts.push(firstScreenOnly(answer.scrollsInside));
     if (noteId) parts.push(`Where each picture is and what moved on the page, as measured: ${noteId}.`);
     parts.push(HOW_TO_READ);
     return parts.join(" ");

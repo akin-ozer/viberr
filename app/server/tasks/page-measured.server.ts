@@ -29,7 +29,7 @@ const pageMeasuredSchema = z
           .object({
             view: z.enum(["desktop", "phone"]),
             faultKinds: z.number().int().nonnegative().nullable().default(null),
-            faultElements: z.number().int().nonnegative().default(0),
+            faultElements: z.number().int().nonnegative().nullable().default(null),
             worstContrast: z.number().positive().nullable().default(null),
             // Null where that check did not run: not measured, not clean.
             controls: z.number().int().nonnegative().nullable().default(null),

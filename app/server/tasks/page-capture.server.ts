@@ -78,7 +78,7 @@ import {
 import { loadText, measuredOf, weightText, type PageMeasuredRecord } from "./page-measured.server";
 import { isTerminalStage } from "~/shared/workflow/stage-roles";
 import { noSuchAttachment } from "./board-read.server";
-import { deliveryOfTaskFiles, PAGE_HTML_MAX_BYTES, recordRunLooks } from "./page-looks.server";
+import { deliveredCopyFor, PAGE_HTML_MAX_BYTES, recordRunLooks } from "./page-looks.server";
 import { reprojectTask, taskRef, type TaskMutationContext } from "./task-mutation.server";
 import { deliverersOwnFileNames } from "./task-replies.server";
 import { isRelayComment } from "./task-relay.server";
@@ -568,6 +568,8 @@ const measuredSchema = z.looseObject({
         faults: z.looseObject({
           ran: z.boolean().catch(false),
           why: z.string().nullable().catch(null),
+          /** How many kinds were found, of which `kinds` is the first few. */
+          kindsCount: z.number().int().nonnegative().optional().catch(undefined),
           kinds: z
             .array(
               z.looseObject({
@@ -1208,8 +1210,8 @@ function measuredRecord(measured: PageMeasured): PageMeasuredRecord {
     line: measured.line,
     views: measured.views.map((view) => ({
       view: view.view,
-      faultKinds: view.faults.ran ? view.faults.kinds.length : null,
-      faultElements: view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0),
+      faultKinds: view.faults.ran ? (view.faults.kindsCount ?? view.faults.kinds.length) : null,
+      faultElements: view.faults.ran ? view.faults.kinds.reduce((sum, kind) => sum + kind.count, 0) : null,
       worstContrast: view.faults.worstContrast?.ratio ?? null,
       // A check that did not run keeps no figure: null is "not measured",
       // which zero would say was measured and clean. A walk cut at its press
@@ -1237,8 +1239,10 @@ function viewSentences(view: PageMeasured["views"][number]): string[] {
     const kinds = faults.kinds.map(
       (kind) => `\`${kind.id}\` on ${kind.count} (${kind.help}${kind.first.length > 0 ? `; first: ${quoted(kind.first)}` : ""})`,
     );
+    const total = faults.kindsCount ?? faults.kinds.length;
     lines.push(
-      `${at} the accessibility checks (axe, WCAG 2.2 AA) found ${faults.kinds.length === 1 ? "1 kind" : `${faults.kinds.length} kinds`} of fault: ${kinds.join("; ")}.` +
+      `${at} the accessibility checks (axe, WCAG 2.2 AA) found ${total === 1 ? "1 kind" : `${total} kinds`} of fault` +
+        `${total > faults.kinds.length ? `, the first ${faults.kinds.length} of them` : ""}: ${kinds.join("; ")}.` +
         (faults.worstContrast
           ? ` The lowest contrast is ${faults.worstContrast.ratio.toFixed(2)} to 1, on "${faults.worstContrast.text}".`
           : ""),
@@ -2075,6 +2079,9 @@ async function capturePage(
         if (reduce) asked.reduce = true;
         return asked;
       });
+  // Ruling 329: a run that judges is shown the delivery as it was kept, not
+  // the task's files as a rework or an upload may since have left them.
+  const delivered = deliveredCopyFor(db, ctx, { projectSlug, taskKey, runId: ask.runId, name: stored }, file.parsed);
   let rendered: Render;
   try {
     rendered = await render({
@@ -2084,7 +2091,7 @@ async function capturePage(
       taskKey,
       renderer: found,
       launch,
-      source: { kind: "attachments" },
+      source: delivered?.dir ? { kind: "kept", dir: delivered.dir } : { kind: "attachments" },
       pages: [{ file: stored, kind }],
       views,
       runId: ask.runId,
@@ -2127,10 +2134,10 @@ async function capturePage(
   // reader's width, and a state, a moving screen or the page with reduced
   // motion is not the page as it loads for every reader, so none is one.
   if (!box && !act && !ask.moving && !reduce) {
-    // The look is of the task's delivery only while its files are still as
-    // delivered: read after the render, so a file changed under it counts.
-    const now = readTaskFile(taskRef(ctx, projectSlug, taskKey));
-    const delivery = now ? deliveryOfTaskFiles(ctx, projectSlug, taskKey, now.parsed) : null;
+    // The look is of the delivery when the run was shown the delivery: its
+    // kept copy, or the task's files where no copy could be kept. Anyone
+    // else's look is of the files as they stand, and counts for no approval.
+    const delivery = delivered?.deliveredAt ?? null;
     recordRunLooks(
       db,
       ask.runId,
@@ -2155,14 +2162,20 @@ async function capturePage(
   // author asked for, up to 8,000 px a side: past 2,000 it is saved and not
   // handed back, and the reply says to look at a lower scale.
   const shown = !box || page.shots.every(shownToTheRun);
+  // A run that judges is told what it was shown, so a page that reads
+  // differently in the task's folder is no surprise.
+  const asDelivered = delivered?.dir
+    ? ` This is the delivery of ${delivered.deliveredAt} as Viberr kept it, not the task's files as they stand now.`
+    : "";
   return {
-    text: box
-      ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown)
-      : act
-        ? actReplyText(name, page, reduce, kept)
-        : ask.moving
-          ? movingReplyText(name, page, from, reduce, kept)
-          : captureReplyText(name, page, from, kept) + (reduce ? ` Rendered${REDUCED}.` : ""),
+    text:
+      (box
+        ? boxReplyText(name, page, box, kept, ask.keeps !== false, shown)
+        : act
+          ? actReplyText(name, page, reduce, kept)
+          : ask.moving
+            ? movingReplyText(name, page, from, reduce, kept)
+            : captureReplyText(name, page, from, kept) + (reduce ? ` Rendered${REDUCED}.` : "")) + asDelivered,
     images: shown ? page.shots.map((shot) => ({ data: shot.bytes.toString("base64"), mimeType: "image/png" })) : [],
   };
 }
@@ -2409,6 +2422,8 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
   const measure = async (): Promise<string> => {
     const task = readTaskFile(taskRef(ctx, projectSlug, taskKey));
     if (!task) return `[noop] ${code(name)} is not a page on ${taskKey}.`;
+    // A run that judges measures what was delivered, as it looks at it.
+    const delivered = deliveredCopyFor(db, ctx, { projectSlug, taskKey, runId: ask.runId, name: file }, task.parsed);
     let launch: AgentLaunch | null;
     try {
       launch = taskOwnerLaunch(db, task.parsed.frontmatter.ownerUserId, ctx.dataRoot, NO_OWNER);
@@ -2430,7 +2445,7 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
         taskKey,
         renderer: found,
         launch,
-        source: { kind: "attachments" },
+        source: delivered?.dir ? { kind: "kept", dir: delivered.dir } : { kind: "attachments" },
         pages: [{ file, kind: "html" }],
         // The delivery's own views, so the page is walked as far and weighs
         // what it will weigh when it is delivered. Not in the run's folder:
@@ -2457,7 +2472,9 @@ export function measureTaskPage(db: DatabaseSync, ctx: TaskMutationContext, ask:
       ...page.shots.flatMap((shot) => widthRemark(shot, "it") ?? []),
       ...loadRemarks(page),
       ...(against ? [against] : []),
-      "Nothing was saved: these are the figures as the file stands now.",
+      delivered?.dir
+        ? `Nothing was saved: these are the figures of the delivery of ${delivered.deliveredAt} as Viberr kept it.`
+        : "Nothing was saved: these are the figures as the file stands now.",
     ].join(" ");
   };
   return new Promise((resolve) => {
@@ -2515,7 +2532,13 @@ export interface WebPagePicture {
 }
 
 export type WebPageAnswer =
-  | { pictures: WebPagePicture[]; motion: PageMotion | null }
+  | {
+      pictures: WebPagePicture[];
+      motion: PageMotion | null;
+      /** The element the page scrolls inside, when it does not scroll as a
+       *  page: its pictures are then of its first screen only. */
+      scrollsInside: { what: string; height: number } | null;
+    }
   /** Why nothing was pictured, as a sentence a reply prints after "[error] ". */
   | { refused: string }
   | { busy: true };
@@ -2606,6 +2629,7 @@ export function pictureWebPage(
           cut: shot.cut,
         })),
       motion: page.motion,
+      scrollsInside: page.scrollsInside,
     };
   };
   return new Promise((resolve) => {
