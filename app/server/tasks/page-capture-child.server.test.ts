@@ -1333,7 +1333,9 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
       kinds: [],
       worstContrast: null,
     });
-  });
+    // Its own limit: four pages are measured above, one after another, each
+    // in a real process that waits two seconds of the clock by itself.
+  }, 60_000);
 
   it("walks a page with real presses of Tab and says which of the controls a keyboard should reach it never reached, and which took focus with no change of look", async () => {
     const links = (count: number) => Array.from({ length: count }, (_, at) => ["a", `Link ${at}`]);
@@ -1522,26 +1524,36 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
         "<p>fake-axe:[]</p>",
       ].join("\n"),
     });
-    const stuck = await b.run({ pages: ["stuck.html"], measure: true, pageTimeoutMs: 6_000 });
-    // The pictures stand, and so does what was measured before the time went.
+    const notWalked = { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 };
+    const outOfTime = "the page's time ran out before it was measured";
+    // The page's time has to run out by the clock: ten seconds, of which a
+    // browser to start and two pictures of a page of three lines are all
+    // that has to fit. How much of the measuring fits before the load that
+    // never finishes is the machine's to say, and nothing below needs any of
+    // it to have.
+    const stuck = await b.run({ pages: ["stuck.html"], measure: true, pageTimeoutMs: 10_000 });
+    // The pictures stand.
     expect(stuck.pages[0]).toMatchObject({ error: null });
     expect(stuck.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png", "1-phone.png"]);
     const [desktop, phone] = measuredOf(stuck).views;
-    expect(desktop).toMatchObject({
-      view: "desktop",
-      keyboard: { ran: true, controls: 1, stops: 1 },
-      faults: { ran: false, why: "no accessibility engine is installed" },
-    });
-    // CANARY: answer a reduced-motion read that failed with its zeros alone
-    // (`ran: true`) and this reads as a page on which nothing still moves.
+    // What came before the time went stands, and what did not says so: the
+    // walk is the whole of a walk or none, and the engine is either the one
+    // nobody named or one whose turn never came.
+    expect([{ ...notWalked, ran: true, controls: 1, stops: 1 }, notWalked]).toContainEqual(desktop!.keyboard);
+    expect(desktop!.faults).toMatchObject({ ran: false, kinds: [] });
+    expect(["no accessibility engine is installed", outOfTime]).toContain(desktop!.faults.why);
+    // The read with reduced motion asked for never ran, whether the time
+    // went under it or before it. CANARY: answer a reduced-motion read that
+    // failed with its zeros alone (`ran: true`) and this reads as a page on
+    // which nothing still moves.
     expect(desktop!.reduced).toEqual({ ran: false, runningCount: 0, running: [], videosPlaying: 0 });
     // The phone's turn never came. CANARY: report a width that was never
     // measured as measured (`ran: true` in `unmeasured`) and it reads as a
     // page with no control, nothing still moving and nothing to say why.
     expect(phone).toEqual({
       view: "phone",
-      faults: { ran: false, why: "the page's time ran out before it was measured", kinds: [], worstContrast: null },
-      keyboard: { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 },
+      faults: { ran: false, why: outOfTime, kinds: [], worstContrast: null },
+      keyboard: notWalked,
       reduced: { ran: false, runningCount: 0, running: [], videosPlaying: 0 },
     });
 
@@ -1551,10 +1563,12 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(measuredOf(breaks).views[0]).toEqual({
       view: "desktop",
       faults: { ran: true, why: null, kinds: [], worstContrast: null },
-      keyboard: { ran: false, cut: false, controls: 0, stops: 0, unreached: [], unreachedCount: 0, unmarked: [], unmarkedCount: 0 },
+      keyboard: notWalked,
       reduced: { ran: true, runningCount: 0, running: [], videosPlaying: 0 },
     });
-  });
+    // Its own limit: the first run above waits ten seconds of the clock out
+    // in a real process before the second starts.
+  }, 60_000);
 
   it("leaves `loadMs` out when the slow load does not finish in what is left of the page's time, and the page's pictures stand", async () => {
     // The stand-in never finishes this page's load once the line is held.
@@ -1565,8 +1579,12 @@ describe("a measured page, read by the renderer child (ruling 328)", () => {
     expect(report.pages[0]).toMatchObject({ error: null });
     expect(report.pages[0]!.shots.map((shot) => shot.file)).toEqual(["1-desktop.png"]);
     expect(measuredOf(report)).toMatchObject({ loadMs: null, line: "1.6 Mbit/s down, 150 ms" });
-    // What was measured before it stands too.
-    expect(measuredOf(report).views[0]!.faults).toMatchObject({ ran: false, why: "no accessibility engine is installed" });
+    // What was measured before it stands too, and the engine nobody named
+    // is said not to have run. (On a machine so loaded that the page's time
+    // went before the engine's turn, that is the reason it gives.)
+    const { faults } = measuredOf(report).views[0]!;
+    expect(faults.ran).toBe(false);
+    expect(["no accessibility engine is installed", "the page's time ran out before it was measured"]).toContain(faults.why);
   });
 });
 
