@@ -442,8 +442,10 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // pass; drop "and nothing else", and a maker types a project of its own
     // into the running product and keeps the screenshot as its own proof;
     // drop what the product makes of it from the Reviewer's, and no honest
-    // picture of a command's output can be approved; drop the kept run from
-    // either, and a screen drawn in markup passes with totals nobody ran.
+    // picture of a command's output can be approved; drop the kept run and
+    // the documentation from either, and a screen drawn in markup passes
+    // with totals nobody ran; drop the documentation alone, and a product an
+    // agent cannot run has no picture of itself a review can pass.
     const dataRoot = ctx.makeTempDir();
     seedDefaultAgentAssets(dataRoot);
     const developer = said(dataRoot, "developer-expertise");
@@ -454,8 +456,8 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     expect(developer).toContain(
       `What a picture of the product itself shows comes from one of two places, each kept with \`keep_source\` like any statement: the product's ${demo}, or ${gift} on the task. ` +
         "Give the product that and nothing else: whatever else you put into it or draw in for the picture is made up, whatever it is marked as. " +
-        "What the product makes of it (its output, a total, a date) is the product's own; " +
-        "where the picture is drawn from a run and not taken of it, keep the run's output too, and draw in nothing that output does not show. " +
+        "What the product shows of its own (its labels, its output, a total, a date) is the product's; " +
+        "where the picture is drawn and not taken of the product running, draw in only what a run's output you kept shows, or what the product's own documentation says that screen shows. " +
         "A person's live data goes in only when they gave it for this. " +
         "Where neither place holds anything, see what another task of the board keeps of either (`read_task_source` with its key); " +
         "where that holds none, ask the person for the content itself, their own screens or the names and figures to show, and keep what they give; " +
@@ -465,15 +467,16 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     // wherever on the board the source is kept (a source of another task
     // can be read from this one and cannot be kept again on it), takes the
     // rest for the product's, and holds a drawn picture to the run the
-    // maker kept: only that run tells an honest transcript from an invented
-    // one.
+    // maker kept or to the product's documentation: only those tell an
+    // honest drawing from an invented one.
     expect(reviewer).toContain(
       "What a picture of the product itself shows rests on a kept source like any statement, on this task or another of the board's. " +
         `What the product was given comes from its ${demo} or from ${gift}: ` +
         "a name, a title or a figure given to it from neither was made up for the picture, whatever it is marked as, and is a finding, " +
         "and so is a person's live data they did not give for it. " +
-        "The rest is what the product itself made of that (its output, a total, a date): " +
-        "where the picture is drawn and not taken of the running product, hold the rest to the kept output of a run, and what that output does not show is a finding too.",
+        "The rest is the product's own (its labels, its output, a total, a date): " +
+        "where the picture is drawn and not taken of the product running, hold the rest to the kept output of a run or to what the product's own documentation says that screen shows, " +
+        "and what neither shows is a finding too.",
     );
     // And to the same two kinds of picture the maker is.
     expect(developer).toContain("A picture on it is the product itself, running, or it explains the product: never a drawing of a screen that does not exist, or a stock picture.");
