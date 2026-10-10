@@ -2298,9 +2298,8 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     const PAGE =
       "- An approval here binds only from a run that looked. Before you approve, look at `index.html`, whole, at the desktop width (1280 px) and at the phone width (390 px)";
     const LOOK = ", and at every picture of https://example.com/ as this task kept it on 2026-10-09 (S1 to S3). ";
-    // A server that can render a page (the browser is named; nothing here starts it).
-    await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () => {
-    for (const backend of ["claude", "codex"] as const) {
+    /** Both agents deployed on one backend: the note is the same on either. */
+    const deployOn = (backend: "claude" | "codex"): void => {
       const file = readProjectFile({ projectSlug: store.slug, dataRoot: store.dataRoot })!;
       writeProject(store.dataRoot, {
         ...file.parsed.frontmatter,
@@ -2319,11 +2318,18 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
         })),
       });
       rebuildAll(store.db, { dataRoot: store.dataRoot, force: true });
+    };
+    const ACCOUNT =
+      "Your report says, after its findings, what differs from them, section by section at each width, and an approval says why each difference it leaves standing is no finding.";
+    // A server that can render a page (the browser is named; nothing here starts it).
+    await withEnv({ VIBERR_BROWSER_EXECUTABLE: process.execPath }, async () => {
+    for (const backend of ["claude", "codex"] as const) {
+      deployOn(backend);
       // A page and no look kept: the page alone.
       const page = await prompt("critic", ["index.html", "styles.css"]);
       expect(page, backend).toContain(`${PAGE}. A page is looked at with \`capture_page\``);
       expect(page, backend).not.toContain("kept pictures section by section");
-      expect(page, backend).not.toContain("Your verdict says what differs");
+      expect(page, backend).not.toContain("what differs from them");
       // Prose and its notes: an approval there owes no look, and none is asked.
       expect(await prompt("critic", ["notes.md"]), backend).not.toContain("binds only from a run that looked");
     }
@@ -2357,18 +2363,20 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
       },
       store.dataRoot,
     );
-    const withLook = await prompt("critic", ["index.html"]);
-    expect(withLook).toContain(`${PAGE}${LOOK}`);
-    expect(withLook).toContain("never the address as it reads today and never anyone's description of it");
-    // A review of work made to a kept look says what differs from it, and the
-    // run is told so before it starts. CANARY: drop the sentence from
-    // `pageLooksNote` and a review that looked at both may approve without a
-    // word on what it saw differ, as the second board's did.
-    expect(withLook).toContain(
-      "Your verdict says what differs from them, section by section at each width, and an approval says why each difference it leaves standing is no finding.",
-    );
-    // The run that delivers judges nothing, and is told nothing about approving.
-    expect(await prompt("dev", ["index.html"], true)).not.toContain("binds only from a run that looked");
+    for (const backend of ["claude", "codex"] as const) {
+      deployOn(backend);
+      const withLook = await prompt("critic", ["index.html"]);
+      expect(withLook, backend).toContain(`${PAGE}${LOOK}`);
+      expect(withLook, backend).toContain("never the address as it reads today and never anyone's description of it");
+      // A review of work made to a kept look says what differs from it, and
+      // the run is told so before it starts, on either backend. CANARY: drop
+      // the sentence from `pageLooksNote` and a review that looked at both
+      // may approve without a word on what it saw differ, as the second
+      // board's did.
+      expect(withLook, backend).toContain(ACCOUNT);
+      // The run that delivers judges nothing, and is told nothing about approving.
+      expect(await prompt("dev", ["index.html"], true), backend).not.toContain("binds only from a run that looked");
+    }
     });
     // On a server with no browser nothing can show a page, so none is owed
     // and the tool is not named; the kept pictures are still there to open.
@@ -2378,6 +2386,10 @@ describe("P14-RT-01 — a FRESH run of an UNDEPLOYED profile is confined like a 
     expect(noBrowser).not.toContain("look at `index.html`");
     expect(noBrowser).not.toContain("capture_page");
     expect(noBrowser).toContain("Before you approve, look at every picture of https://example.com/ as this task kept it on 2026-10-09 (S1 to S3).");
+    // An account of what differs at each width rests on a look at the page
+    // too. CANARY: ask for it wherever a look is kept and a review that can
+    // be shown no page is asked what it saw differ at widths it never saw.
+    expect(noBrowser).not.toContain(ACCOUNT);
   });
 
   it("ruling 201: the note's lists are bounded where a file can go unnamed safely, and a name is cut by character", () => {

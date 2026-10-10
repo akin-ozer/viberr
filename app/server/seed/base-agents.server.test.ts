@@ -401,19 +401,30 @@ describe("rulings 178 and 268: work that is looked at is made, judged and planne
     const judgedOn = "layout and rhythm, the scale and weight of type, colour and contrast, depth, density, how the product is shown, what moves";
     expect(developer).toContain(`set your own beside them, section by section at each width, on each of: ${judgedOn}. Say in your report what still differs on each and why you left it.`);
     expect(reviewer).toContain(`set the two side by side at each width, section by section: ${judgedOn}.`);
+    // The account comes after the findings, a line a section and width: a
+    // verdict keeps the first 2,000 characters of a report (ruling 88), and
+    // those are the findings' to have.
     expect(reviewer).toContain(
-      "Your report says, for each section at each width, what differs from them on each of those seven, or that it is the same there: a difference you do not name is one you did not see. " +
-        "An approval lists every difference it leaves standing and why it is not a finding.",
+      "Your report says, after its findings, what differs from them: one line for each section at each width, naming what differs on those seven or that nothing does. " +
+        "A difference you do not name is one you did not see. An approval says of each difference it leaves standing why it is not a finding.",
     );
-    expect(judgedOn.split(", ")).toHaveLength(7);
+    // "Those seven" are the ones the manual itself lists.
+    const listed = /section by section: ([^.]+)\. Judge against the kept pictures/.exec(reviewer)?.[1].split(", ");
+    expect(listed).toHaveLength(7);
     // A placeholder is neither content nor honesty about its absence, and a
     // word nobody can read says nothing: unfinished to the maker, a finding
-    // to the judge, in the same words.
+    // to the judge. The maker is told the way out, which is never to write
+    // something in.
     const placeholder = (verdict: string) =>
-      `Nothing stands where content belongs: an empty box, a bar or a blank label in place of what a reader expects there is ${verdict}, in a picture of the product as anywhere else. ` +
-      "At each width a reader can read every word on it, the words inside a picture included.";
-    expect(developer).toContain(placeholder("unfinished work"));
-    expect(reviewer).toContain(placeholder("a finding"));
+      `Nothing stands in for content: an empty box, a bar or a blank label where a reader expects something is ${verdict}, in a picture of the product as anywhere else.`;
+    expect(developer).toContain(
+      `${placeholder("unfinished work")} Put there what is on record, or take it out. ` +
+        "At each width a reader can read every word they are meant to read, the words inside a picture included: " +
+        "a picture shrunk until its words cannot be read is cropped, or made again for that width.",
+    );
+    expect(reviewer).toContain(
+      `${placeholder("a finding")} So is a word a reader is meant to read and cannot, at the desktop width or at the phone width, the words inside a picture included.`,
+    );
     // Sent back for its blanks, the same page came back with its screens
     // filled: a project, nine tasks, a person and a repository made up for
     // the pictures and marked as sample, which the review took for demo

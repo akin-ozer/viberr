@@ -166,6 +166,7 @@ import {
   suppressedReplyReason,
 } from "./task-replies.server";
 import { acceptanceRefusalFor } from "./task-acceptance.server";
+import { clipVerdictReason } from "./verdict-reason.server";
 import { noteSourcesKeptByRun } from "./task-sources.server";
 import {
   deliveryCapturesSettled,
@@ -331,31 +332,6 @@ export function deliveredWorkEvidence(fm: {
 
 /** "A", "A and B", "A, B, and C": the reviewers a verdict event names. */
 const LIST_AND = new Intl.ListFormat("en", { style: "long", type: "conjunction" });
-
-/**
- * Ruling 88: the longest verdict justification stored on a task, and the
- * sentence that ships when it does not fit.
- *
- * 2,000 characters is a generous paragraph and a short essay, which is the
- * right size for the reason a reviewer gives beside its verdict. What was
- * wrong was the silence: a bare `.slice` meant a long justification was stored
- * ending mid-word and read, on the task page, as the whole of what the reviewer
- * said. The full text is never lost - the agent's own report is on the same
- * timeline, untruncated - so the marker's job is to send the reader there.
- */
-const VERDICT_REASON_MAX_CHARS = 2_000;
-
-function clipVerdictReason(text: string): string {
-  const reason = text.trim();
-  if (reason.length <= VERDICT_REASON_MAX_CHARS) return reason;
-  return (
-    `${reason.slice(0, VERDICT_REASON_MAX_CHARS)}\n\n` +
-    `[cut here - the reviewer's justification ran to ` +
-    `${reason.length.toLocaleString("en-US")} characters and this is its first ` +
-    `${VERDICT_REASON_MAX_CHARS.toLocaleString("en-US")}. Its full report is on this ` +
-    `task's timeline, whole.]`
-  );
-}
 
 /** What {@link recordAgentCompletion} tells its caller. */
 interface AgentCompletionRecord {
